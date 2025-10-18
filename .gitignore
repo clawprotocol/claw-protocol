@@ -205,3 +205,28 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# CLAW custom ignore rules
+
+# System / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Build & artifacts
+dist/
+build/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+
+# Security
+.env
+*.pem
+*.key
+secret_*
+credentials_*
+
+# Docs cache
+/docs/whitepaper/~$*
