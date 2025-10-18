@@ -2,11 +2,9 @@ name: CLAW Simulation Test
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+    branches: [ main ]
+  schedule:
+    - cron: "0 9 * * *"   # Run every day at 9 AM UTC
 
 jobs:
   run-simulation:
