@@ -25,10 +25,10 @@ jobs:
 
       - name: Run CLAW Simulation
         run: |
-          python scripts/tests/full_simulation.py
+          python scripts/tests/full_simulation.py > simulation_output.txt
 
       - name: Save simulation log
-     uses: actions/upload-artifact@v4
-     with:
-       name: claw-simulation-log
-       path: simulation_output.txt
+        uses: actions/upload-artifact@v4
+        with:
+          name: claw-simulation-log
+          path: simulation_output.txt
