@@ -5,9 +5,10 @@ on:
     branches: [ main ]
   schedule:
     # Hourly during weekdays (Monday–Friday)
-    - cron: '0 * * 1-5'   # every hour, Mon–Fri
+    - cron: '0 * * * 1-5'   # every hour, Mon–Fri
+
     # Once daily on weekends (Saturday & Sunday)
-    - cron: '0 9 * 6,0'   # 9:00 AM UTC on Sat & Sun
+    - cron: '0 9 * * 6,0'   # 9:00 AM UTC on Sat & Sun
 
 jobs:
   run-simulation:
