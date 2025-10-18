@@ -9,10 +9,11 @@ on:
 
     # Once daily on weekends (Saturday & Sunday)
     - cron: "0 9 * 6,0"   # 9:00 AM UTC on Sat & Sun
-    
+
 jobs:
   run-simulation:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,8 +21,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.x'
 
       - name: Run CLAW Simulation
         run: |
-          python3 scripts/tests/full_simulation.py
+          python scripts/tests/full_simulation.py
