@@ -209,6 +209,16 @@
         0%, 80%, 100% { opacity: 0; }
         40% { opacity: 1; }
     }
+    /* --- proof fetch success flash --- */
+    @keyframes flashSuccess {
+        0% { background-color: rgba(0, 255, 0, 0.1); }
+        50% { background-color: rgba(0, 255, 0, 0.35); }
+        100% { background-color: rgba(0, 255, 0, 0.1); }
+    }
+
+    .flash-success {
+        animation: flashSuccess 0.8s ease-out;
+    }
     </style>
   </head>
 
@@ -279,6 +289,8 @@ async function fetchLogs() {
 
     document.getElementById("output").innerHTML =
       `<strong>Fetched ${proofs.length} proofs</strong><br><ul>${logList}</ul>`;
+        document.body.classList.add("flash-success");
+        setTimeout(() => document.body.classList.remove("flash-success"), 900);
   } catch (err) {
     setIndicator("fallback");
     document.getElementById("output").innerHTML =
