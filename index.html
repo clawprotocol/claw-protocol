@@ -104,6 +104,12 @@
 body {
   padding-top: 70px;
 }
+/* --- hover glow for interactive buttons --- */
+button:hover, .btn:hover, a.btn:hover {
+  box-shadow: 0 0 8px rgba(153, 204, 255, 0.6);
+  transform: translateY(-2px);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
   </style>
 </head>
 <body>
@@ -126,5 +132,17 @@ body {
   <footer>
     CLAW Protocol © 2025 · Open-source under MIT License
   </footer>
+  <script>
+  window.addEventListener('scroll', () => {
+    const nav = document.querySelector('.top-nav');
+    if (window.scrollY > 10) {
+      nav.style.background = 'rgba(0, 0, 0, 0.45)';
+      nav.style.boxShadow = '0 0 12px rgba(255, 255, 255, 0.12)';
+    } else {
+      nav.style.background = 'rgba(0, 0, 0, 0.25)';
+      nav.style.boxShadow = 'none';
+    }
+  });
+  </script>
 </body>
 </html>
