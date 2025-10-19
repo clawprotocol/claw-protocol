@@ -109,6 +109,25 @@
         white-space: nowrap;
         border: 1px solid #444;
     }
+    @keyframes pulse {
+        0% { box-shadow: 0 0 8px rgba(0, 255, 128, 0.3); }
+        50% { box-shadow: 0 0 16px rgba(0, 255, 128, 0.6); }
+        100% { box-shadow: 0 0 8px rgba(0, 255, 128, 0.3); }
+    }
+
+    .indicator.live.pulse {
+        animation: pulse 2s ease-in-out 2;
+    }
+
+    @keyframes pulseFallback {
+        0% { box-shadow: 0 0 8px rgba(255, 165, 0, 0.3); }
+        50% { box-shadow: 0 0 16px rgba(255, 165, 0, 0.6); }
+        100% { box-shadow: 0 0 8px rgba(255, 165, 0, 0.3); }
+    }
+
+    .indicator.fallback.pulse {
+        animation: pulseFallback 2s ease-in-out 2;
+    }
     </style>
   </head>
 
@@ -138,8 +157,11 @@
 
     function setIndicator(state, timestamp = '') {
         const indicator = document.getElementById('source-indicator');
-        indicator.className = `indicator ${state} show`;
+        indicator.className = `indicator ${state} show pulse`;
         indicator.dataset.timestamp = `Last checked: ${timestamp}`;
+
+        // remove pulse class after animation ends
+        setTimeout(() => indicator.classList.remove('pulse'), 2500);
     }
     async function fetchLogs() {
     try {
