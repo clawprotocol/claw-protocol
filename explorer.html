@@ -152,66 +152,52 @@
     </iframe>
 
     <script>
-    const API_URL = "https://raw.githubusercontent.com/clawprotocol/claw-protocol/main/data/claw-audit-feed.json";
-    const FALLBACK_CID = "bafybeicbckiftbnuvac6wqjoe7ziw4up4ddlbetxwzpgbz5lrftxyuctpa"; // backup proof
+const PROOFS_URL = "https://raw.githubusercontent.com/clawprotocol/claw-protocol/main/proofs.json";
+const VALIDATORS_URL = "https://raw.githubusercontent.com/clawprotocol/claw-protocol/main/validators.json";
 
-    function setIndicator(state, timestamp = '') {
-        const indicator = document.getElementById('source-indicator');
-        indicator.className = `indicator ${state} show pulse`;
-        indicator.dataset.timestamp = `Last checked: ${timestamp}`;
+async function fetchLogs() {
+  try {
+    setIndicator("live");
 
-        // remove pulse class after animation ends
-        setTimeout(() => indicator.classList.remove('pulse'), 2500);
-    }
-    async function fetchLogs() {
-    try {
-        const res = await fetch(API_URL);
-        setIndicator('live', new Date().toISOString());
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        const uploads = json.results || [];
+    // Load proofs + validators
+    const [proofRes, valRes] = await Promise.all([fetch(PROOFS_URL), fetch(VALIDATORS_URL)]);
+    if (!proofRes.ok) throw new Error("Proofs fetch failed");
+    if (!valRes.ok) throw new Error("Validators fetch failed");
 
-        if (uploads.length === 0) throw new Error("No uploads found");
+    const proofsData = await proofRes.json();
+    const validatorsData = await valRes.json();
 
-        // sort newest → oldest
-        uploads.sort((a, b) => new Date(b.created) - new Date(a.created));
+    const proofs = proofsData.proofs || [];
+    const validators = Object.fromEntries(
+      (validatorsData.validators || []).map(v => [v.id, v])
+    );
 
-        // show latest proof in iframe
-        const latest = uploads[0];
-        const latestCid = latest.cid;
-        document.getElementById("proofFrame").src = `https://storacha.link/ipfs/${latestCid}`;
+    if (!proofs.length) throw new Error("No proofs found");
 
-        // build timeline
-        const logList = uploads
-            .map((item, i) => {
-                let statusClass = i === 0 ? "verified" : i < 5 ? "pending" : "archived";
-                return `<li class="${statusClass}">
-                            <a href="https://ipfs.io/ipfs/${item.cid}" target="_blank">${item.cid}</a>
-                            <span style="color:#888;"> — ${new Date(item.created).toISOString()}</span>
-                        </li>`;
-            })
-            .join("");
+    // Sort newest first
+    proofs.sort((a, b) => new Date(b.created) - new Date(a.created));
 
-        document.getElementById("output").innerHTML =
-        `<strong>Fetched ${uploads.length} proofs from Storacha</strong><br><ul>${logList}</ul>`;
-    } catch (err) {
-        setIndicator('fallback', new Date().toISOString());
-        document.getElementById("output").innerHTML =
-        `<span style='color:#f5a623;'>⚠ Using fallback CID (API error: ${err.message})</span>`;
-        document.getElementById("proofFrame").src = `https://storacha.link/ipfs/${FALLBACK_CID}`;
-    }
-    }
+    // Build timeline
+    const logList = proofs.map((p) => {
+      const v = validators[p.validator];
+      return `
+        <li class="${p.status}">
+          <a href="https://ipfs.io/ipfs/${p.cid}" target="_blank">${p.cid}</a>
+          <span style="color:#888;"> — ${new Date(p.created).toISOString()}</span><br>
+          <span style="color:#ccc;">${p.description}</span><br>
+          <span style="color:#6af;">Validator: ${v ? v.name : p.validator}</span>
+        </li>`;
+    }).join("");
 
-    function updateClock() {
-    const now = new Date().toISOString();
-    document.getElementById("lastUpdated").innerText = "⏱ Last updated: " + now;
-    }
-
-    fetchLogs();
-    setInterval(fetchLogs, 60000);
-    updateClock();
-    setInterval(updateClock, 60000);
-    </script>
+    document.getElementById("output").innerHTML =
+      `<strong>Fetched ${proofs.length} proofs</strong><br><ul>${logList}</ul>`;
+  } catch (err) {
+    setIndicator("fallback");
+    document.getElementById("output").innerHTML =
+      `<span style="color:#f63;">⚠ ${err.message}</span>`;
+  }
+}
+</script>
   </body>
 </html>
 <div style="margin-top: 20px;">
