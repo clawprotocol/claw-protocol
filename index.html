@@ -49,9 +49,33 @@
       0%, 100% { opacity: 0.6; }
       50% { opacity: 1; }
     }
+  /* --- top navigation --- */
+  .top-nav {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .top-nav a {
+    color: #9cf;
+    margin: 0 10px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: color 0.2s;
+  }
+  .top-nav a:hover {
+    color: #fff;
+    text-decoration: underline;
+  }
+.top-nav a.active {
+  color: #ffcc66;
+}  
   </style>
 </head>
 <body>
+  <!-- 🔗 Navigation -->
+  <nav class="top-nav">
+    <a href="index.html" class="active">🏠 Home</a>
+    <a href="explorer.html">🧾 Explorer</a>
+  </nav>
   <h1>🦅 CLAW Protocol</h1>
   <p>
     A decentralized adjudication, proof anchoring, and verifiable transparency protocol.<br>
