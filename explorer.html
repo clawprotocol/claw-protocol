@@ -189,6 +189,26 @@
         transform: translateY(-2px);
         transition: box-shadow 0.2s ease, transform 0.2s ease;
     }
+    /* --- animated loading pulse --- */
+    .loading-pulse {
+        font-weight: 500;
+        letter-spacing: 1px;
+    }
+
+    .loading-pulse .dot1,
+    .loading-pulse .dot2,
+    .loading-pulse .dot3 {
+        opacity: 0;
+        animation: blink 1.5s infinite;
+    }
+
+    .loading-pulse .dot2 { animation-delay: 0.3s; }
+    .loading-pulse .dot3 { animation-delay: 0.6s; }
+
+    @keyframes blink {
+        0%, 80%, 100% { opacity: 0; }
+        40% { opacity: 1; }
+    }
     </style>
   </head>
 
@@ -208,7 +228,9 @@
     <p id="lastUpdated" style="font-size:0.9em;color:#999;"></p>
 
     <h3>📜 Proof Timeline (Most Recent First)</h3>
-    <pre id="output">Loading proof history...</pre>
+    <pre id="output">
+        <span class="loading-pulse">Loading proof history<span class="dot1">.</span><span class="dot2">.</span><span class="dot3">.</span></span>
+    </pre>
     <p id="lastUpdated" style="font-size:0.9em;color:#999;"></p>
     <iframe
       id="proofFrame"
