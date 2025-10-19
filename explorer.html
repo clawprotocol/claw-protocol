@@ -61,7 +61,9 @@
     <pre id="output">Loading...</pre>
     <p id="lastUpdated" style="font-size:0.9em;color:#999;"></p>
 
-    <h3 style="margin-top: 20px;">Latest Proof from Storacha:</h3>
+    <h3>📜 Proof Timeline (Most Recent First)</h3>
+    <pre id="output">Loading proof history...</pre>
+    <p id="lastUpdated" style="font-size:0.9em;color:#999;"></p>
     <iframe
       id="proofFrame"
       width="100%"
@@ -70,41 +72,55 @@
     </iframe>
 
     <script>
-      const API_URL = "https://api.storacha.network/space/list?space=CLAW-Audit-Logs";
-      const FALLBACK_CID = "bafybeicbckiftbnuvac6wqjoe7ziw4up4ddlbetxwzpgbz5lrftxyuctpa"; // last known proof
+    const API_URL = "https://api.storacha.network/space/list?space=CLAW-Audit-Logs";
+    const FALLBACK_CID = "bafybeicbckiftbnuvac6wqjoe7ziw4up4ddlbetxwzpgbz5lrftxyuctpa"; // backup proof
 
-      async function fetchLogs() {
-        try {
-          const res = await fetch(API_URL);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const json = await res.json();
-          const uploads = json?.results || json;
+    async function fetchLogs() {
+    try {
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const uploads = json.results || [];
 
-          if (!uploads || uploads.length === 0) throw new Error("No uploads found");
+        if (uploads.length === 0) throw new Error("No uploads found");
 
-          const latest = uploads[0];
-          const cid = latest.root || latest.cid || FALLBACK_CID;
-          const created = new Date(latest.created).toISOString();
+        // sort newest → oldest
+        uploads.sort((a, b) => new Date(b.created) - new Date(a.created));
 
-          document.getElementById("output").innerHTML =
-            `🟢 <b>Latest Proof:</b> <a href="https://ipfs.io/ipfs/${cid}" target="_blank">${cid}</a><br/>📅 ${created}`;
+        // show latest proof in iframe
+        const latest = uploads[0];
+        const latestCid = latest.cid;
+        document.getElementById("proofFrame").src = `https://storacha.link/ipfs/${latestCid}`;
 
-          document.getElementById("proofFrame").src = `https://storacha.link/ipfs/${cid}`;
-        } catch (err) {
-          document.getElementById("output").innerHTML =
-            `⚠️ Using fallback CID (API error: ${err.message})`;
-          document.getElementById("proofFrame").src = `https://storacha.link/ipfs/${FALLBACK_CID}`;
-        }
-      }
+        // build timeline
+        const logList = uploads
+        .map(
+            (item) =>
+            `<li>
+                <a href="https://ipfs.io/ipfs/${item.cid}" target="_blank">${item.cid}</a>
+                <span style="color:#888;"> — ${new Date(item.created).toISOString()}</span>
+            </li>`
+        )
+        .join("");
 
-      fetchLogs();
-      setInterval(fetchLogs, 60000); // refresh every minute
-      function updateClock() {
-        const now = new Date().toISOString();
-        document.getElementById("lastUpdated").innerText = "⏱ Last updated: " + now;
-}
-updateClock();
-setInterval(updateClock, 60000);
+        document.getElementById("output").innerHTML =
+        `<strong>Fetched ${uploads.length} proofs from Storacha</strong><br><ul>${logList}</ul>`;
+    } catch (err) {
+        document.getElementById("output").innerHTML =
+        `<span style='color:#f5a623;'>⚠ Using fallback CID (API error: ${err.message})</span>`;
+        document.getElementById("proofFrame").src = `https://storacha.link/ipfs/${FALLBACK_CID}`;
+    }
+    }
+
+    function updateClock() {
+    const now = new Date().toISOString();
+    document.getElementById("lastUpdated").innerText = "⏱ Last updated: " + now;
+    }
+
+    fetchLogs();
+    setInterval(fetchLogs, 60000);
+    updateClock();
+    setInterval(updateClock, 60000);
     </script>
   </body>
 </html>
