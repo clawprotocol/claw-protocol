@@ -2,6 +2,54 @@
 <html>
   <head>
     <title>🦅 CLAW Explorer – Verifiable Proof Log</title>
+    <style>
+        body {
+            background-color: #0a0a0a;
+            color: #e0e0e0;
+            font-family: "Courier New", monospace;
+            margin: 40px;
+            line-height: 1.5;
+        }
+
+        h1 {
+            color: #66ccff;
+            border-bottom: 1px solid #333;
+            padding-bottom: 8px;
+        }
+
+        h3 {
+            color: #cccccc;
+        }
+
+        a {
+            color: #66ffcc;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        pre {
+            background: #111;
+            border: 1px solid #444;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        iframe {
+            border: 1px solid #555;
+            border-radius: 6px;
+            background-color: #111;
+            margin-top: 12px;
+        }
+
+        #lastUpdated {
+            color: #888;
+            margin-top: 8px;
+        }
+</style>
   </head>
 
   <body>
@@ -11,6 +59,7 @@
     </p>
 
     <pre id="output">Loading...</pre>
+    <p id="lastUpdated" style="font-size:0.9em;color:#999;"></p>
 
     <h3 style="margin-top: 20px;">Latest Proof from Storacha:</h3>
     <iframe
@@ -50,6 +99,12 @@
 
       fetchLogs();
       setInterval(fetchLogs, 60000); // refresh every minute
+      function updateClock() {
+        const now = new Date().toISOString();
+        document.getElementById("lastUpdated").innerText = "⏱ Last updated: " + now;
+}
+updateClock();
+setInterval(updateClock, 60000);
     </script>
   </body>
 </html>
