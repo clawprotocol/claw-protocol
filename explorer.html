@@ -24,30 +24,47 @@
   <pre id="output">Loading...</pre>
 
   <script>
-    async function fetchLogs() {
-      try {
-        // NOTE: adjust the endpoint if Storacha changes their API path
-        const res = await fetch('https://api.storacha.network/space/list?space=CLAW-Audit-Logs');
-        const data = await res.json();
-        const out = data.map(item =>
-          `${new Date(item.created).toISOString()} — <a href="https://ipfs.io/ipfs/${item.cid}" target="_blank">${item.cid}</a>`
-        ).join('\n');
-        document.getElementById('output').innerHTML = out || 'No logs yet.';
-      } catch (e) {
-        document.getElementById('output').innerHTML =
-          '⚠️ Failed to fetch logs (try again later).';
-      }
-    }
-    fetchLogs();
-  </script>
+const API_URL = "https://api.storacha.network/space/list?space=CLAW-Audit-Logs";
+
+// fetch latest proofs every 60 seconds
+async function fetchLogs() {
+  try {
+    const res = await fetch(API_URL);
+    const json = await res.json();
+    const uploads = json?.results || json; // normalize for API shape
+
+    if (!uploads.length) throw new Error("No logs found");
+
+    // get newest upload
+    const latest = uploads[0];
+    const cid = latest.root || latest.cid;
+    const created = new Date(latest.created).toISOString();
+
+    // update text log
+    document.getElementById("output").innerHTML =
+      `🟢 <b>Latest Proof:</b> <a href="https://ipfs.io/ipfs/${cid}" target="_blank">${cid}</a><br/>📅 ${created}`;
+
+    // update iframe automatically
+    document.getElementById("proofFrame").src = `https://storacha.link/ipfs/${cid}`;
+  } catch (err) {
+    document.getElementById("output").innerHTML =
+      `⚠️ Failed to fetch logs (${err.message})`;
+  }
+}
+
+// run now + refresh every minute
+fetchLogs();
+setInterval(fetchLogs, 60000);
+</script>
 </body>
 </html>
 <div style="margin-top: 20px;">
   <h3>Latest Proof from Storacha:</h3>
-  <iframe 
-    src="https://storacha.link/ipfs/bafybeicbckiftbnuvac6wqjoe7ziw4up4ddlbetxwzpgbz5lrftxyuctpa"
-    width="100%" 
-    height="600"
-    style="border: 1px solid #555; border-radius: 6px; background-color: #111;">
-  </iframe>
+ <iframe
+  id="proofFrame"
+  src=""
+  width="100%"
+  height="600"
+  style="border:1px solid #555; border-radius:6px; background-color:#111;">
+</iframe>
 </div>
