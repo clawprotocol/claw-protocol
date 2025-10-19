@@ -282,7 +282,7 @@ async function fetchLogs() {
         if (!badge) return;
         const lastUpdate = new Date(badge.textContent.replace("Last verified: ", ""));
         const diff = (Date.now() - lastUpdate.getTime()) / 1000;
-        if (diff > 300) { // 5 minutes
+        if (diff > 5) { // 5 seconds for test
             badge.style.animation = "pulse 1.5s infinite ease-in-out";
         } else {
             badge.style.animation = "none";
@@ -349,7 +349,11 @@ window.addEventListener('scroll', () => {
 </html>
 <div style="margin-top: 20px;">
   <h3>Latest Proof from Storacha:</h3>
- <iframe
+ <div id="verifiedBadge"
+     style="font-size: 0.9em; color: #00ff99; margin-bottom: 12px;">
+  Last verified: (none yet)
+</div>
+  <iframe
   id="proofFrame"
   src=""
   width="100%"
