@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "last_updated": "2025-10-19T17:00:00Z",
+  "validators": [
+    {
+      "id": "bar-usa-0001",
+      "name": "Jane Doe, Esq.",
+      "jurisdiction": "California, USA",
+      "bar_number": "CA123456",
+      "wallet": "0x1234abcd5678ef...",
+      "status": "active",
+      "joined": "2025-10-19T17:00:00Z",
+      "proof": "bafy...CID",
+      "note": "Founding Clause Author"
+    }
+  ]
+}
