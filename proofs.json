@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "last_updated": "2025-10-19T17:05:00Z",
+  "proofs": [
+    {
+      "cid": "bafybeibckiftbnuvac6wgjoe7ziw4up4dllbetxwzpgb2slrftxyuctpa",
+      "type": "audit-proof",
+      "created": "2025-10-19T03:00:00Z",
+      "submitted_by": "0x1234abcd5678ef...",
+      "validator": "bar-usa-0001",
+      "status": "verified",
+      "description": "CLAW Explorer initial proof test entry"
+    }
+  ]
+}
