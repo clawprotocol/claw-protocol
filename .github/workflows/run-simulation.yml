@@ -53,3 +53,19 @@ jobs:
           storacha up "${logfile}" | tee storacha_output.txt
           cid=$(grep -Eo 'bafy[0-9a-z]+' storacha_output.txt | head -1)
           echo "🪶 CLAW proof uploaded → https://ipfs.io/ipfs/${cid}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Append CID to CLAW Audit Log (Storacha)
+        run: |
+          ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          logfile="audit_append_${ts}.txt"
+    
+          # Pull CID from the last Storacha upload output
+          cid=$(grep -Eo 'bafy[0-9a-z]+' storacha_output.txt | head -1)
+    
+          # Create a small append entry
+          echo "CLAW run proof ${ts} → ${cid}" > "${logfile}"
+    
+          # Upload the append log so it's timestamped + pinned
+          storacha up "${logfile}" | tee append_output.txt
+    
+          echo "✅ Appended CID ${cid} to CLAW-Audit-Logs space" >> $GITHUB_STEP_SUMMARY
