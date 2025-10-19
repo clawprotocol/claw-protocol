@@ -3,6 +3,10 @@
   <head>
     <title>🦅 CLAW Explorer – Verifiable Proof Log</title>
     <style>
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; box-shadow: 0 0 5px #00ff99; }
+            50% { opacity: 1; box-shadow: 0 0 15px #00ff99; }
+        }
         body {
             background-color: #0a0a0a;
             color: #e0e0e0;
@@ -273,6 +277,17 @@ async function fetchLogs() {
   try {
     setIndicator("live");
     updateVerifiedBadge();
+    setInterval(() => {
+        const badge = document.getElementById("verifiedBadge");
+        if (!badge) return;
+        const lastUpdate = new Date(badge.textContent.replace("Last verified: ", ""));
+        const diff = (Date.now() - lastUpdate.getTime()) / 1000;
+        if (diff > 300) { // 5 minutes
+            badge.style.animation = "pulse 1.5s infinite ease-in-out";
+        } else {
+            badge.style.animation = "none";
+        }
+    }, 60000);
 
     // Load proofs + validators
     const [proofRes, valRes] = await Promise.all([fetch(PROOFS_URL), fetch(VALIDATORS_URL)]);
