@@ -49,6 +49,25 @@
             color: #888;
             margin-top: 8px;
         }
+    /* --- top navigation --- */
+    .top-nav {
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    .top-nav a {
+        color: #9cf;
+        margin: 0 10px;
+        text-decoration: none;
+        font-weight: bold;
+        transition: color 0.2s;
+    }
+    .top-nav a:hover {
+        color: #fff;
+        text-decoration: underline;
+    }
+    .top-nav a.active {
+        color: #ffcc66;
+    }
     </style>
     <style>
         ul.proof-list li {
@@ -132,6 +151,11 @@
   </head>
 
   <body>
+    <!-- 🔗 Navigation -->
+    <nav class="top-nav">
+        <a href="index.html">🏠 Home</a>
+        <a href="explorer.html" class="active">🧾 Explorer</a>
+    </nav>
     <div id="source-indicator" class="indicator">⏳ Checking data source...</div>
     <h1>🦅 CLAW Explorer – Verifiable Proof Log</h1>
     <p>
