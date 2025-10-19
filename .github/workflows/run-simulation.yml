@@ -44,3 +44,12 @@ jobs:
           echo "### ✅ CLAW Simulation Run Complete" >> $GITHUB_STEP_SUMMARY
           echo "Timestamp: ${{ env.timestamp }}" >> $GITHUB_STEP_SUMMARY
           echo "Artifact: claw-simulation-log-${{ env.timestamp }}" >> $GITHUB_STEP_SUMMARY
+
+- name: Upload simulation proof to Storacha
+  run: |
+    ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    logfile="simulation_output_${ts}.txt"
+    echo "CLAW simulation proof ${ts}" > "${logfile}"
+    storacha up "${logfile}" | tee storacha_output.txt
+    cid=$(grep -Eo 'bafy[0-9a-z]+' storacha_output.txt | head -1)
+    echo "🪶 CLAW proof uploaded → https://ipfs.io/ipfs/${cid}" >> $GITHUB_STEP_SUMMARY
