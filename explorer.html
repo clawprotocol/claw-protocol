@@ -277,6 +277,9 @@ async function fetchLogs() {
   try {
     setIndicator("live");
     updateVerifiedBadge();
+    const badge = document.getElementById("verifiedBadge");
+    badge.style.animation = "pulse 2s infinite ease-in-out";
+    badge.style.color = "#00ff99";
     setInterval(() => {
         const badge = document.getElementById("verifiedBadge");
         if (!badge) return;
