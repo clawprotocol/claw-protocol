@@ -2,6 +2,7 @@
 <html>
   <head>
     <title>🦅 CLAW Explorer – Verifiable Proof Log</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <style>
         @keyframes pulse {
             0%, 100% {
@@ -298,7 +299,70 @@
     #verifiedBadge[data-status="offline"] {
         color: #ff4444;
     }
+    /* Tooltip / hover legend fixes */
+    .tooltip {
+        position: relative;
+        display: inline-block;
+        cursor: help;
+    }
+
+    .tooltip .tooltiptext {
+        visibility: hidden;
+        width: max-content;
+        max-width: 90vw;               /* Fit within screen */
+        background-color: rgba(0, 0, 0, 0.85);
+        color: #eee;
+        text-align: center;
+        border-radius: 6px;
+        padding: 6px 8px;
+        position: absolute;
+        z-index: 10;
+        bottom: 125%;                  /* Above element */
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.9em;
+        line-height: 1.2em;
+        white-space: normal;           /* Allow wrapping */
+        word-break: break-word;
+    }
+
+    .tooltip:hover .tooltiptext {
+        visibility: visible;
+    }
+
+    .status:hover .tooltip {
+        opacity: 1;
+    }
     </style>
+    <!-- --- Mobile Layout Optimization --- -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+    @media (max-width: 768px) {
+        body {
+            font-size: 14px;
+            padding: 8px;
+        }
+        h1 {
+            font-size: 1.3em;
+            text-align: center;
+        }
+        .status-bar {
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 6px;
+        }
+        #verifiedBadge {
+            font-size: 0.9em;
+            text-align: center;
+            margin: 8px auto;
+            display: block;
+        }
+        .indicator, .proof-box {
+            font-size: 0.9em;
+            padding: 6px;
+        }
+}
+</style>
   </head>
 
   <body>
