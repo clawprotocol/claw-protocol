@@ -357,6 +357,27 @@ function updateVerifiedBadge() {
   badge.style.opacity = 1;
   setTimeout(() => (badge.style.opacity = 0.6), 1500);
 }
+// Auto-update 'Last verified' timestamp from latest proof
+async function updateVerifiedBadge() {
+  const badge = document.getElementById("verifiedBadge");
+  try {
+    const response = await fetch("https://raw.githubusercontent.com/clawprotocol/claw-protocol/main/proofs.json");
+    if (!response.ok) throw new Error("Failed to fetch proofs");
+    const data = await response.json();
+    if (data.proofs && data.proofs.length > 0) {
+      const latest = data.proofs[0];
+      const time = new Date(latest.created).toUTCString();
+      badge.textContent = `Last verified: ${time}`;
+    } else {
+      badge.textContent = "Last verified: (no proofs yet)";
+    }
+  } catch (err) {
+    console.error("Badge update error:", err);
+    badge.textContent = "Last verified: (fetch error)";
+  }
+}
+updateVerifiedBadge();
+setInterval(updateVerifiedBadge, 60000); // refresh every 60 s
 </script>
 <script>
 window.addEventListener('scroll', () => {
