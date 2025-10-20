@@ -252,7 +252,7 @@
         0% { background-color: rgba(255,0,0,0.5); }
         100% { background-color: transparent; }
     }
-    /* 🧭 Tooltip styling */
+    /* Tooltip Base */
     #verifiedBadge {
         position: relative;
         cursor: help;
@@ -261,27 +261,42 @@
     #verifiedBadge::after {
         content: "🟢 Live   🟡 Lag   🔴 Offline\nStatus updates automatically";
         position: absolute;
-        bottom: 125%;
+        bottom: 130%;
         left: 50%;
         transform: translateX(-50%);
         background: rgba(0,0,0,0.85);
-        color: #00ff99;
         font-size: 11px;
         white-space: pre;
         padding: 6px 10px;
         border-radius: 6px;
-        border: 1px solid #00ff99;
+        border: 1px solid currentColor;
         opacity: 0;
         pointer-events: none;
-        transition: opacity 0.3s ease;
+        transition: opacity 0.3s ease, color 0.3s ease, border-color 0.3s ease;
         text-align: center;
         width: max-content;
-        max-width: 200px;
-        z-index: 10;
-    }
+        max-width: 240px;
+        z-index: 20;
+        box-shadow: 0 0 8px rgba(0,255,153,0.4);
+        color: currentColor;
+    }   
 
+    /* Tooltip visible on hover */
     #verifiedBadge:hover::after {
         opacity: 1;
+    }
+
+    /* Dynamic color states */
+    #verifiedBadge[data-status="live"] {
+        color: #00ff99;
+    }
+
+    #verifiedBadge[data-status="lag"] {
+        color: #ffcc00; 
+    }
+
+    #verifiedBadge[data-status="offline"] {
+        color: #ff4444;
     }
     </style>
   </head>
@@ -422,24 +437,27 @@ async function updateVerifiedBadge() {
       const prevText = badge.textContent;
       badge.textContent = `Last verified: ${time}`;
 
-      // Compute age of proof
+      // Compute proof freshness
       const diffSec = (Date.now() - new Date(latest.created).getTime()) / 1000;
 
-      // Flash logic
       if (prevText !== badge.textContent) {
         if (diffSec < 60) {
+          badge.dataset.status = "live";       // 🟢
           badge.style.animation = "flashSuccess 1.5s ease-out";
         } else {
+          badge.dataset.status = "lag";        // 🟡
           badge.style.animation = "flashLag 1.5s ease-out";
         }
         setTimeout(() => badge.style.animation = "pulse 2s infinite ease-in-out", 1600);
       }
     } else {
       badge.textContent = "Last verified: (no proofs yet)";
+      badge.dataset.status = "offline";        // 🔴
     }
   } catch (err) {
     console.error("Verification fetch failed:", err);
     badge.textContent = "Last verified: (fetch error)";
+    badge.dataset.status = "offline";          // 🔴
     badge.style.animation = "flashError 1.5s ease-out";
     setTimeout(() => badge.style.animation = "pulse 2s infinite ease-in-out", 1600);
   }
