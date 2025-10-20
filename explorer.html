@@ -252,6 +252,37 @@
         0% { background-color: rgba(255,0,0,0.5); }
         100% { background-color: transparent; }
     }
+    /* 🧭 Tooltip styling */
+    #verifiedBadge {
+        position: relative;
+        cursor: help;
+    }
+
+    #verifiedBadge::after {
+        content: "🟢 Live   🟡 Lag   🔴 Offline\nStatus updates automatically";
+        position: absolute;
+        bottom: 125%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0,0,0,0.85);
+        color: #00ff99;
+        font-size: 11px;
+        white-space: pre;
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid #00ff99;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+        text-align: center;
+        width: max-content;
+        max-width: 200px;
+        z-index: 10;
+    }
+
+    #verifiedBadge:hover::after {
+        opacity: 1;
+    }
     </style>
   </head>
 
