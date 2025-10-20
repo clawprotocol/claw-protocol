@@ -337,6 +337,29 @@
         opacity: 1;
     }
 
+    /* ✅ Verified badge responsive + overflow fix */
+    #verifiedBadge {
+        display: inline-block;
+        color: #00ff99;
+        animation: pulse 2s infinite ease-in-out;
+        font-weight: bold;
+        padding: 6px 10px;
+        margin: 10px auto;
+        border: 1px solid #00ff99;
+        border-radius: 6px;
+        box-shadow: 0 0 20px rgba(0,255,153,0.3);
+        text-align: center;
+        max-width: 95vw;
+        white-space: normal;
+        overflow-wrap: break-word;
+    }
+
+    /* make sure it scales down a bit on phones */
+    @media (max-width: 600px) {
+        #verifiedBadge {
+            font-size: 0.9em;
+        }
+    }
     /* === STATUS CONTAINER (Live / Lag / Offline legend) === */
     .status-container {
         position: relative;
@@ -399,16 +422,17 @@
         <a href="index.html">🏠 Home</a>
         <a href="explorer.html" class="active">🧾 Explorer</a>
     </nav>
-    <div id="verifiedBadge"
-        style="color:#00ff99;
-            animation:pulse 2s infinite ease-in-out;
-            font-weight:bold;
-            margin-left:20px;">
+    <div id="verifiedBadge">
         Last verified: (test mode)
     </div>
 
     <div id="source-indicator" class="indicator">⏳ Checking data source...</div>
     
+    <div class="status-container">
+        <div class="status-item live"></div> <span>Live</span>
+        <div class="status-item lag"></div> <span>Lag</span>
+        <div class="status-item offline"></div> <span>Offline</span>
+    </div>
     <h1>🦅 CLAW Explorer – Verifiable Proof Log</h1>
     <p style="color:#888; font-size:0.9em; margin-top:-8px;">
         Public verifiability powered by Storacha 🧾 — last proof fetched live.
@@ -567,17 +591,3 @@ window.addEventListener('scroll', () => {
 </script>
   </body>
 </html>
-<div style="margin-top: 20px;">
-  <h3>Latest Proof from Storacha:</h3>
- <div id="verifiedBadge"
-     style="font-size: 0.9em; color: #00ff99; margin-bottom: 12px;">
-  Last verified: (none yet)
-</div>
-  <iframe
-  id="proofFrame"
-  src=""
-  width="100%"
-  height="600"
-  style="border:1px solid #555; border-radius:6px; background-color:#111;">
-</iframe>
-</div>
