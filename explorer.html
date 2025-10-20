@@ -308,31 +308,59 @@
 
     .tooltip .tooltiptext {
         visibility: hidden;
-        width: max-content;
-        max-width: 90vw;               /* Fit within screen */
-        background-color: rgba(0, 0, 0, 0.85);
+        position: absolute;
+        bottom: 125%;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+
+        width: 90%;
+        max-width: 300px;
+        background-color: rgba(0, 0, 0, 0.9);
         color: #eee;
         text-align: center;
         border-radius: 6px;
         padding: 6px 8px;
-        position: absolute;
-        z-index: 10;
-        bottom: 125%;                  /* Above element */
-        left: 50%;
-        transform: translateX(-50%);
         font-size: 0.9em;
-        line-height: 1.2em;
-        white-space: normal;           /* Allow wrapping */
-        word-break: break-word;
+        line-height: 1.3em;
+        white-space: normal;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+
+        /* smooth fade */
+        opacity: 0;
+        transition: opacity 0.25s ease;
     }
 
     .tooltip:hover .tooltiptext {
         visibility: visible;
-    }
-
-    .status:hover .tooltip {
         opacity: 1;
     }
+
+    /* === STATUS CONTAINER (Live / Lag / Offline legend) === */
+    .status-container {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        max-width: 100%;
+        margin: 0 auto;
+        overflow: visible;
+    }
+
+    /* Colored indicator dots */
+    .status-item {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 4px;
+    }
+
+    .status-item.live { background-color: #00ff66; }
+    .status-item.lag { background-color: #ffcc00; }
+    .status-item.offline { background-color: #ff4444; }
     </style>
     <!-- --- Mobile Layout Optimization --- -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
