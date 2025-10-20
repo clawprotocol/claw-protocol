@@ -233,6 +233,25 @@
     .flash-success {
         animation: flashSuccess 0.8s ease-out;
     }
+    @keyframes verifyFlash {
+        0% { background-color: rgba(0,255,153,0.4); }
+        100% { background-color: transparent; }
+    }
+    /* 🔵 Adaptive verification flashes */
+    @keyframes flashSuccess {
+        0% { background-color: rgba(0,255,153,0.6); }
+        100% { background-color: transparent; }
+    }
+
+    @keyframes flashLag {
+        0% { background-color: rgba(255,255,0,0.5); }
+        100% { background-color: transparent; }
+    }
+
+    @keyframes flashError {
+        0% { background-color: rgba(255,0,0,0.5); }
+        100% { background-color: transparent; }
+    }
     </style>
   </head>
 
@@ -362,18 +381,36 @@ async function updateVerifiedBadge() {
   const badge = document.getElementById("verifiedBadge");
   try {
     const response = await fetch("https://raw.githubusercontent.com/clawprotocol/claw-protocol/main/proofs.json");
-    if (!response.ok) throw new Error("Failed to fetch proofs");
+    if (!response.ok) throw new Error("Fetch failed");
     const data = await response.json();
+
     if (data.proofs && data.proofs.length > 0) {
       const latest = data.proofs[0];
       const time = new Date(latest.created).toUTCString();
+
+      const prevText = badge.textContent;
       badge.textContent = `Last verified: ${time}`;
+
+      // Compute age of proof
+      const diffSec = (Date.now() - new Date(latest.created).getTime()) / 1000;
+
+      // Flash logic
+      if (prevText !== badge.textContent) {
+        if (diffSec < 60) {
+          badge.style.animation = "flashSuccess 1.5s ease-out";
+        } else {
+          badge.style.animation = "flashLag 1.5s ease-out";
+        }
+        setTimeout(() => badge.style.animation = "pulse 2s infinite ease-in-out", 1600);
+      }
     } else {
       badge.textContent = "Last verified: (no proofs yet)";
     }
   } catch (err) {
-    console.error("Badge update error:", err);
+    console.error("Verification fetch failed:", err);
     badge.textContent = "Last verified: (fetch error)";
+    badge.style.animation = "flashError 1.5s ease-out";
+    setTimeout(() => badge.style.animation = "pulse 2s infinite ease-in-out", 1600);
   }
 }
 updateVerifiedBadge();
