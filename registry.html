@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>📜 CLAW Registry – Clause Database</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body {
+        background-color: #0a0a0a;
+        color: #e0e0e0;
+        font-family: "Courier New", monospace;
+        margin: 40px;
+        line-height: 1.5;
+      }
+      h1 {
+        color: #66ccff;
+        border-bottom: 1px solid #333;
+        padding-bottom: 8px;
+      }
+      a {
+        color: #66ffcc;
+        text-decoration: none;
+        margin: 0 10px;
+        font-weight: bold;
+      }
+      a:hover { text-decoration: underline; }
+      .top-nav {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      .clause-card {
+        background: #111;
+        border: 1px solid #444;
+        border-radius: 6px;
+        margin: 10px 0;
+        padding: 12px;
+        transition: box-shadow 0.3s;
+      }
+      .clause-card:hover {
+        box-shadow: 0 0 12px rgba(102, 255, 204, 0.4);
+      }
+      .clause-card h3 {
+        color: #00ff99;
+        margin: 0;
+        font-size: 1.1em;
+      }
+      .clause-meta {
+        color: #888;
+        font-size: 0.85em;
+        margin-top: 4px;
+      }
+      .clause-text {
+        display: none;
+        margin-top: 8px;
+        background: #0f0f0f;
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid #333;
+      }
+      .clause-card.open .clause-text { display: block; }
+
+      /* Add new clause form */
+      form {
+        background: #111;
+        padding: 12px;
+        border-radius: 6px;
+        border: 1px solid #333;
+        margin-top: 20px;
+      }
+      input, textarea {
+        width: 100%;
+        background: #0f0f0f;
+        color: #eee;
+        border: 1px solid #444;
+        border-radius: 4px;
+        padding: 8px;
+        margin-top: 6px;
+        font-family: inherit;
+      }
+      button {
+        margin-top: 10px;
+        padding: 8px 14px;
+        background: #00ff99;
+        color: #000;
+        border: none;
+        border-radius: 4px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #33ffaa;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 🔗 Navigation -->
+    <nav class="top-nav">
+      <a href="index.html">🏠 Home</a>
+      <a href="explorer.html">🧾 Explorer</a>
+      <a href="registry.html" class="active">📜 Registry</a>
+    </nav>
+
+    <h1>📜 CLAW Registry – Smart Clauses</h1>
+    <p style="color:#999;">View or submit verifiable legal clauses. All entries are public and timestamped.</p>
+
+    <div id="clauseList">Loading clauses...</div>
+
+    <form id="newClauseForm">
+      <h3>Submit New Clause</h3>
+      <label>Title</label><input type="text" id="title" required>
+      <label>Jurisdiction</label><input type="text" id="jurisdiction" required>
+      <label>Author</label><input type="text" id="author" required>
+      <label>Clause Text</label><textarea id="text" rows="4" required></textarea>
+      <button type="submit">Register Clause</button>
+    </form>
+
+    <script>
+      const CLAUSES_URL = "https://raw.githubusercontent.com/clawprotocol/claw-protocol/main/clauses.json";
+
+      async function loadClauses() {
+        try {
+          const res = await fetch(CLAUSES_URL);
+          const data = await res.json();
+          const container = document.getElementById("clauseList");
+          container.innerHTML = data.clauses.map(c => `
+            <div class="clause-card" onclick="this.classList.toggle('open')">
+              <h3>${c.title}</h3>
+              <div class="clause-meta">Jurisdiction: ${c.jurisdiction} | Author: ${c.author} | Status: ${c.status}</div>
+              <div class="clause-text">${c.text}</div>
+            </div>
+          `).join("");
+        } catch (err) {
+          document.getElementById("clauseList").innerHTML = `<span style="color:#f66;">⚠ Failed to load clauses.</span>`;
+        }
+      }
+
+      document.getElementById("newClauseForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const newClause = {
+          title: title.value,
+          jurisdiction: jurisdiction.value,
+          author: author.value,
+          text: text.value,
+          status: "draft",
+          timestamp: new Date().toISOString()
+        };
+        alert("Clause registered locally (MVP mode). Future versions will commit to IPFS or GitHub.");
+        console.log("New Clause:", newClause);
+      });
+
+      loadClauses();
+    </script>
+  </body>
+</html>
