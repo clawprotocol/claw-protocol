@@ -286,6 +286,19 @@
         transform: translateX(-50%) translateY(4px);
     }
 
+    <script>
+    document.addEventListener("DOMContentLoaded", () => {
+        const badge = document.getElementById("verifiedBadge");
+        if (!badge) return;
+
+        // For mobile: show tooltip briefly on tap/press
+        badge.addEventListener("touchstart", () => {
+            badge.classList.add("show-tooltip");
+            setTimeout(() => badge.classList.remove("show-tooltip"), 2000); // hide after 2s
+        });
+        });
+    </script>
+
     /* Tooltip visible on hover */
     #verifiedBadge:hover::after {
         opacity: 1;
@@ -339,6 +352,11 @@
     .tooltip:hover .tooltiptext {
         visibility: visible;
         opacity: 1;
+    }
+
+    #verifiedBadge.show-tooltip::after {
+        opacity: 1;
+        transform: translateX(-50%) translateY(4px);
     }
 
     /* ✅ Verified badge responsive + overflow fix */
