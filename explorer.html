@@ -13,6 +13,15 @@
                 opacity: 0.3;
                 box-shadow: 0 0 25px #00ff99;
             }
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 10px #00ff99; }
+            50% { box-shadow: 0 0 30px #00ff99; }
+            100% { box-shadow: 0 0 10px #00ff99; }
+        }
+        #verifiedBadge.glow {
+            animation: pulseGlow 1s ease-out;
+        }
+            
         }
         body {
             background-color: #0a0a0a;
@@ -382,6 +391,24 @@
             font-size: 0.9em;
         }
     }
+
+    #verifiedBadge {
+        display: inline-block;
+        max-width: 90vw;
+        overflow-wrap: break-word;
+        word-break: break-all;
+        text-align: center;
+        white-space: normal;
+    }
+
+    #output {
+        opacity: 0;
+        transition: opacity 0.8s ease-in;
+    }
+    #output.loaded {
+        opacity: 1;
+    }
+
     /* === STATUS CONTAINER (Live / Lag / Offline legend) === */
     .status-container {
         position: relative;
@@ -540,6 +567,7 @@ async function fetchLogs() {
 
     document.getElementById("output").innerHTML =
       `<strong>Fetched ${proofs.length} proofs</strong><br><ul>${logList}</ul>`;
+        document.getElementById("output").classList.add("loaded");
         document.body.classList.add("flash-success");
         setTimeout(() => document.body.classList.remove("flash-success"), 900);
   } catch (err) {
@@ -574,6 +602,8 @@ async function updateVerifiedBadge() {
       const diffSec = (Date.now() - new Date(latest.created).getTime()) / 1000;
 
       if (prevText !== badge.textContent) {
+        badge.classList.add("glow");
+        setTimeout(() => badge.classList.remove("glow"), 1200);
         if (diffSec < 60) {
           badge.dataset.status = "live";       // 🟢
           badge.style.animation = "flashSuccess 1.5s ease-out";
