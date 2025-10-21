@@ -1,0 +1,20 @@
+{
+  "clauses": [
+    {
+      "title": "Non-Disclosure Agreement (Mutual)",
+      "jurisdiction": "Delaware, USA",
+      "author": "Attorney Alpha",
+      "text": "Both parties agree to maintain confidentiality of shared information for a period of 3 years.",
+      "status": "verified",
+      "timestamp": "2025-10-19T00:00:00Z"
+    },
+    {
+      "title": "Employee Conduct Clause",
+      "jurisdiction": "California, USA",
+      "author": "Attorney Beta",
+      "text": "All employees must comply with ethical and legal obligations in the course of business operations.",
+      "status": "draft",
+      "timestamp": "2025-10-18T00:00:00Z"
+    }
+  ]
+}
