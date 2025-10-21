@@ -290,6 +290,35 @@
         box-shadow: 0 0 8px rgba(0, 255, 153, 0.4);
         color: currentColor;
     }
+
+    /* Adjust tooltip placement and spacing */
+    #verifiedBadge::after {
+        bottom: auto;
+        top: 130%;          /* place below badge instead of above */
+        margin-top: 6px;    /* give breathing room */
+    }
+
+    /* Smooth slide-in motion for tooltip */
+    #verifiedBadge::after {
+        transition: opacity 0.3s ease, transform 0.3s ease;
+        transform: translateX(-50%) translateY(-4px);
+    }
+
+    #verifiedBadge:hover::after,
+    #verifiedBadge.show-tooltip::after {
+        transform: translateX(-50%) translateY(0);
+    }
+
+    /* Responsive: ensure on mobile it's centered and doesn't overflow */
+    @media (max-width: 768px) {
+        #verifiedBadge::after {
+            max-width: 85vw;
+            white-space: normal;
+            text-align: center;
+            font-size: 12px;
+        }   
+    }
+
     #verifiedBadge:hover::after {
         opacity: 1;
         transform: translateX(-50%) translateY(4px);
