@@ -1,0 +1,5 @@
+python-telegram-bot==20.7
+pydantic==2.7.1
+python-dotenv
+requests
+aiohttp
