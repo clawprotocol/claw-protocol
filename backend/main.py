@@ -7,13 +7,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from handlers.clause_extract import extract_clauses_from_bytes
-from handlers.sign_handler import create_sign_packet
-from handlers.proof_handler import generate_proof_packet
-from handlers.receipt_handler import build_receipt
-from handlers.verify_handler import (
+# Existing handlers (switch to relative imports)
+from .handlers.clause_extract import extract_clauses_from_bytes
+from .handlers.sign_handler import create_sign_packet
+from .handlers.proof_handler import generate_proof_packet
+from .handlers.receipt_handler import build_receipt
+from .handlers.verify_handler import (
     verify_evm_personal_sign,
     verify_solana_sign_message,
+)
+
+# NEW: agent-native headless API stubs
+from .handlers.agent_api_handler import (
+    ProposeClauseRequest,
+    ProposeClauseResponse,
+    SignClauseRequest,
+    SignClauseResponse,
+    GenerateProofRequest,
+    GenerateProofResponse,
+    AnchorProofRequest,
+    AnchorProofResponse,
+    propose_clause as propose_clause_fn,
+    sign_clause as sign_clause_fn,
+    generate_proof as generate_proof_fn,
+    anchor_proof as anchor_proof_fn,
+    verify_receipt as verify_receipt_fn,
 )
 
 app = FastAPI(title="CLAW Backend", version="0.1.0")
@@ -27,7 +45,7 @@ app.add_middleware(
 )
 
 # -------------------------------------------------
-# Models
+# Models (existing)
 # -------------------------------------------------
 SigningRole = Literal["author", "verifier", "judge"]
 Chain = Literal["evm", "solana"]
@@ -174,3 +192,55 @@ async def receipt(request: ReceiptRequest):
         raise HTTPException(status_code=500, detail=f"Receipt generation failed: {exc}") from exc
 
     return JSONResponse({"receipt": receipt_obj})
+
+
+# =================================================
+# NEW: Headless Agent-Native Endpoints (stubs)
+# =================================================
+
+@app.post("/propose_clause", response_model=ProposeClauseResponse)
+async def propose_clause_endpoint(req: ProposeClauseRequest):
+    try:
+        proposal_id, clause_hash = propose_clause_fn(req)
+        return ProposeClauseResponse(proposal_id=proposal_id, clause_hash=clause_hash)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/sign_clause", response_model=SignClauseResponse)
+async def sign_clause_endpoint(req: SignClauseRequest):
+    try:
+        signature_id = sign_clause_fn(req)
+        return SignClauseResponse(signature_id=signature_id, proposal_id=req.proposal_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/generate_proof", response_model=GenerateProofResponse)
+async def generate_proof_endpoint(req: GenerateProofRequest):
+    try:
+        proof_id, receipt_id, proof_packet = generate_proof_fn(req)
+        return GenerateProofResponse(proof_id=proof_id, receipt_id=receipt_id, proof_packet=proof_packet)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/anchor_proof", response_model=AnchorProofResponse)
+async def anchor_proof_endpoint(req: AnchorProofRequest):
+    try:
+        anchor = anchor_proof_fn(req)
+        return AnchorProofResponse(proof_id=req.proof_id, anchor=anchor)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/verify_receipt/{receipt_id}")
+async def verify_receipt_endpoint(receipt_id: str):
+    # Return dict so it's easy to curl and inspect
+    return verify_receipt_fn(receipt_id).model_dump()
