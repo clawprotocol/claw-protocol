@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -78,7 +79,184 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# IPython# =========================
+# Python
+# =========================
+__pycache__/
+*.py[codz]
+*$py.class
+*.pyo
+*.pyd
+
+# C extensions
+*.so
+
+# =========================
+# Distribution / packaging
+# =========================
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# =========================
+# PyInstaller
+# =========================
+*.manifest
+*.spec
+
+# =========================
+# Installer logs
+# =========================
+pip-log.txt
+pip-delete-this-directory.txt
+
+# =========================
+# Unit test / coverage reports
+# =========================
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# =========================
+# Translations
+# =========================
+*.mo
+*.pot
+
+# =========================
+# Framework / app artifacts
+# =========================
+# Django
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask
+instance/
+.webassets-cache/
+
+# Scrapy
+.scrapy/
+
+# Sphinx
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter
+.ipynb_checkpoints/
+
 # IPython
+profile_default/
+ipython_config.py
+
+# =========================
+# Environments / secrets
+# =========================
+.env
+.env.*
+!.env.example
+.envrc
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# =========================
+# Type checkers / linters
+# =========================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# =========================
+# Build / temp
+# =========================
+*.log
+*.tmp
+
+# =========================
+# OS / IDE / Editor
+# =========================
+.DS_Store
+.vscode/
+.idea/
+.spyderproject
+.spyproject
+.ropeproject
+
+# Cursor
+.cursor/
+.cursorignore
+.cursorindexingignore
+
+# =========================
+# Node / Frontend
+# =========================
+node_modules/
+.next/
+dist/
+build/
+
+# =========================
+# CLAW runtime artifacts
+# =========================
+
+# SQLite usage / audit DBs
+audit/*.sqlite3
+audit/*.sqlite3-*
+audit/*.db
+
+# Temporary / local inputs
+contract.txt
+flow.json
+extract.json
+receipt.json
+tree_req.json
+
+# Docs cache / office temp
+docs/whitepaper/~$*
+
+# Security (optional extras)
+*.pem
+*.key
+secret_*
+credentials_*
+
 profile_default/
 ipython_config.py
 
@@ -230,3 +408,24 @@ credentials_*
 
 # Docs cache
 /docs/whitepaper/~$*
+=======
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ---- Virtual environments ----
+venv/
+.env
+
+# ---- OS ----
+.DS_Store
+
+# ---- Editors ----
+.vscode/
+.cursor/
+
+# ---- Logs ----
+*.log
+>>>>>>> 7332907 (chore: add .gitignore and remove python cache files)
