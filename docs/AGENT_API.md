@@ -22,3 +22,22 @@ POST /sign_clause
 POST /generate_proof
 POST /anchor_proof
 GET  /verify_receipt/{id}
+curl -s -X POST http://127.0.0.1:8000/sign_clause \
+  -H "Content-Type: application/json" \
+  -d '{
+    "proposal_id": "PROPOSAL_ID_HERE",
+    "idempotency_key": "agentB_sig_once",
+    "signature_object": {
+      "signer_id": "did:claw:agentB",
+      "signer_type": "agent",
+      "role": "counterparty",
+      "signature": "sigB_stub",
+      "timestamp": "2025-12-22T19:30:00Z",
+      "scope": "limited",
+      "authority_proof": {
+        "delegated_by": "did:claw:agentB",
+        "scope": "limited",
+        "expires_at": null
+      }
+    }
+  }'
