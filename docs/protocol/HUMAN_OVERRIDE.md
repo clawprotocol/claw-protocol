@@ -29,3 +29,8 @@ When triggered:
   "decision": "approve | reject | amend",
   "timestamp": "iso8601"
 }
+curl -s -X POST http://127.0.0.1:8000/generate_proof \
+  -H "Content-Type: application/json" \
+  -d '{
+    "proposal_id": "PROPOSAL_ID_HERE"
+  }'
