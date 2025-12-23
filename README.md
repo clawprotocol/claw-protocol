@@ -1,3 +1,10 @@
+## 🚀 Protocol Launch Index
+
+New to CLAW?  
+Start here → **[`docs/LAUNCH_INDEX.md`](docs/LAUNCH_INDEX.md)**
+
+This index links to the canonical agent-to-agent examples and protocol specifications.
+
 # CLAW Protocol  
 A decentralized adjudication and proof anchoring protocol.  
 ### Folder overview:
