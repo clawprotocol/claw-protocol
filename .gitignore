@@ -1,19 +1,22 @@
-# ---- Python ----
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
+dist/
+build/
 
-# ---- Virtual environments ----
+# Virtualenv
 venv/
-.env
+.venv/
 
-# ---- OS ----
+# Pytest
+.pytest_cache/
+
+# Mac
 .DS_Store
 
-# ---- Editors ----
+# Editor
 .vscode/
-.cursor/
-
-# ---- Logs ----
-*.log
+.idea/
