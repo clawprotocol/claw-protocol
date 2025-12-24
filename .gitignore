@@ -76,6 +76,7 @@ dist/
 build/
 
 # =========================
+<<<<<<< HEAD
 # CLAW runtime artifacts
 # =========================
 
@@ -103,3 +104,43 @@ docs/whitepaper/~$*
 *.key
 secret_*
 credentials_*
+=======
+# Virtual environments
+# =========================
+venv/
+.venv/
+
+# =========================
+# Environment / secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Pytest / test artifacts
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+.vscode/
+.idea/
+
+# =========================
+# Node / Frontend (safe even if unused)
+# =========================
+node_modules/
+.next/
+dist/
+build/
+>>>>>>> 15ed5bf (chore: harden .gitignore for env, tests, and tooling)
