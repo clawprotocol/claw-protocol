@@ -1,4 +1,6 @@
+# =========================
 # Python
+# =========================
 __pycache__/
 *.pyc
 *.pyo
@@ -7,16 +9,42 @@ __pycache__/
 dist/
 build/
 
-# Virtualenv
+# =========================
+# Virtual environments
+# =========================
 venv/
 .venv/
 
-# Pytest
+# =========================
+# Environment / secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Pytest / test artifacts
+# =========================
 .pytest_cache/
+.coverage
+htmlcov/
 
-# Mac
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# OS / Editor
+# =========================
 .DS_Store
-
-# Editor
 .vscode/
 .idea/
+
+# =========================
+# Node / Frontend (safe even if unused)
+# =========================
+node_modules/
+.next/
+dist/
+build/
