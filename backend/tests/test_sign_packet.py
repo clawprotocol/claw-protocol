@@ -1,4 +1,4 @@
-from handlers.sign_handler import create_sign_packet
+from backend.handlers.sign_handler import create_sign_packet
 
 
 def test_sign_packet_contains_packet_hash_and_message():
