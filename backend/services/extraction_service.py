@@ -5,7 +5,7 @@ import re
 from typing import Optional
 
 import docx  # python-docx
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 
 def extract_text_from_bytes(content: bytes, filename: Optional[str] = None) -> str:
