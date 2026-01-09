@@ -74,3 +74,10 @@ receipts/*.json
 # =========================
 *.wal
 *.shm
+
+# =========================
+# Misc build / tooling
+# =========================
+*.wal
+*.shm
+requirements.lock.txt
