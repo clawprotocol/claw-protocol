@@ -48,3 +48,29 @@ node_modules/
 .next/
 dist/
 build/
+
+# =========================
+# CLAW runtime artifacts
+# =========================
+
+# SQLite usage / audit DBs
+audit/*.sqlite3
+audit/*.sqlite3-*
+audit/*.db
+
+# Temporary / local inputs
+contract.txt
+flow.json
+extract.json
+receipt.json
+tree_req.json
+proofs/genesis_input.txt
+
+# Receipts generated locally (keep genesis receipts committed explicitly)
+receipts/*.json
+
+# =========================
+# Misc build / tooling
+# =========================
+*.wal
+*.shm
