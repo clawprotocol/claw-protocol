@@ -8,17 +8,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-# IMPORTANT: use backend.* absolute imports (fixes pytest ModuleNotFoundError)
+# IMPORTANT: use backend.* absolute imports (fixes your pytest ModuleNotFoundError)
 from backend.handlers.epoch_merkle import (
-    MerklePath,
     merkle_root_and_paths,
-    merkle_verify,
     receipt_commitment_from_hash_tree_root,
 )
 from backend.handlers.bitcoin_opreturn import (
     build_claw_opreturn_payload,
     anchor_opreturn_tx_testnet,
 )
+from backend.handlers.payment_adapters.base import PaymentAdapter, PaymentRequiredError
+
 
 # ----------------------------
 # Deterministic helpers
@@ -33,429 +33,347 @@ def sha256_hex(s: str) -> str:
 
 
 def deterministic_id(prefix: str, payload: Any) -> str:
-    return f"{prefix}_{sha256_hex(canonical_json(payload))[:24]}"
+    return f"{prefix}_{sha256_hex(canonical_json(payload))[:20]}"
 
 
-def _is_hex_32bytes(s: str) -> bool:
-    if not isinstance(s, str):
-        return False
-    if len(s) != 64:
-        return False
-    try:
-        bytes.fromhex(s)
-        return True
-    except Exception:
-        return False
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _as_jsonable(obj: Any) -> Any:
+    """
+    Convert common python / pydantic / dataclass-ish objects into JSON-serializable forms
+    without throwing. This prevents 500s during receipt/proof assembly when upstream
+    returns MerklePath models, dicts, tuples, etc.
+    """
+    # Pydantic v2
+    if hasattr(obj, "model_dump") and callable(getattr(obj, "model_dump")):
+        return obj.model_dump()
+
+    # Pydantic v1
+    if hasattr(obj, "dict") and callable(getattr(obj, "dict")):
+        return obj.dict()
+
+    # Dict already
+    if isinstance(obj, dict):
+        return obj
+
+    # Tuples/lists already JSON-ish
+    if isinstance(obj, (list, tuple)):
+        return list(obj)
+
+    # Dataclass / simple object
+    if hasattr(obj, "__dict__"):
+        try:
+            return dict(obj.__dict__)
+        except Exception:
+            return {"value": str(obj)}
+
+    # Fallback: stringify
+    return {"value": str(obj)}
 
 
 # ----------------------------
-# In-memory stores (stub phase)
+# Request / Response Models (now include optional receipt)
 # ----------------------------
-
-PROPOSALS: Dict[str, Dict[str, Any]] = {}
-SIGNATURES: Dict[str, Dict[str, Any]] = {}
-PROOFS: Dict[str, Dict[str, Any]] = {}
-RECEIPTS: Dict[str, Dict[str, Any]] = {}
-
-# Epoch anchoring stores
-EPOCHS: Dict[str, Dict[str, Any]] = {}          # epoch_id -> epoch manifest
-RECEIPT_ANCHOR: Dict[str, Dict[str, Any]] = {}  # receipt_id -> anchoring info (commitment + merkle path + txid)
-
-
-# ----------------------------
-# API models
-# ----------------------------
-
-class ClauseConstraints(BaseModel):
-    max_value: Optional[float] = None
-    expiry: Optional[str] = None  # ISO8601 string
-    revocable: bool = False
-
-
-class ExecutionPolicy(BaseModel):
-    auto_execute: bool = True
-    human_required: bool = False
-    dispute_window_seconds: int = 0
-
-
-class ClauseObject(BaseModel):
-    clause_id: str
-    clause_text: str
-    jurisdiction: Optional[str] = None
-    roles: List[str] = Field(default_factory=list)
-    constraints: ClauseConstraints = Field(default_factory=ClauseConstraints)
-    execution_policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
-    hash: Optional[str] = None  # optional input; we compute our own clause_hash
-
 
 class ProposeClauseRequest(BaseModel):
-    agent_id: str
-    clause: ClauseObject
-    signature: str  # stub: opaque string
-    idempotency_key: Optional[str] = None
+    clauses: List[str]
+    role: str = Field(default="author")
+    signer_name: Optional[str] = None
+    signer_wallet: Optional[str] = None
 
 
 class ProposeClauseResponse(BaseModel):
-    proposal_id: str
-    clause_hash: str
-
-
-class SignatureObject(BaseModel):
-    signer_id: str
-    signer_type: str  # "human" | "agent"
-    role: str
-    signature: str
-    timestamp: Optional[str] = None
-    scope: str = "limited"
-    authority_proof: Optional[Dict[str, Any]] = None
+    action_id: str
+    clauses: List[str]
+    canonical_hash_sha256: str
+    receipt: Optional[Dict[str, Any]] = None
 
 
 class SignClauseRequest(BaseModel):
-    proposal_id: str
-    signature_object: SignatureObject
-    idempotency_key: Optional[str] = None
+    clauses: List[str]
+    role: str = Field(default="signer")
+    signer_name: Optional[str] = None
+    signer_wallet: Optional[str] = None
 
 
 class SignClauseResponse(BaseModel):
-    signature_id: str
-    proposal_id: str
+    action_id: str
+    clauses: List[str]
+    canonical_hash_sha256: str
+    signature_payload: Dict[str, Any]
+    receipt: Optional[Dict[str, Any]] = None
 
 
 class GenerateProofRequest(BaseModel):
-    proposal_id: str
-    signature_ids: Optional[List[str]] = None
+    clauses: List[str]
 
 
 class GenerateProofResponse(BaseModel):
-    proof_id: str
-    receipt_id: str
-    proof_packet: Dict[str, Any]
+    action_id: str
+    merkle_root_sha256: str
+    merkle_paths: List[Dict[str, Any]]
+    receipt_commitment: str
+    receipt: Optional[Dict[str, Any]] = None
 
 
 class AnchorProofRequest(BaseModel):
-    proof_id: str
-    anchor_type: str = "internal"  # "bitcoin_opreturn" | "internal" | etc.
+    merkle_root_sha256: str
+    receipt_commitment: str
+    network: str = Field(default="testnet")
 
 
 class AnchorProofResponse(BaseModel):
-    proof_id: str
-    anchor: Dict[str, Any]
-
-
-class VerifyReceiptResponse(BaseModel):
-    verified: bool
-    proof_id: Optional[str] = None
-    anchor_valid: bool = False
-    signatures_valid: bool = True  # stub (no cryptographic verification yet)
-    tamper_detected: bool = False
-
-    # Epoch anchoring extension
-    epoch_id: Optional[str] = None
-    epoch_inclusion_valid: bool = False
-    bitcoin_anchor_valid: bool = False
-    bitcoin_txid: Optional[str] = None
-
-    explanation: str = ""
-
-
-# Epoch API models (optional; used if your FastAPI layer validates)
-class EpochReceiptInput(BaseModel):
-    receipt_id: str
-    hash_tree_root: str  # hex32
-
-
-class EpochBuildRequest(BaseModel):
-    network: str = "testnet"
-    epoch_start_height: int
-    epoch_end_height: int
-    receipts: List[EpochReceiptInput]
-
-
-class EpochBuildResponse(BaseModel):
-    ok: bool
-    epoch_id: Optional[str] = None
-    epoch_root: Optional[str] = None
-    receipt_count: int = 0
-    reason: str = ""
-
-
-class EpochAnchorRequest(BaseModel):
-    epoch_id: str
+    action_id: str
+    network: str
+    txid: str
+    op_return: str
+    receipt: Optional[Dict[str, Any]] = None
 
 
 # ----------------------------
-# Core operations
+# Payment-aware action helpers
 # ----------------------------
 
-def propose_clause(req: ProposeClauseRequest) -> Tuple[str, str]:
-    clause_payload = req.clause.model_dump()
-    clause_hash = sha256_hex(canonical_json(clause_payload))
+def _maybe_require_payment(
+    *,
+    payment_adapter: Optional[PaymentAdapter],
+    claw_action_id: str,
+    action: str,
+    request_context: Dict[str, Any],
+    payment_proof_header: Optional[str],
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """
+    Returns (payment_fragments, quoted_terms_or_none), or raises PaymentRequiredError.
+    """
+    if payment_adapter is None:
+        return [], None
 
-    proposal_payload = {
-        "agent_id": req.agent_id,
-        "clause": clause_payload,
-        "clause_hash": clause_hash,
-        "signature": req.signature,
-        "idempotency_key": req.idempotency_key,
-    }
-    proposal_id = deterministic_id("proposal", proposal_payload)
+    terms = payment_adapter.quote(claw_action_id=claw_action_id, action=action, request_context=request_context)
+    if not terms:
+        return [], None
 
-    PROPOSALS[proposal_id] = proposal_payload
-    return proposal_id, clause_hash
+    if not payment_proof_header:
+        raise PaymentRequiredError(terms)
 
-
-def sign_clause(req: SignClauseRequest) -> str:
-    if req.proposal_id not in PROPOSALS:
-        raise KeyError("proposal_not_found")
-
-    sig_payload = {
-        "proposal_id": req.proposal_id,
-        "signature_object": req.signature_object.model_dump(),
-        "idempotency_key": req.idempotency_key,
-    }
-    signature_id = deterministic_id("sig", sig_payload)
-    SIGNATURES[signature_id] = sig_payload
-    return signature_id
-
-
-def generate_proof(req: GenerateProofRequest) -> Tuple[str, str, Dict[str, Any]]:
-    if req.proposal_id not in PROPOSALS:
-        raise KeyError("proposal_not_found")
-
-    proposal = PROPOSALS[req.proposal_id]
-
-    if req.signature_ids:
-        sig_ids = req.signature_ids
-    else:
-        sig_ids = [sid for sid, s in SIGNATURES.items() if s.get("proposal_id") == req.proposal_id]
-
-    # Minimal proof hash root (v0.1)
-    hash_tree_root = sha256_hex(canonical_json({"clause_hash": proposal["clause_hash"], "signatures": sig_ids}))
-
-    proof_packet = {
-        "proposal_id": req.proposal_id,
-        "clause_hash": proposal["clause_hash"],
-        "signatures": sig_ids,
-        "hash_tree_root": hash_tree_root,
-        "anchor": {"type": "internal", "reference": "unanchored"},
-        "lineage": {"parent_proofs": [], "supersedes": []},
-    }
-
-    proof_id = deterministic_id("proof", proof_packet)
-    proof_packet["proof_id"] = proof_id
-    PROOFS[proof_id] = proof_packet
-
-    receipt = {
-        "proof_id": proof_id,
-        "hash_tree_root": hash_tree_root,  # include for epoch anchoring inputs
-        "summary": f"Proposal {req.proposal_id} proved with {len(sig_ids)} signature(s); anchor={proof_packet['anchor']['reference']}.",
-        "verifiable": True,
-        "verify_endpoint": "/verify_receipt/{receipt_id}",
-    }
-    receipt_id = deterministic_id("receipt", receipt)
-    receipt["receipt_id"] = receipt_id
-    RECEIPTS[receipt_id] = receipt
-
-    return proof_id, receipt_id, proof_packet
-
-
-def anchor_proof(req: AnchorProofRequest) -> Dict[str, Any]:
-    if req.proof_id not in PROOFS:
-        raise KeyError("proof_not_found")
-
-    proof = PROOFS[req.proof_id]
-    anchor_ref = deterministic_id(
-        "anchor",
-        {"anchor_type": req.anchor_type, "proof_id": req.proof_id, "root": proof["hash_tree_root"]},
+    vr = payment_adapter.verify(
+        claw_action_id=claw_action_id,
+        action=action,
+        request_context=request_context,
+        payment_proof_header=payment_proof_header,
+        expected_terms=terms,
     )
 
-    proof["anchor"] = {"type": req.anchor_type, "reference": anchor_ref}
-    PROOFS[req.proof_id] = proof
+    if vr.status != "paid" or not vr.payment_fragment:
+        raise PaymentRequiredError(terms)
 
-    for rid, r in list(RECEIPTS.items()):
-        if r.get("proof_id") == req.proof_id:
-            r["summary"] = f"Proof {req.proof_id} anchored to {anchor_ref}."
-            RECEIPTS[rid] = r
-
-    return proof["anchor"]
+    return [vr.payment_fragment], terms
 
 
 # ----------------------------
-# Epoch anchoring (B=144 blocks)
+# Agent-native handlers (return payment fragments for receipt building)
 # ----------------------------
 
-def epoch_build(req: EpochBuildRequest) -> EpochBuildResponse:
-    network = (req.network or "testnet").strip()
-    start_h = int(req.epoch_start_height)
-    end_h = int(req.epoch_end_height)
-    receipts = req.receipts or []
-    if not receipts:
-        return EpochBuildResponse(ok=False, reason="no_receipts", receipt_count=0)
+def propose_clause(
+    request: ProposeClauseRequest,
+    *,
+    payment_adapter: Optional[PaymentAdapter] = None,
+    payment_proof_header: Optional[str] = None,
+    request_context: Optional[Dict[str, Any]] = None,
+) -> Tuple[ProposeClauseResponse, List[Dict[str, Any]], Dict[str, Any]]:
+    ctx = request_context or {}
+    payload = {
+        "clauses": request.clauses,
+        "role": request.role,
+        "signer_name": request.signer_name,
+        "signer_wallet": request.signer_wallet,
+    }
+    action_id = deterministic_id("claw_propose", payload)
+    canonical_hash = sha256_hex(canonical_json(payload))
 
-    # Validate inputs early for clean error messages
-    for r in receipts:
-        if not _is_hex_32bytes(r.hash_tree_root):
-            return EpochBuildResponse(
-                ok=False,
-                reason=f"bad_hash_tree_root_for_receipt:{r.receipt_id}",
-                receipt_count=len(receipts),
-            )
+    pay_frags, _terms = _maybe_require_payment(
+        payment_adapter=payment_adapter,
+        claw_action_id=action_id,
+        action="propose_clause",
+        request_context=ctx,
+        payment_proof_header=payment_proof_header,
+    )
 
-    # 1) compute commitments per receipt (commitment derived from each proof's hash_tree_root)
-    receipt_commitments: List[str] = []
-    for r in receipts:
-        receipt_commitments.append(receipt_commitment_from_hash_tree_root(r.hash_tree_root))
-
-    # 2) build epoch root + paths (paths correspond to commitments_sorted order)
-    epoch_root, paths, commitments_sorted = merkle_root_and_paths(receipt_commitments)
-
-    # 3) map commitment -> list of receipt_ids that have it (rare collisions possible)
-    commit_to_receipt_ids: Dict[str, List[str]] = {}
-    for r, c in zip(receipts, receipt_commitments):
-        commit_to_receipt_ids.setdefault(c, []).append(r.receipt_id)
-
-    epoch_id = f"btc:{network}:{start_h}-{end_h}"
-
-    manifest = {
-        "epoch_id": epoch_id,
-        "network": network,
-        "epoch_start_height": start_h,
-        "epoch_end_height": end_h,
-        "receipt_count": len(receipts),
-        "epoch_root": epoch_root,
-        "anchor": {
-            "type": "bitcoin_opreturn",
-            "network": network,
-            "txid": None,
-            "vout": None,
-            "block_height": None,
-            "block_hash": None,
-            "confirmations": None,
+    claw_block = {
+        "action": "propose_clause",
+        "action_id": action_id,
+        "created_at": _utc_now_iso(),
+        "request": ctx,
+        "payload": {"canonical_json": canonical_json(payload), "canonical_hash_sha256": canonical_hash},
+        "roles": {
+            "actor_role": request.role,
+            "actor_wallet": request.signer_wallet,
+            "actor_name": request.signer_name,
         },
-        "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    EPOCHS[epoch_id] = manifest
 
-    # 4) store per-receipt inclusion proofs
-    for c, p in zip(commitments_sorted, paths):
-        for rid in commit_to_receipt_ids.get(c, []):
-            RECEIPT_ANCHOR[rid] = {
-                "epoch_id": epoch_id,
-                "network": network,
-                "epoch_root": epoch_root,
-                "receipt_commitment": c,
-                "merkle_path": {"siblings": p.siblings, "positions": p.positions},
-                "txid": None,
-            }
-
-    return EpochBuildResponse(ok=True, epoch_id=epoch_id, epoch_root=epoch_root, receipt_count=len(receipts))
+    resp = ProposeClauseResponse(action_id=action_id, clauses=request.clauses, canonical_hash_sha256=canonical_hash)
+    return resp, pay_frags, claw_block
 
 
-def epoch_get(epoch_id: str) -> Dict[str, Any]:
-    m = EPOCHS.get(epoch_id)
-    if not m:
-        raise KeyError("epoch_not_found")
-    return m
+def sign_clause(
+    request: SignClauseRequest,
+    *,
+    payment_adapter: Optional[PaymentAdapter] = None,
+    payment_proof_header: Optional[str] = None,
+    request_context: Optional[Dict[str, Any]] = None,
+) -> Tuple[SignClauseResponse, List[Dict[str, Any]], Dict[str, Any]]:
+    ctx = request_context or {}
+    payload = {
+        "clauses": request.clauses,
+        "role": request.role,
+        "signer_name": request.signer_name,
+        "signer_wallet": request.signer_wallet,
+    }
+    action_id = deterministic_id("claw_sign", payload)
+    canonical_hash = sha256_hex(canonical_json(payload))
 
-
-def receipt_anchor_proof(receipt_id: str) -> Dict[str, Any]:
-    info = RECEIPT_ANCHOR.get(receipt_id)
-    if not info:
-        raise KeyError("anchor_proof_not_found")
-    return info
-
-
-def epoch_anchor_testnet(req: EpochAnchorRequest) -> Dict[str, Any]:
-    epoch_id = req.epoch_id
-    if epoch_id not in EPOCHS:
-        raise KeyError("epoch_not_found")
-
-    m = EPOCHS[epoch_id]
-    if m["anchor"].get("txid"):
-        return {"ok": True, "epoch_id": epoch_id, "txid": m["anchor"]["txid"], "already_anchored": True}
-
-    epoch_root = m["epoch_root"]
-    start_h = m["epoch_start_height"]
-    end_h = m["epoch_end_height"]
-
-    # Build OP_RETURN payload (45 bytes target)
-    opreturn_hex = build_claw_opreturn_payload(epoch_root, start_h, end_h)
-
-    # Broadcast using Bitcoin Core RPC (testnet)
-    res = anchor_opreturn_tx_testnet(opreturn_hex)
-    txid = res["txid"]
-
-    m["anchor"]["txid"] = txid
-    m["anchor"]["vout"] = 0  # placeholder; can be discovered later
-    EPOCHS[epoch_id] = m
-
-    # Attach txid to receipts in this epoch
-    for rid, info in RECEIPT_ANCHOR.items():
-        if info.get("epoch_id") == epoch_id:
-            info["txid"] = txid
-
-    return {"ok": True, "epoch_id": epoch_id, "txid": txid, "opreturn_hex": opreturn_hex}
-
-
-# ----------------------------
-# Verification
-# ----------------------------
-
-def verify_receipt(receipt_id: str) -> VerifyReceiptResponse:
-    r = RECEIPTS.get(receipt_id)
-    if not r:
-        return VerifyReceiptResponse(verified=False, explanation="Receipt not found.")
-
-    proof_id = r.get("proof_id")
-    proof = PROOFS.get(proof_id) if proof_id else None
-    if not proof:
-        return VerifyReceiptResponse(
-            verified=False,
-            proof_id=proof_id,
-            tamper_detected=True,
-            explanation="Receipt exists but proof not found.",
-        )
-
-    anchor_ref = proof.get("anchor", {}).get("reference", "unanchored")
-    anchor_valid = anchor_ref != "unanchored"
-
-    # Epoch anchoring verification (if present)
-    epoch_info = RECEIPT_ANCHOR.get(receipt_id)
-    epoch_id = epoch_info.get("epoch_id") if epoch_info else None
-
-    epoch_inclusion_valid = False
-    bitcoin_anchor_valid = False
-    bitcoin_txid = None
-
-    if epoch_info:
-        bitcoin_txid = epoch_info.get("txid")
-
-        # 1) recompute receipt commitment from proof hash_tree_root
-        expected_commit = receipt_commitment_from_hash_tree_root(proof["hash_tree_root"])
-
-        # 2) verify Merkle inclusion against epoch_root
-        path = MerklePath(
-            siblings=epoch_info["merkle_path"]["siblings"],
-            positions=epoch_info["merkle_path"]["positions"],
-        )
-        epoch_root = epoch_info["epoch_root"]
-
-        epoch_inclusion_valid = (expected_commit == epoch_info["receipt_commitment"]) and merkle_verify(
-            expected_commit, epoch_root, path
-        )
-
-        # 3) bitcoin anchor validity is stubbed until we parse tx + verify OP_RETURN
-        bitcoin_anchor_valid = bool(bitcoin_txid)
-
-    return VerifyReceiptResponse(
-        verified=True,
-        proof_id=proof_id,
-        anchor_valid=anchor_valid,
-        signatures_valid=True,
-        tamper_detected=False,
-        epoch_id=epoch_id,
-        epoch_inclusion_valid=epoch_inclusion_valid,
-        bitcoin_anchor_valid=bitcoin_anchor_valid,
-        bitcoin_txid=bitcoin_txid,
-        explanation="Verified deterministically (stub).",
+    pay_frags, _terms = _maybe_require_payment(
+        payment_adapter=payment_adapter,
+        claw_action_id=action_id,
+        action="sign_clause",
+        request_context=ctx,
+        payment_proof_header=payment_proof_header,
     )
+
+    signature_payload = {
+        "message": canonical_hash,
+        "scheme": "sha256(canonical_json)",
+        "created_at": _utc_now_iso(),
+        "action_id": action_id,
+    }
+
+    claw_block = {
+        "action": "sign_clause",
+        "action_id": action_id,
+        "created_at": _utc_now_iso(),
+        "request": ctx,
+        "payload": {"canonical_json": canonical_json(payload), "canonical_hash_sha256": canonical_hash},
+        "roles": {
+            "actor_role": request.role,
+            "actor_wallet": request.signer_wallet,
+            "actor_name": request.signer_name,
+        },
+        "signature_payload": signature_payload,
+    }
+
+    resp = SignClauseResponse(
+        action_id=action_id,
+        clauses=request.clauses,
+        canonical_hash_sha256=canonical_hash,
+        signature_payload=signature_payload,
+    )
+    return resp, pay_frags, claw_block
+
+
+def generate_proof(
+    request: GenerateProofRequest,
+    *,
+    payment_adapter: Optional[PaymentAdapter] = None,
+    payment_proof_header: Optional[str] = None,
+    request_context: Optional[Dict[str, Any]] = None,
+) -> Tuple[GenerateProofResponse, List[Dict[str, Any]], Dict[str, Any]]:
+    ctx = request_context or {}
+    payload = {"clauses": request.clauses}
+    action_id = deterministic_id("claw_proof", payload)
+
+    pay_frags, _terms = _maybe_require_payment(
+        payment_adapter=payment_adapter,
+        claw_action_id=action_id,
+        action="generate_proof",
+        request_context=ctx,
+        payment_proof_header=payment_proof_header,
+    )
+
+    leaf_hashes = [sha256_hex(c) for c in request.clauses]
+
+    mrp = merkle_root_and_paths(leaf_hashes)
+    # Support both (root, paths) and (root, <extra>, paths)
+    if isinstance(mrp, tuple) and len(mrp) == 2:
+        root, paths = mrp
+    elif isinstance(mrp, tuple) and len(mrp) == 3:
+        root, _, paths = mrp
+    else:
+        raise ValueError(
+            f"Unexpected merkle_root_and_paths return shape: {type(mrp)} "
+            f"len={len(mrp) if isinstance(mrp, tuple) else 'n/a'}"
+        )
+
+    receipt_commitment = receipt_commitment_from_hash_tree_root(root)
+
+    paths_json = [_as_jsonable(p) for p in paths]
+
+    claw_block = {
+        "action": "generate_proof",
+        "action_id": action_id,
+        "created_at": _utc_now_iso(),
+        "request": ctx,
+        "payload": {"clauses": request.clauses},
+        "proofs": {
+            "merkle_root_sha256": root,
+            "receipt_commitment": receipt_commitment,
+            "merkle_paths": paths_json,
+        },
+    }
+
+    resp = GenerateProofResponse(
+        action_id=action_id,
+        merkle_root_sha256=root,
+        merkle_paths=paths_json if isinstance(paths_json, list) else [],
+        receipt_commitment=receipt_commitment,
+    )
+    return resp, pay_frags, claw_block
+
+
+def anchor_proof(
+    request: AnchorProofRequest,
+    *,
+    payment_adapter: Optional[PaymentAdapter] = None,
+    payment_proof_header: Optional[str] = None,
+    request_context: Optional[Dict[str, Any]] = None,
+) -> Tuple[AnchorProofResponse, List[Dict[str, Any]], Dict[str, Any]]:
+    ctx = request_context or {}
+    payload = {
+        "merkle_root_sha256": request.merkle_root_sha256,
+        "receipt_commitment": request.receipt_commitment,
+    }
+    action_id = deterministic_id("claw_anchor", payload)
+
+    pay_frags, _terms = _maybe_require_payment(
+        payment_adapter=payment_adapter,
+        claw_action_id=action_id,
+        action="anchor_proof",
+        request_context=ctx,
+        payment_proof_header=payment_proof_header,
+    )
+
+    opret = build_claw_opreturn_payload(request.receipt_commitment)
+    txid = anchor_opreturn_tx_testnet(opret)
+
+    claw_block = {
+        "action": "anchor_proof",
+        "action_id": action_id,
+        "created_at": _utc_now_iso(),
+        "request": ctx,
+        "payload": payload,
+        "proofs": {
+            "anchors": [
+                {
+                    "chain": "bitcoin",
+                    "network": request.network,
+                    "anchor_type": "op_return",
+                    "txid": txid,
+                    "op_return_commitment": opret,
+                }
+            ]
+        },
+    }
+
+    resp = AnchorProofResponse(action_id=action_id, network=request.network, txid=txid, op_return=opret)
+    return resp, pay_frags, claw_block

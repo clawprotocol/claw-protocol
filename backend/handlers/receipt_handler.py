@@ -1,70 +1,90 @@
-# backend/handlers/receipt_handler.py
-
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import hashlib
+import json
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-from utils.canon_json import canon_json_bytes, sha256_hex
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _normalize_sig(s: Dict[str, Any]) -> Dict[str, Any]:
+def canonical_json(obj: Any) -> str:
+    # Deterministic JSON: stable key ordering, no whitespace variance
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def _receipt_payload_for_hash(receipt: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Normalize signatures into a stable schema so:
-    - missing fields don't change hashing
-    - casing/whitespace doesn't create surprises
-    - empty signature is allowed for preview mode
-    """
-    chain = (s.get("chain") or "").strip().lower()
-    address = (s.get("address") or "").strip().lower()
-    role = (s.get("role") or "").strip().lower()
-    message = s.get("message") or ""
-    signature = s.get("signature")
-    if signature is None:
-        signature = ""
-    else:
-        signature = str(signature)
+    Canonical payload hashed for receipt integrity.
 
+    CRITICAL: exclude integrity itself to avoid self-referential hashing.
+    """
+    payload = dict(receipt)
+    payload.pop("integrity", None)
+    return payload
+
+
+def receipt_summary(receipt: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Small, stable summary object suitable to embed as a child reference in a parent receipt.
+    """
+    integ = receipt.get("integrity") or {}
+    claw = receipt.get("claw") or {}
     return {
-        "chain": chain,
-        "address": address,
-        "role": role,
-        "message": message,
-        "signature": signature,
+        "receipt_id": receipt.get("receipt_id"),
+        "receipt_hash_sha256": integ.get("receipt_canonical_hash_sha256"),
+        "created_at": receipt.get("created_at"),
+        "environment": receipt.get("environment"),
+        "claw": {
+            "action": claw.get("action"),
+            "action_id": claw.get("action_id"),
+        },
     }
 
 
 def build_receipt(
-    proof_packet: Dict[str, Any],
-    signatures: List[Dict[str, Any]],
+    *,
+    claw: Dict[str, Any],
+    payment_fragments: Optional[List[Dict[str, Any]]] = None,
+    children: Optional[List[Dict[str, Any]]] = None,
+    environment: str = "local",
+    receipt_version: str = "claw-receipt/0.4",
 ) -> Dict[str, Any]:
     """
-    Deterministic receipt:
-    - receipt_hash does NOT depend on signatures input order
-    - receipt_hash changes if signature content changes
-    - no timestamps / randomness
+    Build a deterministic CLAW receipt.
+
+    Hash = sha256(canonical_json(receipt_without_integrity))
     """
+    payments = payment_fragments or []
+    child_refs = children or []
 
-    # Prefer explicit packet_hash if present; otherwise fall back safely.
-    proof_packet_hash = (
-        proof_packet.get("packet_hash")
-        or proof_packet.get("clauses_hash")
-        or sha256_hex(canon_json_bytes(proof_packet))
-    )
-
-    normalized = [_normalize_sig(s) for s in (signatures or [])]
-
-    # Deterministic ordering: sort by canonical JSON bytes of each signature.
-    # This is stronger than sorting by (chain,address,...) because it cannot drift.
-    normalized_sorted = sorted(normalized, key=lambda sig: canon_json_bytes(sig))
-
+    # Base receipt (NO integrity yet)
     receipt: Dict[str, Any] = {
-        "version": "0.1.0",
-        "proof_packet_hash": proof_packet_hash,
-        "signatures": normalized_sorted,
+        "receipt_version": receipt_version,
+        "created_at": _utc_now_iso(),
+        "environment": environment,
+        "claw": claw,
+        "payments": payments,
+        "children": child_refs,
     }
 
-    # Hash the receipt (no receipt_hash field yet)
-    receipt_hash = sha256_hex(canon_json_bytes(receipt))
-    receipt["receipt_hash"] = receipt_hash
+    # Deterministic receipt_id derived from canonical payload (excluding integrity)
+    payload_for_id = _receipt_payload_for_hash(receipt)
+    receipt_id = f"claw_rcpt_{sha256_hex(canonical_json(payload_for_id))[:20]}"
+    receipt["receipt_id"] = receipt_id
+
+    # Compute hash after receipt_id is present (still excluding integrity)
+    payload_for_hash = _receipt_payload_for_hash(receipt)
+    receipt_hash = sha256_hex(canonical_json(payload_for_hash))
+
+    receipt["integrity"] = {
+        "receipt_canonical_hash_sha256": receipt_hash
+    }
 
     return receipt
