@@ -72,6 +72,24 @@ This document does NOT:
 
 ---
 
+6. Post-Genesis Runtime Implementations (Non-Governing)
+
+Following the CLAW v0 genesis declaration, implementation files, runtime modules, and auxiliary documentation MAY be added to the repository to support execution, integration, and developer tooling.
+
+Such materials:
+
+Are explicitly non-governing
+
+MUST conform to the rules defined in CLAW-PROOF-v0.md
+
+MUST NOT alter, reinterpret, or supersede the governing specification
+
+MAY evolve independently without constituting a protocol fork
+
+In the event of any conflict, the governing specification and its on-chain anchor SHALL prevail.
+
+---
+
 **CLAW v0 is hereby declared complete.**
 
 
