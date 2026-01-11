@@ -144,3 +144,7 @@ node_modules/
 dist/
 build/
 >>>>>>> 15ed5bf (chore: harden .gitignore for env, tests, and tooling)
+
+# Local binaries
+frontend/tailwindcss-macos-*
+tailwindcss-*
