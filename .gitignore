@@ -148,3 +148,8 @@ build/
 # Local binaries
 frontend/tailwindcss-macos-*
 tailwindcss-*
+
+# Local artifacts
+proofs/genesis_input.txt
+receipts/
+requirements.lock.txt
