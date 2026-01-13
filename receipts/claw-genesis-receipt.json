@@ -1,0 +1,11 @@
+{
+  "protocol": "CLAW-PROOF-v0",
+  "network": "bitcoin-mainnet",
+  "txid": "848504abb12b5582cea4d55631a562be9cd0bac790a82f7fe65130e9dc166de7",
+  "op_return_commitment": "ae1cf609fcaf2a06ae89a186740e7084696c0bba25edd0789da9e313b3550a24",
+  "commitment_alg": "sha256",
+  "created_utc": "2026-01-06T00:00:00Z",
+  "block_height": null,
+  "block_hash": null,
+  "notes": "CLAW Genesis anchor (OP_RETURN push32). Fill block_* after confirmation."
+}

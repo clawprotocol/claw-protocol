@@ -7,6 +7,7 @@ __pycache__/
 *.pyd
 *$py.class
 *.egg-info/
+*.egg
 
 # C extensions
 *.so
@@ -17,7 +18,6 @@ __pycache__/
 build/
 dist/
 wheels/
-*.egg
 MANIFEST
 .Python
 pip-log.txt
@@ -73,10 +73,8 @@ venv.bak/
 node_modules/
 .next/
 dist/
-build/
 
 # =========================
-<<<<<<< HEAD
 # CLAW runtime artifacts
 # =========================
 
@@ -85,7 +83,7 @@ audit/*.sqlite3
 audit/*.sqlite3-*
 audit/*.db
 
-# Temporary / local inputs
+# Temporary / local inputs (local-only; do not commit)
 contract.txt
 flow.json
 extract.json
@@ -104,46 +102,6 @@ docs/whitepaper/~$*
 *.key
 secret_*
 credentials_*
-=======
-# Virtual environments
-# =========================
-venv/
-.venv/
-
-# =========================
-# Environment / secrets
-# =========================
-.env
-.env.*
-!.env.example
-
-# =========================
-# Pytest / test artifacts
-# =========================
-.pytest_cache/
-.coverage
-htmlcov/
-
-# =========================
-# Logs
-# =========================
-*.log
-
-# =========================
-# OS / Editor
-# =========================
-.DS_Store
-.vscode/
-.idea/
-
-# =========================
-# Node / Frontend (safe even if unused)
-# =========================
-node_modules/
-.next/
-dist/
-build/
->>>>>>> 15ed5bf (chore: harden .gitignore for env, tests, and tooling)
 
 # Local binaries
 frontend/tailwindcss-macos-*
@@ -151,5 +109,12 @@ tailwindcss-*
 
 # Local artifacts
 proofs/genesis_input.txt
-receipts/
+
+# Lockfile (if you want this tracked, remove this line)
 requirements.lock.txt
+
+# =========================
+# Receipts policy
+# =========================
+# Track public receipts (safe to publish). Keep any sensitive receipts here:
+receipts/private/
