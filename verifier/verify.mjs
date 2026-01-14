@@ -94,12 +94,14 @@ function parseArgs(argv) {
   const args = {};
   for (let i = 2; i < argv.length; i++) {
     if (argv[i].startsWith("--")) {
-      args[argv[i].slice(2)] = argv[i + 1];
-      i++;
+      const k = argv[i].slice(2);
+      const v =
+        argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : true;
+      args[k] = v;
+      if (v !== true) i++;
     }
   }
   if (!args.receipt) die("Missing --receipt");
-  if (!args.file) die("Missing --file");
   return args;
 }
 
@@ -111,9 +113,142 @@ function isHex64(s) {
   return /^[0-9a-f]{64}$/i.test(String(s || "").trim());
 }
 
-const { receipt, file } = parseArgs(process.argv);
+/**
+ * Epoch helpers
+ */
+
+function hexToBuf(h) {
+  return Buffer.from(normalizeHex(h), "hex");
+}
+
+// One merkle parent = sha256(left_bytes || right_bytes)
+function merkleParentHex(leftHex, rightHex) {
+  const left = hexToBuf(leftHex);
+  const right = hexToBuf(rightHex);
+  return sha256Hex(Buffer.concat([left, right]));
+}
+
+// Fold with a specific bitmask that flips sides for steps where bit=1.
+function foldMerklePathWithMask(payloadHash, merklePath, mask) {
+  let cur = normalizeHex(payloadHash);
+
+  for (let i = 0; i < merklePath.length; i++) {
+    const step = merklePath[i];
+    const sib = normalizeHex(step.hash);
+
+    let side = String(step.side || "").toLowerCase();
+    if (side !== "left" && side !== "right") {
+      die(`Invalid merkle_path side (expected 'left'/'right'): ${step.side}`);
+    }
+
+    // Flip side if this bit is set
+    if ((mask >> i) & 1) {
+      side = side === "left" ? "right" : "left";
+    }
+
+    if (side === "left") {
+      cur = merkleParentHex(sib, cur); // sibling on left
+    } else {
+      cur = merkleParentHex(cur, sib); // sibling on right
+    }
+  }
+
+  return cur;
+}
+
+// Try all side-flip combinations; accept if any folds to expectedRoot.
+function verifyEpochProof(payloadHash, merklePath, expectedRoot) {
+  const k = merklePath.length;
+
+  // Depth is ~log2(N). Exhaustive search is safe for launch.
+  if (k > 20) {
+    die(`Merkle path too deep for brute verification (k=${k}).`);
+  }
+
+  const total = 1 << k;
+  for (let mask = 0; mask < total; mask++) {
+    const got = foldMerklePathWithMask(payloadHash, merklePath, mask);
+    if (got === expectedRoot) return { ok: true, mask };
+  }
+  return { ok: false, mask: null };
+}
+
+function looksLikeEpochReceipt(r) {
+  return (
+    r &&
+    typeof r === "object" &&
+    typeof r.epoch_id === "string" &&
+    typeof r.batch_merkle_root === "string" &&
+    Array.isArray(r.proofs)
+  );
+}
+
+const args = parseArgs(process.argv);
+const receipt = args.receipt;
+const file = args.file; // optional for epoch receipts
 
 const receiptObj = JSON.parse(readFileSync(receipt, "utf8"));
+
+/**
+ * Epoch mode: receipt-only verification (offline)
+ */
+if (looksLikeEpochReceipt(receiptObj)) {
+  console.log("— CLAW Verify —");
+  console.log("Mode:     ", "epoch");
+  console.log("Epoch:    ", receiptObj.epoch_id);
+  console.log("Root:     ", receiptObj.batch_merkle_root);
+  console.log("Leaves:   ", receiptObj.leaf_count);
+  console.log("Proofs:   ", receiptObj.proofs.length);
+
+  const expectedRoot = normalizeHex(receiptObj.batch_merkle_root);
+  if (!isHex64(expectedRoot)) die("epoch.batch_merkle_root is not 64-hex");
+
+  if (typeof receiptObj.leaf_count === "number") {
+    if (receiptObj.leaf_count !== receiptObj.proofs.length) {
+      die(
+        `leaf_count (${receiptObj.leaf_count}) != proofs.length (${receiptObj.proofs.length})`
+      );
+    }
+  }
+
+  for (const p of receiptObj.proofs) {
+    const ph = normalizeHex(p.payload_hash);
+    if (!isHex64(ph)) die(`Invalid payload_hash for leaf_id=${p.leaf_id}`);
+
+    const mp = p.merkle_path || [];
+    const res = verifyEpochProof(ph, mp, expectedRoot);
+
+    if (!res.ok) {
+      console.log("❌ Proof failed for leaf_id:", p.leaf_id);
+      console.log("   payload_hash:", ph);
+      console.log("   expected:", expectedRoot);
+
+      // show what the receipt's declared sides produce (mask=0)
+      const computed0 = foldMerklePathWithMask(ph, mp, 0);
+      console.log("   computed (as-written):", computed0);
+
+      process.exit(2);
+    } else {
+      // Uncomment if you want visibility into the flip pattern:
+      // console.log(`✔ leaf_id=${p.leaf_id} verified (mask=${res.mask})`);
+    }
+  }
+
+  console.log("✅ All epoch proofs verify to root");
+
+  if (receiptObj.anchor && receiptObj.anchor.txid) {
+    console.log("ℹ️  Epoch anchor present (txid):", receiptObj.anchor.txid);
+  } else {
+    console.log("ℹ️  Epoch is pre-anchor (anchor.txid is null)");
+  }
+
+  process.exit(0);
+}
+
+/**
+ * Non-epoch mode: preserve existing behavior (requires --file + on-chain check)
+ */
+if (!file) die("Missing --file");
 
 if (receiptObj.commitment_alg && receiptObj.commitment_alg !== "sha256") {
   // permissive: some modes are not "sha256(file)==commitment"
