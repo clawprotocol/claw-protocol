@@ -1,0 +1,79 @@
+{
+  "protocol_id": "CLAW-EPOCH-v0",
+  "epoch_id": "epoch-0002",
+  "created_utc": "2026-01-14T04:53:23.834902+00:00",
+  "hash_algo": "sha256",
+  "canonicalization": "claw-canonical-text-v0",
+  "batch_merkle_root": "a2d369c992ca9fc1070adedf3ea470a6d23e89cc1b2416e0ea4690cb63403db0",
+  "epoch_commitment": "21d426b7dbc77815f6c8def37065c36cb9a37893cc6b27db4846738e3464f9a3",
+  "leaf_count": 4,
+  "anchor": {
+    "chain": "bitcoin",
+    "network": "mainnet",
+    "txid": null,
+    "op_return": null,
+    "block_height": null
+  },
+  "proofs": [
+    {
+      "leaf_id": "001_draft-clause",
+      "payload_hash": "f952f17b9b1fadf417bf7c08acf69637bfedee7a4dbccb6bc19fc16d70be0cbe",
+      "merkle_path": [
+        {
+          "side": "left",
+          "hash": "9d205fc5863ce20e44410ab3ad302205ec1d5ef0ef10183008b09b498c402ee5"
+        },
+        {
+          "side": "left",
+          "hash": "76430f7923238381db7cb647dfaf1d5677cbc268597b9b2873bdd77b5f452aff"
+        }
+      ]
+    },
+    {
+      "leaf_id": "002_ai-summary",
+      "payload_hash": "2983a1ddd06127ed68d068de8359b1a42df8ca2105782bad13e9ba14dc031b27",
+      "merkle_path": [
+        {
+          "side": "right",
+          "hash": "4f9edd17a72dc8b77bc6ff2a8e96c07b40dcd4a8d14d3628d4ed90ed7bf72db9"
+        },
+        {
+          "side": "right",
+          "hash": "bb54aaa2d7a659e63297c8051ce70978155f11666354f731d39601301073f449"
+        }
+      ]
+    },
+    {
+      "leaf_id": "003_counter-opinion",
+      "payload_hash": "9d205fc5863ce20e44410ab3ad302205ec1d5ef0ef10183008b09b498c402ee5",
+      "merkle_path": [
+        {
+          "side": "right",
+          "hash": "f952f17b9b1fadf417bf7c08acf69637bfedee7a4dbccb6bc19fc16d70be0cbe"
+        },
+        {
+          "side": "left",
+          "hash": "76430f7923238381db7cb647dfaf1d5677cbc268597b9b2873bdd77b5f452aff"
+        }
+      ]
+    },
+    {
+      "leaf_id": "004_epoch-intent",
+      "payload_hash": "4f9edd17a72dc8b77bc6ff2a8e96c07b40dcd4a8d14d3628d4ed90ed7bf72db9",
+      "merkle_path": [
+        {
+          "side": "left",
+          "hash": "2983a1ddd06127ed68d068de8359b1a42df8ca2105782bad13e9ba14dc031b27"
+        },
+        {
+          "side": "right",
+          "hash": "bb54aaa2d7a659e63297c8051ce70978155f11666354f731d39601301073f449"
+        }
+      ]
+    }
+  ],
+  "verifier": {
+    "version": "dev",
+    "commit": "unknown"
+  }
+}
