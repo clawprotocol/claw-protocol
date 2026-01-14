@@ -1,0 +1,79 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://claw.protocol/schemas/epoch-receipt.schema.json",
+    "title": "CLAW Epoch Receipt",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "protocol_id",
+      "epoch_id",
+      "created_utc",
+      "hash_algo",
+      "canonicalization",
+      "batch_merkle_root",
+      "leaf_count",
+      "anchor",
+      "proofs",
+      "verifier"
+    ],
+    "properties": {
+      "protocol_id": { "type": "string", "minLength": 1 },
+      "epoch_id": { "type": "string", "pattern": "^epoch-[0-9]{4}$" },
+      "created_utc": { "type": "string", "format": "date-time" },
+      "hash_algo": { "type": "string", "enum": ["sha256"] },
+      "canonicalization": { "type": "string", "minLength": 1 },
+  
+      "batch_merkle_root": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+      "leaf_count": { "type": "integer", "minimum": 1 },
+  
+      "anchor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["chain", "network", "txid", "op_return", "block_height"],
+        "properties": {
+          "chain": { "type": "string", "enum": ["bitcoin"] },
+          "network": { "type": "string", "enum": ["mainnet", "testnet", "signet", "regtest"] },
+          "txid": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+          "op_return": { "type": ["string", "null"], "pattern": "^[0-9a-f]*$" },
+          "block_height": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      },
+  
+      "proofs": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["leaf_id", "payload_hash", "merkle_path"],
+          "properties": {
+            "leaf_id": { "type": "string", "minLength": 1 },
+            "payload_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "merkle_path": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["side", "hash"],
+                "properties": {
+                  "side": { "type": "string", "enum": ["left", "right"] },
+                  "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                }
+              }
+            }
+          }
+        }
+      },
+  
+      "verifier": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "commit"],
+        "properties": {
+          "version": { "type": "string", "minLength": 1 },
+          "commit": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+  

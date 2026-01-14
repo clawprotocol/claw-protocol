@@ -1,0 +1,60 @@
+{
+  "protocol_id": "CLAW-EPOCH-v0",
+  "epoch_id": "epoch-0001",
+  "created_utc": "2026-01-14T01:34:20.696549+00:00",
+  "hash_algo": "sha256",
+  "canonicalization": "claw-canonical-text-v0",
+  "batch_merkle_root": "7bc66ec48a5698ef16c301d86b8c9baf531a3e61b2398d94320819275f5aadef",
+  "leaf_count": 3,
+  "anchor": {
+    "chain": "bitcoin",
+    "network": "mainnet",
+    "txid": null,
+    "op_return": null,
+    "block_height": null
+  },
+  "proofs": [
+    {
+      "leaf_id": "001",
+      "payload_hash": "9b7cd9c4211bc1fc12f62dcf33208b68f789f4783340ab2fbddffff4d0b7c23b",
+      "merkle_path": [
+        {
+          "side": "right",
+          "hash": "37d0ee2533bc6f5cf3223f6ae70ae79c6aec7e65594198378817715ba9b07cc7"
+        }
+      ]
+    },
+    {
+      "leaf_id": "002",
+      "payload_hash": "5016dffda839d81f85614e7d130a3cfd3c50612037bc5bd401820f4495ce4576",
+      "merkle_path": [
+        {
+          "side": "right",
+          "hash": "22425f616c46123cd78e4244f4b1e56dc3dea65ad31ac9a3c22e686ea71a518c"
+        },
+        {
+          "side": "left",
+          "hash": "136c2835450b98ae2c13470086cd6c52b3b14b658fcae94c6d698cd1a6558eeb"
+        }
+      ]
+    },
+    {
+      "leaf_id": "003",
+      "payload_hash": "22425f616c46123cd78e4244f4b1e56dc3dea65ad31ac9a3c22e686ea71a518c",
+      "merkle_path": [
+        {
+          "side": "left",
+          "hash": "5016dffda839d81f85614e7d130a3cfd3c50612037bc5bd401820f4495ce4576"
+        },
+        {
+          "side": "left",
+          "hash": "136c2835450b98ae2c13470086cd6c52b3b14b658fcae94c6d698cd1a6558eeb"
+        }
+      ]
+    }
+  ],
+  "verifier": {
+    "version": "dev",
+    "commit": "aba12a7"
+  }
+}
