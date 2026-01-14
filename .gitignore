@@ -119,3 +119,6 @@ requirements.lock.txt
 # Track public receipts (safe to publish). Keep any sensitive receipts here:
 receipts/private/
 Inputs/
+
+# Tailwind standalone binaries (platform-specific)
+**/tailwindcss-*
