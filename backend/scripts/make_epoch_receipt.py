@@ -69,11 +69,10 @@ def main() -> None:
 
         merkle_path = []
         for sib, pos in zip(mp.siblings, mp.positions):
-            # Some MerklePath implementations include the leaf hash itself in siblings[0].
-            # Skip any self-entry; it is not a real sibling step.
-            if sib == payload_hash:
-                continue
-
+            # IMPORTANT: do NOT skip sib == payload_hash.
+            # In this repo's MerklePath format, a "self sibling" can be a real step
+            # (e.g., duplication/carry behavior in odd-width trees).
+            #
             # In this MerklePath format, positions refers to the *current node* position.
             # If current node is 'R', sibling is on the LEFT (and vice versa).
             side = "left" if pos == "R" else "right"
