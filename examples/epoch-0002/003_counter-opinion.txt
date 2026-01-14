@@ -1,0 +1,11 @@
+Counter-Opinion:
+
+This clause is unenforceable as written.
+
+Issues:
+- “Knowingly” is undefined.
+- No remedy for breach.
+- No governing law or venue.
+- No process for disputing whether a statement is false.
+
+Conclusion: useful conceptually, weak legally.

@@ -1,0 +1,13 @@
+Epoch-0002 Intent:
+
+Seal a draft clause, AI interpretation, and counter-analysis together
+to prove:
+
+1) what text existed,
+2) how it was interpreted,
+3) where disagreement arose,
+
+at a specific moment in time.
+
+This epoch demonstrates CLAW as a dispute-memory system,
+not just a document hash.

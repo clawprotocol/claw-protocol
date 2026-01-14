@@ -1,7 +1,7 @@
 {
   "protocol_id": "CLAW-EPOCH-v0",
   "epoch_id": "epoch-0002",
-  "created_utc": "2026-01-14T04:53:23.834902+00:00",
+  "created_utc": "2026-01-14T05:47:14.054864+00:00",
   "hash_algo": "sha256",
   "canonicalization": "claw-canonical-text-v0",
   "batch_merkle_root": "a2d369c992ca9fc1070adedf3ea470a6d23e89cc1b2416e0ea4690cb63403db0",
