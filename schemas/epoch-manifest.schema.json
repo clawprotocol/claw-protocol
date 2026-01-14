@@ -1,0 +1,46 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://clawprotocol.org/schemas/epoch-manifest.schema.json",
+    "title": "CLAW Epoch Manifest (v0)",
+    "type": "object",
+    "required": ["protocol_id", "epoch_id", "hash_algo", "canonicalization", "ordering", "inputs"],
+    "properties": {
+      "protocol_id": { "const": "CLAW-EPOCH-MANIFEST-v0" },
+      "epoch_id": { "type": "string", "minLength": 1 },
+      "created_utc": { "type": ["string", "null"], "format": "date-time" },
+  
+      "hash_algo": { "const": "sha256" },
+      "canonicalization": { "type": "string", "minLength": 1 },
+  
+      "ordering": {
+        "type": "string",
+        "enum": ["by_leaf_id_asc"]
+      },
+  
+      "context": { "type": ["string", "null"] },
+  
+      "inputs": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["leaf_id", "uri", "payload_sha256"],
+          "properties": {
+            "leaf_id": { "type": "string", "minLength": 1 },
+            "uri": { "type": "string", "minLength": 1 },
+  
+            "payload_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{64}$"
+            },
+  
+            "media_type": { "type": ["string", "null"] },
+            "bytes": { "type": ["integer", "null"], "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "additionalProperties": false
+  }
+  

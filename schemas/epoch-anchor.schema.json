@@ -1,0 +1,44 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://clawprotocol.org/schemas/epoch-anchor.schema.json",
+    "title": "CLAW Epoch Anchor Supplement (v0)",
+    "type": "object",
+    "required": ["protocol_id", "epoch_id", "batch_merkle_root", "op_return_commitment", "chain", "network"],
+    "properties": {
+      "protocol_id": { "const": "CLAW-EPOCH-ANCHOR-v0" },
+  
+      "epoch_id": { "type": "string", "minLength": 1 },
+  
+      "batch_merkle_root": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{64}$"
+      },
+  
+      "op_return_commitment": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{64}$",
+        "description": "Commitment expected to appear as OP_RETURN push32 (6a20...). For v0: sha256('CLAW' + 0x01 + root_bytes)."
+      },
+  
+      "chain": { "const": "bitcoin" },
+      "network": { "type": "string", "enum": ["mainnet", "testnet"] },
+  
+      "txid": { "type": ["string", "null"], "pattern": "^[0-9a-fA-F]{64}$" },
+      "block_height": { "type": ["integer", "null"], "minimum": 0 },
+      "anchored_utc": { "type": ["string", "null"], "format": "date-time" },
+  
+      "receipt_uri": { "type": ["string", "null"] },
+      "manifest_uri": { "type": ["string", "null"] },
+  
+      "anchorer": {
+        "type": ["object", "null"],
+        "properties": {
+          "pubkey": { "type": ["string", "null"] },
+          "signature": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  }
+  

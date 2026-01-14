@@ -16,7 +16,6 @@ function sha256HexFromStringUtf8(s) {
   return createHash("sha256").update(Buffer.from(s, "utf8")).digest("hex");
 }
 
-// Deterministic JSON: deep-sort keys, compact (matches python json.dumps(sort_keys=True,separators=(",",":")))
 function stableStringify(x) {
   if (x === null || typeof x !== "object") return JSON.stringify(x);
   if (Array.isArray(x)) return "[" + x.map(stableStringify).join(",") + "]";
@@ -28,7 +27,6 @@ function stableStringify(x) {
   );
 }
 
-// Spec: CRLF->LF, CR->LF, trim trailing spaces/tabs per line
 function normalizeTextForGenesis(s) {
   s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return s
@@ -37,8 +35,6 @@ function normalizeTextForGenesis(s) {
     .join("\n");
 }
 
-// Genesis commitment = sha256("CLAW" + 0x00 + merkle_root)
-// merkle_root = sha256(canonical_claim_json) for single-leaf tree
 function computeGenesisCommitmentFromFile(fileBytes, receiptObj) {
   const protocol = receiptObj.protocol || "CLAW-PROOF-v0";
   const doc_hash = sha256Hex(fileBytes);
@@ -53,10 +49,7 @@ function computeGenesisCommitmentFromFile(fileBytes, receiptObj) {
     protocol,
     type: "genesis_spec",
     text: claim_text,
-    source: {
-      doc_hash,
-      locator,
-    },
+    source: { doc_hash, locator },
   };
 
   const claimJson = stableStringify(claim);
@@ -81,7 +74,7 @@ function extractOpReturnPush32(rawTxHex) {
 
 async function fetchRawTxHex(txid, network) {
   const base =
-    network === "bitcoin-testnet"
+    network === "testnet" || network === "bitcoin-testnet"
       ? "https://blockstream.info/testnet/api"
       : "https://blockstream.info/api";
 
@@ -113,64 +106,74 @@ function isHex64(s) {
   return /^[0-9a-f]{64}$/i.test(String(s || "").trim());
 }
 
-/**
- * Epoch helpers
- */
-
 function hexToBuf(h) {
   return Buffer.from(normalizeHex(h), "hex");
 }
 
-// One merkle parent = sha256(left_bytes || right_bytes)
 function merkleParentHex(leftHex, rightHex) {
   const left = hexToBuf(leftHex);
   const right = hexToBuf(rightHex);
   return sha256Hex(Buffer.concat([left, right]));
 }
 
-// Fold with a specific bitmask that flips sides for steps where bit=1.
-function foldMerklePathWithMask(payloadHash, merklePath, mask) {
+/**
+ * Epoch proof folding: accept BOTH conventions for `side`
+ *
+ * Convention A (sibling-side):
+ *   side=left  => parent = sha256(sib || cur)
+ *   side=right => parent = sha256(cur || sib)
+ *
+ * Convention B (current-side):
+ *   side=left  => parent = sha256(cur || sib)
+ *   side=right => parent = sha256(sib || cur)
+ */
+
+function foldMerklePathSiblingSide(payloadHash, merklePath) {
   let cur = normalizeHex(payloadHash);
-
-  for (let i = 0; i < merklePath.length; i++) {
-    const step = merklePath[i];
+  for (const step of merklePath) {
     const sib = normalizeHex(step.hash);
-
-    let side = String(step.side || "").toLowerCase();
-    if (side !== "left" && side !== "right") {
+    const side = String(step.side || "").toLowerCase();
+    if (side === "left" || side === "l") {
+      cur = merkleParentHex(sib, cur);
+    } else if (side === "right" || side === "r") {
+      cur = merkleParentHex(cur, sib);
+    } else {
       die(`Invalid merkle_path side (expected 'left'/'right'): ${step.side}`);
     }
-
-    // Flip side if this bit is set
-    if ((mask >> i) & 1) {
-      side = side === "left" ? "right" : "left";
-    }
-
-    if (side === "left") {
-      cur = merkleParentHex(sib, cur); // sibling on left
-    } else {
-      cur = merkleParentHex(cur, sib); // sibling on right
-    }
   }
-
   return cur;
 }
 
-// Try all side-flip combinations; accept if any folds to expectedRoot.
-function verifyEpochProof(payloadHash, merklePath, expectedRoot) {
-  const k = merklePath.length;
-
-  // Depth is ~log2(N). Exhaustive search is safe for launch.
-  if (k > 20) {
-    die(`Merkle path too deep for brute verification (k=${k}).`);
+function foldMerklePathCurrentSide(payloadHash, merklePath) {
+  let cur = normalizeHex(payloadHash);
+  for (const step of merklePath) {
+    const sib = normalizeHex(step.hash);
+    const side = String(step.side || "").toLowerCase();
+    if (side === "left" || side === "l") {
+      cur = merkleParentHex(cur, sib);
+    } else if (side === "right" || side === "r") {
+      cur = merkleParentHex(sib, cur);
+    } else {
+      die(`Invalid merkle_path side (expected 'left'/'right'): ${step.side}`);
+    }
   }
+  return cur;
+}
 
-  const total = 1 << k;
-  for (let mask = 0; mask < total; mask++) {
-    const got = foldMerklePathWithMask(payloadHash, merklePath, mask);
-    if (got === expectedRoot) return { ok: true, mask };
-  }
-  return { ok: false, mask: null };
+function foldMerklePath(payloadHash, merklePath) {
+  const siblingSide = foldMerklePathSiblingSide(payloadHash, merklePath);
+  const currentSide = foldMerklePathCurrentSide(payloadHash, merklePath);
+  return { siblingSide, currentSide };
+}
+
+// Epoch commitment = sha256("CLAW" + 0x01 + root_bytes)
+function epochCommitmentFromRoot(rootHex) {
+  const rootBytes = hexToBuf(rootHex);
+  return createHash("sha256")
+    .update(Buffer.from("CLAW", "ascii"))
+    .update(Buffer.from([0x01]))
+    .update(rootBytes)
+    .digest("hex");
 }
 
 function looksLikeEpochReceipt(r) {
@@ -184,13 +187,14 @@ function looksLikeEpochReceipt(r) {
 }
 
 const args = parseArgs(process.argv);
-const receipt = args.receipt;
-const file = args.file; // optional for epoch receipts
+const receiptPath = args.receipt;
+const file = args.file; // optional
+const anchorPath = args.anchor; // optional
 
-const receiptObj = JSON.parse(readFileSync(receipt, "utf8"));
+const receiptObj = JSON.parse(readFileSync(receiptPath, "utf8"));
 
 /**
- * Epoch mode: receipt-only verification (offline)
+ * Epoch mode: receipt-only verification + optional anchor supplement
  */
 if (looksLikeEpochReceipt(receiptObj)) {
   console.log("— CLAW Verify —");
@@ -215,31 +219,85 @@ if (looksLikeEpochReceipt(receiptObj)) {
     const ph = normalizeHex(p.payload_hash);
     if (!isHex64(ph)) die(`Invalid payload_hash for leaf_id=${p.leaf_id}`);
 
-    const mp = p.merkle_path || [];
-    const res = verifyEpochProof(ph, mp, expectedRoot);
+    const got = foldMerklePath(ph, p.merkle_path || []);
 
-    if (!res.ok) {
+    if (got.siblingSide !== expectedRoot && got.currentSide !== expectedRoot) {
       console.log("❌ Proof failed for leaf_id:", p.leaf_id);
       console.log("   payload_hash:", ph);
       console.log("   expected:", expectedRoot);
-
-      // show what the receipt's declared sides produce (mask=0)
-      const computed0 = foldMerklePathWithMask(ph, mp, 0);
-      console.log("   computed (as-written):", computed0);
-
+      console.log("   computed (sib-side):", got.siblingSide);
+      console.log("   computed (cur-side):", got.currentSide);
       process.exit(2);
-    } else {
-      // Uncomment if you want visibility into the flip pattern:
-      // console.log(`✔ leaf_id=${p.leaf_id} verified (mask=${res.mask})`);
     }
   }
 
   console.log("✅ All epoch proofs verify to root");
 
-  if (receiptObj.anchor && receiptObj.anchor.txid) {
-    console.log("ℹ️  Epoch anchor present (txid):", receiptObj.anchor.txid);
+  const computedCommitment = epochCommitmentFromRoot(expectedRoot);
+  const receiptCommitment = normalizeHex(receiptObj.epoch_commitment || "");
+
+  if (receiptCommitment) {
+    console.log("Receipt epoch_commitment:", receiptCommitment);
+    if (receiptCommitment !== computedCommitment) {
+      console.log("❌ epoch_commitment mismatch (receipt vs computed)");
+      console.log("   computed:", computedCommitment);
+      process.exit(2);
+    }
   } else {
-    console.log("ℹ️  Epoch is pre-anchor (anchor.txid is null)");
+    console.log(
+      "ℹ️  receipt.epoch_commitment not present; computed:",
+      computedCommitment
+    );
+  }
+
+  if (anchorPath && anchorPath !== true) {
+    const anchorObj = JSON.parse(readFileSync(anchorPath, "utf8"));
+
+    const aRoot = normalizeHex(anchorObj.batch_merkle_root || "");
+    const aCommit = normalizeHex(anchorObj.op_return_commitment || "");
+
+    if (!isHex64(aRoot)) die("anchor.batch_merkle_root is not 64-hex");
+    if (!isHex64(aCommit)) die("anchor.op_return_commitment is not 64-hex");
+
+    if (aRoot !== expectedRoot) {
+      die("anchor.batch_merkle_root does not match receipt.batch_merkle_root");
+    }
+
+    if (aCommit !== computedCommitment) {
+      console.log("❌ anchor.op_return_commitment mismatch");
+      console.log("   computed:", computedCommitment);
+      console.log("   anchor:  ", aCommit);
+      process.exit(2);
+    }
+
+    console.log("✅ Anchor supplement matches receipt/root/commitment");
+
+    const txid = normalizeHex(anchorObj.txid || "");
+    const network = anchorObj.network || "mainnet";
+
+    if (txid) {
+      if (!isHex64(txid)) die("anchor.txid is not 64-hex");
+      console.log("Anchored TXID:", txid, "Network:", network);
+
+      const rawTxHex = await fetchRawTxHex(txid, network);
+      const onchain = extractOpReturnPush32(rawTxHex);
+      if (!onchain) die("No OP_RETURN push32 found in tx");
+
+      console.log("On-chain OP_RETURN push32:", onchain);
+      if (normalizeHex(onchain) !== computedCommitment) {
+        console.log("❌ NO MATCH (on-chain OP_RETURN != epoch commitment)");
+        process.exit(2);
+      }
+      console.log("✅ ON-CHAIN MATCH");
+    } else {
+      console.log("ℹ️  Anchor supplement has no txid (pre-anchor)");
+    }
+  } else {
+    if (receiptObj.anchor && receiptObj.anchor.txid) {
+      console.log("ℹ️  Receipt anchor present (txid):", receiptObj.anchor.txid);
+    } else {
+      console.log("ℹ️  Epoch is pre-anchor (no anchor supplement provided)");
+    }
   }
 
   process.exit(0);
@@ -251,7 +309,6 @@ if (looksLikeEpochReceipt(receiptObj)) {
 if (!file) die("Missing --file");
 
 if (receiptObj.commitment_alg && receiptObj.commitment_alg !== "sha256") {
-  // permissive: some modes are not "sha256(file)==commitment"
   console.warn(
     "⚠️  Note: receipt.commitment_alg is not 'sha256'. Proceeding anyway."
   );
@@ -262,7 +319,6 @@ if (!txid) die("Receipt missing txid");
 
 const network = receiptObj.network || "bitcoin-mainnet";
 
-// What the receipt claims is in OP_RETURN (accept multiple receipt conventions)
 const expectedOpret = normalizeHex(
   receiptObj.op_return_commitment ||
     receiptObj.opreturn_payload_hex32 ||
@@ -275,14 +331,9 @@ if (!expectedOpret || !isHex64(expectedOpret)) {
   die("Receipt missing a valid op_return_commitment (expected 64 hex chars)");
 }
 
-// Read the provided file (could be a document, could be a 64-hex merkle root)
 const fileBytes = readFileSync(file);
 const fileText = fileBytes.toString("utf8").trim();
 
-// Decide mode:
-// - genesis: compute commitment from file using CLAW genesis rules
-// - merkle-root: file is exactly 64-hex (optionally check receipt merkle_root_sha256)
-// - document: receipt commitment must equal sha256(file)
 const fileLooksLikeMerkleRoot = isHex64(fileText);
 const looksLikeGenesis =
   receiptObj.type === "genesis_spec" ||
@@ -297,8 +348,8 @@ console.log("Receipt OP_RETURN commitment:", expectedOpret);
 
 if (looksLikeGenesis && !fileLooksLikeMerkleRoot) {
   console.log("Mode:     ", "genesis");
-
   const g = computeGenesisCommitmentFromFile(fileBytes, receiptObj);
+
   console.log("Computed doc_hash:", g.doc_hash);
   console.log("Computed leaf:", g.leaf);
   console.log("Computed merkle_root:", g.merkle_root);
@@ -315,7 +366,6 @@ if (looksLikeGenesis && !fileLooksLikeMerkleRoot) {
   console.log("Mode:     ", "merkle-root");
   console.log("Merkle root (from file):", normalizeHex(fileText));
 
-  // Optional: if receipt includes merkle_root_sha256, enforce it matches the file
   if (receiptObj.merkle_root_sha256) {
     const expectedRoot = normalizeHex(receiptObj.merkle_root_sha256);
     if (!isHex64(expectedRoot)) die("receipt.merkle_root_sha256 is not 64-hex");
@@ -345,14 +395,13 @@ if (looksLikeGenesis && !fileLooksLikeMerkleRoot) {
   }
 }
 
-// Always verify what’s actually on-chain in OP_RETURN push32
 const rawTxHex = await fetchRawTxHex(txid, network);
 const onchainOpret = extractOpReturnPush32(rawTxHex);
 if (!onchainOpret) die("No OP_RETURN push32 found in tx");
 
 console.log("On-chain OP_RETURN push32:", onchainOpret);
 
-if (onchainOpret === expectedOpret) {
+if (normalizeHex(onchainOpret) === expectedOpret) {
   console.log("✅ ON-CHAIN MATCH");
   process.exit(0);
 } else {
