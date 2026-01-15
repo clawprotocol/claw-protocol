@@ -1,0 +1,11 @@
+{
+  "protocol_id": "CLAW-EPOCH-ANCHOR-v0",
+  "epoch_id": "epoch-0002",
+  "batch_merkle_root": "a2d369c992ca9fc1070adedf3ea470a6d23e89cc1b2416e0ea4690cb63403db0",
+  "op_return_commitment": "21d426b7dbc77815f6c8def37065c36cb9a37893cc6b27db4846738e3464f9a3",
+  "chain": "bitcoin",
+  "network": "mainnet",
+  "txid": null,
+  "block_height": null,
+  "notes": "Fill txid+block_height once anchored. Commitment = sha256('CLAW' + 0x01 + root_bytes)."
+}
