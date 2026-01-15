@@ -1,0 +1,6 @@
+Epoch-0002 (folder CID):
+ipfs://bafybeigeqdw3xl4b6z7drpxc6qvmiahjyfogisghvrt5ojymlvwa6zfybi/
+
+Gateway examples:
+https://dweb.link/ipfs/bafybeigeqdw3xl4b6z7drpxc6qvmiahjyfogisghvrt5ojymlvwa6zfybi/
+https://ipfs.io/ipfs/bafybeigeqdw3xl4b6z7drpxc6qvmiahjyfogisghvrt5ojymlvwa6zfybi/
