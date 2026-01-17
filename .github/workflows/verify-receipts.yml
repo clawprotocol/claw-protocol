@@ -1,0 +1,28 @@
+      - name: Verify example receipt (Genesis)
+        run: |
+          bash scripts/verify_receipt.sh receipts/examples/epoch-0000-genesis.json
+name: Verify 
+CLAW Receipts
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: |
+          chmod +x scripts/*.sh || true
+
+      - name: Verify example receipt (Genesis)
+        run: |
+          bash scripts/verify_receipt.sh receipts/examples/epoch-0000-genesis.json
+
