@@ -122,3 +122,9 @@ Inputs/
 
 # Tailwind standalone binaries (platform-specific)
 **/tailwindcss-*
+
+# CLAW runtime artifacts
+proofs/*.psbt.txt
+proofs/*.broadcast.json
+psbt.b64
+psbt.out
