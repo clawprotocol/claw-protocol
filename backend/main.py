@@ -25,6 +25,7 @@ from backend.handlers.timeline_handler import (
     create_receipt_response,
 )
 from backend.utils.timeline_store import TimelineStore
+from backend.handlers.anchor_adapter import AnchorAdapter, BitcoinCoreRpcAnchorAdapter
 
 # Agent APIs
 from backend.handlers.agent_api_handler import (
@@ -73,7 +74,17 @@ app.add_middleware(
 # stores
 usage_store = UsageStore()
 anchor_queue = AnchorQueue()
-timeline_store = TimelineStore()
+
+
+def _timeline_db_path() -> str:
+    return os.path.expanduser(os.getenv("CLAW_TIMELINE_DB_PATH", "~/.claw/timeline.sqlite3"))
+
+
+def _anchor_adapter() -> AnchorAdapter:
+    return BitcoinCoreRpcAnchorAdapter()
+
+
+timeline_store = TimelineStore(db_path=_timeline_db_path())
 
 
 def _payment_adapter() -> Optional[PaymentAdapter]:
@@ -147,6 +158,42 @@ def _multipart_enabled() -> bool:
 
 
 # -------------------------------------------------
+# Node mode: API vs verifier-only
+# -------------------------------------------------
+def _node_mode() -> str:
+    """
+    Node mode controls whether this server can MUTATE state or only VERIFY.
+
+    - "api"      : normal mode (default)
+    - "verifier" : verifier-only mode (no writes/mutations/anchoring)
+    """
+    return os.getenv("CLAW_NODE_MODE", "api").strip().lower()
+
+
+def _verifier_only() -> bool:
+    return _node_mode() == "verifier"
+
+
+def _deny_write_if_verifier() -> Optional[JSONResponse]:
+    """
+    In verifier-only mode, we block ALL mutation endpoints.
+
+    Read-only endpoints remain available:
+      /health, /version, /verify, /verify/tree,
+      GET /v1/timelines/*, GET /v1/receipts/*
+    """
+    if _verifier_only():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "verifier_only",
+                "hint": "This node is running in verifier-only mode (CLAW_NODE_MODE=verifier).",
+            },
+        )
+    return None
+
+
+# -------------------------------------------------
 # Health + Version
 # -------------------------------------------------
 @app.get("/health")
@@ -161,6 +208,7 @@ async def version():
             "name": "claw-backend",
             "environment": _environment(),
             "debug": _debug_enabled(),
+            "node_mode": _node_mode(),
             "x402_payment_header": os.getenv("CLAW_X402_PAYMENT_HEADER", "X-PAYMENT"),
             "tier_headers": ["x-claw-wallet", "x-claw-api-key", "x-claw-tier"],
             "anchor": {
@@ -175,6 +223,7 @@ async def version():
 
 # -------------------------------------------------
 # /receipt — legacy receipt builder (tests expect this)
+# NOTE: allowed in verifier mode (pure function / no state mutation)
 # -------------------------------------------------
 @app.post("/receipt")
 async def receipt_legacy(body: Dict[str, Any]):
@@ -205,7 +254,9 @@ async def receipt_legacy(body: Dict[str, Any]):
     receipt_payload["receipt_hash"] = receipt_payload.get("receipt_hash") or receipt_hash
 
     # legacy compatibility key expected by tests
-    proof_packet_hash = receipt_payload.get("proof_packet_hash") or receipt_payload.get("proof_packet_hash_sha256") or ""
+    proof_packet_hash = (
+        receipt_payload.get("proof_packet_hash") or receipt_payload.get("proof_packet_hash_sha256") or ""
+    )
     if not proof_packet_hash:
         proof_packet_hash = (proof_packet.get("clauses_hash") if isinstance(proof_packet, dict) else "") or ""
     receipt_payload["proof_packet_hash"] = proof_packet_hash
@@ -238,6 +289,10 @@ async def verify(body: Dict[str, Any]):
 # -------------------------------------------------
 @app.post("/v1/timelines")
 async def create_timeline(body: CreateTimelineRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     network = body.network or _default_anchor_network()
     if network not in TIMELINE_ALLOWED_NETWORKS:
         return JSONResponse(status_code=400, content={"error": "Invalid network"})
@@ -261,6 +316,10 @@ async def get_timeline(timeline_id: str):
 
 @app.post("/v1/timelines/{timeline_id}/events")
 async def append_event(timeline_id: str, body: AppendEventRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     try:
         ev = timeline_store.append_event(
             timeline_id=timeline_id,
@@ -300,6 +359,10 @@ async def get_event(timeline_id: str, event_id: str):
 
 @app.post("/v1/timelines/{timeline_id}/freeze")
 async def freeze_timeline(timeline_id: str, body: FreezeTimelineRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     try:
         event_hashes = timeline_store.list_event_hashes(timeline_id)
         current_manifest = build_manifest(event_hashes)
@@ -322,6 +385,10 @@ async def freeze_timeline(timeline_id: str, body: FreezeTimelineRequest):
 
 @app.post("/v1/timelines/{timeline_id}/anchor")
 async def anchor_timeline(timeline_id: str, body: AnchorTimelineRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     try:
         tl = timeline_store.get_timeline(timeline_id)
         if not tl.frozen or not tl.frozen_manifest_sha256:
@@ -329,11 +396,23 @@ async def anchor_timeline(timeline_id: str, body: AnchorTimelineRequest):
         if body.frozen_manifest_sha256 != tl.frozen_manifest_sha256:
             return JSONResponse(status_code=409, content={"error": "frozen_manifest_sha256_mismatch"})
 
+        btc_txid = "pending"
+        if _anchor_mode_env() == "immediate":
+            if body.anchor_network == "bitcoin-mainnet" and _mainnet_disabled():
+                return JSONResponse(status_code=403, content={"error": "Mainnet anchoring disabled"})
+            try:
+                btc_txid = _anchor_adapter().broadcast_commitment(
+                    body.anchor_network, body.frozen_manifest_sha256
+                )
+            except Exception as e:
+                return JSONResponse(status_code=500, content={"error": str(e)})
+
         receipt = create_receipt_response(
             timeline_id=timeline_id,
             frozen_manifest_sha256=body.frozen_manifest_sha256,
             anchor_network=body.anchor_network,
             epoch_id=body.epoch_id,
+            btc_txid=btc_txid,
         )
         timeline_store.create_receipt(
             receipt_id=receipt["receipt_id"],
@@ -375,6 +454,10 @@ async def verify_tree(body: Dict[str, Any]):
 # -------------------------------------------------
 @app.post("/admin/anchor/run")
 async def admin_anchor_run(req: Request):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     if not _admin_ok(req):
         return JSONResponse(status_code=403, content={"error": "Forbidden"})
 
@@ -388,7 +471,9 @@ async def admin_anchor_run(req: Request):
     max_n = int(os.getenv("CLAW_ANCHOR_MAX_PER_BATCH", "50000"))
     jobs = anchor_queue.claim_batch(max_n=max_n)
     if not jobs:
-        return JSONResponse({"ok": True, "ran": 0, "done": 0, "failed": 0, "pending": anchor_queue.pending_count()})
+        return JSONResponse(
+            {"ok": True, "ran": 0, "done": 0, "failed": 0, "pending": anchor_queue.pending_count()}
+        )
 
     ran = done = failed = 0
 
@@ -444,6 +529,10 @@ async def admin_anchor_run(req: Request):
 # -------------------------------------------------
 @app.post("/agent/propose")
 async def agent_propose(req: Request, body: ProposeClauseRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     adapter = _payment_adapter()
     ctx = _request_context(req)
     pay_hdr = _payment_header_value(req)
@@ -460,6 +549,10 @@ async def agent_propose(req: Request, body: ProposeClauseRequest):
 
 @app.post("/agent/sign")
 async def agent_sign(req: Request, body: SignClauseRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     adapter = _payment_adapter()
     ctx = _request_context(req)
     pay_hdr = _payment_header_value(req)
@@ -476,6 +569,10 @@ async def agent_sign(req: Request, body: SignClauseRequest):
 
 @app.post("/agent/proof")
 async def agent_proof(req: Request, body: GenerateProofRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     adapter = _payment_adapter()
     ctx = _request_context(req)
     pay_hdr = _payment_header_value(req)
@@ -492,6 +589,10 @@ async def agent_proof(req: Request, body: GenerateProofRequest):
 
 @app.post("/agent/anchor")
 async def agent_anchor(req: Request, body: AnchorProofRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     adapter = _payment_adapter()
     ctx = _request_context(req)
     pay_hdr = _payment_header_value(req)
@@ -534,11 +635,18 @@ async def agent_anchor(req: Request, body: AnchorProofRequest):
 # -------------------------------------------------
 @app.post("/propose")
 async def propose_legacy(req: Request, body: ProposeClauseRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
     return await agent_propose(req, body)
 
 
 @app.post("/sign")
 async def sign_legacy(req: Request, body: SignClauseRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     """
     Legacy test/client compatibility:
     tests expect top-level key "sign_packet" from /sign response.
@@ -558,7 +666,9 @@ async def sign_legacy(req: Request, body: SignClauseRequest):
 
     # Deterministic packet_hash source:
     # Prefer canonical_hash_sha256 (already stable), else signature_payload.message.
-    canonical_hash = data.get("canonical_hash_sha256") or (data.get("signature_payload") or {}).get("message") or ""
+    canonical_hash = (
+        data.get("canonical_hash_sha256") or (data.get("signature_payload") or {}).get("message") or ""
+    )
 
     # Build a legacy-ish sign_packet with required key.
     sign_packet = {
@@ -585,6 +695,10 @@ async def sign_legacy(req: Request, body: SignClauseRequest):
 
 @app.post("/proof")
 async def proof_legacy(req: Request, body: GenerateProofRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
+
     """
     Legacy test/client compatibility:
     tests expect top-level key "proof_packet" from /proof response.
@@ -651,6 +765,9 @@ async def proof_legacy(req: Request, body: GenerateProofRequest):
 
 @app.post("/anchor")
 async def anchor_legacy(req: Request, body: AnchorProofRequest):
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
     return await agent_anchor(req, body)
 
 

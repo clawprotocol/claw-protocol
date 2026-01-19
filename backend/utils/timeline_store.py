@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from utils.canon_json import canon_sha256_hex
 
-DEFAULT_DB_PATH = os.getenv("CLAW_TIMELINE_DB_PATH", "audit/timeline.sqlite3")
+DEFAULT_DB_PATH = os.path.expanduser(
+    os.getenv("CLAW_TIMELINE_DB_PATH", "~/.claw/timeline.sqlite3")
+)
 
 
 def _utc_now_iso() -> str:

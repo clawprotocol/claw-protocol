@@ -134,6 +134,7 @@ def create_receipt_response(
     frozen_manifest_sha256: str,
     anchor_network: str,
     epoch_id: Optional[str],
+    btc_txid: str,
 ) -> Dict[str, Any]:
     payload = {
         "timeline_id": timeline_id,
@@ -148,7 +149,7 @@ def create_receipt_response(
         "protocol_version": PROTOCOL_VERSION,
         "network": anchor_network,
         "epoch_id": epoch_id,
-        "btc_txid": "pending",
+        "btc_txid": btc_txid,
         "commitment": frozen_manifest_sha256,
         "merkle_proof": [],
         "zk_proof_refs": None,

@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from backend.handlers.epoch_merkle import merkle_root_and_paths
 
@@ -70,7 +70,15 @@ def fetch_bytes(uri: str, ipfs_gateway: str) -> bytes:
         uri = _ipfs_to_gateway(uri, ipfs_gateway)
 
     if uri.startswith("http://") or uri.startswith("https://"):
-        with urlopen(uri) as r:
+        # Some IPFS gateways 403 default urllib User-Agent; send a normal UA.
+        req = Request(
+            uri,
+            headers={
+                "User-Agent": "claw-bot/0 (+https://github.com/clawprotocol/claw-protocol)",
+                "Accept": "*/*",
+            },
+        )
+        with urlopen(req) as r:
             return r.read()
 
     if uri.startswith("file:"):

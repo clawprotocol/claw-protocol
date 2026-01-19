@@ -8,28 +8,28 @@
   "inputs": [
     {
       "leaf_id": "001_draft-clause",
-      "uri": "file:examples/epoch-0002/001_draft-clause.txt",
+      "uri": "ipfs://bafybeigeqdw3xl4b6z7drpxc6qvmiahjyfogisghvrt5ojymlvwa6zfybi/001_draft-clause.txt",
       "payload_sha256": "f952f17b9b1fadf417bf7c08acf69637bfedee7a4dbccb6bc19fc16d70be0cbe",
       "media_type": "text/plain",
       "bytes": 585
     },
     {
       "leaf_id": "002_ai-summary",
-      "uri": "file:examples/epoch-0002/002_ai-summary.txt",
+      "uri": "ipfs://bafybeigeqdw3xl4b6z7drpxc6qvmiahjyfogisghvrt5ojymlvwa6zfybi/002_ai-summary.txt",
       "payload_sha256": "2983a1ddd06127ed68d068de8359b1a42df8ca2105782bad13e9ba14dc031b27",
       "media_type": "text/plain",
       "bytes": 310
     },
     {
       "leaf_id": "003_counter-opinion",
-      "uri": "file:examples/epoch-0002/003_counter-opinion.txt",
+      "uri": "ipfs://bafybeigeqdw3xl4b6z7drpxc6qvmiahjyfogisghvrt5ojymlvwa6zfybi/003_counter-opinion.txt",
       "payload_sha256": "9d205fc5863ce20e44410ab3ad302205ec1d5ef0ef10183008b09b498c402ee5",
       "media_type": "text/plain",
       "bytes": 258
     },
     {
       "leaf_id": "004_epoch-intent",
-      "uri": "file:examples/epoch-0002/004_epoch-intent.txt",
+      "uri": "ipfs://bafybeigeqdw3xl4b6z7drpxc6qvmiahjyfogisghvrt5ojymlvwa6zfybi/004_epoch-intent.txt",
       "payload_sha256": "4f9edd17a72dc8b77bc6ff2a8e96c07b40dcd4a8d14d3628d4ed90ed7bf72db9",
       "media_type": "text/plain",
       "bytes": 294
