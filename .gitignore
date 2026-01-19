@@ -128,3 +128,12 @@ proofs/*.psbt.txt
 proofs/*.broadcast.json
 psbt.b64
 psbt.out
+
+# CLAW runtime artifacts
+timestamps/
+.claw/
+**/*.sqlite3
+**/*.sqlite3-*
+
+# Python packaging noise
+clawctl.egg-info/

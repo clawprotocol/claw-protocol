@@ -1,9 +1,0 @@
-pyproject.toml
-clawctl/__init__.py
-clawctl/main.py
-clawctl.egg-info/PKG-INFO
-clawctl.egg-info/SOURCES.txt
-clawctl.egg-info/dependency_links.txt
-clawctl.egg-info/entry_points.txt
-clawctl.egg-info/requires.txt
-clawctl.egg-info/top_level.txt
