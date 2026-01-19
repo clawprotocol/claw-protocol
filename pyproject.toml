@@ -2,12 +2,24 @@
 name = "clawctl"
 version = "0.1.0"
 description = "Command-line interface for the CLAW Protocol"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
-    "typer",
-    "requests",
-    "rich",
-    "tomli; python_version < '3.11'",
+  "typer",
+  "rich",
+  "requests",
+  "tomli; python_version < '3.11'",
+
+  # backend/runtime
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic==2.7.1",
+  "python-dotenv",
+  "aiohttp",
+  "python-telegram-bot==20.7",
+
+  # dev/test (ok to keep here for now; later we can split to optional groups)
+  "pytest",
+  "httpx",
 ]
 
 [tool.setuptools]
