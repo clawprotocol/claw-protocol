@@ -27,6 +27,21 @@ If you read only one file, read that one.
 
 ---
 
+## Protocol Semantics (v1.x)
+
+CLAW v1.x semantics are **explicitly frozen**.
+
+Interpretation of implemented behavior is governed by:
+- [`docs/COURT_SUMMARY.md`](docs/COURT_SUMMARY.md)
+- [`docs/VERIFICATION_MODEL.md`](docs/VERIFICATION_MODEL.md)
+- [`docs/ANCHORING_MODEL.md`](docs/ANCHORING_MODEL.md)
+- [`docs/SEMANTIC_LOCK.md`](docs/SEMANTIC_LOCK.md)
+
+If any description, example, or future document conflicts with these files,  
+**the above documents control**.
+
+---
+
 ## 🚀 Protocol Launch Index
 
 New to CLAW?  

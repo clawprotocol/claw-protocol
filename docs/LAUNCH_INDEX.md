@@ -19,6 +19,10 @@ If you read only three files, read these:
 3. **Signed agent-to-agent flow (canonical)**  
    `docs/examples/agent_to_agent_signed.md`
 
+4. **Semantic Lock (v1.x):**  
+  [`SEMANTIC_LOCK.md`](SEMANTIC_LOCK.md) — freezes the meaning and scope of CLAW v1.x and prevents retroactive reinterpretation.
+
+
 ---
 
 ## 📜 Protocol Specifications
