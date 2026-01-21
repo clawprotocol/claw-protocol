@@ -425,6 +425,7 @@ async def anchor_timeline(timeline_id: str, body: AnchorTimelineRequest):
             merkle_proof=receipt["merkle_proof"],
             zk_proof_refs=receipt.get("zk_proof_refs"),
             issued_at=receipt["issued_at"],
+            receipt_hash_sha256=receipt.get("receipt_hash_sha256"),  # ✅ critical: persist embedded integrity hash
         )
         return JSONResponse(receipt)
     except KeyError:
@@ -444,10 +445,25 @@ async def get_receipt(receipt_id: str):
 # -------------------------------------------------
 @app.post("/verify/tree")
 async def verify_tree(body: Dict[str, Any]):
+    # Accept either:
+    #  - {"receipt": {...}, ...}
+    #  - {"receipt_id": "...", ...}  (clawctl timeline verify uses this)
+    # and fetch locally if needed.
+
+    # If caller sent only receipt_id, fetch the receipt from our local timeline_store.
+    if isinstance(body, dict) and not body.get("receipt") and body.get("receipt_id"):
+        rid = body.get("receipt_id")
+        try:
+            body = dict(body)
+            body["receipt"] = timeline_store.get_receipt(rid)
+        except KeyError:
+            return JSONResponse(status_code=404, content={"error": "receipt_not_found", "receipt_id": rid})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": f"receipt_fetch_failed: {str(e)}"})
+
     req = VerifyTreeRequest(**body)
     resp = verify_receipt_tree(req)
     return JSONResponse(resp.model_dump())
-
 
 # -------------------------------------------------
 # /admin/anchor/run — drain queued anchors (batch mode)

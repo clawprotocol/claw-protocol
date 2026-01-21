@@ -8,7 +8,6 @@ dependencies = [
   "rich",
   "requests",
   "tomli; python_version < '3.11'",
-
   # backend/runtime
   "fastapi",
   "uvicorn[standard]",
@@ -16,10 +15,10 @@ dependencies = [
   "python-dotenv",
   "aiohttp",
   "python-telegram-bot==20.7",
-
   # dev/test (ok to keep here for now; later we can split to optional groups)
   "pytest",
   "httpx",
+  "certifi>=2026.1.4",
 ]
 
 [tool.setuptools]

@@ -1,178 +1,154 @@
 # backend/handlers/verify_tree_handler.py
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from backend.handlers.verify_handler import VerifyReceiptRequest, verify_receipt_packet
 
 
-# ----------------------------
-# Models
-# ----------------------------
-
 class VerifyTreeRequest(BaseModel):
     """
-    Accepts either:
-      - parent_receipt containing embedded children receipts in parent_receipt["children"]
-    OR
-      - parent_receipt + child_receipts passed separately in this request
+    Flexible tree verification request.
 
-    strict=True enforces that the parent-reported/embedded children match provided children by hash.
+    Supported shapes (all optional to avoid 500s):
+      1) {"receipt": {...}, "children": [{"receipt": {...}}, ...]}
+      2) {"receipt": {...}, "children_receipts": [{...}, ...]}
+      3) {"receipt_id": "..."}   (we will NOT fetch server-side; returns a structured error)
+      4) {"root": {...}}         (legacy alias)
     """
-    parent_receipt: Dict[str, Any]
-    child_receipts: Optional[Dict[str, Optional[Dict[str, Any]]]] = None  # keys like propose/sign/proof/anchor
-    strict: bool = Field(default=False)
+
+    # Preferred
+    receipt: Optional[Dict[str, Any]] = None
+
+    # Legacy aliases
+    root: Optional[Dict[str, Any]] = None
+    receipt_id: Optional[str] = None
+
+    # Children formats
+    children: Optional[List[Dict[str, Any]]] = None
+    children_receipts: Optional[List[Dict[str, Any]]] = None
+
+    # Optional expected hash for root verification
+    expected_receipt_hash_sha256: Optional[str] = None
 
 
 class VerifyTreeResponse(BaseModel):
     ok: bool
-    parent_ok: bool
-    parent_receipt_hash_sha256: Optional[str] = None
 
-    children_total: int = 0
-    children_ok: int = 0
+    # Root receipt verification result (same shape as /verify)
+    root: Optional[Dict[str, Any]] = None
 
-    # helpful diagnostics
-    child_results: List[Dict[str, Any]] = Field(default_factory=list)
+    # Children verification results
+    children: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # Informational flags
+    tree_skipped: bool = False
+
+    # Errors (never throw)
     errors: List[str] = Field(default_factory=list)
 
 
-# ----------------------------
-# Helpers
-# ----------------------------
-
-def _receipt_hash_from_verify_response(v: Dict[str, Any]) -> Optional[str]:
-    return v.get("receipt_hash_sha256") or (v.get("checks") or {}).get("canonical_hash_computed")
-
-
-def _canonical_child_list_from_parent(parent: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Parent receipts may embed children in "children".
-    If absent, return [].
-    """
-    ch = parent.get("children")
-    if isinstance(ch, list):
-        return [c for c in ch if isinstance(c, dict)]
-    return []
+def _extract_root_receipt(req: VerifyTreeRequest) -> Optional[Dict[str, Any]]:
+    if isinstance(req.receipt, dict):
+        return req.receipt
+    if isinstance(req.root, dict):
+        return req.root
+    return None
 
 
-def _normalize_child_receipts_from_request(req: VerifyTreeRequest) -> List[Tuple[str, Dict[str, Any]]]:
-    """
-    Convert request.child_receipts dict into a list of (label, receipt_obj).
-    Skips null values.
-    """
-    out: List[Tuple[str, Dict[str, Any]]] = []
-    if not req.child_receipts:
-        return out
-    for k, v in req.child_receipts.items():
-        if v is None:
-            continue
-        if isinstance(v, dict):
-            out.append((k, v))
+def _extract_children(req: VerifyTreeRequest) -> List[Dict[str, Any]]:
+    # children may be [{"receipt": {...}}, {"receipt": {...}}] or [{...}, {...}]
+    raw: List[Dict[str, Any]] = []
+    if isinstance(req.children, list):
+        raw.extend([c for c in req.children if isinstance(c, dict)])
+    if isinstance(req.children_receipts, list):
+        raw.extend([c for c in req.children_receipts if isinstance(c, dict)])
+
+    out: List[Dict[str, Any]] = []
+    for c in raw:
+        if "receipt" in c and isinstance(c["receipt"], dict):
+            out.append(c["receipt"])
+        else:
+            out.append(c)
     return out
 
 
-def _child_label_from_receipt(r: Dict[str, Any], fallback: str) -> str:
-    claw = r.get("claw") if isinstance(r.get("claw"), dict) else {}
-    action = claw.get("action")
-    if isinstance(action, str) and action:
-        return action
-    return fallback
-
-
-# ----------------------------
-# Main verifier
-# ----------------------------
-
 def verify_receipt_tree(req: VerifyTreeRequest) -> VerifyTreeResponse:
+    """
+    Verify a root receipt and (optionally) a list of child receipts.
+
+    IMPORTANT: This function MUST NOT raise. It must always return a structured response.
+    """
     errors: List[str] = []
-    child_results: List[Dict[str, Any]] = []
 
-    # 1) verify parent receipt integrity
-    parent_verify = verify_receipt_packet(
-        VerifyReceiptRequest(receipt=req.parent_receipt, expected_receipt_hash_sha256=None)
-    ).model_dump()
+    root_receipt = _extract_root_receipt(req)
+    if root_receipt is None:
+        # We intentionally do NOT fetch by receipt_id here (pure verifier).
+        # Returning a structured error avoids 500s and keeps the API deterministic.
+        if req.receipt_id:
+            errors.append(
+                "verify/tree requires a receipt object (server will not fetch by receipt_id). "
+                "Provide {\"receipt\": {...}} in the request body."
+            )
+        else:
+            errors.append("verify/tree missing root receipt. Provide {\"receipt\": {...}}.")
+        return VerifyTreeResponse(ok=False, root=None, children=[], tree_skipped=True, errors=errors)
 
-    parent_ok = bool(parent_verify.get("ok"))
-    parent_hash = _receipt_hash_from_verify_response(parent_verify)
-
-    if not parent_ok:
-        errors.append("parent receipt failed integrity verification")
-        # include underlying errors
-        for e in parent_verify.get("errors") or []:
-            errors.append(f"parent: {e}")
-
-    # 2) determine children set:
-    #    Prefer parent-embedded children if present,
-    #    otherwise use request.child_receipts
-    embedded_children = _canonical_child_list_from_parent(req.parent_receipt)
-
-    request_children = _normalize_child_receipts_from_request(req)
-
-    if embedded_children:
-        children = [(_child_label_from_receipt(c, f"child_{i}"), c) for i, c in enumerate(embedded_children)]
-        source = "parent.children"
-    else:
-        children = request_children
-        source = "request.child_receipts"
-
-    children_total = len(children)
-    children_ok = 0
-
-    # 3) verify each child
-    verified_child_hashes: List[str] = []
-    for idx, (label, child) in enumerate(children):
-        v = verify_receipt_packet(VerifyReceiptRequest(receipt=child, expected_receipt_hash_sha256=None)).model_dump()
-        ok = bool(v.get("ok"))
-        h = _receipt_hash_from_verify_response(v)
-        if ok:
-            children_ok += 1
-        if h:
-            verified_child_hashes.append(h)
-
-        child_results.append(
-            {
-                "index": idx,
-                "label": label,
-                "ok": ok,
-                "receipt_hash_sha256": h,
-                "errors": v.get("errors") or [],
-            }
+    # Verify root using the same rules as /verify
+    try:
+        root_resp = verify_receipt_packet(
+            VerifyReceiptRequest(
+                receipt=root_receipt,
+                expected_receipt_hash_sha256=req.expected_receipt_hash_sha256,
+            )
         )
+        root_dict = root_resp.model_dump()
+    except Exception as e:
+        # Never throw; return structured error
+        errors.append(f"root verification error: {type(e).__name__}: {str(e)}")
+        return VerifyTreeResponse(ok=False, root=None, children=[], tree_skipped=True, errors=errors)
 
-    # 4) strict linkage check (optional)
-    #    If strict=True AND request.child_receipts provided AND parent has embedded children:
-    #    - compare the set of hashes from embedded children vs request children
-    if req.strict and req.child_receipts and embedded_children:
-        # verify request children separately (even if we already used embedded children as children list)
-        req_child_list = _normalize_child_receipts_from_request(req)
-        req_hashes: List[str] = []
-        for _k, rc in req_child_list:
-            vv = verify_receipt_packet(VerifyReceiptRequest(receipt=rc, expected_receipt_hash_sha256=None)).model_dump()
-            hh = _receipt_hash_from_verify_response(vv)
-            if hh:
-                req_hashes.append(hh)
+    # Verify children (if any). Timeline receipts currently have no children; that's fine.
+    children_receipts = _extract_children(req)
+    children_out: List[Dict[str, Any]] = []
+    child_ok = True
 
-        embedded_hashes: List[str] = []
-        for ec in embedded_children:
-            vv = verify_receipt_packet(VerifyReceiptRequest(receipt=ec, expected_receipt_hash_sha256=None)).model_dump()
-            hh = _receipt_hash_from_verify_response(vv)
-            if hh:
-                embedded_hashes.append(hh)
+    for idx, child in enumerate(children_receipts):
+        if not isinstance(child, dict):
+            child_ok = False
+            children_out.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "errors": ["child receipt is not an object"],
+                }
+            )
+            continue
 
-        if sorted(req_hashes) != sorted(embedded_hashes):
-            errors.append("strict mismatch: provided child_receipts do not match parent embedded children (by hash)")
+        try:
+            cr = verify_receipt_packet(VerifyReceiptRequest(receipt=child))
+            children_out.append({"index": idx, **cr.model_dump()})
+            if not cr.ok:
+                child_ok = False
+        except Exception as e:
+            child_ok = False
+            children_out.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "errors": [f"{type(e).__name__}: {str(e)}"],
+                }
+            )
 
-    ok = parent_ok and (children_ok == children_total) and (len(errors) == 0)
+    tree_skipped = len(children_receipts) == 0
+    ok = bool(root_dict.get("ok")) and child_ok
 
     return VerifyTreeResponse(
         ok=ok,
-        parent_ok=parent_ok,
-        parent_receipt_hash_sha256=parent_hash,
-        children_total=children_total,
-        children_ok=children_ok,
-        child_results=child_results,
-        errors=errors + ([f"children source: {source}"] if source else []),
+        root=root_dict,
+        children=children_out,
+        tree_skipped=tree_skipped,
+        errors=errors,
     )

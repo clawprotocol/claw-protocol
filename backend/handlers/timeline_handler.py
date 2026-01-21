@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from backend.utils.timeline_store import TimelineStore, manifest_sha256
 from utils.canon_json import canon_sha256_hex
@@ -38,6 +38,15 @@ class CreateTimelineRequest(BaseModel):
     parties: List[Party]
     network: Optional[str] = None
 
+    @field_validator("network")
+    @classmethod
+    def _network_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if v not in ALLOWED_NETWORKS:
+            raise ValueError(f"network must be one of {sorted(ALLOWED_NETWORKS)}")
+        return v
+
 
 class AppendEventRequest(BaseModel):
     event_type: str
@@ -45,28 +54,36 @@ class AppendEventRequest(BaseModel):
     notice: Optional[Dict[str, Any]] = None
     marker: Optional[Dict[str, Any]] = None
 
-    @validator("event_type")
+    @field_validator("event_type")
+    @classmethod
     def _event_type_valid(cls, v: str) -> str:
         if v not in ("notice", "marker"):
             raise ValueError("event_type must be notice or marker")
         return v
 
-    @validator("event_time")
+    @field_validator("event_time")
+    @classmethod
     def _event_time_valid(cls, v: str) -> str:
         _parse_rfc3339(v)
         return v
 
-    @validator("marker", always=True)
-    def _payload_union(cls, marker, values):
-        notice = values.get("notice")
-        et = values.get("event_type")
+    @model_validator(mode="after")
+    def _payload_union(self) -> "AppendEventRequest":
+        notice = self.notice
+        marker = self.marker
+        et = self.event_type
+
+        # Exactly one of notice / marker must be present
         if (notice is None and marker is None) or (notice is not None and marker is not None):
             raise ValueError("Exactly one of notice or marker must be present")
+
+        # Must match event_type
         if et == "notice" and notice is None:
             raise ValueError("notice payload required for event_type=notice")
         if et == "marker" and marker is None:
             raise ValueError("marker payload required for event_type=marker")
-        return marker
+
+        return self
 
 
 class FreezeTimelineRequest(BaseModel):
@@ -78,7 +95,8 @@ class AnchorTimelineRequest(BaseModel):
     anchor_network: str
     epoch_id: Optional[str] = None
 
-    @validator("anchor_network")
+    @field_validator("anchor_network")
+    @classmethod
     def _anchor_network_valid(cls, v: str) -> str:
         if v not in ALLOWED_ANCHOR_NETWORKS:
             raise ValueError("anchor_network must be bitcoin-mainnet or bitcoin-testnet")
@@ -128,6 +146,31 @@ def event_response(store: TimelineStore, timeline_id: str, event_id: str) -> Dic
     }
 
 
+# ----------------------------
+# Receipt hashing (must match verify_handler.py stable identity payload)
+# ----------------------------
+
+_RECEIPT_STABLE_IDENTITY_FIELDS: Tuple[str, ...] = (
+    "receipt_id",
+    "protocol_version",
+    "network",
+    "epoch_id",
+    "timeline_id",
+    "commitment",
+    "issued_at",
+)
+
+
+def _receipt_payload_for_hash(receipt: Dict[str, Any]) -> Dict[str, Any]:
+    # IMPORTANT: include ALL stable fields, even if absent, as None (null).
+    # This avoids missing-key vs null-key canonicalization divergence.
+    return {k: receipt.get(k, None) for k in _RECEIPT_STABLE_IDENTITY_FIELDS}
+
+
+def _compute_receipt_hash(receipt: Dict[str, Any]) -> str:
+    return canon_sha256_hex(_receipt_payload_for_hash(receipt))
+
+
 def create_receipt_response(
     *,
     timeline_id: str,
@@ -136,23 +179,36 @@ def create_receipt_response(
     epoch_id: Optional[str],
     btc_txid: str,
 ) -> Dict[str, Any]:
-    payload = {
+    """
+    Build a receipt that is self-verifiable:
+      - commitment == frozen_manifest_sha256
+      - receipt_hash_sha256 is computed over the stable identity payload
+        (see verify_handler.py for the same field set)
+    """
+    # Deterministic receipt_id based on stable inputs (not btc_txid, not proofs)
+    receipt_id_payload = {
         "timeline_id": timeline_id,
         "frozen_manifest_sha256": frozen_manifest_sha256,
         "anchor_network": anchor_network,
         "epoch_id": epoch_id,
     }
-    receipt_id = f"tl_rcpt_{canon_sha256_hex(payload)[:20]}"
+    receipt_id = f"tl_rcpt_{canon_sha256_hex(receipt_id_payload)[:20]}"
     issued_at = _utc_now_iso()
-    return {
+
+    receipt: Dict[str, Any] = {
         "receipt_id": receipt_id,
         "protocol_version": PROTOCOL_VERSION,
         "network": anchor_network,
         "epoch_id": epoch_id,
+        "timeline_id": timeline_id,
         "btc_txid": btc_txid,
         "commitment": frozen_manifest_sha256,
+        "issued_at": issued_at,
         "merkle_proof": [],
         "zk_proof_refs": None,
-        "issued_at": issued_at,
     }
 
+    # Embed integrity hash (top-level pragmatic field)
+    receipt["receipt_hash_sha256"] = _compute_receipt_hash(receipt)
+
+    return receipt
