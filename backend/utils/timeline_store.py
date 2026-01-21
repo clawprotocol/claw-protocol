@@ -120,6 +120,7 @@ class TimelineStore:
                 )
                 """
             )
+
             c.execute(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -136,6 +137,7 @@ class TimelineStore:
                 )
                 """
             )
+
             c.execute(
                 """
                 CREATE TABLE IF NOT EXISTS receipts (
@@ -148,10 +150,16 @@ class TimelineStore:
                     commitment TEXT NOT NULL,
                     merkle_proof_json TEXT NOT NULL,
                     zk_proof_refs_json TEXT,
-                    issued_at TEXT NOT NULL
+                    issued_at TEXT NOT NULL,
+                    receipt_hash_sha256 TEXT
                 )
                 """
             )
+
+            # Backwards-compatible migration: add receipt_hash_sha256 if missing (older DBs)
+            cols = [r[1] for r in c.execute("PRAGMA table_info(receipts)").fetchall()]
+            if "receipt_hash_sha256" not in cols:
+                c.execute("ALTER TABLE receipts ADD COLUMN receipt_hash_sha256 TEXT")
 
     def create_timeline(
         self,
@@ -164,7 +172,9 @@ class TimelineStore:
     ) -> TimelineRow:
         tl_id = timeline_id or f"tl_{uuid.uuid4().hex}"
         created_at = _utc_now_iso()
-        parties_json = json.dumps(parties, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        parties_json = json.dumps(
+            parties, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
         with self._conn() as c:
             c.execute(
                 """
@@ -178,7 +188,9 @@ class TimelineStore:
 
     def get_timeline(self, timeline_id: str) -> TimelineRow:
         with self._conn() as c:
-            row = c.execute("SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)).fetchone()
+            row = c.execute(
+                "SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)
+            ).fetchone()
         if not row:
             raise KeyError("timeline_not_found")
         return TimelineRow(**dict(row))
@@ -222,7 +234,9 @@ class TimelineStore:
         conn = self._conn()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            tl = conn.execute("SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)).fetchone()
+            tl = conn.execute(
+                "SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)
+            ).fetchone()
             if not tl:
                 raise KeyError("timeline_not_found")
             if int(tl["frozen"] or 0) == 1:
@@ -244,8 +258,16 @@ class TimelineStore:
             )
             event_id = f"evt_{sha[:32]}"
             created_at = _utc_now_iso()
-            notice_json = json.dumps(notice, ensure_ascii=False, separators=(",", ":"), sort_keys=True) if notice else None
-            marker_json = json.dumps(marker, ensure_ascii=False, separators=(",", ":"), sort_keys=True) if marker else None
+            notice_json = (
+                json.dumps(notice, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                if notice
+                else None
+            )
+            marker_json = (
+                json.dumps(marker, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                if marker
+                else None
+            )
 
             conn.execute(
                 """
@@ -278,7 +300,9 @@ class TimelineStore:
         conn = self._conn()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            tl = conn.execute("SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)).fetchone()
+            tl = conn.execute(
+                "SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)
+            ).fetchone()
             if not tl:
                 raise KeyError("timeline_not_found")
 
@@ -328,14 +352,15 @@ class TimelineStore:
         merkle_proof: List[Dict[str, Any]],
         zk_proof_refs: Optional[List[str]],
         issued_at: str,
+        receipt_hash_sha256: Optional[str] = None,
     ) -> None:
         with self._conn() as c:
             c.execute(
                 """
                 INSERT INTO receipts
                 (receipt_id, timeline_id, protocol_version, network, epoch_id, btc_txid, commitment,
-                 merkle_proof_json, zk_proof_refs_json, issued_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 merkle_proof_json, zk_proof_refs_json, issued_at, receipt_hash_sha256)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     receipt_id,
@@ -345,21 +370,35 @@ class TimelineStore:
                     epoch_id,
                     btc_txid,
                     commitment,
-                    json.dumps(merkle_proof, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
-                    json.dumps(zk_proof_refs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                    json.dumps(
+                        merkle_proof,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    json.dumps(
+                        zk_proof_refs,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
                     if zk_proof_refs
                     else None,
                     issued_at,
+                    receipt_hash_sha256,
                 ),
             )
 
     def get_receipt(self, receipt_id: str) -> Dict[str, Any]:
         with self._conn() as c:
-            row = c.execute("SELECT * FROM receipts WHERE receipt_id = ?", (receipt_id,)).fetchone()
+            row = c.execute(
+                "SELECT * FROM receipts WHERE receipt_id = ?", (receipt_id,)
+            ).fetchone()
         if not row:
             raise KeyError("receipt_not_found")
         data = dict(row)
         data["merkle_proof"] = json.loads(data["merkle_proof_json"])
-        data["zk_proof_refs"] = json.loads(data["zk_proof_refs_json"]) if data["zk_proof_refs_json"] else None
+        data["zk_proof_refs"] = (
+            json.loads(data["zk_proof_refs_json"]) if data["zk_proof_refs_json"] else None
+        )
         return data
-
