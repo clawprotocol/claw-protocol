@@ -335,6 +335,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -353,6 +354,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp" },
+    { name = "certifi", specifier = ">=2026.1.4" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic", specifier = "==2.7.1" },
