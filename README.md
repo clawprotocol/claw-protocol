@@ -1,6 +1,6 @@
 # CLAW Protocol
 
-**CLAW** is an administrative-less **legal proof and verification protocol** for creating, anchoring, and verifying **tamper-evident timelines and receipts**.
+**CLAW** is a **public cryptographic proof and verification protocol** for creating, anchoring, and verifying **tamper-evident timelines and receipts**.
 
 CLAW produces cryptographic evidence of:
 - existence
@@ -32,20 +32,21 @@ If you read only one file, read that one.
 CLAW v1.x semantics are **explicitly frozen**.
 
 Interpretation of implemented behavior is governed by:
-- [`docs/COURT_SUMMARY.md`](docs/COURT_SUMMARY.md)
-- [`docs/VERIFICATION_MODEL.md`](docs/VERIFICATION_MODEL.md)
-- [`docs/ANCHORING_MODEL.md`](docs/ANCHORING_MODEL.md)
-- [`docs/SEMANTIC_LOCK.md`](docs/SEMANTIC_LOCK.md)
 
-If any description, example, or future document conflicts with these files,  
+- **[`docs/COURT_SUMMARY.md`](docs/COURT_SUMMARY.md)**
+- **[`docs/VERIFICATION_MODEL.md`](docs/VERIFICATION_MODEL.md)**
+- **[`docs/ANCHORING_MODEL.md`](docs/ANCHORING_MODEL.md)**
+- **[`docs/SEMANTIC_LOCK.md`](docs/SEMANTIC_LOCK.md)**
+
+If any description, example, UI text, or future document conflicts with these files,  
 **the above documents control**.
 
 ---
 
 ## 🚀 Protocol Launch Index
 
-New to CLAW?  
-Start here → **[`docs/LAUNCH_INDEX.md`](docs/LAUNCH_INDEX.md)**
+Primary canonical entry point:  
+→ **[`docs/LAUNCH_INDEX.md`](docs/LAUNCH_INDEX.md)**
 
 Court-safe, non-technical summary (CLAW v1.x):  
 → **[`docs/COURT_SUMMARY.md`](docs/COURT_SUMMARY.md)**
@@ -78,15 +79,15 @@ Anchoring semantics (Bitcoin time-bounding & reorg posture):
 - A replacement for due process
 - A forced marketplace
 
-All authority in CLAW flows from:
-1. cryptographic proofs, and  
+All authority in CLAW flows only from:
+1. cryptographic proofs, and
 2. voluntary human agreement (contracts, filings, opt-in clauses).
 
 ---
 
 ## Protocol Status & Versioning
 
-CLAW uses **two complementary versioning concepts**:
+CLAW uses **two complementary versioning concepts**.
 
 ### 1. Semantic Versions (Human-Facing)
 Used by developers and integrators.
@@ -97,9 +98,9 @@ Used by developers and integrators.
 ### 2. Cryptographic Milestones (Verifier-Facing)
 Used by auditors, courts, and reviewers to reproduce behavior exactly.
 
-- Example milestone:  
-  **`claw-milestone-local-verify-2026-01-21`**
-  - End-to-end timeline creation + verification
+Example milestone:
+- **`claw-milestone-local-verify-2026-01-21`**
+  - End-to-end timeline creation and verification
   - Canonical receipt identity stabilized
   - `verify` and `verify_tree` invariants hardened
   - Legacy receipts supported
@@ -151,15 +152,12 @@ No layer confers adjudicative authority.
 
 ## Repository Structure (Orientation Only)
 
-backend/ Backend services and verification logic
-clawctl/ CLI tooling
-docs/ Canonical protocol documentation (authoritative)
-examples/ Example epochs, anchors, and demos
-scripts/ Local tooling and helpers
-tests/ Verification and invariant tests
-
-yaml
-Copy code
+- `backend/` — backend services and verification logic
+- `clawctl/` — CLI tooling
+- `docs/` — canonical protocol documentation (**authoritative**)
+- `examples/` — example epochs, anchors, and demos
+- `scripts/` — local tooling and helpers
+- `tests/` — verification and invariant tests
 
 Details belong in `/docs`, not here.
 
@@ -189,8 +187,8 @@ Use is permitted subject to license terms.
 
 If you remember only one thing:
 
-> **CLAW produces receipts, not rulings.  
-> Proofs, not power.  
-> Verification, not authority.**
+> **CLAW produces receipts, not rulings.**  
+> **Proof, not power.**  
+> **Verification, not authority.**
 
 Everything else follows from that.

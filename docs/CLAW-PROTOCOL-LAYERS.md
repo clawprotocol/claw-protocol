@@ -1,374 +1,259 @@
-# CLAW Protocol Layers (Outcome-First, Incentive-Sound Architecture)
+# CLAW Protocol Layers (Canonical)
 
-**One-sentence definition:**  
-CLAW is a public protocol stack for **automated legal services** that avoids administrative attrition and peer-captured legal dynamics by combining Bitcoin-anchored proofs, selective privacy, automated determinations, and optional licensed enforcement layers.
+## Status
+Normative for CLAW v1.x  
+Non-normative and aspirational for CLAW v2+
 
----
+This document defines the layered architecture of the CLAW protocol and explicitly distinguishes between:
 
-## 0) Architectural North Star (Read First)
+- protocol behavior that exists, is implemented, and is relied upon in CLAW v1.x
+- future extensions that are not yet implemented and must not be inferred as present
 
-CLAW is not designed to “win cases.”  
-CLAW is designed to **change the payoff matrix** so that:
-
-- ambiguity is expensive,
-- delay is ineffective,
-- peer-mediated suppression is minimized,
-- and enforceable outcomes occur *before* litigation becomes a zero-sum war.
-
-This requires **three simultaneous properties**:
-
-1. **Public verifiability** (for credibility and enforceability)  
-2. **Selective privacy** (to protect lawyers and parties from retaliation, signaling, or capture)  
-3. **Automation with opt-in authority** (to reduce admin and human bottlenecks)
-
-Every layer below exists to support one or more of these properties.
+If any code, explanation, diagram, or third-party description conflicts with this document, this document controls.
 
 ---
 
-## 1) Layer 0 — Cryptographic & Network Assumptions
+## Purpose
 
-**Role:** Immutable math and public time.
+The CLAW Protocol Layers document exists to:
 
-Includes:
-- SHA-256 hashing
-- Merkle trees
-- Bitcoin consensus
-- ZK proof systems (general category; implementation-agnostic)
-
-This layer is **non-governed** and **non-upgradable** by CLAW.
+- describe CLAW as a layered system with constrained responsibilities
+- prevent accidental or intentional over-claiming of authority
+- make version boundaries explicit for courts, auditors, and integrators
+- allow future expansion without retroactively changing v1.x meaning
 
 ---
 
-## 2) Layer 1 — Bitcoin Anchoring (Public Finality Layer)
+## Core Architectural Principle
 
-**Role:**  
-Provide a globally neutral, adversary-resistant timestamp and commitment anchor.
+Each CLAW layer:
+- has a narrowly defined responsibility
+- confers no authority outside its scope
+- may be composed with, but not substituted for, external systems
 
-**What is anchored:**
-- Hashes or Merkle roots of:
-  - agreements
-  - evidence packages
-  - determination rules
-  - determination outputs
-  - timeline manifests
-  - ZK commitments (not raw private data)
-
-**What this layer proves (precisely):**
-> “A cryptographic commitment to specific data existed no later than block T.”
-
-**What it does NOT prove:**
-- truth of the data
-- authorship
-- legality
-- disclosure of contents
-
-Bitcoin is the **court-grade clock**, nothing more, nothing less.
+No layer independently adjudicates, governs, or compels behavior.
 
 ---
 
-## 3) Layer 2 — Canonicalization & Hashing (Truth Definition)
+## Layer Overview (At a Glance)
 
-**Role:**  
-Define *exactly* what bytes are being committed so disputes cannot hide in formatting or interpretation.
+### CLAW v1.x (Normative)
+1. Timeline Layer
+2. Manifest and Commitment Layer
+3. Anchoring Layer
+4. Receipt Layer
+5. Verification Layer
 
-Includes:
-- canonical JSON rules
-- UTF-8 encoding
-- deterministic sorting
-- strict hashing procedures
+### CLAW v2+ (Non-Normative / Future)
+6. Privacy and Zero-Knowledge Layer
+7. Automation and Determination Layer
+8. Coordination and Escrow Layer
+9. Distribution and Cultural Layer
 
-Without this layer, “proof” collapses into vibes.
-
----
-
-## 4) Layer 3 — Epochs & Merkle Batching (Scale Without Trust)
-
-**Role:**  
-Batch thousands of legal artifacts into a single anchor event.
-
-- Individual items → leaf hashes  
-- Epoch → Merkle root  
-- Root → Bitcoin anchor  
-
-This gives:
-- extremely low per-item cost
-- independent verifiability
-- no editorial discretion
-
-Epochs are **mechanical**, not political.
+Only layers 1–5 are authoritative in v1.x.
 
 ---
 
-## 5) Layer 4 — Receipts (Portable Legal Proof Objects)
+## CLAW v1.x — Normative Layers
 
-**Role:**  
-Turn abstract protocol state into something a human or court can verify.
+The following layers are implemented, tested, and relied upon in CLAW v1.x.
 
-A receipt contains:
-- protocol version
-- network
-- epoch ID
-- Bitcoin txid
-- expected commitment
-- Merkle path
-- (optionally) ZK proof references
+### 1. Timeline Layer (v1.x)
 
-Receipts are:
-- portable
-- immutable
-- verifier-agnostic
+**Responsibility**
+- Deterministic sequencing of events
+- Event hashing and indexing
+- Freeze semantics
 
-They are **evidence**, not arguments.
+**Guarantees**
+- existence of events in a specific digital form
+- deterministic ordering
+- immutability after freeze
 
----
+**Non-Guarantees**
+- truth or accuracy of content
+- identity authenticity
+- legal meaning of events
 
-## 6) Layer 5 — Deterministic Verifier (Hostile-Verifier Safe)
-
-**Role:**  
-Ensure no one — including CLAW — can lie about what was anchored.
-
-Verifier properties:
-- recomputes everything
-- fetches public chain data
-- fails loudly
-- CI-enforced
-
-This layer is the **anti-capture backstop**.
+This layer establishes sequence, not significance.
 
 ---
 
-## 7) Layer 6 — Storage & Availability (IPFS / Arweave)
+### 2. Manifest and Commitment Layer (v1.x)
 
-**Role:**  
-Make underlying documents retrievable when needed.
+**Responsibility**
+- Aggregate event hashes deterministically
+- Produce a frozen commitment representing timeline state
 
-- **IPFS:** fast, cheap, redundant distribution
-- **Arweave:** durable, high-assurance storage for critical artifacts
+**Guarantees**
+- commitment uniquely represents the frozen event set
+- post-freeze modification is detectable
 
-Important separation:
-- **Bitcoin proves existence**
-- **IPFS/Arweave provide access**
-- Either can fail without invalidating the proof
+**Non-Guarantees**
+- completeness of the timeline
+- exclusivity of events
+- semantic interpretation of content
 
----
-
-## 8) Layer 7 — ZK / Selective Privacy Layer (Critical)
-
-> **This layer is essential to avoid lawyer capture, retaliation, and signaling effects.**
-
-### 8.1 Purpose
-Enable parties and licensed professionals to:
-- participate in determinations
-- issue opinions or rulings
-- review evidence
-
-**without publicly exposing:**
-- sensitive facts
-- legal strategy
-- lawyer identities (where appropriate)
-- preliminary analysis
-
-### 8.2 What is public vs private
-
-**Public (anchored):**
-- cryptographic commitments
-- proof that a valid determination occurred
-- proof that agreed rules were followed
-- timestamps and sequence
-
-**Private (protected):**
-- underlying evidence
-- internal reasoning
-- sensitive submissions
-- reviewer identity (if ZK-shielded)
-
-### 8.3 How ZK is used (conceptually)
-ZK proofs may be used to prove statements such as:
-- “This determination was produced by a licensed lawyer in jurisdiction X”
-- “The output satisfies rule set Y”
-- “The inputs matched the agreed schema”
-- “No prohibited data was considered”
-
-…without revealing the data itself.
-
-### 8.4 Why this matters (game theory)
-Without privacy:
-- lawyers are chilled by future career risk
-- controversial determinations are avoided
-- peer pressure re-enters the system
-
-With ZK:
-- lawyers can participate without social signaling
-- determinations are judged on validity, not politics
-- enforcement relies on proofs, not reputations
-
-This **breaks the lawyer prisoner’s dilemma** structurally.
+This layer binds structure, not narrative.
 
 ---
 
-## 9) Layer 8 — Solana (High-Throughput Registry & UX Rail)
+### 3. Anchoring Layer (v1.x)
 
-**Role:**  
-Cheap, fast coordination layer for:
-- receipt pointer registries
-- user identities / handles
-- activity feeds
-- community passes
-- social/legal UX
+**Responsibility**
+- Bind commitments to external public systems
+- Provide public observability and time bounding
 
-Solana stores **references**, not truth.
+**Guarantees**
+- commitment appeared no later than the anchor event
+- anchor artifacts are independently verifiable
 
----
+**Non-Guarantees**
+- blockchain finality
+- irreversibility
+- economic security
+- legal effect
 
-## 10) Layer 9 — Base (EVM Coordination & Payments)
+This layer witnesses existence, not permanence.
 
-**Role:**  
-Programmable execution layer for:
-- payments (USDC/USDT)
-- tier gating
-- escrow triggers
-- Chainlink oracle consumption
-- DAO primitives (if used)
-
-Base is where **economic logic** lives, not proof logic.
+(See `ANCHORING_MODEL.md` for canonical semantics.)
 
 ---
 
-## 11) Layer 10 — Automated Determination (ABAD)
+### 4. Receipt Layer (v1.x)
 
-**Role:**  
-Enable **agreement-based automated legal determinations**.
+**Responsibility**
+- Produce self-verifying cryptographic receipts
+- Bind identity, commitment, protocol version, and time
 
-- parties opt in
-- scope is defined
-- rules are fixed
-- inputs are structured
-- outputs are anchored
+**Guarantees**
+- payload integrity via canonical hashing
+- stable receipt identity
+- commitment binding
 
-Binding effect arises **only from prior agreement**, never by default.
+**Non-Guarantees**
+- enforceability
+- consent
+- adjudication
+- authority
 
-ZK may shield:
-- inputs
-- reasoning
-- reviewer identity
-
-while still proving:
-- compliance
-- validity
-- sequence
+Receipts prove integrity, not obligation.
 
 ---
 
-## 12) Layer 11 — Escrow Integration (Non-Custodial Enforcement)
+### 5. Verification Layer (v1.x)
 
-**Role:**  
-Convert determinations into real-world consequences.
+**Responsibility**
+- Deterministic verification of receipts and trees
+- Reproducible integrity checks
 
-CLAW:
-- never holds funds
-- never releases assets
+**Guarantees**
+- verification results are deterministic
+- failures are explainable
+- legacy behavior degrades safely
 
-Escrow agents (statutory or contractual):
-- may rely on CLAW receipts + proofs
-- retain legal discretion unless contractually constrained
+**Non-Guarantees**
+- admissibility
+- legal sufficiency
+- correctness of content
 
-This is how **records become leverage**.
+Verification confirms structure, not truth.
 
----
-
-## 13) Layer 12 — Lawyer DAO (Licensed Human Override)
-
-**Role:**  
-Route workflows through licensed professionals **only when required**.
-
-Key properties:
-- jurisdiction-scoped
-- opt-in
-- auditable
-- ZK-compatible (identity may be shielded)
-
-Lawyers are used:
-- surgically
-- at high-value decision points
-- without becoming permanent gatekeepers
+(See `VERIFICATION_MODEL.md` for canonical guarantees.)
 
 ---
 
-## 14) Layer 13 — Node Operator DAO (Availability & Neutrality)
+## CLAW v2+ — Non-Normative Future Layers
 
-**Role:**  
-Decentralize:
-- storage pinning
-- indexers
-- verifiers
-- receipt resolution APIs
+The following layers are aspirational and explicitly **not present in v1.x**.
 
-Operators are paid for:
-- uptime
-- correctness
-- responsiveness
-
-They **cannot** alter truth.
+They must not be relied upon or inferred as implemented.
 
 ---
 
-## 15) Layer 14 — Treasury, Clearing, and Oracles
+### 6. Privacy and Zero-Knowledge Layer (v2+)
 
-**Role:**  
-Keep the protocol alive without rent-seeking.
+**Intended Scope**
+- selective disclosure
+- private commitments
+- ZK proofs over timelines
 
-Includes:
-- BTC reserves (credibility + longevity)
-- USDC/USDT (operations)
-- capped risk sleeve (e.g. BBot)
-- THORChain for non-custodial rebalancing
-- Chainlink for price references
-
-Treasury governs **sustainability**, not outcomes.
+**Status**
+Not implemented.  
+No privacy guarantees exist in v1.x.
 
 ---
 
-## 16) Layer 15 — Cultural Distribution & Meme Coordination (Doginal Dogs / Dogecoin)
+### 7. Automation and Determination Layer (v2+)
 
-**Role:**  
-Provide non-authoritative cultural distribution, community signaling, and incentive alignment for CLAW adoption without contaminating proof, determination, or enforcement layers.
+**Intended Scope**
+- automated outcomes by explicit agreement
+- opt-in determination clauses
+- bounded execution logic
 
-**Doginal Dogs function as:**
-- community passes
-- discount and priority access keys
-- referral and distribution primitives
-- cultural UX layer for non-legal-native users
+**Constraints**
+- no coercion
+- no unilateral authority
+- no default activation
 
-**Dogecoin may be supported as:**
-- optional payment rail
-- micro-payment and promotional currency
-- meme-native access mechanism
-
-**Explicit limitations:**
-- This layer has no authority over truth, determinations, escrow, or enforcement.
-- Ownership or participation confers no legal power.
-- All legal authority remains opt-in, contractual, and verifiable via CLAW receipts.
-
-**Design rationale:**
-Doginal-based distribution allows CLAW to escape the “death by admin” adoption trap by introducing legal automation tools through culturally legible, low-friction channels—without recreating governance capture or signaling risk.
+**Status**
+Conceptual only.  
+No automated determinations exist in v1.x.
 
 ---
 
-## 17) Summary (Why This Works)
+### 8. Coordination and Escrow Layer (v2+)
 
-CLAW succeeds because:
+**Intended Scope**
+- voluntary escrow coordination
+- settlement assistance
+- external system integration
 
-- **Bitcoin** prevents historical lies  
-- **ZK** prevents social and professional retaliation  
-- **Automation** eliminates admin attrition  
-- **Escrow** creates consequences  
-- **Optional lawyers** add legitimacy without capture  
-
-The result is a system where:
-> clarity beats delay,  
-> proofs beat narratives,  
-> and outcomes do not depend on who controls the room.
+**Status**
+Not implemented.  
+No funds custody or control exists in v1.x.
 
 ---
 
-## End of Document
+### 9. Distribution and Cultural Layer (v2+)
+
+**Intended Scope**
+- community access
+- cultural signaling
+- pricing and participation incentives
+
+**Status**
+Non-authoritative by design.  
+Never required for verification or anchoring.
+
+Courts and auditors need not reference this layer.
+
+---
+
+## Version Boundary Rule
+
+Anything not explicitly described as v1.x:
+- does not exist
+- must not be assumed
+- must not be relied upon
+- must not be implied
+
+Future versions must:
+- introduce new protocol identifiers
+- preserve v1.x semantics
+- avoid retroactive reinterpretation
+
+---
+
+## Canonical Interpretation Rule
+
+If ambiguity arises:
+- prefer the narrower interpretation
+- defer to verification and anchoring models
+- reject implied authority
+
+CLAW is intentionally minimal.
+
+---
+
+## End of Protocol Layers

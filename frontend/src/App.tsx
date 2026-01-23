@@ -24,7 +24,7 @@ const App: React.FC = () => {
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ProcessResponse | null>(null);
-  const [role, setRole] = useState<"author" | "verifier" | "judge">("author");
+  const [role, setRole] = useState<"author" | "verifier" | "reviewer">("author");
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -178,7 +178,7 @@ const App: React.FC = () => {
                 Signing Role (for this run)
               </label>
               <div className="flex gap-2 text-xs">
-                {(["author", "verifier", "judge"] as const).map((r) => (
+                {(["author", "verifier", "reviewer"] as const).map((r) => (
                   <button
                     key={r}
                     type="button"
@@ -193,7 +193,7 @@ const App: React.FC = () => {
                       ? "Author"
                       : r === "verifier"
                       ? "Verifier"
-                      : "Judge"}
+                      : "reviewer"}
                   </button>
                 ))}
               </div>

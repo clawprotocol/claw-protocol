@@ -10,6 +10,8 @@ Silence does not imply capability, authority, or intent.
 
 Interpretation of CLAW v1.x behavior is further constrained by the binding Semantic Lock defined in `SEMANTIC_LOCK.md`.
 
+This document is normative for CLAW v1.x as of release v1.2.0.
+
 ---
 
 

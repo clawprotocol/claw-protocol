@@ -3,6 +3,7 @@
 ## Status
 **Normative for CLAW v1.x**  
 This document is binding on interpretation of CLAW v1.x behavior and claims.
+This document is normative for CLAW v1.x as of release v1.2.0.
 
 ---
 
