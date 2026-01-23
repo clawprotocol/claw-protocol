@@ -1,0 +1,3 @@
+**CLAW v1.x Citation Snippet (Verification Only)**
+
+CLAW v1.x is a cryptographic proof and verification system that allows any third party to independently verify that specific digital content existed in a particular form no later than a known time, and that the content has not been altered since. Verification is deterministic, reproducible, and does not rely on trust in CLAW, its authors, or its infrastructure. CLAW v1.x does not adjudicate disputes, determine truth, issue judgments, or confer legal authority. Any legal significance, if any, arises solely from external law or voluntary agreement. A complete reproduction example, including frozen inputs and a one-command verifier, is provided in the CLAW v1.x Verification Reproduction Pack.

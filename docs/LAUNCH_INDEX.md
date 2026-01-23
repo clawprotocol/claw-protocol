@@ -4,6 +4,10 @@ CLAW is an administrative-less legal proof protocol designed for humans, bots, D
 
 This repository contains the **first working, headless, agent-native implementation** of CLAW.
 
+Meaning Lock (v1.x)
+The semantic interpretation of CLAW v1.x is frozen and legally bounded.
+→ SEMANTIC_LOCK.md
+
 ---
 
 ## 🚀 Start Here (2 minutes)

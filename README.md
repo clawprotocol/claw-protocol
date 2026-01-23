@@ -12,6 +12,8 @@ CLAW produces cryptographic evidence of:
 
 It does **not** adjudicate disputes, render judgments, or exercise authority.
 
+Canonical citation language: docs/CITATION_SNIPPET_v1.x.md
+
 ---
 
 ## Start Here (Canonical Entry Point)

@@ -12,6 +12,8 @@ Interpretation of CLAW v1.x behavior is further constrained by the binding Seman
 
 This document is normative for CLAW v1.x as of release v1.2.0.
 
+For citation-ready language, see CITATION_SNIPPET_v1.x.md
+
 ---
 
 

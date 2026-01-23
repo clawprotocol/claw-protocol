@@ -1,0 +1,8 @@
+{
+  "network": "local",
+  "anchor_type": "none",
+  "txid": null,
+  "block_height": null,
+  "block_time": null,
+  "note": "This reproduction pack verifies deterministically from timeline + receipt alone. If a Bitcoin anchor exists, replace these fields with real values."
+}
