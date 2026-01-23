@@ -10,6 +10,17 @@ If any ambiguity exists between code, UI, commentary, or third-party description
 
 ---
 
+## Verifier Path (Recommended Reading Order)
+
+If you are verifying a CLAW v1.x receipt, read these in order:
+
+1. `VERIFIER_ENTRY.md`
+2. `VERIFY.md`
+3. `../repro/README.md`
+4. `VERIFIER_DIAGRAM.md`
+
+---
+
 ## Protocol Status & Stability
 
 CLAW operates with two complementary forms of versioning:
@@ -21,7 +32,7 @@ Semantic versions (e.g. `v1.2.0`) communicate **backward compatibility guarantee
 Milestone tags lock specific verification and hashing behavior for **reproducibility and audit**.
 
 #### Current Stable State
-- **Release:** `v1.2.0` — Deterministic verification and canonical receipt hashing
+- **Release:** `v1.2.1` — Meaning Lock + Reproducible Verification Pack
 - **Milestone:** `claw-milestone-local-verify-2026-01-21`
   - Local end-to-end timeline creation, anchoring, and verification
   - Canonical receipt identity stabilized
