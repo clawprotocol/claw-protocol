@@ -10,6 +10,17 @@ not truth, legal merit, adjudication, or enforcement.
 
 ---
 
+## Start Here
+
+- Verification procedure: **[`VERIFY.md`](VERIFY.md)**
+- Minimal reproduction pack: **[`../repro/`](../repro/)**
+- Citation snippet (1 paragraph): 
+**[`CITATION_SNIPPET_v1.x.md`](CITATION_SNIPPET_v1.x.md)**
+
+A minimal visual overview is provided in `VERIFIER_DIAGRAM.md`.
+
+---
+
 ## What you can verify
 
 A CLAW v1.x receipt allows any third party to verify that specific digital content:

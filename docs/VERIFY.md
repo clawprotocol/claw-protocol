@@ -33,6 +33,8 @@ Verification does **not**:
 
 Any legal significance, if any, arises solely from **external law or voluntary agreement**.
 
+For a visual, non-technical overview of this process, see `VERIFIER_DIAGRAM.md`.
+
 ---
 
 ## Recommended Verification Path (Quickstart)

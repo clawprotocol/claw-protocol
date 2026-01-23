@@ -2,7 +2,7 @@
 _Last updated: 2025-12-20_
 
 This document defines the canonical onchain event interfaces for:
-- Base/EVM Court of Record (Receipt anchoring)
+- Base/EVM Receipt Registry (receipt anchoring events)
 - Base Lockbox (Base → Solana mint authority)
 - Solana Market Rail (Solana → Base redeem authority)
 
@@ -41,7 +41,7 @@ IDs MUST be stored by the mint/burn programs to prevent replays.
 
 ---
 
-## 1) Base/EVM: Receipt Registry (Court of Record)
+## 1) Base/EVM: Receipt Registry (anchoring events)
 
 ### 1.1 Purpose
 Anchors proof receipts so any third party can verify:

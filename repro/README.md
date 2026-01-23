@@ -3,6 +3,9 @@
 This directory contains a complete, minimal, frozen example for independently
 verifying a CLAW v1.x receipt.
 
+This reproduction pack implements the verification procedure described in 
+**[`docs/VERIFY.md`](../docs/VERIFY.md)**.
+
 No trust in CLAW, its authors, or its infrastructure is required.
 
 Citation-ready summary: see docs/CITATION_SNIPPET_v1.x.md

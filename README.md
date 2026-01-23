@@ -27,6 +27,8 @@ It links to the authoritative specifications, examples, and architectural docume
 
 If you read only one file, read that one.
 
+Verifying a receipt? Start here → **[`docs/VERIFIER_ENTRY.md`](docs/VERIFIER_ENTRY.md)**
+
 ---
 
 ## Protocol Semantics (v1.x)
@@ -61,6 +63,16 @@ Verification guarantees (deterministic, reproducible):
 
 Anchoring semantics (Bitcoin time-bounding & reorg posture):  
 → **[`docs/ANCHORING_MODEL.md`](docs/ANCHORING_MODEL.md)**
+
+---
+
+## Verification
+
+Verifier entry point (court/auditor safe):
+→ **[`docs/VERIFIER_ENTRY.md`](docs/VERIFIER_ENTRY.md)**
+
+Minimal reproduction pack (frozen inputs + one-command verifier):
+→ **[`repro/`](repro/)**
 
 ---
 
