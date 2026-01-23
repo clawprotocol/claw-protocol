@@ -71,7 +71,7 @@ metadata.
 
 ## Summary
 
-- Genesis defines **truth rules**
-- Epochs record **truth events**
+- Genesis defines verification rules
+- Epochs record verification events
 - Bitcoin anchoring provides **public finality**
 
