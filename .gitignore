@@ -137,3 +137,5 @@ timestamps/
 
 # Python packaging noise
 clawctl.egg-info/
+# CLAW runtime artifacts
+artifacts/
