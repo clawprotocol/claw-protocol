@@ -120,6 +120,7 @@ const App: React.FC = () => {
   const [esignStep, setEsignStep] = useState<
     "upload" | "signers" | "place" | "invite" | "sign" | "done"
   >("upload");
+  const [esignWizardStep, setEsignWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [esignPreviewUrl, setEsignPreviewUrl] = useState<string | null>(null);
   const [esignMode, setEsignMode] = useState<"prepare" | "sign">("prepare");
   const [esignActiveRecipientEmail, setEsignActiveRecipientEmail] = useState("");
@@ -212,10 +213,12 @@ const App: React.FC = () => {
     { ts: number; message: string }[]
   >([]);
   const [esignSentLocked, setEsignSentLocked] = useState(false);
-  const [allowNoRecipientFieldsRequired, setAllowNoRecipientFieldsRequired] = useState(false);
   const [showIdentityModal, setShowIdentityModal] = useState(false);
   const [autoPlaceInitialsEveryPage, setAutoPlaceInitialsEveryPage] = useState(false);
   const [showAuditTrail, setShowAuditTrail] = useState(false);
+  const [textToolKind, setTextToolKind] = useState<"printedName" | "textField">(
+    "printedName"
+  );
   const [esignSigners, setEsignSigners] = useState<
     { id: string; name: string; email: string; role: string; status: "Not Sent" | "Sent" | "Viewed" | "Signed"; signer_id?: string; typed_name?: string }[]
   >([{ id: `signer_${Date.now()}`, name: "", email: "", role: "host", status: "Not Sent" }]);
@@ -1378,6 +1381,7 @@ const App: React.FC = () => {
       );
       if (nearest.d <= tolPx) snappedY = nearest.b;
     }
+    const isPrintedName = esignFieldTool === "text" && textToolKind === "printedName";
     const value =
       esignFieldTool === "date"
         ? (activeSigner.role === "host" ? new Date().toISOString().slice(0, 10) : "")
@@ -1385,8 +1389,15 @@ const App: React.FC = () => {
           ? (activeSigner.role === "host" ? adoptedSignaturePreview : "")
           : esignFieldTool === "initials"
             ? (activeSigner.role === "host" ? adoptedInitialsPreview : "")
-            : (activeSigner.role === "host" ? (activeSigner.name?.trim() || "") : (activeSigner.name?.trim() || ""));
-    const placeholder = esignFieldTool === "text" ? "Printed Name" : esignFieldTool === "date" ? "MM/DD/YYYY" : "";
+            : isPrintedName
+              ? (activeSigner.role === "host" ? (activeSigner.name?.trim() || "") : "")
+              : "";
+    const placeholder =
+      esignFieldTool === "text"
+        ? (isPrintedName ? "Printed Name" : "Text Field")
+        : esignFieldTool === "date"
+          ? "MM/DD/YYYY"
+          : "";
     const required = esignFieldTool !== "text";
     const nextXPct = Math.max(0, Math.min(1 - base.wPct, xPct));
     const nextYPct = Math.max(0, Math.min(1 - base.hPct, snappedY));
@@ -1707,6 +1718,7 @@ const App: React.FC = () => {
     addEsignActivity(`Sent invite links to ${Object.keys(links).length} recipient(s)`);
     setShowSendModal(false);
     setEsignSideTab("recipients");
+    setEsignWizardStep(4);
     setEsignSentLocked(true);
   };
 
@@ -1829,6 +1841,11 @@ const App: React.FC = () => {
     setShowSignRequiredPanel(isDesktop);
   }, [phase, esignMode, esignSigningAsEmail]);
 
+  useEffect(() => {
+    if (esignWizardStep === 1) setEsignSideTab("recipients");
+    if (esignWizardStep === 2) setEsignSideTab("fields");
+  }, [esignWizardStep]);
+
   const [esignExporting, setEsignExporting] = useState(false);
   const handleExportFilledPdf = async () => {
     if (!esignDocFile || esignDocFile.type !== "application/pdf" || esignExporting) return;
@@ -1902,6 +1919,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (phase !== "esign" || esignMode !== "prepare") return;
     const onKey = (e: KeyboardEvent) => {
+        const target = e.target as HTMLElement | null;
+        if (target?.closest("input, textarea, [contenteditable='true']")) return;
         if (e.key === "Escape") {
           setEsignFieldTool(null);
           setEsignPlacementHint(null);
@@ -2452,13 +2471,9 @@ const App: React.FC = () => {
   );
   const canSendNow =
     esignSigners.filter((s) => Boolean((s.email || "").trim())).length > 0 &&
-    (allowNoRecipientFieldsRequired ||
-      esignSigners
-        .filter((s) => Boolean((s.email || "").trim()))
-        .every((s) => esignFields.some((f) => f.recipientEmail === s.email && Boolean(f.required))));
-  const senderCanSignNow = Boolean(
-    esignFields.some((f) => f.recipientEmail === esignSigningAsEmail && Boolean(f.required))
-  );
+    esignSigners
+      .filter((s) => Boolean((s.email || "").trim()))
+      .every((s) => esignFields.some((f) => f.recipientEmail === s.email && Boolean(f.required)));
   const signerChecklist: string[] = [];
   if (!esignDocFile) signerChecklist.push("Upload a document");
   if (!esignPageCount) signerChecklist.push("Load PDF pages");
@@ -2474,6 +2489,18 @@ const App: React.FC = () => {
   if (missingRequiredBySigner.length > 0) signerChecklist.push("Add required signature/initials fields for each signer");
   const canProceedReview = signerChecklist.length === 0;
   const canReviewAndSend = canProceedReview && canSendNow;
+  const senderIdentityReady =
+    Boolean((esignSigners[0]?.name || "").trim()) &&
+    isValidEmail(esignSigners[0]?.email || "");
+  const step1Ready = senderIdentityReady && invalidEmails.length === 0 && esignSigners.length > 0;
+  const step2Ready = step1Ready && missingRequiredBySigner.length === 0;
+  const getFieldDisplayLabel = (f: typeof esignFields[number]) => {
+    if (f.type === "signature") return "Signature";
+    if (f.type === "initials") return "Initials";
+    if (f.type === "date") return "Date";
+    if (f.type === "text") return f.placeholder === "Text Field" ? "Text Field" : "Printed Name";
+    return "Field";
+  };
   const signerColorClass = (email: string) => {
     const idx = Math.max(0, esignSigners.findIndex((s) => s.email === email));
     const palette = [
@@ -2862,11 +2889,13 @@ const App: React.FC = () => {
           {esignDocFile && (
             <div className="flex flex-wrap items-center gap-4 py-2 border-b border-slate-700 text-sm">
               <div className="flex items-center gap-2 text-xs">
-                <span className={`${esignSigners.length > 0 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>1. Add Signers</span>
+                <span className={`${esignWizardStep === 1 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>1. Add Signers</span>
                 <span className="text-slate-600">→</span>
-                <span className={`${esignFields.length > 0 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>2. Place Fields</span>
+                <span className={`${esignWizardStep === 2 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>2. Place Fields</span>
                 <span className="text-slate-600">→</span>
-                <span className="text-slate-500">{esignSigners.length <= 1 ? "3. Finish & Download" : "3. Review & Send"}</span>
+                <span className={`${esignWizardStep === 3 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>3. Review & Send</span>
+                <span className="text-slate-600">→</span>
+                <span className={`${esignWizardStep === 4 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>4. Complete</span>
               </div>
               {esignSigners.length > 0 && (
                 <div className="ml-auto flex items-center gap-2">
@@ -2889,64 +2918,70 @@ const App: React.FC = () => {
                   )}
                   {esignMode === "prepare" && (
                     <>
-                      {esignSentLocked ? (
+                      {esignWizardStep === 1 && (
                         <button
                           type="button"
-                          className="btn text-xs"
-                          onClick={() => {
-                            const ok = window.confirm(
-                              "Edit & resend will invalidate current invite links. Continue?"
-                            );
-                            if (!ok) return;
-                            setEsignSentLocked(false);
-                            setEsignInviteLinks({});
-                            addEsignActivity("Unlocked prepare mode for edit & resend");
-                          }}
+                          className={`btn text-xs ${step1Ready ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
+                          disabled={!step1Ready}
+                          onClick={() => setEsignWizardStep(2)}
                         >
-                          Edit & resend
+                          Next: Place Fields
                         </button>
-                      ) : null}
-                      {esignSigners.filter((s) => Boolean((s.email || "").trim())).length <= 1 ? (
+                      )}
+                      {esignWizardStep === 2 && (
                         <button
                           type="button"
-                          className={`btn text-xs ${canProceedReview ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
-                          onClick={handleExportFilledPdf}
-                          disabled={esignExporting || !canProceedReview}
+                          className={`btn text-xs ${step2Ready ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
+                          disabled={!step2Ready}
+                          onClick={() => setEsignWizardStep(3)}
                         >
-                          {esignExporting ? "Exporting…" : "Finish & Download"}
+                          Next: Review & Send
                         </button>
-                      ) : (
+                      )}
+                      {esignWizardStep === 3 && (
                         <>
+                          <button
+                            type="button"
+                            className="btn text-xs"
+                            onClick={() => {
+                              if (!activeSigner?.email) return;
+                              setEsignSigningAsEmail(activeSigner.email);
+                              setEsignMode("sign");
+                            }}
+                          >
+                            Preview signer session
+                          </button>
                           <button
                             data-testid="send-button"
                             type="button"
                             className={`btn text-xs ${canReviewAndSend && !esignSentLocked ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
                             disabled={!canReviewAndSend || esignSentLocked}
-                            onClick={() => setShowSendModal(true)}
+                            onClick={() => {
+                              if (esignSigners.filter((s) => Boolean((s.email || "").trim())).length <= 1) {
+                                handleExportFilledPdf();
+                                setEsignWizardStep(4);
+                                return;
+                              }
+                              setShowSendModal(true);
+                            }}
                           >
-                            Send for signature
-                          </button>
-                          <button
-                            data-testid="sign-now-button"
-                            type="button"
-                            className={`btn text-xs ${senderCanSignNow ? "" : "opacity-70"}`}
-                            onClick={() => setEsignMode("sign")}
-                          >
-                            Review fields
+                            {esignSigners.filter((s) => Boolean((s.email || "").trim())).length <= 1
+                              ? "Complete Signing"
+                              : "Send for Signature"}
                           </button>
                         </>
                       )}
-                      {!canReviewAndSend && (
-                        <span className="text-[11px] text-slate-400">
-                          Complete all review checks before sending.
-                        </span>
+                      {esignWizardStep === 4 && (
+                        <button
+                          type="button"
+                          className="btn text-xs bg-emerald-600 hover:bg-emerald-500"
+                          onClick={handleExportFilledPdf}
+                          disabled={esignExporting}
+                        >
+                          {esignExporting ? "Exporting…" : "Download Signed PDF"}
+                        </button>
                       )}
-                      {allowNoRecipientFieldsRequired && (
-                        <span className="text-[11px] text-slate-400">
-                          Recipient required-field check bypassed.
-                        </span>
-                      )}
-                      {signerChecklist.length > 0 && (
+                      {signerChecklist.length > 0 && esignWizardStep !== 4 && (
                         <div className="rounded border border-slate-700 bg-slate-900/50 px-2 py-1 text-[11px] text-slate-300">
                           {signerChecklist.map((item) => (
                             <div key={item}>- {item}</div>
@@ -2984,13 +3019,15 @@ const App: React.FC = () => {
                       </span>
                     </div>
                   )}
-                  <button
-                    type="button"
-                    className={`btn text-xs ml-1 ${esignMode === "sign" ? "bg-emerald-600 hover:bg-emerald-500" : ""}`}
-                    onClick={() => setEsignMode((m) => (m === "prepare" ? "sign" : "prepare"))}
-                  >
-                    {esignMode === "prepare" ? "Review & Send" : "Back to Placement"}
-                  </button>
+                  {esignWizardStep > 1 && esignMode === "prepare" && (
+                    <button
+                      type="button"
+                      className="btn text-xs ml-1"
+                      onClick={() => setEsignWizardStep((s) => (Math.max(1, s - 1) as 1 | 2 | 3 | 4))}
+                    >
+                      Back
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -3002,14 +3039,14 @@ const App: React.FC = () => {
                 <div className="grid grid-cols-1 gap-2 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
                   <div className="flex items-center gap-2">
                     <div className="rounded border border-slate-700 bg-slate-950/70 px-2 py-1">
-                      <div className="text-[10px] text-slate-400">👤 You are signing as</div>
+                      <div className="text-[10px] text-slate-400">You are signing as</div>
                       <button
                         type="button"
                         className="text-xs font-medium text-slate-100 hover:text-emerald-300"
                         onClick={() => setShowIdentityModal(true)}
                         title="Edit identity"
                       >
-                        {signingDisplayName} ✎
+                        {signingDisplayName} ({esignSigningAsEmail || "no-email"}) ✎
                       </button>
                     </div>
                     <span className="text-xs text-slate-300">Signing as</span>
@@ -3020,7 +3057,7 @@ const App: React.FC = () => {
                     >
                       {esignSigners.map((s, idx) => (
                         <option key={s.email || idx} value={s.email}>
-                          {s.name?.trim() || `Signer ${idx + 1}`}
+                          {(s.name?.trim() || `Signer ${idx + 1}`) + (s.email ? ` (${s.email})` : "")}
                         </option>
                       ))}
                     </select>
@@ -3088,6 +3125,13 @@ const App: React.FC = () => {
                     >
                       Download PDF
                     </button>
+                    <button
+                      type="button"
+                      className="btn text-xs"
+                      onClick={() => setEsignMode("prepare")}
+                    >
+                      Back to sender flow
+                    </button>
                   </div>
                 </div>
               </div>
@@ -3121,7 +3165,7 @@ const App: React.FC = () => {
                     disabled={getSignerRequiredRemaining() !== 0}
                     onClick={() => setShowSignCompleteModal(true)}
                   >
-                    Finish
+                    Complete Signing
                   </button>
                 </div>
                 {getSignerRequiredRemaining() !== 0 && (
@@ -3149,6 +3193,7 @@ const App: React.FC = () => {
                       const file = e.target.files?.item(0) || null;
                       setEsignDocFile(file);
                       setEsignStep(file ? "signers" : "upload");
+                      setEsignWizardStep(file ? 1 : 1);
                       setEsignPacket(null);
                       if (DEBUG_ESIGN && file) console.log("REPLACE_BOXES", "new_file_upload", 0);
                       setEsignFields([]);
@@ -3168,7 +3213,7 @@ const App: React.FC = () => {
             {esignDocFile && (
               <div className="rounded border border-slate-800 bg-slate-900/40 p-2">
                 {/* Prepare: toolbar, active recipient, Fields counter */}
-                {esignMode === "prepare" && (
+                {esignMode === "prepare" && esignWizardStep === 2 && (
                   <div className="flex flex-wrap items-center gap-3 mb-2 pb-2 border-b border-slate-700">
                     <span className="text-xs font-medium text-slate-300">Active signer:</span>
                     <span className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100">
@@ -3176,7 +3221,7 @@ const App: React.FC = () => {
                     </span>
                     <span className="text-slate-500">|</span>
                     <span className="text-xs text-slate-400">Tools:</span>
-                    {(["signature", "initials", "text", "date"] as const).map((t) => (
+                    {(["signature", "initials", "date"] as const).map((t) => (
                       <button
                         key={t}
                         className={`btn text-xs ${esignFieldTool === t ? "ring-2 ring-emerald-400" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
@@ -3186,9 +3231,31 @@ const App: React.FC = () => {
                           setEsignPlacementHint(null);
                         }}
                       >
-                        {t === "signature" ? "Signature" : t === "initials" ? "Initials" : t === "date" ? "Date" : "Printed Name"}
+                        {t === "signature" ? "Signature" : t === "initials" ? "Initials" : "Date"}
                       </button>
                     ))}
+                    <button
+                      className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "printedName" ? "ring-2 ring-emerald-400" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
+                      disabled={esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email)}
+                      onClick={() => {
+                        setEsignFieldTool("text");
+                        setTextToolKind("printedName");
+                        setEsignPlacementHint(null);
+                      }}
+                    >
+                      Printed Name
+                    </button>
+                    <button
+                      className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "textField" ? "ring-2 ring-emerald-400" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
+                      disabled={esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email)}
+                      onClick={() => {
+                        setEsignFieldTool("text");
+                        setTextToolKind("textField");
+                        setEsignPlacementHint(null);
+                      }}
+                    >
+                      Text Field
+                    </button>
                     <span className="text-slate-500">|</span>
                     <span className="text-xs font-medium text-emerald-300">Fields: {esignFields.length}</span>
                     <span className="text-xs text-slate-400">
@@ -3197,7 +3264,7 @@ const App: React.FC = () => {
                         : !isValidEmail(activeSigner.email)
                           ? "Add a valid signer email before placing fields."
                           : esignFieldTool
-                            ? (esignPlacementHint ?? `Click on document to place ${esignFieldTool === "signature" ? "Signature" : esignFieldTool === "initials" ? "Initials" : esignFieldTool === "date" ? "Date" : "Printed Name"} for ${activeSigner.name || "signer"}`)
+                            ? (esignPlacementHint ?? `Click on document to place ${esignFieldTool === "signature" ? "Signature" : esignFieldTool === "initials" ? "Initials" : esignFieldTool === "date" ? "Date" : (textToolKind === "textField" ? "Text Field" : "Printed Name")} for ${activeSigner.name || "signer"}`)
                             : "Select a tool, then click on document to place."}
                     </span>
                   </div>
@@ -3207,9 +3274,9 @@ const App: React.FC = () => {
                   ref={esignPreviewRef}
                   className="relative border border-slate-800 bg-slate-900 overflow-y-auto"
                   style={{ height: esignPreviewHeight }}
-                  onMouseMove={esignMode === "prepare" ? onMoveBox : undefined}
-                  onMouseUp={esignMode === "prepare" ? endDragBox : undefined}
-                  onMouseLeave={esignMode === "prepare" ? endDragBox : undefined}
+                  onMouseMove={esignMode === "prepare" && esignWizardStep === 2 ? onMoveBox : undefined}
+                  onMouseUp={esignMode === "prepare" && esignWizardStep === 2 ? endDragBox : undefined}
+                  onMouseLeave={esignMode === "prepare" && esignWizardStep === 2 ? endDragBox : undefined}
                 >
                   <div ref={outerStableRef} className="mx-auto w-full max-w-[1100px]">
                   {esignDocFile?.type === "application/pdf" ? (
@@ -3234,6 +3301,7 @@ const App: React.FC = () => {
                         const renderH = baseH * effectiveScale;
                         const inPlacementMode =
                           esignMode === "prepare" &&
+                          esignWizardStep === 2 &&
                           !!esignFieldTool &&
                           !esignSentLocked;
                         return (
@@ -3307,7 +3375,7 @@ const App: React.FC = () => {
                                 const recipientName =
                                   esignSigners.find((s) => (box.signerId ? s.id === box.signerId : s.email === box.recipientEmail))?.name ||
                                   "Recipient";
-                                const typeLabel = box.type === "signature" ? "Signature" : box.type === "initials" ? "Initials" : box.type === "date" ? "Date" : "Printed Name";
+                                const typeLabel = getFieldDisplayLabel(box);
                                 const label = `${typeLabel} • ${recipientName}`;
                                 const isFilled = Boolean(box.value && String(box.value).trim());
                                 const isSelected = esignSelectedFieldId === box.id;
@@ -3315,7 +3383,7 @@ const App: React.FC = () => {
                                 const isEditing = esignEditingFieldId === box.id;
                                 const isMe = box.recipientEmail === esignSigningAsEmail;
                                 const inSignMode = esignMode === "sign";
-                                const inPrepareMode = esignMode === "prepare";
+                                const inPrepareMode = esignMode === "prepare" && esignWizardStep === 2;
                                 const isTargeted = inSignMode && currentTargetFieldId === box.id;
                                 const isRequiredIncompleteForMe =
                                   inSignMode && isMe && Boolean(box.required) && !isFieldComplete(box);
@@ -3580,7 +3648,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 <div className="hidden lg:flex flex-col rounded border border-slate-700 bg-slate-900/60 p-2 text-xs h-fit min-h-[420px]">
-                  {esignMode === "prepare" && (
+                  {esignMode === "prepare" && esignWizardStep === 1 && (
                     <div data-testid="sender-identity" className="mb-2 rounded border border-slate-700 p-2 space-y-2">
                       <div className="text-[11px] text-slate-400">🧑 Your Signing Identity</div>
                       <label className="block text-[11px] text-slate-400">
@@ -3640,13 +3708,13 @@ const App: React.FC = () => {
                       </label>
                     </div>
                   )}
-                  {esignMode === "prepare" && (
+                  {esignMode === "prepare" && (esignWizardStep === 1 || esignWizardStep === 2) && (
                   <div className="grid grid-cols-2 gap-1 mb-2">
                     <button className={`btn text-xs ${esignSideTab === "recipients" ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignSideTab("recipients")}>Recipients</button>
                     <button className={`btn text-xs ${esignSideTab === "fields" ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignSideTab("fields")}>Fields</button>
                   </div>
                   )}
-                  {esignMode === "prepare" && esignSideTab === "recipients" && (
+                  {esignMode === "prepare" && esignWizardStep === 1 && esignSideTab === "recipients" && (
                     <div className="space-y-2">
                       <button
                         type="button"
@@ -3683,16 +3751,58 @@ const App: React.FC = () => {
                       <button className="btn w-full text-xs" onClick={() => { setEsignSigners([...esignSigners, { id: `signer_${Date.now()}`, name: "", email: "", role: "signer", status: "Not Sent" }]); addEsignActivity("Added signer"); }}>
                         + Add signer
                       </button>
+                      {step1Ready ? (
+                        <div className="text-[11px] text-emerald-300">
+                          All signer emails valid. Continue to field placement.
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-400">
+                          Add sender + signer details and valid emails to continue.
+                        </div>
+                      )}
                     </div>
                   )}
-                  {esignMode === "prepare" && esignSideTab === "fields" && (
+                  {esignMode === "prepare" && esignWizardStep === 2 && esignSideTab === "fields" && (
                     <div className="space-y-2">
-                      <div className="grid grid-cols-2 gap-1">
-                        {(["signature", "initials", "date", "text"] as const).map((t) => (
-                          <button key={t} className={`btn text-xs ${esignFieldTool === t ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignFieldTool(t)}>
-                            {t === "signature" ? "Signature" : t === "initials" ? "Initials" : t === "date" ? "Date" : "Printed Name"}
+                      <button
+                        type="button"
+                        className="btn w-full text-xs"
+                        onClick={() => setEsignWizardStep(1)}
+                      >
+                        Back to Signers
+                      </button>
+                      <div className="grid grid-cols-1 gap-1">
+                        {esignSigners.map((s, idx) => (
+                          <button
+                            key={`pick-${s.id}`}
+                            type="button"
+                            className={`w-full rounded border px-2 py-1 text-left text-[11px] ${activeSignerId === s.id ? "border-emerald-400 bg-emerald-900/15 text-emerald-200" : "border-slate-700 text-slate-300 hover:border-slate-500"}`}
+                            onClick={() => setActiveSignerId(s.id)}
+                          >
+                            {idx === 0 ? "Document Owner" : `Signer ${idx}`}: {s.name || s.email || "Unspecified"}
                           </button>
                         ))}
+                      </div>
+                      <div className="grid grid-cols-2 gap-1">
+                        {(["signature", "initials", "date"] as const).map((t) => (
+                          <button key={t} className={`btn text-xs ${esignFieldTool === t ? "ring-2 ring-emerald-400" : ""} ${!activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`} onClick={() => setEsignFieldTool(t)} disabled={!activeSigner || !isValidEmail(activeSigner.email)}>
+                            {t === "signature" ? "Signature" : t === "initials" ? "Initials" : "Date"}
+                          </button>
+                        ))}
+                        <button
+                          className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "printedName" ? "ring-2 ring-emerald-400" : ""} ${!activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
+                          onClick={() => { setEsignFieldTool("text"); setTextToolKind("printedName"); }}
+                          disabled={!activeSigner || !isValidEmail(activeSigner.email)}
+                        >
+                          Printed Name
+                        </button>
+                        <button
+                          className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "textField" ? "ring-2 ring-emerald-400" : ""} ${!activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
+                          onClick={() => { setEsignFieldTool("text"); setTextToolKind("textField"); }}
+                          disabled={!activeSigner || !isValidEmail(activeSigner.email)}
+                        >
+                          Text Field
+                        </button>
                       </div>
                       <div className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-300">
                         Fields for{" "}
@@ -3702,6 +3812,11 @@ const App: React.FC = () => {
                             "selected signer"}
                         </span>
                       </div>
+                      {activeSigner?.role !== "host" && (
+                        <div className="text-[11px] text-slate-400">
+                          You are placing templates only. This signer will complete signature/initials/date in their signing session.
+                        </div>
+                      )}
                       {((selectedField && selectedField.type === "initials") || esignFieldTool === "initials") && (
                         <div className="rounded border border-slate-700 p-2">
                           <label className="flex items-center gap-2 text-slate-300">
@@ -3715,7 +3830,7 @@ const App: React.FC = () => {
                                 toggleRepeatInitialsForField(selectedField.id, e.target.checked);
                               }}
                             />
-                            Repeat initials on all pages
+                            Place initials on every page for selected signer
                           </label>
                           {esignPageCount <= 1 && (
                             <div className="text-[10px] text-slate-500 mt-1">Available when document has multiple pages.</div>
@@ -3725,18 +3840,10 @@ const App: React.FC = () => {
                             className="btn text-xs mt-2 w-full"
                             onClick={placeInitialsAtAllSignatureBlocks}
                           >
-                            Place initials at all signature blocks
+                            Place initials at all signature blocks (helper)
                           </button>
                         </div>
                       )}
-                      <label className="flex items-center gap-2 text-slate-300 text-[11px] rounded border border-slate-700 px-2 py-1">
-                        <input
-                          type="checkbox"
-                          checked={allowNoRecipientFieldsRequired}
-                          onChange={(e) => setAllowNoRecipientFieldsRequired(e.target.checked)}
-                        />
-                        No recipient fields required
-                      </label>
                       <div className="space-y-1">
                         {esignSigners.map((s) => {
                           const byRecipient = allFieldsSorted.filter((f) => fieldBelongsToSigner(f, s));
@@ -3754,7 +3861,7 @@ const App: React.FC = () => {
                         {allFieldsSorted.filter((f) => (activeSigner ? fieldBelongsToSigner(f, activeSigner) : false)).map((f, idx) => (
                           <button key={f.id} className={`w-full text-left rounded border px-2 py-1 ${esignSelectedFieldId === f.id ? "border-emerald-400 bg-emerald-900/20" : "border-slate-700 hover:border-slate-500"}`} onClick={() => { setEsignSelectedFieldId(f.id); setTargetField(f.id); }}>
                             <div className="flex items-center justify-between">
-                              <span>{idx + 1}. {(f.type === "text" ? "PRINTED NAME" : f.type.toUpperCase())} p{f.pageIndex + 1}</span>
+                              <span>{idx + 1}. {getFieldDisplayLabel(f).toUpperCase()} p{f.pageIndex + 1}</span>
                               <span className={isFieldComplete(f) ? "text-emerald-300" : "text-slate-400"}>{isFieldComplete(f) ? "Filled" : "Empty"}</span>
                             </div>
                           </button>
@@ -3766,7 +3873,11 @@ const App: React.FC = () => {
                           <select
                             className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1"
                             value={selectedField.recipientEmail}
-                            onChange={(e) => updateField(selectedField.id, { recipientEmail: e.target.value })}
+                            onChange={(e) => {
+                              const nextEmail = e.target.value;
+                              const nextSigner = esignSigners.find((s) => s.email === nextEmail);
+                              updateField(selectedField.id, { recipientEmail: nextEmail, signerId: nextSigner?.id });
+                            }}
                           >
                             {esignSigners.map((s) => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
                           </select>
@@ -3780,6 +3891,53 @@ const App: React.FC = () => {
                           </label>
                         </div>
                       )}
+                    </div>
+                  )}
+                  {esignMode === "prepare" && esignWizardStep === 3 && (
+                    <div className="space-y-2">
+                      <div className="rounded border border-slate-700 p-2">
+                        <div className="text-slate-200 font-medium">Review Summary</div>
+                        <div className="text-[11px] text-slate-400 mt-1 truncate">
+                          Document: {esignDocFile?.name || "No document"}
+                        </div>
+                        <div className="mt-2 text-[11px] text-slate-300 space-y-1">
+                          {esignSigners.map((s) => {
+                            const req = esignFields.filter((f) => fieldBelongsToSigner(f, s) && Boolean(f.required));
+                            return (
+                              <div key={`rv-${s.id}`} className="flex items-center justify-between">
+                                <span>{s.name || s.email || "Signer"}</span>
+                                <span>{req.length} required</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <label className="mt-3 flex items-center gap-2 text-[11px] text-slate-300">
+                          <input type="checkbox" checked readOnly />
+                          Generate secure signing link
+                        </label>
+                        <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                          <input type="checkbox" disabled />
+                          Email delivery (if enabled)
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  {esignMode === "prepare" && esignWizardStep === 4 && (
+                    <div className="space-y-2">
+                      <div className="rounded border border-emerald-700/60 bg-emerald-950/30 p-2">
+                        <div className="text-emerald-300 font-medium">Completion</div>
+                        <div className="text-[11px] text-slate-300 mt-1">
+                          Sender completion recorded for this session.
+                        </div>
+                        <div className="mt-2 space-y-1 text-[11px] text-slate-300">
+                          {esignSigners.map((s) => (
+                            <div key={`cp-${s.id}`} className="flex items-center justify-between">
+                              <span>{s.name || s.email || "Signer"}</span>
+                              <span>{recipientStatusByEmail[s.email] || "Not Sent"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   )}
                   {esignMode === "sign" && (
@@ -3814,7 +3972,7 @@ const App: React.FC = () => {
                                 onClick={() => setTargetField(f.id)}
                               >
                                 <div className="flex items-center justify-between">
-                                  <span>{idx + 1}. {(f.type === "text" ? "PRINTED NAME" : f.type.toUpperCase())} p{f.pageIndex + 1}</span>
+                                  <span>{idx + 1}. {getFieldDisplayLabel(f).toUpperCase()} p{f.pageIndex + 1}</span>
                                   <span className={complete ? "text-emerald-300" : "text-amber-300"}>{complete ? "Done" : "Required"}</span>
                                 </div>
                               </button>
@@ -3825,6 +3983,58 @@ const App: React.FC = () => {
                     </div>
                   )}
                 </div>
+                </div>
+              </div>
+            )}
+            {esignMode === "prepare" && esignWizardStep === 3 && (
+              <div className="rounded border border-slate-700 bg-slate-900/40 p-3 text-sm">
+                <div className="font-semibold text-slate-100">Review & Send</div>
+                <div className="mt-2 text-xs space-y-1">
+                  <div className={invalidEmails.length === 0 ? "text-emerald-300" : "text-amber-300"}>
+                    {invalidEmails.length === 0 ? "✅ All signer emails valid" : "❌ Fix invalid signer emails"}
+                  </div>
+                  <div className={missingRequiredBySigner.length === 0 ? "text-emerald-300" : "text-amber-300"}>
+                    {missingRequiredBySigner.length === 0 ? "✅ Required fields placed for each signer" : "❌ Place required signature/initials for each signer"}
+                  </div>
+                  <div className={senderIdentityReady ? "text-emerald-300" : "text-amber-300"}>
+                    {senderIdentityReady ? "✅ Owner identity set" : "❌ Set Document Owner name/email"}
+                  </div>
+                </div>
+                <div className="mt-2 text-xs text-slate-300 space-y-1">
+                  <div>Document: {esignDocFile?.name || "No document selected"}</div>
+                  {esignSigners.map((s) => {
+                    const required = esignFields.filter((f) => fieldBelongsToSigner(f, s) && Boolean(f.required));
+                    const sig = required.filter((f) => f.type === "signature").length;
+                    const ini = required.filter((f) => f.type === "initials").length;
+                    const dt = required.filter((f) => f.type === "date").length;
+                    const txt = required.filter((f) => f.type === "text").length;
+                    return (
+                      <div key={`sum-${s.id}`} className="flex items-center justify-between">
+                        <span>{s.role === "host" ? "Document Owner" : (s.name || s.email || "Signer")}</span>
+                        <span>Sig {sig} • Ini {ini} • Date {dt} • Text {txt}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {esignMode === "prepare" && esignWizardStep === 4 && (
+              <div className="rounded border border-emerald-700/60 bg-emerald-950/30 p-3 text-sm">
+                <div className="font-semibold text-emerald-300">Complete</div>
+                <div className="mt-1 text-xs text-slate-200">
+                  {(() => {
+                    const waiting = esignSigners.filter((s) => (recipientStatusByEmail[s.email] || "Not Sent") !== "Signed").length;
+                    if (waiting === 0) return "Fully Executed: all parties have signed.";
+                    return `Owner signed; waiting on ${waiting} signer${waiting === 1 ? "" : "s"}.`;
+                  })()}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button type="button" className="btn text-xs" onClick={handleExportFilledPdf}>
+                    Download Fully Signed PDF
+                  </button>
+                  <button type="button" className="btn text-xs" onClick={() => copyToClipboard(esignPacket?.packet_id || "local-packet")}>
+                    Copy Audit Record ID
+                  </button>
                 </div>
               </div>
             )}
