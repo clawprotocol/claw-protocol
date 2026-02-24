@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgreementDoc",
+  "type": "object",
+  "required": ["schema", "agreement_id", "title", "versions", "current_version_id"],
+  "properties": {
+    "schema": { "type": "string" },
+    "agreement_id": { "type": "string" },
+    "title": { "type": "string" },
+    "parties": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "versions": {
+      "type": "array",
+      "items": { "$ref": "agreement_version.schema.json" }
+    },
+    "current_version_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

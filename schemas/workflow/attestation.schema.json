@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Attestation",
+  "type": "object",
+  "required": ["schema", "attestation_id", "type", "payload", "signer", "attestation_sha256"],
+  "properties": {
+    "schema": { "type": "string" },
+    "attestation_id": { "type": "string" },
+    "type": { "type": "string", "enum": ["esign", "liability"] },
+    "payload": { "type": "object" },
+    "signer": { "type": "object" },
+    "attestation_sha256": { "type": "string" },
+    "issued_at": { "type": "string" },
+    "signature": {
+      "type": ["object", "null"],
+      "properties": {
+        "algo": { "type": "string" },
+        "signature": { "type": "string" },
+        "signer_id": { "type": "string" },
+        "signed_at": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "frozen": { "type": "boolean" },
+    "frozen_at": { "type": ["string", "null"] },
+    "structuring_notes": { "type": ["object", "null"] },
+    "hashing": {
+      "type": "object",
+      "properties": {
+        "hashed_fields": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgreementRedline",
+  "type": "object",
+  "required": ["redline_id", "base_version_id", "ops"],
+  "properties": {
+    "redline_id": { "type": "string" },
+    "base_version_id": { "type": "string" },
+    "ops": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["op", "path"],
+        "properties": {
+          "op": { "type": "string", "enum": ["insert", "replace", "delete"] },
+          "path": { "type": "string" },
+          "value": { "type": "string" },
+          "note": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
