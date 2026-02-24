@@ -29,6 +29,10 @@ If you read only one file, read that one.
 
 Verifying a receipt? Start here → **[`docs/VERIFIER_ENTRY.md`](docs/VERIFIER_ENTRY.md)**
 
+## Development & Troubleshooting
+Developer setup and test troubleshooting:
+→ **[`docs/DEV.md`](docs/DEV.md)**
+
 ---
 
 ## Protocol Semantics (v1.x)

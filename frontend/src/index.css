@@ -18,6 +18,19 @@ body {
   @apply min-h-screen;
 }
 
+/* E-Sign: react-pdf internal layers must not capture clicks (canvas, text, annotations only) */
+.react-pdf__Page__canvas,
+.react-pdf__Page__textContent,
+.react-pdf__Page__annotations {
+  pointer-events: none !important;
+}
+
+/* E-Sign field resize handles */
+[data-resize] {
+  z-index: 5;
+  border-radius: 1px;
+}
+
 /* Nice scrollbars */
 ::-webkit-scrollbar {
   width: 8px;

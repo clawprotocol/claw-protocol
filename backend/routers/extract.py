@@ -1,5 +1,14 @@
+"""
+Legacy / Non-Core Router.
+Not part of CLAW v1 four utilities.
+Do not expand; only maintain for compatibility.
+"""
+
+# Legacy / Non-Core Router: keep for compatibility only.
+
 from fastapi import APIRouter, File, UploadFile, Request
 
+# Exists for CLI and legacy compatibility; do not expand scope.
 router = APIRouter()
 
 

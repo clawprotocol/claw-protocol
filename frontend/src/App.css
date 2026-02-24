@@ -40,3 +40,16 @@
 .read-the-docs {
   color: #888;
 }
+
+.btn {
+  background: #22c55e;
+  color: #0f172a;
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.btn:hover {
+  background: #16a34a;
+}

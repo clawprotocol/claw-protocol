@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExportBundleManifest",
+  "type": "object",
+  "required": ["schema", "created_at", "commitment", "artifacts", "utilities"],
+  "properties": {
+    "schema": { "type": "string" },
+    "created_at": { "type": "string" },
+    "commitment": { "type": "string" },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "utilities": { "type": "object" },
+    "pack_inputs_hash_sha256": { "type": "string" }
+  },
+  "additionalProperties": false
+}

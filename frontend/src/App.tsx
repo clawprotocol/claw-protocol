@@ -2,6 +2,9 @@ import React, { Component, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { exportFilledPdf } from "./esignExportPdf";
+import AgreementWorkspace from "./components/agreements/AgreementWorkspace";
+import AgreementBuilderIntake from "./components/agreements/AgreementBuilderIntake";
+import AgreementReview from "./components/agreements/AgreementReview";
 
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -35,6 +38,8 @@ class EsignPdfErrorBoundary extends Component<
 
 const API_BASE =
   (import.meta as any).env?.VITE_API_BASE || "http://127.0.0.1:8000";
+const LEGACY_AGREEMENT_FLAG =
+  String((import.meta as any).env?.VITE_CLAW_LEGACY_AGREEMENT || "0") === "1";
 const SHOW_DEMOS = false;
 const DEBUG_ESIGN =
   typeof window !== "undefined" &&
@@ -66,6 +71,10 @@ const App: React.FC = () => {
   const [phase, setPhase] = useState<
     "landing" | "chooser" | "timeline" | "esign" | "liability" | "agreement" | "verify"
   >("landing");
+  const [routePath, setRoutePath] = useState<string>(
+    typeof window !== "undefined" ? window.location.pathname : "/"
+  );
+  const [agreementReviewId, setAgreementReviewId] = useState<string | null>(null);
   const [apiVersion, setApiVersion] = useState<{
     protocol_version?: string;
     api_version?: string;
@@ -156,17 +165,21 @@ const App: React.FC = () => {
   >({});
   const [esignPdfError, setEsignPdfError] = useState<string | null>(null);
   const esignPreviewRef = useRef<HTMLDivElement | null>(null);
+  const stepScrollTopRef = useRef<Partial<Record<1 | 2 | 3 | 4, number>>>({});
   // Stable width container (observed) vs scaled render wrapper (not observed).
   const outerStableRef = useRef<HTMLDivElement | null>(null);
   const pdfRenderRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledFieldIdRef = useRef<string | null>(null);
   const scrollRafRef = useRef<number>(0);
+  const signaturePromptedByEmailRef = useRef<Record<string, boolean>>({});
   const versionFetchedRef = useRef(false);
   const [fitScale, setFitScale] = useState(1);
   const [userZoom, setUserZoom] = useState(1);
   const [esignDrag, setEsignDrag] = useState<{
     id: string;
     mode: "move" | "resize-se" | "resize-sw" | "resize-ne" | "resize-nw";
+    fieldType: "signature" | "initials" | "date" | "text";
+    aspectRatio: number;
     startX: number;
     startY: number;
     startXPct: number;
@@ -175,6 +188,8 @@ const App: React.FC = () => {
     startHPct: number;
     pageIndex: number;
   } | null>(null);
+  const [autoPlacedPulseFieldIds, setAutoPlacedPulseFieldIds] = useState<Record<string, boolean>>({});
+  const prevAutoPlaceRef = useRef<Record<string, boolean>>({});
   const [esignEditingFieldId, setEsignEditingFieldId] = useState<string | null>(null);
   const [esignDraftById, setEsignDraftById] = useState<Record<string, string>>({});
   const [esignHighlightedFieldId, setEsignHighlightedFieldId] = useState<string | null>(null);
@@ -191,10 +206,12 @@ const App: React.FC = () => {
   const [esignSignatureType, setEsignSignatureType] = useState<
     "typed" | "drawn" | "image"
   >("typed");
+  const [ownerInitialsStyle, setOwnerInitialsStyle] = useState<"typed" | "drawn" | "image">("typed");
+  const [esignDrawDataUrl, setEsignDrawDataUrl] = useState<string>("");
   const [esignSignatureValue, setEsignSignatureValue] = useState<string>("");
   const [esignInitialsValue, setEsignInitialsValue] = useState<string>("");
   const [esignDefaultsByRecipient, setEsignDefaultsByRecipient] = useState<
-    Record<string, { signatureType?: "typed" | "drawn" | "image"; signatureValue?: string; initialsValue?: string }>
+    Record<string, { signatureType?: "typed" | "drawn" | "image"; initialsType?: "typed" | "drawn" | "image"; signatureValue?: string; initialsValue?: string }>
   >({});
   const [esignSaveSignature, setEsignSaveSignature] = useState(true);
   const [esignSaveInitials, setEsignSaveInitials] = useState(true);
@@ -203,6 +220,11 @@ const App: React.FC = () => {
   const [showSignRequiredPanel, setShowSignRequiredPanel] = useState(false);
   const [esignSideTab, setEsignSideTab] = useState<"recipients" | "fields">("recipients");
   const [showSendModal, setShowSendModal] = useState(false);
+  const [esignSending, setEsignSending] = useState(false);
+  const [showSentSuccessModal, setShowSentSuccessModal] = useState(false);
+  const [sentDocuments, setSentDocuments] = useState<
+    { id: string; name: string; sentAt: number; signerCount: number; status: "Sent" | "Viewed" | "Signed" | "Completed" }[]
+  >([]);
   const [sendSubject, setSendSubject] = useState("Please sign this document");
   const [sendMessage, setSendMessage] = useState("Please review and sign at your earliest convenience.");
   const [recipientStatusByEmail, setRecipientStatusByEmail] = useState<
@@ -214,8 +236,9 @@ const App: React.FC = () => {
   >([]);
   const [esignSentLocked, setEsignSentLocked] = useState(false);
   const [showIdentityModal, setShowIdentityModal] = useState(false);
-  const [autoPlaceInitialsEveryPage, setAutoPlaceInitialsEveryPage] = useState(false);
+  const [autoPlaceInitialsBySigner, setAutoPlaceInitialsBySigner] = useState<Record<string, boolean>>({});
   const [showAuditTrail, setShowAuditTrail] = useState(false);
+  const [showPlacementValidation, setShowPlacementValidation] = useState(false);
   const [textToolKind, setTextToolKind] = useState<"printedName" | "textField">(
     "printedName"
   );
@@ -523,6 +546,7 @@ const App: React.FC = () => {
       return;
     }
     if (d.signatureType) setEsignSignatureType(d.signatureType);
+    if (d.initialsType) setOwnerInitialsStyle(d.initialsType);
     if (typeof d.signatureValue === "string") setEsignSignatureValue(d.signatureValue || defaultSig);
     else if (defaultSig) setEsignSignatureValue((prev) => prev || defaultSig);
     if (typeof d.initialsValue === "string") setEsignInitialsValue(d.initialsValue || defaultIni);
@@ -555,7 +579,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!esignSaveSignature) return;
-    if (!esignSignatureValue) return;
     const key = (esignSigningAsEmail || "").toLowerCase();
     if (key) {
       setEsignDefaultsByRecipient((prev) => ({
@@ -563,7 +586,7 @@ const App: React.FC = () => {
         [key]: {
           ...prev[key],
           signatureType: esignSignatureType,
-          signatureValue: esignSignatureValue,
+          signatureValue: esignSignatureValue || prev[key]?.signatureValue || "",
         },
       }));
     }
@@ -578,16 +601,48 @@ const App: React.FC = () => {
         ...prev,
         [key]: {
           ...prev[key],
+          initialsType: ownerInitialsStyle,
           initialsValue: esignInitialsValue,
         },
       }));
     }
-  }, [esignInitialsValue, esignSaveInitials, esignSigningAsEmail]);
+  }, [esignInitialsValue, ownerInitialsStyle, esignSaveInitials, esignSigningAsEmail]);
 
   function copyToClipboard(text: string) {
     if (!navigator?.clipboard) return;
     navigator.clipboard.writeText(text).catch(() => undefined);
   }
+
+  const navigateTo = (path: string) => {
+    if (typeof window === "undefined") return;
+    window.history.pushState({}, "", path);
+    setRoutePath(path);
+  };
+
+  useEffect(() => {
+    const m = routePath.match(/^\/agreements\/([^/]+)\/review$/);
+    if (m?.[1]) {
+      setPhase("agreement");
+      setAgreementReviewId(decodeURIComponent(m[1]));
+      return;
+    }
+    if (routePath === "/agreements/new") {
+      setPhase("agreement");
+      setAgreementReviewId(null);
+      return;
+    }
+    if (routePath === "/agreements/legacy") {
+      setPhase("agreement");
+      return;
+    }
+  }, [routePath]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPopState = () => setRoutePath(window.location.pathname);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const deriveInitials = (nameOrEmail: string) => {
     const base = (nameOrEmail || "").trim();
@@ -600,6 +655,20 @@ const App: React.FC = () => {
     if (parts.length === 0) return "";
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
+  };
+
+  const measurePrintedNameWidthPct = (text: string, pageIndex?: number) => {
+    const dims = typeof pageIndex === "number" ? esignPageDimensions[pageIndex] : undefined;
+    const baseW = Math.max(1, dims?.width || 612);
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return 0.2;
+    const fontPx = 16;
+    ctx.font = `${fontPx}px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    const measured = ctx.measureText((text || "").trim() || "Printed Name").width;
+    const paddingPx = 10 * 2; // 10px left + right
+    const pct = (measured + paddingPx) / baseW;
+    return Math.max(0.16, Math.min(0.7, pct));
   };
 
   const addEsignActivity = (message: string) => {
@@ -1229,7 +1298,7 @@ const App: React.FC = () => {
           typed_name: s.typed_name || s.name,
         }))
       );
-      setEsignStatus("Packet created. Next: Recipients sign.");
+      setEsignStatus("Packet created. Next: signers complete their assigned fields.");
       setEsignStep("place");
     } catch (err: any) {
       setEsignError(err?.message || "Create packet failed.");
@@ -1360,6 +1429,11 @@ const App: React.FC = () => {
       setEsignPlacementHint("Active signer must have a valid email before placing fields.");
       return;
     }
+    if (esignFieldTool === "initials" && autoPlaceInitialsBySigner[activeSigner.id]) {
+      setEsignPlacementHint("Initials already auto-placed for this signer. Disable auto-place to customize.");
+      window.setTimeout(() => setEsignPlacementHint(null), 1600);
+      return;
+    }
     const defaults: Record<string, { wPct: number; hPct: number }> = {
       signature: { wPct: 0.17, hPct: 0.06 },
       initials: { wPct: 0.10, hPct: 0.05 },
@@ -1384,13 +1458,13 @@ const App: React.FC = () => {
     const isPrintedName = esignFieldTool === "text" && textToolKind === "printedName";
     const value =
       esignFieldTool === "date"
-        ? (activeSigner.role === "host" ? new Date().toISOString().slice(0, 10) : "")
+        ? new Date().toISOString().slice(0, 10)
         : esignFieldTool === "signature"
           ? (activeSigner.role === "host" ? adoptedSignaturePreview : "")
           : esignFieldTool === "initials"
             ? (activeSigner.role === "host" ? adoptedInitialsPreview : "")
             : isPrintedName
-              ? (activeSigner.role === "host" ? (activeSigner.name?.trim() || "") : "")
+              ? (activeSigner.name?.trim() || "")
               : "";
     const placeholder =
       esignFieldTool === "text"
@@ -1401,7 +1475,8 @@ const App: React.FC = () => {
     const required = esignFieldTool !== "text";
     const nextXPct = Math.max(0, Math.min(1 - base.wPct, xPct));
     const nextYPct = Math.max(0, Math.min(1 - base.hPct, snappedY));
-    const adjustedWPct = esignFieldTool === "signature" && snappedY !== yPct ? 0.24 : base.wPct;
+    let adjustedWPct = esignFieldTool === "signature" && snappedY !== yPct ? 0.24 : base.wPct;
+    if (isPrintedName) adjustedWPct = measurePrintedNameWidthPct(value || placeholder || "", pageIndex);
     const newField = {
       id: `field_${Date.now()}`,
       type: esignFieldTool,
@@ -1417,128 +1492,98 @@ const App: React.FC = () => {
       required,
     };
     setEsignFields((prev) => [...prev, newField]);
-    if (esignFieldTool === "signature" && !value.trim() && activeSigner.role === "host") {
-      setEsignSignatureModal({ fieldId: newField.id, type: "signature" });
-    } else if (esignFieldTool === "initials" && !value.trim() && activeSigner.role === "host") {
-      setEsignSignatureModal({ fieldId: newField.id, type: "initials" });
+    setAutoPlacedPulseFieldIds((prev) => ({ ...prev, [newField.id]: true }));
+    window.setTimeout(() => {
+      setAutoPlacedPulseFieldIds((prev) => {
+        if (!prev[newField.id]) return prev;
+        const next = { ...prev };
+        delete next[newField.id];
+        return next;
+      });
+    }, 450);
+    // Document Owner: prompt once when first signature field is placed (industry-standard flow).
+    if (esignFieldTool === "signature" && activeSigner.role === "host") {
+      const ownerKey = (recipientEmail || "").toLowerCase();
+      const savedSig = ownerKey ? (esignDefaultsByRecipient[ownerKey]?.signatureValue || "") : "";
+      const activeSig = (esignSignatureValue || adoptedSignaturePreview || savedSig || "").trim();
+      if (!activeSig && !signaturePromptedByEmailRef.current[ownerKey]) {
+        signaturePromptedByEmailRef.current[ownerKey] = true;
+        setEsignSignatureModal({ fieldId: newField.id, type: "signature" });
+      }
     }
     addEsignActivity(
       `Placed ${esignFieldTool} field on page ${pageIndex + 1} for ${recipientEmail || "unassigned"}`
     );
   };
 
-  const toggleRepeatInitialsForField = (fieldId: string, enabled: boolean) => {
+  const syncAutoFooterInitials = () => {
+    if (!esignDocFile || esignDocFile.type !== "application/pdf") return;
+    const pageTotal = Math.max(esignPageCount || 0, 0);
+    const toggledOnSignerIds = esignSigners
+      .filter((s) => Boolean(autoPlaceInitialsBySigner[s.id]) && !prevAutoPlaceRef.current[s.id])
+      .map((s) => s.id);
+    prevAutoPlaceRef.current = esignSigners.reduce<Record<string, boolean>>((acc, s) => {
+      acc[s.id] = Boolean(autoPlaceInitialsBySigner[s.id]);
+      return acc;
+    }, {});
+    const pulseIds: string[] = [];
     setEsignFields((prev) => {
-      const anchor = prev.find((f) => f.id === fieldId);
-      if (!anchor || anchor.type !== "initials") return prev;
-      const groupId = anchor.repeatGroupId || `repeat_${anchor.id}`;
-      if (!enabled) {
-        const next = prev.filter((f) => !(f.isRepeatClone && f.repeatGroupId === groupId));
-        return next.map((f) =>
-          f.id === anchor.id ? { ...f, repeatGroupId: undefined, isRepeatClone: false } : f
-        );
-      }
-
-      const pageTotal = Math.max(esignPageCount || 0, 1);
-      const byPage = new Set(
-        prev
-          .filter((f) => f.repeatGroupId === groupId && f.type === "initials")
-          .map((f) => f.pageIndex)
-      );
-      byPage.add(anchor.pageIndex);
-
-      const clones: typeof prev = [];
-      for (let page = 0; page < pageTotal; page += 1) {
-        if (byPage.has(page)) continue;
-        clones.push({
-          ...anchor,
-          id: `${anchor.id}_p${page}_${Date.now()}`,
+      let next = [...prev];
+      esignSigners.forEach((signer) => {
+        const signerEmail = (signer.email || "").trim();
+        if (!signerEmail) return;
+        const groupId = `auto_footer_${signer.id}`;
+        next = next.filter((f) => f.repeatGroupId !== groupId);
+        if (!autoPlaceInitialsBySigner[signer.id]) return;
+        const signerDefaults = esignDefaultsByRecipient[(signerEmail || "").toLowerCase()];
+        const signerInitials = signerDefaults?.initialsValue
+          || (signer.role === "host" ? adoptedInitialsPreview : "")
+          || deriveInitials(signer.name || signer.email || "");
+        const autoFields = Array.from({ length: pageTotal }, (_, page) => ({
+          id: `field_auto_initial_${signer.id}_${page}_${Date.now()}`,
+          type: "initials" as const,
+          signerId: signer.id,
           pageIndex: page,
-          value: "",
+          recipientEmail: signerEmail,
+          xPct: 0.9,
+          yPct: 0.945,
+          wPct: 0.08,
+          hPct: 0.035,
+          value: signer.role === "host" ? signerInitials : "",
+          placeholder: signerInitials || "Initials",
+          required: false,
           repeatGroupId: groupId,
           isRepeatClone: true,
-        });
-      }
-      const next = prev.map((f) =>
-        f.id === anchor.id ? { ...f, repeatGroupId: groupId, isRepeatClone: false } : f
-      );
-      return [...next, ...clones];
-    });
-    addEsignActivity(
-      enabled
-        ? "Enabled repeat initials on all pages"
-        : "Disabled repeat initials on all pages"
-    );
-  };
-
-  const placeInitialsAtAllSignatureBlocks = () => {
-    const assignee = (activeSigner?.email || "").trim();
-    const assigneeId = activeSigner?.id;
-    if (!assignee) return;
-    setEsignFields((prev) => {
-      const sigBlocks = prev.filter(
-        (f) => f.type === "signature" && (assigneeId ? f.signerId === assigneeId : f.recipientEmail === assignee)
-      );
-      if (sigBlocks.length === 0) return prev;
-      const next = [...prev];
-      sigBlocks.forEach((sig) => {
-        const hasInitials = next.some(
-          (f) =>
-            f.type === "initials" &&
-            (assigneeId ? f.signerId === assigneeId : f.recipientEmail === assignee) &&
-            f.pageIndex === sig.pageIndex &&
-            Math.abs(f.xPct - sig.xPct) < 0.02 &&
-            Math.abs(f.yPct - sig.yPct) < 0.02
-        );
-        if (hasInitials) return;
-        const wPct = 0.1;
-        const hPct = 0.05;
-        next.push({
-          id: `field_${Date.now()}_${sig.pageIndex}`,
-          type: "initials",
-          signerId: sig.signerId,
-          pageIndex: sig.pageIndex,
-          recipientEmail: assignee,
-          xPct: Math.max(0, Math.min(1 - wPct, sig.xPct)),
-          yPct: Math.max(0, Math.min(1 - hPct, sig.yPct)),
-          wPct,
-          hPct,
-          value: "",
-          placeholder: "",
-          required: true,
-        });
+        }));
+        next = [...next, ...autoFields];
+        if (toggledOnSignerIds.includes(signer.id)) {
+          pulseIds.push(...autoFields.map((f) => f.id));
+        }
       });
       return next;
     });
-    addEsignActivity(`Placed initials at all signature blocks for ${assignee}`);
-  };
-
-  const syncAutoFooterInitials = () => {
-    const owner = ((esignSigners[0]?.email || esignSigningAsEmail || "")).trim();
-    if (!owner || !esignDocFile || esignDocFile.type !== "application/pdf") return;
-    const groupId = `auto_footer_${owner.toLowerCase()}`;
-    setEsignFields((prev) => {
-      const withoutAuto = prev.filter((f) => f.repeatGroupId !== groupId);
-      if (!autoPlaceInitialsEveryPage || !adoptedInitialsPreview) return withoutAuto;
-      const pageTotal = Math.max(esignPageCount || 0, 0);
-      const autoFields = Array.from({ length: pageTotal }, (_, page) => ({
-        id: `field_auto_initial_${page}_${Date.now()}`,
-        type: "initials" as const,
-        signerId: esignSigners[0]?.id,
-        pageIndex: page,
-        recipientEmail: owner,
-        xPct: 0.9,
-        yPct: 0.945,
-        wPct: 0.08,
-        hPct: 0.035,
-        value: adoptedInitialsPreview,
-        placeholder: "",
-        required: false,
-        repeatGroupId: groupId,
-        isRepeatClone: true,
-      }));
-      return [...withoutAuto, ...autoFields];
-    });
+    if (pulseIds.length > 0) {
+      setAutoPlacedPulseFieldIds((prev) => {
+        const next = { ...prev };
+        pulseIds.forEach((id) => {
+          next[id] = true;
+        });
+        return next;
+      });
+      const signer = esignSigners.find((s) => toggledOnSignerIds.includes(s.id));
+      const signerIdx = signer ? Math.max(1, esignSigners.findIndex((s) => s.id === signer.id)) : 1;
+      setEsignPlacementHint(`Initials placed on ${pageTotal} page${pageTotal === 1 ? "" : "s"} for ${signer?.role === "host" ? "Document Owner" : `Signer ${signerIdx}`}.`);
+      window.setTimeout(() => setEsignPlacementHint(null), 1800);
+      window.setTimeout(() => {
+        setAutoPlacedPulseFieldIds((prev) => {
+          const next = { ...prev };
+          pulseIds.forEach((id) => {
+            delete next[id];
+          });
+          return next;
+        });
+      }, 300);
+    }
   };
 
   const deleteSelectedField = () => {
@@ -1616,6 +1661,8 @@ const App: React.FC = () => {
     setEsignDrag({
       id,
       mode,
+      fieldType: target.type,
+      aspectRatio: target.wPct > 0 ? target.hPct / target.wPct : 0.35,
       startX: e.clientX,
       startY: e.clientY,
       startXPct: target.xPct,
@@ -1669,6 +1716,17 @@ const App: React.FC = () => {
           h = startYPct + startHPct - newY;
           y = newY;
         }
+        // Keep signature fields proportional while resizing.
+        if (esignDrag.fieldType === "signature") {
+          const ratio = Math.max(0.2, Math.min(1.2, esignDrag.aspectRatio || 0.35));
+          const bottom = y + h;
+          h = Math.max(minHPct, Math.min(1 - y, w * ratio));
+          if (mode === "resize-ne" || mode === "resize-nw") {
+            y = Math.max(0, bottom - h);
+          }
+          if (x + w > 1) w = 1 - x;
+          if (y + h > 1) h = 1 - y;
+        }
         return { ...b, xPct: x, yPct: y, wPct: Math.max(minWPct, w), hPct: Math.max(minHPct, h) };
       })
     );
@@ -1696,30 +1754,48 @@ const App: React.FC = () => {
   };
 
   const sendEsignInvitesFromModal = () => {
-    if (!requiredFieldsComplete(esignSigningAsEmail)) {
-      addEsignActivity("Sent before you completed your required fields");
-    }
-    const links: Record<string, string> = {};
-    esignSigners.forEach((s) => {
-      const email = s.email || "";
-      if (!email) return;
-      links[email] = `Signing link (placeholder): ${window.location.origin}/?esign=1&packet=${esignPacket?.packet_id || "local"}&signer=${encodeURIComponent(
-        email
-      )}`;
-    });
-    setEsignInviteLinks(links);
-    setRecipientStatusByEmail((prev) => {
-      const next = { ...prev };
-      Object.keys(links).forEach((email) => {
-        if (next[email] !== "Signed") next[email] = "Sent";
+    if (esignSending) return;
+    setEsignSending(true);
+    try {
+      if (!requiredFieldsComplete(esignSigningAsEmail)) {
+        addEsignActivity("Sent before you completed your required fields");
+      }
+      const links: Record<string, string> = {};
+      esignSigners.forEach((s) => {
+        const email = s.email || "";
+        if (!email) return;
+        links[email] = `Signing link (placeholder): ${window.location.origin}/?esign=1&packet=${esignPacket?.packet_id || "local"}&signer=${encodeURIComponent(
+          email
+        )}`;
       });
-      return next;
-    });
-    addEsignActivity(`Sent invite links to ${Object.keys(links).length} recipient(s)`);
-    setShowSendModal(false);
-    setEsignSideTab("recipients");
-    setEsignWizardStep(4);
-    setEsignSentLocked(true);
+      setEsignInviteLinks(links);
+      setRecipientStatusByEmail((prev) => {
+        const next = { ...prev };
+        Object.keys(links).forEach((email) => {
+          if (next[email] !== "Signed") next[email] = "Sent";
+        });
+        return next;
+      });
+      addEsignActivity(`Sent invite links to ${Object.keys(links).length} recipient(s)`);
+      // TODO: integrate SMTP provider for email delivery.
+      // TODO: persist /documents/{documentId}/ metadata when backend endpoint is available.
+      setShowSendModal(false);
+      setEsignStage("complete");
+      setEsignSentLocked(true);
+      setShowSentSuccessModal(true);
+      setSentDocuments((prev) => [
+        {
+          id: String(esignPacket?.packet_id || `doc_${Date.now()}`),
+          name: esignDocFile?.name || "Signed Document",
+          sentAt: Date.now(),
+          signerCount: esignSigners.length,
+          status: "Sent" as const,
+        },
+        ...prev,
+      ].slice(0, 20));
+    } finally {
+      setEsignSending(false);
+    }
   };
 
   const selectedField = esignFields.find((f) => f.id === esignSelectedFieldId);
@@ -1738,7 +1814,15 @@ const App: React.FC = () => {
         const current = f.value ?? "";
         if (current === newValue) return f;
         changed = true;
-        return { ...f, value: newValue };
+        let nextField = { ...f, value: newValue };
+        // Keep printed-name fields wide enough for full names.
+        if (f.type === "text" && f.placeholder !== "Text Field") {
+          const targetW = measurePrintedNameWidthPct(newValue || f.placeholder || "", f.pageIndex);
+          if (Math.abs((f.wPct || 0) - targetW) > 0.005) {
+            nextField = { ...nextField, wPct: targetW };
+          }
+        }
+        return nextField;
       });
       const updated = next.find((f) => f.id === boxId);
       if (DEBUG_ESIGN && updated) {
@@ -1842,9 +1926,38 @@ const App: React.FC = () => {
   }, [phase, esignMode, esignSigningAsEmail]);
 
   useEffect(() => {
+    if (!esignSignatureModal) return;
+    const modalField = esignSignatureModal.fieldId
+      ? esignFields.find((f) => f.id === esignSignatureModal.fieldId)
+      : null;
+    const key = ((modalField?.recipientEmail || esignSigningAsEmail || "").trim().toLowerCase());
+    const prefType = key ? esignDefaultsByRecipient[key]?.signatureType : undefined;
+    setEsignSignatureType(prefType || "typed");
+    setEsignDrawDataUrl("");
+  }, [esignSignatureModal, esignFields, esignSigningAsEmail, esignDefaultsByRecipient]);
+
+  useEffect(() => {
+    if (!esignSignatureModal) return;
+    if (phase !== "esign" || esignMode !== "prepare" || esignWizardStep !== 3) return;
+    if (!esignSignatureModal.fieldId && esignSignatureModal.type === "signature") {
+      // Keep review uninterrupted; signature setup belongs in placement or signer session.
+      setEsignSignatureModal(null);
+      setEsignPlacementHint("Set signature during field placement or signer session.");
+      window.setTimeout(() => setEsignPlacementHint(null), 1800);
+    }
+  }, [phase, esignMode, esignWizardStep, esignSignatureModal]);
+
+  useEffect(() => {
     if (esignWizardStep === 1) setEsignSideTab("recipients");
-    if (esignWizardStep === 2) setEsignSideTab("fields");
-  }, [esignWizardStep]);
+    if (esignWizardStep === 2) {
+      setEsignSideTab("fields");
+      setShowPlacementValidation(false);
+      setActiveSignerId((prev) => {
+        if (prev && esignSigners.some((s) => s.id === prev)) return prev;
+        return esignSigners[0]?.id || "";
+      });
+    }
+  }, [esignWizardStep, esignSigners]);
 
   const [esignExporting, setEsignExporting] = useState(false);
   const handleExportFilledPdf = async () => {
@@ -1872,9 +1985,16 @@ const App: React.FC = () => {
   useEffect(() => {
     if (phase !== "esign") return;
     const first = esignSigners[0];
-    if (first && !activeSignerId) setActiveSignerId(first.id);
+    if (first && (!activeSignerId || !esignSigners.some((s) => s.id === activeSignerId))) {
+      setActiveSignerId(first.id);
+    }
     if (first?.email && !esignSigningAsEmail) setEsignSigningAsEmail(first.email);
   }, [phase, esignSigners, activeSignerId, esignSigningAsEmail]);
+
+  useEffect(() => {
+    // Keep signer-specific signature canvas state isolated by active signer context.
+    setEsignDrawDataUrl("");
+  }, [activeSignerId]);
 
   useEffect(() => {
     if (phase !== "esign") return;
@@ -1961,6 +2081,35 @@ const App: React.FC = () => {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [phase, esignMode, esignEditingFieldId, esignSelectedFieldId, selectedField, esignPageDimensions, effectiveScale]);
+
+  useEffect(() => {
+    if (!showSendModal && !esignSignatureModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (esignSignatureModal) {
+          setEsignDrawDataUrl("");
+          setEsignSignatureModal(null);
+        }
+        if (showSendModal) setShowSendModal(false);
+        return;
+      }
+      if (e.key !== "Enter") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.closest("textarea,[contenteditable='true']"))) return;
+      if (showSendModal) {
+        e.preventDefault();
+        if (!esignSending) sendEsignInvitesFromModal();
+      } else if (esignSignatureModal) {
+        const btn = document.querySelector("[data-primary-signature-apply='true']") as HTMLButtonElement | null;
+        if (btn) {
+          e.preventDefault();
+          btn.click();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showSendModal, esignSignatureModal, esignSending]);
 
   const requiredFieldsComplete = (email: string) => {
     return esignFields
@@ -2460,40 +2609,12 @@ const App: React.FC = () => {
   const signingDisplayName = signerOption?.name?.trim() || esignSigningAsEmail || "Signer";
   const adoptedSignaturePreview = (esignSignatureValue || signingDisplayName || "").trim();
   const adoptedInitialsPreview = (esignInitialsValue || deriveInitials(signingDisplayName)).trim();
-  const allFieldsSorted = useMemo(
-    () =>
-      [...esignFields].sort((a, b) => {
-        if (a.pageIndex !== b.pageIndex) return a.pageIndex - b.pageIndex;
-        if (a.yPct !== b.yPct) return a.yPct - b.yPct;
-        return a.xPct - b.xPct;
-      }),
-    [esignFields]
-  );
-  const canSendNow =
-    esignSigners.filter((s) => Boolean((s.email || "").trim())).length > 0 &&
-    esignSigners
-      .filter((s) => Boolean((s.email || "").trim()))
-      .every((s) => esignFields.some((f) => f.recipientEmail === s.email && Boolean(f.required)));
-  const signerChecklist: string[] = [];
-  if (!esignDocFile) signerChecklist.push("Upload a document");
-  if (!esignPageCount) signerChecklist.push("Load PDF pages");
   const invalidEmails = esignSigners.filter((s) => !isValidEmail(s.email));
-  if (invalidEmails.length > 0) signerChecklist.push("Fix signer email addresses");
-  const missingRequiredBySigner = esignSigners.filter((s) => {
-    const required = esignFields.filter((f) => f.recipientEmail === s.email && Boolean(f.required));
-    if (s.role === "signer") {
-      return !required.some((f) => f.type === "signature" || f.type === "initials");
-    }
-    return required.length === 0;
-  });
-  if (missingRequiredBySigner.length > 0) signerChecklist.push("Add required signature/initials fields for each signer");
-  const canProceedReview = signerChecklist.length === 0;
-  const canReviewAndSend = canProceedReview && canSendNow;
+  const invalidNames = esignSigners.filter((s) => !Boolean((s.name || "").trim()));
   const senderIdentityReady =
     Boolean((esignSigners[0]?.name || "").trim()) &&
     isValidEmail(esignSigners[0]?.email || "");
-  const step1Ready = senderIdentityReady && invalidEmails.length === 0 && esignSigners.length > 0;
-  const step2Ready = step1Ready && missingRequiredBySigner.length === 0;
+  const step1Ready = invalidNames.length === 0 && invalidEmails.length === 0 && esignSigners.length > 0;
   const getFieldDisplayLabel = (f: typeof esignFields[number]) => {
     if (f.type === "signature") return "Signature";
     if (f.type === "initials") return "Initials";
@@ -2501,6 +2622,10 @@ const App: React.FC = () => {
     if (f.type === "text") return f.placeholder === "Text Field" ? "Text Field" : "Printed Name";
     return "Field";
   };
+  const getSignerRoleLabel = (s: typeof esignSigners[number]) =>
+    s.role === "host" ? "Document Owner" : "Signer";
+  const getSignerRoleLabelWithIndex = (s: typeof esignSigners[number], idx: number) =>
+    s.role === "host" ? "Document Owner" : `Signer ${idx + 1}`;
   const signerColorClass = (email: string) => {
     const idx = Math.max(0, esignSigners.findIndex((s) => s.email === email));
     const palette = [
@@ -2513,14 +2638,132 @@ const App: React.FC = () => {
   };
   const fieldBelongsToSigner = (f: typeof esignFields[number], s: typeof esignSigners[number]) =>
     (f.signerId ? f.signerId === s.id : f.recipientEmail === s.email);
+  // Centralized derived participant state used by sidebar + review.
+  const participantSummaries = useMemo(() => {
+    return esignSigners.map((s) => {
+      const owned = esignFields.filter((f) => fieldBelongsToSigner(f, s));
+      const required = owned.filter((f) => Boolean(f.required));
+      const requiredSigOrIni = required.filter((f) => f.type === "signature" || f.type === "initials");
+      const signaturesPlaced = owned.filter((f) => f.type === "signature").length;
+      const initialsPlaced = owned.filter((f) => f.type === "initials").length;
+      const printedNamePlaced = owned.filter((f) => f.type === "text" && f.placeholder !== "Text Field").length;
+      const datePlaced = owned.filter((f) => f.type === "date").length;
+      const optionalFieldsPlaced = owned.filter((f) => !f.required).length;
+      const initialsAutoPlacedCount = owned.filter((f) => f.type === "initials" && Boolean(f.isRepeatClone)).length;
+      const requiredFieldsTotal = 1;
+      const requiredFieldsPlaced = requiredSigOrIni.length > 0 ? 1 : 0;
+      const requiredFieldsRemaining = Math.max(0, requiredFieldsTotal - requiredFieldsPlaced);
+      return {
+        signer: s,
+        owned,
+        required,
+        signaturesPlaced,
+        initialsPlaced,
+        printedNamePlaced,
+        datePlaced,
+        optionalFieldsPlaced,
+        initialsAutoPlacedCount,
+        requiredFieldsTotal,
+        requiredFieldsPlaced,
+        requiredFieldsRemaining,
+      };
+    });
+  }, [esignSigners, esignFields]);
+  const allSignerRequirementsReady = participantSummaries.every(
+    (p) => p.requiredFieldsPlaced >= p.requiredFieldsTotal
+  );
+  const step2Ready = step1Ready && allSignerRequirementsReady;
+  useEffect(() => {
+    if (step2Ready) setShowPlacementValidation(false);
+  }, [step2Ready]);
+  type EsignStage = "add_signers" | "place_fields" | "review" | "complete";
+  const currentStage: EsignStage =
+    esignWizardStep === 1
+      ? "add_signers"
+      : esignWizardStep === 2
+        ? "place_fields"
+        : esignWizardStep === 3
+          ? "review"
+          : "complete";
+  const setEsignStage = (stage: EsignStage, expectedCurrentStage?: EsignStage) => {
+    // Defensive transition guard: only CTA-driven, expected-step transitions are allowed.
+    if (expectedCurrentStage && currentStage !== expectedCurrentStage) {
+      if (DEBUG_ESIGN) {
+        console.log("BLOCK_STAGE_TRANSITION", {
+          expected: expectedCurrentStage,
+          current: currentStage,
+          requested: stage,
+        });
+      }
+      return;
+    }
+    const nextStep = stage === "add_signers" ? 1 : stage === "place_fields" ? 2 : stage === "review" ? 3 : 4;
+    const scroller = esignPreviewRef.current;
+    if (scroller) {
+      stepScrollTopRef.current[esignWizardStep] = scroller.scrollTop;
+    }
+    setEsignWizardStep(nextStep);
+  };
+  // Single deterministic blocker reason for disabled "Send for Signature".
+  const firstValidationBlocker = useMemo(() => {
+    if (!esignDocFile) return { message: "Upload a document before sending.", signerId: null as string | null, fieldId: null as string | null };
+    if (!esignPageCount) return { message: "Load the document pages before sending.", signerId: null as string | null, fieldId: null as string | null };
+    if (!senderIdentityReady) return { message: "Set document owner name and valid email.", signerId: esignSigners[0]?.id || null, fieldId: null as string | null };
+    const invalidName = esignSigners.find((s) => !Boolean((s.name || "").trim()));
+    if (invalidName) return { message: "Each signer must have a valid name and email.", signerId: invalidName.id, fieldId: null as string | null };
+    const invalid = esignSigners.find((s) => !isValidEmail(s.email));
+    if (invalid) return { message: "Each signer must have a valid name and email.", signerId: invalid.id, fieldId: null as string | null };
+    const missing = participantSummaries.find((p) => p.requiredFieldsPlaced < p.requiredFieldsTotal);
+    if (missing) {
+      const jumpField = missing.owned.find((f) => f.type === "signature" || f.type === "initials")?.id || null;
+      const signerIdx = Math.max(0, esignSigners.findIndex((s) => s.id === missing.signer.id));
+      const who = getSignerRoleLabelWithIndex(missing.signer, signerIdx);
+      const remaining = Math.max(1, missing.requiredFieldsTotal - missing.requiredFieldsPlaced);
+      return {
+        message: `You still need to place ${remaining} field${remaining === 1 ? "" : "s"} for ${who}.`,
+        signerId: missing.signer.id,
+        fieldId: jumpField,
+      };
+    }
+    return null;
+  }, [esignDocFile, esignPageCount, senderIdentityReady, esignSigners, participantSummaries]);
+  const signerValidationMessage = firstValidationBlocker
+    ? "To continue:\n• Each signer must have a valid name and email.\n• Each signer must have at least one required signature or initials field."
+    : "";
+  const documentRepository = useMemo(() => {
+    const pending = sentDocuments.filter((d) => d.status === "Sent" || d.status === "Viewed");
+    const signed = sentDocuments.filter((d) => d.status === "Signed" || d.status === "Completed");
+    const drafts =
+      esignDocFile && !esignSentLocked
+        ? [{
+            id: `draft_${esignDocFile.name}`,
+            name: esignDocFile.name,
+            sentAt: Date.now(),
+            signerCount: esignSigners.length,
+            status: "Draft" as const,
+          }]
+        : [];
+    return { drafts, pending, signed };
+  }, [sentDocuments, esignDocFile, esignSentLocked, esignSigners.length]);
 
   useEffect(() => {
     syncAutoFooterInitials();
-  }, [autoPlaceInitialsEveryPage, esignPageCount, esignActiveRecipientEmail, esignSigningAsEmail, adoptedInitialsPreview, esignDocFile]);
+  }, [autoPlaceInitialsBySigner, esignPageCount, esignActiveRecipientEmail, esignSigningAsEmail, adoptedInitialsPreview, esignDocFile, esignSigners, esignDefaultsByRecipient]);
+
+  useEffect(() => {
+    if (phase !== "esign" || esignMode !== "prepare") return;
+    const scroller = esignPreviewRef.current;
+    if (!scroller) return;
+    const y = stepScrollTopRef.current[esignWizardStep];
+    if (typeof y !== "number") return;
+    requestAnimationFrame(() => {
+      scroller.scrollTop = y;
+    });
+  }, [phase, esignMode, esignWizardStep]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className={`${phase === "esign" ? "max-w-[1440px]" : "max-w-5xl"} mx-auto px-4 py-6 space-y-6`}>
+      <div className={`${phase === "esign" ? "max-w-[1440px] text-[15px] leading-relaxed" : "max-w-5xl"} mx-auto px-4 py-6 space-y-6`}>
         {phase !== "landing" && (
           <header className="flex items-center justify-between">
             <div>
@@ -2879,7 +3122,7 @@ const App: React.FC = () => {
         )}
 
         {phase === "esign" && (
-        <section className={`rounded-xl border border-slate-800 ${esignMode === "sign" ? "p-3 space-y-3" : "p-4 space-y-4"}`}>
+        <section className={`w-full overflow-x-hidden rounded-xl border border-slate-800 ${esignMode === "sign" ? "p-3 space-y-3" : "p-4 space-y-4"}`}>
           <h2 className="text-lg font-semibold">Signed Record</h2>
           {esignMode !== "sign" && (
             <div className="text-xs text-slate-400">
@@ -2887,21 +3130,21 @@ const App: React.FC = () => {
             </div>
           )}
           {esignDocFile && (
-            <div className="flex flex-wrap items-center gap-4 py-2 border-b border-slate-700 text-sm">
-              <div className="flex items-center gap-2 text-xs">
-                <span className={`${esignWizardStep === 1 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>1. Add Signers</span>
+            <div className="flex w-full flex-col gap-3 py-2 border-b border-slate-700 text-[15px] md:flex-row md:items-center md:gap-4">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className={`${esignWizardStep === 1 ? "text-emerald-400 font-semibold" : "text-slate-400"}`}>1. Add Signers</span>
                 <span className="text-slate-600">→</span>
-                <span className={`${esignWizardStep === 2 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>2. Place Fields</span>
+                <span className={`${esignWizardStep === 2 ? "text-emerald-400 font-semibold" : "text-slate-400"}`}>2. Place Fields</span>
                 <span className="text-slate-600">→</span>
-                <span className={`${esignWizardStep === 3 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>3. Review & Send</span>
+                <span className={`${esignWizardStep === 3 ? "text-emerald-400 font-semibold" : "text-slate-400"}`}>3. Review & Send</span>
                 <span className="text-slate-600">→</span>
-                <span className={`${esignWizardStep === 4 ? "text-emerald-400 font-medium" : "text-slate-500"}`}>4. Complete</span>
+                <span className={`${esignWizardStep === 4 ? "text-emerald-400 font-semibold" : "text-slate-400"}`}>4. Complete</span>
               </div>
               {esignSigners.length > 0 && (
-                <div className="ml-auto flex items-center gap-2">
+                <div className="flex w-full flex-wrap items-center gap-2 md:ml-auto md:w-auto">
                   <button
                     type="button"
-                    className="btn text-xs lg:hidden"
+                    className="hidden"
                     onClick={() => setMobileSidePanelOpen(true)}
                   >
                     Panel
@@ -2915,80 +3158,6 @@ const App: React.FC = () => {
                     >
                       {esignExporting ? "Exporting…" : "Export filled PDF"}
                     </button>
-                  )}
-                  {esignMode === "prepare" && (
-                    <>
-                      {esignWizardStep === 1 && (
-                        <button
-                          type="button"
-                          className={`btn text-xs ${step1Ready ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
-                          disabled={!step1Ready}
-                          onClick={() => setEsignWizardStep(2)}
-                        >
-                          Next: Place Fields
-                        </button>
-                      )}
-                      {esignWizardStep === 2 && (
-                        <button
-                          type="button"
-                          className={`btn text-xs ${step2Ready ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
-                          disabled={!step2Ready}
-                          onClick={() => setEsignWizardStep(3)}
-                        >
-                          Next: Review & Send
-                        </button>
-                      )}
-                      {esignWizardStep === 3 && (
-                        <>
-                          <button
-                            type="button"
-                            className="btn text-xs"
-                            onClick={() => {
-                              if (!activeSigner?.email) return;
-                              setEsignSigningAsEmail(activeSigner.email);
-                              setEsignMode("sign");
-                            }}
-                          >
-                            Preview signer session
-                          </button>
-                          <button
-                            data-testid="send-button"
-                            type="button"
-                            className={`btn text-xs ${canReviewAndSend && !esignSentLocked ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
-                            disabled={!canReviewAndSend || esignSentLocked}
-                            onClick={() => {
-                              if (esignSigners.filter((s) => Boolean((s.email || "").trim())).length <= 1) {
-                                handleExportFilledPdf();
-                                setEsignWizardStep(4);
-                                return;
-                              }
-                              setShowSendModal(true);
-                            }}
-                          >
-                            {esignSigners.filter((s) => Boolean((s.email || "").trim())).length <= 1
-                              ? "Complete Signing"
-                              : "Send for Signature"}
-                          </button>
-                        </>
-                      )}
-                      {esignWizardStep === 4 && (
-                        <button
-                          type="button"
-                          className="btn text-xs bg-emerald-600 hover:bg-emerald-500"
-                          onClick={handleExportFilledPdf}
-                          disabled={esignExporting}
-                        >
-                          {esignExporting ? "Exporting…" : "Download Signed PDF"}
-                        </button>
-                      )}
-                      {signerChecklist.length > 0 && esignWizardStep !== 4 && (
-                        <div className="rounded border border-slate-700 bg-slate-900/50 px-2 py-1 text-[11px] text-slate-300">
-                          {signerChecklist.map((item) => (
-                            <div key={item}>- {item}</div>
-                          ))}
-                        </div>
-                      )}
-                    </>
                   )}
                   {esignDocFile.type === "application/pdf" && esignMode !== "sign" && (
                     <div className="flex items-center gap-1 rounded-lg border border-slate-700 p-0.5">
@@ -3018,15 +3187,6 @@ const App: React.FC = () => {
                         {Math.round(effectiveScale * 100)}%
                       </span>
                     </div>
-                  )}
-                  {esignWizardStep > 1 && esignMode === "prepare" && (
-                    <button
-                      type="button"
-                      className="btn text-xs ml-1"
-                      onClick={() => setEsignWizardStep((s) => (Math.max(1, s - 1) as 1 | 2 | 3 | 4))}
-                    >
-                      Back
-                    </button>
                   )}
                 </div>
               )}
@@ -3215,64 +3375,70 @@ const App: React.FC = () => {
                 {/* Prepare: toolbar, active recipient, Fields counter */}
                 {esignMode === "prepare" && esignWizardStep === 2 && (
                   <div className="flex flex-wrap items-center gap-3 mb-2 pb-2 border-b border-slate-700">
-                    <span className="text-xs font-medium text-slate-300">Active signer:</span>
-                    <span className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100">
-                      {activeSigner?.name?.trim() || activeSigner?.email || "Select signer in right panel"}
+                    <span className="text-sm font-medium text-slate-300">Placing fields for:</span>
+                    <span className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100 transition-colors duration-200">
+                      {activeSigner
+                        ? getSignerRoleLabelWithIndex(activeSigner, Math.max(0, esignSigners.findIndex((s) => s.id === activeSigner.id)))
+                        : "Select signer in right panel"}
                     </span>
                     <span className="text-slate-500">|</span>
                     <span className="text-xs text-slate-400">Tools:</span>
                     {(["signature", "initials", "date"] as const).map((t) => (
                       <button
                         key={t}
-                        className={`btn text-xs ${esignFieldTool === t ? "ring-2 ring-emerald-400" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
+                        title={t === "signature" ? "Place a signature field" : t === "initials" ? "Place an initials field" : "Place a date field"}
+                        className={`btn text-xs ${esignFieldTool === t ? "ring-2 ring-emerald-400 bg-emerald-900/25 text-emerald-200" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
                         disabled={esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email)}
                         onClick={() => {
+                          if (currentStage !== "place_fields") return;
                           setEsignFieldTool(t);
                           setEsignPlacementHint(null);
                         }}
                       >
-                        {t === "signature" ? "Signature" : t === "initials" ? "Initials" : "Date"}
+                        {esignFieldTool === t ? "● " : ""}{t === "signature" ? "Signature" : t === "initials" ? "Initials" : "Date"}
                       </button>
                     ))}
                     <button
-                      className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "printedName" ? "ring-2 ring-emerald-400" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
+                      title="Place a printed name field"
+                      className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "printedName" ? "ring-2 ring-emerald-400 bg-emerald-900/25 text-emerald-200" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
                       disabled={esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email)}
                       onClick={() => {
+                        if (currentStage !== "place_fields") return;
                         setEsignFieldTool("text");
                         setTextToolKind("printedName");
                         setEsignPlacementHint(null);
                       }}
                     >
-                      Printed Name
+                      {esignFieldTool === "text" && textToolKind === "printedName" ? "● " : ""}Printed Name
                     </button>
                     <button
-                      className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "textField" ? "ring-2 ring-emerald-400" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
+                      title="Place a free text field"
+                      className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "textField" ? "ring-2 ring-emerald-400 bg-emerald-900/25 text-emerald-200" : ""} ${esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
                       disabled={esignSentLocked || !activeSigner || !isValidEmail(activeSigner.email)}
                       onClick={() => {
+                        if (currentStage !== "place_fields") return;
                         setEsignFieldTool("text");
                         setTextToolKind("textField");
                         setEsignPlacementHint(null);
                       }}
                     >
-                      Text Field
+                      {esignFieldTool === "text" && textToolKind === "textField" ? "● " : ""}Text Field
                     </button>
-                    <span className="text-slate-500">|</span>
-                    <span className="text-xs font-medium text-emerald-300">Fields: {esignFields.length}</span>
                     <span className="text-xs text-slate-400">
                       {!activeSigner
                         ? "Select a signer in the right panel to place fields."
                         : !isValidEmail(activeSigner.email)
                           ? "Add a valid signer email before placing fields."
                           : esignFieldTool
-                            ? (esignPlacementHint ?? `Click on document to place ${esignFieldTool === "signature" ? "Signature" : esignFieldTool === "initials" ? "Initials" : esignFieldTool === "date" ? "Date" : (textToolKind === "textField" ? "Text Field" : "Printed Name")} for ${activeSigner.name || "signer"}`)
-                            : "Select a tool, then click on document to place."}
+                            ? (esignPlacementHint ?? "Select a tool, then click on the document to place.")
+                            : "Select a tool, then click on the document to place."}
                     </span>
                   </div>
                 )}
-                <div className={`grid grid-cols-1 ${esignMode === "sign" ? "lg:grid-cols-[1fr,260px]" : "lg:grid-cols-[1fr,220px]"} gap-3`}>
+                <div className="flex flex-col gap-3 md:flex-row md:gap-8 md:max-w-6xl md:mx-auto">
                 <div
                   ref={esignPreviewRef}
-                  className="relative border border-slate-800 bg-slate-900 overflow-y-auto"
+                  className="relative order-2 border border-slate-800 bg-slate-900 overflow-y-auto overflow-x-hidden max-h-[60vh] md:order-1 md:max-h-none md:flex-1"
                   style={{ height: esignPreviewHeight }}
                   onMouseMove={esignMode === "prepare" && esignWizardStep === 2 ? onMoveBox : undefined}
                   onMouseUp={esignMode === "prepare" && esignWizardStep === 2 ? endDragBox : undefined}
@@ -3372,11 +3538,12 @@ const App: React.FC = () => {
                               .map((box) => {
                                 const dims = esignPageDimensions[pageIndex];
                                 if (!dims) return null;
-                                const recipientName =
-                                  esignSigners.find((s) => (box.signerId ? s.id === box.signerId : s.email === box.recipientEmail))?.name ||
-                                  "Recipient";
+                                const ownerSigner =
+                                  esignSigners.find((s) => (box.signerId ? s.id === box.signerId : s.email === box.recipientEmail));
+                                const recipientName = ownerSigner?.name || "Recipient";
+                                const recipientRole = ownerSigner ? getSignerRoleLabel(ownerSigner) : "Signer";
                                 const typeLabel = getFieldDisplayLabel(box);
-                                const label = `${typeLabel} • ${recipientName}`;
+                                const label = `${typeLabel}${box.required ? " *" : ""} - ${recipientRole}`;
                                 const isFilled = Boolean(box.value && String(box.value).trim());
                                 const isSelected = esignSelectedFieldId === box.id;
                                 const isHighlighted = esignHighlightedFieldId === box.id;
@@ -3392,6 +3559,14 @@ const App: React.FC = () => {
                                   (esignSigningAsEmail || "").toLowerCase();
                                 const ownerLabel = isSelfOwned ? "You" : recipientName;
                                 const color = signerColorClass(box.recipientEmail || "");
+                                const displayText = String((box.value ?? box.placeholder ?? "") || "");
+                                const baseFontPx = Math.max(11, Math.min(22, (box.hPct * renderH) * 0.42));
+                                const widthPx = Math.max(44, box.wPct * renderW - 12);
+                                const estTextPx = Math.max(1, displayText.length) * baseFontPx * 0.55;
+                                const fittedFontPx = Math.max(
+                                  10,
+                                  Math.min(baseFontPx, baseFontPx * Math.min(1, widthPx / estTextPx))
+                                );
                                 return (
                                   <div
                                     key={box.id}
@@ -3399,7 +3574,7 @@ const App: React.FC = () => {
                                     data-esign-field-id={box.id}
                                     data-esign-target={isTargeted ? "true" : "false"}
                                     title={`${typeLabel}\nAssigned to: ${recipientName}`}
-                                    className={`absolute z-[100] pointer-events-auto ${color.bg} ${color.text} text-xs select-none ${isFilled ? `border ${color.border}` : `border border-dashed ${color.dash}`} ${isSelected && inPrepareMode ? "ring-2 ring-emerald-400 shadow-lg shadow-emerald-500/20" : ""} ${isHighlighted ? "ring-1 ring-sky-400/50" : ""} ${isTargeted ? "border-sky-300 ring-2 ring-sky-300/60 shadow-sm shadow-sky-500/20" : ""} ${inSignMode && !box.required ? "opacity-60" : ""} ${inSignMode && !isMe ? "opacity-45 saturate-50 cursor-not-allowed" : ""}`}
+                                    className={`absolute z-[100] pointer-events-auto ${color.bg} ${color.text} text-sm select-none ${isFilled ? `border-2 ${color.border}` : `border-2 border-dashed ${color.dash}`} ${isSelected && inPrepareMode ? "ring-2 ring-emerald-400 shadow-[0_0_0_2px_rgba(16,185,129,0.25)]" : ""} ${isHighlighted ? "ring-1 ring-sky-400/50" : ""} ${isTargeted ? "border-sky-300 ring-2 ring-sky-300/60" : ""} ${autoPlacedPulseFieldIds[box.id] ? "animate-pulse" : ""} ${inPrepareMode ? "cursor-move" : ""} ${inSignMode && !box.required ? "opacity-60" : ""} ${inSignMode && !isMe ? "opacity-45 saturate-50 cursor-not-allowed" : ""}`}
                                     style={{
                                       left: `${box.xPct * 100}%`,
                                       top: `${box.yPct * 100}%`,
@@ -3417,9 +3592,9 @@ const App: React.FC = () => {
                                       if (inSignMode && isMe) {
                                         setTargetField(box.id);
                                         if (box.type === "signature") {
-                                          setEsignSignatureModal({ fieldId: box.id, type: "signature" });
+                                          if (!(box.value || "").trim()) setEsignSignatureModal({ fieldId: box.id, type: "signature" });
                                         } else if (box.type === "initials") {
-                                          setEsignSignatureModal({ fieldId: box.id, type: "initials" });
+                                          if (!(box.value || "").trim()) setEsignSignatureModal({ fieldId: box.id, type: "initials" });
                                         } else if (box.type === "text") {
                                           setEsignEditingFieldId(box.id);
                                           setDraftValue(box.id, box.value ?? "");
@@ -3481,15 +3656,18 @@ const App: React.FC = () => {
                                       </button>
                                     )}
                                     {/* Content area - controlled by box.value, draft when editing; visible on PDF */}
-                                    <div className="p-1 overflow-hidden flex-1 min-h-0 flex flex-col justify-center">
+                                    <div
+                                      className={`${box.type === "text" && box.placeholder !== "Text Field" ? "overflow-visible" : "overflow-hidden"} flex-1 min-h-0 flex flex-col justify-center`}
+                                      style={{ padding: `${Math.max(2, Math.min(10, fittedFontPx * 0.35))}px` }}
+                                    >
                                       {box.type === "text" && (
                                         (() => {
-                                          if (DEBUG_ESIGN) console.log("RENDER_FIELD", { id: box.id, type: "text", value: box.value ?? "", draft: esignDraftById[box.id] ?? null });
                                           return isEditing ? (
                                             <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
                                               <input
                                                 type="text"
-                                                className="w-full min-h-[2em] bg-white border border-emerald-500 text-[#111] text-xs p-1 rounded z-[110]"
+                                                className="w-full min-h-[2em] bg-transparent border border-emerald-400/80 text-[#111] text-sm p-1.5 rounded z-[110]"
+                                                style={{ fontSize: `${fittedFontPx}px` }}
                                                 value={esignDraftById[box.id] ?? box.value ?? ""}
                                                 onChange={(e) => setDraftValue(box.id, e.target.value)}
                                                 onBlur={(e) => {
@@ -3526,7 +3704,8 @@ const App: React.FC = () => {
                                             </div>
                                           ) : (
                                             <div
-                                              className="w-full min-h-[2em] bg-white/95 border border-slate-300 text-[#111] text-xs p-1 rounded truncate flex items-center cursor-pointer hover:border-emerald-400/50"
+                                              className="w-full min-h-[2em] bg-transparent border border-slate-400/70 text-[#111] text-sm p-2 rounded truncate flex items-center cursor-pointer hover:border-emerald-400/50"
+                                              style={{ fontSize: `${fittedFontPx}px` }}
                                               onClick={(e) => { e.stopPropagation(); if (inPrepareMode || (inSignMode && isMe)) { setEsignEditingFieldId(box.id); setDraftValue(box.id, box.value ?? ""); } }}
                                             >
                                               {(box.value ?? "") || (box.placeholder || "Printed name")}
@@ -3536,12 +3715,12 @@ const App: React.FC = () => {
                                       )}
                                       {box.type === "date" && (
                                         (() => {
-                                          if (DEBUG_ESIGN) console.log("RENDER_FIELD", { id: box.id, type: "date", value: box.value ?? "", draft: esignDraftById[box.id] ?? null });
                                           return isEditing ? (
                                             <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
                                               <input
                                                 type="date"
-                                                className="w-full bg-white border border-emerald-500 text-[#111] text-xs p-1 rounded z-[110]"
+                                                className="w-full bg-transparent border border-emerald-400/80 text-[#111] text-sm p-1.5 rounded z-[110]"
+                                                style={{ fontSize: `${fittedFontPx}px` }}
                                                 value={esignDraftById[box.id] ?? box.value ?? ""}
                                                 onChange={(e) => setDraftValue(box.id, e.target.value)}
                                                 onBlur={(e) => {
@@ -3578,7 +3757,8 @@ const App: React.FC = () => {
                                             </div>
                                           ) : (
                                             <div
-                                              className="w-full min-h-[2em] bg-white/95 border border-slate-300 text-[#111] text-xs p-1 rounded flex items-center cursor-pointer hover:border-emerald-400/50"
+                                              className="w-full min-h-[2em] bg-transparent border border-slate-400/70 text-[#111] text-sm p-2 rounded flex items-center cursor-pointer hover:border-emerald-400/50"
+                                              style={{ fontSize: `${fittedFontPx}px` }}
                                               onClick={(e) => { e.stopPropagation(); if (inPrepareMode || (inSignMode && isMe)) { setEsignEditingFieldId(box.id); setDraftValue(box.id, box.value || new Date().toISOString().slice(0, 10)); } }}
                                             >
                                               {(box.value ?? "") || box.placeholder || "Date"}
@@ -3591,12 +3771,12 @@ const App: React.FC = () => {
                                           (box.value || "").startsWith("data:image") ? (
                                             <img src={box.value} alt="" className="max-h-full max-w-full object-contain" />
                                           ) : (
-                                            <div className="text-[#111] font-serif italic truncate text-sm" style={{ fontFamily: "Georgia, 'Brush Script MT', cursive" }}>{String(box.value)}</div>
+                                            <div className="text-[#111] font-serif italic truncate text-sm" style={{ fontSize: `${Math.max(11, fittedFontPx * 0.95)}px`, fontFamily: "Georgia, 'Brush Script MT', cursive" }}>{String(box.value)}</div>
                                           )
                                         ) : inSignMode && !isMe ? (
                                           <div className="text-emerald-200/50 text-[10px]">Assigned to {recipientName}</div>
                                         ) : (
-                                          <div className="w-full h-full rounded border border-dashed border-slate-500/50 text-slate-300/80 text-[11px] cursor-pointer flex items-center justify-center">
+                                          <div className="w-full h-full rounded border-2 border-dashed border-emerald-400/70 text-emerald-200/90 text-[11px] cursor-pointer flex items-center justify-center">
                                             Signature
                                           </div>
                                         )
@@ -3606,13 +3786,16 @@ const App: React.FC = () => {
                                           (box.value || "").startsWith("data:image") ? (
                                             <img src={box.value} alt="" className="max-h-full max-w-full object-contain" />
                                           ) : (
-                                            <div className="text-[#111] font-serif italic truncate text-sm" style={{ fontFamily: "Georgia, 'Brush Script MT', cursive" }}>{String(box.value)}</div>
+                                            <div className="text-[#111] font-serif italic truncate text-sm" style={{ fontSize: `${Math.max(11, fittedFontPx * 0.95)}px`, fontFamily: "Georgia, 'Brush Script MT', cursive" }}>{String(box.value)}</div>
                                           )
                                         ) : inSignMode && !isMe ? (
                                           <div className="text-emerald-200/50 text-[10px]">Assigned to {recipientName}</div>
                                         ) : (
-                                          <div className="w-full h-full rounded border border-dashed border-slate-500/50 text-slate-300/80 text-[11px] cursor-pointer flex items-center justify-center">
-                                            Initials
+                                          <div
+                                            className="w-full h-full rounded border-2 border-dashed border-violet-400/70 text-violet-200/90 text-[11px] cursor-pointer flex items-center justify-center transition-opacity duration-300 opacity-80"
+                                            title={box.isRepeatClone ? "Initials auto-placed on all pages." : undefined}
+                                          >
+                                            {box.placeholder || "Initials"}
                                           </div>
                                         )
                                       )}
@@ -3620,10 +3803,10 @@ const App: React.FC = () => {
                                     {/* Resize handles (Prepare mode only) */}
                                     {inPrepareMode && (
                                       <>
-                                        <div data-resize className="absolute right-0 bottom-0 w-2 h-2 bg-emerald-400 cursor-se-resize" onMouseDown={(e) => { e.stopPropagation(); startDragBox(e, box.id, "resize-se"); }} />
-                                        <div data-resize className="absolute left-0 bottom-0 w-2 h-2 bg-emerald-400 cursor-sw-resize" onMouseDown={(e) => { e.stopPropagation(); startDragBox(e, box.id, "resize-sw"); }} />
-                                        <div data-resize className="absolute right-0 top-0 w-2 h-2 bg-emerald-400 cursor-ne-resize" onMouseDown={(e) => { e.stopPropagation(); startDragBox(e, box.id, "resize-ne"); }} />
-                                        <div data-resize className="absolute left-0 top-0 w-2 h-2 bg-emerald-400 cursor-nw-resize" onMouseDown={(e) => { e.stopPropagation(); startDragBox(e, box.id, "resize-nw"); }} />
+                                        <div data-resize className="absolute right-0 bottom-0 w-3.5 h-3.5 bg-emerald-400 cursor-se-resize rounded-sm" onMouseDown={(e) => { e.stopPropagation(); startDragBox(e, box.id, "resize-se"); }} />
+                                        <div data-resize className="absolute left-0 bottom-0 w-3.5 h-3.5 bg-emerald-400 cursor-sw-resize rounded-sm" onMouseDown={(e) => { e.stopPropagation(); startDragBox(e, box.id, "resize-sw"); }} />
+                                        <div data-resize className="absolute right-0 top-0 w-3.5 h-3.5 bg-emerald-400 cursor-ne-resize rounded-sm" onMouseDown={(e) => { e.stopPropagation(); startDragBox(e, box.id, "resize-ne"); }} />
+                                        <div data-resize className="absolute left-0 top-0 w-3.5 h-3.5 bg-emerald-400 cursor-nw-resize rounded-sm" onMouseDown={(e) => { e.stopPropagation(); startDragBox(e, box.id, "resize-nw"); }} />
                                       </>
                                     )}
                                   </div>
@@ -3647,93 +3830,36 @@ const App: React.FC = () => {
                   )}
                   </div>
                 </div>
-                <div className="hidden lg:flex flex-col rounded border border-slate-700 bg-slate-900/60 p-2 text-xs h-fit min-h-[420px]">
+                <div className="order-1 flex w-full flex-col rounded border border-slate-700 bg-slate-900/60 p-4 text-sm md:order-2 md:max-w-md md:min-h-[420px] md:h-fit">
                   {esignMode === "prepare" && esignWizardStep === 1 && (
-                    <div data-testid="sender-identity" className="mb-2 rounded border border-slate-700 p-2 space-y-2">
-                      <div className="text-[11px] text-slate-400">🧑 Your Signing Identity</div>
-                      <label className="block text-[11px] text-slate-400">
-                        Full Name
-                        <input
-                          className="mt-1 w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-slate-200"
-                          value={esignSigners[0]?.name || ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setEsignSigners((prev) => {
-                              const first = prev[0] || { id: `signer_${Date.now()}`, name: "", email: "", role: "host", status: "Not Sent" as const };
-                              return [{ ...first, name: val, role: "host" }, ...prev.slice(1)];
-                            });
-                            setEsignSignatureValue(val);
-                            setEsignInitialsValue(deriveInitials(val));
-                          }}
-                          placeholder="Your full name"
-                        />
-                      </label>
-                      <label className="block text-[11px] text-slate-400">
-                        Email
-                        <input
-                          className="mt-1 w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-slate-200"
-                          value={esignSigners[0]?.email || ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setEsignSigners((prev) => {
-                              const first = prev[0] || { id: `signer_${Date.now()}`, name: "", email: "", role: "host", status: "Not Sent" as const };
-                              return [{ ...first, email: val, role: "host" }, ...prev.slice(1)];
-                            });
-                            if (!esignSigningAsEmail) setEsignSigningAsEmail(val);
-                          }}
-                          placeholder="you@email.com"
-                        />
-                      </label>
-                      <div className="grid grid-cols-2 gap-1 text-[11px]">
-                        <div className="rounded border border-slate-700 px-2 py-1">
-                          <div className="text-slate-400">Signature</div>
-                          <div className="text-slate-200 truncate">{adoptedSignaturePreview || "Not set"}</div>
-                        </div>
-                        <div className="rounded border border-slate-700 px-2 py-1">
-                          <div className="text-slate-400">Initials</div>
-                          <div className="text-slate-200 truncate">{adoptedInitialsPreview || "Not set"}</div>
-                        </div>
-                      </div>
-                      <div className="flex gap-1">
-                        <button data-testid="adopt-signature" className="btn text-xs flex-1" onClick={() => setEsignSignatureModal({ type: "signature" })}>Adopt signature</button>
-                        <button data-testid="adopt-initials" className="btn text-xs flex-1" onClick={() => setEsignSignatureModal({ type: "initials" })}>Adopt initials</button>
-                      </div>
-                      <label className="flex items-center gap-2 text-[11px] text-slate-300">
-                        <input
-                          type="checkbox"
-                          checked={autoPlaceInitialsEveryPage}
-                          onChange={(e) => setAutoPlaceInitialsEveryPage(e.target.checked)}
-                        />
-                        Auto-place initials on every page
-                      </label>
-                    </div>
-                  )}
-                  {esignMode === "prepare" && (esignWizardStep === 1 || esignWizardStep === 2) && (
-                  <div className="grid grid-cols-2 gap-1 mb-2">
-                    <button className={`btn text-xs ${esignSideTab === "recipients" ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignSideTab("recipients")}>Recipients</button>
-                    <button className={`btn text-xs ${esignSideTab === "fields" ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignSideTab("fields")}>Fields</button>
-                  </div>
-                  )}
-                  {esignMode === "prepare" && esignWizardStep === 1 && esignSideTab === "recipients" && (
                     <div className="space-y-2">
-                      <button
-                        type="button"
-                        className={`btn w-full text-xs ${canProceedReview ? "bg-emerald-600 hover:bg-emerald-500" : ""}`}
-                        onClick={() => { setEsignStep("place"); setEsignSideTab("fields"); }}
-                      >
-                        Next: Place Fields
-                      </button>
-                      <div className="text-[11px] font-semibold tracking-wide text-slate-300">SIGNERS</div>
+                      <div className="text-xs font-semibold tracking-wide text-slate-200">SIGNERS</div>
                       {esignSigners.map((s, idx) => (
                         <div
                           key={s.id}
-                          className={`rounded border p-2 space-y-1 cursor-pointer ${activeSignerId === s.id ? "border-emerald-400 bg-emerald-900/15" : "border-slate-700"}`}
+                          className={`rounded border p-2 space-y-1 cursor-pointer transition-all duration-200 ${activeSignerId === s.id ? "border-emerald-400 bg-emerald-900/15 ring-1 ring-emerald-400/40" : "border-slate-700 hover:border-slate-500"}`}
                           onClick={() => setActiveSignerId(s.id)}
                         >
                           <div className="flex items-center justify-between">
-                            <span className="text-slate-200 text-xs">{activeSignerId === s.id ? "✔" : "◻"} {idx === 0 ? "You (Host)" : (s.name?.trim() || `Signer ${idx + 1}`)}</span>
+                            <span className="text-slate-200 text-xs whitespace-normal break-words max-w-[70%]">
+                              {activeSignerId === s.id ? "✔" : "◻"} {s.name?.trim() || getSignerRoleLabelWithIndex(s, idx)}
+                            </span>
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] shrink-0 ${s.role === "host" ? "bg-amber-900/40 text-amber-300 border border-amber-700/50" : "bg-blue-900/30 text-blue-300 border border-blue-700/40"}`}>
+                              {getSignerRoleLabelWithIndex(s, idx)}
+                            </span>
                             {idx > 0 && (
-                              <button className="btn text-xs" onClick={(e) => { e.stopPropagation(); addEsignActivity(`Removed signer ${s.email || s.name || idx + 1}`); setEsignSigners(esignSigners.filter((_, i) => i !== idx)); setActiveSignerId((prev) => (prev === s.id ? (esignSigners[0]?.id || "") : prev)); }}>
+                              <button
+                                className="btn text-xs"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addEsignActivity(`Removed signer ${s.email || s.name || idx + 1}`);
+                                  setEsignSigners((prev) => {
+                                    const next = prev.filter((x) => x.id !== s.id);
+                                    setActiveSignerId((current) => (current === s.id ? (next[0]?.id || "") : current));
+                                    return next;
+                                  });
+                                }}
+                              >
                                 Remove
                               </button>
                             )}
@@ -3746,149 +3872,222 @@ const App: React.FC = () => {
                           <div className="flex items-center justify-between text-[11px]">
                             <span className="text-slate-400">{recipientStatusByEmail[s.email] || "Not Sent"}</span>
                           </div>
-                        </div>
-                      ))}
-                      <button className="btn w-full text-xs" onClick={() => { setEsignSigners([...esignSigners, { id: `signer_${Date.now()}`, name: "", email: "", role: "signer", status: "Not Sent" }]); addEsignActivity("Added signer"); }}>
-                        + Add signer
-                      </button>
-                      {step1Ready ? (
-                        <div className="text-[11px] text-emerald-300">
-                          All signer emails valid. Continue to field placement.
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-slate-400">
-                          Add sender + signer details and valid emails to continue.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {esignMode === "prepare" && esignWizardStep === 2 && esignSideTab === "fields" && (
-                    <div className="space-y-2">
-                      <button
-                        type="button"
-                        className="btn w-full text-xs"
-                        onClick={() => setEsignWizardStep(1)}
-                      >
-                        Back to Signers
-                      </button>
-                      <div className="grid grid-cols-1 gap-1">
-                        {esignSigners.map((s, idx) => (
-                          <button
-                            key={`pick-${s.id}`}
-                            type="button"
-                            className={`w-full rounded border px-2 py-1 text-left text-[11px] ${activeSignerId === s.id ? "border-emerald-400 bg-emerald-900/15 text-emerald-200" : "border-slate-700 text-slate-300 hover:border-slate-500"}`}
-                            onClick={() => setActiveSignerId(s.id)}
-                          >
-                            {idx === 0 ? "Document Owner" : `Signer ${idx}`}: {s.name || s.email || "Unspecified"}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="grid grid-cols-2 gap-1">
-                        {(["signature", "initials", "date"] as const).map((t) => (
-                          <button key={t} className={`btn text-xs ${esignFieldTool === t ? "ring-2 ring-emerald-400" : ""} ${!activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`} onClick={() => setEsignFieldTool(t)} disabled={!activeSigner || !isValidEmail(activeSigner.email)}>
-                            {t === "signature" ? "Signature" : t === "initials" ? "Initials" : "Date"}
-                          </button>
-                        ))}
-                        <button
-                          className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "printedName" ? "ring-2 ring-emerald-400" : ""} ${!activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
-                          onClick={() => { setEsignFieldTool("text"); setTextToolKind("printedName"); }}
-                          disabled={!activeSigner || !isValidEmail(activeSigner.email)}
-                        >
-                          Printed Name
-                        </button>
-                        <button
-                          className={`btn text-xs ${esignFieldTool === "text" && textToolKind === "textField" ? "ring-2 ring-emerald-400" : ""} ${!activeSigner || !isValidEmail(activeSigner.email) ? "opacity-60 cursor-not-allowed" : ""}`}
-                          onClick={() => { setEsignFieldTool("text"); setTextToolKind("textField"); }}
-                          disabled={!activeSigner || !isValidEmail(activeSigner.email)}
-                        >
-                          Text Field
-                        </button>
-                      </div>
-                      <div className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-300">
-                        Fields for{" "}
-                        <span className="font-medium text-slate-100">
-                          {activeSigner?.name?.trim() ||
-                            activeSigner?.email ||
-                            "selected signer"}
-                        </span>
-                      </div>
-                      {activeSigner?.role !== "host" && (
-                        <div className="text-[11px] text-slate-400">
-                          You are placing templates only. This signer will complete signature/initials/date in their signing session.
-                        </div>
-                      )}
-                      {((selectedField && selectedField.type === "initials") || esignFieldTool === "initials") && (
-                        <div className="rounded border border-slate-700 p-2">
-                          <label className="flex items-center gap-2 text-slate-300">
+                          <label className="flex items-center gap-2 text-[10px] text-slate-300">
                             <input
-                              data-testid="repeat-initials-toggle"
                               type="checkbox"
-                              disabled={esignPageCount <= 1 || !(selectedField && selectedField.type === "initials")}
-                              checked={Boolean(selectedField?.type === "initials" && selectedField.repeatGroupId)}
+                              checked={Boolean(autoPlaceInitialsBySigner[s.id])}
                               onChange={(e) => {
-                                if (!(selectedField && selectedField.type === "initials")) return;
-                                toggleRepeatInitialsForField(selectedField.id, e.target.checked);
+                                setAutoPlaceInitialsBySigner((prev) => ({ ...prev, [s.id]: e.target.checked }));
+                                if (e.target.checked) {
+                                  const pageCount = Math.max(esignPageCount, 0);
+                                  setEsignPlacementHint(`Initials auto-placed on all ${pageCount} pages.`);
+                                  window.setTimeout(() => setEsignPlacementHint(null), 1400);
+                                }
                               }}
                             />
-                            Place initials on every page for selected signer
+                            Auto-place initials on all pages
                           </label>
-                          {esignPageCount <= 1 && (
-                            <div className="text-[10px] text-slate-500 mt-1">Available when document has multiple pages.</div>
-                          )}
-                          <button
-                            type="button"
-                            className="btn text-xs mt-2 w-full"
-                            onClick={placeInitialsAtAllSignatureBlocks}
-                          >
-                            Place initials at all signature blocks (helper)
-                          </button>
-                        </div>
-                      )}
-                      <div className="space-y-1">
-                        {esignSigners.map((s) => {
-                          const byRecipient = allFieldsSorted.filter((f) => fieldBelongsToSigner(f, s));
-                          const required = byRecipient.filter((f) => Boolean(f.required));
-                          const complete = required.filter((f) => isFieldComplete(f));
-                          return (
-                            <div key={`grp-${s.email}`} className="flex items-center justify-between rounded border border-slate-700 px-2 py-1 text-[11px]">
-                              <span className="text-slate-300 truncate">{s.name || s.email}</span>
-                              <span className="text-slate-400">{complete.length}/{required.length} required complete</span>
+                          {Boolean(autoPlaceInitialsBySigner[s.id]) && (
+                            <div className="text-[10px] text-emerald-300">
+                              ✓ Initials auto-placed on {Math.max(esignPageCount, 0)} page{esignPageCount === 1 ? "" : "s"}
                             </div>
+                          )}
+                          {idx === 0 && (
+                            <div className="mt-2 rounded border border-slate-700 bg-slate-900/50 p-2 space-y-2">
+                              <div className="text-[11px] font-medium text-slate-200">Signature &amp; Initials</div>
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] text-slate-400">Signature style</span>
+                                  <div className="flex items-center gap-1">
+                                    {(["typed", "drawn", "image"] as const).map((style) => (
+                                      <button
+                                        key={`owner-sig-${style}`}
+                                        type="button"
+                                        className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                                          (esignDefaultsByRecipient[(s.email || "").toLowerCase()]?.signatureType || "typed") === style
+                                            ? "border-emerald-500/70 bg-emerald-900/30 text-emerald-200"
+                                            : "border-slate-600 bg-slate-900/50 text-slate-300"
+                                        }`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const key = (s.email || "").toLowerCase();
+                                          if (!key) return;
+                                          setEsignDefaultsByRecipient((prev) => ({
+                                            ...prev,
+                                            [key]: { ...prev[key], signatureType: style },
+                                          }));
+                                          setEsignSignatureType(style);
+                                        }}
+                                      >
+                                        {style === "typed" ? "Type" : style === "drawn" ? "Draw" : "Upload"}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] text-slate-400">Initials style</span>
+                                  <div className="flex items-center gap-1">
+                                    {(["typed", "drawn", "image"] as const).map((style) => (
+                                      <button
+                                        key={`owner-ini-${style}`}
+                                        type="button"
+                                        className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                                          ownerInitialsStyle === style
+                                            ? "border-emerald-500/70 bg-emerald-900/30 text-emerald-200"
+                                            : "border-slate-600 bg-slate-900/50 text-slate-300"
+                                        }`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setOwnerInitialsStyle(style);
+                                        }}
+                                      >
+                                        {style === "typed" ? "Type" : style === "drawn" ? "Draw" : "Upload"}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1 text-[10px]">
+                                <div className="rounded border border-slate-700 px-2 py-1">
+                                  <div className="text-slate-400">Signature</div>
+                                  <div className="truncate text-slate-100">{adoptedSignaturePreview || "Not set"}</div>
+                                  {!adoptedSignaturePreview && <span className="text-[9px] text-amber-300">Not set</span>}
+                                </div>
+                                <div className="rounded border border-slate-700 px-2 py-1">
+                                  <div className="text-slate-400">Initials</div>
+                                  <div className="truncate text-slate-100">{adoptedInitialsPreview || "Not set"}</div>
+                                  {!adoptedInitialsPreview && <span className="text-[9px] text-amber-300">Not set</span>}
+                                </div>
+                              </div>
+                              <div className="flex gap-1">
+                                <button
+                                  type="button"
+                                  className="btn flex-1 text-[10px]"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const pref = (esignDefaultsByRecipient[(s.email || "").toLowerCase()]?.signatureType || "typed");
+                                    setEsignSignatureType(pref);
+                                    setEsignSignatureModal({ type: "signature" });
+                                  }}
+                                >
+                                  Edit signature
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn flex-1 text-[10px]"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEsignSignatureType(ownerInitialsStyle);
+                                    setEsignSignatureModal({ type: "initials" });
+                                  }}
+                                >
+                                  Edit initials
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      <button className="btn w-full text-xs" onClick={() => { const id = `signer_${Date.now()}`; setEsignSigners([...esignSigners, { id, name: "", email: "", role: "signer", status: "Not Sent" }]); setActiveSignerId(id); addEsignActivity("Added signer"); }}>
+                        + Add Additional Signer
+                      </button>
+                    </div>
+                  )}
+                  {esignMode === "prepare" && esignWizardStep === 2 && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-semibold tracking-wide text-slate-100">Participants</div>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {participantSummaries.map((summary, idx) => {
+                          const s = summary.signer;
+                          const active = activeSignerId === s.id;
+                          return (
+                            <button
+                              key={`pick-${s.id}`}
+                              type="button"
+                              className={`w-full rounded border px-2.5 py-2 text-left transition ${active ? "border-emerald-400 bg-emerald-900/15 text-emerald-100 ring-1 ring-emerald-400/40" : "border-slate-700 text-slate-300 hover:border-slate-500"}`}
+                              onClick={() => {
+                                setActiveSignerId(s.id);
+                                setEsignFieldTool(null);
+                                setEsignSelectedFieldId(null);
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium whitespace-normal break-words leading-snug max-w-[72%]">
+                                  {getSignerRoleLabelWithIndex(s, idx)}: {s.name || s.email || "Unspecified"}
+                                </span>
+                                <span className={`rounded px-1.5 py-0.5 text-[11px] shrink-0 ${s.role === "host" ? "bg-amber-900/40 text-amber-300 border border-amber-700/50" : "bg-blue-900/30 text-blue-300 border border-blue-700/40"}`}>
+                                  {getSignerRoleLabelWithIndex(s, idx)}
+                                </span>
+                              </div>
+                              <div className="mt-1 text-[12px] text-slate-300">
+                                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
+                                  summary.requiredFieldsRemaining === 0
+                                    ? "border-emerald-700/40 bg-emerald-900/20 text-emerald-300"
+                                    : "border-slate-600 bg-slate-800/50 text-slate-300"
+                                }`}>
+                                  {summary.requiredFieldsRemaining === 0 ? "Status: Complete" : "Status: In Progress"}
+                                </span>
+                              </div>
+                              <div className="text-[12px] text-slate-400">
+                                Signatures placed: {summary.signaturesPlaced}
+                              </div>
+                              <div className="text-[12px] text-slate-400">
+                                Required fields remaining: {summary.requiredFieldsRemaining}
+                              </div>
+                              {summary.initialsAutoPlacedCount > 0 && (
+                                <div className="text-[12px] text-emerald-300">Initials auto-placed: {summary.initialsAutoPlacedCount} page{summary.initialsAutoPlacedCount === 1 ? "" : "s"}</div>
+                              )}
+                              {esignFieldTool === "initials" && activeSignerId === s.id && (
+                                <label
+                                  className="mt-1 flex items-center gap-2 text-[11px] text-slate-300"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(autoPlaceInitialsBySigner[s.id])}
+                                    disabled={esignPageCount <= 1}
+                                    onChange={(e) => {
+                                      setAutoPlaceInitialsBySigner((prev) => ({ ...prev, [s.id]: e.target.checked }));
+                                    }}
+                                  />
+                                  Auto-place initials on all pages
+                                </label>
+                              )}
+                              {summary.requiredFieldsRemaining > 0 && (
+                                <div className="mt-1 flex items-center gap-2">
+                                  <div className={`text-[11px] ${showPlacementValidation ? "text-amber-300" : "text-slate-400"}`}>
+                                    Fields remaining: {summary.requiredFieldsRemaining}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn text-[10px] px-1.5 py-0.5"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveSignerId(s.id);
+                                      const target = summary.required.find((f) => !isFieldComplete(f)) || summary.required[0];
+                                      if (target) {
+                                        setTargetField(target.id);
+                                        setEsignHighlightedFieldId(target.id);
+                                        window.setTimeout(() => setEsignHighlightedFieldId((prev) => (prev === target.id ? null : prev)), 900);
+                                      }
+                                    }}
+                                  >
+                                    Jump to next required
+                                  </button>
+                                </div>
+                              )}
+                            </button>
                           );
                         })}
                       </div>
-                      <div className="max-h-80 overflow-auto space-y-1">
-                        {allFieldsSorted.filter((f) => (activeSigner ? fieldBelongsToSigner(f, activeSigner) : false)).map((f, idx) => (
-                          <button key={f.id} className={`w-full text-left rounded border px-2 py-1 ${esignSelectedFieldId === f.id ? "border-emerald-400 bg-emerald-900/20" : "border-slate-700 hover:border-slate-500"}`} onClick={() => { setEsignSelectedFieldId(f.id); setTargetField(f.id); }}>
-                            <div className="flex items-center justify-between">
-                              <span>{idx + 1}. {getFieldDisplayLabel(f).toUpperCase()} p{f.pageIndex + 1}</span>
-                              <span className={isFieldComplete(f) ? "text-emerald-300" : "text-slate-400"}>{isFieldComplete(f) ? "Filled" : "Empty"}</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                      {selectedField && (
-                        <div className="rounded border border-slate-700 p-2 space-y-2">
-                          <div className="text-slate-300 text-[11px] font-medium">Selected field</div>
-                          <select
-                            className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1"
-                            value={selectedField.recipientEmail}
-                            onChange={(e) => {
-                              const nextEmail = e.target.value;
-                              const nextSigner = esignSigners.find((s) => s.email === nextEmail);
-                              updateField(selectedField.id, { recipientEmail: nextEmail, signerId: nextSigner?.id });
-                            }}
-                          >
-                            {esignSigners.map((s) => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
-                          </select>
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(selectedField.required)}
-                              onChange={(e) => updateField(selectedField.id, { required: e.target.checked })}
-                            />
-                            Required
-                          </label>
+                      {esignFieldTool && (
+                        <div className="rounded border border-slate-700 bg-slate-900 px-2.5 py-2 text-[13px] text-slate-200">
+                          Placing fields for:{" "}
+                          <span className="font-semibold text-slate-100">
+                            {activeSigner
+                              ? getSignerRoleLabelWithIndex(activeSigner, Math.max(0, esignSigners.findIndex((s) => s.id === activeSigner.id)))
+                              : "Select signer"}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -3900,13 +4099,36 @@ const App: React.FC = () => {
                         <div className="text-[11px] text-slate-400 mt-1 truncate">
                           Document: {esignDocFile?.name || "No document"}
                         </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                          <div className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+                            <div className="text-slate-400">Total Signers</div>
+                            <div className="text-slate-100">{esignSigners.length}</div>
+                          </div>
+                          <div className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+                            <div className="text-slate-400">Required Fields Completed</div>
+                            <div className="text-slate-100">
+                              {participantSummaries.reduce((sum, p) => sum + p.requiredFieldsPlaced, 0)}/
+                              {participantSummaries.reduce((sum, p) => sum + p.requiredFieldsTotal, 0)}
+                            </div>
+                          </div>
+                          <div className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+                            <div className="text-slate-400">Signatures Placed</div>
+                            <div className="text-slate-100">{participantSummaries.reduce((sum, p) => sum + p.signaturesPlaced, 0)}</div>
+                          </div>
+                          <div className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+                            <div className="text-slate-400">Initials Placed</div>
+                            <div className="text-slate-100">{participantSummaries.reduce((sum, p) => sum + p.initialsPlaced, 0)}</div>
+                          </div>
+                        </div>
+                        <div className="my-2 border-t border-slate-700/70" />
                         <div className="mt-2 text-[11px] text-slate-300 space-y-1">
-                          {esignSigners.map((s) => {
-                            const req = esignFields.filter((f) => fieldBelongsToSigner(f, s) && Boolean(f.required));
+                          {participantSummaries.map((summary, idx) => {
                             return (
-                              <div key={`rv-${s.id}`} className="flex items-center justify-between">
-                                <span>{s.name || s.email || "Signer"}</span>
-                                <span>{req.length} required</span>
+                              <div key={`rv-${summary.signer.id}`} className="flex items-center justify-between">
+                                <span>{getSignerRoleLabelWithIndex(summary.signer, idx)}</span>
+                                <span className={summary.requiredFieldsRemaining === 0 ? "text-emerald-300" : "text-amber-300"}>
+                                  {summary.requiredFieldsRemaining === 0 ? "Complete" : `${summary.requiredFieldsRemaining} Required Remaining`}
+                                </span>
                               </div>
                             );
                           })}
@@ -3988,33 +4210,155 @@ const App: React.FC = () => {
             )}
             {esignMode === "prepare" && esignWizardStep === 3 && (
               <div className="rounded border border-slate-700 bg-slate-900/40 p-3 text-sm">
-                <div className="font-semibold text-slate-100">Review & Send</div>
-                <div className="mt-2 text-xs space-y-1">
-                  <div className={invalidEmails.length === 0 ? "text-emerald-300" : "text-amber-300"}>
-                    {invalidEmails.length === 0 ? "✅ All signer emails valid" : "❌ Fix invalid signer emails"}
+                <div className="font-semibold text-slate-100">Status Summary</div>
+                {!firstValidationBlocker && (
+                  <div className="mt-2 rounded border border-emerald-700/40 bg-emerald-900/20 px-2 py-1 text-xs text-emerald-300">
+                    ✔ All required fields placed
                   </div>
-                  <div className={missingRequiredBySigner.length === 0 ? "text-emerald-300" : "text-amber-300"}>
-                    {missingRequiredBySigner.length === 0 ? "✅ Required fields placed for each signer" : "❌ Place required signature/initials for each signer"}
+                )}
+                {firstValidationBlocker && (
+                  <div className="mt-2 text-sm whitespace-pre-line text-amber-300">
+                    {signerValidationMessage}
                   </div>
-                  <div className={senderIdentityReady ? "text-emerald-300" : "text-amber-300"}>
-                    {senderIdentityReady ? "✅ Owner identity set" : "❌ Set Document Owner name/email"}
-                  </div>
-                </div>
-                <div className="mt-2 text-xs text-slate-300 space-y-1">
+                )}
+                <div className="mt-2 text-sm text-slate-300 space-y-2">
                   <div>Document: {esignDocFile?.name || "No document selected"}</div>
-                  {esignSigners.map((s) => {
-                    const required = esignFields.filter((f) => fieldBelongsToSigner(f, s) && Boolean(f.required));
-                    const sig = required.filter((f) => f.type === "signature").length;
-                    const ini = required.filter((f) => f.type === "initials").length;
-                    const dt = required.filter((f) => f.type === "date").length;
-                    const txt = required.filter((f) => f.type === "text").length;
+                  {participantSummaries.map((summary, idx) => {
+                    const requiredSig = summary.required.some((f) => f.type === "signature");
+                    const requiredIni = summary.required.some((f) => f.type === "initials");
+                    const anyInitialsPlaced = summary.initialsPlaced > 0;
+                    const initialsLine = anyInitialsPlaced
+                      ? { text: "✔ Initials assigned", cls: "text-emerald-300" }
+                      : requiredIni
+                        ? { text: "⚠ Initials missing", cls: "text-rose-300" }
+                        : { text: "— No initials required", cls: "text-slate-400" };
                     return (
-                      <div key={`sum-${s.id}`} className="flex items-center justify-between">
-                        <span>{s.role === "host" ? "Document Owner" : (s.name || s.email || "Signer")}</span>
-                        <span>Sig {sig} • Ini {ini} • Date {dt} • Text {txt}</span>
+                      <div key={`sum-${summary.signer.id}`} className="rounded border border-slate-700 p-2">
+                        <div className="font-medium text-slate-100 mb-1">
+                          {getSignerRoleLabelWithIndex(summary.signer, idx)}: {summary.signer.name || summary.signer.email || "Signer"}
+                        </div>
+                        <div className={summary.requiredFieldsRemaining === 0 ? "text-emerald-300 text-xs mb-1" : "text-amber-300 text-xs mb-1"}>
+                          {summary.requiredFieldsRemaining === 0 ? "Complete" : `${summary.requiredFieldsRemaining} Required Remaining`}
+                        </div>
+                        <div className="grid grid-cols-1 gap-1 text-xs">
+                          <span className={requiredSig ? "text-emerald-300" : "text-rose-300"}>
+                            {requiredSig ? "✔ Signature placed" : "⚠ Missing signature"}
+                          </span>
+                          <span className={initialsLine.cls}>{initialsLine.text}</span>
+                          <span className={summary.requiredFieldsPlaced >= summary.requiredFieldsTotal ? "text-emerald-300" : "text-amber-300"}>
+                            {summary.requiredFieldsPlaced >= summary.requiredFieldsTotal
+                              ? "✔ Required fields complete"
+                              : "⚠ Required fields incomplete"}
+                          </span>
+                        </div>
+                        {summary.requiredFieldsPlaced < summary.requiredFieldsTotal && (
+                          <button
+                            type="button"
+                            className="mt-1 text-xs text-amber-300 underline"
+                            onClick={() => {
+                              setActiveSignerId(summary.signer.id);
+                              setEsignStage("place_fields", "review");
+                              const jump = summary.owned.find((f) => f.type === "signature" || f.type === "initials");
+                              if (jump) setTargetField(jump.id);
+                            }}
+                          >
+                            Missing required fields - jump to placement
+                          </button>
+                        )}
                       </div>
                     );
                   })}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    className="btn text-xs"
+                    onClick={() => setEsignStage("place_fields", "review")}
+                  >
+                    Back to Fields
+                  </button>
+                </div>
+                {firstValidationBlocker && (
+                  <button
+                    type="button"
+                    className="mt-2 text-xs text-amber-300 underline"
+                    onClick={() => {
+                      if (firstValidationBlocker.signerId) setActiveSignerId(firstValidationBlocker.signerId);
+                      setEsignStage("place_fields", "review");
+                      if (firstValidationBlocker.fieldId) setTargetField(firstValidationBlocker.fieldId);
+                    }}
+                  >
+                    {firstValidationBlocker.message}
+                  </button>
+                )}
+              </div>
+            )}
+            {esignMode === "prepare" && esignWizardStep < 4 && (
+              <div className="sticky bottom-0 z-[80] flex w-full justify-stretch border-t border-slate-700 bg-slate-950/95 py-3 md:bottom-3 md:border-t-0 md:bg-transparent md:justify-end md:py-0">
+                <div className="flex w-full flex-col gap-1 md:w-auto md:items-end">
+                <div className="flex w-full items-center gap-2 rounded border border-slate-700 bg-slate-900/95 p-2 md:w-auto">
+                  {esignWizardStep > 1 && (
+                    <button
+                      type="button"
+                      className="btn text-xs border border-slate-600 bg-transparent text-slate-200 hover:border-slate-400"
+                    onClick={() => {
+                      const prev = Math.max(1, esignWizardStep - 1) as 1 | 2 | 3 | 4;
+                      setEsignStage(
+                        prev === 1 ? "add_signers" : prev === 2 ? "place_fields" : prev === 3 ? "review" : "complete",
+                        currentStage
+                      );
+                    }}
+                    >
+                      Back
+                    </button>
+                  )}
+                  {currentStage === "add_signers" && (
+                    <button
+                      type="button"
+                      className={`btn text-xs ${step1Ready ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
+                      disabled={!step1Ready}
+                      onClick={() => {
+                        setActiveSignerId(esignSigners[0]?.id || "");
+                        setEsignStage("place_fields", "add_signers");
+                      }}
+                    >
+                      Continue to Field Placement
+                    </button>
+                  )}
+                  {currentStage === "place_fields" && (
+                    <button
+                      type="button"
+                      className={`btn flex-1 text-xs md:flex-none ${step2Ready ? "bg-emerald-600 hover:bg-emerald-500" : "border border-slate-600 bg-transparent text-slate-300 hover:border-slate-400"}`}
+                      title={!step2Ready ? (firstValidationBlocker?.message || "Complete signer details and required fields to continue.") : "Review and send"}
+                      onClick={() => {
+                        if (!step2Ready) {
+                          setShowPlacementValidation(true);
+                          return;
+                        }
+                        setShowPlacementValidation(false);
+                        setEsignStage("review", "place_fields");
+                      }}
+                    >
+                      Review & Send
+                    </button>
+                  )}
+                  {currentStage === "review" && (
+                    <button
+                      type="button"
+                      className={`btn flex-1 text-xs md:flex-none ${!firstValidationBlocker && !esignSentLocked ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
+                      disabled={Boolean(firstValidationBlocker) || esignSentLocked}
+                      onClick={() => setShowSendModal(true)}
+                    >
+                      Send for Signature
+                    </button>
+                  )}
+                </div>
+                {currentStage === "place_fields" && showPlacementValidation && !step2Ready && firstValidationBlocker && (
+                  <div className="text-xs text-amber-300">{firstValidationBlocker.message}</div>
+                )}
+                {currentStage === "add_signers" && !step1Ready && (
+                  <div className="text-xs text-amber-300">Each signer must have a valid name and email.</div>
+                )}
                 </div>
               </div>
             )}
@@ -4025,7 +4369,7 @@ const App: React.FC = () => {
                   {(() => {
                     const waiting = esignSigners.filter((s) => (recipientStatusByEmail[s.email] || "Not Sent") !== "Signed").length;
                     if (waiting === 0) return "Fully Executed: all parties have signed.";
-                    return `Owner signed; waiting on ${waiting} signer${waiting === 1 ? "" : "s"}.`;
+                    return `Document Owner complete. Waiting on ${waiting} signer${waiting === 1 ? "" : "s"}.`;
                   })()}
                 </div>
                 <div className="mt-2 flex gap-2">
@@ -4036,6 +4380,46 @@ const App: React.FC = () => {
                     Copy Audit Record ID
                   </button>
                 </div>
+                {Object.keys(esignInviteLinks).length > 0 && (
+                  <div className="mt-3 rounded border border-slate-700 bg-slate-900/50 p-2">
+                    <div className="text-xs font-medium text-slate-200 mb-1">Secure signing links generated</div>
+                    <div className="space-y-1">
+                      {Object.entries(esignInviteLinks).map(([email, link]) => (
+                        <div key={email} className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="truncate text-slate-300">{email}</span>
+                          <button className="btn text-xs" onClick={() => copyToClipboard(link)}>Copy link</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(documentRepository.drafts.length > 0 || documentRepository.pending.length > 0 || documentRepository.signed.length > 0) && (
+                  <div className="mt-3 rounded border border-slate-700 bg-slate-900/50 p-2">
+                    <div className="text-xs font-medium text-slate-200 mb-1">Document Repository</div>
+                    {[
+                      { label: "/Drafts", docs: documentRepository.drafts },
+                      { label: "/Pending", docs: documentRepository.pending },
+                      { label: "/Signed", docs: documentRepository.signed },
+                    ].map((section) => (
+                      <div key={section.label} className="mb-2">
+                        <div className="text-[11px] text-slate-400 mb-1">{section.label}</div>
+                        {section.docs.length === 0 ? (
+                          <div className="text-[11px] text-slate-500">No documents</div>
+                        ) : (
+                          section.docs.map((doc) => (
+                            <div key={doc.id} className="flex items-center justify-between gap-2 py-1 text-xs">
+                              <div className="min-w-0">
+                                <div className="truncate text-slate-200">{doc.name}</div>
+                                <div className="text-slate-400">{new Date(doc.sentAt).toLocaleString()} • {doc.signerCount} signer(s)</div>
+                              </div>
+                              <span className="rounded border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300">{doc.status}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {esignMode !== "sign" && (
@@ -4049,7 +4433,7 @@ const App: React.FC = () => {
                 <span className="text-slate-500">{showAuditTrail ? "Hide" : "Show"}</span>
               </button>
               {showAuditTrail && (
-                <div className="max-h-36 overflow-auto border-t border-slate-800 px-3 py-2 text-[11px]">
+                <div className="max-h-36 overflow-auto border-t border-slate-800 px-3 py-2 text-xs">
                   {esignActivity.length > 0 ? esignActivity.map((ev, idx) => (
                     <div key={`${ev.ts}-${idx}`} className="text-slate-300">
                       {new Date(ev.ts).toLocaleTimeString()} - {ev.message}
@@ -4069,7 +4453,7 @@ const App: React.FC = () => {
                     <button className="btn text-xs" onClick={() => setMobileSidePanelOpen(false)}>Close</button>
                   </div>
                   <div className="grid grid-cols-2 gap-1 mb-2">
-                    <button className={`btn text-xs ${esignSideTab === "recipients" ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignSideTab("recipients")}>Recipients</button>
+                    <button className={`btn text-xs ${esignSideTab === "recipients" ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignSideTab("recipients")}>Signers</button>
                     <button className={`btn text-xs ${esignSideTab === "fields" ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignSideTab("fields")}>Fields</button>
                   </div>
                   <div className="text-xs text-slate-400">Use desktop view for full panel editing controls.</div>
@@ -4079,8 +4463,8 @@ const App: React.FC = () => {
             {showSendModal && (
               <div className="fixed inset-0 z-[205] flex items-center justify-center bg-black/60" onClick={() => setShowSendModal(false)}>
                 <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-w-xl w-full mx-2" onClick={(e) => e.stopPropagation()}>
-                  <div className="text-lg font-semibold text-slate-100 mb-1">Send document</div>
-                  <div className="text-xs text-slate-400 mb-3">Invite recipients now, before signing yourself.</div>
+                  <div className="text-lg font-semibold text-slate-100 mb-1">Send Document</div>
+                  <div className="text-xs text-slate-400 mb-3">Send secure signing links to all participants.</div>
                   <div className="mb-3 flex flex-wrap gap-1">
                     {esignSigners.map((s) => (
                       <span key={s.email} className="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-300">
@@ -4088,21 +4472,90 @@ const App: React.FC = () => {
                       </span>
                     ))}
                   </div>
+                  <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+                      <span className="text-slate-400">Total Signers</span>
+                      <div className="text-slate-100">{esignSigners.length}</div>
+                    </div>
+                    <div className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+                      <span className="text-slate-400">Required Fields Completed</span>
+                      <div className="text-slate-100">
+                        {participantSummaries.reduce((sum, p) => sum + p.requiredFieldsPlaced, 0)}/
+                        {participantSummaries.reduce((sum, p) => sum + p.requiredFieldsTotal, 0)}
+                      </div>
+                    </div>
+                    <div className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+                      <span className="text-slate-400">Initials Placed</span>
+                      <div className="text-slate-100">{participantSummaries.reduce((sum, p) => sum + p.initialsPlaced, 0)}</div>
+                    </div>
+                    <div className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+                      <span className="text-slate-400">Signatures Placed</span>
+                      <div className="text-slate-100">{participantSummaries.reduce((sum, p) => sum + p.signaturesPlaced, 0)}</div>
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <input className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-2 text-sm" value={sendSubject} onChange={(e) => setSendSubject(e.target.value)} placeholder="Subject" />
                     <textarea className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-2 text-sm min-h-[90px]" value={sendMessage} onChange={(e) => setSendMessage(e.target.value)} placeholder="Message" />
                     <label className="text-xs text-slate-300 flex items-center gap-2">
                       <input type="checkbox" checked readOnly />
-                      Create invite links
+                      Generate secure signing links
                     </label>
                     <label className="text-xs text-slate-500 flex items-center gap-2">
                       <input type="checkbox" disabled />
-                      Email delivery (coming soon)
+                      Email delivery
                     </label>
+                    {/* TODO: integrate SMTP provider */}
+                  </div>
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      className="btn w-full text-xs border border-slate-600 bg-transparent text-slate-200 hover:border-slate-400"
+                      onClick={() => {
+                        setShowSendModal(false);
+                        setEsignMode("sign");
+                        setEsignSignatureModal({ type: "signature" });
+                      }}
+                    >
+                      Preview as Signer
+                    </button>
                   </div>
                   <div className="mt-4 flex gap-2">
-                    <button className="btn flex-1 text-slate-300" onClick={() => setShowSendModal(false)}>Cancel</button>
-                    <button className="btn flex-1 bg-emerald-600 hover:bg-emerald-500" onClick={sendEsignInvitesFromModal}>Send</button>
+                    <button className="btn flex-1 border border-slate-600 bg-transparent text-slate-300 hover:border-slate-400" onClick={() => setShowSendModal(false)}>Cancel</button>
+                    <button className="btn flex-1 bg-emerald-600 hover:bg-emerald-500 text-white" disabled={esignSending} onClick={sendEsignInvitesFromModal}>{esignSending ? "Sending…" : "Send for Signature"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {showSentSuccessModal && (
+              <div className="fixed inset-0 z-[206] flex items-center justify-center bg-black/60" onClick={() => setShowSentSuccessModal(false)}>
+                <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-w-md w-full mx-2" onClick={(e) => e.stopPropagation()}>
+                  <div className="text-lg font-semibold text-emerald-300">Document Sent Successfully</div>
+                  <div className="mt-1 text-xs text-slate-400">
+                    Secure signing links have been generated.
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      className="btn text-xs"
+                      onClick={() => {
+                        const first = Object.values(esignInviteLinks)[0];
+                        if (first) copyToClipboard(first);
+                      }}
+                    >
+                      Copy Signing Link
+                    </button>
+                    <button type="button" className="btn text-xs" onClick={() => { setEsignStage("complete"); setShowSentSuccessModal(false); }}>
+                      View Document
+                    </button>
+                    <button
+                      type="button"
+                      className="btn text-xs bg-emerald-600 hover:bg-emerald-500"
+                      onClick={() => {
+                        setShowSentSuccessModal(false);
+                      }}
+                    >
+                      Return to Dashboard
+                    </button>
                   </div>
                 </div>
               </div>
@@ -4161,14 +4614,6 @@ const App: React.FC = () => {
                         Edit Initials
                       </button>
                     </div>
-                    <label className="text-xs text-slate-300 flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={autoPlaceInitialsEveryPage}
-                        onChange={(e) => setAutoPlaceInitialsEveryPage(e.target.checked)}
-                      />
-                      Auto-place initials on every page
-                    </label>
                   </div>
                   <div className="mt-3 flex justify-end">
                     <button type="button" className="btn text-xs" onClick={() => setShowIdentityModal(false)}>Done</button>
@@ -4179,7 +4624,17 @@ const App: React.FC = () => {
             {/* Signature/Initials modal when user lacks value */}
             {esignSignatureModal && (
               <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60" onClick={() => setEsignSignatureModal(null)}>
-                <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-w-md w-full mx-2" onClick={(e) => e.stopPropagation()}>
+                <div
+                  className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-w-md w-full mx-2"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setEsignDrawDataUrl("");
+                      setEsignSignatureModal(null);
+                    }
+                  }}
+                >
                   {(() => {
                     const modalField = esignSignatureModal.fieldId
                       ? esignFields.find((f) => f.id === esignSignatureModal.fieldId)
@@ -4189,9 +4644,7 @@ const App: React.FC = () => {
                     return (
                       <>
                   <div className="font-semibold text-slate-200 mb-2">
-                    {esignSignatureModal.fieldId
-                      ? (esignSignatureModal.type === "signature" ? "Edit signature" : "Edit initials")
-                      : (esignSignatureModal.type === "signature" ? "Set your signature" : "Set your initials")}
+                    {esignSignatureModal.type === "signature" ? "Set Your Signature" : "Set Your Initials"}
                   </div>
                   <div className="mb-2 grid grid-cols-3 gap-1">
                     <button className={`btn text-xs ${esignSignatureType === "typed" ? "ring-2 ring-emerald-400" : ""}`} onClick={() => setEsignSignatureType("typed")}>Type</button>
@@ -4203,37 +4656,83 @@ const App: React.FC = () => {
                       <img src={fieldValue} alt="" className="max-h-24 object-contain mx-auto" />
                     </div>
                   )}
-                  {esignSignatureModal.type === "signature" && esignSignatureType === "typed" ? (
+                  {esignSignatureType === "typed" ? (
                     <input
                       className="rounded bg-slate-800 border border-slate-700 px-2 py-2 w-full text-emerald-100 mb-3"
-                      value={esignSignatureValue}
-                      onChange={(e) => setEsignSignatureValue(e.target.value)}
-                      placeholder="Type your signature"
+                      value={esignSignatureModal.type === "signature" ? esignSignatureValue : esignInitialsValue}
+                      onChange={(e) => {
+                        if (esignSignatureModal.type === "signature") setEsignSignatureValue(e.target.value);
+                        else setEsignInitialsValue(e.target.value);
+                      }}
+                      placeholder={esignSignatureModal.type === "signature" ? "Type your signature" : "Initials"}
                       autoFocus
                     />
-                  ) : esignSignatureModal.type === "signature" && esignSignatureType === "drawn" ? (
-                    <div className="rounded border border-slate-700 bg-slate-800/50 px-2 py-3 text-xs text-slate-400 mb-3">
-                      Draw mode is available in Prepare defaults. Use Typed for fastest signing.
+                  ) : esignSignatureType === "drawn" ? (
+                    <div className="mb-3 rounded border border-slate-700 bg-slate-800/50 p-2">
+                      <div className="mb-1 text-[11px] text-slate-400">Use mouse or touchpad</div>
+                      <canvas
+                        className="h-36 w-full rounded bg-slate-900"
+                        width={460}
+                        height={160}
+                        onPointerDown={(e) => {
+                          const canvas = e.currentTarget;
+                          const ctx = canvas.getContext("2d");
+                          if (!ctx) return;
+                          ctx.strokeStyle = "#e2e8f0";
+                          ctx.lineWidth = 2;
+                          ctx.lineCap = "round";
+                          ctx.beginPath();
+                          ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+                          const move = (ev: PointerEvent) => {
+                            ctx.lineTo(ev.offsetX, ev.offsetY);
+                            ctx.stroke();
+                          };
+                          const up = () => {
+                            canvas.removeEventListener("pointermove", move);
+                            canvas.removeEventListener("pointerup", up);
+                            setEsignDrawDataUrl(canvas.toDataURL("image/png"));
+                          };
+                          canvas.addEventListener("pointermove", move);
+                          canvas.addEventListener("pointerup", up);
+                        }}
+                      />
+                      <button type="button" className="btn mt-2 text-xs" onClick={() => setEsignDrawDataUrl("")}>Clear</button>
                     </div>
-                  ) : esignSignatureModal.type === "signature" && esignSignatureType === "image" ? (
-                    <div className="rounded border border-slate-700 bg-slate-800/50 px-2 py-3 text-xs text-slate-400 mb-3">
-                      Upload mode is available in Prepare defaults. Use Typed for fastest signing.
-                    </div>
-                  ) : esignSignatureType === "typed" ? (
-                    <input
-                      className="rounded bg-slate-800 border border-slate-700 px-2 py-2 w-full text-emerald-100 mb-3"
-                      value={esignInitialsValue}
-                      onChange={(e) => setEsignInitialsValue(e.target.value)}
-                      placeholder="Initials"
-                      autoFocus
-                    />
                   ) : (
-                    <div className="rounded border border-slate-700 bg-slate-800/50 px-2 py-3 text-xs text-slate-400 mb-3">
-                      {esignSignatureType === "drawn"
-                        ? "Draw mode is available for signature and will be added for initials."
-                        : "Upload mode is available for signature and will be added for initials."}
+                    <div className="mb-3">
+                      <div className="mb-1 text-[11px] text-slate-400">PNG or JPG, transparent recommended</div>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        className="w-full text-xs text-slate-300"
+                        onChange={(e) => {
+                          const file = e.target.files?.item(0);
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            if (typeof reader.result !== "string") return;
+                            if (esignSignatureModal.type === "signature") setEsignSignatureValue(reader.result);
+                            else setEsignInitialsValue(reader.result);
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
                     </div>
                   )}
+                  <div className="mb-3 rounded border border-slate-600 bg-slate-950/40 p-2">
+                    <div className="text-[10px] text-slate-400 mb-1">Preview</div>
+                    {((esignSignatureType === "drawn" ? esignDrawDataUrl : (esignSignatureModal.type === "signature" ? esignSignatureValue : esignInitialsValue)) || "").startsWith("data:image/") ? (
+                      <img
+                        src={esignSignatureType === "drawn" ? esignDrawDataUrl : (esignSignatureModal.type === "signature" ? esignSignatureValue : esignInitialsValue)}
+                        alt=""
+                        className="max-h-20 object-contain mx-auto"
+                      />
+                    ) : (
+                      <div className="text-sm text-slate-200 truncate">
+                        {(esignSignatureType === "drawn" ? "Drawn signature" : (esignSignatureModal.type === "signature" ? esignSignatureValue : esignInitialsValue)) || "Not set"}
+                      </div>
+                    )}
+                  </div>
                   {esignSignatureModal.type === "signature" && (
                     <label className="text-xs text-slate-300 flex items-center gap-2 mb-3">
                       <input
@@ -4241,7 +4740,7 @@ const App: React.FC = () => {
                         checked={esignSaveSignature}
                         onChange={(e) => setEsignSaveSignature(e.target.checked)}
                       />
-                      Save for this recipient
+                      Save as default signature
                     </label>
                   )}
                   {esignSignatureModal.type === "initials" && (
@@ -4257,9 +4756,14 @@ const App: React.FC = () => {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      className="btn flex-1 bg-emerald-600 hover:bg-emerald-500"
+                      data-primary-signature-apply="true"
+                      className="btn flex-1 bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold"
                       onClick={() => {
-                        const raw = (esignSignatureModal.type === "signature" ? esignSignatureValue : esignInitialsValue)?.trim();
+                        const sourceValue =
+                          esignSignatureType === "drawn"
+                            ? esignDrawDataUrl
+                            : (esignSignatureModal.type === "signature" ? esignSignatureValue : esignInitialsValue);
+                        const raw = (sourceValue || "").trim();
                         const val =
                           esignSignatureModal.type === "initials"
                             ? raw.toUpperCase()
@@ -4271,25 +4775,25 @@ const App: React.FC = () => {
                             updateBoxValue(esignSignatureModal.fieldId, val, esignSignatureModal.type);
                             scrollToNextEmptyField();
                           }
+                          setEsignDrawDataUrl("");
                           setEsignSignatureModal(null);
                         }
                       }}
                     >
                       {esignSignatureModal.fieldId ? "Apply & Continue" : "Apply & Continue"}
                     </button>
-                    {esignSignatureModal.fieldId && (
-                      <button
-                        type="button"
-                        className="btn flex-1 text-rose-300"
-                        onClick={() => {
-                          updateBoxValue(esignSignatureModal.fieldId!, "", esignSignatureModal.type);
-                          setEsignSignatureModal(null);
-                        }}
-                      >
-                        Clear
-                      </button>
-                    )}
-                    <button type="button" className="btn flex-1 text-slate-400" onClick={() => setEsignSignatureModal(null)}>Cancel</button>
+                    <button
+                      type="button"
+                      className="btn flex-1 border border-slate-600 bg-transparent text-slate-300 hover:border-slate-400"
+                      onClick={() => {
+                        setEsignDrawDataUrl("");
+                        if (esignSignatureModal.type === "signature") setEsignSignatureValue("");
+                        else setEsignInitialsValue("");
+                      }}
+                    >
+                      Clear
+                    </button>
+                    <button type="button" className="btn flex-1 text-slate-400" onClick={() => { setEsignDrawDataUrl(""); setEsignSignatureModal(null); }}>Cancel</button>
                   </div>
                       </>
                     );
@@ -4873,460 +5377,110 @@ const App: React.FC = () => {
         )}
 
         {phase === "agreement" && (
-          <section className="rounded-xl border border-slate-800 p-4 space-y-4">
-            <h2 className="text-lg font-semibold">Agreement Draft v1</h2>
-            <div className="rounded-md border border-slate-800 bg-slate-900/40 p-2 text-xs text-slate-300">
-              <div className="font-semibold text-slate-200">What this does</div>
-              Draft and redline agreement text as a document artifact.
-              <div className="mt-1 font-semibold text-slate-200">When to use</div>
-              Use to capture a non-binding draft you can export and attach to
-              a bundle if needed.
-            </div>
-            <div className="rounded-md border border-amber-400/60 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
-              Draft / non-binding by default. No legal advice. Verify
-              jurisdictional enforceability separately.
-            </div>
-            <div className="rounded-md border border-slate-800 p-3 space-y-3">
-              <div className="font-semibold text-slate-200">
-                Agreement Packet v1 (Multi-party)
-              </div>
-              <div className="text-xs text-slate-300">
-                Evidence-only. CLAW does not enforce outcomes. Optional analysis
-                is non-binding and excluded by default.
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <input
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                  value={agreementId}
-                  onChange={(e) => setAgreementId(e.target.value)}
-                  placeholder="agreement_id (optional)"
+          <>
+            {!LEGACY_AGREEMENT_FLAG && routePath !== "/agreements/legacy" ? (
+              agreementReviewId ? (
+                <AgreementReview
+                  agreementId={agreementReviewId}
+                  onBackToNew={() => navigateTo("/agreements/new")}
+                  onGoLegacy={() => navigateTo("/agreements/legacy")}
                 />
-                <input
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                  value={agreementTitle}
-                  onChange={(e) => setAgreementTitle(e.target.value)}
-                  placeholder="title"
+              ) : (
+                <AgreementBuilderIntake
+                  onCreated={(id) => {
+                    setAgreementReviewId(id);
+                    navigateTo(`/agreements/${encodeURIComponent(id)}/review`);
+                  }}
                 />
-              </div>
-              <div className="text-xs text-slate-300">Parties</div>
-              {agreementPartyRows.map((p, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                  <input
-                    className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                    value={p.party_id}
-                    onChange={(e) => {
-                      const next = [...agreementPartyRows];
-                      next[idx] = { ...next[idx], party_id: e.target.value };
-                      setAgreementPartyRows(next);
-                    }}
-                    placeholder="party_id"
-                  />
-                  <input
-                    className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                    value={p.name}
-                    onChange={(e) => {
-                      const next = [...agreementPartyRows];
-                      next[idx] = { ...next[idx], name: e.target.value };
-                      setAgreementPartyRows(next);
-                    }}
-                    placeholder="name"
-                  />
-                  <input
-                    className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                    value={p.role}
-                    onChange={(e) => {
-                      const next = [...agreementPartyRows];
-                      next[idx] = { ...next[idx], role: e.target.value };
-                      setAgreementPartyRows(next);
-                    }}
-                    placeholder="role"
-                  />
-                  <input
-                    className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                    value={p.contact || ""}
-                    onChange={(e) => {
-                      const next = [...agreementPartyRows];
-                      next[idx] = { ...next[idx], contact: e.target.value };
-                      setAgreementPartyRows(next);
-                    }}
-                    placeholder="contact (optional)"
-                  />
-                </div>
-              ))}
-              <button
-                className="btn"
-                onClick={() =>
-                  setAgreementPartyRows([
-                    ...agreementPartyRows,
-                    { party_id: "", name: "", role: "" },
-                  ])
-                }
-              >
-                Add party
-              </button>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <label className="text-xs text-slate-300 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={agreementIncludeDiffs}
-                    onChange={(e) => setAgreementIncludeDiffs(e.target.checked)}
-                  />
-                  Include diffs in export bundle (default ON)
-                </label>
-                <label className="text-xs text-slate-300 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={agreementIncludeNotes}
-                    onChange={(e) => setAgreementIncludeNotes(e.target.checked)}
-                  />
-                  Include private notes in export bundle (default OFF)
-                </label>
-              </div>
-              <input
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1 w-full"
-                value={agreementEscrowRef}
-                onChange={(e) => setAgreementEscrowRef(e.target.value)}
-                placeholder="Escrow reference (optional, e.g., escrow.com link)"
+              )
+            ) : (
+              <AgreementWorkspace
+                model={{
+                  agreementId,
+                  setAgreementId,
+                  agreementTitle,
+                  setAgreementTitle,
+                  agreementJurisdiction,
+                  setAgreementJurisdiction,
+                  agreementParties,
+                  setAgreementParties,
+                  agreementEffectiveDate,
+                  setAgreementEffectiveDate,
+                  agreementContent,
+                  setAgreementContent,
+                  agreement,
+                  agreementPacket,
+                  agreementPacketStatus,
+                  agreementPacketError,
+                  agreementDiffOpen,
+                  setAgreementDiffOpen,
+                  agreementPartyRows,
+                  setAgreementPartyRows,
+                  agreementAuthorPartyId,
+                  setAgreementAuthorPartyId,
+                  agreementBodyText,
+                  setAgreementBodyText,
+                  agreementContentType,
+                  setAgreementContentType,
+                  agreementVersionNotes,
+                  setAgreementVersionNotes,
+                  agreementIncludeDiffs,
+                  setAgreementIncludeDiffs,
+                  agreementIncludeNotes,
+                  setAgreementIncludeNotes,
+                  agreementEscrowRef,
+                  setAgreementEscrowRef,
+                  agreementAnalysisText,
+                  setAgreementAnalysisText,
+                  agreementAnalysisInclude,
+                  setAgreementAnalysisInclude,
+                  agreementAnalysisOptInAll,
+                  setAgreementAnalysisOptInAll,
+                  agreementRedlines,
+                  agreementExport,
+                  agreementStatus,
+                  agreementError,
+                  attachAgreement,
+                  setAttachAgreement,
+                  agreementVersions,
+                  fromVersion,
+                  setFromVersion,
+                  toVersion,
+                  setToVersion,
+                  diffText,
+                  diffSha256,
+                  includeDiff,
+                  setIncludeDiff,
+                  includeAgreementVersion,
+                  setIncludeAgreementVersion,
+                  agreementVersionToExport,
+                  setAgreementVersionToExport,
+                  redlineText,
+                  setRedlineText,
+                  redlineRationale,
+                  setRedlineRationale,
+                  redlineAuthor,
+                  setRedlineAuthor,
+                  redlineCreatedAt,
+                  setRedlineCreatedAt,
+                  createdAt,
+                  setCreatedAt,
+                  agreementHasVersions,
+                  createAgreement,
+                  createAgreementPacket,
+                  addAgreementVersionPacket,
+                  finalizeAgreementPacket,
+                  addAgreementRedline,
+                  exportAgreement,
+                  saveAgreementVersion,
+                  loadAgreementVersions,
+                  generateAgreementDiff,
+                  copyToClipboard,
+                  prettyJson,
+                }}
               />
-              <details className="rounded border border-slate-800 p-2 text-xs text-slate-300">
-                <summary className="cursor-pointer text-slate-200">
-                  Optional analysis (non-binding)
-                </summary>
-                <div className="space-y-2 mt-2">
-                  <textarea
-                    className="rounded bg-slate-900 border border-slate-800 px-2 py-1 w-full h-20"
-                    value={agreementAnalysisText}
-                    onChange={(e) => setAgreementAnalysisText(e.target.value)}
-                    placeholder="Optional non-binding analysis text (excluded by default)"
-                  />
-                  <label className="text-xs text-slate-300 flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={agreementAnalysisInclude}
-                      onChange={(e) => setAgreementAnalysisInclude(e.target.checked)}
-                    />
-                    Include analysis in export (requires all-party opt-in)
-                  </label>
-                  <label className="text-xs text-slate-300 flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={agreementAnalysisOptInAll}
-                      onChange={(e) => setAgreementAnalysisOptInAll(e.target.checked)}
-                    />
-                    All parties opt in (required)
-                  </label>
-                </div>
-              </details>
-              <div className="flex gap-2">
-                <button className="btn" onClick={createAgreementPacket}>
-                  Create Packet
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <input
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                  value={agreementAuthorPartyId}
-                  onChange={(e) => setAgreementAuthorPartyId(e.target.value)}
-                  placeholder="author_party_id"
-                />
-                <input
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                  value={agreementContentType}
-                  onChange={(e) => setAgreementContentType(e.target.value)}
-                  placeholder="content_type"
-                />
-              </div>
-              <textarea
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1 w-full h-28"
-                value={agreementBodyText}
-                onChange={(e) => setAgreementBodyText(e.target.value)}
-                placeholder="agreement body text"
-              />
-              <textarea
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1 w-full h-16"
-                value={agreementVersionNotes}
-                onChange={(e) => setAgreementVersionNotes(e.target.value)}
-                placeholder="private notes (optional)"
-              />
-              <div className="flex gap-2">
-                <button
-                  className="btn"
-                  onClick={addAgreementVersionPacket}
-                  disabled={!agreementPacket}
-                >
-                  Add Version
-                </button>
-                <button
-                  className="btn"
-                  onClick={finalizeAgreementPacket}
-                  disabled={!agreementHasVersions}
-                >
-                  Finalize
-                </button>
-              </div>
-              {!agreementPacket && (
-                <div className="text-xs text-slate-400">
-                  Create Packet to enable Add Version.
-                </div>
-              )}
-              {agreementPacket && !agreementHasVersions && (
-                <div className="text-xs text-slate-400">
-                  Add at least one version to enable Finalize.
-                </div>
-              )}
-              {agreementPacketError && (
-                <div className="text-xs text-rose-300">{agreementPacketError}</div>
-              )}
-              {agreementPacketStatus && (
-                <div className="text-xs text-emerald-300">
-                  {agreementPacketStatus}
-                </div>
-              )}
-              {agreementPacket?.versions?.length > 0 && (
-                <div className="text-xs text-slate-300">
-                  <div className="font-semibold text-slate-200">Versions</div>
-                  {agreementPacket.versions.map((v: any) => (
-                    <div key={v.version_id} className="mt-2">
-                      <div>
-                        {v.version_id} • {v.created_at} • {v.author_party_id} •{" "}
-                        {v.body_sha256}
-                      </div>
-                      {v.diff_from_prev && (
-                        <button
-                          className="btn mt-2 text-xs"
-                          onClick={() =>
-                            setAgreementDiffOpen((prev) => ({
-                              ...prev,
-                              [v.version_id]: !prev[v.version_id],
-                            }))
-                          }
-                        >
-                          {agreementDiffOpen[v.version_id]
-                            ? "Hide Diff"
-                            : "Show Diff"}
-                        </button>
-                      )}
-                      {agreementDiffOpen[v.version_id] && v.diff_from_prev && (
-                        <pre className="text-xs bg-slate-900 border border-slate-800 rounded p-2 overflow-auto mt-2">
-                          {v.diff_from_prev}
-                        </pre>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <input
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                value={agreementId}
-                onChange={(e) => setAgreementId(e.target.value)}
-                placeholder="agreement_id"
-              />
-              <input
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                value={agreementTitle}
-                onChange={(e) => setAgreementTitle(e.target.value)}
-                placeholder="title"
-              />
-              <input
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                value={agreementJurisdiction}
-                onChange={(e) => setAgreementJurisdiction(e.target.value)}
-                placeholder="jurisdiction"
-              />
-              <input
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                value={agreementParties}
-                onChange={(e) => setAgreementParties(e.target.value)}
-                placeholder="parties (separate with ;) "
-              />
-              <input
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                value={agreementEffectiveDate}
-                onChange={(e) => setAgreementEffectiveDate(e.target.value)}
-                placeholder="effective_date"
-              />
-              <input
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                value={createdAt}
-                onChange={(e) => setCreatedAt(e.target.value)}
-                placeholder="created_at"
-              />
-            </div>
-            <textarea
-              className="rounded bg-slate-900 border border-slate-800 px-2 py-1 w-full h-32"
-              value={agreementContent}
-              onChange={(e) => setAgreementContent(e.target.value)}
-              placeholder="agreement body (markdown)"
-            />
-            <div className="flex gap-2">
-              <button className="btn" onClick={createAgreement}>
-                Create Draft
-              </button>
-              <button className="btn" onClick={exportAgreement}>
-                Export JSON/MD
-              </button>
-              <button className="btn" onClick={saveAgreementVersion}>
-                Save Version
-              </button>
-              <button className="btn" onClick={loadAgreementVersions}>
-                Refresh Versions
-              </button>
-            </div>
-            <label className="text-xs text-slate-300 flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={attachAgreement}
-                onChange={(e) => setAttachAgreement(e.target.checked)}
-              />
-              Attach to bundle (optional)
-            </label>
-            <label className="text-xs text-slate-300 flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={includeAgreementVersion}
-                onChange={(e) => setIncludeAgreementVersion(e.target.checked)}
-              />
-              Include saved version files in bundle
-            </label>
-            {includeAgreementVersion && (
-              <select
-                className="rounded bg-slate-900 border border-slate-800 px-2 py-1 text-xs"
-                value={agreementVersionToExport}
-                onChange={(e) => setAgreementVersionToExport(e.target.value)}
-              >
-                <option value="">Select version</option>
-                {agreementVersions.map((v: any) => (
-                  <option key={v.version} value={v.version}>
-                    v{v.version}
-                  </option>
-                ))}
-              </select>
             )}
-            {agreementError && (
-              <div className="text-xs text-rose-300">{agreementError}</div>
-            )}
-            {agreementStatus && (
-              <div className="text-xs text-emerald-300">{agreementStatus}</div>
-            )}
-
-            <div className="rounded-lg border border-slate-800 p-3 space-y-2">
-              <div className="font-semibold text-sm">Redlines</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <input
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                  value={redlineText}
-                  onChange={(e) => setRedlineText(e.target.value)}
-                  placeholder="change_text"
-                />
-                <input
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                  value={redlineRationale}
-                  onChange={(e) => setRedlineRationale(e.target.value)}
-                  placeholder="rationale"
-                />
-                <input
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                  value={redlineAuthor}
-                  onChange={(e) => setRedlineAuthor(e.target.value)}
-                  placeholder="author"
-                />
-                <input
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1"
-                  value={redlineCreatedAt}
-                  onChange={(e) => setRedlineCreatedAt(e.target.value)}
-                  placeholder="created_at"
-                />
-              </div>
-              <button className="btn" onClick={addAgreementRedline}>
-                Add Redline
-              </button>
-              <pre className="text-xs bg-slate-900 border border-slate-800 rounded p-2 overflow-auto">
-                {prettyJson(agreementRedlines)}
-              </pre>
-            </div>
-            <div className="rounded-lg border border-slate-800 p-3 space-y-2">
-              <div className="font-semibold text-sm">Versioned Redline</div>
-              <div className="flex gap-2">
-                <select
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1 text-xs"
-                  value={fromVersion}
-                  onChange={(e) => setFromVersion(e.target.value)}
-                >
-                  <option value="">from_version</option>
-                  {agreementVersions.map((v: any) => (
-                    <option key={`from-${v.version}`} value={v.version}>
-                      v{v.version}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="rounded bg-slate-900 border border-slate-800 px-2 py-1 text-xs"
-                  value={toVersion}
-                  onChange={(e) => setToVersion(e.target.value)}
-                >
-                  <option value="">to_version</option>
-                  {agreementVersions.map((v: any) => (
-                    <option key={`to-${v.version}`} value={v.version}>
-                      v{v.version}
-                    </option>
-                  ))}
-                </select>
-                <button className="btn" onClick={generateAgreementDiff}>
-                  Generate Redline
-                </button>
-              </div>
-              <label className="text-xs text-slate-300 flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={includeDiff}
-                  onChange={(e) => setIncludeDiff(e.target.checked)}
-                />
-                Include redline in bundle export
-              </label>
-              {diffSha256 && (
-                <div className="text-xs text-slate-400">
-                  diff_sha256: {diffSha256}
-                </div>
-              )}
-              {diffText && (
-                <>
-                  <button
-                    className="btn"
-                    onClick={() => copyToClipboard(diffText)}
-                  >
-                    Copy Redline
-                  </button>
-                  <pre className="text-xs bg-slate-900 border border-slate-800 rounded p-2 overflow-auto">
-                    {diffText}
-                  </pre>
-                </>
-              )}
-            </div>
-
-            <pre className="text-xs bg-slate-900 border border-slate-800 rounded p-2 overflow-auto">
-              {prettyJson(agreement)}
-            </pre>
-            {agreementExport?.json_url && agreementExport?.md_url && (
-              <div className="text-xs text-emerald-300 space-x-3">
-                <a
-                  className="underline"
-                  href={agreementExport.json_url}
-                  download={agreementExport.filename_json || "agreement.json"}
-                >
-                  Download JSON
-                </a>
-                <a
-                  className="underline"
-                  href={agreementExport.md_url}
-                  download={agreementExport.filename_md || "agreement.md"}
-                >
-                  Download Markdown
-                </a>
-              </div>
-            )}
-          </section>
+          </>
         )}
 
         {phase === "verify" && (

@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from utils.canon_json import canon_sha256_hex
+# ✅ IMPORTANT: match backend import style
+from backend.utils.canon_json import canon_sha256_hex
+from backend.handlers.batch_handler import build_receipt_batch
 
-DEFAULT_DB_PATH = os.path.expanduser(
-    os.getenv("CLAW_TIMELINE_DB_PATH", "~/.claw/timeline.sqlite3")
-)
+DEFAULT_DB_PATH = os.path.expanduser(os.getenv("CLAW_TIMELINE_DB_PATH", "~/.claw/timeline.sqlite3"))
 
 
 def _utc_now_iso() -> str:
@@ -93,13 +93,19 @@ class EventRow:
 
 
 class TimelineStore:
-    def __init__(self, db_path: str = DEFAULT_DB_PATH) -> None:
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        if db_path is None:
+            db_path = os.path.expanduser(
+                os.getenv("CLAW_TIMELINE_DB_PATH", "~/.claw/timeline.sqlite3")
+            )
         self.db_path = db_path
         self._init_db()
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _init_db(self) -> None:
@@ -161,6 +167,89 @@ class TimelineStore:
             if "receipt_hash_sha256" not in cols:
                 c.execute("ALTER TABLE receipts ADD COLUMN receipt_hash_sha256 TEXT")
 
+            # ✅ Batch anchoring fields (stored on receipt rows)
+            if "batch_id" not in cols:
+                c.execute("ALTER TABLE receipts ADD COLUMN batch_id TEXT")
+            if "batch_merkle_root_sha256" not in cols:
+                c.execute("ALTER TABLE receipts ADD COLUMN batch_merkle_root_sha256 TEXT")
+            if "leaf_index" not in cols:
+                c.execute("ALTER TABLE receipts ADD COLUMN leaf_index INTEGER")
+
+            # ✅ Batch tables (header + membership). Safe even if you also have a separate audit DB.
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS batches (
+                    batch_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    network TEXT NOT NULL,
+                    protocol_version TEXT NOT NULL,
+                    leaf_count INTEGER NOT NULL,
+                    merkle_root TEXT NOT NULL,
+                    batch_commitment TEXT NOT NULL,
+                    anchor_txid TEXT,
+                    anchor_op_return TEXT
+                )
+                """
+            )
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS batch_receipts (
+                    batch_id TEXT NOT NULL,
+                    receipt_id TEXT NOT NULL,
+                    receipt_hash TEXT NOT NULL,
+                    leaf_index INTEGER NOT NULL,
+                    PRIMARY KEY (batch_id, receipt_id)
+                )
+                """
+            )
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_batch_receipts_batch ON batch_receipts(batch_id)"
+            )
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_batch_receipts_receipt ON batch_receipts(receipt_id)"
+            )
+
+            # ✅ Timeline anchor job queue (batch mode)
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS timeline_anchor_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    receipt_id TEXT NOT NULL,
+                    timeline_id TEXT NOT NULL,
+                    network TEXT NOT NULL,
+                    commitment TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',   -- queued|running|done|failed
+                    txid TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
+            # Helpful index for batch runners
+            c.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_timeline_anchor_jobs_status_created
+                ON timeline_anchor_jobs(status, created_at)
+                """
+            )
+
+            # Backwards-compatible migration: older DBs may have created the table without defaults/columns
+            job_cols = [r[1] for r in c.execute("PRAGMA table_info(timeline_anchor_jobs)").fetchall()]
+            if job_cols:
+                if "status" not in job_cols:
+                    c.execute("ALTER TABLE timeline_anchor_jobs ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'")
+                if "txid" not in job_cols:
+                    c.execute("ALTER TABLE timeline_anchor_jobs ADD COLUMN txid TEXT")
+                if "error" not in job_cols:
+                    c.execute("ALTER TABLE timeline_anchor_jobs ADD COLUMN error TEXT")
+                if "updated_at" not in job_cols:
+                    c.execute("ALTER TABLE timeline_anchor_jobs ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+
+    # --------------------------
+    # Timelines
+    # --------------------------
     def create_timeline(
         self,
         *,
@@ -172,9 +261,7 @@ class TimelineStore:
     ) -> TimelineRow:
         tl_id = timeline_id or f"tl_{uuid.uuid4().hex}"
         created_at = _utc_now_iso()
-        parties_json = json.dumps(
-            parties, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-        )
+        parties_json = json.dumps(parties, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         with self._conn() as c:
             c.execute(
                 """
@@ -188,13 +275,14 @@ class TimelineStore:
 
     def get_timeline(self, timeline_id: str) -> TimelineRow:
         with self._conn() as c:
-            row = c.execute(
-                "SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)
-            ).fetchone()
+            row = c.execute("SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)).fetchone()
         if not row:
             raise KeyError("timeline_not_found")
         return TimelineRow(**dict(row))
 
+    # --------------------------
+    # Events: helpers
+    # --------------------------
     def list_event_hashes(self, timeline_id: str) -> List[str]:
         with self._conn() as c:
             rows = c.execute(
@@ -213,6 +301,81 @@ class TimelineStore:
             raise KeyError("event_not_found")
         return EventRow(**dict(row))
 
+    def _ensure_not_frozen_tx(self, conn: sqlite3.Connection, timeline_id: str) -> None:
+        tl = conn.execute("SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)).fetchone()
+        if not tl:
+            raise KeyError("timeline_not_found")
+        if int(tl["frozen"] or 0) == 1:
+            raise RuntimeError("timeline_frozen")
+
+    def _parse_notice(self, notice_json: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not notice_json:
+            return None
+        try:
+            return json.loads(notice_json)
+        except Exception:
+            return None
+
+    def _parse_marker(self, marker_json: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not marker_json:
+            return None
+        try:
+            return json.loads(marker_json)
+        except Exception:
+            return None
+
+    # --------------------------
+    # Events: UX-friendly list
+    # --------------------------
+    def list_events(self, timeline_id: str) -> Dict[str, Any]:
+        """
+        Returns events ordered by event_index ascending.
+        Includes parsed notice/marker objects.
+        """
+        _ = self.get_timeline(timeline_id)
+
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT *
+                FROM events
+                WHERE timeline_id = ?
+                ORDER BY event_index ASC
+                """,
+                (timeline_id,),
+            ).fetchall()
+
+        events: List[Dict[str, Any]] = []
+        for r in rows:
+            notice = self._parse_notice(r["notice_json"])
+            marker = self._parse_marker(r["marker_json"])
+
+            attachment_count = 0
+            if isinstance(notice, dict):
+                atts = notice.get("attachments")
+                if isinstance(atts, list):
+                    attachment_count = len(atts)
+
+            events.append(
+                {
+                    "event_id": r["event_id"],
+                    "timeline_id": r["timeline_id"],
+                    "event_index": int(r["event_index"]),
+                    "event_type": r["event_type"],
+                    "event_time": r["event_time"],
+                    "notice": notice,
+                    "marker": marker,
+                    "attachment_count": attachment_count,
+                    "event_sha256": r["event_sha256"],
+                    "created_at": r["created_at"],
+                }
+            )
+
+        return {"timeline_id": timeline_id, "events": events}
+
+    # --------------------------
+    # Events: create
+    # --------------------------
     def append_event(
         self,
         *,
@@ -234,13 +397,7 @@ class TimelineStore:
         conn = self._conn()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            tl = conn.execute(
-                "SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)
-            ).fetchone()
-            if not tl:
-                raise KeyError("timeline_not_found")
-            if int(tl["frozen"] or 0) == 1:
-                raise RuntimeError("timeline_frozen")
+            self._ensure_not_frozen_tx(conn, timeline_id)
 
             row = conn.execute(
                 "SELECT MAX(event_index) AS max_idx FROM events WHERE timeline_id = ?",
@@ -296,13 +453,216 @@ class TimelineStore:
 
         return self.get_event(timeline_id, event_id)
 
+    # --------------------------
+    # Events: patch / delete / duplicate (Screen 3 actions)
+    # --------------------------
+    def patch_event(self, timeline_id: str, event_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
+        allowed_keys = {"event_type", "event_time", "notice", "marker"}
+        patch = {k: v for k, v in patch.items() if k in allowed_keys}
+        if not patch:
+            return {"ok": True, "event": self._event_as_dict(self.get_event(timeline_id, event_id))}
+
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            self._ensure_not_frozen_tx(conn, timeline_id)
+
+            row = conn.execute(
+                "SELECT * FROM events WHERE timeline_id = ? AND event_id = ?",
+                (timeline_id, event_id),
+            ).fetchone()
+            if not row:
+                raise KeyError("event_not_found")
+
+            current_type = row["event_type"]
+            current_time = row["event_time"]
+            current_notice = self._parse_notice(row["notice_json"])
+            current_marker = self._parse_marker(row["marker_json"])
+            idx = int(row["event_index"])
+
+            new_type = patch.get("event_type", current_type)
+            new_time = patch.get("event_time", current_time)
+
+            notice_provided = "notice" in patch
+            marker_provided = "marker" in patch
+            new_notice = patch.get("notice") if notice_provided else current_notice
+            new_marker = patch.get("marker") if marker_provided else current_marker
+
+            if new_type not in ("notice", "marker"):
+                raise ValueError("event_type must be notice or marker")
+
+            if new_type == "notice":
+                if new_notice is None:
+                    raise ValueError("notice payload required for event_type=notice")
+                new_marker = None
+            else:
+                if new_marker is None:
+                    raise ValueError("marker payload required for event_type=marker")
+                new_notice = None
+
+            new_notice_json = (
+                json.dumps(new_notice, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                if new_notice is not None
+                else None
+            )
+            new_marker_json = (
+                json.dumps(new_marker, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                if new_marker is not None
+                else None
+            )
+
+            new_sha = event_sha256(
+                timeline_id=timeline_id,
+                event_index=idx,
+                event_type=new_type,
+                event_time=new_time,
+                notice=new_notice,
+                marker=new_marker,
+            )
+
+            conn.execute(
+                """
+                UPDATE events
+                SET event_type = ?, event_time = ?, notice_json = ?, marker_json = ?, event_sha256 = ?
+                WHERE timeline_id = ? AND event_id = ?
+                """,
+                (new_type, new_time, new_notice_json, new_marker_json, new_sha, timeline_id, event_id),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return {"ok": True, "event": self._event_as_dict(self.get_event(timeline_id, event_id))}
+
+    def delete_event(self, timeline_id: str, event_id: str) -> Dict[str, Any]:
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            self._ensure_not_frozen_tx(conn, timeline_id)
+
+            cur = conn.execute(
+                "DELETE FROM events WHERE timeline_id = ? AND event_id = ?",
+                (timeline_id, event_id),
+            )
+            if cur.rowcount == 0:
+                raise KeyError("event_not_found")
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return {"ok": True, "timeline_id": timeline_id, "event_id": event_id}
+
+    def duplicate_event(self, timeline_id: str, event_id: str) -> Dict[str, Any]:
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            self._ensure_not_frozen_tx(conn, timeline_id)
+
+            src = conn.execute(
+                "SELECT * FROM events WHERE timeline_id = ? AND event_id = ?",
+                (timeline_id, event_id),
+            ).fetchone()
+            if not src:
+                raise KeyError("event_not_found")
+
+            row = conn.execute(
+                "SELECT MAX(event_index) AS max_idx FROM events WHERE timeline_id = ?",
+                (timeline_id,),
+            ).fetchone()
+            next_idx = 0 if row["max_idx"] is None else int(row["max_idx"]) + 1
+
+            src_type = src["event_type"]
+            src_time = src["event_time"]
+            src_notice = self._parse_notice(src["notice_json"])
+            src_marker = self._parse_marker(src["marker_json"])
+
+            new_sha = event_sha256(
+                timeline_id=timeline_id,
+                event_index=next_idx,
+                event_type=src_type,
+                event_time=src_time,
+                notice=src_notice,
+                marker=src_marker,
+            )
+            new_event_id = f"evt_{new_sha[:32]}"
+            created_at = _utc_now_iso()
+
+            notice_json = (
+                json.dumps(src_notice, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                if src_notice is not None
+                else None
+            )
+            marker_json = (
+                json.dumps(src_marker, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                if src_marker is not None
+                else None
+            )
+
+            conn.execute(
+                """
+                INSERT INTO events
+                (event_id, timeline_id, event_index, event_type, event_time, notice_json, marker_json, event_sha256, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_event_id,
+                    timeline_id,
+                    next_idx,
+                    src_type,
+                    src_time,
+                    notice_json,
+                    marker_json,
+                    new_sha,
+                    created_at,
+                ),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return {"ok": True, "event": self._event_as_dict(self.get_event(timeline_id, new_event_id))}
+
+    def _event_as_dict(self, ev: EventRow) -> Dict[str, Any]:
+        notice = self._parse_notice(ev.notice_json)
+        marker = self._parse_marker(ev.marker_json)
+
+        attachment_count = 0
+        if isinstance(notice, dict):
+            atts = notice.get("attachments")
+            if isinstance(atts, list):
+                attachment_count = len(atts)
+
+        return {
+            "event_id": ev.event_id,
+            "timeline_id": ev.timeline_id,
+            "event_index": int(ev.event_index),
+            "event_type": ev.event_type,
+            "event_time": ev.event_time,
+            "notice": notice,
+            "marker": marker,
+            "attachment_count": attachment_count,
+            "event_sha256": ev.event_sha256,
+            "created_at": ev.created_at,
+        }
+
+    # --------------------------
+    # Freeze
+    # --------------------------
     def freeze_timeline(self, timeline_id: str, manifest_hash: str) -> Tuple[str, str]:
         conn = self._conn()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            tl = conn.execute(
-                "SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)
-            ).fetchone()
+            tl = conn.execute("SELECT * FROM timelines WHERE timeline_id = ?", (timeline_id,)).fetchone()
             if not tl:
                 raise KeyError("timeline_not_found")
 
@@ -339,6 +699,9 @@ class TimelineStore:
 
         return manifest_hash, frozen_at
 
+    # --------------------------
+    # Receipts
+    # --------------------------
     def create_receipt(
         self,
         *,
@@ -349,7 +712,7 @@ class TimelineStore:
         epoch_id: Optional[str],
         btc_txid: str,
         commitment: str,
-        merkle_proof: List[Dict[str, Any]],
+        merkle_proof: List[Any],
         zk_proof_refs: Optional[List[str]],
         issued_at: str,
         receipt_hash_sha256: Optional[str] = None,
@@ -370,18 +733,8 @@ class TimelineStore:
                     epoch_id,
                     btc_txid,
                     commitment,
-                    json.dumps(
-                        merkle_proof,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    ),
-                    json.dumps(
-                        zk_proof_refs,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    )
+                    json.dumps(merkle_proof, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                    json.dumps(zk_proof_refs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
                     if zk_proof_refs
                     else None,
                     issued_at,
@@ -391,14 +744,308 @@ class TimelineStore:
 
     def get_receipt(self, receipt_id: str) -> Dict[str, Any]:
         with self._conn() as c:
-            row = c.execute(
-                "SELECT * FROM receipts WHERE receipt_id = ?", (receipt_id,)
-            ).fetchone()
+            row = c.execute("SELECT * FROM receipts WHERE receipt_id = ?", (receipt_id,)).fetchone()
         if not row:
             raise KeyError("receipt_not_found")
+
         data = dict(row)
-        data["merkle_proof"] = json.loads(data["merkle_proof_json"])
-        data["zk_proof_refs"] = (
-            json.loads(data["zk_proof_refs_json"]) if data["zk_proof_refs_json"] else None
-        )
+
+        # Parse proof + refs
+        proof = json.loads(data["merkle_proof_json"]) if data.get("merkle_proof_json") else []
+        zk = json.loads(data["zk_proof_refs_json"]) if data.get("zk_proof_refs_json") else None
+
+        # Verifier-only clean fields
+        data.pop("merkle_proof_json", None)
+        data.pop("zk_proof_refs_json", None)
+        data["batch_proof_siblings"] = proof
+        data["zk_proof_refs"] = zk
+
         return data
+
+
+    def set_receipt_txid(self, *, receipt_id: str, btc_txid: str) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE receipts SET btc_txid = ? WHERE receipt_id = ?",
+                (btc_txid, receipt_id),
+            )
+
+    def set_receipt_batch_fields(
+        self,
+        *,
+        receipt_id: str,
+        batch_id: str,
+        batch_merkle_root_sha256: str,
+        leaf_index: int,
+        merkle_proof_siblings_hex: List[str],
+    ) -> None:
+        """
+        Store batch metadata + merkle proof (siblings hex list) into the receipt.
+        We reuse merkle_proof_json for batch proofs.
+        """
+        with self._conn() as c:
+            c.execute(
+                """
+                UPDATE receipts
+                SET batch_id = ?,
+                    batch_merkle_root_sha256 = ?,
+                    leaf_index = ?,
+                    merkle_proof_json = ?
+                WHERE receipt_id = ?
+                """,
+                (
+                    batch_id,
+                    batch_merkle_root_sha256,
+                    leaf_index,
+                    json.dumps(merkle_proof_siblings_hex, ensure_ascii=False, separators=(",", ":"), sort_keys=False),
+                    receipt_id,
+                ),
+            )
+
+    # ----------------------------
+    # Batch build + persist (NO broadcast)
+    # ----------------------------
+    def build_next_batch(self, *, network: str, protocol_version: str, limit: int = 5000) -> Dict[str, Any]:
+        """
+        Deterministically:
+          - selects receipts where receipt_hash_sha256 is present AND batch_id is NULL
+          - sorts by receipt_hash_sha256
+          - builds batch merkle root + commitment
+          - persists batches + batch_receipts
+          - (optionally) writes batch_id + batch_merkle_root_sha256 + leaf_index onto receipts
+        """
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+
+            rows = conn.execute(
+                """
+                SELECT receipt_id, receipt_hash_sha256
+                FROM receipts
+                WHERE network = ?
+                  AND protocol_version = ?
+                  AND receipt_hash_sha256 IS NOT NULL
+                  AND (batch_id IS NULL OR batch_id = '')
+                ORDER BY receipt_hash_sha256 ASC
+                LIMIT ?
+                """,
+                (network, protocol_version, limit),
+            ).fetchall()
+
+            if not rows:
+                conn.rollback()
+                return {"ok": False, "reason": "no eligible receipts"}
+
+            receipt_summaries = [
+                {"receipt_id": r["receipt_id"], "receipt_sha256": r["receipt_hash_sha256"]} for r in rows
+            ]
+
+            built = build_receipt_batch(
+                network=network,
+                protocol_version=protocol_version,
+                receipt_summaries=receipt_summaries,
+            )
+
+            # Persist batch header
+            conn.execute(
+                """
+                INSERT INTO batches
+                (batch_id, created_at, network, protocol_version, leaf_count, merkle_root, batch_commitment)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    built.batch_id,
+                    built.created_at,
+                    built.network,
+                    built.protocol_version,
+                    built.leaf_count,
+                    built.merkle_root,
+                    built.batch_commitment,
+                ),
+            )
+
+            # Persist membership + stamp receipts
+            for idx, r in enumerate(rows):
+                rid = r["receipt_id"]
+                rh = r["receipt_hash_sha256"]
+                conn.execute(
+                    """
+                    INSERT INTO batch_receipts (batch_id, receipt_id, receipt_hash, leaf_index)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (built.batch_id, rid, rh, idx),
+                )
+                conn.execute(
+                    """
+                    UPDATE receipts
+                    SET batch_id = ?, batch_merkle_root_sha256 = ?, leaf_index = ?
+                    WHERE receipt_id = ?
+                    """,
+                    (built.batch_id, built.merkle_root, idx, rid),
+                )
+
+            conn.commit()
+
+            return {
+                "ok": True,
+                "batch_id": built.batch_id,
+                "created_at": built.created_at,
+                "network": built.network,
+                "protocol_version": built.protocol_version,
+                "leaf_count": built.leaf_count,
+                "merkle_root": built.merkle_root,
+                "batch_commitment": built.batch_commitment,
+            }
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    # ----------------------------
+    # Timeline anchor job queue (batch mode)
+    # ----------------------------
+    def enqueue_timeline_anchor_job(
+        self,
+        *,
+        receipt_id: str,
+        timeline_id: str,
+        network: str,
+        commitment: str,
+    ) -> str:
+        job_id = f"tl_anchor_{receipt_id}"
+        now = _utc_now_iso()
+        with self._conn() as c:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO timeline_anchor_jobs
+                (job_id, receipt_id, timeline_id, network, commitment, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
+                """,
+                (job_id, receipt_id, timeline_id, network, commitment, now, now),
+            )
+        return job_id
+
+    def list_queued_timeline_anchor_jobs(self, *, limit: int = 200) -> List[Dict[str, Any]]:
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT *
+                FROM timeline_anchor_jobs
+                WHERE status = 'queued'
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def claim_timeline_anchor_jobs(self, *, max_n: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Claim queued jobs and mark them running to avoid double-processing.
+        """
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """
+                SELECT * FROM timeline_anchor_jobs
+                WHERE status = 'queued'
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (max_n,),
+            ).fetchall()
+
+            jobs = [dict(r) for r in rows]
+            now = _utc_now_iso()
+            for j in jobs:
+                conn.execute(
+                    """
+                    UPDATE timeline_anchor_jobs
+                    SET status='running', updated_at=?
+                    WHERE job_id=? AND status='queued'
+                    """,
+                    (now, j["job_id"]),
+                )
+            conn.commit()
+            return jobs
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def mark_timeline_anchor_built(
+        self,
+        *,
+        job_id: str,
+        receipt_id: str,
+        batch_id: str,
+        batch_merkle_root_sha256: str,
+        leaf_index: int,
+        merkle_proof_siblings_hex: List[str],
+    ) -> None:
+        """
+        Mark a job as built (we currently reuse status='done' for "built but not broadcast"),
+        and store batch fields into the underlying receipt.
+        """
+        now = _utc_now_iso()
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                UPDATE timeline_anchor_jobs
+                SET status='done', txid=NULL, error=NULL, updated_at=?
+                WHERE job_id=?
+                """,
+                (now, job_id),
+            )
+            conn.execute(
+                """
+                UPDATE receipts
+                SET batch_id = ?,
+                    batch_merkle_root_sha256 = ?,
+                    leaf_index = ?,
+                    merkle_proof_json = ?
+                WHERE receipt_id = ?
+                """,
+                (
+                    batch_id,
+                    batch_merkle_root_sha256,
+                    leaf_index,
+                    json.dumps(merkle_proof_siblings_hex, ensure_ascii=False, separators=(",", ":"), sort_keys=False),
+                    receipt_id,
+                ),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def mark_timeline_anchor_done(self, *, job_id: str, txid: str) -> None:
+        now = _utc_now_iso()
+        with self._conn() as c:
+            c.execute(
+                """
+                UPDATE timeline_anchor_jobs
+                SET status='done', txid=?, error=NULL, updated_at=?
+                WHERE job_id=?
+                """,
+                (txid, now, job_id),
+            )
+
+    def mark_timeline_anchor_failed(self, *, job_id: str, error: str) -> None:
+        now = _utc_now_iso()
+        with self._conn() as c:
+            c.execute(
+                """
+                UPDATE timeline_anchor_jobs
+                SET status='failed', error=?, updated_at=?
+                WHERE job_id=?
+                """,
+                (error, now, job_id),
+            )

@@ -1,75 +1,15 @@
-# CLAW Protocol — Launch Index
+# CLAW v1 Launch Index
 
-CLAW is an administrative-less legal proof protocol designed for humans, bots, DAOs, and AI agents.
+This index lists the authoritative documents for the CLAW v1 production release.
 
-This repository contains the **first working, headless, agent-native implementation** of CLAW.
+## Required Reading
+- Canon: `CLAW_V1_CANON.md`
+- Trust boundary: `CLAW_V1_TRUST_BOUNDARY.md`
+- Freeze and distribution: `docs/CLAW_V1_FREEZE_AND_DISTRIBUTION.md`
+- Verification guide: `docs/VERIFY.md`
+- Repro kit guide: `repro/README.md`
+- Release notes: v1.0.0 Release Notes (GitHub Release)
 
-Meaning Lock (v1.x)
-The semantic interpretation of CLAW v1.x is frozen and legally bounded.
-→ SEMANTIC_LOCK.md
-
----
-
-## 🚀 Start Here (2 minutes)
-
-If you read only three files, read these:
-
-1. **Agent API Overview**  
-   `docs/AGENT_API.md`
-
-2. **Minimal agent-to-agent flow (no signatures)**  
-   `docs/examples/agent_to_agent_minimal.md`
-
-3. **Signed agent-to-agent flow (canonical)**  
-   `docs/examples/agent_to_agent_signed.md`
-
-4. **Semantic Lock (v1.x):**  
-  [`SEMANTIC_LOCK.md`](SEMANTIC_LOCK.md) — freezes the meaning and scope of CLAW v1.x and prevents retroactive reinterpretation.
-
-
----
-
-## 📜 Protocol Specifications
-
-- Canonical JSON + hashing rules  
-  `docs/protocol/CANON_JSON.md`
-
-- Proof construction & verification  
-  `docs/protocol/PROOF_VERIFICATION.md`
-
-- Non-human signers (agents, bots, DAOs)  
-  `docs/protocol/NON_HUMAN_SIGNERS.md`
-
-- Human override model  
-  `docs/protocol/HUMAN_OVERRIDE.md`
-
-- Dispute lineage & supersession  
-  `docs/protocol/DISPUTE_LINEAGE.md`
-
-- Protocol events  
-  `docs/protocol/PROTOCOL_EVENTS.md`
-
-- Invariants & interfaces  
-  `docs/protocol/INVARIANTS_AND_INTERFACES.md`
-
----
-
-## ✅ What Works Today
-
-- Deterministic clause hashing
-- Agent-native signing (no UI)
-- Proof generation with lineage
-- Anchoring (internal; chain-adapter ready)
-- Receipt verification
-- Tamper detection
-
-All flows can execute **without humans and without UI**.
-
----
-
-## 🔜 Near-Term Roadmap
-
-- Proof supersession (signed > unsigned)
-- Real wallet signature verification
-- External chain anchors (Base / Solana / BTC)
-- Optional execution hooks
+## Workflow API + CLI Commands
+- Workflow API: `/v1/workflow/*` (create, freeze, export)
+- CLI: `clawctl timeline|attest|agreement|dispute`

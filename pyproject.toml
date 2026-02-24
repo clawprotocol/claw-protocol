@@ -15,10 +15,20 @@ dependencies = [
   "python-dotenv",
   "aiohttp",
   "python-telegram-bot==20.7",
+  "python-multipart",
   # dev/test (ok to keep here for now; later we can split to optional groups)
   "pytest",
   "httpx",
   "certifi>=2026.1.4",
+  "embit>=0.8.0",
+  "openai>=2.21.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "httpx",
+  "python-multipart",
 ]
 
 [tool.setuptools]

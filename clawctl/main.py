@@ -18,6 +18,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from backend.services import workflow_service
+from backend.services import attestation_service
+from backend.services import bundle_service
+
 # ---------------------------------------------------------------------------
 # Globals & basic setup
 # ---------------------------------------------------------------------------
@@ -132,6 +136,49 @@ def _canon(obj: Any) -> str:
 
 def _sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def _env_default(name: str, default: str) -> str:
+    return os.getenv(name, default)
+
+
+def _read_json(path: Path) -> Dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_json(path: Path, obj: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _export_bundle(
+    *,
+    out_dir: Path,
+    timeline_path: Path,
+    receipt_path: Path,
+    esign_path: Path,
+    liability_path: Path,
+    agreement_path: Path,
+    dispute_path: Optional[Path],
+    created_at: str,
+) -> None:
+    timeline = _read_json(timeline_path)
+    receipt = _read_json(receipt_path)
+    esign = _read_json(esign_path)
+    liability = _read_json(liability_path)
+    agreement = _read_json(agreement_path)
+    dispute = _read_json(dispute_path) if dispute_path else None
+    workflow_service.export_bundle(
+        out_dir=out_dir,
+        timeline=timeline,
+        receipt=receipt,
+        esign_attestation=esign,
+        liability_attestation=liability,
+        agreement=agreement,
+        dispute_packet=dispute,
+        verify_md_path=PROJECT_ROOT / "docs" / "VERIFY.md",
+        created_at=created_at,
+    )
 
 
 # Stable receipt fields (keep this small + deterministic for “vector” tests)
@@ -764,12 +811,227 @@ def timestamp(
     console.print(f"[green]💾 Saved timestamp receipt to {out_path}[/green]")
 
 
+@app.command("first-adjudication")
+def first_adjudication(
+    out_dir: Optional[str] = typer.Option(
+        None, "--out-dir", help="Output directory for adjudication artifacts"
+    ),
+) -> None:
+    """
+    Run the first adjudication pack end-to-end: demo -> verify -> export.
+    """
+    env = os.environ.copy()
+    if out_dir:
+        env["CLAW_OUT_DIR"] = out_dir
+
+    cmds = [
+        ["uv", "run", "python", "-m", "backend.scripts.demo_first_adjudication"],
+        ["uv", "run", "python", "-m", "backend.scripts.verify_first_adjudication"],
+        ["uv", "run", "python", "-m", "backend.scripts.export_first_adjudication_pack"],
+    ]
+
+    zip_path = None
+    for cmd in cmds:
+        result = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if result.returncode != 0:
+            console.print(result.stdout)
+            raise typer.Exit(1)
+        if "export_first_adjudication_pack" in " ".join(cmd):
+            zip_path = (result.stdout or "").strip().splitlines()[-1]
+
+    if zip_path:
+        console.print(f"[green]pack_zip={zip_path}[/green]")
+
+
+@app.command("verify")
+def verify_bundle(
+    path: Path = typer.Argument(..., help="Path to bundle.zip or bundle directory"),
+    json_output: bool = typer.Option(True, "--json/--no-json", help="Print JSON output (default true)"),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON"),
+    quiet: bool = typer.Option(False, "--quiet", help="Print only ok true/false"),
+) -> None:
+    """
+    Verify a CLAW bundle zip or directory offline.
+    Exit code: 0 if ok, 1 if not ok, 2 on tool error.
+    """
+    try:
+        if path.is_dir():
+            report = bundle_service.verify_bundle_dir(path)
+        else:
+            data = path.read_bytes()
+            report = bundle_service.verify_bundle_zip(data)
+        ok = bool(report.get("ok"))
+        if quiet:
+            print("true" if ok else "false")
+        elif json_output:
+            if pretty:
+                print(json.dumps(report, indent=2, sort_keys=True))
+            else:
+                print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        else:
+            print(f"ok={str(ok).lower()}")
+        raise typer.Exit(code=0 if ok else 1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[red]verify error: {e}[/red]")
+        raise typer.Exit(code=2)
+
+
 # ---------------------------------------------------------------------------
 # Timeline mode (notice + timeline demo flow)
 # ---------------------------------------------------------------------------
 
-timeline_app = typer.Typer(help="Timeline tools – notice + timeline demo flow.")
+timeline_app = typer.Typer(
+    help="Timeline tools – verification is file-based; verify.py is authoritative."
+)
 app.add_typer(timeline_app, name="timeline")
+
+
+@timeline_app.command("new")
+def timeline_new(
+    timeline_id: str = typer.Option(..., "--timeline-id"),
+    title: str = typer.Option(..., "--title"),
+    network: str = typer.Option("testnet", "--network"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+    out_dir: Path = typer.Option(Path("workflow_artifacts"), "--out-dir"),
+) -> None:
+    tl = workflow_service.create_timeline(
+        timeline_id=timeline_id,
+        title=title,
+        network=network,
+        created_at=created_at,
+        parties=[],
+    )
+    path = out_dir / "timelines" / timeline_id / "timeline.json"
+    _write_json(path, tl)
+    console.print(f"[green]timeline={path}[/green]")
+
+
+@timeline_app.command("append")
+def timeline_append(
+    timeline_path: Optional[Path] = typer.Option(None, "--timeline"),
+    timeline_id: Optional[str] = typer.Option(None, "--timeline-id"),
+    out_dir: Path = typer.Option(Path("workflow_artifacts"), "--out-dir"),
+    event_json: Optional[str] = typer.Option(
+        None, "--event", help="Event JSON string (file-based verification only)."
+    ),
+    event_file: Optional[Path] = typer.Option(
+        None, "--event-file", help="Event JSON file (file-based verification only)."
+    ),
+    event_type: str = typer.Option("notice", "--event-type"),
+    event_time: str = typer.Option(
+        _env_default("CLAW_EVENT_TIME", "2026-01-01T00:00:00Z"), "--event-time"
+    ),
+    notice: str = typer.Option("", "--notice"),
+) -> None:
+    if not timeline_path:
+        if not timeline_id:
+            raise typer.Exit(1)
+        timeline_path = out_dir / "timelines" / timeline_id / "timeline.json"
+    timeline = _read_json(timeline_path)
+    if event_json or event_file:
+        if event_json and event_file:
+            raise typer.Exit(1)
+        raw = event_json or event_file.read_text(encoding="utf-8")
+        event_obj = json.loads(raw)
+        notice_obj = event_obj.get("notice")
+        marker_obj = event_obj.get("marker")
+        references = event_obj.get("references")
+        tl = workflow_service.append_event(
+            timeline=timeline,
+            event_type=event_obj.get("event_type", "notice"),
+            event_time=event_obj.get("event_time", event_time),
+            notice=notice_obj,
+            marker=marker_obj,
+            references=references,
+        )
+    else:
+        notice_obj = {"text": notice} if notice else {}
+        tl = workflow_service.append_event(
+            timeline=timeline,
+            event_type=event_type,
+            event_time=event_time,
+            notice=notice_obj,
+            marker=None,
+            references=None,
+        )
+    _write_json(timeline_path, tl)
+    console.print(f"[green]timeline={timeline_path}[/green]")
+
+
+@timeline_app.command("freeze")
+def timeline_freeze(
+    timeline_path: Optional[Path] = typer.Option(None, "--timeline"),
+    timeline_id: Optional[str] = typer.Option(None, "--timeline-id"),
+    out_dir: Path = typer.Option(Path("workflow_artifacts"), "--out-dir"),
+    frozen_at: str = typer.Option(
+        _env_default("CLAW_FROZEN_AT", "2026-01-01T00:00:00Z"), "--frozen-at"
+    ),
+    anchor_network: str = typer.Option("bitcoin-testnet", "--anchor-network"),
+    epoch_id: str = typer.Option("epoch-demo", "--epoch-id"),
+    issued_at: str = typer.Option(
+        _env_default("CLAW_ISSUED_AT", "2026-01-01T00:00:00Z"), "--issued-at"
+    ),
+    btc_txid: str = typer.Option("pending", "--btc-txid"),
+) -> None:
+    if not timeline_path:
+        if not timeline_id:
+            raise typer.Exit(1)
+        timeline_path = out_dir / "timelines" / timeline_id / "timeline.json"
+    timeline = _read_json(timeline_path)
+    frozen = workflow_service.freeze_timeline(timeline=timeline, frozen_at=frozen_at)
+    receipt = workflow_service.create_receipt(
+        timeline_id=frozen["timeline_id"],
+        frozen_manifest_sha256=frozen["frozen_manifest_sha256"],
+        anchor_network=anchor_network,
+        epoch_id=epoch_id,
+        issued_at=issued_at,
+        btc_txid=btc_txid,
+    )
+    _write_json(timeline_path, frozen)
+    receipt_path = timeline_path.parent / "receipt.json"
+    _write_json(receipt_path, receipt)
+    console.print(f"[green]timeline={timeline_path}[/green]")
+    console.print(f"[green]receipt={receipt_path}[/green]")
+
+
+@timeline_app.command("export")
+def timeline_export(
+    out_dir: Path = typer.Option(Path("workflow_bundle"), "--out-dir"),
+    timeline_path: Path = typer.Option(..., "--timeline"),
+    receipt_path: Path = typer.Option(..., "--receipt"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_PACK_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+) -> None:
+    """
+    Export a repo-less timeline capture repro kit.
+
+    Verification is file-based; verify.py is authoritative.
+    """
+    timeline = _read_json(timeline_path)
+    receipt = _read_json(receipt_path)
+    workflow_service.export_timeline_repro_kit(
+        out_dir=out_dir,
+        timeline=timeline,
+        receipt=receipt,
+        created_at=created_at,
+        verify_md_path=PROJECT_ROOT / "docs" / "VERIFY.md",
+        reference_base_dir=timeline_path.parent,
+    )
+    console.print(
+        f"[green]bundle={out_dir}[/green]\n[cyan]Verification is file-based; verify.py is authoritative.[/cyan]"
+    )
 
 
 @timeline_app.command("demo")
@@ -1301,6 +1563,409 @@ def init(
             border_style="green",
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Workflow CLI (deterministic, file-based)
+# ---------------------------------------------------------------------------
+
+attest_app = typer.Typer(help="Attestation workflows (e-sign, liability).")
+app.add_typer(attest_app, name="attest")
+
+esign_app = typer.Typer(help="E-sign attestation workflow.")
+liability_app = typer.Typer(help="Personal liability attestation workflow.")
+attest_app.add_typer(esign_app, name="esign")
+attest_app.add_typer(liability_app, name="liability")
+
+
+attestation_app = typer.Typer(
+    help="Attestation signing – verification is file-based; verify.py is authoritative."
+)
+app.add_typer(attestation_app, name="attestation")
+
+
+@attestation_app.command("new")
+def attestation_new(
+    attestation_type: str = typer.Option(..., "--type"),
+    payload_json: Optional[str] = typer.Option(None, "--payload-json"),
+    payload_file: Optional[Path] = typer.Option(None, "--payload-file"),
+    signer_json: Optional[str] = typer.Option(None, "--signer-json"),
+    signer_file: Optional[Path] = typer.Option(None, "--signer-file"),
+    issued_at: str = typer.Option(
+        _env_default("CLAW_ISSUED_AT", "2026-01-01T00:00:00Z"), "--issued-at"
+    ),
+    out_dir: Path = typer.Option(Path("workflow_artifacts"), "--out-dir"),
+) -> None:
+    if (payload_json is None) == (payload_file is None):
+        raise typer.Exit(1)
+    if (signer_json is None) == (signer_file is None):
+        raise typer.Exit(1)
+    payload = json.loads(payload_json) if payload_json else json.loads(payload_file.read_text(encoding="utf-8"))
+    signer = json.loads(signer_json) if signer_json else json.loads(signer_file.read_text(encoding="utf-8"))
+    att = attestation_service.create_attestation(attestation_type, payload, signer, issued_at)
+    path = out_dir / "attestations" / f"{att['attestation_id']}.json"
+    _write_json(path, att)
+    console.print(f"[green]attestation={path}[/green]")
+
+
+@attestation_app.command("sign")
+def attestation_sign(
+    attestation_path: Path = typer.Option(..., "--attestation"),
+    signer_id: str = typer.Option(..., "--signer-id"),
+    signed_at: str = typer.Option(
+        _env_default("CLAW_SIGNED_AT", "2026-01-01T00:00:00Z"), "--signed-at"
+    ),
+    signing_key: Optional[str] = typer.Option(None, "--signing-key"),
+) -> None:
+    att = _read_json(attestation_path)
+    signed = attestation_service.sign_attestation(
+        att, signer_id=signer_id, signed_at=signed_at, signing_key=signing_key
+    )
+    _write_json(attestation_path, signed)
+    console.print(f"[green]attestation={attestation_path}[/green]")
+
+
+@attestation_app.command("freeze")
+def attestation_freeze(
+    attestation_path: Path = typer.Option(..., "--attestation"),
+    frozen_at: str = typer.Option(
+        _env_default("CLAW_FROZEN_AT", "2026-01-01T00:00:00Z"), "--frozen-at"
+    ),
+) -> None:
+    att = _read_json(attestation_path)
+    frozen = attestation_service.freeze_attestation(att, frozen_at)
+    _write_json(attestation_path, frozen)
+    console.print(f"[green]attestation={attestation_path}[/green]")
+
+
+@attestation_app.command("export")
+def attestation_export(
+    attestation_path: Path = typer.Option(..., "--attestation"),
+    out_dir: Path = typer.Option(Path("attestation_repro"), "--out"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+    event_time: str = typer.Option(
+        _env_default("CLAW_EVENT_TIME", "2026-01-01T00:00:00Z"), "--event-time"
+    ),
+    frozen_at: str = typer.Option(
+        _env_default("CLAW_FROZEN_AT", "2026-01-01T00:00:00Z"), "--frozen-at"
+    ),
+    issued_at: str = typer.Option(
+        _env_default("CLAW_ISSUED_AT", "2026-01-01T00:00:00Z"), "--issued-at"
+    ),
+    anchor_network: str = typer.Option("bitcoin-testnet", "--anchor-network"),
+    epoch_id: str = typer.Option("epoch-demo", "--epoch-id"),
+) -> None:
+    """
+    Export a repo-less attestation repro kit.
+
+    Verification is file-based; verify.py is authoritative.
+    """
+    att = _read_json(attestation_path)
+    attestation_service.export_attestation_repro(
+        out_dir=out_dir,
+        attestation=att,
+        created_at=created_at,
+        event_time=event_time,
+        frozen_at=frozen_at,
+        issued_at=issued_at,
+        anchor_network=anchor_network,
+        epoch_id=epoch_id,
+        verify_md_path=PROJECT_ROOT / "docs" / "VERIFY.md",
+    )
+    console.print(
+        f"[green]bundle={out_dir}[/green]\n[cyan]Verification is file-based; verify.py is authoritative.[/cyan]"
+    )
+
+
+@esign_app.command("new")
+def esign_new(
+    signer_id: str = typer.Option(..., "--signer-id"),
+    signer_name: str = typer.Option(..., "--signer-name"),
+    statement: str = typer.Option(..., "--statement"),
+    signed_at: str = typer.Option(
+        _env_default("CLAW_SIGNED_AT", "2026-01-01T00:00:00Z"), "--signed-at"
+    ),
+    out_dir: Path = typer.Option(Path("workflow_artifacts"), "--out-dir"),
+) -> None:
+    att = workflow_service.create_attestation_esign(
+        signer_id=signer_id,
+        signer_name=signer_name,
+        statement=statement,
+        signed_at=signed_at,
+    )
+    path = out_dir / "attestations" / f"esign_{att['attestation_sha256'][:12]}.json"
+    _write_json(path, att)
+    console.print(f"[green]esign_attestation={path}[/green]")
+
+
+@esign_app.command("freeze")
+def esign_freeze(
+    attestation_path: Path = typer.Option(..., "--attestation"),
+    frozen_at: str = typer.Option(
+        _env_default("CLAW_FROZEN_AT", "2026-01-01T00:00:00Z"), "--frozen-at"
+    ),
+) -> None:
+    att = _read_json(attestation_path)
+    frozen = workflow_service.freeze_attestation(attestation=att, frozen_at=frozen_at)
+    _write_json(attestation_path, frozen)
+    console.print(f"[green]esign_attestation={attestation_path}[/green]")
+
+
+@esign_app.command("export")
+def esign_export(
+    out_dir: Path = typer.Option(Path("workflow_bundle"), "--out-dir"),
+    timeline_path: Path = typer.Option(..., "--timeline"),
+    receipt_path: Path = typer.Option(..., "--receipt"),
+    esign_path: Path = typer.Option(..., "--esign"),
+    liability_path: Path = typer.Option(..., "--liability"),
+    agreement_path: Path = typer.Option(..., "--agreement"),
+    dispute_path: Optional[Path] = typer.Option(None, "--dispute"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_PACK_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+) -> None:
+    _export_bundle(
+        out_dir=out_dir,
+        timeline_path=timeline_path,
+        receipt_path=receipt_path,
+        esign_path=esign_path,
+        liability_path=liability_path,
+        agreement_path=agreement_path,
+        dispute_path=dispute_path,
+        created_at=created_at,
+    )
+    console.print(f"[green]bundle={out_dir}[/green]")
+
+
+@liability_app.command("new")
+def liability_new(
+    subject_id: str = typer.Option(..., "--subject-id"),
+    role: str = typer.Option(..., "--role"),
+    capacity: str = typer.Option("individual", "--capacity"),
+    control_asserted: bool = typer.Option(True, "--control-asserted"),
+    access_asserted: bool = typer.Option(True, "--access-asserted"),
+    valid_from: str = typer.Option(
+        _env_default("CLAW_VALID_FROM", "2026-01-01T00:00:00Z"), "--valid-from"
+    ),
+    valid_to: str = typer.Option(
+        _env_default("CLAW_VALID_TO", "2027-01-01T00:00:00Z"), "--valid-to"
+    ),
+    out_dir: Path = typer.Option(Path("workflow_artifacts"), "--out-dir"),
+) -> None:
+    att = workflow_service.create_attestation_liability(
+        subject_id=subject_id,
+        role=role,
+        capacity=capacity,
+        control_asserted=control_asserted,
+        access_asserted=access_asserted,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        exclusions=[],
+    )
+    path = out_dir / "attestations" / f"liability_{att['attestation_sha256'][:12]}.json"
+    _write_json(path, att)
+    console.print(f"[green]liability_attestation={path}[/green]")
+
+
+@liability_app.command("freeze")
+def liability_freeze(
+    attestation_path: Path = typer.Option(..., "--attestation"),
+    frozen_at: str = typer.Option(
+        _env_default("CLAW_FROZEN_AT", "2026-01-01T00:00:00Z"), "--frozen-at"
+    ),
+) -> None:
+    att = _read_json(attestation_path)
+    frozen = workflow_service.freeze_attestation(attestation=att, frozen_at=frozen_at)
+    _write_json(attestation_path, frozen)
+    console.print(f"[green]liability_attestation={attestation_path}[/green]")
+
+
+@liability_app.command("export")
+def liability_export(
+    out_dir: Path = typer.Option(Path("workflow_bundle"), "--out-dir"),
+    timeline_path: Path = typer.Option(..., "--timeline"),
+    receipt_path: Path = typer.Option(..., "--receipt"),
+    esign_path: Path = typer.Option(..., "--esign"),
+    liability_path: Path = typer.Option(..., "--liability"),
+    agreement_path: Path = typer.Option(..., "--agreement"),
+    dispute_path: Optional[Path] = typer.Option(None, "--dispute"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_PACK_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+) -> None:
+    _export_bundle(
+        out_dir=out_dir,
+        timeline_path=timeline_path,
+        receipt_path=receipt_path,
+        esign_path=esign_path,
+        liability_path=liability_path,
+        agreement_path=agreement_path,
+        dispute_path=dispute_path,
+        created_at=created_at,
+    )
+    console.print(f"[green]bundle={out_dir}[/green]")
+
+
+agreement_app = typer.Typer(help="Agreement workflow.")
+app.add_typer(agreement_app, name="agreement")
+
+
+@agreement_app.command("new")
+def agreement_new(
+    title: str = typer.Option(..., "--title"),
+    content_file: Path = typer.Option(..., "--content-file"),
+    party: List[str] = typer.Option([], "--party"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+    out_dir: Path = typer.Option(Path("workflow_artifacts"), "--out-dir"),
+) -> None:
+    content = content_file.read_text(encoding="utf-8")
+    agreement = workflow_service.create_agreement(
+        title=title, parties=party, content=content, created_at=created_at
+    )
+    path = out_dir / "agreements" / agreement["agreement_id"] / "agreement.json"
+    _write_json(path, agreement)
+    console.print(f"[green]agreement={path}[/green]")
+
+
+@agreement_app.command("redline")
+def agreement_redline(
+    agreement_path: Path = typer.Option(..., "--agreement"),
+    base_version_id: str = typer.Option(..., "--base-version-id"),
+    ops_json: Optional[str] = typer.Option(None, "--ops"),
+    ops_file: Optional[Path] = typer.Option(None, "--ops-file"),
+    new_content_file: Path = typer.Option(..., "--content-file"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+) -> None:
+    agreement = _read_json(agreement_path)
+    if ops_json:
+        ops = json.loads(ops_json)
+    elif ops_file:
+        ops = json.loads(ops_file.read_text(encoding="utf-8"))
+    else:
+        ops = []
+    new_content = new_content_file.read_text(encoding="utf-8")
+    updated = workflow_service.propose_redline(
+        agreement=agreement,
+        base_version_id=base_version_id,
+        ops=ops,
+        new_content=new_content,
+        created_at=created_at,
+    )
+    _write_json(agreement_path, updated)
+    console.print(f"[green]agreement={agreement_path}[/green]")
+
+
+@agreement_app.command("accept")
+def agreement_accept(
+    agreement_path: Path = typer.Option(..., "--agreement"),
+    version_id: str = typer.Option(..., "--version-id"),
+    accepted_at: str = typer.Option(
+        _env_default("CLAW_ACCEPTED_AT", "2026-01-01T00:00:00Z"), "--accepted-at"
+    ),
+) -> None:
+    agreement = _read_json(agreement_path)
+    updated = workflow_service.accept_version(
+        agreement=agreement, version_id=version_id, accepted_at=accepted_at
+    )
+    _write_json(agreement_path, updated)
+    console.print(f"[green]agreement={agreement_path}[/green]")
+
+
+@agreement_app.command("freeze")
+def agreement_freeze(
+    agreement_path: Path = typer.Option(..., "--agreement"),
+    frozen_at: str = typer.Option(
+        _env_default("CLAW_FROZEN_AT", "2026-01-01T00:00:00Z"), "--frozen-at"
+    ),
+) -> None:
+    agreement = _read_json(agreement_path)
+    frozen = workflow_service.freeze_agreement(agreement=agreement, frozen_at=frozen_at)
+    _write_json(agreement_path, frozen)
+    console.print(f"[green]agreement={agreement_path}[/green]")
+
+
+@agreement_app.command("export")
+def agreement_export(
+    out_dir: Path = typer.Option(Path("workflow_bundle"), "--out-dir"),
+    timeline_path: Path = typer.Option(..., "--timeline"),
+    receipt_path: Path = typer.Option(..., "--receipt"),
+    esign_path: Path = typer.Option(..., "--esign"),
+    liability_path: Path = typer.Option(..., "--liability"),
+    agreement_path: Path = typer.Option(..., "--agreement"),
+    dispute_path: Optional[Path] = typer.Option(None, "--dispute"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_PACK_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+) -> None:
+    _export_bundle(
+        out_dir=out_dir,
+        timeline_path=timeline_path,
+        receipt_path=receipt_path,
+        esign_path=esign_path,
+        liability_path=liability_path,
+        agreement_path=agreement_path,
+        dispute_path=dispute_path,
+        created_at=created_at,
+    )
+    console.print(f"[green]bundle={out_dir}[/green]")
+
+
+dispute_app = typer.Typer(help="Dispute packet workflow.")
+app.add_typer(dispute_app, name="dispute")
+
+
+@dispute_app.command("new")
+def dispute_new(
+    claim: List[str] = typer.Option(..., "--claim"),
+    references_file: Path = typer.Option(..., "--references"),
+    timelines_file: Optional[Path] = typer.Option(None, "--timelines"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+    out_dir: Path = typer.Option(Path("workflow_artifacts"), "--out-dir"),
+) -> None:
+    references = json.loads(references_file.read_text(encoding="utf-8"))
+    timelines = (
+        json.loads(timelines_file.read_text(encoding="utf-8")) if timelines_file else []
+    )
+    packet = workflow_service.build_dispute_packet(
+        claims=claim, references=references, timelines=timelines, created_at=created_at
+    )
+    path = out_dir / "disputes" / f"{packet['packet_id']}.json"
+    _write_json(path, packet)
+    console.print(f"[green]dispute_packet={path}[/green]")
+
+
+@dispute_app.command("export")
+def dispute_export(
+    out_dir: Path = typer.Option(Path("workflow_bundle"), "--out-dir"),
+    timeline_path: Path = typer.Option(..., "--timeline"),
+    receipt_path: Path = typer.Option(..., "--receipt"),
+    esign_path: Path = typer.Option(..., "--esign"),
+    liability_path: Path = typer.Option(..., "--liability"),
+    agreement_path: Path = typer.Option(..., "--agreement"),
+    dispute_path: Optional[Path] = typer.Option(None, "--dispute"),
+    created_at: str = typer.Option(
+        _env_default("CLAW_PACK_CREATED_AT", "2026-01-01T00:00:00Z"), "--created-at"
+    ),
+) -> None:
+    _export_bundle(
+        out_dir=out_dir,
+        timeline_path=timeline_path,
+        receipt_path=receipt_path,
+        esign_path=esign_path,
+        liability_path=liability_path,
+        agreement_path=agreement_path,
+        dispute_path=dispute_path,
+        created_at=created_at,
+    )
+    console.print(f"[green]bundle={out_dir}[/green]")
 
 
 # ---------------------------------------------------------------------------
