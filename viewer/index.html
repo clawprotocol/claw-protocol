@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CLAW v1 Evidence Viewer (Read-Only)</title>
+    <style>
+      :root {
+        --bg: #0b0f14;
+        --fg: #e6eef7;
+        --muted: #9fb2c7;
+        --warn-bg: #2a0f12;
+        --warn-fg: #ffb4a2;
+        --card: #121823;
+        --border: #1f2a3a;
+        --ok: #40c463;
+        --bad: #ff5a5a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+        line-height: 1.45;
+      }
+      header, main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .banner {
+        background: var(--warn-bg);
+        color: var(--warn-fg);
+        padding: 12px 16px;
+        border: 1px solid #5a1b22;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        font-weight: 600;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      h1, h2, h3 { margin: 0 0 8px 0; }
+      h2 { font-size: 18px; }
+      p { margin: 8px 0; color: var(--muted); }
+      label { display: block; margin: 12px 0 6px; font-weight: 600; }
+      input[type="file"] {
+        display: block;
+        width: 100%;
+        padding: 6px;
+        background: #0f1520;
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      pre {
+        background: #0f1520;
+        border: 1px solid var(--border);
+        padding: 12px;
+        border-radius: 8px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+      th, td {
+        border: 1px solid var(--border);
+        padding: 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .status {
+        font-weight: 700;
+      }
+      .status.ok { color: var(--ok); }
+      .status.fail { color: var(--bad); }
+      .hint { font-size: 13px; color: var(--muted); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="banner">
+        CLAW verification is cryptographic and file-based. This viewer is informational only.
+      </div>
+      <h1>CLAW v1 Evidence Viewer (Read-Only)</h1>
+      <p>
+        This viewer displays artifacts exactly as recorded. It does not verify integrity.
+        Use <span class="mono">verify.py</span> for authoritative verification.
+      </p>
+    </header>
+
+    <main>
+      <div class="card">
+        <h2>Load Repro Kit Files</h2>
+        <label>pack.json</label>
+        <input id="packFile" type="file" accept=".json" />
+
+        <label>sample_timeline.json</label>
+        <input id="timelineFile" type="file" accept=".json" />
+
+        <label>sample_receipt.json</label>
+        <input id="receiptFile" type="file" accept=".json" />
+
+        <label>esign_attestation.json</label>
+        <input id="esignFile" type="file" accept=".json" />
+
+        <label>personal_liability_attestation.json</label>
+        <input id="liabilityFile" type="file" accept=".json" />
+
+        <label>agreement_ref.json</label>
+        <input id="agreementFile" type="file" accept=".json" />
+      </div>
+
+      <div class="card">
+        <h2>Verification Status (From verify.py)</h2>
+        <p class="hint">
+          Run <span class="mono">python verify.py</span> locally. Paste its output below.
+          This viewer only displays the result; it does not compute verification.
+        </p>
+        <label>verify.py output (paste)</label>
+        <textarea id="verifyOutput" rows="4" style="width:100%;"></textarea>
+        <p class="status" id="verifyStatus">Status: unknown</p>
+      </div>
+
+      <div class="card">
+        <h2>Pack Summary</h2>
+        <div id="packSummary"><p class="hint">Load pack.json to display summary.</p></div>
+      </div>
+
+      <div class="card">
+        <h2>Timeline (Ordered Events)</h2>
+        <div id="timelineView"><p class="hint">Load sample_timeline.json to display events.</p></div>
+      </div>
+
+      <div class="card">
+        <h2>Receipt</h2>
+        <pre id="receiptView">Load sample_receipt.json to display receipt.</pre>
+      </div>
+
+      <div class="card">
+        <h2>Attestations & Agreement Reference</h2>
+        <pre id="attestView">Load attestation and agreement files to display contents.</pre>
+      </div>
+    </main>
+
+    <script>
+      const state = {
+        pack: null,
+        timeline: null,
+        receipt: null,
+        esign: null,
+        liability: null,
+        agreement: null
+      };
+
+      function parseFile(input, key) {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            state[key] = JSON.parse(reader.result);
+            render();
+          } catch (e) {
+            alert(`Invalid JSON in ${file.name}: ${e.message}`);
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      function renderPack() {
+        const el = document.getElementById("packSummary");
+        if (!state.pack) {
+          el.innerHTML = "<p class='hint'>Load pack.json to display summary.</p>";
+          return;
+        }
+        const p = state.pack;
+        const rows = [
+          ["schema", p.schema],
+          ["pack_inputs_hash_sha256", p.pack_inputs_hash_sha256],
+          ["created_at", p.created_at],
+          ["commitment", p.commitment]
+        ];
+        const utilities = p.utilities || {};
+        const utilKeys = Object.keys(utilities).join(", ");
+        let html = "<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>";
+        rows.forEach(r => {
+          html += `<tr><td>${r[0]}</td><td class="mono">${r[1] ?? ""}</td></tr>`;
+        });
+        html += `<tr><td>utilities</td><td class="mono">${utilKeys}</td></tr>`;
+        html += "</tbody></table>";
+        el.innerHTML = html;
+      }
+
+      function renderTimeline() {
+        const el = document.getElementById("timelineView");
+        if (!state.timeline) {
+          el.innerHTML = "<p class='hint'>Load sample_timeline.json to display events.</p>";
+          return;
+        }
+        const events = state.timeline.events || [];
+        if (!Array.isArray(events) || events.length === 0) {
+          el.innerHTML = "<p class='hint'>No events found.</p>";
+          return;
+        }
+        let html = "<table><thead><tr><th>#</th><th>Event</th></tr></thead><tbody>";
+        events.forEach((ev, i) => {
+          html += `<tr><td>${i}</td><td><pre>${JSON.stringify(ev, null, 2)}</pre></td></tr>`;
+        });
+        html += "</tbody></table>";
+        el.innerHTML = html;
+      }
+
+      function renderReceipt() {
+        const el = document.getElementById("receiptView");
+        if (!state.receipt) {
+          el.textContent = "Load sample_receipt.json to display receipt.";
+          return;
+        }
+        el.textContent = JSON.stringify(state.receipt, null, 2);
+      }
+
+      function renderAttestations() {
+        const el = document.getElementById("attestView");
+        const parts = [];
+        if (state.esign) parts.push({title: "E‑Sign Attestation", data: state.esign});
+        if (state.liability) parts.push({title: "Personal Liability Attestation", data: state.liability});
+        if (state.agreement) parts.push({title: "Agreement Reference", data: state.agreement});
+        if (parts.length === 0) {
+          el.textContent = "Load attestation and agreement files to display contents.";
+          return;
+        }
+        el.textContent = parts.map(p => `${p.title}\n${JSON.stringify(p.data, null, 2)}`).join("\n\n");
+      }
+
+      function renderVerifyStatus() {
+        const out = document.getElementById("verifyOutput").value || "";
+        const statusEl = document.getElementById("verifyStatus");
+        if (/^PASS/m.test(out)) {
+          statusEl.textContent = "Status: PASS (from verify.py output)";
+          statusEl.className = "status ok";
+        } else if (/^FAIL/m.test(out)) {
+          statusEl.textContent = "Status: FAIL (from verify.py output)";
+          statusEl.className = "status fail";
+        } else {
+          statusEl.textContent = "Status: unknown";
+          statusEl.className = "status";
+        }
+      }
+
+      function render() {
+        renderPack();
+        renderTimeline();
+        renderReceipt();
+        renderAttestations();
+        renderVerifyStatus();
+      }
+
+      document.getElementById("packFile").addEventListener("change", e => parseFile(e.target, "pack"));
+      document.getElementById("timelineFile").addEventListener("change", e => parseFile(e.target, "timeline"));
+      document.getElementById("receiptFile").addEventListener("change", e => parseFile(e.target, "receipt"));
+      document.getElementById("esignFile").addEventListener("change", e => parseFile(e.target, "esign"));
+      document.getElementById("liabilityFile").addEventListener("change", e => parseFile(e.target, "liability"));
+      document.getElementById("agreementFile").addEventListener("change", e => parseFile(e.target, "agreement"));
+      document.getElementById("verifyOutput").addEventListener("input", renderVerifyStatus);
+    </script>
+  </body>
+</html>
+

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgreementVersion",
+  "type": "object",
+  "required": ["version_id", "created_at", "content_hash_sha256"],
+  "properties": {
+    "version_id": { "type": "string" },
+    "created_at": { "type": "string" },
+    "content_hash_sha256": { "type": "string" },
+    "source_ref": { "type": "string" },
+    "redlines": {
+      "type": "array",
+      "items": { "$ref": "agreement_redline.schema.json" }
+    }
+  },
+  "additionalProperties": false
+}
