@@ -77,6 +77,7 @@ from backend.routers.agreements_api import router as agreements_router
 from backend.routers.agreements_v2_api import router as agreements_v2_router
 from backend.routers.liability_api import router as liability_router
 from backend.routers.vs01_documents_api import router as vs01_documents_router
+from backend.routers.vs01_sign_api import router as vs01_sign_router
 
 
 # -------------------------------------------------
@@ -1175,6 +1176,7 @@ app.include_router(agreements_router)
 app.include_router(agreements_v2_router)
 app.include_router(liability_router)
 app.include_router(vs01_documents_router)
+app.include_router(vs01_sign_router)
 
 
 # -------------------------------------------------
