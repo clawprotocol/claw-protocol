@@ -176,3 +176,66 @@ export async function completeSignSession(
 
   return data;
 }
+
+export type GetReceiptResponse = {
+  ok?: boolean;
+  receipt?: unknown;
+  receipt_hash_sha256?: string;
+  [key: string]: unknown;
+};
+
+/**
+ * GET /v1/receipts/{receipt_id}
+ */
+export async function getReceipt(receiptId: string): Promise<GetReceiptResponse> {
+  const base = apiBase();
+  const enc = encodeURIComponent(receiptId);
+  const url = `${base}/v1/receipts/${enc}`;
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+
+  const text = await res.text();
+  let data: GetReceiptResponse;
+  try {
+    data = text ? (JSON.parse(text) as GetReceiptResponse) : {};
+  } catch {
+    if (!res.ok) {
+      throw new Error(text || `${res.status} ${res.statusText}`);
+    }
+    throw new Error("Invalid JSON response");
+  }
+
+  if (!res.ok) {
+    throw new Error(messageFromJsonBody(data, text || `${res.status} ${res.statusText}`));
+  }
+
+  return data;
+}
+
+/**
+ * GET /v1/receipts/{receipt_id}/bundle — verification zip bytes.
+ */
+export async function downloadBundle(receiptId: string): Promise<Blob> {
+  const base = apiBase();
+  const enc = encodeURIComponent(receiptId);
+  const url = `${base}/v1/receipts/${enc}/bundle`;
+
+  const res = await fetch(url, { method: "GET" });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text || `${res.status} ${res.statusText}`;
+    try {
+      const parsed = text ? JSON.parse(text) : {};
+      msg = messageFromJsonBody(parsed, msg);
+    } catch {
+      /* use msg as-is */
+    }
+    throw new Error(msg);
+  }
+
+  return res.blob();
+}

@@ -51,6 +51,16 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
     []
   );
 
+  const handleReceiptUpdated = useCallback(
+    (payload: { receipt: unknown; receiptHashSha256?: string | null }) => {
+      setReceipt(payload.receipt);
+      if (payload.receiptHashSha256 != null && String(payload.receiptHashSha256).trim() !== "") {
+        setReceiptHashSha256(String(payload.receiptHashSha256).trim());
+      }
+    },
+    []
+  );
+
   return (
     <>
       {error ? (
@@ -129,7 +139,13 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
         ) : null}
         {step === 2 ? (
           <StepDone
+            receiptId={receiptId}
+            receiptHashSha256={receiptHashSha256}
+            receipt={receipt}
             loading={loading}
+            setLoading={setLoading}
+            onError={setError}
+            onReceiptUpdated={handleReceiptUpdated}
             onStartOver={() => {
               setDocumentId(null);
               setContentSha256(null);
