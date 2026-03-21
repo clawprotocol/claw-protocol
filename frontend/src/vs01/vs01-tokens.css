@@ -1,0 +1,44 @@
+/**
+ * VS01 design tokens — single source of truth.
+ * See docs/implementation/VS01_UI_STYLE_AND_SHELL_SPEC.md
+ */
+:root {
+  --vs01-color-bg-page: #faf8f5;
+  --vs01-color-bg-card: #ffffff;
+  --vs01-color-bg-muted: rgba(15, 23, 42, 0.04);
+  --vs01-color-border-subtle: rgba(15, 23, 42, 0.12);
+  --vs01-color-text-primary: #0f172a;
+  --vs01-color-text-secondary: #334155;
+  --vs01-color-text-muted: #64748b;
+  /* Teal accent — signal color only for CTAs / active step / focus */
+  --vs01-color-accent: #0d9488;
+  --vs01-color-accent-hover: #0f766e;
+  --vs01-color-on-accent: #f8fafc;
+  --vs01-color-danger: #b91c1c;
+  --vs01-color-danger-bg: rgba(185, 28, 28, 0.08);
+  --vs01-color-success: #047857;
+
+  --vs01-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --vs01-font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  --vs01-text-page-title: 1.375rem;
+  --vs01-text-step-title: 1.125rem;
+  --vs01-text-body: 1rem;
+  --vs01-text-legal: 0.8125rem;
+  --vs01-text-mono: 0.8125rem;
+
+  --vs01-leading-body: 1.55;
+
+  --vs01-space-card: 1.75rem;
+  --vs01-space-section: 1.25rem;
+  --vs01-space-page-x: 1rem;
+  --vs01-space-page-y: 1.5rem;
+
+  --vs01-radius-card: 14px;
+  --vs01-radius-control: 9px;
+
+  --vs01-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.05);
+
+  --vs01-max-width: 42rem; /* ~672px */
+  --vs01-accent-strip-height: 4px;
+}

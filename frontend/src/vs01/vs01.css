@@ -1,0 +1,228 @@
+@import "./vs01-tokens.css";
+
+.vs01-root {
+  min-height: 100vh;
+  background: var(--vs01-color-bg-page);
+  color: var(--vs01-color-text-primary);
+  font-family: var(--vs01-font-sans);
+  font-size: var(--vs01-text-body);
+  line-height: var(--vs01-leading-body);
+}
+
+.vs01-accent-strip {
+  height: var(--vs01-accent-strip-height);
+  background: linear-gradient(
+    90deg,
+    var(--vs01-color-accent) 0%,
+    color-mix(in srgb, var(--vs01-color-accent) 75%, #f59e0b) 100%
+  );
+}
+
+.vs01-shell {
+  max-width: var(--vs01-max-width);
+  margin: 0 auto;
+  padding: var(--vs01-space-page-y) var(--vs01-space-page-x);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.vs01-header-title {
+  font-size: var(--vs01-text-page-title);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.vs01-header-subtitle {
+  margin: 0.35rem 0 0;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-header-tagline {
+  margin: 0.5rem 0 0;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-muted);
+  font-style: italic;
+}
+
+/* Stepper */
+.vs01-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+  overflow: hidden;
+  background: var(--vs01-color-bg-card);
+}
+
+.vs01-stepper-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.65rem 0.5rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--vs01-color-text-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.vs01-stepper-step:not(:last-child) {
+  border-right: 1px solid var(--vs01-color-border-subtle);
+}
+
+.vs01-stepper-step:hover:not(:disabled) {
+  background: var(--vs01-color-bg-muted);
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-stepper-step:disabled {
+  cursor: default;
+}
+
+.vs01-stepper-step--active {
+  background: color-mix(in srgb, var(--vs01-color-accent) 12%, transparent);
+  color: var(--vs01-color-accent);
+  font-weight: 600;
+}
+
+.vs01-stepper-num {
+  font-size: 0.75rem;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.vs01-stepper-label {
+  font-size: 0.8125rem;
+}
+
+/* Error banner */
+.vs01-error-banner {
+  padding: 0.75rem 1rem;
+  border-radius: var(--vs01-radius-control);
+  border-left: 4px solid var(--vs01-color-danger);
+  background: var(--vs01-color-danger-bg);
+  color: var(--vs01-color-danger);
+  font-size: var(--vs01-text-legal);
+}
+
+/* Main card */
+.vs01-card {
+  background: var(--vs01-color-bg-card);
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-card);
+  box-shadow: var(--vs01-shadow-card);
+  padding: var(--vs01-space-card);
+}
+
+.vs01-card-title {
+  margin: 0 0 0.35rem;
+  font-size: var(--vs01-text-step-title);
+  font-weight: 600;
+}
+
+.vs01-card-help {
+  margin: 0 0 1.25rem;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-placeholder-box {
+  padding: 1rem;
+  border: 1px dashed var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+  background: var(--vs01-color-bg-muted);
+  color: var(--vs01-color-text-secondary);
+  font-size: var(--vs01-text-legal);
+}
+
+.vs01-hash-panel {
+  font-family: var(--vs01-font-mono);
+  font-size: var(--vs01-text-mono);
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+  background: var(--vs01-color-bg-muted);
+  color: var(--vs01-color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* Buttons */
+.vs01-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--vs01-radius-control);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.vs01-btn:focus-visible {
+  outline: 2px solid var(--vs01-color-accent);
+  outline-offset: 2px;
+}
+
+.vs01-btn--primary {
+  background: var(--vs01-color-accent);
+  color: var(--vs01-color-on-accent);
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.vs01-btn--primary:hover:not(:disabled) {
+  background: var(--vs01-color-accent-hover);
+}
+
+.vs01-btn--secondary {
+  background: transparent;
+  color: var(--vs01-color-text-primary);
+  border-color: var(--vs01-color-border-subtle);
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.vs01-btn--secondary:hover:not(:disabled) {
+  background: var(--vs01-color-bg-muted);
+}
+
+.vs01-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Footer */
+.vs01-footer {
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-muted);
+  line-height: 1.5;
+}
+
+.vs01-footer p {
+  margin: 0 0 0.65rem;
+}
+
+.vs01-footer strong {
+  color: var(--vs01-color-text-secondary);
+  font-weight: 600;
+}
+
+.vs01-footer code {
+  font-family: var(--vs01-font-mono);
+  font-size: 0.78rem;
+  background: var(--vs01-color-bg-muted);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
