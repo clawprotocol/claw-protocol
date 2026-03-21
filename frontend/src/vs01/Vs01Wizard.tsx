@@ -17,33 +17,59 @@ export type Vs01WizardProps = {
 };
 
 /**
- * Single-page 3-step wizard: owns step index + loading axis (idle until API wiring).
- * Presentational steps; no fetch here.
- * Future: global error from API — render `.vs01-error-banner` above the stepper.
+ * Single-page 3-step wizard: owns step index, finalize identifiers, loading, and errors.
  */
 export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
   const [step, setStep] = useState<Vs01Step>(initialStep);
-  const [loading] = useState<Vs01LoadingState>("idle");
+  const [loading, setLoading] = useState<Vs01LoadingState>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(null);
+  const [contentSha256, setContentSha256] = useState<string | null>(null);
 
   const goToStep = useCallback((target: Vs01Step) => {
     setStep(target);
+    setError(null);
   }, []);
+
+  const handleFinalized = useCallback(
+    (payload: { documentId: string; contentSha256: string }) => {
+      setDocumentId(payload.documentId ? payload.documentId : null);
+      setContentSha256(payload.contentSha256 ? payload.contentSha256 : null);
+    },
+    []
+  );
 
   return (
     <>
+      {error ? (
+        <div className="vs01-error-banner" role="alert">
+          {error}
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--secondary"
+            style={{ marginTop: "0.5rem", width: "auto" }}
+            onClick={() => setError(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       <nav className="vs01-stepper" aria-label="VS01 steps">
         {STEPS.map(({ id, label }) => {
           const active = id === step;
           const future = id > step;
+          const allowStep1FromFinalize = step === 0 && id === 1 && !!documentId;
+          const blocked = future && !allowStep1FromFinalize;
           return (
             <button
               key={id}
               type="button"
               className={`vs01-stepper-step${active ? " vs01-stepper-step--active" : ""}`}
-              disabled={future}
+              disabled={blocked}
               aria-current={active ? "step" : undefined}
               onClick={() => {
-                if (!future) goToStep(id);
+                if (!blocked) goToStep(id);
               }}
             >
               <span className="vs01-stepper-num">{id + 1}</span>
@@ -55,7 +81,17 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
 
       <div className="vs01-card" data-vs01-active-step={step}>
         {step === 0 ? (
-          <StepFinalize loading={loading} onContinue={() => goToStep(1)} />
+          <StepFinalize
+            loading={loading}
+            setLoading={setLoading}
+            documentId={documentId}
+            contentSha256={contentSha256}
+            onFinalized={handleFinalized}
+            onError={setError}
+            onContinue={() => {
+              if (documentId) goToStep(1);
+            }}
+          />
         ) : null}
         {step === 1 ? (
           <StepSign
@@ -65,7 +101,14 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
           />
         ) : null}
         {step === 2 ? (
-          <StepDone loading={loading} onStartOver={() => goToStep(0)} />
+          <StepDone
+            loading={loading}
+            onStartOver={() => {
+              setDocumentId(null);
+              setContentSha256(null);
+              goToStep(0);
+            }}
+          />
         ) : null}
       </div>
     </>
