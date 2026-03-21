@@ -73,3 +73,106 @@ export async function finalizeDocument(
 
   return data;
 }
+
+export type CreateSignSessionResponse = {
+  ok?: boolean;
+  session?: { session_id?: string; [key: string]: unknown };
+  session_id?: string;
+  [key: string]: unknown;
+};
+
+/**
+ * POST /v1/sign-sessions — bind document + expected content hash.
+ */
+export async function createSignSession(
+  documentId: string,
+  contentSha256: string
+): Promise<CreateSignSessionResponse> {
+  const base = apiBase();
+  const url = `${base}/v1/sign-sessions`;
+  const body = {
+    document_id: documentId,
+    content_sha256: contentSha256.toLowerCase(),
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  let data: CreateSignSessionResponse;
+  try {
+    data = text ? (JSON.parse(text) as CreateSignSessionResponse) : {};
+  } catch {
+    if (!res.ok) {
+      throw new Error(text || `${res.status} ${res.statusText}`);
+    }
+    throw new Error("Invalid JSON response");
+  }
+
+  if (!res.ok) {
+    throw new Error(messageFromJsonBody(data, text || `${res.status} ${res.statusText}`));
+  }
+
+  return data;
+}
+
+export type FieldManifestEntry = {
+  field_id: string;
+  page_index: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+export type CompleteSignSessionPayload = {
+  signer_ref: string;
+  intent: string;
+  field_manifest: FieldManifestEntry[];
+};
+
+export type CompleteSignSessionResponse = {
+  ok?: boolean;
+  receipt_id?: string;
+  receipt_hash_sha256?: string;
+  receipt?: unknown;
+  [key: string]: unknown;
+};
+
+/**
+ * POST /v1/sign-sessions/{session_id}/complete — issue receipt.
+ */
+export async function completeSignSession(
+  sessionId: string,
+  payload: CompleteSignSessionPayload
+): Promise<CompleteSignSessionResponse> {
+  const base = apiBase();
+  const enc = encodeURIComponent(sessionId);
+  const url = `${base}/v1/sign-sessions/${enc}/complete`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await res.text();
+  let data: CompleteSignSessionResponse;
+  try {
+    data = text ? (JSON.parse(text) as CompleteSignSessionResponse) : {};
+  } catch {
+    if (!res.ok) {
+      throw new Error(text || `${res.status} ${res.statusText}`);
+    }
+    throw new Error("Invalid JSON response");
+  }
+
+  if (!res.ok) {
+    throw new Error(messageFromJsonBody(data, text || `${res.status} ${res.statusText}`));
+  }
+
+  return data;
+}

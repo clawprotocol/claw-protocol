@@ -25,6 +25,9 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
   const [error, setError] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [contentSha256, setContentSha256] = useState<string | null>(null);
+  const [receiptId, setReceiptId] = useState<string | null>(null);
+  const [receiptHashSha256, setReceiptHashSha256] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<unknown>(null);
 
   const goToStep = useCallback((target: Vs01Step) => {
     setStep(target);
@@ -35,6 +38,15 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
     (payload: { documentId: string; contentSha256: string }) => {
       setDocumentId(payload.documentId ? payload.documentId : null);
       setContentSha256(payload.contentSha256 ? payload.contentSha256 : null);
+    },
+    []
+  );
+
+  const handleSigned = useCallback(
+    (payload: { receiptId: string; receiptHashSha256: string; receipt: unknown }) => {
+      setReceiptId(payload.receiptId || null);
+      setReceiptHashSha256(payload.receiptHashSha256 || null);
+      setReceipt(payload.receipt ?? null);
     },
     []
   );
@@ -60,7 +72,8 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
           const active = id === step;
           const future = id > step;
           const allowStep1FromFinalize = step === 0 && id === 1 && !!documentId;
-          const blocked = future && !allowStep1FromFinalize;
+          const allowStep2FromSign = step === 1 && id === 2 && !!receiptId;
+          const blocked = future && !allowStep1FromFinalize && !allowStep2FromSign;
           return (
             <button
               key={id}
@@ -79,7 +92,13 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
         })}
       </nav>
 
-      <div className="vs01-card" data-vs01-active-step={step}>
+      <div
+        className="vs01-card"
+        data-vs01-active-step={step}
+        data-vs01-receipt-id={receiptId ?? ""}
+        data-vs01-receipt-hash={receiptHashSha256 ?? ""}
+        data-vs01-receipt-present={receipt != null ? "1" : "0"}
+      >
         {step === 0 ? (
           <StepFinalize
             loading={loading}
@@ -95,9 +114,17 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
         ) : null}
         {step === 1 ? (
           <StepSign
+            documentId={documentId}
+            contentSha256={contentSha256}
+            receiptId={receiptId}
             loading={loading}
+            setLoading={setLoading}
+            onError={setError}
+            onSigned={handleSigned}
             onBack={() => goToStep(0)}
-            onContinue={() => goToStep(2)}
+            onContinue={() => {
+              if (receiptId) goToStep(2);
+            }}
           />
         ) : null}
         {step === 2 ? (
@@ -106,6 +133,9 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
             onStartOver={() => {
               setDocumentId(null);
               setContentSha256(null);
+              setReceiptId(null);
+              setReceiptHashSha256(null);
+              setReceipt(null);
               goToStep(0);
             }}
           />
