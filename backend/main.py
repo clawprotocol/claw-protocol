@@ -78,6 +78,7 @@ from backend.routers.agreements_v2_api import router as agreements_v2_router
 from backend.routers.liability_api import router as liability_router
 from backend.routers.vs01_documents_api import router as vs01_documents_router
 from backend.routers.vs01_sign_api import router as vs01_sign_router
+from backend.routers.vs01_receipts_api import router as vs01_receipts_router
 
 
 # -------------------------------------------------
@@ -126,6 +127,7 @@ async def verifier_only_guard(request: Request, call_next):
     allowed_prefixes = (
         "/v1/batches/",
         "/v1/receipts/",
+        "/v1/timeline/receipts/",
         "/v1/llm-test",  # ✅ additive; handler still denies in verifier-only
         "/health",
         "/openapi.json",
@@ -352,7 +354,8 @@ def _deny_write_if_verifier() -> Optional[JSONResponse]:
 
     Read-only endpoints remain available:
       /health, /version, /verify, /verify/tree,
-      GET /v1/timelines/*, GET /v1/receipts/*
+      GET /v1/timelines/*, GET /v1/receipts/* (VS01 filesystem receipts),
+      GET /v1/timeline/receipts/* (legacy timeline-store receipts)
     """
     if _verifier_only():
         return JSONResponse(
@@ -371,7 +374,7 @@ def api_get_batch(batch_id: str):
     return get_batch(store=store, batch_id=batch_id)
 
 
-@app.get("/v1/receipts/{receipt_id}")
+@app.get("/v1/timeline/receipts/{receipt_id}/verify")
 def api_get_receipt_for_verify(receipt_id: str):
     store = TimelineStore()
     return get_receipt_for_verify(store=store, receipt_id=receipt_id)
@@ -770,7 +773,7 @@ async def anchor_timeline(timeline_id: str, body: AnchorTimelineRequest):
         return JSONResponse(status_code=404, content={"error": "timeline_not_found"})
 
 
-@app.get("/v1/receipts/{receipt_id}")
+@app.get("/v1/timeline/receipts/{receipt_id}")
 async def get_receipt(receipt_id: str):
     try:
         return JSONResponse(timeline_store.get_receipt(receipt_id))
@@ -1177,6 +1180,7 @@ app.include_router(agreements_v2_router)
 app.include_router(liability_router)
 app.include_router(vs01_documents_router)
 app.include_router(vs01_sign_router)
+app.include_router(vs01_receipts_router)
 
 
 # -------------------------------------------------
