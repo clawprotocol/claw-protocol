@@ -16,6 +16,8 @@ export type StepCompleteAndSendProps = {
   setLoading: (next: Vs01LoadingState) => void;
   onError: (message: string | null) => void;
   onReceiptUpdated: (payload: { receipt: unknown; receiptHashSha256?: string | null }) => void;
+  /** Optional: advance to final receipt record step (envelope flow). */
+  onContinueToRecord?: () => void;
   onStartOver?: () => void;
 };
 
@@ -73,6 +75,7 @@ export function StepCompleteAndSend({
   setLoading,
   onError,
   onReceiptUpdated,
+  onContinueToRecord,
   onStartOver,
 }: StepCompleteAndSendProps) {
   const busyReceipt = loading === "receipt";
@@ -125,72 +128,67 @@ export function StepCompleteAndSend({
         Complete & handoff
       </h2>
       <p className="vs01-card-help">
-        Your receipt is on the public VS01 path. Download the verification bundle for your records — then get
-        ready to loop in the others (stubbed below until send is wired).
+        Your receipt is ready. Download the verification bundle for your records. Counterparty delivery below is
+        a preview until send is connected.
       </p>
 
-      <div
-        className="vs01-summary-panel"
-        style={{ marginBottom: "1rem", background: "color-mix(in srgb, var(--vs01-color-success) 12%, transparent)" }}
-      >
-        <strong>Ready to send to counterparties</strong> — you’ve signed; next is sharing the flow (integration
-        pending).
+      <div className="vs01-summary-panel vs01-summary-panel--success vs01-summary-panel--spaced">
+        <strong>Next: hand off to counterparties</strong> — you’ve signed; sharing the flow is the step after
+        you save your bundle.
       </div>
 
-      <div className="vs01-hash-panel" style={{ marginBottom: "1rem" }} aria-label="Receipt identifiers">
+      <div className="vs01-hash-panel vs01-hash-panel--compact" aria-label="Receipt identifiers">
         <div>
-          <strong>receipt_id</strong> — {receiptId ?? "(pending)"}
+          <span className="vs01-hash-label">Receipt ID</span>{" "}
+          <span className="vs01-hash-value">{receiptId ?? "—"}</span>
         </div>
         <div>
-          <strong>receipt_hash_sha256</strong> — {receiptHashSha256 ?? "(pending)"}
+          <span className="vs01-hash-label">Receipt hash (SHA-256)</span>{" "}
+          <span className="vs01-hash-value">{receiptHashSha256 ?? "—"}</span>
         </div>
       </div>
 
-      <div className="vs01-placeholder-box" style={{ whiteSpace: "pre-wrap", maxHeight: "12rem", overflow: "auto" }}>
-        {receipt != null ? prettyJson(receipt) : "Receipt JSON will appear here after signing."}
+      <div className="vs01-receipt-json" role="region" aria-label="Receipt details">
+        {receipt != null ? prettyJson(receipt) : "Receipt details will appear here after you sign."}
       </div>
 
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--secondary"
-        disabled={busyReceipt || busyBundle || !receiptId}
-        onClick={() => void handleRefreshReceipt()}
-      >
-        {busyReceipt ? "Refreshing…" : "Refresh receipt"}
-      </button>
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--primary"
-        disabled={busyReceipt || busyBundle || !receiptId}
-        onClick={() => void handleDownloadBundle()}
-      >
-        {busyBundle ? "Preparing download…" : "Download verification bundle (.zip)"}
-      </button>
+      <div className="vs01-action-toolbar">
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--auto"
+          disabled={busyReceipt || busyBundle || !receiptId}
+          onClick={() => void handleRefreshReceipt()}
+        >
+          {busyReceipt ? "Refreshing…" : "Refresh receipt"}
+        </button>
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--primary vs01-btn--auto"
+          disabled={busyReceipt || busyBundle || !receiptId}
+          onClick={() => void handleDownloadBundle()}
+        >
+          {busyBundle ? "Preparing download…" : "Download verification bundle (.zip)"}
+        </button>
+      </div>
 
       <div className="vs01-stub-panel">
-        <div className="vs01-stub-badge">Next integration point</div>
-        <p className="vs01-card-help" style={{ margin: "0 0 0.75rem" }}>
-          Counterparty delivery is not connected yet. This is a preview of what a real send step would use.
+        <div className="vs01-stub-badge">Coming soon</div>
+        <p className="vs01-stub-lead">
+          Counterparty delivery isn’t connected yet. Review who will receive the package when it is.
         </p>
-        <ul className="vs01-stack" style={{ listStyle: "none", padding: 0, margin: "0 0 1rem" }}>
+        <ul className="vs01-cp-send-list">
           {namedCp.length ? (
             namedCp.map((c) => (
-              <li
-                key={c.id}
-                className="vs01-placeholder-box"
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}
-              >
+              <li key={c.id} className="vs01-cp-send-row">
                 <span>
                   <strong>{c.name.trim()}</strong>
                   {c.email.trim() ? ` · ${c.email.trim()}` : ""}
                 </span>
-                <span style={{ fontSize: "var(--vs01-text-legal)", color: "var(--vs01-color-text-muted)" }}>
-                  Not sent yet
-                </span>
+                <span className="vs01-cp-send-status">Not sent yet</span>
               </li>
             ))
           ) : (
-            <li className="vs01-card-help">No counterparties listed.</li>
+            <li className="vs01-stub-empty">No counterparties listed.</li>
           )}
         </ul>
         <button
@@ -201,45 +199,57 @@ export function StepCompleteAndSend({
           {sendPreviewOpen ? "Hide send package preview" : "Prepare send package"}
         </button>
         {sendPreviewOpen ? (
-          <div
-            className="vs01-hash-panel"
-            style={{ marginTop: "1rem", textAlign: "left" }}
-            aria-label="Send package preview (stub)"
-          >
+          <div className="vs01-hash-panel vs01-hash-panel--compact vs01-send-preview" aria-label="Send package preview (stub)">
             <div>
-              <strong>agreement_title</strong> — {agreementTitle || "—"}
+              <span className="vs01-hash-label">Agreement title</span>{" "}
+              <span className="vs01-hash-value">{agreementTitle || "—"}</span>
             </div>
             <div>
-              <strong>document_id</strong> — {documentId || "—"}
+              <span className="vs01-hash-label">Document ID</span>{" "}
+              <span className="vs01-hash-value">{documentId || "—"}</span>
             </div>
             <div>
-              <strong>receipt_id</strong> — {receiptId || "—"}
+              <span className="vs01-hash-label">Receipt ID</span>{" "}
+              <span className="vs01-hash-value">{receiptId || "—"}</span>
             </div>
             <div>
-              <strong>sender</strong> — {creatorName || "—"}
-              {creatorEmail ? ` <${creatorEmail}>` : ""}
+              <span className="vs01-hash-label">Sender</span>{" "}
+              <span className="vs01-hash-value">
+                {creatorName || "—"}
+                {creatorEmail ? ` <${creatorEmail}>` : ""}
+              </span>
             </div>
             <div>
-              <strong>counterparties</strong> —{" "}
-              {namedCp.length
-                ? namedCp.map((c) => `${c.name.trim()}${c.email.trim() ? ` <${c.email.trim()}>` : ""}`).join("; ")
-                : "—"}
+              <span className="vs01-hash-label">Counterparties</span>{" "}
+              <span className="vs01-hash-value">
+                {namedCp.length
+                  ? namedCp.map((c) => `${c.name.trim()}${c.email.trim() ? ` <${c.email.trim()}>` : ""}`).join("; ")
+                  : "—"}
+              </span>
             </div>
             <div>
-              <strong>sender_message</strong> — {senderMessage.trim() || "(none)"}
+              <span className="vs01-hash-label">Sender message</span>{" "}
+              <span className="vs01-hash-value">{senderMessage.trim() || "(none)"}</span>
             </div>
           </div>
         ) : null}
       </div>
 
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--secondary"
-        style={{ marginTop: "0.75rem" }}
-        onClick={() => onStartOver?.()}
-      >
-        Start over
-      </button>
+      <div className="vs01-step-actions vs01-step-actions--tight">
+        {onContinueToRecord ? (
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--primary"
+            onClick={() => onContinueToRecord()}
+          >
+            Continue to receipt record
+          </button>
+        ) : null}
+
+        <button type="button" className="vs01-btn vs01-btn--secondary" onClick={() => onStartOver?.()}>
+          Start over
+        </button>
+      </div>
     </section>
   );
 }
