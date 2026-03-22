@@ -1,0 +1,86 @@
+import type { Vs01Counterparty } from "./types";
+
+export type CounterpartyListProps = {
+  counterparties: Vs01Counterparty[];
+  onChange: (next: Vs01Counterparty[]) => void;
+  disabled?: boolean;
+};
+
+function newCounterparty(): Vs01Counterparty {
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `cp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  return { id, name: "", email: "" };
+}
+
+/**
+ * Editable counterparty rows (name + email). At least one row.
+ */
+export function CounterpartyList({ counterparties, onChange, disabled }: CounterpartyListProps) {
+  const update = (id: string, patch: Partial<Pick<Vs01Counterparty, "name" | "email">>) => {
+    onChange(
+      counterparties.map((c) => (c.id === id ? { ...c, ...patch } : c))
+    );
+  };
+
+  const add = () => {
+    onChange([...counterparties, newCounterparty()]);
+  };
+
+  const remove = (id: string) => {
+    if (counterparties.length <= 1) return;
+    onChange(counterparties.filter((c) => c.id !== id));
+  };
+
+  return (
+    <div className="vs01-stack">
+      <div className="vs01-field-label">Counterparties (who else should sign later)</div>
+      {counterparties.map((c) => (
+        <div key={c.id} className="vs01-counterparty-row">
+          <div className="vs01-field">
+            <span className="vs01-card-help">Name</span>
+            <input
+              className="vs01-input"
+              value={c.name}
+              disabled={disabled}
+              placeholder="Jamie Chen"
+              autoComplete="name"
+              onChange={(ev) => update(c.id, { name: ev.target.value })}
+            />
+          </div>
+          <div className="vs01-field">
+            <span className="vs01-card-help">Email (optional)</span>
+            <input
+              className="vs01-input"
+              type="email"
+              value={c.email}
+              disabled={disabled}
+              placeholder="jamie@…"
+              autoComplete="email"
+              onChange={(ev) => update(c.id, { email: ev.target.value })}
+            />
+          </div>
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--secondary"
+            style={{ width: "auto", marginTop: "0", minHeight: "2.25rem" }}
+            disabled={disabled || counterparties.length <= 1}
+            onClick={() => remove(c.id)}
+            aria-label="Remove counterparty"
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="vs01-btn vs01-btn--secondary"
+        disabled={disabled}
+        onClick={add}
+      >
+        Add counterparty
+      </button>
+    </div>
+  );
+}

@@ -9,3 +9,10 @@ export type Vs01LoadingState =
   | "complete"
   | "receipt"
   | "bundle";
+
+/** Thin agreement envelope (frontend-only orchestration; no backend envelope API yet). */
+export type Vs01Counterparty = {
+  id: string;
+  name: string;
+  email: string;
+};
