@@ -1,4 +1,8 @@
+import pytest
+
 from backend.utils.timeline_store import event_sha256, manifest_sha256
+
+pytestmark = pytest.mark.invariant
 
 
 def test_timeline_event_and_manifest_hash_vectors():

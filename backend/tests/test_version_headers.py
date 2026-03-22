@@ -1,6 +1,9 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+pytestmark = pytest.mark.unit
 
 
 def test_healthz_and_version_headers():

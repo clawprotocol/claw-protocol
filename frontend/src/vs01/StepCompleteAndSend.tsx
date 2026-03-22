@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { downloadBundle, getReceipt, type GetReceiptResponse } from "./vs01Api";
+import { downloadBundle } from "./vs01Api";
 import type { Vs01Counterparty, Vs01LoadingState } from "./types";
 
 export type StepCompleteAndSendProps = {
@@ -11,40 +11,15 @@ export type StepCompleteAndSendProps = {
   senderMessage: string;
   receiptId: string | null;
   receiptHashSha256: string | null;
-  receipt: unknown;
   loading: Vs01LoadingState;
   setLoading: (next: Vs01LoadingState) => void;
   onError: (message: string | null) => void;
-  onReceiptUpdated: (payload: { receipt: unknown; receiptHashSha256?: string | null }) => void;
   /** Optional: advance to final receipt record step (envelope flow). */
   onContinueToRecord?: () => void;
   onStartOver?: () => void;
 };
 
 const STEP_ID = "complete-send" as const;
-
-function pickReceiptPayload(data: GetReceiptResponse): {
-  receipt: unknown;
-  receiptHashSha256: string | null;
-} {
-  const raw = data.receipt !== undefined ? data.receipt : data;
-  let hash: string | null = null;
-  if (typeof data.receipt_hash_sha256 === "string" && data.receipt_hash_sha256.trim()) {
-    hash = data.receipt_hash_sha256.trim();
-  } else if (raw && typeof raw === "object" && raw !== null && "receipt_hash_sha256" in raw) {
-    const h = (raw as { receipt_hash_sha256?: unknown }).receipt_hash_sha256;
-    if (typeof h === "string" && h.trim()) hash = h.trim();
-  }
-  return { receipt: raw, receiptHashSha256: hash };
-}
-
-function prettyJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
 
 function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -59,7 +34,7 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
 }
 
 /**
- * Step 3 — Receipt, bundle, and stubbed “send to counterparties” (frontend-only; no send API yet).
+ * Handoff — receipt IDs, bundle download, sharing preview (full receipt JSON on Receipt step).
  */
 export function StepCompleteAndSend({
   agreementTitle,
@@ -70,38 +45,14 @@ export function StepCompleteAndSend({
   senderMessage,
   receiptId,
   receiptHashSha256,
-  receipt,
   loading,
   setLoading,
   onError,
-  onReceiptUpdated,
   onContinueToRecord,
   onStartOver,
 }: StepCompleteAndSendProps) {
-  const busyReceipt = loading === "receipt";
   const busyBundle = loading === "bundle";
   const [sendPreviewOpen, setSendPreviewOpen] = useState(false);
-
-  const handleRefreshReceipt = useCallback(async () => {
-    if (!receiptId?.trim()) {
-      onError("Missing receipt id.");
-      return;
-    }
-    onError(null);
-    setLoading("receipt");
-    try {
-      const data = await getReceipt(receiptId.trim());
-      const { receipt: nextReceipt, receiptHashSha256: nextHash } = pickReceiptPayload(data);
-      onReceiptUpdated({
-        receipt: nextReceipt,
-        receiptHashSha256: nextHash ?? undefined,
-      });
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading("idle");
-    }
-  }, [onError, onReceiptUpdated, receiptId, setLoading]);
 
   const handleDownloadBundle = useCallback(async () => {
     if (!receiptId?.trim()) {
@@ -128,13 +79,13 @@ export function StepCompleteAndSend({
         Complete & handoff
       </h2>
       <p className="vs01-card-help">
-        Your receipt is ready. Download the verification bundle for your records. Counterparty delivery below is
-        a preview until send is connected.
+        Download your verification bundle here, then review who you’ll share with. Full receipt JSON for verification
+        is on the next step.
       </p>
 
       <div className="vs01-summary-panel vs01-summary-panel--success vs01-summary-panel--spaced">
-        <strong>Next: hand off to counterparties</strong> — you’ve signed; sharing the flow is the step after
-        you save your bundle.
+        <strong>Next: hand off to counterparties</strong> — you’ve signed; sharing continues after you save your
+        bundle.
       </div>
 
       <div className="vs01-hash-panel vs01-hash-panel--compact" aria-label="Receipt identifiers">
@@ -148,23 +99,11 @@ export function StepCompleteAndSend({
         </div>
       </div>
 
-      <div className="vs01-receipt-json" role="region" aria-label="Receipt details">
-        {receipt != null ? prettyJson(receipt) : "Receipt details will appear here after you sign."}
-      </div>
-
       <div className="vs01-action-toolbar">
         <button
           type="button"
-          className="vs01-btn vs01-btn--secondary vs01-btn--auto"
-          disabled={busyReceipt || busyBundle || !receiptId}
-          onClick={() => void handleRefreshReceipt()}
-        >
-          {busyReceipt ? "Refreshing…" : "Refresh receipt"}
-        </button>
-        <button
-          type="button"
           className="vs01-btn vs01-btn--primary vs01-btn--auto"
-          disabled={busyReceipt || busyBundle || !receiptId}
+          disabled={busyBundle || !receiptId}
           onClick={() => void handleDownloadBundle()}
         >
           {busyBundle ? "Preparing download…" : "Download verification bundle (.zip)"}
@@ -172,9 +111,9 @@ export function StepCompleteAndSend({
       </div>
 
       <div className="vs01-stub-panel">
-        <div className="vs01-stub-badge">Coming soon</div>
+        <div className="vs01-stub-badge">Sharing</div>
         <p className="vs01-stub-lead">
-          Counterparty delivery isn’t connected yet. Review who will receive the package when it is.
+          Delivery will be available here. Sharing tools appear here when ready — review who you’ll include below.
         </p>
         <ul className="vs01-cp-send-list">
           {namedCp.length ? (
@@ -184,7 +123,7 @@ export function StepCompleteAndSend({
                   <strong>{c.name.trim()}</strong>
                   {c.email.trim() ? ` · ${c.email.trim()}` : ""}
                 </span>
-                <span className="vs01-cp-send-status">Not sent yet</span>
+                <span className="vs01-cp-send-status">Pending</span>
               </li>
             ))
           ) : (
@@ -196,10 +135,10 @@ export function StepCompleteAndSend({
           className="vs01-btn vs01-btn--secondary"
           onClick={() => setSendPreviewOpen((v) => !v)}
         >
-          {sendPreviewOpen ? "Hide send package preview" : "Prepare send package"}
+          {sendPreviewOpen ? "Hide send details" : "Review send details"}
         </button>
         {sendPreviewOpen ? (
-          <div className="vs01-hash-panel vs01-hash-panel--compact vs01-send-preview" aria-label="Send package preview (stub)">
+          <div className="vs01-hash-panel vs01-hash-panel--compact vs01-send-preview" aria-label="Send package details">
             <div>
               <span className="vs01-hash-label">Agreement title</span>{" "}
               <span className="vs01-hash-value">{agreementTitle || "—"}</span>
@@ -242,7 +181,7 @@ export function StepCompleteAndSend({
             className="vs01-btn vs01-btn--primary"
             onClick={() => onContinueToRecord()}
           >
-            Continue to receipt record
+            View final receipt
           </button>
         ) : null}
 

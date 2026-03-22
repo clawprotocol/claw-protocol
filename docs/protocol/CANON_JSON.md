@@ -14,30 +14,32 @@ Implementations MUST pass these vectors or the protocol is NOT compatible.
 - Newlines normalized to `\n`
 
 ### 1.2 Object keys
-- Sort keys lexicographically by Unicode code point (effectively byte order for ASCII keys).
-- No duplicate keys (reject input with duplicates).
+- Sort keys lexicographically by Unicode code point.
+- No duplicate keys.
 
 ### 1.3 Whitespace
 - No extra whitespace.
-- Use the minimal JSON representation:
-  - separators: `,` and `:`
-  - no spaces after commas or colons
+- Minimal JSON (`:` and `,` only).
 
 ### 1.4 Numbers
-- MUST be JSON numbers (not strings) when representing numeric fields.
-- No NaN/Infinity.
-- Integers must have no leading zeros (except `0`).
-- Decimals must have no trailing zeros (e.g., `1.2300` -> `1.23`).
+- No NaN or Infinity.
+- No leading zeros.
+- No trailing decimal zeros.
 
 ### 1.5 Arrays
-- Preserve given order exactly.
+- Preserve order.
+
+### 1.6 Strings
+- UTF-8 only.
+- JSON escaping only.
+- Newlines as `\n`.
 
 ---
 
-## 2) Canonicalization examples (normative)
+## 2) Canonicalization examples
 
-### Vector A — Key ordering + whitespace
+### Vector A
 
-**Input object (conceptual):**
+Input:
 ```json
 { "b": 2, "a": 1 }

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { downloadBundle, getReceipt, type GetReceiptResponse } from "./vs01Api";
+import { getReceipt, type GetReceiptResponse } from "./vs01Api";
 import type { Vs01LoadingState } from "./types";
 
 export type StepDoneProps = {
@@ -38,20 +38,8 @@ function prettyJson(value: unknown): string {
   }
 }
 
-function triggerBlobDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 /**
- * Step 2 — receipt GET + bundle download.
+ * Final step — verification: receipt JSON + refresh (bundle downloads on Handoff).
  */
 export function StepDone({
   receiptId,
@@ -64,7 +52,6 @@ export function StepDone({
   onStartOver,
 }: StepDoneProps) {
   const busyReceipt = loading === "receipt";
-  const busyBundle = loading === "bundle";
 
   const handleRefreshReceipt = useCallback(async () => {
     if (!receiptId?.trim()) {
@@ -87,69 +74,52 @@ export function StepDone({
     }
   }, [onError, onReceiptUpdated, receiptId, setLoading]);
 
-  const handleDownloadBundle = useCallback(async () => {
-    if (!receiptId?.trim()) {
-      onError("Missing receipt id.");
-      return;
-    }
-    onError(null);
-    setLoading("bundle");
-    try {
-      const blob = await downloadBundle(receiptId.trim());
-      triggerBlobDownload(blob, "claw-bundle.zip");
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading("idle");
-    }
-  }, [onError, receiptId, setLoading]);
-
   return (
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-done-title">
       <h2 id="vs01-step-done-title" className="vs01-card-title">
-        Done
+        Receipt & verification
       </h2>
+
+      <div className="vs01-done-closure" role="status">
+        <strong>Agreement recorded.</strong> Signature captured and verifiable.
+      </div>
+
       <p className="vs01-card-help">
-        Receipt from <code>GET /v1/receipts/&#123;id&#125;</code>; bundle from{" "}
-        <code>GET /v1/receipts/&#123;id&#125;/bundle</code>.
+        The receipt JSON below is what independent verification uses. Refresh if you need the latest copy from the
+        server. Download your verification bundle from the Handoff step when you need offline files.
       </p>
 
-      <div className="vs01-hash-panel" style={{ marginBottom: "1rem" }} aria-label="Receipt identifiers">
+      <div className="vs01-hash-panel vs01-hash-panel--compact" aria-label="Receipt identifiers">
         <div>
-          <strong>receipt_id</strong> — {receiptId ?? "(pending)"}
+          <span className="vs01-hash-label">Receipt ID</span>{" "}
+          <span className="vs01-hash-value">{receiptId ?? "—"}</span>
         </div>
         <div>
-          <strong>receipt_hash_sha256</strong> — {receiptHashSha256 ?? "(pending)"}
+          <span className="vs01-hash-label">Receipt hash (SHA-256)</span>{" "}
+          <span className="vs01-hash-value">{receiptHashSha256 ?? "—"}</span>
         </div>
       </div>
 
-      <div className="vs01-placeholder-box" style={{ whiteSpace: "pre-wrap", maxHeight: "14rem", overflow: "auto" }}>
-        {receipt != null ? prettyJson(receipt) : "No receipt JSON loaded yet — use Refresh or complete Sign."}
+      <div className="vs01-receipt-json" role="region" aria-label="Full receipt JSON for verification">
+        {receipt != null ? prettyJson(receipt) : "Receipt JSON will load from the signed step. Use Refresh if needed."}
       </div>
 
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--secondary"
-        disabled={busyReceipt || busyBundle || !receiptId}
-        onClick={() => void handleRefreshReceipt()}
-      >
-        {busyReceipt ? "Refreshing…" : "Refresh receipt"}
-      </button>
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--primary"
-        disabled={busyReceipt || busyBundle || !receiptId}
-        onClick={() => void handleDownloadBundle()}
-      >
-        {busyBundle ? "Preparing download…" : "Download verification bundle (.zip)"}
-      </button>
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--secondary"
-        onClick={() => onStartOver?.()}
-      >
-        Start over
-      </button>
+      <div className="vs01-action-toolbar vs01-action-toolbar--single">
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary"
+          disabled={busyReceipt || !receiptId}
+          onClick={() => void handleRefreshReceipt()}
+        >
+          {busyReceipt ? "Refreshing…" : "Refresh receipt from server"}
+        </button>
+      </div>
+
+      <div className="vs01-step-actions vs01-step-actions--tight">
+        <button type="button" className="vs01-btn vs01-btn--secondary" onClick={() => onStartOver?.()}>
+          Start over
+        </button>
+      </div>
     </section>
   );
 }

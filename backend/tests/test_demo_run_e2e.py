@@ -1,8 +1,11 @@
 import base64
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+pytestmark = pytest.mark.e2e
 
 
 def test_demo_run_e2e():

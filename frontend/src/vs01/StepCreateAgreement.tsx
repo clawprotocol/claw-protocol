@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { finalizeDocument } from "./vs01Api";
 import { CounterpartyList } from "./CounterpartyList";
 import type { Vs01Counterparty, Vs01LoadingState } from "./types";
@@ -34,6 +34,15 @@ async function fileToBase64(file: File): Promise<string> {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+function fileTypeLabel(file: File): string {
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) return "PDF";
+  if (file.type.startsWith("image/")) {
+    const sub = file.type.slice(6);
+    return sub ? sub.toUpperCase() : "Image";
+  }
+  return file.type || "Document";
 }
 
 function createAgreementStepValid(
@@ -73,6 +82,19 @@ export function StepCreateAgreement({
   const busy = loading === "finalize";
   const [file, setFile] = useState<File | null>(null);
   const [fileLabel, setFileLabel] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    setPreviewFailed(false);
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const onPickFile = (f: File | null) => {
     setFile(f);
@@ -109,151 +131,228 @@ export function StepCreateAgreement({
   const formOk = createAgreementStepValid(agreementTitle, creatorName, counterparties, docReady);
   const canContinue = formOk;
 
+  const isPdf =
+    !!file &&
+    (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
+  const isImage = !!file && file.type.startsWith("image/");
+
   return (
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-create-title">
       <h2 id="vs01-step-create-title" className="vs01-card-title">
         Create agreement
       </h2>
       <p className="vs01-card-help">
-        Name what you’re signing, who’s involved, then upload the final PDF or file. Nothing is sent to
-        counterparties until you’re ready — that step comes after you sign.
+        Name what you’re signing, who’s involved, then upload the final PDF or image. Nothing is sent to
+        counterparties until you’re ready — that comes after you sign.
       </p>
 
-      <div className="vs01-stack">
-        <div className="vs01-field">
-          <label className="vs01-field-label" htmlFor="vs01-agreement-title">
-            Agreement title
-          </label>
-          <input
-            id="vs01-agreement-title"
-            className="vs01-input"
-            value={agreementTitle}
-            disabled={busy}
-            placeholder="e.g. Pilot services agreement"
-            onChange={(ev) => onAgreementTitleChange(ev.target.value)}
-          />
-        </div>
-        <div className="vs01-field">
-          <label className="vs01-field-label" htmlFor="vs01-creator-name">
-            Your name
-          </label>
-          <input
-            id="vs01-creator-name"
-            className="vs01-input"
-            value={creatorName}
-            disabled={busy}
-            placeholder="Alex Rivera"
-            autoComplete="name"
-            onChange={(ev) => onCreatorNameChange(ev.target.value)}
-          />
-        </div>
-        <div className="vs01-field">
-          <label className="vs01-field-label" htmlFor="vs01-creator-email">
-            Your email
-          </label>
-          <input
-            id="vs01-creator-email"
-            className="vs01-input"
-            type="email"
-            value={creatorEmail}
-            disabled={busy}
-            placeholder="alex@…"
-            autoComplete="email"
-            onChange={(ev) => onCreatorEmailChange(ev.target.value)}
-          />
+      <div className="vs01-create-split">
+        <div className="vs01-create-panel vs01-create-panel--document">
+          <div className="vs01-upload-zone" role="group" aria-labelledby="vs01-upload-label">
+            <p id="vs01-upload-label" className="vs01-upload-zone-title">
+              Upload agreement PDF
+            </p>
+            <p className="vs01-upload-zone-hint">
+              Choose a document from your device. On a phone you can use the camera for a photo or scan.
+            </p>
+            <div className="vs01-upload-actions">
+              <label className="vs01-upload-btn vs01-upload-btn--primary">
+                <span className="vs01-sr-only">Choose document — PDF or image</span>
+                <input
+                  className="vs01-upload-input"
+                  type="file"
+                  accept=".pdf,application/pdf,image/*"
+                  disabled={busy}
+                  onChange={(ev) => onPickFile(ev.target.files?.[0] ?? null)}
+                />
+                Choose document
+              </label>
+              <label className="vs01-upload-btn vs01-upload-btn--secondary">
+                <span className="vs01-sr-only">Use camera or capture — PDF or image</span>
+                <input
+                  className="vs01-upload-input"
+                  type="file"
+                  accept="image/*,application/pdf"
+                  capture="environment"
+                  disabled={busy}
+                  onChange={(ev) => onPickFile(ev.target.files?.[0] ?? null)}
+                />
+                Use camera
+              </label>
+            </div>
+            {fileLabel ? (
+              <p className="vs01-upload-selected" aria-live="polite">
+                Selected: <strong>{fileLabel}</strong>
+              </p>
+            ) : (
+              <p className="vs01-upload-selected vs01-upload-selected--muted">No file selected yet.</p>
+            )}
+          </div>
+
+          <div className="vs01-doc-preview-shell" aria-label="Document preview">
+            <div className="vs01-doc-preview-header">Preview</div>
+            {file && fileLabel ? (
+              <div className="vs01-doc-preview-trust" aria-live="polite">
+                <span className="vs01-doc-preview-trust-status">Document loaded</span>
+                <span className="vs01-doc-preview-trust-meta">
+                  {fileLabel} · {fileTypeLabel(file)}
+                </span>
+              </div>
+            ) : null}
+            <div className="vs01-doc-preview-body">
+              {!file || !previewUrl ? (
+                <p className="vs01-doc-preview-empty">Select a document to preview it here.</p>
+              ) : previewFailed ? (
+                <div className="vs01-doc-preview-fallback">
+                  <p className="vs01-doc-preview-fallback-text">
+                    Preview not available in this view — open the document below. You can still finalize.
+                  </p>
+                  <a
+                    className="vs01-inline-link"
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open document in new tab
+                  </a>
+                </div>
+              ) : isPdf ? (
+                <iframe
+                  title="Agreement PDF preview"
+                  className="vs01-doc-preview-frame"
+                  src={`${previewUrl}#view=FitH`}
+                  onError={() => setPreviewFailed(true)}
+                />
+              ) : isImage ? (
+                <img
+                  className="vs01-doc-preview-img"
+                  src={previewUrl}
+                  alt="Selected document preview"
+                  onError={() => setPreviewFailed(true)}
+                />
+              ) : (
+                <div className="vs01-doc-preview-fallback">
+                  <p className="vs01-doc-preview-fallback-text">
+                    Preview not available here — open the document below. You can still finalize if your server
+                    accepts this format.
+                  </p>
+                  <a
+                    className="vs01-inline-link"
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open document in new tab
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
-        <CounterpartyList
-          counterparties={counterparties}
-          onChange={onCounterpartiesChange}
-          disabled={busy}
-        />
-
-        <div className="vs01-field">
-          <label className="vs01-field-label" htmlFor="vs01-sender-msg">
-            Note to counterparties (optional)
-          </label>
-          <textarea
-            id="vs01-sender-msg"
-            className="vs01-input"
-            rows={3}
-            value={senderMessage}
-            disabled={busy}
-            placeholder="Short context they’ll see when it’s their turn…"
-            onChange={(ev) => onSenderMessageChange(ev.target.value)}
-          />
-        </div>
-      </div>
-
-      <div className="vs01-field" style={{ marginTop: "1rem" }}>
-        <span className="vs01-field-label">Document</span>
-        <p className="vs01-card-help" style={{ margin: "0 0 0.5rem" }}>
-          Upload from files, or use camera / scan on supported phones.
-        </p>
-        <div className="vs01-file-row">
-          <label className="vs01-file-btn-wrap">
-            <span className="vs01-file-btn">
+        <div className="vs01-create-panel vs01-create-panel--form">
+          <div className="vs01-stack">
+            <div className="vs01-field">
+              <label className="vs01-field-label" htmlFor="vs01-agreement-title">
+                Agreement title
+              </label>
               <input
-                type="file"
+                id="vs01-agreement-title"
+                className="vs01-input"
+                value={agreementTitle}
                 disabled={busy}
-                onChange={(ev) => onPickFile(ev.target.files?.[0] ?? null)}
+                placeholder="e.g. Pilot services agreement"
+                onChange={(ev) => onAgreementTitleChange(ev.target.value)}
               />
-              Choose file
-            </span>
-          </label>
-          <label className="vs01-file-btn-wrap">
-            <span className="vs01-file-btn">
+            </div>
+            <div className="vs01-field">
+              <label className="vs01-field-label" htmlFor="vs01-creator-name">
+                Your name
+              </label>
               <input
-                type="file"
-                accept="image/*,application/pdf"
-                capture="environment"
+                id="vs01-creator-name"
+                className="vs01-input"
+                value={creatorName}
                 disabled={busy}
-                onChange={(ev) => onPickFile(ev.target.files?.[0] ?? null)}
+                placeholder="Alex Rivera"
+                autoComplete="name"
+                onChange={(ev) => onCreatorNameChange(ev.target.value)}
               />
-              Camera / scan
-            </span>
-          </label>
+            </div>
+            <div className="vs01-field">
+              <label className="vs01-field-label" htmlFor="vs01-creator-email">
+                Your email
+              </label>
+              <input
+                id="vs01-creator-email"
+                className="vs01-input"
+                type="email"
+                value={creatorEmail}
+                disabled={busy}
+                placeholder="alex@…"
+                autoComplete="email"
+                onChange={(ev) => onCreatorEmailChange(ev.target.value)}
+              />
+            </div>
+
+            <CounterpartyList
+              counterparties={counterparties}
+              onChange={onCounterpartiesChange}
+              disabled={busy}
+            />
+
+            <div className="vs01-field">
+              <label className="vs01-field-label" htmlFor="vs01-sender-msg">
+                Note to counterparties (optional)
+              </label>
+              <textarea
+                id="vs01-sender-msg"
+                className="vs01-input"
+                rows={3}
+                value={senderMessage}
+                disabled={busy}
+                placeholder="Short context they’ll see when it’s their turn…"
+                onChange={(ev) => onSenderMessageChange(ev.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="vs01-hash-panel vs01-hash-panel--compact" aria-label="Finalized document identifiers">
+            <div>
+              <span className="vs01-hash-label">Document ID</span>{" "}
+              <span className="vs01-hash-value">{documentId || "— finalize to generate"}</span>
+            </div>
+            <div>
+              <span className="vs01-hash-label">Content SHA-256</span>{" "}
+              <span className="vs01-hash-value">{contentSha256 || "—"}</span>
+            </div>
+          </div>
+
+          <div className="vs01-step-actions">
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--primary"
+              disabled={busy || !file}
+              onClick={() => void handleFinalize()}
+            >
+              {busy ? "Finalizing…" : "Finalize for signing"}
+            </button>
+            {!canContinue && docReady ? (
+              <p className="vs01-inline-hint">
+                Add a title, your name, and at least one counterparty name to continue.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--primary"
+              disabled={busy || !canContinue}
+              onClick={() => onContinue?.()}
+            >
+              Continue to signing
+            </button>
+          </div>
         </div>
-        {fileLabel ? (
-          <p className="vs01-card-help" style={{ margin: "0.5rem 0 0" }}>
-            Selected: <strong>{fileLabel}</strong>
-          </p>
-        ) : null}
       </div>
-
-      <div className="vs01-hash-panel" style={{ marginTop: "0.75rem" }} aria-label="Finalized document">
-        <div>
-          <strong>document_id</strong> — {documentId || "(finalize to generate)"}
-        </div>
-        <div>
-          <strong>content_sha256</strong> — {contentSha256 || "(pending)"}
-        </div>
-      </div>
-
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--primary"
-        style={{ marginTop: "0.75rem" }}
-        disabled={busy || !file}
-        onClick={() => void handleFinalize()}
-      >
-        {busy ? "Finalizing…" : "Finalize for signing"}
-      </button>
-
-      {!canContinue && docReady ? (
-        <p className="vs01-card-help" style={{ marginTop: "0.75rem" }}>
-          Add a title, your name, and at least one counterparty name to continue.
-        </p>
-      ) : null}
-
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--primary"
-        disabled={busy || !canContinue}
-        onClick={() => onContinue?.()}
-      >
-        Continue to signature prep
-      </button>
     </section>
   );
 }

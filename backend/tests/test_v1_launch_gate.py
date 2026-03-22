@@ -3,6 +3,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.e2e
+
 
 def _run_verify(bundle_dir: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(

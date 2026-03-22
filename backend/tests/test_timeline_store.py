@@ -4,6 +4,8 @@ import pytest
 
 from backend.utils.timeline_store import TimelineStore, manifest_sha256
 
+pytestmark = pytest.mark.unit
+
 
 def _store(tmp_path):
     return TimelineStore(db_path=str(tmp_path / "timeline.sqlite3"))

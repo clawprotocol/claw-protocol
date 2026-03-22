@@ -1,6 +1,9 @@
 import hashlib
+import pytest
 
 from utils.canon_json import canon_json_bytes
+
+pytestmark = pytest.mark.invariant
 
 
 def test_vector_a_bytes_and_hash():

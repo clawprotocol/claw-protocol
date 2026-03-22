@@ -34,24 +34,36 @@ export function CounterpartyList({ counterparties, onChange, disabled }: Counter
   };
 
   return (
-    <div className="vs01-stack">
-      <div className="vs01-field-label">Counterparties (who else should sign later)</div>
+    <div className="vs01-counterparty-block vs01-stack">
+      <div className="vs01-field-label" id="vs01-cp-heading">
+        Counterparties
+      </div>
+      <p className="vs01-subtle-hint" id="vs01-cp-hint">
+        Who else should sign later (names help you track the handoff).
+      </p>
       {counterparties.map((c) => (
         <div key={c.id} className="vs01-counterparty-row">
           <div className="vs01-field">
-            <span className="vs01-card-help">Name</span>
+            <label className="vs01-subfield-label" htmlFor={`vs01-cp-name-${c.id}`}>
+              Name
+            </label>
             <input
+              id={`vs01-cp-name-${c.id}`}
               className="vs01-input"
               value={c.name}
               disabled={disabled}
               placeholder="Jamie Chen"
               autoComplete="name"
               onChange={(ev) => update(c.id, { name: ev.target.value })}
+              aria-describedby="vs01-cp-hint"
             />
           </div>
           <div className="vs01-field">
-            <span className="vs01-card-help">Email (optional)</span>
+            <label className="vs01-subfield-label" htmlFor={`vs01-cp-email-${c.id}`}>
+              Email (optional)
+            </label>
             <input
+              id={`vs01-cp-email-${c.id}`}
               className="vs01-input"
               type="email"
               value={c.email}
@@ -63,8 +75,7 @@ export function CounterpartyList({ counterparties, onChange, disabled }: Counter
           </div>
           <button
             type="button"
-            className="vs01-btn vs01-btn--secondary"
-            style={{ width: "auto", marginTop: "0", minHeight: "2.25rem" }}
+            className="vs01-btn vs01-btn--secondary vs01-btn--row-action"
             disabled={disabled || counterparties.length <= 1}
             onClick={() => remove(c.id)}
             aria-label="Remove counterparty"

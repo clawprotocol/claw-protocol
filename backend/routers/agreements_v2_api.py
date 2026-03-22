@@ -77,6 +77,10 @@ class AgreementRenderResponse(BaseModel):
     rendered_html: str
 
 
+class AgreementReviseRequest(BaseModel):
+    instruction: str
+
+
 def canonicalize_agreement(draft: Dict[str, Any]) -> str:
     return canon_json_bytes(draft).decode("utf-8")
 
@@ -181,34 +185,121 @@ def _heuristic_parse_intake(intake_text: str) -> AgreementDraftCreate:
 
 
 def _render_html(draft: AgreementDraft) -> str:
-    title = html.escape((draft.title or "").strip() or "Untitled Agreement")
+    title = html.escape((draft.title or "").strip() or "Agreement")
     jurisdiction = html.escape((draft.jurisdiction or "").strip() or "TBD")
     effective_date = html.escape((draft.effective_date or "").strip() or "TBD")
     purpose = html.escape((draft.purpose or "").strip() or "TBD")
     payment_terms = html.escape((draft.payment_terms or "").strip() or "TBD")
     duration = html.escape((draft.duration or "").strip() or "TBD")
     due_date = html.escape((draft.due_date or "").strip() or "TBD")
-    parties_items = "".join(
-        f"<li><strong>{html.escape((p.name or '').strip() or 'Party')}</strong> - {html.escape((p.role or 'party').strip())}</li>"
-        for p in (draft.parties or [])
-    )
-    if not parties_items:
-        parties_items = "<li>TBD</li>"
+    party_a = draft.parties[0] if len(draft.parties) > 0 else AgreementParty(name="Party A", role="Party")
+    party_b = draft.parties[1] if len(draft.parties) > 1 else AgreementParty(name="Party B", role="Party")
+    party_a_name = html.escape((party_a.name or "").strip() or "Party A")
+    party_b_name = html.escape((party_b.name or "").strip() or "Party B")
+    party_a_role = html.escape((party_a.role or "Party").strip())
+    party_b_role = html.escape((party_b.role or "Party").strip())
     return (
-        f"<article>"
-        f"<h1>{title}</h1>"
-        f"<p><strong>Jurisdiction:</strong> {jurisdiction}</p>"
-        f"<p><strong>Effective Date:</strong> {effective_date}</p>"
-        f"<h2>Parties</h2><ul>{parties_items}</ul>"
-        f"<h2>Terms</h2>"
-        f"<p><strong>Purpose:</strong> {purpose}</p>"
-        f"<p><strong>Payment Terms:</strong> {payment_terms}</p>"
-        f"<p><strong>Duration:</strong> {duration}</p>"
-        f"<p><strong>Due Date:</strong> {due_date}</p>"
-        f"<h2>Governing Law</h2>"
+        "<article>"
+        f"<h1 style='text-align:center;margin-bottom:6px'>{title}</h1>"
+        "<p style='text-align:center;margin-top:0;color:#475569'>Draft Agreement (non-binding template)</p>"
+        f"<p>This {title} (the \"Agreement\") is made effective as of {effective_date}, by and between "
+        f"{party_a_name} ({party_a_role}) and {party_b_name} ({party_b_role}). The parties agree as follows:</p>"
+        "<h2>1. Scope of Services</h2>"
+        f"<p>{purpose}. The service provider will perform the services in a professional and workmanlike manner and "
+        "will keep the client reasonably informed regarding project progress.</p>"
+        "<h2>2. Compensation</h2>"
+        f"<p>In consideration for the services, compensation is as follows: {payment_terms}.</p>"
+        "<h2>3. Payment Terms</h2>"
+        f"<p>Payments are due according to the agreed schedule. If applicable, final delivery is expected by {due_date}. "
+        "Late payments may be subject to commercially reasonable collection procedures.</p>"
+        "<h2>4. Term and Termination</h2>"
+        f"<p>This Agreement begins on the effective date and remains in effect for {duration}, unless earlier terminated "
+        "by either party on written notice for material breach or as otherwise agreed in writing.</p>"
+        "<h2>5. Confidentiality</h2>"
+        "<p>Each party shall keep confidential non-public business and technical information disclosed by the other party "
+        "and shall use such information solely for performance under this Agreement.</p>"
+        "<h2>6. Independent Contractor</h2>"
+        "<p>The parties agree that the service provider is an independent contractor and not an employee, partner, or "
+        "agent of the client, except as expressly authorized in writing.</p>"
+        "<h2>7. Governing Law</h2>"
         f"<p>This Agreement is governed by the laws of {jurisdiction}, without regard to conflict of law principles.</p>"
-        f"</article>"
+        "<h2>8. Signatures</h2>"
+        "<p>IN WITNESS WHEREOF, the parties have executed this Agreement as of the effective date.</p>"
+        "<table style='width:100%;margin-top:16px;border-collapse:collapse'>"
+        "<tr>"
+        f"<td style='width:50%;padding-right:12px'><div style='border-bottom:1px solid #64748b;height:28px'></div><div style='font-size:12px;color:#475569'>"
+        f"{party_a_name} Signature</div><div style='margin-top:8px;border-bottom:1px solid #cbd5e1;height:20px'></div><div style='font-size:12px;color:#475569'>Date</div></td>"
+        f"<td style='width:50%;padding-left:12px'><div style='border-bottom:1px solid #64748b;height:28px'></div><div style='font-size:12px;color:#475569'>"
+        f"{party_b_name} Signature</div><div style='margin-top:8px;border-bottom:1px solid #cbd5e1;height:20px'></div><div style='font-size:12px;color:#475569'>Date</div></td>"
+        "</tr>"
+        "</table>"
+        "</article>"
     )
+
+
+def _revise_with_instruction(current: AgreementDraft, instruction: str) -> AgreementDraftCreate:
+    system_prompt = (
+        "You are a structured agreement editor for CLAW.\n"
+        "Update the agreement state based on the user's edit instruction.\n"
+        "Return ONLY strict JSON matching:\n"
+        '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":""}], "purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
+        "Rules:\n"
+        "- Preserve existing values unless user explicitly changes them.\n"
+        "- Keep response concise and valid JSON.\n"
+        "- Do not add commentary."
+    )
+    payload = {
+        "instruction": instruction,
+        "current_draft": {
+            "title": current.title,
+            "jurisdiction": current.jurisdiction,
+            "parties": [p.model_dump() for p in current.parties],
+            "purpose": current.purpose,
+            "payment_terms": current.payment_terms,
+            "duration": current.duration,
+            "due_date": current.due_date,
+            "effective_date": current.effective_date,
+        },
+    }
+    try:
+        llm_text = call_legal_llm(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            max_tokens=350,
+            temperature=0.0,
+        )
+        parsed = _extract_json_object(llm_text)
+        return _normalize_parsed_draft(parsed)
+    except Exception:
+        # deterministic fallback for common edit verbs
+        text = (instruction or "").strip()
+        next_data = AgreementDraftCreate(
+            title=current.title,
+            jurisdiction=current.jurisdiction,
+            parties=current.parties,
+            purpose=current.purpose,
+            payment_terms=current.payment_terms,
+            duration=current.duration,
+            due_date=current.due_date,
+            effective_date=current.effective_date,
+        )
+        m = re.search(r"(?:change|set|update)\s+payment(?:\s+terms)?\s+to\s+(.+)$", text, re.I)
+        if m:
+            next_data.payment_terms = m.group(1).strip(" .")
+        m = re.search(r"(?:change|set|make|update)\s+(?:term|duration)\s+(?:to|for)?\s+(.+)$", text, re.I)
+        if m:
+            next_data.duration = m.group(1).strip(" .")
+        m = re.search(r"(?:change|set|update)\s+effective\s+date\s+(?:to)?\s+(.+)$", text, re.I)
+        if m:
+            next_data.effective_date = m.group(1).strip(" .")
+        m = re.search(r"(?:change|set|update)\s+jurisdiction\s+(?:to)?\s+(.+)$", text, re.I)
+        if m:
+            next_data.jurisdiction = m.group(1).strip(" .")
+        if re.search(r"\bconfidentiality\b", text, re.I) and "confidential" not in (next_data.purpose or "").lower():
+            next_data.purpose = f"{(next_data.purpose or '').strip()}. Includes confidentiality obligations.".strip(" .")
+        return next_data
 
 
 def _load_or_404(agreement_id: str) -> AgreementDraft:
@@ -358,4 +449,39 @@ def export_agreement_docx(agreement_id: str) -> Dict[str, Any]:
         "status": "stub",
         "message": "DOCX export pipeline not yet enabled in this build.",
         "download_path": None,
+    }
+
+
+@router.post("/{agreement_id}/revise")
+def revise_agreement(agreement_id: str, body: AgreementReviseRequest) -> Dict[str, Any]:
+    draft = _load_or_404(agreement_id)
+    instruction = (body.instruction or "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="instruction_required")
+    revised = _revise_with_instruction(draft, instruction)
+    now = _utc_now_iso()
+    next_draft = AgreementDraft(
+        id=draft.id,
+        title=revised.title,
+        jurisdiction=revised.jurisdiction,
+        parties=revised.parties,
+        purpose=revised.purpose,
+        payment_terms=revised.payment_terms,
+        duration=revised.duration,
+        due_date=revised.due_date,
+        effective_date=revised.effective_date,
+        created_at=draft.created_at,
+        updated_at=now,
+        versions=draft.versions,
+        audit_log=[
+            *(draft.audit_log or []),
+            AuditEvent(event_type="field_updated", at=now, field="chat_revise", value=instruction),
+        ],
+    )
+    save_draft(next_draft.model_dump())
+    return {
+        "id": agreement_id,
+        "draft": next_draft.model_dump(),
+        "rendered_html": _render_html(next_draft),
+        "canonical_json": canonicalize_agreement(next_draft.model_dump()),
     }

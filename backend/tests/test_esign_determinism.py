@@ -1,6 +1,9 @@
 import base64
+import pytest
 
 from backend.services import esign_service
+
+pytestmark = pytest.mark.invariant
 
 
 def test_packet_determinism_with_signer_order():

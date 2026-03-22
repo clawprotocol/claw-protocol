@@ -2,7 +2,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from clawctl.main import _verify_bundle_data
+
+pytestmark = pytest.mark.e2e
 
 
 def test_verify_bundle_ok_from_vector():

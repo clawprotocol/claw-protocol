@@ -1,4 +1,7 @@
+import pytest
 from backend.handlers.sign_handler import create_sign_packet
+
+pytestmark = pytest.mark.invariant
 
 
 def test_sign_packet_contains_packet_hash_and_message():

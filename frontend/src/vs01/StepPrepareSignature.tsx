@@ -147,7 +147,7 @@ export function StepPrepareSignature({
         proof spine stays atomic per signature.
       </p>
 
-      <div className="vs01-summary-panel" style={{ marginBottom: "1rem" }}>
+      <div className="vs01-summary-panel vs01-summary-panel--spaced">
         <strong>After you sign</strong>, you can hand off to:{" "}
         {named.length ? (
           <span>{named.map((c) => c.name.trim()).join(" · ")}</span>
@@ -164,55 +164,45 @@ export function StepPrepareSignature({
         ) : null}
       </div>
 
-      <div className="vs01-stack">
-        <div className="vs01-field">
-          <label className="vs01-field-label" htmlFor="vs01-signer-ref">
-            Signer reference (on the receipt)
-          </label>
-          <input
-            id="vs01-signer-ref"
-            className="vs01-input"
-            value={signerRef}
-            disabled={busy}
-            onChange={(ev) => setSignerRef(ev.target.value)}
-            autoComplete="off"
-          />
+      <div className="vs01-sign-columns">
+        <div className="vs01-stack">
+          <div className="vs01-field">
+            <label className="vs01-field-label" htmlFor="vs01-signer-ref">
+              Signer reference (on the receipt)
+            </label>
+            <input
+              id="vs01-signer-ref"
+              className="vs01-input"
+              value={signerRef}
+              disabled={busy}
+              onChange={(ev) => setSignerRef(ev.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div className="vs01-field">
+            <span className="vs01-field-label" id="vs01-intent-label">
+              Intent
+            </span>
+            <select
+              className="vs01-input"
+              value={intent}
+              disabled
+              aria-labelledby="vs01-intent-label"
+            >
+              {INTENT_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div className="vs01-field">
-          <span className="vs01-field-label">Intent</span>
-          <select
-            className="vs01-input"
-            value={intent}
-            disabled
-            aria-readonly
-          >
-            {INTENT_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt.replace(/_/g, " ")}
-              </option>
-            ))}
-          </select>
-        </div>
-        <fieldset
-          style={{
-            border: "1px solid var(--vs01-color-border-subtle)",
-            borderRadius: "var(--vs01-radius-control)",
-            padding: "0.75rem",
-            margin: 0,
-          }}
-        >
-          <legend className="vs01-card-help" style={{ padding: "0 0.25rem" }}>
-            Signature placement (one box)
-          </legend>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "0.5rem",
-            }}
-          >
+
+        <fieldset className="vs01-fieldset-placement">
+          <legend className="vs01-fieldset-legend">Signature placement (one box)</legend>
+          <div className="vs01-placement-grid">
             <label className="vs01-field">
-              <span className="vs01-card-help">Page</span>
+              <span className="vs01-subfield-label">Page</span>
               <input
                 className="vs01-input"
                 type="text"
@@ -223,7 +213,7 @@ export function StepPrepareSignature({
               />
             </label>
             <label className="vs01-field">
-              <span className="vs01-card-help">X</span>
+              <span className="vs01-subfield-label">X</span>
               <input
                 className="vs01-input"
                 type="text"
@@ -234,7 +224,7 @@ export function StepPrepareSignature({
               />
             </label>
             <label className="vs01-field">
-              <span className="vs01-card-help">Y</span>
+              <span className="vs01-subfield-label">Y</span>
               <input
                 className="vs01-input"
                 type="text"
@@ -245,7 +235,7 @@ export function StepPrepareSignature({
               />
             </label>
             <label className="vs01-field">
-              <span className="vs01-card-help">W</span>
+              <span className="vs01-subfield-label">W</span>
               <input
                 className="vs01-input"
                 type="text"
@@ -255,8 +245,8 @@ export function StepPrepareSignature({
                 onChange={(ev) => setW(ev.target.value)}
               />
             </label>
-            <label className="vs01-field" style={{ gridColumn: "1 / -1" }}>
-              <span className="vs01-card-help">H</span>
+            <label className="vs01-field vs01-field--full-row">
+              <span className="vs01-subfield-label">H</span>
               <input
                 className="vs01-input"
                 type="text"
@@ -270,31 +260,34 @@ export function StepPrepareSignature({
         </fieldset>
       </div>
 
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--secondary"
-        disabled={busy}
-        onClick={() => onBack?.()}
-      >
-        Back
-      </button>
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--primary"
-        style={{ marginTop: "0.75rem" }}
-        disabled={busy}
-        onClick={() => void handleSign()}
-      >
-        {busySession ? "Creating session…" : busyComplete ? "Signing…" : "Sign & issue receipt"}
-      </button>
-      <button
-        type="button"
-        className="vs01-btn vs01-btn--primary"
-        disabled={busy || !canContinueToDone}
-        onClick={() => onContinue?.()}
-      >
-        Continue to complete & handoff
-      </button>
+      <div className="vs01-step-actions">
+        <div className="vs01-action-row">
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--secondary vs01-btn--auto"
+            disabled={busy}
+            onClick={() => onBack?.()}
+          >
+            Back
+          </button>
+        </div>
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--primary"
+          disabled={busy}
+          onClick={() => void handleSign()}
+        >
+          {busySession ? "Creating session…" : busyComplete ? "Signing…" : "Sign & issue receipt"}
+        </button>
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--primary"
+          disabled={busy || !canContinueToDone}
+          onClick={() => onContinue?.()}
+        >
+          Continue to handoff
+        </button>
+      </div>
     </section>
   );
 }

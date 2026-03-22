@@ -33,24 +33,29 @@ const AgreementReview: React.FC<Props> = ({ agreementId, onBackToNew, onGoLegacy
   const [savingField, setSavingField] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [auditOpen, setAuditOpen] = useState(false);
-  const [status, setStatus] = useState<"Draft" | "Ready for Review" | "Ready to Sign">("Draft");
+  const [status, setStatus] = useState<"Draft" | "Complete Draft" | "Signed">("Draft");
+  const [editInstruction, setEditInstruction] = useState("");
 
-  const canProceedToSign = useMemo(() => {
+  const requiredComplete = useMemo(() => {
     if (!draft) return false;
     return (
       Boolean((draft.title || "").trim()) &&
-      Boolean((draft.jurisdiction || "").trim()) &&
       (draft.parties || []).length >= 2 &&
       Boolean((draft.purpose || "").trim()) &&
-      Boolean((draft.payment_terms || "").trim())
+      Boolean((draft.payment_terms || "").trim()) &&
+      Boolean((draft.duration || "").trim()) &&
+      (draft.parties || []).length >= 2 &&
+      Boolean((draft.jurisdiction || "").trim()) &&
+      Boolean((draft.effective_date || "").trim())
     );
   }, [draft]);
 
   useEffect(() => {
-    if (canProceedToSign) setStatus("Ready to Sign");
-    else if (draft) setStatus("Ready for Review");
+    const signed = Boolean((draft?.audit_log || []).find((e) => e.event_type === "signed"));
+    if (signed) setStatus("Signed");
+    else if (requiredComplete) setStatus("Complete Draft");
     else setStatus("Draft");
-  }, [draft, canProceedToSign]);
+  }, [draft, requiredComplete]);
 
   async function loadDraft() {
     setLoading(true);
@@ -184,6 +189,29 @@ const AgreementReview: React.FC<Props> = ({ agreementId, onBackToNew, onGoLegacy
     await saveField("parties", nextParties);
   }
 
+  async function reviseAgreement() {
+    const instruction = editInstruction.trim();
+    if (!instruction) return;
+    setSavingField("conversation");
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/revise`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction }),
+      });
+      if (!res.ok) throw new Error("revise_failed");
+      const payload = await res.json();
+      setDraft(payload?.draft || null);
+      setRenderedHtml(String(payload?.rendered_html || ""));
+      setEditInstruction("");
+    } catch (e: any) {
+      setError(e?.message || "Could not apply edit.");
+    } finally {
+      setSavingField(null);
+    }
+  }
+
   if (loading && !draft) {
     return (
       <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300">
@@ -235,6 +263,34 @@ const AgreementReview: React.FC<Props> = ({ agreementId, onBackToNew, onGoLegacy
       </div>
 
       <div className="rounded border border-slate-800 bg-slate-900/40 p-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Edit Agreement</div>
+        <div className="mt-2 text-xs text-slate-400">
+          Describe the change naturally (example: "Change payment to $3,000 flat and make term 12 months.").
+        </div>
+        <div className="mt-2 flex gap-2">
+          <input
+            className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
+            placeholder="Type a drafting instruction..."
+            value={editInstruction}
+            onChange={(e) => setEditInstruction(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void reviseAgreement();
+              }
+            }}
+          />
+          <button
+            className="btn bg-emerald-600 text-xs text-white hover:bg-emerald-500 disabled:opacity-60"
+            disabled={savingField === "conversation" || !editInstruction.trim()}
+            onClick={() => void reviseAgreement()}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded border border-slate-800 bg-slate-900/40 p-3">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Parties</div>
         <div className="space-y-2">
           {(draft.parties || []).map((party, idx) => (
@@ -263,13 +319,6 @@ const AgreementReview: React.FC<Props> = ({ agreementId, onBackToNew, onGoLegacy
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <EditableField label="Purpose" field="purpose" value={draft.purpose} />
-        <EditableField label="Payment Terms" field="payment_terms" value={draft.payment_terms} />
-        <EditableField label="Duration" field="duration" value={draft.duration} />
-        <EditableField label="Due Date" field="due_date" value={draft.due_date} placeholder="YYYY-MM-DD" />
-      </div>
-
       <div className="flex flex-wrap gap-2 rounded border border-slate-800 bg-slate-900/40 p-3">
         <button className="btn text-xs opacity-70" disabled>
           Versions (stub)
@@ -288,8 +337,8 @@ const AgreementReview: React.FC<Props> = ({ agreementId, onBackToNew, onGoLegacy
         </button>
         <button
           className="btn bg-emerald-600 text-xs text-white hover:bg-emerald-500 disabled:opacity-60"
-          disabled={!canProceedToSign}
-          title={canProceedToSign ? "Proceed to sign" : "Complete core fields first"}
+          disabled={!requiredComplete}
+          title={requiredComplete ? "Proceed to sign" : "Complete core fields first"}
         >
           Proceed to Sign
         </button>
@@ -311,7 +360,8 @@ const AgreementReview: React.FC<Props> = ({ agreementId, onBackToNew, onGoLegacy
       )}
 
       <div className="rounded border border-slate-800 bg-white p-4 text-slate-900">
-        <div className="text-xs uppercase tracking-wide text-slate-600">Rendered Agreement</div>
+        <div className="text-xs uppercase tracking-wide text-slate-600">Agreement Preview</div>
+        <div className="mt-1 text-[11px] text-slate-500">Last updated: {new Date(draft.updated_at).toLocaleString()}</div>
         <div
           className="prose mt-2 max-w-none text-sm"
           dangerouslySetInnerHTML={{ __html: renderedHtml || "<p>No rendered document yet.</p>" }}

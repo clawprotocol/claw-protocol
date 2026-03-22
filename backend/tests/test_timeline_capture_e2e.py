@@ -6,6 +6,8 @@ import pytest
 
 from backend.services import workflow_service
 
+pytestmark = pytest.mark.e2e
+
 
 def _flip_byte(path: Path) -> bytes:
     data = path.read_bytes()

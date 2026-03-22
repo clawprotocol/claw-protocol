@@ -240,4 +240,21 @@ INVARIANTS (MUST HOLD)
 
 ----------------------------------------------------------------
 
+### Liability Attestation (via notice event)
+
+Personal Liability declarations are recorded as `notice` events with a
+`liability_attestation` payload.
+
+Required fields:
+- subject_role
+- capacity
+- control_flags
+- valid_from
+- valid_to (optional)
+- declared_exclusions (optional)
+
+These events are immutable once recorded and may be referenced by
+agreements (determination clauses) during adjudication.
+
+
 END OF DOCUMENT

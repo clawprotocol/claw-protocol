@@ -1,4 +1,8 @@
+import pytest
+
 from backend.handlers.bitcoin_opreturn import build_claw_opreturn_payload
+
+pytestmark = pytest.mark.invariant
 
 def test_opreturn_payload_format():
     epoch_root = "01" * 32

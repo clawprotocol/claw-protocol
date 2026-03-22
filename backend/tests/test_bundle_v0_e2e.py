@@ -2,9 +2,13 @@ import hashlib
 import os
 from pathlib import Path
 
+import pytest
+
 from backend.services import attestation_service
 from backend.services import bundle_service
 from backend.services import workflow_service
+
+pytestmark = pytest.mark.e2e
 
 
 def _flip_byte(path: Path) -> bytes:

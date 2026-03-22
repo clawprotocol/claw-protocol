@@ -1,0 +1,371 @@
+# CLAW AGENTS.md
+Version: 1.1
+Status: Load-Bearing
+Last Updated: 2026-03-03
+
+This file defines the operating constraints for all AI agents interacting with the CLAW codebase.
+
+CLAW is a deterministic legal-state protocol.
+Agents must prioritize correctness, determinism, immutability, architectural integrity, and lifecycle discipline over speed.
+
+Failure to follow these rules is a bug.
+
+---
+
+# 0. PRIME DIRECTIVE
+
+CLAW is:
+- Deterministic
+- Cryptographically anchored
+- Versioned
+- Audit-focused
+- Lifecycle-governed
+- Non-advisory (no legal advice language)
+- Immutable once frozen
+
+Agents MUST NOT:
+- Introduce nondeterministic behavior
+- Modify canonical receipt formats without version bump
+- Alter hashing logic casually
+- Break architectural layer boundaries
+- Bypass lifecycle transitions
+- Add “helpful” legal advice language
+
+If uncertain → stop and request clarification.
+
+---
+
+# 1. REQUIRED EXECUTION FLOW
+
+Before submitting any PR:
+
+1. Generate a written plan.
+2. Confirm lifecycle impact.
+3. Confirm architecture boundaries.
+4. Implement changes.
+5. Run all tests.
+6. Run lint.
+7. Confirm canonical hash determinism.
+8. Provide diff summary.
+
+Do not skip planning.
+
+---
+
+# 2. ARCHITECTURAL LAYERS (STRICT)
+
+CLAW follows a layered architecture:
+
+Layer 1: Schemas (pure models, no logic)
+Layer 2: Domain Logic (deterministic transformations, lifecycle transitions)
+Layer 3: Handlers (FastAPI / CLI entrypoints)
+Layer 4: Adapters (Bitcoin, IPFS, external systems)
+
+Rules:
+- Schemas cannot import handlers.
+- Domain cannot import FastAPI.
+- Adapters cannot modify domain logic.
+- No cross-layer shortcuts.
+- No circular imports.
+
+Violations must fail tests.
+
+---
+
+# 3. RECEIPTS & CANONICAL JSON
+
+Receipts are canonical, deterministic objects.
+
+Rules:
+- All receipts must serialize identically across runs.
+- JSON must be:
+  - Sorted keys
+  - UTF-8 encoded
+  - No floating point drift
+- Hash must be SHA-256 over canonical bytes.
+- Changing receipt structure requires:
+  - Version bump
+  - Migration note
+  - Backward compatibility plan
+
+Never introduce nondeterministic fields.
+
+Timestamps must be explicit and controlled.
+
+---
+
+# 4. TIMELINE IMMUTABILITY
+
+Timelines:
+- Are append-only.
+- Cannot be edited after freeze.
+- Must produce identical hashes for identical event sequences.
+- Freeze events permanently lock prior state.
+
+Never mutate historical records.
+
+---
+
+# 5. TESTING REQUIREMENTS
+
+All new logic must include:
+
+- Determinism tests
+- Canonical serialization test
+- Lifecycle transition test
+- Structural integrity test
+- Layer boundary test (if applicable)
+
+Tests must be fast (<3 seconds per module).
+
+Agents must run:
+    pytest
+
+before PR submission.
+
+---
+
+# 6. LINTING & STRUCTURAL VALIDATION
+
+Agents must run:
+    ruff .
+    mypy .
+
+Architectural boundary rules must be enforced via:
+- Structural tests
+- Custom lint rules (if available)
+
+When an agent violates architecture:
+→ Fix architecture or fix code.
+Do not suppress errors.
+
+---
+
+# 7. NO LEGAL ADVICE
+
+CLAW is:
+- Deterministic
+- Analytical
+- Advisory-neutral
+
+Agents must avoid:
+- "You should"
+- "This is legally binding"
+- "This guarantees"
+- Legal conclusions framed as advice
+
+Language must remain procedural and descriptive.
+
+---
+
+# 8. INTERFACE DESIGN
+
+Public APIs must:
+- Be explicit
+- Be versioned
+- Avoid hidden side effects
+- Return structured JSON responses
+
+Never return loosely formatted strings when structured output is required.
+
+---
+
+# 9. HASHING INVARIANTS
+
+Hashing logic is sacred.
+
+Agents must:
+- Never modify hashing implementation casually.
+- Never switch hash algorithm.
+- Never re-encode JSON differently.
+- Never alter canonical ordering.
+
+If modifying hashing:
+→ Stop and escalate.
+
+---
+
+# 10. ERROR HANDLING
+
+Errors must:
+- Be explicit
+- Be structured
+- Not leak internal stack traces
+- Not mutate state
+
+Never catch exceptions silently.
+
+---
+
+# 11. PERFORMANCE
+
+- Determinism > performance.
+- Simplicity > clever abstractions.
+- Explicitness > magic.
+
+Avoid:
+- Overly clever abstractions
+- Hidden mutation
+- Reflection-based hacks
+
+---
+
+# 12. DOCUMENTATION AS FEEDBACK LOOP
+
+Whenever an agent:
+- Makes a mistake
+- Violates architecture
+- Runs wrong command
+- Breaks determinism
+- Breaks lifecycle discipline
+
+Update this file.
+
+This file evolves through failures.
+
+---
+
+# 13. WORKFLOW DISCIPLINE
+
+Always:
+
+- Plan first
+- Execute second
+- Validate third
+- Summarize diff
+
+Never jump directly to large file rewrites without plan approval.
+
+---
+
+# 14. SLOP PREVENTION
+
+Code must be:
+
+- Readable
+- Predictable
+- Consistent
+- Maintainable
+
+Reject:
+- Overly verbose scaffolding
+- Redundant wrappers
+- Excess abstraction
+- Clever one-liners
+
+Architectural clarity > output volume.
+
+---
+
+# 15. ANCHOR ADAPTER RULES
+
+Adapters:
+- Must not mutate domain objects.
+- Must not embed business logic.
+- Must only translate data to/from external systems.
+
+Bitcoin anchoring:
+- OP_RETURN payload must match canonical hash exactly.
+- No trimming, re-encoding, or formatting changes.
+
+---
+
+# 16. VERSIONING
+
+All breaking changes require:
+
+- Version bump
+- Migration notes
+- Backward compatibility test
+
+---
+
+# 17. CLAW LIFECYCLE STATE MACHINE
+
+CLAW operates as a deterministic lifecycle engine.
+
+Core states (non-exhaustive):
+
+- DRAFT
+- SIGNED
+- ACTIVE
+- EVENT_APPENDED
+- DISPUTED
+- EVIDENCE_SUBMITTED
+- ADJUDICATED
+- OUTCOME_ANCHORED
+- CLOSED
+
+Rules:
+- State transitions must be explicit.
+- No direct mutation of state fields.
+- All transitions must pass through defined transition functions.
+- Invalid transitions must raise structured errors.
+- Historical states are immutable once advanced.
+- Freeze operations permanently lock prior state.
+
+---
+
+# 18. TRANSITION ENFORCEMENT
+
+Agents must never:
+
+- Modify a SIGNED agreement.
+- Append events after freeze.
+- Adjudicate without DISPUTED state.
+- Attach liability to unsigned agreements.
+- Anchor outcomes before adjudication completes.
+
+All transitions must:
+
+- Be logged.
+- Be hash-deterministic.
+- Produce identical output for identical inputs.
+
+---
+
+# 19. LLM OUTPUT DETERMINISM
+
+LLM outputs must:
+
+- Conform to structured JSON schema.
+- Avoid open-ended prose where structured output is required.
+- Avoid legal conclusions framed as advice.
+- Avoid citing nonexistent authority.
+- Avoid hallucinated precedent.
+
+Adjudication must:
+
+- Reference only submitted evidence.
+- Avoid unstated assumptions.
+- Produce reproducible output for identical evidence.
+
+If model output changes materially for identical inputs:
+→ Escalate.
+
+---
+
+# 20. RECEIPT ESCALATION
+
+If any change affects:
+
+- Hashing logic
+- Receipt schema
+- Serialization order
+- Anchor payload format
+
+Agent must:
+
+- Stop
+- Explain impact
+- Request approval
+
+---
+
+# 21. WHEN IN DOUBT
+
+Stop.
+Ask.
+Do not improvise.
+
+CLAW prioritizes protocol integrity over velocity.

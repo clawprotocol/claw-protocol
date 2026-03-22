@@ -1,6 +1,9 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+pytestmark = pytest.mark.unit
 
 
 def test_api_agreements_v2_create_update_render_no_template_leakage():

@@ -1,6 +1,9 @@
 # backend/tests/test_receipt.py
 
+import pytest
 from backend.handlers.receipt_handler import build_receipt
+
+pytestmark = pytest.mark.invariant
 
 
 def test_receipt_is_deterministic_across_signature_order():

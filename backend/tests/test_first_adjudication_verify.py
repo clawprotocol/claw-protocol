@@ -7,6 +7,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.e2e
+
 
 def _run(cmd: list[str], cwd: Path, env: dict | None = None) -> None:
     result = subprocess.run(

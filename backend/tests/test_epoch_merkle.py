@@ -1,5 +1,8 @@
 # backend/tests/test_epoch_merkle.py
+import pytest
 from backend.handlers.epoch_merkle import merkle_root_and_paths, merkle_verify
+
+pytestmark = pytest.mark.invariant
 
 
 def test_merkle_determinism_and_inclusion():

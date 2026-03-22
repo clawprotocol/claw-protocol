@@ -1,8 +1,11 @@
 # backend/tests/test_api_happy_path.py
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+pytestmark = pytest.mark.unit
 
 client = TestClient(app)
 
