@@ -14,16 +14,23 @@ export function Vs01Layout({ children }: Vs01LayoutProps) {
     <div className="vs01-root">
       <div className="vs01-accent-strip" aria-hidden />
       <div className="vs01-shell">
-        <header>
-          <h1 className="vs01-header-title">CLAW · VS01</h1>
-          <p className="vs01-header-subtitle">
-            Finalize a document, bind a sign session, and download a verification bundle.
-          </p>
-          <p className="vs01-header-tagline">
-            Proof you can verify — keep it human, keep it honest.
-          </p>
+        <header className="vs01-header" role="banner" aria-labelledby="vs01-shell-title">
+          <div className="vs01-header-panel">
+            <div className="vs01-header-brand">
+              <span className="vs01-header-eyebrow">CLAW</span>
+              <h1 id="vs01-shell-title" className="vs01-header-title">
+                VS01
+              </h1>
+            </div>
+            <p className="vs01-header-subtitle">
+              Finalize a document, run signing, then download a verification bundle you can check locally.
+            </p>
+            <p className="vs01-header-tagline">
+              Proof you can verify yourself — cryptographic, file-based, independent of operators.
+            </p>
+          </div>
         </header>
-        {children}
+        <main className="vs01-main">{children}</main>
         <footer className="vs01-footer">
           <p>
             <strong>Disclaimer:</strong> This interface is informational. It is not legal advice.

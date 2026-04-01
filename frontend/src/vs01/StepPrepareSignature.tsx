@@ -1,6 +1,30 @@
-import { useCallback, useEffect, useState } from "react";
-import { completeSignSession, createSignSession } from "./vs01Api";
-import type { Vs01Counterparty, Vs01LoadingState } from "./types";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
+import { Document, Page, pdfjs } from "react-pdf";
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
+import { completeSignSession, createSignSession, fetchDocumentContent } from "./vs01Api";
+
+pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+import type { Vs01Counterparty, Vs01LoadingState, Vs01SenderSignatureRef } from "./types";
+import {
+  SIGNING_FIELD_TOOLS,
+  buildAutoInitialsFields,
+  createPlacedFieldAtClick,
+  defaultValueForType,
+  fieldsToManifest,
+  labelForFieldType,
+  type PlacedSigningField,
+  type SigningFieldType,
+} from "./signingFields";
 
 const INTENT_OPTIONS = ["agree_and_sign"] as const;
 
@@ -16,6 +40,8 @@ export type StepPrepareSignatureProps = {
     receiptId: string;
     receiptHashSha256: string;
     receipt: unknown;
+    senderPlacedFields: PlacedSigningField[];
+    senderSignatureRef: Vs01SenderSignatureRef | null;
   }) => void;
   counterparties: Vs01Counterparty[];
   senderMessage: string;
@@ -25,13 +51,72 @@ export type StepPrepareSignatureProps = {
 
 const STEP_ID = "prepare-sign" as const;
 
-function parseNum(s: string, fallback: number): number {
-  const n = Number(s);
-  return Number.isFinite(n) ? n : fallback;
+/** Toolbar / “Place …” copy (text tool uses longer label). */
+function signingToolbarLabelForType(t: SigningFieldType): string {
+  return t === "text" ? "Printed name / Text" : labelForFieldType(t);
+}
+
+/** Corner label on placed fields (Step 3, first person). */
+function signingPlacementCornerLabel(t: SigningFieldType): string {
+  switch (t) {
+    case "signature":
+      return "Your signature";
+    case "initials":
+      return "Your initials";
+    case "text":
+      return "Type here";
+    case "date":
+      return "Date";
+    default:
+      return labelForFieldType(t);
+  }
+}
+
+type SignatureMode = "type" | "draw" | "upload";
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n));
+}
+
+/** Normalized min/max field size on page (resize + placement). */
+const FIELD_MIN_W = 0.06;
+const FIELD_MIN_H = 0.036;
+const FIELD_MAX_W = 0.92;
+const FIELD_MAX_H = 0.5;
+
+function roundNorm(n: number): string {
+  const r = Math.round(n * 10000) / 10000;
+  return String(r);
+}
+
+function nameFromSignerRef(ref: string): string {
+  const first = ref.split("·")[0]?.trim();
+  return first || ref.trim();
+}
+
+function initialsFromName(name: string): string {
+  const t = name.trim();
+  if (!t) return "";
+  const parts = t.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const a = parts[0][0] ?? "";
+    const b = parts[parts.length - 1][0] ?? "";
+    return (a + b).toUpperCase();
+  }
+  return t.slice(0, 2).toUpperCase();
+}
+
+function formatIsoDateDisplay(iso: string): string {
+  const t = iso.trim();
+  if (!t) return "";
+  const d = new Date(`${t}T12:00:00.000Z`);
+  return Number.isNaN(d.getTime())
+    ? t
+    : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 /**
- * Step 2 — Signature prep: same VS01 sign session + complete; human summary of who’s next.
+ * Step 2 — Signing: field tools + click-to-place on hit layer, same sign-session API.
  */
 export function StepPrepareSignature({
   defaultSignerRef,
@@ -51,24 +136,558 @@ export function StepPrepareSignature({
   const busyComplete = loading === "complete";
   const busy = busySession || busyComplete;
 
-  const [signerRef, setSignerRef] = useState(defaultSignerRef);
   const [intent] = useState<string>(INTENT_OPTIONS[0]);
-  const [pageIndex, setPageIndex] = useState("0");
-  const [x, setX] = useState("0.1");
-  const [y, setY] = useState("0.1");
-  const [w, setW] = useState("0.2");
-  const [h, setH] = useState("0.05");
+
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [numPages, setNumPages] = useState(0);
+  const [pdfDocReady, setPdfDocReady] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const [fields, setFields] = useState<PlacedSigningField[]>([]);
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<SigningFieldType>("signature");
+  /** When set, the next click on the document places this field type once, then clears. */
+  const [armedTool, setArmedTool] = useState<SigningFieldType | null>(null);
+
+  const [autoInitialsEveryPage, setAutoInitialsEveryPage] = useState(false);
+  const [skippedAutoPages, setSkippedAutoPages] = useState<Set<number>>(() => new Set());
+
+  const [signatureMode, setSignatureMode] = useState<SignatureMode>("type");
+  const [typedName, setTypedName] = useState(() => nameFromSignerRef(defaultSignerRef));
+  const [initials, setInitials] = useState(() => initialsFromName(nameFromSignerRef(defaultSignerRef)));
+  const [initialsTouched, setInitialsTouched] = useState(false);
+  const [hasDrawn, setHasDrawn] = useState(false);
+  const [uploadPreviewUrl, setUploadPreviewUrl] = useState<string | null>(null);
+  const uploadRevokeRef = useRef<string | null>(null);
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawingRef = useRef(false);
+  const lastPtRef = useRef<{ x: number; y: number } | null>(null);
+
+  const [placementPopId, setPlacementPopId] = useState<string | null>(null);
+  const [showDragHint, setShowDragHint] = useState(false);
+  const dragHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const pagesInnerRef = useRef<HTMLDivElement>(null);
+  const [pageRenderWidth, setPageRenderWidth] = useState(520);
+  const pageSurfaceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const pageStackRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const fieldsRef = useRef(fields);
+  fieldsRef.current = fields;
+  const typedNameRef = useRef(typedName);
+  const initialsRef = useRef(initials);
+  typedNameRef.current = typedName;
+  initialsRef.current = initials;
+  const dragStartRef = useRef<{
+    fieldId: string;
+    pointerX: number;
+    pointerY: number;
+    boxX: number;
+    boxY: number;
+  } | null>(null);
+
+  const [resizing, setResizing] = useState(false);
+  const resizeStartRef = useRef<{
+    fieldId: string;
+    pointerId: number;
+    handleEl: HTMLButtonElement | null;
+    pointerX: number;
+    pointerY: number;
+    startW: number;
+    startH: number;
+    x: number;
+    y: number;
+    page: number;
+  } | null>(null);
 
   useEffect(() => {
-    setSignerRef(defaultSignerRef || "signer");
+    const base = nameFromSignerRef(defaultSignerRef);
+    setTypedName(base);
   }, [defaultSignerRef]);
+
+  useEffect(() => {
+    if (!initialsTouched) {
+      setInitials(initialsFromName(typedName));
+    }
+  }, [typedName, initialsTouched]);
+
+  useEffect(() => {
+    setFields([]);
+    setSelectedFieldId(null);
+    setCurrentPage(1);
+    setNumPages(0);
+    setPdfDocReady(false);
+    setPreviewError(null);
+    setAutoInitialsEveryPage(false);
+    setSkippedAutoPages(new Set());
+    setArmedTool(null);
+  }, [documentId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    async function load() {
+      if (!documentId?.trim()) {
+        setPdfUrl(null);
+        setPreviewError(null);
+        setPreviewLoading(false);
+        return;
+      }
+
+      setPreviewLoading(true);
+      setPreviewError(null);
+      try {
+        const blob = await fetchDocumentContent(documentId.trim());
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPdfUrl(objectUrl);
+      } catch (e) {
+        if (!cancelled) {
+          setPdfUrl(null);
+          setPreviewError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [documentId]);
+
+  useLayoutEffect(() => {
+    const el = pagesInnerRef.current;
+    if (!el) return;
+    const apply = () => {
+      const w = el.clientWidth;
+      if (w > 48) setPageRenderWidth(Math.max(160, w - 16));
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [pdfUrl]);
+
+  const registerPageStack = useCallback((pageIndex: number, el: HTMLDivElement | null) => {
+    if (el) pageStackRefs.current.set(pageIndex, el);
+    else pageStackRefs.current.delete(pageIndex);
+  }, []);
+
+  const registerPageSurface = useCallback((pageIndex: number, el: HTMLDivElement | null) => {
+    if (el) pageSurfaceRefs.current.set(pageIndex, el);
+    else pageSurfaceRefs.current.delete(pageIndex);
+  }, []);
+
+  useEffect(() => {
+    setSkippedAutoPages((prev) => {
+      const next = new Set<number>();
+      for (const p of prev) {
+        if (p < numPages) next.add(p);
+      }
+      return next;
+    });
+  }, [numPages]);
+
+  useEffect(() => {
+    return () => {
+      if (uploadRevokeRef.current) {
+        URL.revokeObjectURL(uploadRevokeRef.current);
+      }
+    };
+  }, []);
+
+  const signReady =
+    signatureMode === "type"
+      ? typedName.trim().length > 0
+      : signatureMode === "draw"
+        ? hasDrawn
+        : uploadPreviewUrl != null;
+
+  const hasSignatureOnDoc = fields.some((f) => f.type === "signature");
+  const flowStep3Ready = signReady && hasSignatureOnDoc;
+
+  const signerForApi = defaultSignerRef.trim() || "signer";
+
+  const pageIndex0 = currentPage - 1;
+
+  const selectedField = selectedFieldId ? fields.find((f) => f.id === selectedFieldId) : undefined;
+
+  const updateField = useCallback(
+    (id: string, patch: Partial<PlacedSigningField>) => {
+      setFields((prev) => {
+        const target = prev.find((f) => f.id === id);
+        const syncAutoInitialsGeom =
+          autoInitialsEveryPage &&
+          target?.autoInitials === true &&
+          target.type === "initials" &&
+          (patch.x !== undefined ||
+            patch.y !== undefined ||
+            patch.width !== undefined ||
+            patch.height !== undefined);
+
+        if (syncAutoInitialsGeom && target) {
+          const nx = parseFloat(roundNorm(patch.x !== undefined ? patch.x : target.x));
+          const ny = parseFloat(roundNorm(patch.y !== undefined ? patch.y : target.y));
+          const nw = parseFloat(roundNorm(patch.width !== undefined ? patch.width : target.width));
+          const nh = parseFloat(roundNorm(patch.height !== undefined ? patch.height : target.height));
+          return prev.map((f) =>
+            f.autoInitials && f.type === "initials"
+              ? { ...f, x: nx, y: ny, width: nw, height: nh }
+              : f
+          );
+        }
+
+        return prev.map((f) => (f.id === id ? { ...f, ...patch } : f));
+      });
+    },
+    [autoInitialsEveryPage]
+  );
+
+  const removeField = useCallback((id: string) => {
+    const target = fieldsRef.current.find((f) => f.id === id);
+    if (target?.autoInitials) {
+      setSkippedAutoPages((s) => new Set(s).add(target.page));
+    }
+    setFields((prev) => prev.filter((f) => f.id !== id));
+    setSelectedFieldId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  /** Add/remove auto-initials slots only when toggle, page count, or skipped pages change — not on every name keystroke. */
+  useEffect(() => {
+    if (!autoInitialsEveryPage) {
+      setFields((prev) => prev.filter((f) => !f.autoInitials));
+      setSkippedAutoPages(new Set());
+      return;
+    }
+    if (numPages <= 0) return;
+
+    const ctx = { typedName: typedNameRef.current, initials: initialsRef.current };
+    setFields((prev) => {
+      const manual = prev.filter((f) => !f.autoInitials);
+      const auto = buildAutoInitialsFields(numPages, ctx, skippedAutoPages);
+      return [...manual, ...auto];
+    });
+  }, [autoInitialsEveryPage, numPages, skippedAutoPages]);
+
+  /** Keep auto-initials text in sync when the user edits initials/name, without rebuilding positions. */
+  useEffect(() => {
+    if (!autoInitialsEveryPage) return;
+    setFields((prev) =>
+      prev.map((f) =>
+        f.autoInitials && f.type === "initials"
+          ? { ...f, value: defaultValueForType("initials", { typedName, initials }) }
+          : f
+      )
+    );
+  }, [autoInitialsEveryPage, typedName, initials]);
+
+  const onPagePlacementClick = useCallback(
+    (pageIndex0: number, ev: React.MouseEvent<HTMLDivElement>) => {
+      if (busy || armedTool == null) return;
+      const t = ev.target as HTMLElement;
+      if (t.closest?.(".vs01-sign-placement-box")) return;
+      const surface = ev.currentTarget.parentElement as HTMLElement | null;
+      if (!surface) return;
+      const rect = surface.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const px = (ev.clientX - rect.left) / rect.width;
+      const py = (ev.clientY - rect.top) / rect.height;
+      const ctx = { typedName, initials };
+      const nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, ctx);
+      setFields((prev) => [...prev, nf]);
+      setSelectedFieldId(nf.id);
+      setCurrentPage(pageIndex0 + 1);
+      setArmedTool(null);
+      setPlacementPopId(nf.id);
+      window.setTimeout(() => setPlacementPopId(null), 380);
+      if (dragHintTimerRef.current) clearTimeout(dragHintTimerRef.current);
+      setShowDragHint(true);
+      dragHintTimerRef.current = setTimeout(() => {
+        setShowDragHint(false);
+        dragHintTimerRef.current = null;
+      }, 2200);
+    },
+    [armedTool, busy, typedName, initials]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (dragHintTimerRef.current) clearTimeout(dragHintTimerRef.current);
+    };
+  }, []);
+
+  const onBoxPointerDown = useCallback(
+    (ev: PointerEvent<HTMLDivElement>, field: PlacedSigningField) => {
+      if (busy || resizing) return;
+      if ((ev.target as HTMLElement).closest(".vs01-sign-placement-resize-handle")) return;
+      if ((ev.target as HTMLElement).closest(".vs01-sign-field-inline-input")) return;
+      if (
+        (field.type === "text" || field.type === "date") &&
+        selectedFieldId !== field.id
+      ) {
+        setSelectedFieldId(field.id);
+        return;
+      }
+      ev.preventDefault();
+      ev.stopPropagation();
+      setSelectedFieldId(field.id);
+      dragStartRef.current = {
+        fieldId: field.id,
+        pointerX: ev.clientX,
+        pointerY: ev.clientY,
+        boxX: field.x,
+        boxY: field.y,
+      };
+      setDragging(true);
+      (ev.currentTarget as HTMLDivElement).setPointerCapture(ev.pointerId);
+    },
+    [busy, resizing, selectedFieldId]
+  );
+
+  const onPlacementBoxClick = useCallback((ev: MouseEvent<HTMLDivElement>, fieldId: string) => {
+    ev.stopPropagation();
+    setSelectedFieldId(fieldId);
+  }, []);
+
+  useEffect(() => {
+    if (!dragging || !dragStartRef.current) return;
+
+    const onMove = (e: globalThis.PointerEvent) => {
+      const start = dragStartRef.current;
+      if (!start) return;
+      const field = fieldsRef.current.find((f) => f.id === start.fieldId);
+      if (!field) return;
+      const surface = pageSurfaceRefs.current.get(field.page);
+      if (!surface) return;
+      const rect = surface.getBoundingClientRect();
+      const dx = (e.clientX - start.pointerX) / rect.width;
+      const dy = (e.clientY - start.pointerY) / rect.height;
+      const wn = clamp01(field.width);
+      const hn = clamp01(field.height);
+      let nx = start.boxX + dx;
+      let ny = start.boxY + dy;
+      nx = Math.min(Math.max(0, nx), 1 - wn);
+      ny = Math.min(Math.max(0, ny), 1 - hn);
+      updateField(field.id, { x: parseFloat(roundNorm(nx)), y: parseFloat(roundNorm(ny)) });
+    };
+
+    const onUp = () => {
+      dragStartRef.current = null;
+      setDragging(false);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [dragging, updateField]);
+
+  useEffect(() => {
+    if (!resizing || !resizeStartRef.current) return;
+
+    const onMove = (e: globalThis.PointerEvent) => {
+      const start = resizeStartRef.current;
+      if (!start) return;
+      const field = fieldsRef.current.find((f) => f.id === start.fieldId);
+      if (!field) return;
+      const surface = pageSurfaceRefs.current.get(field.page);
+      if (!surface) return;
+      const rect = surface.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const dx = (e.clientX - start.pointerX) / rect.width;
+      const dy = (e.clientY - start.pointerY) / rect.height;
+      const maxW = Math.min(FIELD_MAX_W, 1 - start.x);
+      const maxH = Math.min(FIELD_MAX_H, 1 - start.y);
+      let nw = start.startW + dx;
+      let nh = start.startH + dy;
+      nw = Math.min(Math.max(FIELD_MIN_W, nw), maxW);
+      nh = Math.min(Math.max(FIELD_MIN_H, nh), maxH);
+      updateField(field.id, {
+        width: parseFloat(roundNorm(nw)),
+        height: parseFloat(roundNorm(nh)),
+      });
+    };
+
+    const onUp = () => {
+      const s = resizeStartRef.current;
+      if (s?.handleEl) {
+        try {
+          s.handleEl.releasePointerCapture(s.pointerId);
+        } catch {
+          /* not capturing */
+        }
+      }
+      resizeStartRef.current = null;
+      setResizing(false);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [resizing, updateField]);
+
+  const onResizeHandlePointerDown = useCallback(
+    (ev: PointerEvent<HTMLButtonElement>, field: PlacedSigningField) => {
+      if (busy) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      setSelectedFieldId(field.id);
+      const el = ev.currentTarget;
+      resizeStartRef.current = {
+        fieldId: field.id,
+        pointerId: ev.pointerId,
+        handleEl: el,
+        pointerX: ev.clientX,
+        pointerY: ev.clientY,
+        startW: field.width,
+        startH: field.height,
+        x: field.x,
+        y: field.y,
+        page: field.page,
+      };
+      setResizing(true);
+      el.setPointerCapture(ev.pointerId);
+    },
+    [busy]
+  );
+
+  const clearCanvas = useCallback(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#faf8f5";
+    ctx.fillRect(0, 0, c.width, c.height);
+    setHasDrawn(false);
+    lastPtRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (signatureMode !== "draw") return;
+    clearCanvas();
+  }, [signatureMode, clearCanvas]);
+
+  useLayoutEffect(() => {
+    if (signatureMode !== "draw") return;
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#faf8f5";
+    ctx.fillRect(0, 0, c.width, c.height);
+  }, [signatureMode]);
+
+  const canvasDraw = useCallback(
+    (ev: React.MouseEvent<HTMLCanvasElement>, end: boolean) => {
+      const c = canvasRef.current;
+      if (!c || busy) return;
+      const ctx = c.getContext("2d");
+      if (!ctx) return;
+      const r = c.getBoundingClientRect();
+      const px = ((ev.clientX - r.left) / r.width) * c.width;
+      const py = ((ev.clientY - r.top) / r.height) * c.height;
+
+      if (ev.type === "mousedown") {
+        drawingRef.current = true;
+        lastPtRef.current = { x: px, y: py };
+        ctx.strokeStyle = "#1a1a1a";
+        ctx.lineWidth = 2.25;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        setHasDrawn(true);
+        return;
+      }
+      if (end) {
+        drawingRef.current = false;
+        lastPtRef.current = null;
+        return;
+      }
+      if (ev.type === "mousemove" && (!drawingRef.current || ev.buttons !== 1)) return;
+      if (!drawingRef.current || !lastPtRef.current) return;
+      ctx.beginPath();
+      ctx.moveTo(lastPtRef.current.x, lastPtRef.current.y);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+      lastPtRef.current = { x: px, y: py };
+    },
+    [busy]
+  );
+
+  const onUploadPick = useCallback((ev: React.ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    if (uploadRevokeRef.current) {
+      URL.revokeObjectURL(uploadRevokeRef.current);
+      uploadRevokeRef.current = null;
+    }
+    setUploadPreviewUrl(null);
+    if (!file || !file.type.startsWith("image/")) return;
+    const url = URL.createObjectURL(file);
+    uploadRevokeRef.current = url;
+    setUploadPreviewUrl(url);
+  }, []);
 
   const handleSign = useCallback(async () => {
     if (!documentId?.trim() || !contentSha256?.trim()) {
       onError("Finalize a document first (missing document id or content hash).");
       return;
     }
+    if (!flowStep3Ready || fields.length === 0) {
+      onError("Create your signature and place a signature field on the document first.");
+      return;
+    }
     onError(null);
+
+    let drawOrUploadDataUrl: string | null = null;
+    if (signatureMode === "upload" && uploadPreviewUrl) {
+      try {
+        const res = await fetch(uploadPreviewUrl);
+        const blob = await res.blob();
+        drawOrUploadDataUrl = await new Promise<string | null>((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(typeof fr.result === "string" ? fr.result : null);
+          fr.onerror = () => reject(fr.error);
+          fr.readAsDataURL(blob);
+        });
+      } catch {
+        drawOrUploadDataUrl = null;
+      }
+    } else if (signatureMode === "draw" && canvasRef.current && hasDrawn) {
+      try {
+        drawOrUploadDataUrl = canvasRef.current.toDataURL("image/png");
+      } catch {
+        drawOrUploadDataUrl = null;
+      }
+    }
+
+    const hasSigField = fields.some((f) => f.type === "signature");
+    const senderSignatureRef: Vs01SenderSignatureRef | null = hasSigField
+      ? {
+          mode: signatureMode,
+          typedName: typedName.trim(),
+          imageDataUrl:
+            signatureMode === "upload" || signatureMode === "draw" ? drawOrUploadDataUrl : undefined,
+        }
+      : null;
+
     setLoading("session");
     try {
       const sessionRes = await createSignSession(documentId.trim(), contentSha256.trim());
@@ -84,18 +703,9 @@ export function StepPrepareSignature({
       }
 
       setLoading("complete");
-      const field_manifest = [
-        {
-          field_id: "sig1",
-          page_index: parseNum(pageIndex, 0),
-          x: parseNum(x, 0.1),
-          y: parseNum(y, 0.1),
-          w: parseNum(w, 0.2),
-          h: parseNum(h, 0.05),
-        },
-      ];
+      const field_manifest = fieldsToManifest(fields);
       const completeRes = await completeSignSession(sid, {
-        signer_ref: signerRef.trim() || "signer",
+        signer_ref: signerForApi,
         intent: intent || "agree_and_sign",
         field_manifest,
       });
@@ -113,6 +723,8 @@ export function StepPrepareSignature({
         receiptId: rid,
         receiptHashSha256: rhash,
         receipt: completeRes.receipt ?? null,
+        senderPlacedFields: fields.map((f) => ({ ...f })),
+        senderSignatureRef,
       });
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -122,171 +734,578 @@ export function StepPrepareSignature({
   }, [
     contentSha256,
     documentId,
-    h,
+    fields,
+    flowStep3Ready,
+    hasDrawn,
     intent,
     onError,
     onSigned,
-    pageIndex,
     setLoading,
-    signerRef,
-    w,
-    x,
-    y,
+    signatureMode,
+    signerForApi,
+    typedName,
+    uploadPreviewUrl,
   ]);
 
-  const canContinueToDone = Boolean(receiptId);
+  const canContinueToHandoff = Boolean(receiptId);
   const named = counterparties.filter((c) => c.name.trim());
 
+  const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
+
+  const primaryDisabled = busy || Boolean(receiptId) || !flowStep3Ready;
+
+  const placementArmed = armedTool != null;
+
+  const goPrev = useCallback(() => {
+    setCurrentPage((p) => {
+      const next = Math.max(1, p - 1);
+      window.requestAnimationFrame(() =>
+        pageStackRefs.current.get(next - 1)?.scrollIntoView({ behavior: "smooth", block: "start" })
+      );
+      return next;
+    });
+  }, []);
+  const goNext = useCallback(() => {
+    setCurrentPage((p) => {
+      if (numPages <= 0) return p;
+      const next = Math.min(numPages, p + 1);
+      window.requestAnimationFrame(() =>
+        pageStackRefs.current.get(next - 1)?.scrollIntoView({ behavior: "smooth", block: "start" })
+      );
+      return next;
+    });
+  }, [numPages]);
+
+  const goTop = useCallback(() => {
+    setCurrentPage(1);
+    window.requestAnimationFrame(() =>
+      pageStackRefs.current.get(0)?.scrollIntoView({ behavior: "smooth", block: "start" })
+    );
+  }, []);
+
+  const goBottom = useCallback(() => {
+    if (numPages <= 0) return;
+    setCurrentPage(numPages);
+    window.requestAnimationFrame(() =>
+      pageStackRefs.current.get(numPages - 1)?.scrollIntoView({ behavior: "smooth", block: "start" })
+    );
+  }, [numPages]);
+
+  const onAutoInitialsToggle = useCallback((checked: boolean) => {
+    setAutoInitialsEveryPage(checked);
+    if (checked) {
+      setSkippedAutoPages(new Set());
+    }
+  }, []);
+
   return (
-    <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title">
-      <h2 id="vs01-step-prepare-title" className="vs01-card-title">
-        Signature prep
-      </h2>
-      <p className="vs01-card-help">
-        You’re signing as the sender. Each signer still gets their own receipt on the same document — the
-        proof spine stays atomic per signature.
-      </p>
+    <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title" className="vs01-sign-step">
+      <header className="vs01-sign-step-header">
+        <h2 id="vs01-step-prepare-title" className="vs01-card-title">
+          Sign your document
+        </h2>
+        <p className="vs01-card-help vs01-sign-step-lead">
+          Choose a field type, use Place on document, then click once where it should go.
+        </p>
+      </header>
 
-      <div className="vs01-summary-panel vs01-summary-panel--spaced">
-        <strong>After you sign</strong>, you can hand off to:{" "}
-        {named.length ? (
-          <span>{named.map((c) => c.name.trim()).join(" · ")}</span>
-        ) : (
-          <span>your counterparties</span>
-        )}
-        {senderMessage.trim() ? (
-          <>
-            <br />
-            <span style={{ marginTop: "0.35rem", display: "inline-block" }}>
-              Your note: “{senderMessage.trim()}”
-            </span>
-          </>
-        ) : null}
-      </div>
+      <div className="vs01-sign-workspace">
+        <div className="vs01-sign-doc-col">
+          {placementArmed && placementSurface && !previewLoading ? (
+            <div className="vs01-sign-armed-banner" role="status">
+              Click once on the document to place your {signingToolbarLabelForType(armedTool)}.
+            </div>
+          ) : null}
 
-      <div className="vs01-sign-columns">
-        <div className="vs01-stack">
-          <div className="vs01-field">
-            <label className="vs01-field-label" htmlFor="vs01-signer-ref">
-              Signer reference (on the receipt)
-            </label>
-            <input
-              id="vs01-signer-ref"
-              className="vs01-input"
-              value={signerRef}
-              disabled={busy}
-              onChange={(ev) => setSignerRef(ev.target.value)}
-              autoComplete="off"
-            />
+          {placementSurface && !previewLoading ? (
+            <div className="vs01-sign-page-bar" aria-label="Page navigation">
+              <button
+                type="button"
+                className="vs01-sign-page-btn"
+                disabled={busy || numPages <= 0 || currentPage <= 1}
+                onClick={goTop}
+              >
+                Top
+              </button>
+              <button
+                type="button"
+                className="vs01-sign-page-btn"
+                disabled={busy || currentPage <= 1}
+                onClick={goPrev}
+              >
+                Prev
+              </button>
+              <span className="vs01-sign-page-label">
+                Page {numPages > 0 ? currentPage : 1}
+                {numPages > 0 ? ` of ${numPages}` : ""}
+              </span>
+              <button
+                type="button"
+                className="vs01-sign-page-btn"
+                disabled={busy || numPages <= 0 || currentPage >= numPages}
+                onClick={goNext}
+              >
+                Next
+              </button>
+              <button
+                type="button"
+                className="vs01-sign-page-btn"
+                disabled={busy || numPages <= 0 || currentPage >= numPages}
+                onClick={goBottom}
+              >
+                Bottom
+              </button>
+            </div>
+          ) : null}
+
+          <div className="vs01-sign-scroll">
+            {previewLoading ? (
+              <div className="vs01-sign-preview-fallback" role="status">
+                Loading document…
+              </div>
+            ) : pdfUrl || (documentId?.trim() && previewError) ? (
+              <div
+                className={`vs01-sign-doc-pages-wrap vs01-sign-doc-surface${placementArmed ? " vs01-sign-doc-surface--armed" : ""}`}
+              >
+                {pdfUrl ? (
+                  previewError ? (
+                    <div className="vs01-sign-preview-fallback" role="alert">
+                      <strong>Preview unavailable.</strong> {previewError}
+                    </div>
+                  ) : (
+                  <div ref={pagesInnerRef} className="vs01-sign-pages-inner">
+                    {!pdfDocReady ? (
+                      <div className="vs01-sign-pdf-loading" role="status">
+                        Rendering PDF…
+                      </div>
+                    ) : null}
+                    <Document
+                      key={documentId ?? pdfUrl}
+                      file={pdfUrl}
+                      onLoadSuccess={({ numPages: n }) => {
+                        setNumPages(n);
+                        setPdfDocReady(true);
+                        setPreviewError(null);
+                      }}
+                      onLoadError={(err) => {
+                        setPdfDocReady(false);
+                        setNumPages(0);
+                        setPreviewError(typeof err?.message === "string" ? err.message : "Failed to load PDF");
+                      }}
+                      loading={null}
+                    >
+                      {pdfDocReady && numPages > 0
+                        ? Array.from({ length: numPages }, (_, p) => {
+                            const fieldsHere = fields.filter((f) => f.page === p);
+                            return (
+                              <div
+                                key={p}
+                                ref={(el) => registerPageStack(p, el)}
+                                className="vs01-sign-page-stack"
+                                data-vs01-sign-page={p}
+                              >
+                                <div
+                                  ref={(el) => registerPageSurface(p, el)}
+                                  className="vs01-sign-page-surface"
+                                >
+                                  <Page
+                                    pageNumber={p + 1}
+                                    width={pageRenderWidth}
+                                    renderTextLayer={false}
+                                    renderAnnotationLayer={false}
+                                  />
+                                  <div
+                                    className={`vs01-sign-placement-click-layer${
+                                      placementArmed
+                                        ? " vs01-sign-placement-click-layer--armed"
+                                        : " vs01-sign-placement-click-layer--idle"
+                                    }`}
+                                    aria-hidden
+                                    onClick={placementArmed ? (ev) => onPagePlacementClick(p, ev) : undefined}
+                                  />
+                                  <div
+                                    className={`vs01-sign-overlay${fieldsHere.length > 0 ? " vs01-sign-overlay--placed" : ""}`}
+                                    role="presentation"
+                                  >
+                                    {showDragHint && p === pageIndex0 ? (
+                                      <div className="vs01-sign-drag-hint" role="status">
+                                        Drag to move
+                                      </div>
+                                    ) : null}
+                                    {fieldsHere.map((field) => {
+                                      const xFit = Math.min(field.x, 1 - field.width);
+                                      const yFit = Math.min(field.y, 1 - field.height);
+                                      const isSel = selectedFieldId === field.id;
+                                      const pop = placementPopId === field.id;
+                                      const textVal = typeof field.value === "string" ? field.value : "";
+                                      return (
+                                        <div
+                                          key={field.id}
+                                          data-field-id={field.id}
+                                          className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
+                                            isSel ? " vs01-sign-placement-box--selected" : ""
+                                          }${pop ? " vs01-sign-placement-box--pop" : ""}`}
+                                          style={{
+                                            left: `${xFit * 100}%`,
+                                            top: `${yFit * 100}%`,
+                                            width: `${field.width * 100}%`,
+                                            height: `${field.height * 100}%`,
+                                            zIndex: isSel ? 4 : 3,
+                                          }}
+                                          onPointerDown={(e) => onBoxPointerDown(e, field)}
+                                          onClick={(e) => onPlacementBoxClick(e, field.id)}
+                                        >
+                                          <span className="vs01-sign-placement-label">{signingPlacementCornerLabel(field.type)}</span>
+                                          {field.type === "signature" ? (
+                                            <>
+                                              {signatureMode === "type" && typedName.trim() ? (
+                                                <span className="vs01-sign-placement-script">{typedName.trim()}</span>
+                                              ) : null}
+                                              {signatureMode === "type" && !typedName.trim() ? (
+                                                <span className="vs01-sign-placement-meta vs01-sign-placement-ph">Your signature</span>
+                                              ) : null}
+                                              {signatureMode === "draw" ? (
+                                                hasDrawn ? (
+                                                  <span className="vs01-sign-placement-meta">Drawn signature</span>
+                                                ) : (
+                                                  <span className="vs01-sign-placement-meta vs01-sign-placement-ph">Your signature</span>
+                                                )
+                                              ) : null}
+                                              {signatureMode === "upload" && uploadPreviewUrl ? (
+                                                <img
+                                                  className="vs01-sign-placement-img"
+                                                  src={uploadPreviewUrl}
+                                                  alt=""
+                                                />
+                                              ) : null}
+                                              {signatureMode === "upload" && !uploadPreviewUrl ? (
+                                                <span className="vs01-sign-placement-meta vs01-sign-placement-ph">Your signature</span>
+                                              ) : null}
+                                            </>
+                                          ) : null}
+                                          {field.type === "initials" ? (
+                                            <span className="vs01-sign-placement-initials">
+                                              {textVal.trim().slice(0, 8) || "Your initials"}
+                                            </span>
+                                          ) : null}
+                                          {field.type === "text" ? (
+                                            isSel && !busy ? (
+                                              <input
+                                                type="text"
+                                                className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                value={textVal}
+                                                placeholder="Type here"
+                                                autoComplete="off"
+                                                aria-label="Printed name or text on document"
+                                                onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                onPointerDown={(ev) => ev.stopPropagation()}
+                                                onClick={(ev) => ev.stopPropagation()}
+                                              />
+                                            ) : (
+                                              <span className="vs01-sign-placement-text">
+                                                {textVal.trim() ? textVal : "Type here"}
+                                              </span>
+                                            )
+                                          ) : null}
+                                          {field.type === "date" ? (
+                                            isSel && !busy ? (
+                                              <input
+                                                type="date"
+                                                className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                value={textVal}
+                                                aria-label="Date on document"
+                                                onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                onPointerDown={(ev) => ev.stopPropagation()}
+                                                onClick={(ev) => ev.stopPropagation()}
+                                              />
+                                            ) : (
+                                              <span className="vs01-sign-placement-text">
+                                                {textVal.trim() ? formatIsoDateDisplay(textVal) : "Date"}
+                                              </span>
+                                            )
+                                          ) : null}
+                                          {isSel && !busy ? (
+                                            <button
+                                              type="button"
+                                              className="vs01-sign-placement-resize-handle"
+                                              aria-label="Resize field"
+                                              tabIndex={-1}
+                                              onPointerDown={(e) => onResizeHandlePointerDown(e, field)}
+                                            />
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        : null}
+                    </Document>
+                  </div>
+                  )
+                ) : previewError ? (
+                  <div className="vs01-sign-preview-fallback" role="alert">
+                    <strong>Preview unavailable.</strong> {previewError}
+                  </div>
+                ) : (
+                  <div className="vs01-sign-placeholder-doc" aria-hidden />
+                )}
+              </div>
+            ) : (
+              <div className="vs01-sign-preview-fallback" role="region" aria-label="Preview unavailable">
+                {previewError ? (
+                  <>
+                    <strong>Preview unavailable.</strong> {previewError}
+                  </>
+                ) : (
+                  <>Finalize a document first to see it here.</>
+                )}
+              </div>
+            )}
           </div>
-          <div className="vs01-field">
-            <span className="vs01-field-label" id="vs01-intent-label">
-              Intent
-            </span>
-            <select
-              className="vs01-input"
-              value={intent}
-              disabled
-              aria-labelledby="vs01-intent-label"
-            >
-              {INTENT_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt.replace(/_/g, " ")}
-                </option>
+          <p className="vs01-sign-doc-foot-hint">
+            {placementSurface && !previewLoading
+              ? selectedFieldId
+                ? "Scroll the document area (mouse wheel, trackpad, or scrollbar) if a page is off-screen. Drag the field to move it; use the corner handle to resize."
+                : placementArmed
+                  ? "Scroll the document area (mouse wheel, trackpad, or scrollbar) to reach every page, then click once where the field should go."
+                  : "Scroll the document area (mouse wheel, trackpad, or scrollbar) to review every page. Use Place on document in the toolbar, then click once on the page to add a field."
+              : null}
+          </p>
+        </div>
+
+        <aside className="vs01-sign-rail" aria-label="Signing controls">
+          <div className="vs01-sign-rail-brief vs01-sign-rail-brief--compact">
+            <p className="vs01-sign-rail-line">
+              <span className="vs01-sign-rail-k">You</span>
+              <span className="vs01-sign-rail-v">{signerForApi}</span>
+            </p>
+            {named.length > 0 ? (
+              <div className="vs01-sign-rail-recipients">
+                <span className="vs01-sign-rail-k" id="vs01-sign-rail-recipients-label">
+                  Recipients ({named.length})
+                </span>
+                <ul className="vs01-sign-rail-recipient-list" aria-labelledby="vs01-sign-rail-recipients-label">
+                  {named.map((c) => (
+                    <li key={c.id} className="vs01-sign-rail-recipient-item">
+                      <span className="vs01-sign-rail-recipient-name">{c.name.trim()}</span>
+                      {c.email.trim() ? (
+                        <span className="vs01-sign-rail-recipient-email">{c.email.trim()}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {senderMessage.trim() ? (
+              <p className="vs01-sign-rail-note">{senderMessage.trim()}</p>
+            ) : null}
+          </div>
+
+          <div className="vs01-sign-toolbar" role="toolbar" aria-label="Choose what to place">
+            <p className="vs01-sign-toolbar-hint">Choose what to place</p>
+            <div className="vs01-sign-toolbar-btns">
+              {SIGNING_FIELD_TOOLS.map(({ type }) => (
+                <button
+                  key={type}
+                  type="button"
+                  className={`vs01-sign-tool-btn${activeTool === type ? " vs01-sign-tool-btn--active" : ""}`}
+                  disabled={busy}
+                  onClick={() => {
+                    setActiveTool(type);
+                    setArmedTool(null);
+                  }}
+                >
+                  {signingToolbarLabelForType(type)}
+                </button>
               ))}
-            </select>
+            </div>
+            <div className="vs01-sign-placement-mode">
+              <p className="vs01-sign-placement-mode-status">
+                Placement mode: <strong>{placementArmed ? "On" : "Off"}</strong>
+              </p>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--auto vs01-sign-place-cta"
+                disabled={busy || !placementSurface || previewLoading}
+                onClick={() => setArmedTool(activeTool)}
+              >
+                Place {signingToolbarLabelForType(activeTool)} on document
+              </button>
+              {placementArmed ? (
+                <p className="vs01-sign-placement-mode-hint">
+                  Click once on the document to place your {signingToolbarLabelForType(armedTool)}.
+                </p>
+              ) : (
+                <p className="vs01-sign-placement-mode-hint vs01-sign-placement-mode-hint--muted">
+                  Not armed — clicks on the document will not add a field.
+                </p>
+              )}
+            </div>
           </div>
-        </div>
 
-        <fieldset className="vs01-fieldset-placement">
-          <legend className="vs01-fieldset-legend">Signature placement (one box)</legend>
-          <div className="vs01-placement-grid">
-            <label className="vs01-field">
-              <span className="vs01-subfield-label">Page</span>
-              <input
-                className="vs01-input"
-                type="text"
-                inputMode="numeric"
-                value={pageIndex}
-                disabled={busy}
-                onChange={(ev) => setPageIndex(ev.target.value)}
-              />
-            </label>
-            <label className="vs01-field">
-              <span className="vs01-subfield-label">X</span>
-              <input
-                className="vs01-input"
-                type="text"
-                inputMode="decimal"
-                value={x}
-                disabled={busy}
-                onChange={(ev) => setX(ev.target.value)}
-              />
-            </label>
-            <label className="vs01-field">
-              <span className="vs01-subfield-label">Y</span>
-              <input
-                className="vs01-input"
-                type="text"
-                inputMode="decimal"
-                value={y}
-                disabled={busy}
-                onChange={(ev) => setY(ev.target.value)}
-              />
-            </label>
-            <label className="vs01-field">
-              <span className="vs01-subfield-label">W</span>
-              <input
-                className="vs01-input"
-                type="text"
-                inputMode="decimal"
-                value={w}
-                disabled={busy}
-                onChange={(ev) => setW(ev.target.value)}
-              />
-            </label>
-            <label className="vs01-field vs01-field--full-row">
-              <span className="vs01-subfield-label">H</span>
-              <input
-                className="vs01-input"
-                type="text"
-                inputMode="decimal"
-                value={h}
-                disabled={busy}
-                onChange={(ev) => setH(ev.target.value)}
-              />
-            </label>
+          {selectedField ? (
+            <div className="vs01-sign-selected-panel">
+              <div className="vs01-sign-selected-head">
+                <span className="vs01-sign-selected-title">{signingPlacementCornerLabel(selectedField.type)}</span>
+                <button
+                  type="button"
+                  className="vs01-sign-remove-field"
+                  disabled={busy}
+                  onClick={() => removeField(selectedField.id)}
+                >
+                  Remove selected field
+                </button>
+              </div>
+              <p className="vs01-sign-selected-note">
+                Drag to move; drag the bottom-right corner to resize.
+              </p>
+            </div>
+          ) : null}
+
+          {!selectedField ? (
+            <p className="vs01-sign-rail-helper">
+              Pick a field type, tap Place on document, then click the preview once.
+            </p>
+          ) : null}
+
+          <label className="vs01-sign-auto-initials">
+            <input
+              type="checkbox"
+              checked={autoInitialsEveryPage}
+              disabled={busy || numPages <= 0}
+              onChange={(e) => onAutoInitialsToggle(e.target.checked)}
+            />
+            <span>Add my initials box to every page</span>
+          </label>
+
+          <div className="vs01-sign-signature-panel">
+            <div className="vs01-sign-signature-panel-title">Your signature</div>
+            <div className="vs01-sign-style-tabs" role="tablist" aria-label="Signature style">
+              {(["type", "draw", "upload"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="tab"
+                  aria-selected={signatureMode === m}
+                  className={`vs01-sign-style-tab${signatureMode === m ? " vs01-sign-style-tab--active" : ""}`}
+                  disabled={busy}
+                  onClick={() => setSignatureMode(m)}
+                >
+                  {m === "type" ? "Type" : m === "draw" ? "Draw" : "Upload"}
+                </button>
+              ))}
+            </div>
+
+            {signatureMode === "type" ? (
+              <div className="vs01-sign-type-block">
+                <label className="vs01-field-label" htmlFor="vs01-sig-typed-name">
+                  Full name
+                </label>
+                <input
+                  id="vs01-sig-typed-name"
+                  className="vs01-input"
+                  value={typedName}
+                  disabled={busy}
+                  onChange={(ev) => setTypedName(ev.target.value)}
+                  autoComplete="name"
+                />
+                <div className="vs01-sign-preview-row">
+                  <span className="vs01-sign-preview-k">Signature</span>
+                  <div className="vs01-sign-preview-script" aria-hidden>
+                    {typedName.trim() || "Your name"}
+                  </div>
+                </div>
+                <label className="vs01-field-label" htmlFor="vs01-sig-initials">
+                  Initials
+                </label>
+                <input
+                  id="vs01-sig-initials"
+                  className="vs01-input"
+                  value={initials}
+                  disabled={busy}
+                  onChange={(ev) => {
+                    setInitialsTouched(true);
+                    setInitials(ev.target.value);
+                  }}
+                  maxLength={8}
+                />
+                <div className="vs01-sign-preview-row">
+                  <span className="vs01-sign-preview-k">Initials</span>
+                  <div className="vs01-sign-preview-initials" aria-hidden>
+                    {initials.trim() || "—"}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {signatureMode === "draw" ? (
+              <div className="vs01-sign-draw-block">
+                <p className="vs01-sign-draw-hint">Draw in the box with your mouse or finger.</p>
+                <canvas
+                  ref={canvasRef}
+                  className="vs01-sign-draw-canvas"
+                  width={280}
+                  height={120}
+                  onMouseDown={(e) => canvasDraw(e, false)}
+                  onMouseMove={(e) => canvasDraw(e, false)}
+                  onMouseUp={(e) => canvasDraw(e, true)}
+                  onMouseLeave={(e) => canvasDraw(e, true)}
+                />
+                <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--auto" disabled={busy} onClick={clearCanvas}>
+                  Clear
+                </button>
+              </div>
+            ) : null}
+
+            {signatureMode === "upload" ? (
+              <div className="vs01-sign-upload-block">
+                <label className="vs01-sign-upload-label">
+                  <input type="file" accept="image/*" className="vs01-sr-only" disabled={busy} onChange={onUploadPick} />
+                  <span className="vs01-btn vs01-btn--secondary">Choose image</span>
+                </label>
+                {uploadPreviewUrl ? (
+                  <img className="vs01-sign-upload-preview" src={uploadPreviewUrl} alt="Signature preview" />
+                ) : (
+                  <p className="vs01-sign-upload-hint">PNG or JPG works best.</p>
+                )}
+              </div>
+            ) : null}
           </div>
-        </fieldset>
-      </div>
 
-      <div className="vs01-step-actions">
-        <div className="vs01-action-row">
-          <button
-            type="button"
-            className="vs01-btn vs01-btn--secondary vs01-btn--auto"
-            disabled={busy}
-            onClick={() => onBack?.()}
-          >
-            Back
-          </button>
-        </div>
-        <button
-          type="button"
-          className="vs01-btn vs01-btn--primary"
-          disabled={busy}
-          onClick={() => void handleSign()}
-        >
-          {busySession ? "Creating session…" : busyComplete ? "Signing…" : "Sign & issue receipt"}
-        </button>
-        <button
-          type="button"
-          className="vs01-btn vs01-btn--primary"
-          disabled={busy || !canContinueToDone}
-          onClick={() => onContinue?.()}
-        >
-          Continue to handoff
-        </button>
+          {flowStep3Ready && !receiptId ? (
+            <p className="vs01-sign-status-ready" role="status">
+              Ready to sign
+            </p>
+          ) : null}
+
+          <div className="vs01-sign-actions">
+            <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--auto" disabled={busy} onClick={() => onBack?.()}>
+              Back
+            </button>
+            <button
+              type="button"
+              className={`vs01-btn vs01-btn--primary${receiptId ? " vs01-btn--signed-done" : ""}`}
+              disabled={primaryDisabled}
+              onClick={() => void handleSign()}
+            >
+              {receiptId
+                ? "Signature added ✓"
+                : busySession
+                  ? "Working…"
+                  : busyComplete
+                    ? "Signing…"
+                    : "Sign document"}
+            </button>
+            {canContinueToHandoff ? (
+              <button type="button" className="vs01-btn vs01-btn--next-step" disabled={busy} onClick={() => onContinue?.()}>
+                Continue to handoff →
+              </button>
+            ) : null}
+          </div>
+        </aside>
       </div>
     </section>
   );

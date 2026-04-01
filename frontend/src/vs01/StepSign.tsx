@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { completeSignSession, createSignSession } from "./vs01Api";
-import type { Vs01LoadingState } from "./types";
+import type { Vs01LoadingState, Vs01SenderSignatureRef } from "./types";
+import type { PlacedSigningField } from "./signingFields";
 
 const INTENT_OPTIONS = ["agree_and_sign"] as const;
 
@@ -15,6 +16,8 @@ export type StepSignProps = {
     receiptId: string;
     receiptHashSha256: string;
     receipt: unknown;
+    senderPlacedFields: PlacedSigningField[];
+    senderSignatureRef: Vs01SenderSignatureRef | null;
   }) => void;
   onBack?: () => void;
   onContinue?: () => void;
@@ -103,6 +106,8 @@ export function StepSign({
         receiptId: rid,
         receiptHashSha256: rhash,
         receipt: completeRes.receipt ?? null,
+        senderPlacedFields: [],
+        senderSignatureRef: null,
       });
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));

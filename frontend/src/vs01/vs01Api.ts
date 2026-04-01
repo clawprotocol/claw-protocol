@@ -119,6 +119,31 @@ export async function createSignSession(
   return data;
 }
 
+/**
+ * GET /v1/documents/{document_id}/content — raw document bytes (e.g. PDF for preview).
+ */
+export async function fetchDocumentContent(documentId: string): Promise<Blob> {
+  const base = apiBase();
+  const enc = encodeURIComponent(documentId.trim());
+  const url = `${base}/v1/documents/${enc}/content`;
+
+  const res = await fetch(url, { method: "GET" });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text || `${res.status} ${res.statusText}`;
+    try {
+      const parsed = text ? JSON.parse(text) : {};
+      msg = messageFromJsonBody(parsed, msg);
+    } catch {
+      /* use msg as-is */
+    }
+    throw new Error(msg);
+  }
+
+  return res.blob();
+}
+
 export type FieldManifestEntry = {
   field_id: string;
   page_index: number;

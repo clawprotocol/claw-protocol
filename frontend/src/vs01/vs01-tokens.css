@@ -1,27 +1,31 @@
 /**
  * VS01 design tokens — single source of truth.
  * See docs/implementation/VS01_UI_STYLE_AND_SHELL_SPEC.md
+ *
+ * Premium dark: warm neutrals + restrained amber “signal” (Doginal-adjacent warmth, not mascot UI).
  */
 :root {
-  --vs01-color-bg-page: #faf8f5;
-  --vs01-color-bg-card: #ffffff;
-  --vs01-color-bg-muted: rgba(15, 23, 42, 0.04);
-  --vs01-color-border-subtle: rgba(15, 23, 42, 0.12);
-  --vs01-color-text-primary: #0f172a;
-  --vs01-color-text-secondary: #334155;
-  --vs01-color-text-muted: #64748b;
-  /* Teal accent — signal color only for CTAs / active step / focus */
-  --vs01-color-accent: #0d9488;
-  --vs01-color-accent-hover: #0f766e;
-  --vs01-color-on-accent: #f8fafc;
-  --vs01-color-danger: #b91c1c;
-  --vs01-color-danger-bg: rgba(185, 28, 28, 0.08);
-  --vs01-color-success: #047857;
+  --vs01-color-bg-page: #0b0c0f;
+  --vs01-color-bg-page-elevated: #101218;
+  --vs01-color-bg-card: #14161c;
+  --vs01-color-bg-muted: rgba(245, 240, 232, 0.06);
+  --vs01-color-border-subtle: rgba(245, 240, 232, 0.12);
+  --vs01-color-text-primary: #f4efe6;
+  --vs01-color-text-secondary: #c4bdb0;
+  --vs01-color-text-muted: #8a8478;
+  /* Amber signal — primary CTAs / active step / focus (warm, collectible-adjacent) */
+  --vs01-color-accent: #d4a574;
+  --vs01-color-accent-hover: #e0b588;
+  --vs01-color-on-accent: #14110d;
+  --vs01-color-danger: #f87171;
+  --vs01-color-danger-bg: rgba(248, 113, 113, 0.12);
+  --vs01-color-success: #6ee7b7;
+  --vs01-color-preview-canvas: #0e1014;
 
   --vs01-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --vs01-font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
-  --vs01-text-page-title: 1.375rem;
+  --vs01-text-page-title: 1.5rem;
   --vs01-text-step-title: 1.125rem;
   --vs01-text-body: 1rem;
   --vs01-text-legal: 0.8125rem;
@@ -37,8 +41,8 @@
   --vs01-radius-card: 14px;
   --vs01-radius-control: 9px;
 
-  --vs01-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.05);
+  --vs01-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 40px rgba(0, 0, 0, 0.45);
 
   --vs01-max-width: 52rem; /* ~832px — room for create-step split + preview */
-  --vs01-accent-strip-height: 4px;
+  --vs01-accent-strip-height: 3px;
 }

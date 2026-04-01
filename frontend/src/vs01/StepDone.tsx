@@ -1,8 +1,13 @@
-import { useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { getReceipt, type GetReceiptResponse } from "./vs01Api";
-import type { Vs01LoadingState } from "./types";
+import { buildVs01RecipientSigningUrl } from "./StepReceipt";
+import type { Vs01Counterparty, Vs01LoadingState, Vs01RecipientPlacedField } from "./types";
 
 export type StepDoneProps = {
+  counterparties: Vs01Counterparty[];
+  /** Used to embed per-recipient field geometry in signing links. */
+  recipientPlacedFields: Vs01RecipientPlacedField[];
+  documentId: string | null;
   receiptId: string | null;
   receiptHashSha256: string | null;
   receipt: unknown;
@@ -39,9 +44,12 @@ function prettyJson(value: unknown): string {
 }
 
 /**
- * Final step — verification: receipt JSON + refresh (bundle downloads on Handoff).
+ * Final step — send links, receipt identifiers, optional technical JSON, refresh.
  */
 export function StepDone({
+  counterparties,
+  recipientPlacedFields,
+  documentId,
   receiptId,
   receiptHashSha256,
   receipt,
@@ -52,6 +60,12 @@ export function StepDone({
   onStartOver,
 }: StepDoneProps) {
   const busyReceipt = loading === "receipt";
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const namedRecipients = useMemo(
+    () => counterparties.map((c, i) => ({ c, index: i })).filter(({ c }) => c.name.trim().length > 0),
+    [counterparties]
+  );
 
   const handleRefreshReceipt = useCallback(async () => {
     if (!receiptId?.trim()) {
@@ -74,6 +88,23 @@ export function StepDone({
     }
   }, [onError, onReceiptUpdated, receiptId, setLoading]);
 
+  const copyLink = useCallback(
+    async (key: string, url: string) => {
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopiedKey(key);
+        window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 2000);
+      } catch {
+        onError("Could not copy link to clipboard.");
+      }
+    },
+    [onError]
+  );
+
+  const openLink = useCallback((url: string) => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
   return (
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-done-title">
       <h2 id="vs01-step-done-title" className="vs01-card-title">
@@ -85,8 +116,8 @@ export function StepDone({
       </div>
 
       <p className="vs01-card-help">
-        The receipt JSON below is what independent verification uses. Refresh if you need the latest copy from the
-        server. Download your verification bundle from the Handoff step when you need offline files.
+        Share a signing link with each recipient below. Receipt id and hash stay on this page for verification; refresh
+        pulls the latest receipt from the server. Expand technical JSON only if you need the raw payload.
       </p>
 
       <div className="vs01-hash-panel vs01-hash-panel--compact" aria-label="Receipt identifiers">
@@ -100,9 +131,62 @@ export function StepDone({
         </div>
       </div>
 
-      <div className="vs01-receipt-json" role="region" aria-label="Full receipt JSON for verification">
-        {receipt != null ? prettyJson(receipt) : "Receipt JSON will load from the signed step. Use Refresh if needed."}
-      </div>
+      <section className="vs01-send-signers-section" aria-labelledby="vs01-send-signers-title">
+        <h3 id="vs01-send-signers-title" className="vs01-send-signers-heading">
+          Send to signers
+        </h3>
+        <p className="vs01-subtle-hint">
+          Links use this site&apos;s address and query parameters only (no server-generated URLs).
+        </p>
+        {namedRecipients.length === 0 ? (
+          <p className="vs01-card-help">Add named recipients in Details to generate signing links.</p>
+        ) : (
+          <ul className="vs01-send-signers-list">
+            {namedRecipients.map(({ c, index }) => {
+              const url = buildVs01RecipientSigningUrl({
+                recipientIndex: index,
+                recipientName: c.name.trim(),
+                recipientEmail: c.email.trim(),
+                counterpartyId: c.id,
+                documentId,
+                receiptId,
+                recipientFieldsForSigner: recipientPlacedFields.filter((f) => f.counterpartyId === c.id),
+              });
+              const copyKey = `cp-${c.id}`;
+              return (
+                <li key={c.id} className="vs01-send-signer-card">
+                  <div className="vs01-send-signer-name">{c.name.trim()}</div>
+                  <div className="vs01-send-signer-email">{c.email.trim() || "—"}</div>
+                  <a
+                    className="vs01-send-signer-link"
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {url}
+                  </a>
+                  <div className="vs01-send-signer-actions">
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--secondary vs01-btn--auto"
+                      onClick={() => void copyLink(copyKey, url)}
+                    >
+                      {copiedKey === copyKey ? "Copied" : "Copy link"}
+                    </button>
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--primary vs01-btn--auto"
+                      onClick={() => openLink(url)}
+                    >
+                      Open link
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       <div className="vs01-action-toolbar vs01-action-toolbar--single">
         <button
@@ -115,8 +199,17 @@ export function StepDone({
         </button>
       </div>
 
-      <div className="vs01-step-actions vs01-step-actions--tight">
-        <button type="button" className="vs01-btn vs01-btn--secondary" onClick={() => onStartOver?.()}>
+      <details className="vs01-receipt-json-details">
+        <summary className="vs01-receipt-json-details-summary">Technical receipt JSON</summary>
+        <div className="vs01-receipt-json" role="region" aria-label="Full receipt JSON for verification">
+          {receipt != null
+            ? prettyJson(receipt)
+            : "Receipt JSON will load from the signed step. Use Refresh if needed."}
+        </div>
+      </details>
+
+      <div className="vs01-step-actions vs01-step-actions--tight vs01-done-start-over">
+        <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--auto" onClick={() => onStartOver?.()}>
           Start over
         </button>
       </div>

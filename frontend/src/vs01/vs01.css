@@ -2,7 +2,11 @@
 
 .vs01-root {
   min-height: 100vh;
-  background: var(--vs01-color-bg-page);
+  background: radial-gradient(
+    ellipse 120% 80% at 50% -20%,
+    var(--vs01-color-bg-page-elevated) 0%,
+    var(--vs01-color-bg-page) 55%
+  );
   color: var(--vs01-color-text-primary);
   font-family: var(--vs01-font-sans);
   font-size: var(--vs01-text-body);
@@ -13,8 +17,9 @@
   height: var(--vs01-accent-strip-height);
   background: linear-gradient(
     90deg,
-    var(--vs01-color-accent) 0%,
-    color-mix(in srgb, var(--vs01-color-accent) 75%, #f59e0b) 100%
+    color-mix(in srgb, var(--vs01-color-accent) 85%, #1a1510) 0%,
+    color-mix(in srgb, var(--vs01-color-accent) 55%, #3d2e1f) 50%,
+    color-mix(in srgb, var(--vs01-color-accent) 75%, #1a1510) 100%
   );
 }
 
@@ -27,24 +32,72 @@
   gap: 1.25rem;
 }
 
+/* Signing + assign recipient fields — wide document + rail */
+.vs01-shell:has(.vs01-card--envelope[data-vs01-active-step="2"]),
+.vs01-shell:has(.vs01-card--envelope[data-vs01-active-step="3"]) {
+  max-width: min(96vw, 78rem);
+}
+
+.vs01-header {
+  text-align: center;
+  padding-bottom: 0.25rem;
+}
+
+/* Elevated header surface — reads as one calm “instrument” block on dark page */
+.vs01-header-panel {
+  margin: 0 auto;
+  max-width: 38rem;
+  padding: 1.1rem 1.35rem 1.2rem;
+  border-radius: var(--vs01-radius-card);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 92%, transparent);
+  box-shadow: var(--vs01-shadow-card);
+}
+
+.vs01-header-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  margin-bottom: 0.5rem;
+}
+
+.vs01-header-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--vs01-color-text-muted);
+}
+
 .vs01-header-title {
   font-size: var(--vs01-text-page-title);
   font-weight: 650;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   margin: 0;
+  line-height: 1.15;
 }
 
 .vs01-header-subtitle {
-  margin: 0.35rem 0 0;
-  font-size: var(--vs01-text-legal);
+  margin: 0.55rem auto 0;
+  max-width: 36rem;
+  font-size: 0.875rem;
   color: var(--vs01-color-text-secondary);
+  line-height: 1.5;
 }
 
 .vs01-header-tagline {
-  margin: 0.5rem 0 0;
+  margin: 0.45rem auto 0;
+  max-width: 32rem;
   font-size: var(--vs01-text-legal);
   color: var(--vs01-color-text-muted);
-  font-style: italic;
+  line-height: 1.45;
+}
+
+/* Main wizard slot (below header, above footer) */
+.vs01-main {
+  width: 100%;
+  min-width: 0;
 }
 
 /* Stepper */
@@ -71,7 +124,6 @@
   cursor: pointer;
   font: inherit;
   color: var(--vs01-color-text-muted);
-  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .vs01-stepper-step:not(:last-child) {
@@ -107,10 +159,15 @@
 .vs01-error-banner {
   padding: 0.75rem 1rem;
   border-radius: var(--vs01-radius-control);
+  border: 1px solid color-mix(in srgb, var(--vs01-color-danger) 35%, var(--vs01-color-border-subtle));
   border-left: 4px solid var(--vs01-color-danger);
   background: var(--vs01-color-danger-bg);
-  color: var(--vs01-color-danger);
+  color: var(--vs01-color-text-primary);
   font-size: var(--vs01-text-legal);
+  max-width: 36rem;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.45;
 }
 
 /* Main card */
@@ -167,7 +224,6 @@
   font-size: 0.9375rem;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background 0.15s ease, opacity 0.15s ease;
 }
 
 .vs01-btn:focus-visible {
@@ -205,6 +261,9 @@
 
 /* Footer */
 .vs01-footer {
+  margin-top: 0.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--vs01-color-border-subtle);
   font-size: var(--vs01-text-legal);
   color: var(--vs01-color-text-muted);
   line-height: 1.5;
@@ -340,15 +399,29 @@
 
 .vs01-counterparty-row {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 0.5rem;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 0.5rem 0.75rem;
   align-items: end;
 }
 
-@media (max-width: 520px) {
+@media (max-width: 720px) {
   .vs01-counterparty-row {
     grid-template-columns: 1fr;
   }
+}
+
+.vs01-details-section-title {
+  margin: 0.35rem 0 0;
+  font-size: var(--vs01-text-body);
+  font-weight: 600;
+  color: var(--vs01-color-text-primary);
+  line-height: 1.35;
+}
+
+.vs01-btn--add-signer {
+  align-self: flex-start;
+  width: auto;
+  margin-top: 0.1rem;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -367,8 +440,438 @@
   border: 0;
 }
 
+/* Hidden file input — no native “No file chosen” in layout (triggered via button). */
+.vs01-doc-file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  opacity: 0;
+}
+
 .vs01-card--envelope {
   max-width: 100%;
+}
+
+/* Step 0 — Document (single column, centered intake) */
+.vs01-doc-step {
+  max-width: 28rem;
+  margin: 0 auto;
+}
+
+.vs01-doc-step-title {
+  margin: 0 0 0.35rem;
+  font-size: var(--vs01-text-step-title);
+  font-weight: 600;
+  text-align: center;
+}
+
+.vs01-doc-step-lead {
+  margin: 0 0 1.1rem;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-secondary);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.vs01-doc-step-lead--tight {
+  margin-bottom: 0.55rem;
+}
+
+/* STATE A — empty: lighter first screen */
+.vs01-doc-step-lead--state-a {
+  margin-bottom: 0.75rem;
+}
+
+/* Empty step — centered marketplace-style intake (PDF only) */
+.vs01-doc-step--hero {
+  max-width: 36rem;
+  min-height: min(68vh, 540px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-inline: auto;
+}
+
+.vs01-doc-hero {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 1.75rem 1rem 2.5rem;
+}
+
+.vs01-doc-hero-card {
+  width: 100%;
+  max-width: 24rem;
+  padding: 2.5rem 2rem;
+  border-radius: var(--vs01-radius-card);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.07);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2rem;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.vs01-doc-hero-card--drag {
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 50%, var(--vs01-color-border-subtle));
+  background: color-mix(in srgb, var(--vs01-color-accent) 9%, var(--vs01-color-bg-card));
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.09);
+}
+
+.vs01-doc-hero-title {
+  margin: 0;
+  font-size: clamp(1.4rem, 4.2vw, 1.7rem);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.vs01-doc-hero-subtitle {
+  margin: 0;
+  max-width: 19rem;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-secondary);
+  line-height: 1.55;
+}
+
+.vs01-doc-upload-cta {
+  margin-top: 0.1rem;
+  padding: 0.95rem 2.4rem;
+  min-width: 13rem;
+  font: inherit;
+  font-size: 1.0625rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  border-radius: var(--vs01-radius-control);
+  border: none;
+  cursor: pointer;
+  background: var(--vs01-color-accent);
+  color: var(--vs01-color-on-accent);
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+
+.vs01-doc-upload-cta:hover:not(:disabled) {
+  background: var(--vs01-color-accent-hover);
+}
+
+.vs01-doc-upload-cta:focus-visible {
+  outline: 2px solid var(--vs01-color-accent);
+  outline-offset: 3px;
+}
+
+.vs01-doc-upload-cta:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.vs01-doc-hero-drop-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.4;
+}
+
+/* Single card after file chosen: file row + preview */
+.vs01-doc-work-card {
+  margin: 0 0 0.65rem;
+  border-radius: var(--vs01-radius-card);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  overflow: hidden;
+}
+
+.vs01-doc-work-card .vs01-doc-selected-row {
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--vs01-color-border-subtle);
+}
+
+.vs01-doc-preview-inline {
+  min-height: 0;
+  max-height: min(58vh, 520px);
+  overflow: hidden;
+}
+
+.vs01-doc-preview-body--flush {
+  min-height: 12rem;
+}
+
+/* Compact selected document (replaces full chooser once file or server ids exist) */
+.vs01-doc-selected-card {
+  margin: 0 0 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+  background: var(--vs01-color-bg-card);
+}
+
+.vs01-doc-selected-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+@media (min-width: 480px) {
+  .vs01-doc-selected-row {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.65rem;
+  }
+}
+
+.vs01-doc-selected-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.vs01-doc-selected-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-doc-selected-name {
+  font-size: var(--vs01-text-body);
+  font-weight: 600;
+  color: var(--vs01-color-text-primary);
+  word-break: break-word;
+}
+
+.vs01-doc-selected-meta {
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-doc-selected-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--vs01-color-text-primary);
+  word-break: break-all;
+}
+
+.vs01-doc-selected-change {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--vs01-text-legal);
+  font-weight: 600;
+  color: var(--vs01-color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.vs01-doc-selected-change:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Caption under primary Finalize CTA */
+.vs01-doc-cta-caption {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-muted);
+  text-align: center;
+  line-height: 1.45;
+}
+
+/* Post-finalize: single human-readable line (IDs in sr-only for assistive tech). */
+.vs01-doc-finalized-line {
+  margin: 0 0 0.55rem;
+  padding: 0.45rem 0.65rem;
+  font-size: var(--vs01-text-legal);
+  font-weight: 650;
+  color: var(--vs01-color-success);
+  text-align: center;
+  line-height: 1.45;
+  border-radius: var(--vs01-radius-control);
+  background: color-mix(in srgb, var(--vs01-color-success) 9%, var(--vs01-color-bg-card));
+  border: 1px solid color-mix(in srgb, var(--vs01-color-success) 28%, var(--vs01-color-border-subtle));
+}
+
+.vs01-doc-finalized-line--plain {
+  padding: 0.4rem 0;
+  border: none;
+  background: transparent;
+}
+
+.vs01-doc-preview-shell--tight {
+  margin-top: 0.35rem;
+  min-height: 10rem;
+}
+
+.vs01-intake-chooser--compact {
+  margin-bottom: 0.85rem;
+}
+
+.vs01-upload-zone--centered {
+  text-align: center;
+}
+
+.vs01-upload-actions--center {
+  position: relative;
+  justify-content: center;
+}
+
+.vs01-doc-step-hashes {
+  margin-top: 1rem;
+}
+
+.vs01-doc-step-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  align-items: stretch;
+}
+
+.vs01-doc-step-actions .vs01-btn {
+  margin-top: 0;
+}
+
+.vs01-doc-step-actions--primary-block {
+  margin-top: 0.55rem;
+}
+
+/* Secondary text action under primary (post-finalize: Change document) */
+.vs01-doc-action-secondary {
+  padding: 0.35rem 0.25rem;
+  margin: 0 auto;
+  width: auto;
+  max-width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--vs01-text-legal);
+  font-weight: 600;
+  color: var(--vs01-color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.vs01-doc-action-secondary:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--vs01-color-accent) 85%, var(--vs01-color-text-primary));
+}
+
+.vs01-doc-action-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Step 1 — Agreement details (form card) */
+.vs01-details-step {
+  max-width: 40rem;
+  margin: 0 auto;
+}
+
+.vs01-details-title {
+  margin-bottom: 0.35rem;
+}
+
+.vs01-details-step-lead {
+  margin-bottom: 0.65rem;
+}
+
+.vs01-details-form {
+  padding: 0;
+}
+
+.vs01-details-form .vs01-details-stack {
+  gap: 0.45rem;
+}
+
+.vs01-details-form .vs01-counterparty-block {
+  margin-top: 0.15rem;
+}
+
+.vs01-details-step-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 1.15rem;
+}
+
+.vs01-details-step-actions .vs01-btn {
+  margin-top: 0;
+}
+
+/* Tighter Details step: compact Back, full-width primary, normal control height */
+.vs01-details-step-actions.vs01-details-step-actions--polish {
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.vs01-details-step-actions--polish .vs01-btn--secondary {
+  order: -1;
+  align-self: flex-start;
+  width: auto;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.85rem;
+  margin-top: 0;
+}
+
+.vs01-details-step-actions--polish .vs01-btn--primary {
+  margin-top: 0;
+  min-height: 2.45rem;
+  padding: 0.5rem 1rem;
+  width: 100%;
+  max-width: min(100%, 19rem);
+  align-self: flex-start;
+}
+
+@media (min-width: 480px) {
+  .vs01-details-step-actions:not(.vs01-details-step-actions--polish) {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .vs01-details-step-actions:not(.vs01-details-step-actions--polish) .vs01-btn--secondary {
+    width: auto;
+    min-width: 6rem;
+  }
+
+  .vs01-details-step-actions:not(.vs01-details-step-actions--polish) .vs01-btn--primary {
+    flex: 1 1 12rem;
+    min-width: 10rem;
+  }
+
+  .vs01-details-step-actions.vs01-details-step-actions--polish {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* Five-step stepper: slightly tighter labels on narrow viewports */
+@media (max-width: 720px) {
+  .vs01-stepper-step {
+    padding: 0.5rem 0.25rem;
+  }
+
+  .vs01-stepper-label {
+    font-size: 0.6875rem;
+  }
 }
 
 /* Two columns on wide viewports; stack on narrow */
@@ -405,10 +908,151 @@
 
 /* Upload zone — high-visibility target */
 .vs01-upload-zone {
-  padding: 1.1rem 1.15rem;
+  padding: 1.35rem 1.25rem;
   border-radius: var(--vs01-radius-card);
   border: 2px dashed color-mix(in srgb, var(--vs01-color-accent) 45%, var(--vs01-color-border-subtle));
   background: color-mix(in srgb, var(--vs01-color-accent) 7%, var(--vs01-color-bg-card));
+}
+
+.vs01-upload-zone--drag {
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 75%, var(--vs01-color-border-subtle));
+  background: color-mix(in srgb, var(--vs01-color-accent) 14%, var(--vs01-color-bg-card));
+}
+
+/* Intake: upload vs camera (Create agreement) */
+.vs01-intake-chooser {
+  margin-bottom: 0.75rem;
+}
+
+.vs01-intake-chooser-label {
+  margin: 0 0 0.65rem;
+  font-size: var(--vs01-text-legal);
+  font-weight: 600;
+  color: var(--vs01-color-text-secondary);
+  text-align: center;
+}
+
+.vs01-intake-mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+@media (max-width: 420px) {
+  .vs01-intake-mode-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.vs01-intake-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0.65rem 1rem;
+  border-radius: var(--vs01-radius-control);
+  font: inherit;
+  font-weight: 650;
+  font-size: 0.9375rem;
+  cursor: pointer;
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  color: var(--vs01-color-text-primary);
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.vs01-intake-mode-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 50%, var(--vs01-color-border-subtle));
+  background: var(--vs01-color-bg-muted);
+}
+
+.vs01-intake-mode-btn:focus-visible {
+  outline: 2px solid var(--vs01-color-accent);
+  outline-offset: 2px;
+}
+
+.vs01-intake-mode-btn--active {
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 65%, var(--vs01-color-border-subtle));
+  background: color-mix(in srgb, var(--vs01-color-accent) 14%, transparent);
+  color: var(--vs01-color-accent);
+}
+
+.vs01-intake-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vs01-camera-panel {
+  margin-top: 0.5rem;
+  padding: 1rem 1.1rem;
+  border-radius: var(--vs01-radius-card);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-muted);
+}
+
+.vs01-camera-preview-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: min(52vh, 420px);
+  margin: 0 0 0.85rem;
+  border-radius: var(--vs01-radius-control);
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--vs01-color-border-subtle);
+}
+
+.vs01-camera-preview-video,
+.vs01-camera-preview-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.vs01-camera-preview-img {
+  background: var(--vs01-color-preview-canvas);
+}
+
+.vs01-camera-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 10rem;
+  padding: 1rem;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-muted);
+  text-align: center;
+  line-height: 1.45;
+}
+
+.vs01-camera-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.vs01-camera-actions .vs01-btn {
+  margin-top: 0;
+  width: auto;
+  min-width: 6.5rem;
+  flex: 1 1 auto;
+}
+
+.vs01-camera-actions--tight {
+  margin-top: 0.35rem;
+}
+
+.vs01-camera-fallback {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: color-mix(in srgb, var(--vs01-color-danger) 8%, transparent);
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-secondary);
+  line-height: 1.45;
 }
 
 .vs01-upload-zone-title {
@@ -445,7 +1089,6 @@
   font-size: 0.9375rem;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .vs01-upload-btn:focus-within {
@@ -484,6 +1127,21 @@
 }
 
 .vs01-upload-btn:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Button-triggered upload (no <label> wrapping input) */
+button.vs01-upload-btn--primary:hover:not(:disabled) {
+  background: var(--vs01-color-accent-hover);
+}
+
+button.vs01-upload-btn:focus-visible {
+  outline: 2px solid var(--vs01-color-accent);
+  outline-offset: 2px;
+}
+
+button.vs01-upload-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -547,7 +1205,7 @@
   flex: 1 1 auto;
   min-height: 0;
   position: relative;
-  background: #e2e8f0;
+  background: var(--vs01-color-preview-canvas);
 }
 
 .vs01-doc-preview-frame {
@@ -766,6 +1424,94 @@
   color: var(--vs01-color-text-primary);
 }
 
+.vs01-send-signers-section {
+  margin: 1rem 0 1.25rem;
+}
+
+.vs01-send-signers-heading {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-send-signers-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vs01-send-signer-card {
+  margin: 0 0 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+  background: var(--vs01-color-bg-card);
+}
+
+.vs01-send-signer-name {
+  font-weight: 650;
+  color: var(--vs01-color-text-primary);
+  margin-bottom: 0.2rem;
+}
+
+.vs01-send-signer-email {
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-secondary);
+  margin-bottom: 0.45rem;
+  word-break: break-word;
+}
+
+.vs01-send-signer-link {
+  display: block;
+  margin: 0 0 0.55rem;
+  font-family: var(--vs01-font-mono);
+  font-size: var(--vs01-text-mono);
+  line-height: 1.4;
+  word-break: break-all;
+  color: var(--vs01-color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.vs01-send-signer-link:hover {
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-send-signer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.vs01-receipt-json-details {
+  margin: 0.75rem 0 0;
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+  background: var(--vs01-color-bg-muted);
+  padding: 0.35rem 0.65rem;
+}
+
+.vs01-receipt-json-details-summary {
+  cursor: pointer;
+  font-weight: 650;
+  font-size: 0.9375rem;
+  color: var(--vs01-color-text-primary);
+  padding: 0.35rem 0.25rem;
+  list-style-position: outside;
+}
+
+.vs01-receipt-json-details .vs01-receipt-json {
+  margin: 0.5rem 0 0.35rem;
+  max-height: min(40vh, 16rem);
+}
+
+.vs01-done-start-over {
+  margin-top: 1rem;
+  justify-content: flex-start;
+}
+
 /* Counterparty block + handoff stub */
 .vs01-counterparty-block {
   gap: 0.5rem;
@@ -821,4 +1567,1619 @@
 .vs01-send-preview {
   margin-top: 1rem;
   text-align: left;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Signing step — document-first workspace (step 2)                            */
+/* -------------------------------------------------------------------------- */
+
+.vs01-sign-step-header {
+  margin-bottom: 0.35rem;
+}
+
+.vs01-sign-step-lead {
+  margin-bottom: 1rem;
+}
+
+/* Assign recipient fields — match signing step preview size + calmer rail */
+.vs01-recipient-assign-step .vs01-sign-workspace {
+  gap: 1.35rem 1.75rem;
+}
+
+.vs01-recipient-assign-step .vs01-sign-scroll {
+  max-height: min(78vh, 920px);
+}
+
+.vs01-recipient-assign-step .vs01-sign-doc-pages-wrap {
+  min-height: min(70vh, 200px);
+}
+
+.vs01-recipient-assign-step .vs01-sign-pages-inner {
+  padding: 0.65rem 0 1.5rem;
+  gap: 1.2rem;
+}
+
+.vs01-recipient-assign-step .vs01-sign-rail {
+  gap: 1.05rem;
+}
+
+.vs01-recipient-assign-step .vs01-sign-toolbar {
+  padding: 0.75rem 0.85rem;
+  gap: 0.55rem;
+}
+
+.vs01-recipient-assign-step .vs01-sign-toolbar-btns {
+  gap: 0.4rem;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-mode {
+  margin-top: 0.4rem;
+  padding-top: 0.65rem;
+  gap: 0.55rem;
+}
+
+.vs01-recipient-assign-step .vs01-sign-selected-panel {
+  margin-top: 0.15rem;
+}
+
+.vs01-recipient-assign-step .vs01-sign-rail-helper {
+  margin-top: 0.1rem;
+  line-height: 1.5;
+}
+
+.vs01-recipient-assign-step .vs01-sign-actions {
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+}
+
+.vs01-recipient-rail-panel {
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.vs01-recipient-rail-panel .vs01-input {
+  width: 100%;
+  max-width: 100%;
+}
+
+.vs01-recipient-rail-heading {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 650;
+  color: var(--vs01-color-text-primary);
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.vs01-recipient-assign-step .vs01-sign-toolbar .vs01-sign-toolbar-hint.vs01-recipient-rail-heading {
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-recipient-assign-warning {
+  margin: 0;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-muted);
+  line-height: 1.45;
+}
+
+.vs01-recipient-assign-callout {
+  margin: 0.65rem 0 0;
+  padding: 0.55rem 0.75rem;
+  font-size: var(--vs01-text-legal);
+  line-height: 1.45;
+  color: var(--vs01-color-text-secondary);
+  background: color-mix(in srgb, var(--vs01-color-bg-muted) 88%, transparent);
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+}
+
+.vs01-recipient-rail-helper-copy {
+  margin: 0.5rem 0 0;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-muted);
+  line-height: 1.48;
+  text-wrap: pretty;
+}
+
+.vs01-recipient-rail-helper-copy strong {
+  font-weight: 650;
+  color: var(--vs01-color-text-secondary);
+}
+
+/* Counterparty name under field type label (recipient assignment step) */
+.vs01-recipient-assign-for {
+  display: block;
+  margin: 0;
+  padding: 0;
+  font-size: 0.62rem;
+  font-weight: 650;
+  color: var(--vs01-color-text-secondary);
+  line-height: 1.2;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.vs01-sign-page-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 0.65rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-sign-page-btn {
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  color: var(--vs01-color-text-primary);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vs01-sign-page-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 45%, var(--vs01-color-border-subtle));
+  color: var(--vs01-color-accent);
+}
+
+.vs01-sign-page-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vs01-sign-page-label {
+  font-variant-numeric: tabular-nums;
+  min-width: 6.5rem;
+  text-align: center;
+  font-weight: 600;
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-sign-toolbar {
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.vs01-sign-toolbar-hint {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-sign-toolbar-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.vs01-sign-tool-btn {
+  flex: 1 1 calc(33% - 0.35rem);
+  min-width: 4.25rem;
+  padding: 0.45rem 0.4rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  color: var(--vs01-color-text-secondary);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.vs01-sign-tool-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 40%, transparent);
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-sign-tool-btn--active {
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 70%, transparent);
+  background: color-mix(in srgb, var(--vs01-color-accent) 14%, transparent);
+  color: var(--vs01-color-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--vs01-color-accent) 25%, transparent);
+}
+
+.vs01-sign-toolbar-sub {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.35;
+}
+
+.vs01-sign-placement-mode {
+  margin-top: 0.35rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--vs01-color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.vs01-sign-placement-mode-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-secondary);
+  line-height: 1.35;
+}
+
+.vs01-sign-place-cta {
+  margin-top: 0;
+}
+
+.vs01-sign-placement-mode-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--vs01-color-accent);
+  font-weight: 600;
+}
+
+.vs01-sign-placement-mode-hint--muted {
+  color: var(--vs01-color-text-muted);
+  font-weight: 500;
+}
+
+.vs01-sign-armed-banner {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid color-mix(in srgb, var(--vs01-color-accent) 45%, var(--vs01-color-border-subtle));
+  background: color-mix(in srgb, var(--vs01-color-accent) 12%, var(--vs01-color-bg-card));
+  color: var(--vs01-color-text-primary);
+  font-size: 0.875rem;
+  font-weight: 650;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.vs01-sign-status-ready {
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid color-mix(in srgb, var(--vs01-color-success) 35%, var(--vs01-color-border-subtle));
+  background: color-mix(in srgb, var(--vs01-color-success) 10%, transparent);
+  color: var(--vs01-color-text-primary);
+  font-size: 0.875rem;
+  font-weight: 650;
+  text-align: center;
+}
+
+.vs01-sign-status-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.4;
+  min-height: 1.25rem;
+}
+
+.vs01-sign-doc-instruction-sub {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-sign-placement-box--selected {
+  border-width: 3px;
+  border-color: var(--vs01-color-accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--vs01-color-accent) 35%, transparent),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+  z-index: 4;
+}
+
+.vs01-sign-placement-box--signature {
+  justify-content: flex-start;
+}
+
+.vs01-sign-placement-box--signature .vs01-sign-placement-script,
+.vs01-sign-placement-box--signature .vs01-sign-placement-img,
+.vs01-sign-placement-box--signature .vs01-sign-placement-meta {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.vs01-sign-placement-box--initials {
+  justify-content: center;
+  align-items: stretch;
+}
+
+.vs01-sign-placement-box--initials .vs01-sign-placement-initials {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: max(0.52rem, 11cqi);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  color: #111111;
+  text-align: center;
+}
+
+.vs01-sign-placement-ph {
+  opacity: 0.52;
+  color: color-mix(in srgb, var(--vs01-color-text-muted) 75%, #111111);
+}
+
+/* Step 4: signature/initials markers look “to do later”, not like a finished signature */
+.vs01-recipient-assign-step .vs01-recipient-pending-slot {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--vs01-color-text-muted) 38%, var(--vs01-color-accent));
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 78%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.vs01-recipient-assign-step .vs01-recipient-pending-slot:hover {
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 84%, transparent);
+}
+
+.vs01-recipient-assign-step .vs01-recipient-pending-slot.vs01-sign-placement-box--selected {
+  border-style: solid;
+  border-color: var(--vs01-color-accent);
+  background: color-mix(in srgb, var(--vs01-color-accent) 10%, var(--vs01-color-bg-card));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--vs01-color-accent) 35%, transparent),
+    0 6px 16px rgba(0, 0, 0, 0.28);
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--initials .vs01-sign-placement-initials.vs01-sign-placement-ph {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 650;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  opacity: 0.58;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--initials .vs01-sign-placement-initials:not(.vs01-sign-placement-ph) {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  opacity: 0.95;
+}
+
+/* Step 4: text/date with content reads as “filled in” vs empty placeholders */
+.vs01-recipient-assign-step .vs01-recipient-field-value-filled {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--vs01-color-text-primary);
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 92%, #ebe4d8);
+  border-radius: 4px;
+  padding: 0.08rem 0.16rem;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  opacity: 1;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--date .vs01-sign-field-inline-input {
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 94%, #ebe4d8);
+  border-color: color-mix(in srgb, var(--vs01-color-text-muted) 32%, var(--vs01-color-border-subtle));
+}
+
+/* Step 4: signature / printed name — mirror sender ref hierarchy (label + subline + centered body). */
+.vs01-recipient-assign-step .vs01-sign-placement-box--signature,
+.vs01-recipient-assign-step .vs01-sign-placement-box--printed_name {
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 0.26rem 0.34rem 0.34rem;
+  gap: 0.12rem;
+  cursor: default;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--signature.vs01-recipient-pending-slot {
+  cursor: move;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--printed_name.vs01-sign-placement-box--selected {
+  cursor: default;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--signature .vs01-sign-placement-label,
+.vs01-recipient-assign-step .vs01-sign-placement-box--printed_name .vs01-sign-placement-label {
+  text-align: center;
+  align-self: stretch;
+  width: 100%;
+  flex: 0 0 auto;
+}
+
+.vs01-recipient-field-assignee {
+  display: block;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 0.06rem;
+  font-size: max(0.42rem, 4.2cqi);
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-align: center;
+  color: var(--vs01-color-text-muted);
+  pointer-events: none;
+  user-select: none;
+}
+
+.vs01-recipient-field-body--fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.12rem 0.1rem 0.14rem;
+  margin-top: 0.04rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vs01-color-text-muted) 22%, var(--vs01-color-border-subtle));
+  pointer-events: none;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--signature .vs01-recipient-field-body--fill {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--vs01-color-text-muted) 38%, var(--vs01-color-accent));
+}
+
+.vs01-recipient-field-placeholder-text {
+  display: block;
+  max-width: 100%;
+  padding: 0.08rem 0.2rem;
+  text-align: center;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: max(0.46rem, 8cqi);
+  font-weight: 650;
+  font-style: italic;
+  line-height: 1.25;
+  letter-spacing: 0.03em;
+  color: color-mix(in srgb, var(--vs01-color-text-secondary) 55%, #1a1a1a);
+  opacity: 0.92;
+}
+
+.vs01-recipient-field-body--fill .vs01-sign-placement-script {
+  max-width: 100%;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.vs01-recipient-field-printed-readout {
+  display: block;
+  max-width: 100%;
+  padding: 0.16rem 0.32rem;
+  text-align: center;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 650;
+  font-size: max(0.52rem, 10.5cqi);
+  line-height: 1.32;
+  letter-spacing: 0.02em;
+  color: var(--vs01-color-text-primary);
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 88%, #e8e2d8);
+  border: 1px solid color-mix(in srgb, var(--vs01-color-text-muted) 26%, var(--vs01-color-border-subtle));
+  border-radius: 5px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.vs01-sign-placement-meta {
+  font-size: max(0.45rem, 7.5cqi);
+  color: #111111;
+  user-select: none;
+  pointer-events: none;
+}
+
+.vs01-sign-placement-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  flex: 1;
+  min-height: 0;
+}
+
+.vs01-sign-placement-text {
+  font-size: max(0.45rem, 9.5cqi);
+  line-height: 1.15;
+  color: #111111;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.vs01-sign-field-inline-input {
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 0.12rem 0.2rem;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--vs01-color-accent) 45%, transparent);
+  background: rgba(255, 252, 248, 0.92);
+  border-radius: 4px;
+  font-size: max(0.45rem, 9.5cqi);
+  line-height: 1.2;
+  color: #111111;
+  cursor: text;
+  pointer-events: auto;
+}
+
+.vs01-sign-field-inline-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--vs01-color-accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.vs01-sign-placement-text--inline {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+}
+
+.vs01-sign-placement-box--text,
+.vs01-sign-placement-box--date {
+  cursor: default;
+}
+
+.vs01-sign-placement-box--text.vs01-sign-placement-box--selected,
+.vs01-sign-placement-box--date.vs01-sign-placement-box--selected {
+  cursor: text;
+}
+
+.vs01-sign-placement-check {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: max(1rem, 12cqi);
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+
+.vs01-sign-selected-panel {
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.vs01-sign-selected-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.vs01-sign-selected-title {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-sign-remove-field {
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--vs01-color-danger);
+  cursor: pointer;
+  border-radius: var(--vs01-radius-control);
+}
+
+.vs01-sign-remove-field:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.vs01-sign-selected-note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.4;
+}
+
+.vs01-sign-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.vs01-sign-advanced-empty {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.4;
+}
+
+.vs01-sign-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(260px, 3fr);
+  gap: 1.25rem 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .vs01-sign-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.vs01-sign-doc-col {
+  min-width: 0;
+}
+
+.vs01-sign-rail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+/* Scroll wrapper: native wheel/trackpad scroll; placement layer does not call preventDefault on wheel. */
+.vs01-sign-scroll {
+  max-height: 70vh;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-preview-canvas);
+}
+
+.vs01-sign-doc-foot-hint {
+  margin: 0.45rem 0 0;
+  padding: 0 0.12rem;
+  font-size: max(0.8125rem, 12px);
+  font-weight: 550;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.42;
+  max-width: 46rem;
+}
+
+.vs01-sign-canvas-wrap {
+  position: relative;
+  border-radius: inherit;
+  background: transparent;
+  border: none;
+  min-height: min(62vh, 520px);
+  overflow: visible;
+}
+
+.vs01-sign-doc-pages-wrap {
+  position: relative;
+  border-radius: inherit;
+  background: transparent;
+  border: none;
+  min-height: min(62vh, 120px);
+  overflow: visible;
+}
+
+.vs01-sign-pages-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0 1.25rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.vs01-sign-page-stack {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.vs01-sign-page-surface {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+/**
+ * Rendered as children of react-pdf <Page /> after the canvas so overlays stack above the PDF
+ * (sibling canvases can composite above later siblings in some engines).
+ */
+.vs01-sign-page-placement-host {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Sender fields from Step 3 — read-only reference under recipient placement (Step 4). */
+.vs01-sign-sender-ref-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.vs01-sign-sender-ref-box {
+  position: absolute;
+  box-sizing: border-box;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.08rem;
+  padding: 0.16rem 0.22rem 0.2rem;
+  border: 2px dashed color-mix(in srgb, var(--vs01-color-text-muted) 55%, var(--vs01-color-border-subtle));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 55%, transparent);
+  opacity: 0.72;
+  box-shadow: none;
+  pointer-events: none;
+  user-select: none;
+  container-type: size;
+  container-name: vs01-sender-ref-field;
+}
+
+.vs01-sign-sender-ref-label {
+  font-size: max(0.48rem, 4.8cqi);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--vs01-color-text-muted) 92%, #111);
+  line-height: 1.1;
+  text-align: center;
+}
+
+.vs01-sign-sender-ref-yours {
+  font-size: max(0.42rem, 4cqi);
+  font-weight: 650;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.1;
+  text-align: center;
+}
+
+.vs01-sign-sender-ref-script {
+  font-family: "Segoe Script", "Brush Script MT", "Apple Chancery", "Snell Roundhand", cursive;
+  font-size: max(0.48rem, 11cqi);
+  line-height: 1.05;
+  color: color-mix(in srgb, var(--vs01-color-text-secondary) 88%, #111);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vs01-sign-sender-ref-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  flex: 1 1 auto;
+  min-height: 0;
+  opacity: 0.88;
+  filter: grayscale(0.15);
+}
+
+.vs01-sign-sender-ref-meta {
+  font-size: max(0.42rem, 7cqi);
+  color: var(--vs01-color-text-muted);
+  text-align: center;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vs01-sign-sender-ref-initials {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: max(0.78rem, 14cqi);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--vs01-color-text-secondary) 85%, #111);
+  text-align: center;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vs01-sign-sender-ref-text {
+  font-size: max(0.42rem, 8.5cqi);
+  line-height: 1.12;
+  color: color-mix(in srgb, var(--vs01-color-text-secondary) 85%, #111);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vs01-sign-sender-ref-box--signature {
+  justify-content: flex-start;
+}
+
+.vs01-sign-sender-ref-box--initials {
+  justify-content: center;
+}
+
+/* Signing rail: list counterparties instead of one inline “Next · A · B” string. */
+.vs01-sign-rail-recipients {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.vs01-sign-rail-recipient-list {
+  margin: 0;
+  padding: 0 0 0 1.1rem;
+  list-style: disc;
+  color: var(--vs01-color-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.vs01-sign-rail-recipient-item {
+  margin: 0.15rem 0;
+}
+
+.vs01-sign-rail-recipient-name {
+  display: block;
+  font-weight: 600;
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-sign-rail-recipient-email {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-sign-pdf-loading {
+  padding: 0.75rem 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-sign-doc-surface {
+  position: relative;
+}
+
+.vs01-sign-doc-surface--armed .react-pdf__Page {
+  pointer-events: none;
+}
+
+/* Default: PDF receives events for normal viewer scroll/interaction. When armed, surface blocks PDF so the click layer places one field. */
+.vs01-sign-iframe {
+  display: block;
+  width: 100%;
+  height: min(62vh, 520px);
+  border: 0;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.vs01-sign-doc-surface--armed .vs01-sign-iframe,
+.vs01-sign-doc-surface--armed .vs01-sign-placeholder-doc {
+  pointer-events: none;
+}
+
+/* When PDF preview fails, same-size surface so placement still works */
+.vs01-sign-placeholder-doc {
+  min-height: min(62vh, 520px);
+  height: min(62vh, 520px);
+  width: 100%;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--vs01-color-bg-card) 90%, #0a0b0e) 0%,
+    var(--vs01-color-preview-canvas) 100%
+  );
+  border: 0;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+
+/**
+ * Click-capture layer: pointer-events only while armed; idle passes events through for scroll/browse.
+ */
+.vs01-sign-placement-click-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  min-height: min(62vh, 520px);
+  background: transparent;
+  touch-action: auto;
+}
+
+.vs01-sign-page-surface .vs01-sign-placement-click-layer {
+  min-height: 0;
+}
+
+.vs01-sign-placement-click-layer--idle {
+  pointer-events: none;
+  cursor: default;
+}
+
+.vs01-sign-placement-click-layer--armed {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+/* Fields + hints: above click layer; only placement boxes capture pointers. */
+.vs01-sign-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  cursor: default;
+}
+
+.vs01-sign-overlay--placed {
+  cursor: default;
+}
+
+.vs01-sign-drag-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--vs01-color-text-primary);
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 92%, transparent);
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  animation: vs01-sign-hint-fade 2.1s ease forwards;
+}
+
+@keyframes vs01-sign-hint-fade {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.vs01-sign-doc-instruction {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 16rem;
+  padding: 0.65rem 1rem;
+  text-align: center;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--vs01-color-text-primary);
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 88%, transparent);
+  border: 1px solid var(--vs01-color-border-subtle);
+  border-radius: var(--vs01-radius-control);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  line-height: 1.35;
+}
+
+.vs01-sign-placement-box {
+  position: absolute;
+  box-sizing: border-box;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.12rem;
+  padding: 0.2rem 0.28rem 0.28rem;
+  border: 2px solid var(--vs01-color-accent);
+  background: rgba(212, 165, 116, 0.14);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+  transform-origin: center;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+  container-type: size;
+  container-name: vs01-placed-field;
+}
+
+.vs01-sign-placement-resize-handle {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: 2px solid var(--vs01-color-accent);
+  border-radius: 3px;
+  background: var(--vs01-color-bg-card);
+  color: transparent;
+  cursor: nwse-resize;
+  z-index: 6;
+  touch-action: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+
+.vs01-sign-placement-resize-handle:hover {
+  background: color-mix(in srgb, var(--vs01-color-accent) 22%, var(--vs01-color-bg-card));
+  border-color: var(--vs01-color-accent-hover);
+}
+
+.vs01-sign-placement-resize-handle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--vs01-color-accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.vs01-sign-placement-box:hover {
+  border-color: var(--vs01-color-accent-hover);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
+  background: rgba(212, 165, 116, 0.2);
+}
+
+.vs01-sign-placement-box--pop {
+  animation: vs01-sign-placement-pop 0.38s ease-out;
+}
+
+@keyframes vs01-sign-placement-pop {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.85;
+  }
+  70% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.vs01-sign-placement-label {
+  font-size: max(0.48rem, 5.5cqi);
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #111111;
+  user-select: none;
+  pointer-events: none;
+  line-height: 1.15;
+}
+
+.vs01-sign-placement-script {
+  font-family: "Segoe Script", "Brush Script MT", "Apple Chancery", "Snell Roundhand", cursive;
+  font-size: max(0.5rem, 13cqi);
+  line-height: 1.05;
+  color: #111111;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  pointer-events: none;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.vs01-sign-preview-fallback {
+  min-height: min(62vh, 520px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.25rem;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-secondary);
+  line-height: 1.5;
+}
+
+.vs01-sign-canvas-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.45;
+  min-height: 1.25rem;
+}
+
+.vs01-sign-rail-brief {
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-muted);
+}
+
+.vs01-sign-rail-brief--compact {
+  padding: 0.55rem 0.7rem;
+}
+
+.vs01-sign-flow-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.vs01-sign-flow-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-muted);
+  line-height: 1.35;
+}
+
+.vs01-sign-flow-step--current {
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-sign-flow-step--current .vs01-sign-flow-num {
+  background: color-mix(in srgb, var(--vs01-color-accent) 35%, transparent);
+  color: var(--vs01-color-accent);
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 55%, transparent);
+}
+
+.vs01-sign-flow-step--done {
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-sign-flow-step--done .vs01-sign-flow-num {
+  background: color-mix(in srgb, var(--vs01-color-success) 22%, transparent);
+  color: var(--vs01-color-success);
+  border-color: color-mix(in srgb, var(--vs01-color-success) 40%, transparent);
+}
+
+.vs01-sign-flow-num {
+  flex-shrink: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--vs01-color-border-subtle);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.vs01-sign-flow-text {
+  padding-top: 0.1rem;
+}
+
+.vs01-sign-signature-panel {
+  padding: 0.75rem 0.8rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.vs01-sign-signature-panel-title {
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-sign-style-tabs {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.vs01-sign-style-tab {
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  color: var(--vs01-color-text-secondary);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vs01-sign-style-tab:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--vs01-color-accent) 8%, var(--vs01-color-bg-card));
+}
+
+.vs01-sign-style-tab--active {
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 65%, transparent);
+  color: var(--vs01-color-accent);
+  background: color-mix(in srgb, var(--vs01-color-accent) 12%, transparent);
+}
+
+.vs01-sign-type-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.vs01-sign-preview-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.vs01-sign-preview-k {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-sign-preview-script {
+  min-height: 2.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px dashed var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  font-family: "Segoe Script", "Brush Script MT", "Apple Chancery", "Snell Roundhand", cursive;
+  font-size: 1.65rem;
+  line-height: 1.2;
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-sign-preview-initials {
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px dashed var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-sign-draw-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.vs01-sign-draw-hint {
+  margin: 0;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-muted);
+  line-height: 1.4;
+}
+
+.vs01-sign-draw-canvas {
+  display: block;
+  width: 100%;
+  max-width: 280px;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.vs01-sign-upload-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.vs01-sign-upload-label {
+  display: inline-flex;
+  width: fit-content;
+  cursor: pointer;
+}
+
+.vs01-sign-upload-label .vs01-btn {
+  margin-top: 0;
+}
+
+.vs01-sign-upload-hint {
+  margin: 0;
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-sign-upload-preview {
+  max-width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+}
+
+.vs01-sign-readonly-block {
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--vs01-radius-control);
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: var(--vs01-color-bg-card);
+}
+
+.vs01-sign-readonly-value {
+  margin: 0.2rem 0 0;
+  font-size: 0.875rem;
+  color: var(--vs01-color-text-primary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.vs01-sign-rail-line {
+  margin: 0 0 0.55rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.vs01-sign-rail-line:last-of-type {
+  margin-bottom: 0;
+}
+
+.vs01-sign-rail-line--muted {
+  font-size: 0.8125rem;
+}
+
+.vs01-sign-rail-k {
+  font-weight: 650;
+  color: var(--vs01-color-text-muted);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vs01-sign-rail-v {
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-sign-rail-note {
+  margin: 0.6rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--vs01-color-border-subtle);
+  font-size: var(--vs01-text-legal);
+  color: var(--vs01-color-text-muted);
+  line-height: 1.45;
+}
+
+.vs01-sign-advanced {
+  margin: 0;
+}
+
+.vs01-sign-advanced-summary {
+  cursor: pointer;
+  font-size: var(--vs01-text-legal);
+  font-weight: 600;
+  color: var(--vs01-color-text-secondary);
+  padding: 0.35rem 0;
+  list-style: none;
+}
+
+.vs01-sign-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.vs01-sign-advanced .vs01-fieldset-placement {
+  margin-top: 0.5rem;
+}
+
+.vs01-sign-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.25rem;
+  padding-top: 0.35rem;
+}
+
+.vs01-sign-actions .vs01-btn--secondary.vs01-btn--auto {
+  align-self: flex-start;
+  margin-top: 0;
+  width: auto;
+}
+
+.vs01-sign-actions .vs01-btn--primary {
+  margin-top: 0;
+  width: 100%;
+}
+
+.vs01-btn--signed-done {
+  background: color-mix(in srgb, var(--vs01-color-success) 35%, var(--vs01-color-bg-muted));
+  color: var(--vs01-color-success);
+  border: 1px solid color-mix(in srgb, var(--vs01-color-success) 45%, transparent);
+  cursor: default;
+}
+
+.vs01-btn--signed-done:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--vs01-color-success) 35%, var(--vs01-color-bg-muted));
+}
+
+.vs01-btn--next-step {
+  background: transparent;
+  border: none;
+  color: var(--vs01-color-accent);
+  font-weight: 600;
+  font-size: 0.9375rem;
+  padding: 0.45rem 0.5rem;
+  cursor: pointer;
+  text-align: center;
+  width: 100%;
+  margin-top: 0.1rem;
+  font: inherit;
+}
+
+.vs01-btn--next-step:hover:not(:disabled) {
+  text-decoration: underline;
+  color: var(--vs01-color-accent-hover);
+}
+
+.vs01-btn--next-step:focus-visible {
+  outline: 2px solid var(--vs01-color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.vs01-btn--next-step:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Deep-link recipient signing: dedicated view, no placement layer */
+.vs01-sign-placement-click-layer--inert {
+  pointer-events: none;
+}
+
+.vs01-recipient-signing-shell {
+  padding: 1.1rem 0.95rem 1.25rem;
+}
+
+@media (min-width: 720px) {
+  .vs01-recipient-signing-shell {
+    padding: 1.35rem 1.35rem 1.5rem;
+  }
+}
+
+.vs01-recipient-signing-header {
+  margin-bottom: 1rem;
+}
+
+.vs01-recipient-signing-header .vs01-card-title {
+  margin-bottom: 0.35rem;
+}
+
+.vs01-recipient-signing-signer {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-recipient-signing-doc-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.vs01-recipient-signing-scroll {
+  min-height: 12rem;
+  max-height: min(70vh, 52rem);
+}
+
+.vs01-recipient-signing-empty {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-recipient-signing-foot.vs01-sign-doc-foot-hint {
+  margin-top: 0.35rem;
+}
+
+.vs01-recipient-signing-footer-actions {
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid color-mix(in srgb, var(--vs01-color-border) 85%, transparent);
+}
+
+.vs01-recipient-signing-footer-actions .vs01-btn--primary {
+  width: 100%;
+}
+
+.vs01-recipient-signing-done {
+  padding: 0.35rem 0 0.15rem;
+}
+
+.vs01-recipient-signing-done .vs01-card-title {
+  margin-bottom: 0.5rem;
+}
+
+.vs01-recipient-signing-view .vs01-recipient-pending-slot {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--vs01-color-text-muted) 38%, var(--vs01-color-accent));
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 78%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.vs01-recipient-signing-view .vs01-sign-placement-box {
+  min-width: 12cqi;
+  min-height: 3.25rem;
+  box-sizing: border-box;
+}
+
+.vs01-recipient-signing-manifest-error {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: var(--vs01-color-text-primary);
+  background: color-mix(in srgb, var(--vs01-color-danger, #b42318) 12%, var(--vs01-color-bg-card));
+  border: 1px solid color-mix(in srgb, var(--vs01-color-danger, #b42318) 35%, transparent);
+}
+
+.vs01-recipient-signing-signature-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.vs01-recipient-signing-signature-input {
+  flex: 0 0 auto;
 }
