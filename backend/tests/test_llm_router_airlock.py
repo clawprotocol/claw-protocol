@@ -1,0 +1,128 @@
+"""Focused tests for AI airlock wiring in backend.llm_router."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from backend.security.ai_airlock import BLOCK_REASON_PROTECTED_MODE_EXTERNAL_AI
+
+from backend.llm_router import ExternalAIBlockedError, call_legal_llm, embed_texts
+
+
+def _stub_completion_response(content: str = "ok") -> MagicMock:
+    msg = MagicMock()
+    msg.content = content
+    choice = MagicMock()
+    choice.message = msg
+    resp = MagicMock()
+    resp.choices = [choice]
+    return resp
+
+
+def test_call_legal_llm_blocked_skips_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_create = MagicMock()
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+
+    # Policy uses word boundaries; "attorney" must stand alone to trigger a block.
+    secret = "unique_blocked_phrase my attorney client_xyz"
+    with pytest.raises(ExternalAIBlockedError) as excinfo:
+        call_legal_llm([{"role": "user", "content": secret}])
+
+    mock_create.assert_not_called()
+    err_text = str(excinfo.value)
+    assert secret not in err_text
+    assert "attorney" not in err_text.lower()
+
+
+def test_call_legal_llm_blocked_exception_metadata_only() -> None:
+    with pytest.raises(ExternalAIBlockedError) as excinfo:
+        call_legal_llm([{"role": "user", "content": "this is privileged work product"}])
+    assert str(excinfo.value) == f"external_ai_blocked:{BLOCK_REASON_PROTECTED_MODE_EXTERNAL_AI}"
+    assert excinfo.value.block_reason == BLOCK_REASON_PROTECTED_MODE_EXTERNAL_AI
+
+
+def test_call_legal_llm_allowed_sends_minimized_not_raw_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    def fake_create(**kwargs: object) -> MagicMock:
+        captured["messages"] = kwargs.get("messages")
+        return _stub_completion_response()
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = fake_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+
+    email = "reach_me@example.com"
+    call_legal_llm([{"role": "user", "content": f"hello {email} there"}])
+
+    assert "messages" in captured
+    user_parts = [m for m in captured["messages"] if m["role"] == "user"]
+    assert len(user_parts) == 1
+    outbound = user_parts[0]["content"]
+    assert email not in outbound
+    assert "[EMAIL_1]" in outbound
+
+
+def test_call_legal_llm_preserves_system_and_non_user_roles(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    def fake_create(**kwargs: object) -> MagicMock:
+        captured["messages"] = kwargs.get("messages")
+        return _stub_completion_response()
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = fake_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+
+    system_text = "You are a helpful assistant."
+    call_legal_llm(
+        [
+            {"role": "system", "content": system_text},
+            {"role": "assistant", "content": "prior"},
+            {"role": "user", "content": "plain greeting"},
+        ]
+    )
+
+    msgs = captured["messages"]
+    assert msgs[0] == {"role": "system", "content": system_text}
+    assert msgs[1] == {"role": "assistant", "content": "prior"}
+    assert msgs[2]["role"] == "user"
+    assert "plain greeting" in msgs[2]["content"]
+
+
+def test_embed_texts_blocked_skips_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_emb = MagicMock()
+    mock_client = MagicMock()
+    mock_client.embeddings.create = mock_emb
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+
+    with pytest.raises(ExternalAIBlockedError):
+        embed_texts(["safe text", "contact my attorney"])
+
+    mock_emb.assert_not_called()
+
+
+def test_embed_texts_uses_minimized_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    def fake_embeddings_create(**kwargs: object) -> MagicMock:
+        captured["input"] = kwargs.get("input")
+        data = MagicMock()
+        data.embedding = [0.1, 0.2]
+        resp = MagicMock()
+        resp.data = [data]
+        return resp
+
+    mock_client = MagicMock()
+    mock_client.embeddings.create = fake_embeddings_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+
+    email = "e2e@example.com"
+    embed_texts([f"note {email}"])
+
+    assert email not in captured["input"][0]
+    assert "[EMAIL_1]" in captured["input"][0]
