@@ -1,6 +1,7 @@
 # backend/handlers/process_handler.py
 
 from typing import Any, Dict, List
+import hashlib
 import time
 import logging
 
@@ -35,9 +36,10 @@ def run_full_pipeline(
     timestamp_provider = options.get("timestamp_provider", "local")
 
     t0 = time.time()
+    doc_fp = hashlib.sha256(file_bytes).hexdigest()[:16]
 
     # 1) EXTRACT
-    logger.info(f"[CLAW] Starting extraction for {filename}, mode={mode}")
+    logger.info("[CLAW] Starting extraction mode=%s doc_fp=%s", mode, doc_fp)
     raw_clauses: List[str] = extract_from_bytes(
         file_bytes=file_bytes,
         filename=filename,
@@ -50,7 +52,7 @@ def run_full_pipeline(
     meta["raw_clause_count"] = len(raw_clauses)
 
     # 2) CLEAN / STRUCTURE
-    logger.info(f"[CLAW] Cleaning/structuring {len(raw_clauses)} clauses for {filename}")
+    logger.info("[CLAW] Cleaning/structuring clause_count=%s doc_fp=%s", len(raw_clauses), doc_fp)
     structured: List[Clause] = normalize_clauses(raw_clauses)
     t2 = time.time()
     meta["clean_ms"] = int((t2 - t1) * 1000)
@@ -61,7 +63,7 @@ def run_full_pipeline(
     ]
 
     # 3) PROOF PACKET
-    logger.info(f"[CLAW] Generating proof packet for {filename}")
+    logger.info("[CLAW] Generating proof packet doc_fp=%s", doc_fp)
     proof_packet: Dict[str, Any] = generate_proof_packet(
         structured_dicts,
         options={

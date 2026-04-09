@@ -27,7 +27,7 @@ async def sign_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     signer_name = user.full_name or user.username or f"user_{user.id}"
     signer_id = user.id
 
-    logger.info(f"Starting signing flow for user={signer_name} ({signer_id})")
+    logger.info("Starting signing flow signer_id=%s", signer_id)
 
     await update.message.reply_text(
         "✍️ Preparing a signing packet based on your last extracted clauses…"
