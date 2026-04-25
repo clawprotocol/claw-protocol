@@ -1,11 +1,7 @@
-const envBase = import.meta.env.VITE_CLAW_API_BASE as string | undefined;
+import { resolveApiBase } from "../lib/clawApi";
 
 function apiBase(): string {
-  const raw = (envBase ?? "").trim();
-  if (!raw) {
-    throw new Error("VITE_CLAW_API_BASE is not set");
-  }
-  return raw.replace(/\/$/, "");
+  return resolveApiBase().replace(/\/$/, "");
 }
 
 function messageFromJsonBody(data: unknown, fallback: string): string {

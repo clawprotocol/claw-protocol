@@ -1,8 +1,7 @@
 """
-VS01-B09: deterministic receipt.v1 assembly + filesystem persistence.
+VS01-B09: receipt.v1 assembly + persistence.
 
-Calls backend.proof only for hashing (ADR-002). No LLM/OCR/timeline imports.
-TODO: DB-backed persistence, idempotency keys, ACL.
+Primary: ``ArtifactRepository``; optional legacy mirror under ``CLAW_RECEIPTS_DIR``.
 """
 from __future__ import annotations
 
@@ -12,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
+from backend.config.storage_runtime import unified_artifact_store_enabled
 from backend.proof.receipt import build_receipt_body_and_hash
 from backend.proof.sign_packet import normalize_sign_packet, sign_packet_digest_sha256
 
@@ -20,10 +20,29 @@ def receipts_root() -> Path:
     return Path(os.getenv("CLAW_RECEIPTS_DIR", "artifacts/receipts")).expanduser().resolve()
 
 
+def _legacy_mirror_enabled() -> bool:
+    return os.getenv("CLAW_VS01_LEGACY_FILE_MIRROR", "1").strip().lower() in ("1", "true", "yes")
+
+
 def _receipt_dir(receipt_id: str) -> Path:
     if not receipt_id or "/" in receipt_id or ".." in receipt_id:
         raise ValueError("invalid_receipt_id")
     return receipts_root() / receipt_id
+
+
+def _write_legacy_receipt(receipt: Dict[str, Any]) -> None:
+    rid = receipt.get("receipt_id")
+    if not isinstance(rid, str) or not rid:
+        raise ValueError("receipt missing receipt_id")
+    root = _receipt_dir(rid)
+    root.mkdir(parents=True, exist_ok=False)
+    payload = json.dumps(
+        receipt,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    (root / "receipt.json").write_text(payload, encoding="utf-8")
 
 
 def issue_receipt(
@@ -32,13 +51,6 @@ def issue_receipt(
     protocol_version: str,
     receipt_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Build full persisted-shaped receipt.v1: receipt_body fields + receipt_id +
-    receipt_hash_sha256. Does not write to disk.
-
-    sign_packet may be pre-normalized or raw; digest is always recomputed from
-    canonical normalization per RECEIPT_SCHEMAS.
-    """
     normalized = normalize_sign_packet(sign_packet)
     digest = sign_packet_digest_sha256(sign_packet)
     body, receipt_hash = build_receipt_body_and_hash(
@@ -56,19 +68,35 @@ def issue_receipt(
 
 
 def persist_receipt(receipt: Dict[str, Any]) -> None:
-    """Write receipt JSON under artifacts/receipts/{receipt_id}/."""
     rid = receipt.get("receipt_id")
     if not isinstance(rid, str) or not rid:
         raise ValueError("receipt missing receipt_id")
-    root = _receipt_dir(rid)
-    root.mkdir(parents=True, exist_ok=False)
     payload = json.dumps(
         receipt,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-    )
-    (root / "receipt.json").write_text(payload, encoding="utf-8")
+    ).encode("utf-8")
+
+    if unified_artifact_store_enabled():
+        from backend.storage.artifact_repository import get_artifact_repository
+
+        get_artifact_repository().put_artifact(
+            artifact_type="vs01_receipt",
+            logical_ref=rid,
+            data=payload,
+            content_type="application/json",
+            visibility="private",
+            metadata={"schema": "receipt.v1"},
+        )
+        if _legacy_mirror_enabled():
+            try:
+                _write_legacy_receipt(receipt)
+            except FileExistsError:
+                pass
+        return
+
+    _write_legacy_receipt(receipt)
 
 
 def issue_and_persist_receipt(
@@ -77,7 +105,6 @@ def issue_and_persist_receipt(
     protocol_version: str,
     receipt_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """issue_receipt + persist_receipt in one call."""
     r = issue_receipt(
         sign_packet=sign_packet,
         protocol_version=protocol_version,
@@ -88,7 +115,19 @@ def issue_and_persist_receipt(
 
 
 def get_receipt(receipt_id: str) -> Optional[Dict[str, Any]]:
-    """Load persisted receipt or None."""
+    if unified_artifact_store_enabled():
+        from backend.storage.artifact_repository import get_artifact_repository
+
+        raw = get_artifact_repository().get_bytes_by_logical_ref(
+            artifact_type="vs01_receipt", logical_ref=receipt_id
+        )
+        if raw:
+            try:
+                parsed = json.loads(raw.decode("utf-8"))
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
     try:
         d = _receipt_dir(receipt_id)
     except ValueError:

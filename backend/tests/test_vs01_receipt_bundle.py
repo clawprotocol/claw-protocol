@@ -32,9 +32,17 @@ DOC_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
 def _configure_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
-    monkeypatch.setenv("CLAW_SIGN_SESSIONS_DIR", str(tmp_path / "sessions"))
-    monkeypatch.setenv("CLAW_RECEIPTS_DIR", str(tmp_path / "receipts"))
+    from backend.storage.artifact_repository import reset_artifact_repository_singleton
+
+    base = tmp_path / "claw"
+    monkeypatch.setenv("CLAW_DATA_DIR", str(base / "data"))
+    monkeypatch.setenv("CLAW_BLOB_ROOT", str(base / "blobs"))
+    monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(base / "artifact_registry.sqlite3"))
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(base / "documents"))
+    monkeypatch.setenv("CLAW_SIGN_SESSIONS_DIR", str(base / "sessions"))
+    monkeypatch.setenv("CLAW_RECEIPTS_DIR", str(base / "receipts"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    reset_artifact_repository_singleton()
 
 
 def _field_manifest() -> list[dict]:
@@ -46,7 +54,7 @@ def test_get_receipt_404(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     client = TestClient(app)
     r = client.get("/v1/receipts/rcpt_nonexistent")
     assert r.status_code == 404
-    assert r.json()["detail"] == "receipt_not_found"
+    assert "not found" in r.json()["detail"].lower()
 
 
 def test_get_receipt_after_complete_sign(
@@ -187,12 +195,15 @@ def test_bundle_document_hash_mismatch_after_tamper(
     )
     rid = comp.json()["receipt_id"]
 
-    body_path = tmp_path / "documents" / doc_id / "body.bin"
-    body_path.write_bytes(b"TAMPERED")
+    blob_matches = list(
+        (tmp_path / "claw" / "blobs").glob(f"artifacts/vs01_document/{doc_id}/**/content.bin")
+    )
+    assert len(blob_matches) == 1
+    blob_matches[0].write_bytes(b"TAMPERED")
 
     bad = client.get(f"/v1/receipts/{rid}/bundle")
     assert bad.status_code == 400
-    assert bad.json()["detail"] == "document_hash_mismatch"
+    assert "matches the receipt" in bad.json()["detail"].lower()
 
 
 def test_bundle_manifest_digest_stable() -> None:

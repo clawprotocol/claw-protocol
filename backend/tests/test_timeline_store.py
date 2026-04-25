@@ -2,6 +2,7 @@ import sqlite3
 
 import pytest
 
+from backend.db.config import use_postgresql_for_timeline
 from backend.utils.timeline_store import TimelineStore, manifest_sha256
 
 pytestmark = pytest.mark.unit
@@ -64,6 +65,10 @@ def test_freeze_rejects_manifest_mismatch(tmp_path):
     assert frozen_hash == correct_hash
 
 
+@pytest.mark.skipif(
+    use_postgresql_for_timeline(),
+    reason="TimelineStore uses PostgreSQL; _conn() is unavailable (constraint enforced in PG via UNIQUE)",
+)
 def test_unique_event_index_constraint(tmp_path):
     store = _store(tmp_path)
     tl = _create_timeline(store)

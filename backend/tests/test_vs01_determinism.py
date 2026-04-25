@@ -22,9 +22,17 @@ pytestmark = pytest.mark.unit
 
 
 def _configure_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
-    monkeypatch.setenv("CLAW_SIGN_SESSIONS_DIR", str(tmp_path / "sessions"))
-    monkeypatch.setenv("CLAW_RECEIPTS_DIR", str(tmp_path / "receipts"))
+    from backend.storage.artifact_repository import reset_artifact_repository_singleton
+
+    base = tmp_path / "claw"
+    monkeypatch.setenv("CLAW_DATA_DIR", str(base / "data"))
+    monkeypatch.setenv("CLAW_BLOB_ROOT", str(base / "blobs"))
+    monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(base / "artifact_registry.sqlite3"))
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(base / "documents"))
+    monkeypatch.setenv("CLAW_SIGN_SESSIONS_DIR", str(base / "sessions"))
+    monkeypatch.setenv("CLAW_RECEIPTS_DIR", str(base / "receipts"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    reset_artifact_repository_singleton()
 
 
 def _field_manifest() -> list[dict]:

@@ -45,6 +45,42 @@ def test_call_legal_llm_blocked_exception_metadata_only() -> None:
     assert excinfo.value.block_reason == BLOCK_REASON_PROTECTED_MODE_EXTERNAL_AI
 
 
+def test_call_legal_llm_settlement_allows_in_local_bypass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # "settlement" triggers protected mode; only non-prod + CLAW_ALLOW_EXTERNAL_AI_LOCAL allows the call.
+    mock_create = MagicMock()
+    mock_create.return_value = _stub_completion_response("draft ok")
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_ALLOW_EXTERNAL_AI_LOCAL", "1")
+    out = call_legal_llm(
+        [
+            {
+                "role": "user",
+                "content": "Draft a settlement agreement for two parties. Settlement terms: mutual release.",
+            }
+        ],
+    )
+    assert out == "draft ok"
+    mock_create.assert_called_once()
+
+
+def test_call_legal_llm_settlement_still_blocked_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_create = MagicMock()
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLAW_ALLOW_EXTERNAL_AI_LOCAL", "1")
+    with pytest.raises(ExternalAIBlockedError) as excinfo:
+        call_legal_llm([{"role": "user", "content": "settlement and mutual release for both parties."}])
+    assert excinfo.value.block_reason == BLOCK_REASON_PROTECTED_MODE_EXTERNAL_AI
+    mock_create.assert_not_called()
+
+
 def test_call_legal_llm_allowed_sends_minimized_not_raw_email(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict = {}
 

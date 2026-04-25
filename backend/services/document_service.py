@@ -1,8 +1,10 @@
 """
-VS01-B05: minimal document store for agreement finalize → sign flow.
+VS01-B05: finalized document bytes.
 
-Persists finalized document bytes under a configurable directory (default
-artifacts/documents/). No DB. Explicit TODO: retention, authz, virus scan.
+Primary path: ``ArtifactRepository`` + ``BlobStore`` (configurable backend).
+Legacy path: optional mirror under ``CLAW_DOCUMENTS_DIR`` for transitional tooling.
+
+Set ``CLAW_UNIFIED_ARTIFACT_STORE=0`` to force filesystem-only layout (legacy).
 """
 from __future__ import annotations
 
@@ -14,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from backend.config.storage_runtime import unified_artifact_store_enabled
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -23,51 +27,27 @@ def documents_root() -> Path:
     return Path(os.getenv("CLAW_DOCUMENTS_DIR", "artifacts/documents")).expanduser().resolve()
 
 
+def _legacy_mirror_enabled() -> bool:
+    return os.getenv("CLAW_VS01_LEGACY_FILE_MIRROR", "1").strip().lower() in ("1", "true", "yes")
+
+
 def _doc_dir(document_id: str) -> Path:
-    # document_id is controlled by us (uuid); still reject traversal
     if not document_id or "/" in document_id or ".." in document_id:
         raise ValueError("invalid_document_id")
     return documents_root() / document_id
 
 
-def finalize_document(
-    content: bytes,
-    *,
-    content_type: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Write finalized bytes and return stable identifiers.
-
-    Returns:
-      document_id, content_sha256 (lowercase hex), created_at, size_bytes, content_type
-    """
-    if not content:
-        raise ValueError("empty_document")
-
-    content_sha256 = hashlib.sha256(content).hexdigest()
-    document_id = f"doc_{uuid.uuid4().hex}"
+def _write_legacy_layout(document_id: str, content: bytes, meta: Dict[str, Any]) -> None:
     root = _doc_dir(document_id)
     root.mkdir(parents=True, exist_ok=False)
-
-    body_path = root / "body.bin"
-    body_path.write_bytes(content)
-
-    meta: Dict[str, Any] = {
-        "document_id": document_id,
-        "content_sha256": content_sha256,
-        "created_at": _utc_now_iso(),
-        "size_bytes": len(content),
-        "content_type": content_type or "application/octet-stream",
-    }
+    (root / "body.bin").write_bytes(content)
     (root / "meta.json").write_text(
         json.dumps(meta, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
         encoding="utf-8",
     )
-    return meta
 
 
-def get_document_meta(document_id: str) -> Optional[Dict[str, Any]]:
-    """Load meta.json for document_id, or None if missing."""
+def _read_legacy_meta(document_id: str) -> Optional[Dict[str, Any]]:
     try:
         d = _doc_dir(document_id)
     except ValueError:
@@ -81,8 +61,7 @@ def get_document_meta(document_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_document_bytes(document_id: str) -> Optional[bytes]:
-    """Return stored body bytes or None if not found."""
+def _read_legacy_body(document_id: str) -> Optional[bytes]:
     try:
         d = _doc_dir(document_id)
     except ValueError:
@@ -96,12 +75,93 @@ def get_document_bytes(document_id: str) -> Optional[bytes]:
         return None
 
 
-def verify_content_sha256(document_id: str, claimed_sha256: str) -> bool:
+def finalize_document(
+    content: bytes,
+    *,
+    content_type: Optional[str] = None,
+) -> Dict[str, Any]:
     """
-    Return True if claimed_sha256 (hex) matches stored meta and on-disk body.
+    Write finalized bytes and return stable identifiers (``document_id``, ``content_sha256``, ...).
+    """
+    if not content:
+        raise ValueError("empty_document")
 
-    TODO: streaming hash for very large bodies if needed.
-    """
+    content_sha256 = hashlib.sha256(content).hexdigest()
+    document_id = f"doc_{uuid.uuid4().hex}"
+    ct = content_type or "application/octet-stream"
+    meta: Dict[str, Any] = {
+        "document_id": document_id,
+        "content_sha256": content_sha256,
+        "created_at": _utc_now_iso(),
+        "size_bytes": len(content),
+        "content_type": ct,
+    }
+
+    if unified_artifact_store_enabled():
+        from backend.storage.artifact_repository import get_artifact_repository
+
+        repo = get_artifact_repository()
+        repo.put_artifact(
+            artifact_type="vs01_document",
+            logical_ref=document_id,
+            data=content,
+            content_type=ct,
+            visibility="downloadable",
+            metadata={"role": "signed_document_body"},
+        )
+        meta_json = json.dumps(
+            meta, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        repo.put_artifact(
+            artifact_type="vs01_document_meta",
+            logical_ref=document_id,
+            data=meta_json,
+            content_type="application/json",
+            visibility="private",
+            metadata={"role": "signed_document_meta"},
+        )
+        if _legacy_mirror_enabled():
+            try:
+                _write_legacy_layout(document_id, content, meta)
+            except FileExistsError:
+                pass
+        return meta
+
+    _write_legacy_layout(document_id, content, meta)
+    return meta
+
+
+def get_document_meta(document_id: str) -> Optional[Dict[str, Any]]:
+    if unified_artifact_store_enabled():
+        from backend.storage.artifact_repository import get_artifact_repository
+
+        repo = get_artifact_repository()
+        raw = repo.get_bytes_by_logical_ref(
+            artifact_type="vs01_document_meta", logical_ref=document_id
+        )
+        if raw:
+            try:
+                parsed = json.loads(raw.decode("utf-8"))
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+    return _read_legacy_meta(document_id)
+
+
+def get_document_bytes(document_id: str) -> Optional[bytes]:
+    if unified_artifact_store_enabled():
+        from backend.storage.artifact_repository import get_artifact_repository
+
+        b = get_artifact_repository().get_bytes_by_logical_ref(
+            artifact_type="vs01_document", logical_ref=document_id
+        )
+        if b is not None:
+            return b
+    return _read_legacy_body(document_id)
+
+
+def verify_content_sha256(document_id: str, claimed_sha256: str) -> bool:
     meta = get_document_meta(document_id)
     if not meta:
         return False

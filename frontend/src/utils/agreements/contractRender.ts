@@ -43,10 +43,23 @@ export function generateContractMarkdown(input: {
   const paymentFrequency = (normalized.payment?.frequency || "").trim() || "TBD (required)";
   const paymentSchedule = (scheduleText || (dayList.length ? `Days worked: ${dayList.join(", ")}` : "")).trim() || "TBD (required)";
   const paymentTerms = (normalized.payment_terms || "").trim();
-  const partyA = parties[0]?.name || "Party A";
-  const partyB = parties[1]?.name || "Party B";
-  const partyARole = parties[0]?.role ? ` (${parties[0]?.role})` : "";
-  const partyBRole = parties[1]?.role ? ` (${parties[1]?.role})` : "";
+  const partyNameAt = (i: number) => {
+    const n = (parties[i]?.name || "").trim();
+    if (n) return n;
+    return i === 0 ? "Party A" : "Party B";
+  };
+  const partyRoleAt = (i: number) => {
+    const r = (parties[i]?.role || "").trim();
+    if (!r) return "";
+    const low = r.toLowerCase();
+    if (low === "party_a") return "Client";
+    if (low === "party_b") return "Consultant";
+    return r;
+  };
+  const partyA = partyNameAt(0);
+  const partyB = partyNameAt(1);
+  const partyARole = partyRoleAt(0) ? ` (${partyRoleAt(0)})` : "";
+  const partyBRole = partyRoleAt(1) ? ` (${partyRoleAt(1)})` : "";
   const partyAContact = (parties[0]?.contact || "").trim() || "TBD (required)";
   const partyBContact = (parties[1]?.contact || "").trim() || "TBD (required)";
   const termDuration = (normalized.term?.duration || normalized.term_duration || "").trim() || "TBD (required)";

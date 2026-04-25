@@ -5,6 +5,24 @@ import { exportFilledPdf } from "./esignExportPdf";
 import AgreementWorkspace from "./components/agreements/AgreementWorkspace";
 import AgreementBuilderIntake from "./components/agreements/AgreementBuilderIntake";
 import AgreementReview from "./components/agreements/AgreementReview";
+import { AgreementReviewErrorBoundary } from "./agreement/AgreementReviewErrorBoundary";
+import {
+  CollapsibleDocumentSection,
+  DOC_LIST_EMPTY_ESIGN,
+  DOC_LIST_SECTION_ORDER,
+  DOC_LIST_SECTION_TITLE,
+  docListPrimaryCtaForRowStatus,
+  DocumentListEmpty,
+  DocumentListRow,
+  DocumentListSectionGroup,
+  DocumentListStacks,
+  DocumentListUnstyledUl,
+  esignDocRowStatus,
+  formatRelativeFromMs,
+} from "./documents/DocumentWorkspaceListUi";
+import { resolveApiBase } from "./lib/clawApi";
+import { JOY_COPY } from "./joy/clawJoyCopy";
+import { JoyMilestoneMark } from "./joy/JoyMilestone";
 
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -36,8 +54,7 @@ class EsignPdfErrorBoundary extends Component<
   }
 }
 
-const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE || "http://127.0.0.1:8000";
+const API_BASE = resolveApiBase();
 const LEGACY_AGREEMENT_FLAG =
   String((import.meta as any).env?.VITE_CLAW_LEGACY_AGREEMENT || "0") === "1";
 const SHOW_DEMOS = false;
@@ -239,6 +256,8 @@ const App: React.FC = () => {
   const [autoPlaceInitialsBySigner, setAutoPlaceInitialsBySigner] = useState<Record<string, boolean>>({});
   const [showAuditTrail, setShowAuditTrail] = useState(false);
   const [showPlacementValidation, setShowPlacementValidation] = useState(false);
+  const [signerStepSubmitAttempted, setSignerStepSubmitAttempted] = useState(false);
+  const [placementStepSubmitAttempted, setPlacementStepSubmitAttempted] = useState(false);
   const [textToolKind, setTextToolKind] = useState<"printedName" | "textField">(
     "printedName"
   );
@@ -2402,7 +2421,7 @@ const App: React.FC = () => {
       setAgreementError(null);
       setAgreementStatus(null);
       const disclaimers = [
-        "Draft / non-binding by default.",
+        "Draft ready for review.",
         "No legal advice.",
         "Verify jurisdictional enforceability separately.",
       ];
@@ -2605,6 +2624,26 @@ const App: React.FC = () => {
     if (!v) return "Email is required";
     return isValidEmail(v) ? "" : "Enter a valid email";
   };
+  const getNameError = (name: string) => {
+    if (!(name || "").trim()) return "Name is required";
+    return "";
+  };
+  const scrollFocusSignerField = (signerId: string, field: "name" | "email") => {
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-signer-field="${signerId}-${field}"]`) as HTMLElement | null;
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (el instanceof HTMLInputElement) {
+        window.setTimeout(() => {
+          try {
+            el.focus({ preventScroll: true });
+          } catch {
+            el.focus();
+          }
+        }, 350);
+      }
+    });
+  };
   const signerOption = esignSigners.find((s) => s.email === esignSigningAsEmail);
   const signingDisplayName = signerOption?.name?.trim() || esignSigningAsEmail || "Signer";
   const adoptedSignaturePreview = (esignSignatureValue || signingDisplayName || "").trim();
@@ -2615,6 +2654,9 @@ const App: React.FC = () => {
     Boolean((esignSigners[0]?.name || "").trim()) &&
     isValidEmail(esignSigners[0]?.email || "");
   const step1Ready = invalidNames.length === 0 && invalidEmails.length === 0 && esignSigners.length > 0;
+  useEffect(() => {
+    if (step1Ready) setSignerStepSubmitAttempted(false);
+  }, [step1Ready]);
   const getFieldDisplayLabel = (f: typeof esignFields[number]) => {
     if (f.type === "signature") return "Signature";
     if (f.type === "initials") return "Initials";
@@ -2674,7 +2716,10 @@ const App: React.FC = () => {
   );
   const step2Ready = step1Ready && allSignerRequirementsReady;
   useEffect(() => {
-    if (step2Ready) setShowPlacementValidation(false);
+    if (step2Ready) {
+      setShowPlacementValidation(false);
+      setPlacementStepSubmitAttempted(false);
+    }
   }, [step2Ready]);
   type EsignStage = "add_signers" | "place_fields" | "review" | "complete";
   const currentStage: EsignStage =
@@ -2704,7 +2749,7 @@ const App: React.FC = () => {
     }
     setEsignWizardStep(nextStep);
   };
-  // Single deterministic blocker reason for disabled "Send for Signature".
+  // Single deterministic blocker reason for disabled "Send".
   const firstValidationBlocker = useMemo(() => {
     if (!esignDocFile) return { message: "Upload a document before sending.", signerId: null as string | null, fieldId: null as string | null };
     if (!esignPageCount) return { message: "Load the document pages before sending.", signerId: null as string | null, fieldId: null as string | null };
@@ -3834,10 +3879,15 @@ const App: React.FC = () => {
                   {esignMode === "prepare" && esignWizardStep === 1 && (
                     <div className="space-y-2">
                       <div className="text-xs font-semibold tracking-wide text-slate-200">SIGNERS</div>
-                      {esignSigners.map((s, idx) => (
+                      {esignSigners.map((s, idx) => {
+                        const nameErr = signerStepSubmitAttempted ? getNameError(s.name) : "";
+                        const emailErr = signerStepSubmitAttempted ? getEmailError(s.email) : "";
+                        const rowInvalid = Boolean(nameErr || emailErr);
+                        return (
                         <div
                           key={s.id}
-                          className={`rounded border p-2 space-y-1 cursor-pointer transition-all duration-200 ${activeSignerId === s.id ? "border-emerald-400 bg-emerald-900/15 ring-1 ring-emerald-400/40" : "border-slate-700 hover:border-slate-500"}`}
+                          data-signer-row={s.id}
+                          className={`rounded border p-2 space-y-1 cursor-pointer transition-all duration-200 ${activeSignerId === s.id ? "border-emerald-400 bg-emerald-900/15 ring-1 ring-emerald-400/40" : "border-slate-700 hover:border-slate-500"} ${signerStepSubmitAttempted && rowInvalid ? "border-rose-500/50 bg-rose-950/15" : ""}`}
                           onClick={() => setActiveSignerId(s.id)}
                         >
                           <div className="flex items-center justify-between">
@@ -3864,11 +3914,38 @@ const App: React.FC = () => {
                               </button>
                             )}
                           </div>
-                          <input className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1" value={s.name} onChange={(e) => { const n = [...esignSigners]; n[idx] = { ...n[idx], name: e.target.value }; setEsignSigners(n); if (idx === 0) { setEsignSignatureValue(e.target.value); setEsignInitialsValue(deriveInitials(e.target.value)); } }} placeholder={idx === 0 ? "Your full name" : "Signer full name"} />
-                          <input type="email" className={`w-full rounded bg-slate-900 border px-2 py-1 ${getEmailError(s.email) ? "border-rose-500/70" : "border-slate-700"}`} value={s.email} onChange={(e) => { const n = [...esignSigners]; n[idx] = { ...n[idx], email: e.target.value }; setEsignSigners(n); if (idx === 0 && !esignSigningAsEmail) setEsignSigningAsEmail(e.target.value); }} placeholder={idx === 0 ? "your@email.com" : "signer@email.com"} />
-                          {getEmailError(s.email) && (
-                            <div className="text-[10px] text-rose-300">{getEmailError(s.email)}</div>
-                          )}
+                          <input
+                            data-signer-field={`${s.id}-name`}
+                            className={`w-full rounded bg-slate-900 border px-2 py-1 ${nameErr ? "border-rose-500/80 bg-rose-950/20" : "border-slate-700"}`}
+                            value={s.name}
+                            onChange={(e) => {
+                              const n = [...esignSigners];
+                              n[idx] = { ...n[idx], name: e.target.value };
+                              setEsignSigners(n);
+                              if (idx === 0) {
+                                setEsignSignatureValue(e.target.value);
+                                setEsignInitialsValue(deriveInitials(e.target.value));
+                              }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            placeholder={idx === 0 ? "Your full name" : "Signer full name"}
+                          />
+                          {nameErr ? <div className="text-[10px] text-rose-300">{nameErr}</div> : null}
+                          <input
+                            type="email"
+                            data-signer-field={`${s.id}-email`}
+                            className={`w-full rounded bg-slate-900 border px-2 py-1 ${emailErr ? "border-rose-500/80 bg-rose-950/20" : "border-slate-700"}`}
+                            value={s.email}
+                            onChange={(e) => {
+                              const n = [...esignSigners];
+                              n[idx] = { ...n[idx], email: e.target.value };
+                              setEsignSigners(n);
+                              if (idx === 0 && !esignSigningAsEmail) setEsignSigningAsEmail(e.target.value);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            placeholder={idx === 0 ? "your@email.com" : "signer@email.com"}
+                          />
+                          {emailErr ? <div className="text-[10px] text-rose-300">{emailErr}</div> : null}
                           <div className="flex items-center justify-between text-[11px]">
                             <span className="text-slate-400">{recipientStatusByEmail[s.email] || "Not Sent"}</span>
                           </div>
@@ -3892,7 +3969,7 @@ const App: React.FC = () => {
                               ✓ Initials auto-placed on {Math.max(esignPageCount, 0)} page{esignPageCount === 1 ? "" : "s"}
                             </div>
                           )}
-                          {idx === 0 && (
+                          {idx === 0 ? (
                             <div className="mt-2 rounded border border-slate-700 bg-slate-900/50 p-2 space-y-2">
                               <div className="text-[11px] font-medium text-slate-200">Signature &amp; Initials</div>
                               <div className="space-y-1">
@@ -3985,9 +4062,10 @@ const App: React.FC = () => {
                                 </button>
                               </div>
                             </div>
-                          )}
+                          ) : null}
                         </div>
-                      ))}
+                        );
+                      })}
                       <button className="btn w-full text-xs" onClick={() => { const id = `signer_${Date.now()}`; setEsignSigners([...esignSigners, { id, name: "", email: "", role: "signer", status: "Not Sent" }]); setActiveSignerId(id); addEsignActivity("Added signer"); }}>
                         + Add Additional Signer
                       </button>
@@ -4004,7 +4082,8 @@ const App: React.FC = () => {
                             <button
                               key={`pick-${s.id}`}
                               type="button"
-                              className={`w-full rounded border px-2.5 py-2 text-left transition ${active ? "border-emerald-400 bg-emerald-900/15 text-emerald-100 ring-1 ring-emerald-400/40" : "border-slate-700 text-slate-300 hover:border-slate-500"}`}
+                              data-signer-row={s.id}
+                              className={`w-full rounded border px-2.5 py-2 text-left transition ${active ? "border-emerald-400 bg-emerald-900/15 text-emerald-100 ring-1 ring-emerald-400/40" : "border-slate-700 text-slate-300 hover:border-slate-500"} ${placementStepSubmitAttempted && summary.requiredFieldsRemaining > 0 ? "border-rose-500/55 bg-rose-950/20" : ""}`}
                               onClick={() => {
                                 setActiveSignerId(s.id);
                                 setEsignFieldTool(null);
@@ -4315,11 +4394,26 @@ const App: React.FC = () => {
                   {currentStage === "add_signers" && (
                     <button
                       type="button"
-                      className={`btn text-xs ${step1Ready ? "bg-emerald-600 hover:bg-emerald-500" : "opacity-60 cursor-not-allowed"}`}
-                      disabled={!step1Ready}
+                      className={`btn text-xs ${step1Ready ? "bg-emerald-600 hover:bg-emerald-500" : "border border-slate-600 bg-transparent text-slate-300 hover:border-slate-400"}`}
                       onClick={() => {
-                        setActiveSignerId(esignSigners[0]?.id || "");
-                        setEsignStage("place_fields", "add_signers");
+                        if (step1Ready) {
+                          setSignerStepSubmitAttempted(false);
+                          setActiveSignerId(esignSigners[0]?.id || "");
+                          setEsignStage("place_fields", "add_signers");
+                          return;
+                        }
+                        setSignerStepSubmitAttempted(true);
+                        const firstBadName = esignSigners.find((x) => getNameError(x.name));
+                        if (firstBadName) {
+                          setActiveSignerId(firstBadName.id);
+                          scrollFocusSignerField(firstBadName.id, "name");
+                          return;
+                        }
+                        const firstBadEmail = esignSigners.find((x) => getEmailError(x.email));
+                        if (firstBadEmail) {
+                          setActiveSignerId(firstBadEmail.id);
+                          scrollFocusSignerField(firstBadEmail.id, "email");
+                        }
                       }}
                     >
                       Continue to Field Placement
@@ -4329,12 +4423,24 @@ const App: React.FC = () => {
                     <button
                       type="button"
                       className={`btn flex-1 text-xs md:flex-none ${step2Ready ? "bg-emerald-600 hover:bg-emerald-500" : "border border-slate-600 bg-transparent text-slate-300 hover:border-slate-400"}`}
-                      title={!step2Ready ? (firstValidationBlocker?.message || "Complete signer details and required fields to continue.") : "Review and send"}
+                      title={!step2Ready ? "Complete signer details and required fields to continue." : "Review and send"}
                       onClick={() => {
                         if (!step2Ready) {
+                          setPlacementStepSubmitAttempted(true);
                           setShowPlacementValidation(true);
+                          const b = firstValidationBlocker;
+                          if (b?.signerId) {
+                            setActiveSignerId(b.signerId);
+                            requestAnimationFrame(() => {
+                              document
+                                .querySelector(`[data-signer-row="${b.signerId}"]`)
+                                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                            });
+                          }
+                          if (b?.fieldId) setTargetField(b.fieldId);
                           return;
                         }
+                        setPlacementStepSubmitAttempted(false);
                         setShowPlacementValidation(false);
                         setEsignStage("review", "place_fields");
                       }}
@@ -4349,15 +4455,15 @@ const App: React.FC = () => {
                       disabled={Boolean(firstValidationBlocker) || esignSentLocked}
                       onClick={() => setShowSendModal(true)}
                     >
-                      Send for Signature
+                      Send
                     </button>
                   )}
                 </div>
-                {currentStage === "place_fields" && showPlacementValidation && !step2Ready && firstValidationBlocker && (
-                  <div className="text-xs text-amber-300">{firstValidationBlocker.message}</div>
+                {currentStage === "place_fields" && showPlacementValidation && !step2Ready && placementStepSubmitAttempted && (
+                  <div className="text-xs text-slate-400">Please complete the highlighted fields below.</div>
                 )}
-                {currentStage === "add_signers" && !step1Ready && (
-                  <div className="text-xs text-amber-300">Each signer must have a valid name and email.</div>
+                {currentStage === "add_signers" && signerStepSubmitAttempted && !step1Ready && (
+                  <div className="text-xs text-slate-400">Please complete the highlighted fields below.</div>
                 )}
                 </div>
               </div>
@@ -4393,33 +4499,67 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 )}
-                {(documentRepository.drafts.length > 0 || documentRepository.pending.length > 0 || documentRepository.signed.length > 0) && (
-                  <div className="mt-3 rounded border border-slate-700 bg-slate-900/50 p-2">
-                    <div className="text-xs font-medium text-slate-200 mb-1">Document Repository</div>
-                    {[
-                      { label: "/Drafts", docs: documentRepository.drafts },
-                      { label: "/Pending", docs: documentRepository.pending },
-                      { label: "/Signed", docs: documentRepository.signed },
-                    ].map((section) => (
-                      <div key={section.label} className="mb-2">
-                        <div className="text-[11px] text-slate-400 mb-1">{section.label}</div>
-                        {section.docs.length === 0 ? (
-                          <div className="text-[11px] text-slate-500">No documents</div>
-                        ) : (
-                          section.docs.map((doc) => (
-                            <div key={doc.id} className="flex items-center justify-between gap-2 py-1 text-xs">
-                              <div className="min-w-0">
-                                <div className="truncate text-slate-200">{doc.name}</div>
-                                <div className="text-slate-400">{new Date(doc.sentAt).toLocaleString()} • {doc.signerCount} signer(s)</div>
-                              </div>
-                              <span className="rounded border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300">{doc.status}</span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div className="mt-3 rounded border border-slate-700 bg-slate-900/50 p-3">
+                  <div className="text-xs font-medium text-slate-200">Documents</div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Grouped like agreements: active, in progress, completed, and archive.
+                  </p>
+                  <DocumentListStacks>
+                    {DOC_LIST_SECTION_ORDER.map((sec) => {
+                      if (sec === "archive") {
+                        return (
+                          <CollapsibleDocumentSection
+                            key={sec}
+                            title={DOC_LIST_SECTION_TITLE.archive}
+                            count={0}
+                            defaultCollapsed
+                          >
+                            <DocumentListEmpty message={DOC_LIST_EMPTY_ESIGN.archive} />
+                          </CollapsibleDocumentSection>
+                        );
+                      }
+                      const docs =
+                        sec === "active"
+                          ? documentRepository.drafts
+                          : sec === "in_progress"
+                            ? documentRepository.pending
+                            : documentRepository.signed;
+                      return (
+                        <DocumentListSectionGroup
+                          key={sec}
+                          headingId={`doc-sec-legacy-${sec}`}
+                          title={DOC_LIST_SECTION_TITLE[sec]}
+                        >
+                          {docs.length === 0 ? (
+                            <DocumentListEmpty message={DOC_LIST_EMPTY_ESIGN[sec]} />
+                          ) : (
+                            <DocumentListUnstyledUl>
+                              {docs.map((doc) => {
+                                const rowStatus =
+                                  doc.status === "Draft" ? "draft" : esignDocRowStatus(doc.status);
+                                return (
+                                  <li key={doc.id}>
+                                    <DocumentListRow
+                                      title={doc.name}
+                                      subline={`${doc.signerCount} ${doc.signerCount === 1 ? "signer" : "signers"} · Updated ${formatRelativeFromMs(doc.sentAt)}`}
+                                      status={rowStatus}
+                                      primaryCta={docListPrimaryCtaForRowStatus(rowStatus)}
+                                      onPrimaryClick={() => {
+                                        if (rowStatus === "draft") setEsignWizardStep(1);
+                                        else setEsignWizardStep(4);
+                                      }}
+                                      overflowItems={[]}
+                                    />
+                                  </li>
+                                );
+                              })}
+                            </DocumentListUnstyledUl>
+                          )}
+                        </DocumentListSectionGroup>
+                      );
+                    })}
+                  </DocumentListStacks>
+                </div>
               </div>
             )}
             {esignMode !== "sign" && (
@@ -4521,7 +4661,7 @@ const App: React.FC = () => {
                   </div>
                   <div className="mt-4 flex gap-2">
                     <button className="btn flex-1 border border-slate-600 bg-transparent text-slate-300 hover:border-slate-400" onClick={() => setShowSendModal(false)}>Cancel</button>
-                    <button className="btn flex-1 bg-emerald-600 hover:bg-emerald-500 text-white" disabled={esignSending} onClick={sendEsignInvitesFromModal}>{esignSending ? "Sending…" : "Send for Signature"}</button>
+                    <button className="btn flex-1 bg-emerald-600 hover:bg-emerald-500 text-white" disabled={esignSending} onClick={sendEsignInvitesFromModal}>{esignSending ? "Sending…" : "Send"}</button>
                   </div>
                 </div>
               </div>
@@ -4804,14 +4944,12 @@ const App: React.FC = () => {
             {showSignCompleteModal && (
               <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60" onClick={() => setShowSignCompleteModal(false)}>
                 <div data-testid="signed-modal" className="bg-slate-900 border border-slate-700 rounded-lg p-5 max-w-md w-full mx-2 text-center" onClick={(e) => e.stopPropagation()}>
-                  <div className="text-4xl leading-none mb-2" aria-hidden="true">✅</div>
-                  <div className="font-semibold text-emerald-300 text-lg mb-1">Document Signed</div>
-                  <div className="text-xs text-slate-400 mb-4">
-                    All required fields have been completed.
+                  <div className="flex justify-center mb-3">
+                    <JoyMilestoneMark />
                   </div>
-                  <div className="text-xs text-slate-500 mb-4">
-                    This confirms signer completion in the current session.
-                  </div>
+                  <div className="font-semibold text-emerald-300 text-lg mb-1">{JOY_COPY.signLockedIn}</div>
+                  <div className="text-xs text-slate-400 mb-4">Required fields are complete for this session.</div>
+                  <div className="text-xs text-slate-500 mb-4">Signer completion in the current session only — not a legal outcome.</div>
                   <div className="flex gap-2">
                     <button
                       data-testid="download-signed-pdf"
@@ -5380,16 +5518,20 @@ const App: React.FC = () => {
           <>
             {!LEGACY_AGREEMENT_FLAG && routePath !== "/agreements/legacy" ? (
               agreementReviewId ? (
-                <AgreementReview
-                  agreementId={agreementReviewId}
-                  onBackToNew={() => navigateTo("/agreements/new")}
-                  onGoLegacy={() => navigateTo("/agreements/legacy")}
-                />
+                <AgreementReviewErrorBoundary onBack={() => navigateTo("/agreements/new")}>
+                  <AgreementReview
+                    agreementId={agreementReviewId}
+                    onBackToNew={() => navigateTo("/agreements/new")}
+                    onGoLegacy={() => navigateTo("/agreements/legacy")}
+                  />
+                </AgreementReviewErrorBoundary>
               ) : (
                 <AgreementBuilderIntake
                   onCreated={(id) => {
-                    setAgreementReviewId(id);
-                    navigateTo(`/agreements/${encodeURIComponent(id)}/review`);
+                    const tid = String(id || "").trim();
+                    if (!tid) return;
+                    setAgreementReviewId(tid);
+                    navigateTo(`/agreements/${encodeURIComponent(tid)}/review`);
                   }}
                 />
               )

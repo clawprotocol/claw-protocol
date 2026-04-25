@@ -330,7 +330,7 @@ const AgreementWorkspace: React.FC<Props> = ({ model }) => {
     return `${url.origin}${url.pathname}?${url.searchParams.toString()}`;
   }, [session?.session_id]);
   const inviteSubject = useMemo(
-    () => `CLAW Agreement Review - ${session?.current.title || "Agreement Draft"}`,
+    () => `LawDog Agreement Review - ${session?.current.title || "Agreement Draft"}`,
     [session?.current.title]
   );
   const inviteBody = useMemo(() => {

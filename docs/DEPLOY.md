@@ -1,5 +1,13 @@
 # CLAW v1 Deployment Notes
 
+## LawDog frontend — privacy / data-rights inbox (production)
+
+**Required for production LawDog sites:** at **Vite build time**, set **`VITE_LAWDOG_PRIVACY_EMAIL`** to a **real, monitored** address for privacy and data-rights inquiries. The value is baked into static assets (`import.meta.env`); changing it requires a rebuild and redeploy.
+
+If it is missing in a **production** bundle, the Privacy Policy still works but omits a direct `mailto:` for that inbox (fallback channels only), and the SPA logs a **console-only** operator warning at startup — not an end-user banner.
+
+Index: **`docs/architecture/ENV_TOPOLOGY.md`** (table **Frontend (build-time `VITE_*`)**). Example: **`frontend/.env.example`**.
+
 ## Purpose
 This document lists production‑relevant env vars, file paths, and security notes.
 

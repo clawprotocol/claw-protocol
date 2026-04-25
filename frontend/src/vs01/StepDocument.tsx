@@ -10,6 +10,12 @@ export type StepDocumentProps = {
   onFinalized: (payload: Vs01FinalizeDocumentPayload) => void;
   onError: (message: string | null) => void;
   onContinue?: () => void;
+  /** Quick flow: `/app/quick?start=` — PDF may auto-open file picker once. */
+  entryIntent?: "pdf" | "type" | "speak" | null;
+  /** Quick flow: submit typed intake and continue to structured draft (`/app/create`). */
+  onQuickHandoffTypedIntake?: (text: string) => void;
+  /** Quick flow: continue to voice capture on `/app/create`. */
+  onQuickHandoffSpeaking?: () => void;
 };
 
 const STEP_ID = "document" as const;
@@ -42,7 +48,7 @@ function isPdfFile(f: File): boolean {
 function mapFinalizeErrorMessage(raw: string): string {
   const lower = raw.toLowerCase();
   if (raw.includes("VITE_CLAW_API_BASE") || lower.includes("vite_claw_api_base")) {
-    return "CLAW API base is not configured.";
+    return "The app is not configured to reach the LawDog backend. Ask your administrator to set the API URL.";
   }
   if (
     lower.includes("failed to fetch") ||
@@ -52,7 +58,7 @@ function mapFinalizeErrorMessage(raw: string): string {
     lower.includes("err_connection_refused") ||
     lower.includes("econnrefused")
   ) {
-    return "Could not reach the local CLAW server at 127.0.0.1:8000. Start the backend, then try again.";
+    return "We couldn't reach the LawDog service. Check your connection, confirm the backend is running if you're local, then try again.";
   }
   return raw;
 }
@@ -68,6 +74,9 @@ export function StepDocument({
   onFinalized,
   onError,
   onContinue,
+  entryIntent = null,
+  onQuickHandoffTypedIntake,
+  onQuickHandoffSpeaking,
 }: StepDocumentProps) {
   const busyFinalize = loading === "finalize";
   const loadingIdle = loading === "idle";
@@ -78,8 +87,18 @@ export function StepDocument({
   const [dragOver, setDragOver] = useState(false);
 
   const pdfFileInputRef = useRef<HTMLInputElement | null>(null);
+  const didAutoOpenPdfRef = useRef(false);
   /** How the current file was added — drives default agreement title on Details. */
   const [intakeSource, setIntakeSource] = useState<Vs01DocumentIntakeSource | null>(null);
+
+  const showQuickEntryChoices = Boolean(onQuickHandoffTypedIntake && onQuickHandoffSpeaking);
+  type QuickStartMode = "upload" | "typing" | "speaking";
+  const [quickStartMode, setQuickStartMode] = useState<QuickStartMode>("upload");
+  const [quickTypeText, setQuickTypeText] = useState("");
+
+  const showQuickUploadModule = quickStartMode === "upload";
+  const showQuickTypingModule = quickStartMode === "typing";
+  const showQuickSpeakingModule = quickStartMode === "speaking";
 
   const hasFile = Boolean(file && fileLabel);
   /** Server returned document id + hash after finalize (or restored from parent). */
@@ -90,6 +109,22 @@ export function StepDocument({
   const showChooser = !hasFile && !hasStoredDoc && !busyFinalize;
   const showSelectedCard = hasFile || hasStoredDoc;
   const showPreviewPanel = hasFile || hasStoredDoc;
+
+  useEffect(() => {
+    if (!showQuickEntryChoices) return;
+    if (entryIntent !== "pdf") return;
+    if (quickStartMode !== "upload") return;
+    if (!showChooser || busyFinalize) return;
+    if (didAutoOpenPdfRef.current) return;
+    didAutoOpenPdfRef.current = true;
+    requestAnimationFrame(() => pdfFileInputRef.current?.click());
+  }, [showQuickEntryChoices, entryIntent, quickStartMode, showChooser, busyFinalize]);
+
+  useEffect(() => {
+    if (!showQuickEntryChoices) return;
+    if (entryIntent === "type") setQuickStartMode("typing");
+    else if (entryIntent === "speak") setQuickStartMode("speaking");
+  }, [showQuickEntryChoices, entryIntent]);
 
   useEffect(() => {
     if (!file) {
@@ -188,51 +223,225 @@ export function StepDocument({
     },
   };
 
+  const handleQuickTypingSubmit = useCallback(() => {
+    const t = quickTypeText.trim();
+    if (!t || !onQuickHandoffTypedIntake) return;
+    onQuickHandoffTypedIntake(t);
+  }, [quickTypeText, onQuickHandoffTypedIntake]);
+
+  const workflowContinuityHint = (
+    <p className="vs01-doc-entry-continuity-hint">
+      Your input will be turned into a structured draft in the same send/sign/proof workflow.
+    </p>
+  );
+
   return (
-    <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-document-title">
-      <div className={`vs01-doc-step${showChooser ? " vs01-doc-step--hero" : ""}`}>
+    <section className="vs01-doc-step-root" data-vs01-step={STEP_ID} aria-labelledby="vs01-step-document-title">
+      <div
+        className={`vs01-doc-step${showChooser ? " vs01-doc-step--hero" : ""}${
+          showChooser && showQuickEntryChoices ? " vs01-doc-step--hero-wide" : ""
+        }`}
+      >
         {showChooser ? (
-          <div className="vs01-doc-hero">
-            <div
-              className={`vs01-doc-hero-card${dragOver ? " vs01-doc-hero-card--drag" : ""}`}
-              {...heroDragProps}
-            >
-              <h2 id="vs01-step-document-title" className="vs01-doc-step-title vs01-doc-hero-title">
-                Upload your document
-              </h2>
-              <p className="vs01-doc-hero-subtitle">Add a PDF to begin signing.</p>
-              <input
-                ref={pdfFileInputRef}
-                className="vs01-doc-file-input-hidden"
-                type="file"
-                accept=".pdf,application/pdf"
-                disabled={busyFinalize}
-                tabIndex={-1}
-                aria-hidden
-                onChange={(ev) => {
-                  onPickFile(ev.target.files?.[0] ?? null, "upload");
-                  ev.target.value = "";
-                }}
-              />
-              <button
-                type="button"
-                className="vs01-doc-upload-cta"
-                disabled={busyFinalize}
-                onClick={() => pdfFileInputRef.current?.click()}
-              >
-                Upload PDF
-              </button>
-              <p className="vs01-doc-hero-drop-hint">Drag &amp; drop supported</p>
+          showQuickEntryChoices ? (
+            <div className="vs01-doc-hero vs01-doc-hero--entry-wide">
+              <div className="vs01-doc-quick-entry-stack">
+                <h2 id="vs01-step-document-title" className="vs01-sr-only">
+                  Start an agreement
+                </h2>
+                <div key={quickStartMode} className="vs01-doc-quick-module-fade">
+                  {showQuickUploadModule ? (
+                    <div
+                      className={`vs01-doc-entry-primary${dragOver ? " vs01-doc-entry-primary--drag" : ""}${
+                        entryIntent === "pdf" ? " vs01-doc-entry-primary--intent" : ""
+                      }`}
+                      {...heroDragProps}
+                    >
+                      <span className="vs01-doc-entry-primary-label">Fastest start</span>
+                      <p className="vs01-doc-entry-drop-line">Drop your PDF here</p>
+                      <input
+                        ref={pdfFileInputRef}
+                        className="vs01-doc-file-input-hidden"
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        disabled={busyFinalize}
+                        tabIndex={-1}
+                        aria-hidden
+                        onChange={(ev) => {
+                          onPickFile(ev.target.files?.[0] ?? null, "upload");
+                          ev.target.value = "";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="vs01-doc-upload-cta"
+                        disabled={busyFinalize}
+                        onClick={() => pdfFileInputRef.current?.click()}
+                      >
+                        Upload PDF
+                      </button>
+                      <p className="vs01-doc-hero-drop-hint">PDF only · same workflow after upload</p>
+                    </div>
+                  ) : null}
+                  {showQuickTypingModule ? (
+                    <div className="vs01-doc-entry-intake-module">
+                      <span className="vs01-doc-entry-intake-kicker">Starting by typing</span>
+                      <label htmlFor="vs01-quick-type-intake" className="vs01-sr-only">
+                        Describe your deal to structure a draft for send or sign
+                      </label>
+                      <textarea
+                        id="vs01-quick-type-intake"
+                        className="vs01-input vs01-doc-entry-intake-textarea"
+                        rows={5}
+                        value={quickTypeText}
+                        onChange={(e) => setQuickTypeText(e.target.value)}
+                        placeholder="Describe your deal to structure a draft for send or sign…"
+                        disabled={busyFinalize}
+                        autoComplete="off"
+                      />
+                      {workflowContinuityHint}
+                      <button
+                        type="button"
+                        className="vs01-doc-upload-cta"
+                        disabled={busyFinalize || !quickTypeText.trim()}
+                        onClick={() => handleQuickTypingSubmit()}
+                      >
+                        Generate structured draft
+                      </button>
+                      <button
+                        type="button"
+                        className="vs01-doc-entry-switch-to-upload"
+                        disabled={busyFinalize}
+                        onClick={() => setQuickStartMode("upload")}
+                      >
+                        Upload a PDF instead
+                      </button>
+                      <button
+                        type="button"
+                        className="vs01-doc-entry-alt-link vs01-doc-entry-intake-cross-link"
+                        disabled={busyFinalize}
+                        onClick={() => setQuickStartMode("speaking")}
+                      >
+                        Start by speaking
+                      </button>
+                    </div>
+                  ) : null}
+                  {showQuickSpeakingModule ? (
+                    <div className="vs01-doc-entry-intake-module">
+                      <span className="vs01-doc-entry-intake-kicker">Starting by speaking</span>
+                      {workflowContinuityHint}
+                      <button
+                        type="button"
+                        className="vs01-doc-upload-cta"
+                        disabled={busyFinalize}
+                        onClick={() => onQuickHandoffSpeaking?.()}
+                      >
+                        Continue with microphone
+                      </button>
+                      <button
+                        type="button"
+                        className="vs01-doc-entry-switch-to-upload"
+                        disabled={busyFinalize}
+                        onClick={() => setQuickStartMode("upload")}
+                      >
+                        Upload a PDF instead
+                      </button>
+                      <button
+                        type="button"
+                        className="vs01-doc-entry-alt-link vs01-doc-entry-intake-cross-link"
+                        disabled={busyFinalize}
+                        onClick={() => setQuickStartMode("typing")}
+                      >
+                        Start by typing
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                {showQuickUploadModule ? (
+                  <div className="vs01-doc-entry-alt" role="group" aria-labelledby="vs01-quick-alt-label">
+                    <span id="vs01-quick-alt-label" className="vs01-doc-entry-alt-label">
+                      No PDF? Start another way.
+                    </span>
+                    <div className="vs01-doc-entry-alt-actions">
+                      <button
+                        type="button"
+                        className="vs01-doc-entry-alt-link"
+                        disabled={busyFinalize}
+                        onClick={() => setQuickStartMode("typing")}
+                      >
+                        Start by typing
+                      </button>
+                      <span className="vs01-doc-entry-alt-sep" aria-hidden>
+                        ·
+                      </span>
+                      <button
+                        type="button"
+                        className="vs01-doc-entry-alt-link"
+                        disabled={busyFinalize}
+                        onClick={() => setQuickStartMode("speaking")}
+                      >
+                        Start by speaking
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="vs01-doc-hero">
+              <div
+                className={`vs01-doc-hero-card${dragOver ? " vs01-doc-hero-card--drag" : ""}`}
+                {...heroDragProps}
+              >
+                <h2 id="vs01-step-document-title" className="vs01-doc-step-title vs01-doc-hero-title">
+                  Start with a document
+                </h2>
+                <p className="vs01-doc-hero-subtitle">Upload a PDF to begin.</p>
+                <input
+                  ref={pdfFileInputRef}
+                  className="vs01-doc-file-input-hidden"
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  disabled={busyFinalize}
+                  tabIndex={-1}
+                  aria-hidden
+                  onChange={(ev) => {
+                    onPickFile(ev.target.files?.[0] ?? null, "upload");
+                    ev.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  className="vs01-doc-upload-cta"
+                  disabled={busyFinalize}
+                  onClick={() => pdfFileInputRef.current?.click()}
+                >
+                  Upload PDF
+                </button>
+                <p className="vs01-doc-hero-drop-hint">Drag &amp; drop supported</p>
+              </div>
+            </div>
+          )
         ) : (
           <>
             {hasFile && !hasStoredDoc ? (
-              <p className="vs01-doc-step-lead vs01-doc-step-lead--tight">Next: finalize to save on the server.</p>
+              <>
+                {showQuickEntryChoices ? (
+                  <p className="vs01-doc-picked-status" role="status" aria-live="polite">
+                    PDF ready — lock it in with one tap.
+                  </p>
+                ) : (
+                  <p className="vs01-doc-step-lead vs01-doc-step-lead--tight">Next: finalize to save on the server.</p>
+                )}
+              </>
             ) : null}
 
             {showSelectedCard ? (
-              <div className="vs01-doc-work-card" aria-live="polite">
+              <div
+                className="vs01-doc-work-card"
+                aria-live="polite"
+                aria-busy={busyFinalize && showQuickEntryChoices ? true : undefined}
+              >
                 <div className="vs01-doc-selected-row">
                   <div className="vs01-doc-selected-info">
                     {hasFile ? (
@@ -312,13 +521,17 @@ export function StepDocument({
               </div>
             ) : null}
 
-            {hasStoredDoc ? (
+            {hasStoredDoc && !showQuickEntryChoices ? (
               <p className="vs01-doc-finalized-line vs01-doc-finalized-line--plain" role="status">
                 Document saved. Ready for details.
                 <span className="vs01-sr-only">
                   {" "}
                   Document ID {documentId}. Content SHA-256 {contentSha256}.
                 </span>
+              </p>
+            ) : hasStoredDoc && showQuickEntryChoices ? (
+              <p className="vs01-doc-saved-inline" role="status" aria-live="polite">
+                Saved — moving you forward…
               </p>
             ) : null}
 
@@ -331,14 +544,22 @@ export function StepDocument({
                     disabled={busyFinalize || !loadingIdle}
                     onClick={() => void handleFinalize()}
                   >
-                    {busyFinalize ? "Finalizing…" : "Finalize document"}
+                    {busyFinalize
+                      ? showQuickEntryChoices
+                        ? "Saving…"
+                        : "Finalizing…"
+                      : showQuickEntryChoices
+                        ? "Save & continue"
+                        : "Finalize document"}
                   </button>
                   <p className="vs01-doc-cta-caption" aria-live="polite">
-                    Finalize to record the document on the server and continue.
+                    {showQuickEntryChoices
+                      ? "Secures your file — still nothing sent."
+                      : "Finalize to record the document on the server and continue."}
                   </p>
                 </>
               ) : null}
-              {hasStoredDoc ? (
+              {hasStoredDoc && !showQuickEntryChoices ? (
                 <button
                   type="button"
                   className="vs01-btn vs01-btn--primary"

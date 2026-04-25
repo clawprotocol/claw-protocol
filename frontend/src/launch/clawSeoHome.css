@@ -1,0 +1,106 @@
+/* SEO / e-sign landing — minimal light shell (mobile-first) */
+
+.claw-seo-root {
+  min-height: 100vh;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.claw-seo-root .claw-seo-trust-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem 1.25rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+  color: #475569;
+}
+
+.claw-seo-root .claw-seo-card {
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.claw-seo-root .claw-seo-input {
+  border-radius: 0.875rem;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.claw-seo-root .claw-seo-input::placeholder {
+  color: #94a3b8;
+}
+
+.claw-seo-root .claw-seo-input:focus {
+  outline: none;
+  border-color: #0d9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.2);
+}
+
+.claw-seo-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0 1.25rem;
+  border-radius: 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  background: #0f766e;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0       1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.claw-seo-btn-primary:hover {
+  background: #0d9488;
+}
+
+.claw-seo-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.claw-seo-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0 1.25rem;
+  border-radius: 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  background: #fff;
+  color: #0f766e;
+  border: 2px solid #0d9488;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.claw-seo-btn-secondary:hover {
+  background: #f0fdfa;
+}
+
+.claw-seo-seo-block h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 0.75rem;
+}
+
+.claw-seo-seo-block p {
+  font-size: 1rem;
+  line-height: 1.75;
+  max-width: 30rem;
+  margin-left: auto;
+  margin-right: auto;
+  color: #475569;
+}

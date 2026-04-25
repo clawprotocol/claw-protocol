@@ -1,14 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { JOY_COPY } from "../joy/clawJoyCopy";
+import { useAccess } from "../access/AccessContext";
+import { UpgradeLimitNotice } from "../components/access/UpgradeLimitNotice";
 import "./vs01.css";
 import { StepAgreementDetails } from "./StepAgreementDetails";
 import { RecipientSigningView } from "./RecipientSigningView";
 import { StepCompleteAndSend } from "./StepCompleteAndSend";
 import { StepDocument } from "./StepDocument";
 import { StepDone } from "./StepDone";
+import { Vs01DocumentsList } from "./Vs01DocumentsList";
 import { StepPrepareSignature } from "./StepPrepareSignature";
+import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
-import { getReceipt } from "./vs01Api";
+import { fetchDocumentContent, getReceipt } from "./vs01Api";
+import { useLaunchNav } from "../launch/LaunchNavContext";
+import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
+import { prepareFreshMarketingEntry } from "../launch/marketingSession";
+import { logProductEvent } from "../lib/experimentation/productEvents";
+import { sha256Bytes } from "../utils/agreements/hash";
 import type {
   Vs01Counterparty,
   Vs01DocumentIntakeSource,
@@ -64,13 +74,48 @@ const INITIAL_RECIPIENT_FIELDS: Vs01RecipientPlacedField[] =
 export type Vs01WizardProps = {
   /** Reserved for future controlled mode; shell ignores if unset. */
   initialStep?: Vs01Step;
+  /** Open an existing finalized document by id (e.g. /app/esign/:id); loads bytes and content hash. */
+  seedDocumentId?: string | null;
+  /** Quick-send style: hide numbered stepper; user advances with each screen’s primary button. */
+  hideStepper?: boolean;
+  /** From `/app/quick?start=` — highlights entry path; PDF may auto-open file picker once. */
+  quickEntryIntent?: "pdf" | "type" | "speak" | null;
 };
 
 /**
  * Envelope flow: document → details → sign → handoff → receipt.
  * Owns step index, finalize identifiers, counterparties, loading, and errors.
  */
-export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
+export function Vs01Wizard({
+  initialStep = 0,
+  seedDocumentId = null,
+  hideStepper = false,
+  quickEntryIntent = null,
+}: Vs01WizardProps) {
+  const access = useAccess();
+  const { navigate } = useLaunchNav();
+  const handleQuickHandoffTypedIntake = useCallback(
+    (text: string) => {
+      const t = text.trim();
+      if (!t) return;
+      prepareFreshMarketingEntry();
+      logProductEvent("quick_entry_choose", { surface: "vs01", path: "type_handoff" });
+      stashHeroIntakePrefill(t, { fromHomeSubmit: true });
+      navigate("/app/create", {
+        heroIntake: t,
+        heroFromHome: true,
+        heroVoiceFinalize: false,
+        heroQuickSendTypedHandoff: true,
+      });
+    },
+    [navigate],
+  );
+  const handleQuickHandoffSpeaking = useCallback(() => {
+    prepareFreshMarketingEntry();
+    logProductEvent("quick_entry_choose", { surface: "vs01", path: "speak" });
+    navigate("/app/create");
+  }, [navigate]);
+  const countedSignatureReceiptRef = useRef<string | null>(null);
   const [step, setStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.step ?? initialStep);
   /** Furthest step visited — gates Receipt until assign step satisfied. */
   const [furthestStep, setFurthestStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.furthestStep ?? initialStep);
@@ -93,7 +138,12 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
     () => VS01_URL_BOOT?.counterparties ?? initialCounterparties()
   );
 
-  const [documentId, setDocumentId] = useState<string | null>(() => VS01_URL_BOOT?.documentId ?? null);
+  const [documentId, setDocumentId] = useState<string | null>(() => {
+    const fromUrl = VS01_URL_BOOT?.documentId?.trim();
+    if (fromUrl) return fromUrl;
+    const seed = (seedDocumentId || "").trim();
+    return seed || null;
+  });
   const [contentSha256, setContentSha256] = useState<string | null>(null);
   /** Set when document finalize succeeds — drives default agreement title. */
   const [documentMeta, setDocumentMeta] = useState<{
@@ -134,11 +184,8 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
     [creatorName.trim(), creatorEmail.trim()].filter(Boolean).join(" · ") || "signer";
 
   const detailsOk = useMemo(
-    () =>
-      agreementTitle.trim().length > 0 &&
-      creatorName.trim().length > 0 &&
-      counterparties.some((c) => c.name.trim().length > 0),
-    [agreementTitle, creatorName, counterparties]
+    () => detailsStepIsValid(agreementTitle, creatorName, creatorEmail, counterparties),
+    [agreementTitle, creatorName, creatorEmail, counterparties]
   );
 
   const docFinalized = Boolean(documentId && contentSha256);
@@ -167,21 +214,56 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
     setError(null);
   }, []);
 
-  const handleFinalized = useCallback((payload: Vs01FinalizeDocumentPayload) => {
-    setDocumentId(payload.documentId ? payload.documentId : null);
-    setContentSha256(payload.contentSha256 ? payload.contentSha256 : null);
-    setSenderPlacedFields([]);
-    setSenderSignatureRef(null);
-    setRecipientPlacedFields([]);
-    if (!payload.documentId?.trim()) {
-      setDocumentMeta(null);
-      return;
-    }
-    const fn = payload.fileName?.trim();
-    if (fn && payload.source) {
-      setDocumentMeta({ fileName: fn, source: payload.source });
-    }
-  }, []);
+  /** Deep link: /app/esign/:documentId — fetch content and bind hash so steps 1+ unlock. */
+  useEffect(() => {
+    if (RECIPIENT_SIGNER_DEEP_LINK) return;
+    const sid = (seedDocumentId || "").trim();
+    if (!sid) return;
+    if (VS01_URL_BOOT?.documentId?.trim()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const blob = await fetchDocumentContent(sid);
+        const buf = await blob.arrayBuffer();
+        const hex = (await sha256Bytes(buf)).toLowerCase();
+        if (cancelled) return;
+        setDocumentId(sid);
+        setContentSha256(hex);
+        setFurthestStep((prev) => (1 > prev ? 1 : prev));
+        goToStep(1);
+      } catch (e) {
+        console.error("[Vs01Wizard] seed document load failed", e);
+        if (!cancelled) setError("Could not load this document. Check the link or start a new packet.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [seedDocumentId, goToStep]);
+
+  const handleFinalized = useCallback(
+    (payload: Vs01FinalizeDocumentPayload) => {
+      setDocumentId(payload.documentId ? payload.documentId : null);
+      setContentSha256(payload.contentSha256 ? payload.contentSha256 : null);
+      setSenderPlacedFields([]);
+      setSenderSignatureRef(null);
+      setRecipientPlacedFields([]);
+      if (!payload.documentId?.trim()) {
+        setDocumentMeta(null);
+        return;
+      }
+      const fn = payload.fileName?.trim();
+      if (fn && payload.source) {
+        setDocumentMeta({ fileName: fn, source: payload.source });
+      }
+      const did = (payload.documentId || "").trim();
+      const hash = (payload.contentSha256 || "").trim();
+      if (hideStepper && did && hash) {
+        goToStep(1);
+      }
+    },
+    [hideStepper, goToStep]
+  );
 
   useEffect(() => {
     if (step !== 1) return;
@@ -198,13 +280,20 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
       senderPlacedFields: PlacedSigningField[];
       senderSignatureRef: Vs01SenderSignatureRef | null;
     }) => {
+      const rid = payload.receiptId?.trim() || "";
+      if (rid && countedSignatureReceiptRef.current !== rid) {
+        countedSignatureReceiptRef.current = rid;
+        if (access.check("signature_request").allowed) {
+          access.recordUsage("signature_requests");
+        }
+      }
       setReceiptId(payload.receiptId || null);
       setReceiptHashSha256(payload.receiptHashSha256 || null);
       setReceipt(payload.receipt ?? null);
       setSenderPlacedFields(payload.senderPlacedFields ?? []);
       setSenderSignatureRef(payload.senderSignatureRef ?? null);
     },
-    []
+    [access]
   );
 
   const handleReceiptUpdated = useCallback(
@@ -240,6 +329,21 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
 
   const stepCount = STEPS.length;
 
+  const vs01DocumentsUpdatedMs = useMemo(
+    () => Date.now(),
+    [step, documentId, receiptId, agreementTitle, documentMeta?.fileName]
+  );
+
+  const namedCounterpartyCount = useMemo(
+    () => counterparties.filter((c) => c.name.trim().length > 0).length,
+    [counterparties]
+  );
+  const counterpartyGate = access.check("add_vs01_counterparty", {
+    vs01NamedCounterpartyCount: namedCounterpartyCount,
+  });
+  const esignGate = access.check("esign_flow");
+  const signatureGate = access.check("signature_request");
+
   if (RECIPIENT_SIGNER_DEEP_LINK && RECIPIENT_LOCKED_CP_ID) {
     return (
       <>
@@ -266,11 +370,10 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
           {recipientSigningFinished ? (
             <section className="vs01-recipient-signing-done" aria-labelledby="vs01-recipient-done-title">
               <h2 id="vs01-recipient-done-title" className="vs01-card-title">
-                Signing complete
+                {JOY_COPY.signLockedIn}
               </h2>
               <p className="vs01-card-help">
-                Your responses are saved in this browser session. The sender can continue from their receipt flow when
-                everyone has signed.
+                Saved in this session. The sender continues from their receipt flow when everyone has signed.
               </p>
             </section>
           ) : (
@@ -308,35 +411,50 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
           </button>
         </div>
       ) : null}
+      {counterpartyGate.approaching && counterpartyGate.allowed ? (
+        <UpgradeLimitNotice gate={counterpartyGate} className="mb-3" />
+      ) : null}
+      {!esignGate.allowed && step >= 2 ? (
+        <UpgradeLimitNotice gate={esignGate} className="mb-3" />
+      ) : null}
+      {!signatureGate.allowed && step >= 2 ? (
+        <UpgradeLimitNotice gate={signatureGate} className="mb-3" />
+      ) : null}
 
-      <nav className="vs01-stepper" aria-label={`VS01 flow: ${stepCount} steps from document to receipt`}>
-        {STEPS.map(({ id, label }) => {
-          const active = id === step;
-          const future = id > step;
-          const blocked = future && !canReachStep(id);
-          const stepNum = id + 1;
-          return (
-            <button
-              key={id}
-              type="button"
-              className={`vs01-stepper-step${active ? " vs01-stepper-step--active" : ""}`}
-              disabled={blocked}
-              aria-current={active ? "step" : undefined}
-              aria-label={
-                blocked
-                  ? `Step ${stepNum} of ${stepCount}: ${label} (complete earlier steps first)`
-                  : `Step ${stepNum} of ${stepCount}: ${label}`
-              }
-              onClick={() => {
-                if (!blocked) goToStep(id);
-              }}
-            >
-              <span className="vs01-stepper-num">{stepNum}</span>
-              <span className="vs01-stepper-label">{label}</span>
-            </button>
-          );
-        })}
-      </nav>
+      {!hideStepper ? (
+        <nav className="vs01-stepper" aria-label={`VS01 flow: ${stepCount} steps from document to receipt`}>
+          {STEPS.map(({ id, label }) => {
+            const active = id === step;
+            const future = id > step;
+            const blocked = future && !canReachStep(id);
+            const stepNum = id + 1;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`vs01-stepper-step${active ? " vs01-stepper-step--active" : ""}`}
+                disabled={blocked}
+                aria-current={active ? "step" : undefined}
+                aria-label={
+                  blocked
+                    ? `Step ${stepNum} of ${stepCount}: ${label} (complete earlier steps first)`
+                    : `Step ${stepNum} of ${stepCount}: ${label}`
+                }
+                onClick={() => {
+                  if (!blocked) goToStep(id);
+                }}
+              >
+                <span className="vs01-stepper-num">{stepNum}</span>
+                <span className="vs01-stepper-label">{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      ) : hideStepper && step === 0 ? null : (
+        <p className="mb-4 text-center text-sm leading-relaxed text-slate-400" aria-live="polite">
+          Step {step + 1} of {stepCount}
+        </p>
+      )}
 
       <div
         className="vs01-card vs01-card--envelope"
@@ -353,6 +471,9 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
             contentSha256={contentSha256}
             onFinalized={handleFinalized}
             onError={setError}
+            entryIntent={quickEntryIntent}
+            onQuickHandoffTypedIntake={hideStepper ? handleQuickHandoffTypedIntake : undefined}
+            onQuickHandoffSpeaking={hideStepper ? handleQuickHandoffSpeaking : undefined}
             onContinue={() => {
               /* Details step is index 1. Advance when finalize produced ids (mirrors docFinalized / canReachStep(1)). */
               const did = documentId?.trim();
@@ -380,8 +501,17 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
             onError={setError}
             onBack={() => goToStep(0)}
             onContinue={() => {
+              if (!esignGate.allowed) {
+                setError(esignGate.message || "This step isn’t available on your plan.");
+                return;
+              }
               if (detailsOk) goToStep(2);
             }}
+            counterpartyCapacityReached={
+              access.entitlements.max_vs01_counterparties != null &&
+              namedCounterpartyCount >= access.entitlements.max_vs01_counterparties
+            }
+            counterpartyCapacityHint={counterpartyGate.message}
           />
         ) : null}
         {step === 2 ? (
@@ -430,9 +560,20 @@ export function Vs01Wizard({ initialStep = 0 }: Vs01WizardProps) {
             onError={setError}
             onReceiptUpdated={handleReceiptUpdated}
             onStartOver={resetAll}
+            compactCompletion={hideStepper}
           />
         ) : null}
       </div>
+
+      <Vs01DocumentsList
+        documentMeta={documentMeta}
+        documentId={documentId}
+        agreementTitle={agreementTitle}
+        counterparties={counterparties}
+        step={step}
+        goToStep={goToStep}
+        updatedAtMs={vs01DocumentsUpdatedMs}
+      />
     </>
   );
 }

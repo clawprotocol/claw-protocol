@@ -33,6 +33,9 @@ export function useSpeechController(opts: Options) {
   const silenceTimerRef = useRef<number | null>(null);
   const [isSupported, setIsSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  /** True after `stop()` until `onend` — recognition may still deliver finals. */
+  const [awaitingRecognitionEnd, setAwaitingRecognitionEnd] = useState(false);
+  const endWaitersRef = useRef<(() => void)[]>([]);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [autoStopAfterSilence, setAutoStopAfterSilence] = useState(false);
   const [warningShown, setWarningShown] = useState(false);
@@ -41,8 +44,67 @@ export function useSpeechController(opts: Options) {
     setIsSupported(Boolean(getCtor()));
   }, []);
 
+  const flushEndWaiters = useCallback(() => {
+    const q = endWaitersRef.current.splice(0);
+    for (const fn of q) {
+      try {
+        fn();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    restartRef.current = false;
+    clearSilenceTimer();
+    const rec = recognitionRef.current;
+    if (rec && isListening) {
+      setAwaitingRecognitionEnd(true);
+      try {
+        rec.stop();
+      } catch {
+        setAwaitingRecognitionEnd(false);
+        setIsListening(false);
+        flushEndWaiters();
+      }
+    } else {
+      setIsListening(false);
+      setAwaitingRecognitionEnd(false);
+      flushEndWaiters();
+    }
+  }, [clearSilenceTimer, flushEndWaiters, isListening]);
+
+  const finalizeRecording = useCallback((): Promise<void> => {
+    return new Promise((resolve) => {
+      if (!isListening && !awaitingRecognitionEnd) {
+        resolve();
+        return;
+      }
+      endWaitersRef.current.push(resolve);
+      if (isListening) {
+        stopRecording();
+      }
+    });
+  }, [awaitingRecognitionEnd, isListening, stopRecording]);
+
+  const scheduleSilenceStop = useCallback(() => {
+    clearSilenceTimer();
+    if (!autoStopAfterSilence || !isListening || awaitingRecognitionEnd) return;
+    silenceTimerRef.current = window.setTimeout(() => {
+      stopRecording();
+    }, 4000);
+  }, [autoStopAfterSilence, awaitingRecognitionEnd, clearSilenceTimer, isListening, stopRecording]);
+
   useEffect(() => {
-    if (!isListening) return;
+    if (!isListening || awaitingRecognitionEnd) return;
     const timer = window.setInterval(() => {
       const startedAt = startedAtRef.current;
       if (!startedAt) return;
@@ -56,36 +118,7 @@ export function useSpeechController(opts: Options) {
       }
     }, 250);
     return () => window.clearInterval(timer);
-  }, [isListening, warningShown]);
-
-  const clearSilenceTimer = useCallback(() => {
-    if (silenceTimerRef.current) {
-      window.clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleSilenceStop = useCallback(() => {
-    clearSilenceTimer();
-    if (!autoStopAfterSilence || !isListening) return;
-    silenceTimerRef.current = window.setTimeout(() => {
-      stopRecording();
-    }, 4000);
-  }, [autoStopAfterSilence, clearSilenceTimer, isListening]);
-
-  const stopRecording = useCallback(() => {
-    restartRef.current = false;
-    clearSilenceTimer();
-    const rec = recognitionRef.current;
-    if (rec) {
-      try {
-        rec.stop();
-      } catch {
-        // ignore stop race errors
-      }
-    }
-    setIsListening(false);
-  }, [clearSilenceTimer]);
+  }, [isListening, awaitingRecognitionEnd, stopRecording, warningShown]);
 
   const startRecording = useCallback(() => {
     const Ctor = getCtor();
@@ -137,6 +170,8 @@ export function useSpeechController(opts: Options) {
         scheduleSilenceStop();
       } else {
         setIsListening(false);
+        setAwaitingRecognitionEnd(false);
+        flushEndWaiters();
       }
     };
 
@@ -146,14 +181,16 @@ export function useSpeechController(opts: Options) {
     setWarningShown(false);
     try {
       rec.start();
+      setAwaitingRecognitionEnd(false);
       setIsListening(true);
       return true;
     } catch {
       opts.onError?.("Could not start microphone. Please allow mic access.");
+      setAwaitingRecognitionEnd(false);
       setIsListening(false);
       return false;
     }
-  }, [autoStopAfterSilence, opts, scheduleSilenceStop, stopRecording]);
+  }, [autoStopAfterSilence, flushEndWaiters, opts, scheduleSilenceStop, stopRecording]);
 
   const elapsedLabel = useMemo(() => {
     const totalSeconds = Math.floor(elapsedMs / 1000);
@@ -167,12 +204,14 @@ export function useSpeechController(opts: Options) {
   return {
     isSupported,
     isListening,
+    awaitingRecognitionEnd,
     elapsedLabel,
     autoStopAfterSilence,
     setAutoStopAfterSilence,
     warningShown,
     startRecording,
     stopRecording,
+    finalizeRecording,
   };
 }
 

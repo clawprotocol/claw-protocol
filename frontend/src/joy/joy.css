@@ -1,0 +1,97 @@
+/* Joy layer — subtle motion and warmth without overpowering dark UI */
+
+.claw-joy-milestone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  width: 2.75rem;
+  height: 2.75rem;
+  background: color-mix(in srgb, var(--vs01-color-accent, #10b981) 18%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--vs01-color-accent, #10b981) 35%, transparent),
+    0 0 20px color-mix(in srgb, var(--vs01-color-accent, #10b981) 25%, transparent);
+  animation: claw-joy-glow 2.2s ease-in-out 1;
+}
+
+.claw-joy-milestone svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--vs01-color-accent, #34d399);
+}
+
+@keyframes claw-joy-glow {
+  0% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--vs01-color-accent, #10b981) 20%, transparent),
+      0 0 8px color-mix(in srgb, var(--vs01-color-accent, #10b981) 15%, transparent);
+  }
+  40% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--vs01-color-accent, #10b981) 45%, transparent),
+      0 0 26px color-mix(in srgb, var(--vs01-color-accent, #10b981) 32%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--vs01-color-accent, #10b981) 35%, transparent),
+      0 0 20px color-mix(in srgb, var(--vs01-color-accent, #10b981) 25%, transparent);
+  }
+}
+
+/* Warm rim for primary flow shells (Doginal-adjacent cream hint on dark) */
+.claw-joy-flow-warm {
+  border-radius: 0.75rem;
+  background: linear-gradient(
+    165deg,
+    rgba(245, 240, 232, 0.07) 0%,
+    rgba(15, 23, 42, 0.35) 55%,
+    rgba(15, 23, 42, 0.2) 100%
+  );
+  border: 1px solid rgba(245, 240, 232, 0.09);
+}
+
+.claw-joy-social-footer {
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.85);
+  text-align: center;
+}
+
+.claw-joy-step-current {
+  color: rgba(52, 211, 153, 0.95) !important;
+  font-weight: 600;
+}
+
+/* Brief highlight when jurisdiction (or similar) was normalized on save */
+@keyframes claw-jurisdiction-shimmer {
+  0% {
+    background-color: transparent;
+  }
+  35% {
+    background-color: rgba(16, 185, 129, 0.12);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.claw-jurisdiction-normalized-flash {
+  animation: claw-jurisdiction-shimmer 0.85s ease-out 1;
+  border-radius: 0.375rem;
+}
+
+@keyframes claw-payment-aha-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.claw-payment-aha-banner {
+  animation: claw-payment-aha-in 0.45s ease-out 1;
+}

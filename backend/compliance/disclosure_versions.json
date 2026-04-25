@@ -1,0 +1,18 @@
+{
+  "_comment": "COUNSEL REVIEW REQUIRED — Versioned disclosure payloads for consent logging. Hashes computed server-side from canonical JSON.",
+  "product_terms_1": {
+    "version": "2026-04-05",
+    "title": "CLAW product (non-law firm)",
+    "summary": "CLAW is not a law firm and does not provide legal advice. It provides workflow, records, verification, and evidence-oriented tools. No attorney-client relationship is created. Enforceability and appropriateness depend on facts and jurisdiction; consult counsel when uncertain."
+  },
+  "legal_adjacent_ai_1": {
+    "version": "2026-04-05",
+    "title": "Legal-adjacent AI (informational only)",
+    "summary": "Drafting assistance, summaries, and risk triage are informational only, not legal advice, and not a substitute for attorney review. Jurisdiction-specific conclusions require counsel. Do not rely on outputs as legal determinations."
+  },
+  "esign_records_1": {
+    "version": "2026-04-05",
+    "title": "E-sign and records (E-SIGN / UETA baseline)",
+    "summary": "E-sign laws vary by state, transaction type, and party. CLAW captures signer intent and produces audit records, but does not determine enforceability, provide notarization unless separately offered, or replace legal review where required."
+  }
+}

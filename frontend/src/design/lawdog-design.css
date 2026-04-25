@@ -1,0 +1,89 @@
+/* LawDog micro-motion + success patterns — no external animation libs */
+
+@keyframes lawdog-recorded-pop {
+  0% {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  45% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.lawdog-recorded-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vs01-color-success, #6ee7b7);
+  animation: lawdog-recorded-pop 0.38s ease-out forwards;
+}
+
+.lawdog-recorded-mark img,
+.lawdog-recorded-mark svg {
+  display: block;
+  height: 100%;
+  width: 100%;
+  object-fit: contain;
+}
+
+@keyframes lawdog-pulse-once {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.lawdog-pulse {
+  animation: lawdog-pulse-once 0.35s ease-out;
+}
+
+@keyframes lawdog-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lawdog-success-panel-enter {
+  animation: lawdog-fade-up 0.42s ease-out forwards;
+}
+
+/* Top proof tier — pastel glow, low opacity (leaderboard / status only) */
+.lawdog-tier-glow-rose {
+  box-shadow:
+    0 0 32px rgba(255, 177, 221, 0.16),
+    0 0 1px rgba(255, 177, 221, 0.28);
+}
+
+/* Primary / secondary press feedback */
+.vs01-btn:active:not(:disabled) {
+  transform: scale(0.98);
+  transition:
+    transform 0.08s ease-out,
+    box-shadow 0.08s ease-out;
+}
+
+.vs01-done-closure.lawdog-success-panel-accent,
+.lawdog-success-banner.lawdog-success-panel-accent {
+  border-left: 3px solid var(--vs01-color-success, #6ee7b7);
+  padding-left: 0.9rem;
+}
+
+/* Claim / account modal — small centered mark, low-opacity brand glow */
+.lawdog-claim-modal-logo-glow {
+  filter: drop-shadow(0 0 14px rgba(212, 165, 116, 0.22));
+}

@@ -37,6 +37,10 @@ except ImportError:
 
 API_BASE = os.environ.get("CLAW_API_BASE", "http://127.0.0.1:8000").rstrip("/")
 TIMEOUT = float(os.environ.get("CLAW_SMOKE_TIMEOUT", "20"))
+WORKSPACE_HEADERS = {
+    "X-Claw-Org-Id": (os.environ.get("CLAW_SMOKE_ORG_ID", "smoke-org").strip() or "smoke-org"),
+}
+JSON_HEADERS = {**WORKSPACE_HEADERS, "Content-Type": "application/json"}
 
 
 def _die(msg: str, resp: Optional["requests.Response"] = None) -> None:
@@ -58,7 +62,7 @@ def _die(msg: str, resp: Optional["requests.Response"] = None) -> None:
 def _post(path: str, payload: Dict[str, Any]) -> "requests.Response":
     url = f"{API_BASE}{path}"
     try:
-        return requests.post(url, json=payload, timeout=TIMEOUT)
+        return requests.post(url, json=payload, headers=JSON_HEADERS, timeout=TIMEOUT)
     except Exception as e:
         _die(f"Request error POST {url}: {e}")
 
@@ -66,7 +70,7 @@ def _post(path: str, payload: Dict[str, Any]) -> "requests.Response":
 def _get(path: str) -> "requests.Response":
     url = f"{API_BASE}{path}"
     try:
-        return requests.get(url, timeout=TIMEOUT)
+        return requests.get(url, headers=WORKSPACE_HEADERS, timeout=TIMEOUT)
     except Exception as e:
         _die(f"Request error GET {url}: {e}")
 

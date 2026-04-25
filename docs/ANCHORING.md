@@ -1,7 +1,6 @@
 # CLAW Anchoring Model
 
-CLAW uses Bitcoin anchoring to provide public, tamper-evident proof that specific data existed in a specific 
-form no later than a given point in time.
+LawDog / CLAW uses **Bitcoin** as the **canonical** public anchor: tamper-evident proof that specific commitments (e.g. batch Merkle roots) existed by a given time. **Dogecoin** is a **mandatory mirror** of the same commitment at launch (operational pairing); it is **not** the proof source of truth — verification still centers on Bitcoin.
 
 Anchoring occurs at two distinct layers: **Genesis** and **Epochs**.
 
@@ -52,10 +51,10 @@ An Epoch may exist in one of two states:
 on-chain.
 
 - **Anchored**:  
-  The Epoch’s Merkle root has been embedded in a Bitcoin transaction P_RETURN), providing a globally 
-verifiable timestamp.
+  The Epoch’s Merkle root has been embedded in a Bitcoin transaction (OP_RETURN), providing a globally 
+verifiable timestamp. (Optional: a **mirror** transaction on Dogecoin may exist with the same commitment.)
 
-Both states are valid; anchoring increases evidentiary strength.
+Both states are valid; anchoring increases evidentiary strength. On-chain anchoring is **not** legal finality or a compliance certification.
 
 ---
 
@@ -73,5 +72,5 @@ metadata.
 
 - Genesis defines verification rules
 - Epochs record verification events
-- Bitcoin anchoring provides **public finality**
+- Bitcoin anchoring provides a **public, independently verifiable** time commitment for the batched root (not “legal finality”)
 

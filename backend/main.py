@@ -14,7 +14,11 @@ from pydantic import BaseModel
 
 from backend.utils import metrics
 from backend.handlers.receipt_handler import build_receipt
-from backend.handlers.verify_handler import VerifyReceiptRequest, verify_receipt_packet
+from backend.handlers.verify_handler import (
+    VerifyReceiptRequest,
+    verify_receipt_packet,
+    verify_usage_verification_bundle,
+)
 from backend.handlers.verify_tree_handler import VerifyTreeRequest, verify_receipt_tree
 from backend.handlers.timeline_handler import (
     PROTOCOL_VERSION as TIMELINE_PROTOCOL_VERSION,
@@ -29,8 +33,21 @@ from backend.handlers.timeline_handler import (
     create_receipt_response,
 )
 from backend.utils.timeline_store import TimelineStore
-from backend.handlers.anchor_adapter import AnchorAdapter, BitcoinCoreRpcAnchorAdapter
+from backend.anchoring.execution import submit_commitment_for_network
 from backend.handlers.verifier_api_handler import get_batch, get_receipt_for_verify
+from backend.anchoring.config import (
+    anchor_canonical_chain_policy,
+    anchor_mirror_dogecoin_enabled,
+    anchor_mirror_dogecoin_required,
+    bitcoin_execution_provider_type,
+    dogecoin_execution_provider_type,
+    dogecoin_mirror_every_nth_batch_close,
+    launch_anchor_cadence_days,
+    third_party_anchor_api_key_configured,
+    third_party_anchor_base_url,
+)
+from backend.config.anchor_network_config import anchor_cadence_summary
+from backend.config.external_ai_policy import log_external_ai_policy_at_startup
 
 # ✅ LLM router (OpenAI wrapper)
 from backend.llm_router import call_legal_llm
@@ -64,6 +81,14 @@ from backend.utils.tiers import Capability
 
 # ✅ Batch anchoring queue (proof anchoring)
 from backend.utils.anchor_queue import AnchorQueue
+from backend.config.deployment_runtime import (
+    admin_anchor_http_trigger_enabled,
+    public_runtime_summary,
+)
+from backend.ops.break_glass_audit import BreakGlassAction, log_break_glass_event
+from backend.ops.deploy_readiness import gather_deploy_readiness
+from backend.services.anchor_worker_service import run_anchor_batch_cycle_from_env
+from backend.anchoring.store import AnchoringStore
 
 # canonical hashing helper
 from backend.utils.canon_json import canon_sha256_hex
@@ -75,16 +100,34 @@ from backend.routers.workflow_api import router as workflow_router
 from backend.routers.esign_api import router as esign_router
 from backend.routers.agreements_api import router as agreements_router
 from backend.routers.agreements_v2_api import router as agreements_v2_router
+from backend.routers.feed_api import router as feed_router
 from backend.routers.liability_api import router as liability_router
 from backend.routers.vs01_documents_api import router as vs01_documents_router
 from backend.routers.vs01_sign_api import router as vs01_sign_router
 from backend.routers.vs01_receipts_api import router as vs01_receipts_router
+from backend.routers.dev_storage_smoke_api import router as dev_storage_smoke_router
+from backend.payments.webhooks import router as payments_onramp_webhook_router
+from backend.payments.stripe_webhooks import router as stripe_webhook_router
+from backend.routers.economics_v1_api import router as economics_v1_router
+from backend.routers.compliance_api import router as compliance_router
+from backend.routers.client_events_api import router as client_events_router
+from backend.routers.transcription_hero_api import router as transcription_hero_router
+from backend.routers.agreement_memory_api import router as agreement_memory_router
+from backend.routers.document_layout_api import router as document_layout_router
+from backend.routers.integrations_api import router as integrations_router
+from backend.routers.advanced_work_product_api import router as advanced_work_product_router
+from backend.routers.affiliate_gamification_api import router as affiliate_gamification_router
+from backend.routers.integration_hooks_api import router as integration_hooks_router
+from backend.routers.ops_anchor_api import router as ops_anchor_router
+from backend.routers.proof_status_api import router as proof_status_router
+from backend.routers.admin_console_api import router as admin_console_router
 
 
 # -------------------------------------------------
 # App + Middleware
 # -------------------------------------------------
 app = FastAPI(title="CLAW Backend")
+log_external_ai_policy_at_startup()
 
 VERIFIER_ONLY = os.getenv("CLAW_VERIFIER_ONLY", "0") == "1"
 CLAW_PROTOCOL_VERSION = os.getenv("CLAW_PROTOCOL_VERSION", "claw-v1")
@@ -127,7 +170,9 @@ async def verifier_only_guard(request: Request, call_next):
     allowed_prefixes = (
         "/v1/batches/",
         "/v1/receipts/",
+        "/v1/proof/",
         "/v1/timeline/receipts/",
+        "/api/agreements/",  # GET proof-status, access policy/validate, read-only agreement endpoints
         "/v1/llm-test",  # ✅ additive; handler still denies in verifier-only
         "/health",
         "/openapi.json",
@@ -165,9 +210,25 @@ async def claw_request_id(request: Request, call_next):
 _rate_state: Dict[str, Dict[str, float]] = {}
 
 
-def _rate_limit_allow(key: str) -> bool:
+def _rate_limit_rps_burst() -> tuple[float, float]:
+    """
+    Token-bucket limits for /v1/*. Unset env in local/dev/test => no limit (0,0).
+    Production (CLAW_ENVIRONMENT not in local/dev/test) with unset vars => safe defaults
+    (8 RPS, burst 16 per client IP) to reduce launch-day abuse/cost risk.
+    Override with CLAW_RATE_LIMIT_RPS and CLAW_RATE_LIMIT_BURST.
+    """
     rps = float(os.getenv("CLAW_RATE_LIMIT_RPS", "0") or 0)
     burst = float(os.getenv("CLAW_RATE_LIMIT_BURST", "0") or 0)
+    if rps > 0 and burst > 0:
+        return rps, burst
+    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
+    if env in ("local", "dev", "test"):
+        return 0.0, 0.0
+    return 8.0, 16.0
+
+
+def _rate_limit_allow(key: str) -> bool:
+    rps, burst = _rate_limit_rps_burst()
     if rps <= 0 or burst <= 0:
         return True
     now = datetime.now(timezone.utc).timestamp()
@@ -216,6 +277,12 @@ async def claw_request_size_limit(request: Request, call_next):
 
 
 def _cors_origins() -> List[str]:
+    """
+    Production: set CLAW_CORS_ALLOW_ORIGINS to a comma-separated list of allowed web origins
+    (e.g. https://app.example.com,https://www.example.com). Empty in production => no CORS origins
+    (browsers will block cross-origin API calls until configured).
+    Local/dev/test: defaults to "*" for developer ergonomics.
+    """
     env = os.getenv("CLAW_CORS_ALLOW_ORIGINS", "").strip()
     if env:
         return [o.strip() for o in env.split(",") if o.strip()]
@@ -256,10 +323,6 @@ def _timeline_db_path() -> str:
     )
 
 
-def _anchor_adapter() -> AnchorAdapter:
-    return BitcoinCoreRpcAnchorAdapter()
-
-
 timeline_store = TimelineStore(db_path=_timeline_db_path())
 
 
@@ -285,8 +348,24 @@ def _environment() -> str:
     return os.getenv("CLAW_ENVIRONMENT", "local")
 
 
+def _relaxed_claw_environment() -> bool:
+    """local / dev / test — keep admin-secret-off and debug-default-on ergonomic."""
+    return _environment().strip().lower() in ("local", "dev", "test")
+
+
+def _is_production_like() -> bool:
+    return not _relaxed_claw_environment()
+
+
 def _debug_enabled() -> bool:
-    return os.getenv("CLAW_DEBUG", "1").lower() in ("1", "true", "yes")
+    """
+    Production-like: default OFF unless CLAW_DEBUG is explicitly truthy.
+    Relaxed envs: default ON unless CLAW_DEBUG is explicitly set to a falsey value.
+    """
+    raw = os.getenv("CLAW_DEBUG")
+    if raw is None or not str(raw).strip():
+        return _relaxed_claw_environment()
+    return str(raw).strip().lower() in ("1", "true", "yes")
 
 
 def _tier_error_response(e: TierLimitError) -> JSONResponse:
@@ -311,13 +390,27 @@ def _default_anchor_network() -> str:
     return os.getenv("CLAW_ANCHOR_DEFAULT_NETWORK", "testnet").strip().lower()
 
 
+def _log_break_glass_admin(req: Request, action: str) -> None:
+    """Privileged admin surface (shared secret header)."""
+    try:
+        log_break_glass_event(req, action, auth_channel="x-claw-admin-secret")
+    except Exception:
+        pass  # audit must not break operator paths
+
+
 def _admin_ok(req: Request) -> bool:
     """
-    Simple protection for admin-only endpoints.
-    If CLAW_ADMIN_SECRET is unset, endpoint is OPEN (dev convenience).
-    Set CLAW_ADMIN_SECRET in prod and pass x-claw-admin-secret header.
+    Admin-only endpoints (anchor batch, deploy readiness, runtime summary).
+
+    - Production-like (CLAW_ENVIRONMENT not local/dev/test): CLAW_ADMIN_SECRET is **required**;
+      missing secret => deny (fail closed).
+    - Relaxed envs: unset secret => allow (local ergonomics); set secret => header must match.
     """
     secret = os.getenv("CLAW_ADMIN_SECRET", "").strip()
+    if _is_production_like():
+        if not secret:
+            return False
+        return req.headers.get("x-claw-admin-secret") == secret
     if not secret:
         return True
     return req.headers.get("x-claw-admin-secret") == secret
@@ -383,6 +476,12 @@ def api_get_receipt_for_verify(receipt_id: str):
 # -------------------------------------------------
 # Small UX helper models (additive; do not break protocol models)
 # -------------------------------------------------
+class AdminReceiptBatchAnchorRequeueBody(BaseModel):
+    """Ops-only: re-queue a failed_retryable receipt-batch ``anchor_jobs`` row for the next drain."""
+
+    job_id: str
+
+
 class EventPatchRequest(BaseModel):
     # Patch into stored event record. Keep flexible for now.
     event_type: Optional[str] = None
@@ -394,14 +493,67 @@ class EventPatchRequest(BaseModel):
 # -------------------------------------------------
 # Health + Version
 # -------------------------------------------------
+_LIVENESS_SUMMARY = (
+    "Process up only (no dependency probes). "
+    "Postgres readiness: GET /v1/readyz. Full matrix: GET /admin/deploy-readiness (admin)."
+)
+
+
 @app.get("/health")
 async def health():
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "summary": _LIVENESS_SUMMARY})
 
 
 @app.get("/v1/healthz")
 async def healthz():
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "summary": _LIVENESS_SUMMARY})
+
+
+@app.get("/v1/readyz")
+async def readyz():
+    """
+    Readiness for load balancers / orchestration: probes each **configured** Postgres launch domain.
+
+    Liveness stays on ``GET /health`` / ``GET /v1/healthz`` (process up). If any configured domain
+    returns ``error``, responds **503**. Skipped domains (SQLite fallback) do not fail readiness.
+    Usage-economics metering Postgres is intentionally omitted here — see ``checks`` on
+    ``GET /admin/deploy-readiness`` (``usage_economics_postgresql``).
+    """
+    from backend.db.readiness import launch_postgres_readiness_for_readyz
+
+    checks = launch_postgres_readiness_for_readyz()
+    failed_domains = [
+        k for k, v in checks.items() if isinstance(v, dict) and v.get("status") == "error"
+    ]
+    bad = bool(failed_domains)
+    if bad:
+        headline = (
+            "Configured PostgreSQL domain(s) unreachable: "
+            + ", ".join(failed_domains)
+            + "."
+        )
+    else:
+        headline = (
+            "All configured PostgreSQL domains reachable; "
+            "skipped entries use SQLite or have no DSN."
+        )
+    body: dict = {
+        "ok": not bad,
+        "summary": {
+            "headline": headline,
+            "failed_domains": failed_domains,
+            "scope": (
+                "PostgreSQL reachability for launch domains in `checks` "
+                "(`error` → 503; `skipped` → SQLite or no DSN). "
+                "Usage-economics metering PG is not probed here — see "
+                "`checks.usage_economics_postgresql` on GET /admin/deploy-readiness."
+            ),
+        },
+        "checks": checks,
+    }
+    if bad:
+        return JSONResponse(status_code=503, content=body)
+    return JSONResponse(body)
 
 
 @app.get("/version")
@@ -420,6 +572,21 @@ async def version():
                 "default_network": _default_anchor_network(),
                 "mainnet_enabled": not _mainnet_disabled(),
                 "mode": _anchor_mode_env(),
+                "daily_equivalent_block_count_by_network": anchor_cadence_summary(),
+                "launch_policy": {
+                    "canonical_chain": anchor_canonical_chain_policy(),
+                    "mirror_dogecoin_enabled": anchor_mirror_dogecoin_enabled(),
+                    "mirror_dogecoin_required": anchor_mirror_dogecoin_required(),
+                    "target_cadence_days": launch_anchor_cadence_days(),
+                    "dogecoin_mirror_every_nth_batch_close": dogecoin_mirror_every_nth_batch_close(),
+                    "note": "Bitcoin is canonical. Dogecoin mirror jobs are enqueued every Nth batch close (default 2); mirror is secondary in verification.",
+                    "execution": {
+                        "bitcoin_provider": bitcoin_execution_provider_type(),
+                        "dogecoin_provider": dogecoin_execution_provider_type(),
+                        "third_party_base_url_configured": bool(third_party_anchor_base_url()),
+                        "third_party_api_key_configured": third_party_anchor_api_key_configured(),
+                    },
+                },
             },
             "multipart_enabled": _multipart_enabled(),
         }
@@ -449,6 +616,8 @@ def llm_test():
     deny = _deny_write_if_verifier()
     if deny:
         return deny
+    if _is_production_like() and not _debug_enabled():
+        return JSONResponse(status_code=404, content={"detail": "not_found"})
 
     out = call_legal_llm(
         [
@@ -553,6 +722,12 @@ async def receipt_legacy(body: Dict[str, Any]):
 # -------------------------------------------------
 @app.post("/verify")
 async def verify(body: Dict[str, Any]):
+    ub = body.get("usage_bundle")
+    if isinstance(ub, dict):
+        return JSONResponse(verify_usage_verification_bundle(ub))
+    if isinstance(body, dict) and body.get("type") == "UsageVerificationBundle":
+        return JSONResponse(verify_usage_verification_bundle(body))
+
     receipt_obj = body.get("receipt", body)
     expected = body.get("expected_receipt_hash_sha256") or body.get("expected")
 
@@ -729,8 +904,10 @@ async def anchor_timeline(timeline_id: str, body: AnchorTimelineRequest):
         # Immediate mode: broadcast now
         if _anchor_mode_env() == "immediate":
             try:
-                btc_txid = _anchor_adapter().broadcast_commitment(
-                    body.anchor_network, body.frozen_manifest_sha256
+                btc_txid = submit_commitment_for_network(
+                    body.anchor_network,
+                    body.frozen_manifest_sha256,
+                    metadata={"job_kind": "timeline_immediate", "timeline_id": timeline_id},
                 )
             except Exception as e:
                 return JSONResponse(status_code=500, content={"error": str(e)})
@@ -827,113 +1004,100 @@ async def admin_anchor_run(req: Request):
     if not _admin_ok(req):
         return JSONResponse(status_code=403, content={"error": "Forbidden"})
 
+    _log_break_glass_admin(req, BreakGlassAction.ADMIN_ANCHOR_RUN)
+
+    if not admin_anchor_http_trigger_enabled():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "admin_anchor_http_disabled",
+                "hint": "Set CLAW_ADMIN_ANCHOR_RUN_ENABLED=1 to allow HTTP-triggered anchors, "
+                "or run `python -m backend.workers.run_anchor_worker` from a worker/cron.",
+            },
+        )
+
     if _anchor_mode_env() != "batch":
         return JSONResponse(status_code=409, content={"error": "Not in batch mode"})
 
-    # --------------------------
-    # 1) Timeline anchor jobs
-    # --------------------------
-    max_tl = int(os.getenv("CLAW_TIMELINE_ANCHOR_MAX_PER_BATCH", "50000"))
-    tl_jobs = timeline_store.claim_timeline_anchor_jobs(max_n=max_tl)
+    result = run_anchor_batch_cycle_from_env(
+        payment_proof_header=_payment_header_value(req),
+        request_context={
+            **_request_context(req),
+            "path": "/admin/anchor/run",
+            "anchor_run_kind": "admin_http",
+        },
+    )
+    return JSONResponse(result)
 
-    tl_ran = tl_done = tl_failed = 0
-    tl_adapter = _anchor_adapter()
 
-    for j in tl_jobs:
-        tl_ran += 1
-        job_id = j.get("job_id") or ""
-        network = j.get("network") or ""
-        commitment = j.get("commitment") or ""
-        receipt_id = j.get("receipt_id") or ""
+@app.post("/admin/anchor/receipt-batch/requeue")
+async def admin_anchor_receipt_batch_requeue(
+    req: Request, body: AdminReceiptBatchAnchorRequeueBody
+):
+    """
+    Re-queue a single ``failed_retryable`` receipt-batch anchor job (Bitcoin or Dogecoin).
 
-        try:
-            if network == "bitcoin-mainnet" and _mainnet_disabled():
-                timeline_store.mark_timeline_anchor_failed(job_id=job_id, error="Mainnet anchoring disabled")
-                tl_failed += 1
-                continue
+    Same auth and HTTP enablement as ``POST /admin/anchor/run``. Prefer this over ad-hoc SQL.
+    """
+    deny = _deny_write_if_verifier()
+    if deny:
+        return deny
 
-            # Broadcast OP_RETURN commitment via Bitcoin Core RPC adapter
-            txid = tl_adapter.broadcast_commitment(network, commitment)
+    if not _admin_ok(req):
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
 
-            # Mark job done + update receipt row with txid
-            timeline_store.mark_timeline_anchor_done(job_id=job_id, txid=txid)
-            if receipt_id:
-                timeline_store.set_receipt_txid(receipt_id=receipt_id, btc_txid=txid)
+    _log_break_glass_admin(req, BreakGlassAction.ADMIN_ANCHOR_JOB_REQUEUE)
 
-            tl_done += 1
+    if not admin_anchor_http_trigger_enabled():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "admin_anchor_http_disabled",
+                "hint": "Set CLAW_ADMIN_ANCHOR_RUN_ENABLED=1 to allow this endpoint, "
+                "or re-queue via an ops shell using AnchoringStore.requeue_failed_retryable_batch_anchor_job.",
+            },
+        )
 
-        except Exception as e:
-            timeline_store.mark_timeline_anchor_failed(job_id=job_id, error=str(e))
-            tl_failed += 1
-
-    # --------------------------
-    # 2) Proof anchor jobs (existing queue)
-    # --------------------------
-    adapter = _payment_adapter()
-    pay_hdr = _payment_header_value(req)
-    ctx = {**_request_context(req), "path": "/admin/anchor/run"}
-
-    max_n = int(os.getenv("CLAW_ANCHOR_MAX_PER_BATCH", "50000"))
-    jobs = anchor_queue.claim_batch(max_n=max_n)
-
-    proof_ran = proof_done = proof_failed = 0
-
-    for j in jobs:
-        proof_ran += 1
-        try:
-            if j.network == "mainnet" and _mainnet_disabled():
-                anchor_queue.mark_failed(j.job_id, "Mainnet anchoring disabled")
-                proof_failed += 1
-                continue
-
-            resp, pay_frags, claw_block = anchor_proof_fn(
-                AnchorProofRequest(
-                    merkle_root_sha256=j.merkle_root_sha256,
-                    receipt_commitment=j.receipt_commitment,
-                    network=j.network,
-                ),
-                payment_adapter=adapter,
-                payment_proof_header=pay_hdr,
-                request_context={**ctx, "job_id": j.job_id, "anchor_mode": "batch"},
-            )
-
-            txid = ""
-            for attr in ("txid", "anchor_txid", "opreturn_txid", "transaction_id"):
-                if hasattr(resp, attr):
-                    txid = getattr(resp, attr) or ""
-                    if txid:
-                        break
-
-            anchor_queue.mark_done(j.job_id, txid)
-            proof_done += 1
-
-        except PaymentRequiredError as e:
-            anchor_queue.mark_failed(j.job_id, f"PaymentRequired: {str(e)}")
-            proof_failed += 1
-        except Exception as e:
-            anchor_queue.mark_failed(j.job_id, str(e))
-            proof_failed += 1
-
-    # For convenience: counts + remaining pending counts
+    store = AnchoringStore()
+    store.init_schema()
+    ok, reason, jid = store.retry_failed_retryable_batch_anchor_job(job_id=body.job_id.strip())
+    status = 200 if ok else 400
+    if reason == "job_not_found":
+        status = 404
+    elif reason == "already_confirmed":
+        status = 409
     return JSONResponse(
         {
-            "ok": True,
-            # totals
-            "ran": tl_ran + proof_ran,
-            "done": tl_done + proof_done,
-            "failed": tl_failed + proof_failed,
-            "pending": anchor_queue.pending_count(),  # proof queue pending
-            # breakdown (additive; won't break old clients)
-            "timeline_ran": tl_ran,
-            "timeline_done": tl_done,
-            "timeline_failed": tl_failed,
-            "timeline_pending": len(timeline_store.claim_timeline_anchor_jobs(max_n=1)),
-            "proof_ran": proof_ran,
-            "proof_done": proof_done,
-            "proof_failed": proof_failed,
-            "proof_pending": anchor_queue.pending_count(),
-        }
+            "ok": ok,
+            "reason": reason,
+            "job_id": jid or body.job_id.strip(),
+            "requeued": ok,
+        },
+        status_code=status,
     )
+
+
+@app.get("/admin/runtime-summary")
+async def admin_runtime_summary(req: Request):
+    """Non-secret deployment snapshot for operators (requires CLAW_ADMIN_SECRET when not local/dev/test)."""
+    if not _admin_ok(req):
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    _log_break_glass_admin(req, BreakGlassAction.ADMIN_RUNTIME_SUMMARY)
+    return JSONResponse(public_runtime_summary())
+
+
+@app.get("/admin/deploy-readiness")
+async def admin_deploy_readiness(req: Request):
+    """
+    Aggregated DB / queue / RPC ping / optional artifact round-trip checks (no secrets in JSON).
+
+    See docs/ops/DEPLOY_SMOKE_TEST.md. Profile: CLAW_DEPLOY_SMOKE_PROFILE and
+    CLAW_DEPLOY_SMOKE_STORAGE_ROUND_TRIP.
+    """
+    if not _admin_ok(req):
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    _log_break_glass_admin(req, BreakGlassAction.ADMIN_DEPLOY_READINESS)
+    return JSONResponse(gather_deploy_readiness())
 
 
 # -------------------------------------------------
@@ -1177,10 +1341,29 @@ app.include_router(workflow_router)
 app.include_router(esign_router)
 app.include_router(agreements_router)
 app.include_router(agreements_v2_router)
+app.include_router(feed_router)
 app.include_router(liability_router)
 app.include_router(vs01_documents_router)
 app.include_router(vs01_sign_router)
 app.include_router(vs01_receipts_router)
+app.include_router(proof_status_router)
+# /internal/dev/* — omit in production-like env unless explicitly opted in (fail closed).
+if _relaxed_claw_environment() or os.getenv("CLAW_DEV_STORAGE_SMOKE", "").strip() == "1":
+    app.include_router(dev_storage_smoke_router)
+app.include_router(payments_onramp_webhook_router)
+app.include_router(stripe_webhook_router)
+app.include_router(economics_v1_router)
+app.include_router(compliance_router)
+app.include_router(client_events_router)
+app.include_router(transcription_hero_router)
+app.include_router(agreement_memory_router)
+app.include_router(document_layout_router)
+app.include_router(integrations_router)
+app.include_router(affiliate_gamification_router)
+app.include_router(advanced_work_product_router)
+app.include_router(integration_hooks_router)
+app.include_router(ops_anchor_router)
+app.include_router(admin_console_router)
 
 
 # -------------------------------------------------

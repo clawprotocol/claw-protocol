@@ -18,6 +18,12 @@ import type {
   Vs01RecipientPlacedField,
   Vs01SenderSignatureRef,
 } from "./types";
+import {
+  ESIGN_INTENT_FINISH_SIGNING_ACTION,
+  NOT_LEGAL_ADVICE,
+  PRODUCT_NOT_LAW_FIRM,
+  RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
+} from "../compliance/disclosureCopy";
 import { labelForFieldType, labelForRecipientFieldType, type PlacedSigningField } from "./signingFields";
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
 
@@ -585,6 +591,14 @@ export function RecipientSigningView({
           {placementSurface && !previewLoading && !manifestDecodeError
             ? "Scroll through the document to find every assigned field, then choose Finish signing."
             : null}
+        </p>
+      </div>
+
+      <div className="vs01-recipient-signing-intent" role="note">
+        <p className="vs01-recipient-signing-intent__primary">{ESIGN_INTENT_FINISH_SIGNING_ACTION}</p>
+        <p className="vs01-recipient-signing-intent__secondary">{RECORDS_DOWNLOAD_KEEP_COPY_SHORT}</p>
+        <p className="vs01-recipient-signing-intent__product">
+          {PRODUCT_NOT_LAW_FIRM} {NOT_LEGAL_ADVICE}
         </p>
       </div>
 

@@ -1,0 +1,122 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { AgreementDraft } from "../agreement/agreementTypes";
+import {
+  getOrCreateLawdogSessionId,
+  syncLawdogFlowFromPathname,
+  syncLawdogReferralSourceFromAffiliateLanding,
+  syncLawdogReferralSourceFromPathname,
+  syncLawdogTrafficSourceFromSearch,
+} from "../tracking/lawdogSession";
+import { rememberAffiliateCodeFromPathname, rememberAffiliateCodeFromSearch } from "./affiliate/affiliateAttributionContext";
+import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
+import {
+  isSimpleCheckoutPath,
+  resetCheckoutEntryScroll,
+} from "./simpleProduct/checkoutEntryScroll";
+import type { SimpleSendHandoff } from "./simpleProduct/simpleSendHandoff";
+import { buildSimpleSendHistoryState } from "./simpleProduct/simpleSendHandoff";
+
+export type LaunchNavigateOptions = {
+  heroIntake?: string;
+  /** Marketing hero submit — uses intake as authoritative (including empty), not restored draft. */
+  heroFromHome?: boolean;
+  /** `/app/quick` typed handoff — create page shows continuity copy (requires `heroFromHome`). */
+  heroQuickSendTypedHandoff?: boolean;
+  heroVoiceFinalize?: boolean;
+  /** Session-only normalized draft from create → review handoff (`/app/send/...`). */
+  reviewPrimedDraft?: AgreementDraft | null;
+  /** First-run simple flow: lighter review/send chrome (no interstitial). */
+  streamlinedSimpleFlow?: boolean;
+  /** Canonical v1 send handoff (starter + premium fork). */
+  simpleSendHandoff?: SimpleSendHandoff;
+};
+
+type LaunchNav = {
+  pathname: string;
+  search: string;
+  /** URL fragment (including `#`), updated with pathname on SPA navigations and popstate. */
+  hash: string;
+  navigate: (to: string, options?: LaunchNavigateOptions) => void;
+};
+
+const Ctx = createContext<LaunchNav | null>(null);
+
+export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const onPop = () => setTick((t) => t + 1);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    getOrCreateLawdogSessionId();
+    syncLawdogTrafficSourceFromSearch(window.location.search);
+    syncLawdogReferralSourceFromPathname(window.location.pathname);
+    syncLawdogReferralSourceFromAffiliateLanding(window.location.pathname);
+    syncLawdogFlowFromPathname(window.location.pathname);
+    rememberAffiliateCodeFromPathname(window.location.pathname);
+    rememberAffiliateCodeFromSearch(window.location.search);
+  }, [tick]);
+
+  const navigate = useCallback((to: string, options?: LaunchNavigateOptions) => {
+    const p = to.startsWith("/") ? to : `/${to}`;
+    const pathOnly = p.replace(/[?#].*$/, "");
+    let state: Record<string, unknown> | null = null;
+    if (pathOnly === "/app/create") {
+      if (options?.heroFromHome) {
+        state = {
+          clawHeroIntake: options.heroIntake ?? "",
+          clawHeroFromHome: true,
+          clawHeroVoiceFinalize: options.heroVoiceFinalize === true,
+          ...(options.heroQuickSendTypedHandoff === true ? { clawHeroQuickSendTypedHandoff: true } : {}),
+        };
+      } else if (options?.heroIntake?.trim()) {
+        state = { clawHeroIntake: options.heroIntake.trim() };
+      } else {
+        resetHeroHandoffForCreateNavigationWithoutPayload();
+      }
+    } else if (/^\/app\/send\//.test(pathOnly) && options?.simpleSendHandoff) {
+      state = buildSimpleSendHistoryState(options.simpleSendHandoff);
+    } else if (options?.reviewPrimedDraft != null && /^\/app\/send\//.test(pathOnly)) {
+      state = {
+        clawReviewPrimedDraft: options.reviewPrimedDraft,
+        ...(options.streamlinedSimpleFlow ? { clawStreamlinedSimpleFlow: true } : {}),
+      };
+    }
+    window.history.pushState(state, "", p);
+    if (isSimpleCheckoutPath(pathOnly)) {
+      resetCheckoutEntryScroll();
+    }
+    setTick((t) => t + 1);
+  }, []);
+
+  const value = useMemo((): LaunchNav => {
+    void tick;
+    return {
+      pathname: typeof window !== "undefined" ? window.location.pathname : "/",
+      search: typeof window !== "undefined" ? window.location.search : "",
+      hash: typeof window !== "undefined" ? window.location.hash : "",
+      navigate,
+    };
+  }, [tick, navigate]);
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+export function useLaunchNav(): LaunchNav {
+  const v = useContext(Ctx);
+  if (!v) {
+    return {
+      pathname: "/",
+      search: "",
+      hash: "",
+      navigate: () => {
+        /* no-op */
+      },
+    };
+  }
+  return v;
+}

@@ -1,0 +1,146 @@
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  coercePartyNameForRecipientAutoFill,
+  isHighConfidencePartyNameForAutoPopulation,
+  isProsePollutedPartyName,
+} from "./partyNameConfidence";
+import { normalizePartyNameFragment, sanitizePartiesInput } from "./partyIntakeNormalize";
+import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
+
+const PROMPT_POLLUTION_HINT =
+  /\b(make|include|need|want|please|for\s+\d+\s+(?:day|days|week|weeks|month|months|year|years))\b/i;
+
+type PartyRow = ParsedDraftShape["parties"][number] & { email?: string };
+
+export type StarterRecipientHandoffOpts = {
+  recipient1Name: string;
+  recipient1Email: string;
+  recipient2Name: string;
+  recipient2Email: string;
+  stripRecipientEmailNoise: (s: string) => string;
+  looksLikeEmail: (s: string) => boolean;
+};
+
+function cleanStarterPartyName(raw: string, slot: 0 | 1, agreementFamily?: string | null): string {
+  const normalized = normalizePartyNameFragment((raw || "").trim()).slice(0, 280);
+  const polluted = PROMPT_POLLUTION_HINT.test(normalized) && normalized.length > 24;
+  if (isHighConfidencePartyNameForAutoPopulation(normalized) && !polluted) {
+    return normalized;
+  }
+  return coercePartyNameForRecipientAutoFill("", slot, agreementFamily);
+}
+
+function cleanRole(raw: unknown): string {
+  const t = String(raw ?? "").trim().slice(0, 120);
+  return t || "party";
+}
+
+function cleanStarterJurisdiction(raw: unknown): string {
+  const t = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!t || t.toLowerCase() === "tbd" || t.length <= 1) return "Delaware";
+  const normalized = normalizeJurisdictionDisplay(t).trim();
+  if (!normalized || normalized.length <= 1) return "Delaware";
+  return normalized.slice(0, 64);
+}
+
+function cleanStarterText(raw: unknown, maxLen: number): string {
+  return String(raw ?? "").replace(/\s+/g, " ").trim().slice(0, maxLen);
+}
+
+export function sanitizeStarterSignerLabelsLine(raw: string): string {
+  const cleaned = sanitizePartiesInput((raw || "").replace(/\s+/g, " ").trim()).slice(0, 220);
+  if (!cleaned) return "";
+  if (isProsePollutedPartyName(cleaned) || (PROMPT_POLLUTION_HINT.test(cleaned) && cleaned.length > 24)) return "";
+  const chunks = cleaned.split(/\s*·\s*/).map((x) => x.trim()).filter(Boolean);
+  if (
+    chunks.length >= 1 &&
+    chunks.every((x) => !isProsePollutedPartyName(x) && !(PROMPT_POLLUTION_HINT.test(x) && x.length > 24))
+  ) {
+    return chunks.join(" · ").slice(0, 220);
+  }
+  return "";
+}
+
+/**
+ * Free/starter review canonicalization: normalize party rows to safe, non-prose display names.
+ * This is applied before review and before send handoff to keep starter flow deterministic.
+ */
+export function canonicalizeStarterDraftForReview(parsed: ParsedDraftShape): ParsedDraftShape {
+  const base = Array.isArray(parsed.parties) ? parsed.parties : [];
+  const out = base.slice(0, 2).map((p, idx) => ({
+    ...p,
+    name: cleanStarterPartyName(String(p?.name || ""), idx === 0 ? 0 : 1, parsed.agreement_family ?? null),
+    role: cleanRole(p?.role),
+  }));
+  return {
+    ...parsed,
+    title: cleanStarterText(parsed.title, 180),
+    purpose: cleanStarterText(parsed.purpose, 1200),
+    payment_terms: cleanStarterText(parsed.payment_terms, 1200),
+    jurisdiction: cleanStarterJurisdiction(parsed.jurisdiction),
+    parties: out,
+  };
+}
+
+/**
+ * Single canonical structured snapshot for simple-product create → `/app/send/:id`:
+ * merges recipient UI into `parties` (names, emails) and normalizes `parties` to a concrete array
+ * before server PATCH/POST and the primed client snapshot.
+ */
+export function buildCanonicalSimpleProductHandoffDraft(
+  parsed: ParsedDraftShape,
+  opts: StarterRecipientHandoffOpts,
+): ParsedDraftShape {
+  const next = applyStarterRecipientUiToDraftParties(canonicalizeStarterDraftForReview(parsed), opts);
+  return { ...next, parties: next.parties ?? [] };
+}
+
+/**
+ * Starter/free send: merge the recipient UI fields into `draft.parties` before PATCH/POST
+ * so the server and `/app/send` primed snapshot match what the user typed (names, emails).
+ */
+export function applyStarterRecipientUiToDraftParties(
+  parsed: ParsedDraftShape,
+  opts: StarterRecipientHandoffOpts,
+): ParsedDraftShape {
+  const {
+    recipient1Name,
+    recipient1Email,
+    recipient2Name,
+    recipient2Email,
+    stripRecipientEmailNoise,
+    looksLikeEmail,
+  } = opts;
+  const n1 = (recipient1Name || "").trim();
+  const n2 = (recipient2Name || "").trim();
+  const e1 = looksLikeEmail(recipient1Email) ? stripRecipientEmailNoise(recipient1Email) : "";
+  const e2 = looksLikeEmail(recipient2Email) ? stripRecipientEmailNoise(recipient2Email) : "";
+
+  const base = Array.isArray(parsed.parties) ? ([...parsed.parties] as PartyRow[]) : [];
+  const out: PartyRow[] = [...base];
+
+  const mergeSlot = (idx: number, name: string, email: string) => {
+    const prev = out[idx];
+    const cleanName = name ? cleanStarterPartyName(name, idx === 0 ? 0 : 1, parsed.agreement_family ?? null) : "";
+    if (prev) {
+      out[idx] = {
+        ...prev,
+        ...(cleanName ? { name: cleanName } : {}),
+        ...(email ? { email } : {}),
+        role: cleanRole(prev.role),
+      };
+      return;
+    }
+    if (!cleanName && !email) return;
+    out[idx] = {
+      name: cleanName || coercePartyNameForRecipientAutoFill("", idx === 0 ? 0 : 1, parsed.agreement_family ?? null),
+      role: "party",
+      ...(email ? { email } : {}),
+    };
+  };
+
+  mergeSlot(0, n1, e1);
+  mergeSlot(1, n2, e2);
+
+  return { ...parsed, parties: out };
+}

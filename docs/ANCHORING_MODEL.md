@@ -36,6 +36,8 @@ Anchoring does not answer:
 - whether the anchor is legally binding
 - whether the anchor implies truth, consent, or validity
 
+**LawDog launch profile:** **Bitcoin** is the **canonical** chain for public batch commitments; **Dogecoin** is a **mandatory mirror** of the same root for launch operations (social/community layer). Verification and “what we treat as anchored” still prefer **Bitcoin**; Dogecoin is secondary in proof semantics.
+
 ---
 
 ## Definition of Anchoring

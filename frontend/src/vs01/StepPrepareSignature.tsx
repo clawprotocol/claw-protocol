@@ -11,6 +11,12 @@ import { Document, Page, pdfjs } from "react-pdf";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
+import {
+  ESIGN_INTENT_SIGN_DOCUMENT_ACTION,
+  NOT_LEGAL_ADVICE,
+  PRODUCT_NOT_LAW_FIRM,
+  RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
+} from "../compliance/disclosureCopy";
 import { completeSignSession, createSignSession, fetchDocumentContent } from "./vs01Api";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -1279,6 +1285,16 @@ export function StepPrepareSignature({
             <p className="vs01-sign-status-ready" role="status">
               Ready to sign
             </p>
+          ) : null}
+
+          {!receiptId ? (
+            <div className="vs01-sign-intent-hint" role="note">
+              <p className="vs01-sign-intent-hint__primary">{ESIGN_INTENT_SIGN_DOCUMENT_ACTION}</p>
+              <p className="vs01-sign-intent-hint__secondary">{RECORDS_DOWNLOAD_KEEP_COPY_SHORT}</p>
+              <p className="vs01-sign-intent-hint__product">
+                {PRODUCT_NOT_LAW_FIRM} {NOT_LEGAL_ADVICE}
+              </p>
+            </div>
           ) : null}
 
           <div className="vs01-sign-actions">

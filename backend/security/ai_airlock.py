@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from backend.config.external_ai_policy import is_non_production_external_ai_bypass_active
+
 from .privilege_policy import PrivilegePolicyDecision, evaluate_privilege_policy
 from .redaction import RedactionResult, redact_text
 
@@ -84,21 +86,25 @@ def run_ai_airlock(
     summary: list[str] = ["privilege_policy_evaluated"]
 
     if _external_ai_blocked(policy):
-        summary.append("blocked_before_transform")
-        if policy.reason_codes:
-            codes = ",".join(policy.reason_codes)
-            summary.append(f"policy_reason_codes:{codes}")
-        return AIAirlockResult(
-            policy_decision=policy,
-            redacted_text="",
-            minimized_text="",
-            blocked=True,
-            block_reason=BLOCK_REASON_PROTECTED_MODE_EXTERNAL_AI,
-            transformation_summary=tuple(summary),
-            original_length=original_length,
-            redacted_length=0,
-            minimized_length=0,
-        )
+        if is_non_production_external_ai_bypass_active():
+            # local/staging: allow through to redaction + minimization; never skip pre-OpenAI hardening
+            summary.append("non_production_bypass:continuing_to_redact_minimize")
+        else:
+            summary.append("blocked_before_transform")
+            if policy.reason_codes:
+                codes = ",".join(policy.reason_codes)
+                summary.append(f"policy_reason_codes:{codes}")
+            return AIAirlockResult(
+                policy_decision=policy,
+                redacted_text="",
+                minimized_text="",
+                blocked=True,
+                block_reason=BLOCK_REASON_PROTECTED_MODE_EXTERNAL_AI,
+                transformation_summary=tuple(summary),
+                original_length=original_length,
+                redacted_length=0,
+                minimized_length=0,
+            )
 
     redaction = redact_text(text)
     redacted_text = redaction.redacted_text

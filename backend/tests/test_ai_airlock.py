@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import pytest
+
 from backend.security.ai_airlock import (
     BLOCK_REASON_PROTECTED_MODE_EXTERNAL_AI,
     AIAirlockResult,
     minimize_for_airlock,
     run_ai_airlock,
 )
+
+
+def test_legal_sensitive_content_not_blocked_with_local_bypass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_ALLOW_EXTERNAL_AI_LOCAL", "1")
+    raw = "We should discuss this with our attorney before filing."
+    r = run_ai_airlock(raw)
+    assert r.blocked is False
+    assert "non_production_bypass" in "".join(r.transformation_summary)
+    assert len((r.minimized_text or "").strip()) > 0
 
 
 def test_legal_sensitive_content_blocked_no_payload_leak() -> None:

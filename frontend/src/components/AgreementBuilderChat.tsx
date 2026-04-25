@@ -1,4 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  PRODUCT_NOT_LAW_FIRM,
+  STRUCTURED_DRAFT_ASSIST_SHORT,
+} from "../compliance/disclosureCopy";
 import { normalizeDraft, validateDraft } from "../utils/agreements/normalizeValidate";
 
 type PartyRow = { party_id: string; name: string; role: string; contact?: string };
@@ -1158,7 +1162,15 @@ const AgreementBuilderChat: React.FC<Props> = ({
       <div className={`grid grid-cols-1 gap-0 ${draftOnly ? "" : "lg:grid-cols-[minmax(0,1fr)_300px]"}`}>
         <div ref={transcriptRef} className="max-h-[calc(100vh-250px)] min-h-[420px] overflow-y-auto px-3 pb-40 pt-3 sm:px-4">
           <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-            Draft is non-binding by default. Not legal advice.
+            <span>
+              Draft ready for review. {STRUCTURED_DRAFT_ASSIST_SHORT}
+            </span>
+            <details className="mt-1.5 rounded border border-amber-600/30 bg-amber-950/20 px-2 py-1 [&_summary::-webkit-details-marker]:hidden">
+              <summary className="cursor-pointer list-none text-[11px] font-medium text-amber-100/80 marker:hidden hover:text-amber-50">
+                Learn more
+              </summary>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-amber-100/70">{PRODUCT_NOT_LAW_FIRM}</p>
+            </details>
           </div>
           <div className="mb-3 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
             <span className="mr-3"><span className="text-slate-500">Title:</span> {(draftState.title || "").trim() || "Not set"}</span>

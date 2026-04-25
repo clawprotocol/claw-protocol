@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-from utils.canon_json import canon_sha256_hex
+from backend.utils.canon_json import canon_json_bytes, canon_sha256_hex, sha256_hex
 
 
 class VerifyReceiptRequest(BaseModel):
@@ -108,3 +109,50 @@ def verify_receipt_packet(req: VerifyReceiptRequest) -> VerifyReceiptResponse:
         },
         errors=errors,
     )
+
+
+def verify_usage_verification_bundle(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Verify a ``UsageVerificationBundle`` from ``verification.usage_bundle``:
+    canonical hash of ``usage_receipt`` vs ``receipt_hash_sha256``, and each
+    embedded payment canonical event vs ``event_sha256``.
+    """
+    errors: List[str] = []
+    checks: Dict[str, Any] = {}
+    ur = bundle.get("usage_receipt")
+    exp = bundle.get("receipt_hash_sha256")
+    if not isinstance(ur, dict) or not isinstance(exp, str) or not exp:
+        return {
+            "ok": False,
+            "errors": ["bundle missing usage_receipt or receipt_hash_sha256"],
+            "checks": checks,
+        }
+    h_body = sha256_hex(canon_json_bytes(ur))
+    checks["usage_receipt_canonical_sha256"] = h_body
+    if h_body != exp:
+        errors.append("usage_receipt canonical hash mismatch")
+
+    for i, e in enumerate(bundle.get("payment_events") or []):
+        if not isinstance(e, dict):
+            errors.append(f"payment_event[{i}] invalid")
+            continue
+        raw = e.get("canonical_json")
+        if isinstance(raw, str):
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                errors.append(f"payment_event[{i}] canonical_json not json")
+                continue
+        elif isinstance(raw, dict):
+            obj = raw
+        else:
+            errors.append(f"payment_event[{i}] missing canonical_json")
+            continue
+        ch = sha256_hex(canon_json_bytes(obj))
+        if ch != e.get("event_sha256"):
+            errors.append(
+                f"payment_event[{i}] type={e.get('event_type')} sha256 mismatch"
+            )
+
+    ok = len(errors) == 0
+    return {"ok": ok, "errors": errors, "checks": checks}

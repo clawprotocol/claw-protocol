@@ -11,23 +11,7 @@ from backend.handlers.liability_api_handler import get_liability_assessment
 
 
 def get_latest_liability_event_id(store: TimelineStore, timeline_id: str) -> Optional[str]:
-    c = store._conn()
-    try:
-        row = c.execute(
-            """
-            SELECT event_id
-            FROM events
-            WHERE timeline_id = ?
-              AND event_type = 'notice'
-              AND notice_json LIKE '%"liability_attestation"%'
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            (timeline_id,),
-        ).fetchone()
-        return row["event_id"] if row else None
-    finally:
-        c.close()
+    return store.get_latest_liability_event_id(timeline_id)
 
 
 def get_latest_liability_for_timeline(store: TimelineStore, timeline_id: str) -> Dict[str, Any]:

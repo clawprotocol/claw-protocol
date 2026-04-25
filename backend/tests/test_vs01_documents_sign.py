@@ -15,7 +15,14 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def docs_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path))
+    from backend.storage.artifact_repository import reset_artifact_repository_singleton
+
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CLAW_BLOB_ROOT", str(tmp_path / "blobs"))
+    monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(tmp_path / "registry.sqlite3"))
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    reset_artifact_repository_singleton()
     return tmp_path
 
 

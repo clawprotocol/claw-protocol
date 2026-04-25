@@ -21,9 +21,17 @@ DOC_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
 def _configure_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
-    monkeypatch.setenv("CLAW_SIGN_SESSIONS_DIR", str(tmp_path / "sessions"))
-    monkeypatch.setenv("CLAW_RECEIPTS_DIR", str(tmp_path / "receipts"))
+    from backend.storage.artifact_repository import reset_artifact_repository_singleton
+
+    base = tmp_path / "claw"
+    monkeypatch.setenv("CLAW_DATA_DIR", str(base / "data"))
+    monkeypatch.setenv("CLAW_BLOB_ROOT", str(base / "blobs"))
+    monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(base / "artifact_registry.sqlite3"))
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(base / "documents"))
+    monkeypatch.setenv("CLAW_SIGN_SESSIONS_DIR", str(base / "sessions"))
+    monkeypatch.setenv("CLAW_RECEIPTS_DIR", str(base / "receipts"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    reset_artifact_repository_singleton()
 
 
 def _field_manifest() -> list[dict]:
@@ -69,6 +77,8 @@ def test_issue_receipt_matches_proof_golden(monkeypatch: pytest.MonkeyPatch) -> 
 def test_persist_and_get_receipt_roundtrip(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # File layout assertion below targets legacy receipts dir; disable unified store for this unit.
+    monkeypatch.setenv("CLAW_UNIFIED_ARTIFACT_STORE", "0")
     _configure_artifacts(monkeypatch, tmp_path)
     sp = {
         "schema_version": SIGN_PACKET_SCHEMA_VERSION,
@@ -83,7 +93,7 @@ def test_persist_and_get_receipt_roundtrip(
     receipt_service.persist_receipt(r)
     loaded = receipt_service.get_receipt(r["receipt_id"])
     assert loaded == r
-    path = tmp_path / "receipts" / r["receipt_id"] / "receipt.json"
+    path = tmp_path / "claw" / "receipts" / r["receipt_id"] / "receipt.json"
     assert path.is_file()
     disk = json.loads(path.read_text(encoding="utf-8"))
     assert disk["receipt_hash_sha256"] == r["receipt_hash_sha256"]

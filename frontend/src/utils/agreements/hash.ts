@@ -40,6 +40,14 @@ export async function sha256Hex(text: string): Promise<string> {
     .join("");
 }
 
+/** SHA-256 of raw bytes (e.g. finalized document content). */
+export async function sha256Bytes(buffer: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export async function hashDraftState(draft: DraftState): Promise<string> {
   const payload = toSignableDraftPayload(draft);
   return sha256Hex(JSON.stringify(payload));

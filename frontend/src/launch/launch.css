@@ -1,0 +1,143 @@
+/* Launch app shell — composes with vs01 tokens */
+@import "../design/lawdog-design.css";
+.claw-app-nav {
+  width: 100%;
+}
+
+.claw-app-nav__brand {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--vs01-color-text-muted, #94a3b8);
+}
+
+/* Marketing homepage — hook class only; layout (max-width, padding, bottom spacing) lives on LaunchHomePage. */
+.claw-marketing-page {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.claw-hero-marketing {
+  max-width: 42rem;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.claw-home-section {
+  max-width: 42rem;
+  margin: 0 auto;
+}
+
+.claw-home-section--wide {
+  max-width: 48rem;
+}
+
+.claw-home-how-step {
+  scroll-margin-top: 5rem;
+}
+
+/* Vertical rhythm between homepage story sections */
+.claw-home-story-gap {
+  margin-top: 4rem;
+}
+
+@media (min-width: 768px) {
+  .claw-home-story-gap {
+    margin-top: 5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .claw-home-story-gap {
+    margin-top: 6rem;
+  }
+}
+
+.claw-home-story-card {
+  border-radius: 1rem;
+  border: 1px solid rgba(51, 65, 85, 0.55);
+  background: color-mix(in srgb, var(--vs01-color-bg-card, #0f172a) 88%, transparent);
+  padding: 2rem 1.25rem;
+}
+
+@media (min-width: 640px) {
+  .claw-home-story-card {
+    padding: 2.5rem 2.25rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .claw-home-story-card {
+    padding: 3rem 2.75rem;
+  }
+}
+
+.claw-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 9999px;
+  border: 1px solid var(--vs01-color-border-subtle, #334155);
+  background: color-mix(in srgb, var(--vs01-color-bg-card, #0f172a) 90%, transparent);
+  padding: 0.2rem 0.85rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vs01-color-text-muted, #94a3b8);
+}
+
+.claw-stat-card {
+  border-radius: var(--vs01-radius-card, 0.75rem);
+  border: 1px solid var(--vs01-color-border-subtle, #334155);
+  background: color-mix(in srgb, var(--vs01-color-bg-card, #0f172a) 92%, transparent);
+  padding: 1rem 1.15rem;
+}
+
+/* Subtle desktop anchor — no illustration dependency */
+.claw-marketing-visual-anchor {
+  border-radius: 1rem;
+  border: 1px solid rgba(51, 65, 85, 0.45);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--vs01-color-accent, #d4a574) 12%, transparent) 0%,
+    rgba(15, 23, 42, 0.65) 45%,
+    rgba(15, 23, 42, 0.35) 100%
+  );
+  min-height: 12rem;
+}
+
+@media (min-width: 1280px) {
+  .claw-marketing-visual-anchor {
+    min-height: 15rem;
+  }
+}
+
+@keyframes claw-oppo-challenge-pop {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--vs01-color-accent, #34d399) 40%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+
+.claw-oppo-challenge-done {
+  animation: claw-oppo-challenge-pop 0.75s ease-out 1;
+}
+
+@keyframes simple-flow-preview-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.simple-flow-preview-continuity-fade {
+  animation: simple-flow-preview-fade-in 0.18s ease-out;
+}

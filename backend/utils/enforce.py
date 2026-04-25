@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -24,27 +25,57 @@ class Principal:
     tier: Tier
 
 
-def principal_from_request(req: Request) -> Principal:
-    """
-    Resolve the caller identity + tier.
-    Minimal version:
-      - subject: wallet header OR api key hash OR IP fallback
-      - tier: header override (for now) or default PROOF
-    Later: replace with your payment_adapter / subscription DB.
-    """
+def resolve_subject_from_request(req: Request) -> str:
+    """Stable product subject for usage economics: org id preferred, then wallet, api key, then IP."""
+    org = (req.headers.get("x-claw-org-id") or "").strip()
+    if org:
+        return f"org:{org}"
     wallet = req.headers.get("x-claw-wallet")
     api_key = req.headers.get("x-claw-api-key")
     ip = req.client.host if req.client else "unknown"
 
     if wallet:
-        subject = f"wallet:{wallet.lower()}"
-    elif api_key:
-        subject = "apikey:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:24]
-    else:
-        subject = f"ip:{ip}"
+        return f"wallet:{wallet.lower()}"
+    if api_key:
+        return "apikey:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:24]
+    return f"ip:{ip}"
+
+
+def org_id_from_subject(subject_ref: str) -> str | None:
+    s = (subject_ref or "").strip()
+    if s.startswith("org:"):
+        return s[4:].strip() or None
+    return None
+
+
+def principal_from_request(req: Request) -> Principal:
+    """
+    Resolve caller identity + tier.
+
+    ``x-claw-tier`` selects backend tier when valid.
+    When ``CLAW_RESOLVE_TIER_FROM_CLAW_KEY=1``, an **active CLAW Key** for the same subject
+    may raise the effective tier (never below header tier — header can still cap upward in future).
+    """
+    subject = resolve_subject_from_request(req)
 
     tier_raw = (req.headers.get("x-claw-tier") or "proof").strip().lower()
     tier = Tier(tier_raw) if tier_raw in {t.value for t in Tier} else Tier.PROOF
+
+    if os.getenv("CLAW_RESOLVE_TIER_FROM_CLAW_KEY", "0").strip().lower() in ("1", "true", "yes"):
+        try:
+            from backend.treasury.claw_key_entitlement import (  # noqa: PLC0415
+                backend_tier_rank,
+                resolve_backend_tier_from_claw_key_row,
+            )
+            from backend.treasury.treasury_store import get_treasury_store  # noqa: PLC0415
+
+            row = get_treasury_store().get_active_claw_key_for_subject(subject)
+            kt = resolve_backend_tier_from_claw_key_row(row)
+            if kt is not None and backend_tier_rank(kt) > backend_tier_rank(tier):
+                tier = kt
+        except Exception:
+            pass
+
     return Principal(subject=subject, tier=tier)
 
 

@@ -42,3 +42,56 @@ body {
 ::-webkit-scrollbar-track {
   @apply bg-slate-900;
 }
+
+/* Short shake when surfacing a field-level send validation error */
+@keyframes claw-field-error-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+.claw-field-error-shake {
+  animation: claw-field-error-shake 0.2s ease-out;
+}
+
+@keyframes claw-recorded-paw-pop {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+  40% {
+    transform: scale(1.2) rotate(-8deg);
+  }
+  70% {
+    transform: scale(1.08) rotate(6deg);
+  }
+}
+
+.claw-recorded-paw-emoji {
+  animation: claw-recorded-paw-pop 0.75s ease-out 2;
+}
+
+.claw-recorded-paw-line {
+  margin: 0;
+}
+
+/* Send conversion modal: one-shot emphasis on primary subscription CTA only */
+@keyframes paywall-primary-entrance {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+  }
+}
+
+.paywall-primary-entrance {
+  animation: paywall-primary-entrance 1.15s ease-out 1;
+}

@@ -13,6 +13,10 @@ from typing import Any, Dict, List, Optional
 from backend.providers.llm.base import BaseLLMProvider, LLMResponse
 
 
+def _uses_gpt5_chat_tokens_param(model: str) -> bool:
+    return (model or "").strip().lower().startswith("gpt-5")
+
+
 class OpenAIProvider(BaseLLMProvider):
     """
     OpenAI API provider.
@@ -23,7 +27,7 @@ class OpenAIProvider(BaseLLMProvider):
     def __init__(
         self,
         *,
-        model: str = "gpt-4o",
+        model: str = "gpt-5.4-nano",
         api_key: Optional[str] = None,
     ):
         self._model = model
@@ -70,11 +74,16 @@ class OpenAIProvider(BaseLLMProvider):
         temperature: float = 0.0,
         max_tokens: int = 4096,
     ) -> LLMResponse:
+        tokens_kwargs: Dict[str, int]
+        if _uses_gpt5_chat_tokens_param(self._model):
+            tokens_kwargs = {"max_completion_tokens": int(max_tokens)}
+        else:
+            tokens_kwargs = {"max_tokens": int(max_tokens)}
         response = self._client.chat.completions.create(
             model=self._model,
             messages=messages,  # type: ignore
             temperature=temperature,
-            max_tokens=max_tokens,
+            **tokens_kwargs,
         )
 
         content = response.choices[0].message.content or ""
@@ -105,7 +114,7 @@ def get_openai_provider(
 
     Uses environment variables for defaults:
     - OPENAI_API_KEY: API key
-    - CLAW_LLM_MODEL: Model name (default: gpt-4o)
+    - CLAW_LLM_MODEL: Model name (default: gpt-5.4-nano; tier defaults live in ``backend/llm_router.py``)
     """
-    model = model or os.getenv("CLAW_LLM_MODEL", "gpt-4o")
+    model = model or os.getenv("CLAW_LLM_MODEL", "gpt-5.4-nano")
     return OpenAIProvider(model=model, api_key=api_key)
