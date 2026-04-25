@@ -307,6 +307,8 @@ type Props = {
   streamlinedSimpleFlow?: boolean;
   /** Premium create → send: intent captured before session clear (optional). */
   simpleFlowPremiumHandoffIntent?: PremiumSendIntent | null;
+  /** Optional: run after user picks reviewer-handoff; parent may reset Pro celebration + phase. */
+  onContinueToReviewerSetup?: () => void;
 };
 
 const API_BASE = resolveApiBase();

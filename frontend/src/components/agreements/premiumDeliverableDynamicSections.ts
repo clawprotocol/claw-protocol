@@ -698,7 +698,6 @@ export function shouldUsePremiumDynamicCommercialSections(draft: ParsedDraftShap
   const corpus = [purpose, pay, add, term, sched].filter(Boolean).join("\n");
   const corpusSignals = [tit, corpus].filter(Boolean).join("\n");
   const wc = corpus.replace(/\s+/g, " ").trim().length;
-  const wcSignals = corpusSignals.replace(/\s+/g, " ").trim().length;
   if (!corpusSignals.trim()) return false;
 
   const doubleBreakParas = corpus.split(/\n{2,}/).filter((x) => x.trim().length >= 40).length;

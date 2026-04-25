@@ -651,7 +651,9 @@ export function AffiliateDashboardPanel(props: {
               >
                 Copy link
               </button>
-              {typeof navigator !== "undefined" && navigator.share ? (
+              {typeof navigator !== "undefined" &&
+              typeof (navigator as Navigator & { share?: (data: ShareData) => Promise<void> }).share ===
+                "function" ? (
                 <button
                   type="button"
                   className="vs01-btn vs01-btn--secondary vs01-btn--compact"

@@ -459,7 +459,7 @@ export function mergeServerSigningLockIntoBundle(
       ? signingLockPayload.locked_version_id.trim()
       : "";
 
-  if (lvRaw) {
+  if (lvRaw && signingLockPayload) {
     const next: AgreementVersionBundle = {
       ...cur,
       finalizedForSigning: true,

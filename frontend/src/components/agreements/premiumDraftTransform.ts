@@ -5,7 +5,7 @@
 import type { AgreementFamily } from "./agreementFamilyRouter";
 import { partyNameLooksLikeRawPrompt } from "./agreementPreviewPartyLine";
 import { FULL_DRAFT_EXPANSION_MARKER } from "./fullDraftUpgradeEnrich";
-import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
+import { type IntakeStructuredAgreement, parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { extractPremiumAskTargets } from "./premiumIntakeAskCoverage";
 import { parseDeterministicCompensation } from "./premiumPaymentTermsElevate";

@@ -148,7 +148,7 @@ describe("runPremiumCompletion", () => {
       agreement_family: "services_agreement",
     };
     const parseDraft = vi.fn(
-      async (): ParsedDraftShape => ({
+      async (): Promise<ParsedDraftShape> => ({
         ...structured,
         additional_terms: `${FULL_DRAFT_EXPANSION_MARKER}\nExpanded commercial provisions for review`,
       }),
@@ -186,7 +186,7 @@ describe("runPremiumCompletion", () => {
       payment: emptyPayment,
     };
     const parseDraft = vi.fn(
-      async (): ParsedDraftShape => ({
+      async (): Promise<ParsedDraftShape> => ({
         ...structured,
         purpose: "The parties will engage in consulting and advisory services as described herein.",
       }),
@@ -228,7 +228,7 @@ describe("runPremiumCompletion", () => {
     };
 
     const parseDraft = vi.fn(
-      async (): ParsedDraftShape => ({
+      async (): Promise<ParsedDraftShape> => ({
         ...structured,
         purpose: "Consulting services.",
         payment_terms: "$10,000",
@@ -711,7 +711,7 @@ describe("runPremiumCompletion", () => {
       additional_terms: "",
       termination_summary: "Either party may terminate with 30 days written notice.",
     };
-    const thinEcho = vi.fn(async (): ParsedDraftShape => ({
+    const thinEcho = vi.fn(async (): Promise<ParsedDraftShape> => ({
       ...structured,
       purpose: "The parties will work together on business introductions.",
       payment_terms: "Payment schedule to be agreed between the parties.",
@@ -753,7 +753,7 @@ describe("runPremiumCompletion", () => {
       additional_terms: "",
       termination_summary: "Either party may terminate with notice.",
     };
-    const thinEcho = vi.fn(async (): ParsedDraftShape => ({
+    const thinEcho = vi.fn(async (): Promise<ParsedDraftShape> => ({
       ...structured,
       purpose: "Marketing and advertising services between the parties.",
       payment_terms: "Fees to be agreed in writing.",
@@ -797,7 +797,7 @@ describe("runPremiumCompletion", () => {
       additional_terms: "",
       termination_summary: "Standard termination as provided in this Agreement.",
     };
-    const thinEcho = vi.fn(async (): ParsedDraftShape => ({
+    const thinEcho = vi.fn(async (): Promise<ParsedDraftShape> => ({
       ...structured,
       purpose: "The parties will pursue a joint business opportunity.",
       payment_terms: "Economics to be agreed between the parties.",
@@ -849,7 +849,7 @@ describe("runPremiumCompletion", () => {
       "Externally facing advertisements shall comply with FTC truth-in-advertising expectations and platform policies, with substantiation maintained for sensitive claims. " +
       "Either Party may terminate on forty-five days written notice with cooperation on pausing spend, exporting deliverables Client is entitled to receive, and revoking access credentials.";
     const parseDraft = vi.fn(
-      async (): ParsedDraftShape => ({
+      async (): Promise<ParsedDraftShape> => ({
         ...structured,
         purpose: richPurpose,
         payment_terms:
@@ -899,7 +899,7 @@ describe("runPremiumCompletion", () => {
       "For customers who cancel within sixty days of contract execution, the Company may claw back paid commissions on a dollar-for-dollar basis. " +
       "Either Party may terminate this Agreement immediately for fraud, false promises to customers, or criminal misconduct.";
     const parseDraft = vi.fn(
-      async (): ParsedDraftShape => ({
+      async (): Promise<ParsedDraftShape> => ({
         ...structured,
         agreement_family: "independent_contractor_agreement",
         purpose: richPurpose,
@@ -946,7 +946,7 @@ describe("runPremiumCompletion", () => {
       "Non-circumvention: for eighteen months following each introduction, neither Party shall solicit, negotiate with, or contract with an introduced account in a manner that avoids the referral fees described here. " +
       "Referral fees shall be twelve percent of first-year contractually invoiced amounts after customer payments clear, excluding taxes and pass-through costs. " +
       "Fees shall be reconciled monthly with supporting ledger extracts and credited against chargebacks or refunds within the same calendar quarter.";
-    const parseDraft = vi.fn(async (): ParsedDraftShape => ({
+    const parseDraft = vi.fn(async (): Promise<ParsedDraftShape> => ({
       ...structured,
       purpose:
         "The Parties intend a referral-led commercial introduction relationship where Beta introduces qualified accounts and Alpha handles contracting and fulfillment. Detailed economics and protections appear below.",

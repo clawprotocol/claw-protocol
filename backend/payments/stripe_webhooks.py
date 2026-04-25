@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from backend.affiliates.stripe_earnings_handlers import dispatch_stripe_event
 from backend.affiliates.stripe_webhook_verify import stripe_webhook_secret, verify_stripe_signature
+from backend.config.deployment_runtime import is_relaxed_claw_environment
 from backend.economics.store import get_economics_store
 
 router = APIRouter(tags=["payments-stripe"])
@@ -18,6 +19,13 @@ _log = logging.getLogger("claw.payments.stripe_webhook")
 
 
 def _dev_bypass_signature() -> bool:
+    """
+    Unsigned webhook body (no Stripe-Signature) is allowed only in local/dev/test when
+    CLAW_STRIPE_WEBHOOK_DEV_UNSIGNED is truthy. Staging, production, and other envs always
+    require STRIPE_WEBHOOK_SECRET + valid signature.
+    """
+    if not is_relaxed_claw_environment():
+        return False
     return os.getenv("CLAW_STRIPE_WEBHOOK_DEV_UNSIGNED", "").strip().lower() in ("1", "true", "yes")
 
 

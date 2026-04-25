@@ -352,7 +352,7 @@ function applyHardTitleLocks(parsed: ParsedDraftShape, rawIntake: string): Parse
   return parsed;
 }
 
-function buildSparseExpansionPack(family: AgreementFamily, rawIntake: string): string {
+function buildSparseExpansionPack(family: AgreementFamily, _rawIntake: string): string {
   const schedule = "Where commercial details are unspecified, use 'as specified in Schedule A'.";
   if (family === "nda" || family === "confidentiality_commercial_protections_agreement") {
     return [

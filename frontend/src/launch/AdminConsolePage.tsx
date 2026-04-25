@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "./AppShell";
 import {
-  adminFlagAgreement,
   adminPayoutBatchAction,
   adminRefreshEntitlement,
   adminSetAffiliateStatus,

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { PremiumSuccessGateResult } from "./premiumSuccessGate";
 import {
   shouldShowBlockedDraftPreviewLabel,
   shouldShowRetryNeedsDetailsPanel,
 } from "./premiumTruthGateUi";
 
-const strictBlockedGate = {
+const strictBlockedGate: PremiumSuccessGateResult = {
   state: "premium_needs_details",
   successBannerAllowed: false,
   signerCtaAllowed: false,
@@ -13,7 +14,7 @@ const strictBlockedGate = {
   intent_id: "founder_equity_vesting",
   intent_confidence: 0.9,
   strict_intent: true,
-} as const;
+};
 
 describe("premium truth gate UI helpers", () => {
   it("strict founder + blocked gate shows retry panel", () => {
