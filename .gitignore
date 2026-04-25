@@ -139,3 +139,4 @@ timestamps/
 clawctl.egg-info/
 # CLAW runtime artifacts
 artifacts/
+data/agreements/*.json
