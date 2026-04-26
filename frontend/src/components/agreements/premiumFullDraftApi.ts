@@ -1,5 +1,5 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
-import { readJson, resolveApiBase } from "../../lib/clawApi";
+import { apiUrl, readJson } from "../../lib/clawApi";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { IntakePaymentField } from "./intakeCurrencyParse";
 import {
@@ -163,7 +163,6 @@ export async function postPremiumFullDraftOnce(args: {
   userGapAnswers?: string | null;
   signal?: AbortSignal;
 }): Promise<PremiumFullDraftResult> {
-  const base = resolveApiBase().replace(/\/$/, "");
   const uga = (args.userGapAnswers || "").trim();
   if (import.meta.env.DEV) {
     console.info("[gap-trace] stage=frontend_full_draft_request_body", {
@@ -173,7 +172,7 @@ export async function postPremiumFullDraftOnce(args: {
       needles_in_gap_answers: gapTraceNeedlesHit(uga),
     });
   }
-  const res = await fetch(`${base}/api/agreements/premium-full-draft`, {
+  const res = await fetch(apiUrl("/api/agreements/premium-full-draft"), {
     method: "POST",
     headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
@@ -188,6 +187,10 @@ export async function postPremiumFullDraftOnce(args: {
     const msg = typeof (err as { detail?: { message?: string } })?.detail === "object"
       ? (err as { detail?: { message?: string } }).detail?.message
       : null;
+    if (import.meta.env.PROD) {
+      // eslint-disable-next-line no-console
+      console.warn("[CLAW] premium-full-draft failed", { status: res.status, path: "/api/agreements/premium-full-draft" });
+    }
     throw new Error(msg || "premium_full_draft_failed");
   }
   return readJson<PremiumFullDraftResult>(res);
