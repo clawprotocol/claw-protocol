@@ -106,6 +106,7 @@ export type PremiumRecipientCandidate = { name: string; email: string; role: str
 export type PremiumRenderSource =
   | "server_full_draft"
   | "server_full_draft_retry"
+  | "server_full_draft_degraded"
   | "fallback_preview"
   | "fallback_preview_error"
   | "snapshot_server_full_draft"
@@ -149,6 +150,8 @@ export type PremiumCompletionResult = {
     staleOrFingerprintMismatch: boolean;
     premiumPipelineSource: PremiumRenderSource;
   };
+  /** When the API returned 200 with a non-model structured fallback (checkout still valid). */
+  serverGenerationDegraded?: { code: string; message: string } | null;
 };
 
 const PRO_FALLBACK_HEADER =
@@ -1233,6 +1236,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   let premiumRenderSource: PremiumRenderSource = "fallback_preview";
   let founderDetailsGateMessage: string | null = null;
   let proIntentGateMessage: string | null = null;
+  let serverGenerationDegraded: { code: string; message: string } | null = null;
   const intentContract = resolveAgreementIntentContract(rawForSoT || rawIntake);
   const intentPreflightPolicy = resolvePremiumIntentPreflightPolicy(intentContract);
   const tierAEnabled = intentPreflightPolicy.tier === "A";
@@ -1276,7 +1280,23 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       let doc = (full.document_text || "").trim();
       let usedClientRetry = false;
       let effectiveFull: PremiumFullDraftResult = full;
-      const serverSchemaNeedsDetails = full.generation_outcome === "needs_details";
+      const serverGenDegraded = (full.generation_outcome || "").trim() === "degraded";
+      const serverSchemaNeedsDetails = full.generation_outcome === "needs_details" && !serverGenDegraded;
+      if (serverGenDegraded) {
+        const c = (full.server_generation_failure_code || "unknown").trim() || "unknown";
+        const m = (full.server_generation_failure_message || "").trim();
+        serverGenerationDegraded = {
+          code: c,
+          message: m || "The full Pro model pass was temporarily unavailable. Your purchase is still active; the preview below is a structured summary from your intake — try Retry Pro draft in a few minutes for a full agreement.",
+        };
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-completion] server_generation_degraded", {
+            code: c,
+            reasons: (full.schema_validation_reasons || []).slice(0, 6),
+          });
+        }
+      }
       const tierBEarlyNeedsDetails = shouldEarlyNeedsDetailsForTierB({
         policy: intentPreflightPolicy,
         generationOutcome: full.generation_outcome,
@@ -1458,7 +1478,9 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           }
         }
       }
-      if (acc.ok && vPaid.ok) {
+      const acceptDegradedServerBody =
+        serverGenDegraded && (doc || "").trim().length > 0 && (!acc.ok || !vPaid.ok);
+      if ((acc.ok && vPaid.ok) || acceptDegradedServerBody) {
         const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
         const srvFull = (effectiveFull.server_full_document_text || "").trim();
         const srvRepair = (effectiveFull.server_repair_document_text || "").trim();
@@ -1473,12 +1495,17 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           ...(fam ? { agreement_family: fam } : {}),
         });
         winningPremiumBodyText = doc;
-        premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+        if (serverGenDegraded) {
+          premiumRenderSource = "server_full_draft_degraded";
+        } else {
+          premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+        }
         if (import.meta.env.DEV) {
           console.info("[premium-render-source]", {
             premiumRenderSource,
             doc_len: doc.length,
             client_retry: usedClientRetry,
+            server_gen_degraded: serverGenDegraded,
           });
         }
       } else {
@@ -1554,6 +1581,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
       founderDetailsGateMessage: null,
       proIntentGateMessage: null,
+      serverGenerationDegraded: null,
       tierADiagnostic: tierADiag,
     };
   }
@@ -1662,6 +1690,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
       founderDetailsGateMessage: founderDetailsGateMessage ?? null,
       proIntentGateMessage: proIntentGateMessage ?? null,
+      serverGenerationDegraded: null,
       tierADiagnostic: tierADiag,
     };
   }
@@ -1686,6 +1715,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
     founderDetailsGateMessage: null,
     proIntentGateMessage: null,
+    serverGenerationDegraded,
     tierADiagnostic: tierADiag,
   };
 }

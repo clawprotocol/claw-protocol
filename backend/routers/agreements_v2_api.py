@@ -61,7 +61,7 @@ from backend.services.agreement_signing_lock_store import (
     write_signing_lock,
 )
 from backend.utils.timeline_store import TimelineStore
-from backend.llm_router import OPENAI_API_KEY, call_legal_llm, resolve_llm_model_for_access_class
+from backend.llm_router import ExternalAIBlockedError, OPENAI_API_KEY, call_legal_llm, resolve_llm_model_for_access_class
 from backend.llm_usage_guard import (
     build_llm_trace_context,
     client_fingerprint,
@@ -528,8 +528,146 @@ class PremiumFullDraftResponse(BaseModel):
     server_repair_document_text: str = ""
     key_terms_found: List[str] = Field(default_factory=list)
     missing_material_info: List[str] = Field(default_factory=list)
-    generation_outcome: Literal["ok", "needs_details"] = "ok"
+    generation_outcome: Literal["ok", "needs_details", "degraded"] = "ok"
     schema_validation_reasons: List[str] = Field(default_factory=list)
+    """When generation used a non-model fallback (degraded), machine-safe reason for UI + logs."""
+    server_generation_failure_code: str = ""
+    """Operator-safe short text; no secrets."""
+    server_generation_failure_message: str = ""
+
+
+def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
+    """
+    Return (failure_code, safe_log_line) for premium full draft.
+    Distinguishes auth, timeout, parse, airlock, empty output, unknown.
+    """
+    et = type(exc).__name__
+    em = str(exc).lower()
+    if isinstance(exc, RuntimeError) and "openai_api_key" in em:
+        return "missing_openai_key", "missing_openai_key:RuntimeError"
+    if isinstance(exc, ExternalAIBlockedError):
+        br = getattr(exc, "block_reason", None) or "airlock"
+        return "airlock_blocked", f"airlock:{br}"
+    try:
+        from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError, RateLimitError
+
+        if isinstance(exc, AuthenticationError):
+            return "openai_auth", f"openai_auth:{et}"
+        if isinstance(exc, APIStatusError):
+            sc = getattr(exc, "status_code", None)
+            if sc == 401:
+                return "openai_auth", "openai_http_401"
+            if sc == 429:
+                return "openai_rate_limit", "openai_http_429"
+            if sc is not None and int(sc) >= 500:
+                return "openai_server", f"openai_http_{sc}"
+        if isinstance(exc, (APITimeoutError, TimeoutError)):
+            return "openai_timeout", f"timeout:{et}"
+        if isinstance(exc, APIConnectionError):
+            return "openai_connection", f"connection:{et}"
+        if isinstance(exc, RateLimitError):
+            return "openai_rate_limit", f"rate_limit:{et}"
+    except ImportError:
+        pass
+    if isinstance(exc, json.JSONDecodeError):
+        return "json_parse", f"json_decode:{et}"
+    if isinstance(exc, ValueError):
+        if "invalid_json" in em or "invalid_json_object" in em:
+            return "json_parse", f"value_invalid_json:{et}"
+        if "empty_document" in em or em == "empty_document_text":
+            return "empty_output", "empty_document_text"
+        if "premium_dev_context" in em or "dev_context" in em:
+            return "dev_context_leak", "dev_context_leak"
+        if "too_large" in em:
+            return "payload_limits", et
+    if "timeout" in em or "timed out" in em or "read timed out" in em:
+        return "openai_timeout", f"timeout_string:{et}"
+    return "unknown", f"{et}"
+
+
+def _build_premium_full_draft_fallback_document(
+    intake_s: str,
+    ctx_dict: Optional[Dict[str, Any]],
+    failure_code: str,
+) -> str:
+    """Structured preview from intake + context when the Pro model path is unavailable."""
+    title = ""
+    if ctx_dict:
+        title = str(ctx_dict.get("title") or "").strip()
+    if not title:
+        title = "Agreement"
+    blob = build_free_reference_blob(intake_s, ctx_dict).strip()
+    if len(blob) < 400:
+        blob = f"{(intake_s or '').strip()}\n\n{blob}".strip()
+    pad = "\n\n".join(
+        [
+            f"{i}. Operative terms. The parties intend to document the relationship described in the intake above; "
+            f"specific commercial, payment, and liability terms should be completed in review."
+            for i in range(1, 13)
+        ]
+    )
+    return (
+        f"# {title}\n\n"
+        f"*LawDog Pro — structured preview (full AI pass unavailable: {failure_code}). "
+        f"Your Pro purchase and workspace are unchanged. Use **Retry Pro draft** after a few minutes, or keep editing below.*\n\n"
+        f"## Summary from your intake\n\n{blob}\n\n"
+        f"## Commercial framework (complete in review)\n\n{pad}\n"
+    )
+
+
+def _premium_full_draft_degraded_response(
+    *,
+    intake_s: str,
+    ctx_dict: Optional[Dict[str, Any]],
+    failure_code: str,
+    failure_message: str,
+    primary_full: str = "",
+    repair_body: str = "",
+) -> PremiumFullDraftResponse:
+    doc = _build_premium_full_draft_fallback_document(intake_s, ctx_dict, failure_code)
+    fam = ""
+    if ctx_dict:
+        fam = str(ctx_dict.get("agreement_family") or "").strip()
+    log.error(
+        "premium_full_draft event=degraded_response failure_code=%s failure_message=%s doc_len=%s",
+        failure_code,
+        failure_message[:200],
+        len(doc),
+    )
+    return PremiumFullDraftResponse(
+        title=str((ctx_dict or {}).get("title") or "").strip() or "Agreement",
+        agreement_family=fam,
+        document_text=doc,
+        server_full_document_text=primary_full,
+        server_repair_document_text=repair_body,
+        key_terms_found=[],
+        missing_material_info=[f"pro_model_unavailable:{failure_code}"],
+        generation_outcome="degraded",
+        schema_validation_reasons=[f"fallback:{failure_code}"],
+        server_generation_failure_code=failure_code,
+        server_generation_failure_message=failure_message,
+    )
+
+
+def _degraded_user_message_for_code(code: str) -> str:
+    """Safe, non-technical copy for API clients (no secrets)."""
+    m: Dict[str, str] = {
+        "missing_openai_key": "The AI service is not configured on the server. Your Pro access is saved — try **Retry Pro draft** after the service is restored, or continue editing the preview below.",
+        "openai_auth": "The AI provider rejected the request (authentication). Wait a few minutes and tap **Retry Pro draft**.",
+        "openai_rate_limit": "The AI provider rate-limited this request. Wait briefly and use **Retry Pro draft**.",
+        "openai_timeout": "The AI request timed out. Your connection or the model may be busy — use **Retry Pro draft** shortly.",
+        "openai_connection": "Could not reach the AI provider. Check your network and use **Retry Pro draft**.",
+        "openai_server": "The AI provider returned a server error. Try **Retry Pro draft** in a few minutes.",
+        "json_parse": "The model returned an unexpected format this run. Use **Retry Pro draft** to regenerate.",
+        "airlock_blocked": "Content policy blocked an automated pass for this intake. Add detail in review or adjust wording, then **Retry Pro draft**.",
+        "empty_output": "The model returned an empty draft this run. Use **Retry Pro draft**.",
+        "dev_context_leak": "An internal safety check blocked the draft. Use **Retry Pro draft**.",
+        "payload_limits": "The request was too large to process in one pass. Shorten the intake notes and **Retry Pro draft**.",
+    }
+    return m.get(
+        code,
+        "The full Pro model pass was temporarily unavailable. A structured preview from your intake is below — your purchase is intact. Use **Retry Pro draft** in a few minutes for a full pass.",
+    )
 
 
 class PremiumMissingFactsRequest(BaseModel):
@@ -2749,6 +2887,14 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
         )
     if len(json.dumps(user_payload, ensure_ascii=False)) > 240_000:
         raise HTTPException(status_code=400, detail="Input too large for premium full draft")
+    if not (OPENAI_API_KEY or "").strip():
+        log.error("premium_full_draft event=config_error category=missing_env OPENAI_API_KEY_unset=1")
+        return _premium_full_draft_degraded_response(
+            intake_s=intake_s,
+            ctx_dict=ctx_dict,
+            failure_code="missing_openai_key",
+            failure_message=_degraded_user_message_for_code("missing_openai_key"),
+        )
     try:
         llm_text = call_legal_llm(
             messages=[
@@ -2866,8 +3012,13 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             repair_body = ""
             log.info("dev_context_leak event=premium_full_draft_sanitized_retry_succeeded")
         ok_final, final_reasons = _grade_draft(out)
-        generation_outcome: Literal["ok", "needs_details"] = "ok" if ok_final else "needs_details"
+        generation_outcome: Literal["ok", "needs_details", "degraded"] = "ok" if ok_final else "needs_details"
         if not ok_final:
+            log.info(
+                "premium_full_draft event=validator_reject category=quality_or_intent_schema needs_details=1 "
+                "reasons=%s",
+                ",".join(final_reasons[:24]),
+            )
             log.info(
                 "premium_full_draft_quality_event event=premium_intent_or_quality_needs_details reasons=%s",
                 ",".join(final_reasons[:16]),
@@ -2914,14 +3065,20 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             schema_validation_reasons=final_reasons,
         )
     except Exception as exc:
-        log.warning("premium_full_draft failed err=%s", type(exc).__name__, exc_info=True)
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "premium_full_draft_unavailable",
-                "message": "Premium full agreement generation is temporarily unavailable. Retry shortly.",
-            },
-        ) from exc
+        code, log_detail = _classify_premium_full_draft_failure(exc)
+        log.warning(
+            "premium_full_draft event=model_path_failed category=%s detail=%s err_type=%s",
+            code,
+            log_detail,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        return _premium_full_draft_degraded_response(
+            intake_s=intake_s,
+            ctx_dict=ctx_dict,
+            failure_code=code,
+            failure_message=_degraded_user_message_for_code(code),
+        )
 
 
 @router.post("/premium-review", response_model=PremiumAgreementReviewResponse)

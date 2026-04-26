@@ -826,7 +826,7 @@ def test_premium_full_draft_ok(monkeypatch, tmp_path):
     assert b.get("server_repair_document_text") in ("", None)
 
 
-def test_premium_full_draft_503_when_llm_fails(monkeypatch, tmp_path):
+def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     import backend.routers.agreements_v2_api as av2
@@ -841,9 +841,12 @@ def test_premium_full_draft_503_when_llm_fails(monkeypatch, tmp_path):
         headers=_ORG_H,
         json={"intake_text": "Any intake text for testing failure path."},
     )
-    assert res.status_code == 503
-    detail = res.json().get("detail")
-    assert isinstance(detail, dict) and detail.get("code") == "premium_full_draft_unavailable"
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("generation_outcome") == "degraded"
+    assert (body.get("server_generation_failure_code") or "") != ""
+    assert (body.get("document_text") or "").strip() != ""
+    assert "server_full_document_text" in body
 
 
 def test_premium_agreement_review_ok(monkeypatch, tmp_path):

@@ -53,9 +53,11 @@ export type PremiumFullDraftResult = {
   server_repair_document_text?: string;
   key_terms_found: string[];
   missing_material_info: string[];
-  /** Server could not validate category-native schema after one repair; user should add details and retry. */
-  generation_outcome?: "ok" | "needs_details";
+  /** `needs_details` = validator/quality; `degraded` = model path failed, structured server fallback in `document_text`. */
+  generation_outcome?: "ok" | "needs_details" | "degraded";
   schema_validation_reasons?: string[];
+  server_generation_failure_code?: string;
+  server_generation_failure_message?: string;
 };
 
 export function buildPremiumFullDraftContext(draft: ParsedDraftShape): PremiumFullDraftContextPayload {
