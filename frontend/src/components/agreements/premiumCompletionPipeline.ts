@@ -1313,8 +1313,12 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           }
         }
       }
-      const effGen = (effectiveFull.generation_outcome || "ok").trim();
-      const serverSchemaNeedsDetails = effGen === "needs_details" && !serverGenDegraded;
+      const effGenNarrow: "ok" | "needs_details" | "degraded" | undefined = (() => {
+        const t = (effectiveFull.generation_outcome ?? "").trim();
+        if (t === "ok" || t === "needs_details" || t === "degraded") return t;
+        return undefined;
+      })();
+      const serverSchemaNeedsDetails = effGenNarrow === "needs_details" && !serverGenDegraded;
       if (serverGenDegraded) {
         const c = (full.server_generation_failure_code || "unknown").trim() || "unknown";
         const m = (full.server_generation_failure_message || "").trim();
@@ -1336,7 +1340,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
       const tierBEarlyNeedsDetails = shouldEarlyNeedsDetailsForTierB({
         policy: intentPreflightPolicy,
-        generationOutcome: effGen,
+        generationOutcome: effGenNarrow,
         missingMaterialInfo: effectiveFull.missing_material_info,
       });
       if (serverSchemaNeedsDetails) {
