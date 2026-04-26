@@ -4,8 +4,6 @@ import { clawAgreementHeaders } from "./agreementOrgHeaders";
 import { recipientAgreementReadHeaders } from "./recipientAccessApi";
 import { apiUrl, logClawClientWarning, resolveApiBase } from "../lib/clawApi";
 
-const API_BASE = resolveApiBase();
-
 export type WorkspaceIndexAgreement = {
   id: string;
   title: string;
@@ -23,7 +21,7 @@ export type WorkspaceIndexAgreement = {
   workspace_tags?: string[];
 };
 
-const base = () => API_BASE.replace(/\/$/, "");
+const base = () => resolveApiBase().replace(/\/$/, "");
 
 export type WorkspaceIndexResult = {
   agreements: WorkspaceIndexAgreement[];

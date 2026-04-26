@@ -239,4 +239,24 @@ describe("premium success gate (universal Pro truth)", () => {
       expect(g.state).toBe("premium_success");
     }
   });
+
+  it("11) server_generation_degraded: success + signer CTA even if validation failed on fallback body", () => {
+    const c = resolveAgreementIntentContract("Need a logo, $1,500, two revisions, IP to client");
+    const thin = "Short fallback body.";
+    const v = validatePaidProOutput({ text: thin, rawIntake: "logo", intentContract: c, draft: null });
+    expect(v.ok).toBe(false);
+    const g = canShowPremiumSuccess({
+      intentContract: c,
+      renderSource: "server_full_document_text",
+      validation: v,
+      documentText: thin,
+      intakeText: "logo",
+      premiumPipelineSource: "server_full_draft_degraded",
+      stale: false,
+      serverGenerationDegraded: true,
+    });
+    expect(g.state).toBe("premium_success");
+    expect(g.signerCtaAllowed).toBe(true);
+    expect(g.successBannerAllowed).toBe(true);
+  });
 });

@@ -1,4 +1,5 @@
 import type { LivePreviewModel } from "./liveDraftHeuristics";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 /**
  * Minimal bar to treat guided intake as “complete enough to continue” without blocking on every field.
@@ -37,6 +38,22 @@ export function isUsablePartialIntakeStructure(model: LivePreviewModel, intakeTr
     return true;
   }
   return false;
+}
+
+/**
+ * If POST /draft or hydrate fails, we can still show the on-create review surface when
+ * the parse result is clearly a real draft (avoids a dead end when the API is down or CORS-misconfigured).
+ */
+export function isStructuredDraftUsableForLocalReviewFallback(
+  parsed: Pick<ParsedDraftShape, "title" | "purpose" | "parties">,
+  model: LivePreviewModel,
+  rawIntake: string,
+): boolean {
+  if (isUsablePartialIntakeStructure(model, rawIntake)) return true;
+  if ((parsed.parties || []).length < 1) return false;
+  if (!(parsed.purpose || "").trim() || (parsed.purpose || "").trim().length < 8) return false;
+  if (!(parsed.title || "").trim() || (parsed.title || "").trim().length < 2) return false;
+  return true;
 }
 
 /** Compact, assistive next-step ideas (never required). */

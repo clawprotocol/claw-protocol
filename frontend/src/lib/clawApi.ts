@@ -1,5 +1,57 @@
 const DEV_API_FALLBACK = "http://127.0.0.1:8000";
 
+/** Injected at runtime (e.g. static hosting) when build-time VITE_* API URL is missing. Set before the app bundle runs. */
+/** @public Injected on `window` before the app bundle (e.g. Railway static + separate API). */
+export const CLAW_PUBLIC_API_BASE_WINDOW_KEY = "__CLAW_PUBLIC_API_BASE__" as const;
+
+let loggedApiBaseOnce = false;
+
+function getRuntimePublicApiBase(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const w = window as unknown as Record<string, string | undefined>;
+    const a = String(w[CLAW_PUBLIC_API_BASE_WINDOW_KEY] ?? "").trim();
+    if (a) return a.replace(/\/$/, "");
+  } catch {
+    /* ignore */
+  }
+  try {
+    const el = document?.querySelector?.("meta[name=\"claw-api-base\"]") as HTMLMetaElement | null;
+    const c = String(el?.content ?? "").trim();
+    if (c) return c.replace(/\/$/, "");
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+function logApiBaseResolvedOnce(resolved: string, source: "env" | "runtime_meta" | "dev_fallback" | "same_origin"): void {
+  if (loggedApiBaseOnce) return;
+  loggedApiBaseOnce = true;
+  try {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[CLAW] API base (once)", { source, base: resolved || "(empty/same-origin)" });
+      return;
+    }
+    if (import.meta.env.PROD) {
+      let host = "same_origin";
+      if (resolved) {
+        try {
+          host = new URL(resolved).host;
+        } catch {
+          host = "invalid";
+        }
+      }
+      // Safe: no tokens, no path/query
+      // eslint-disable-next-line no-console
+      console.info("[CLAW] API base (once)", { source, apiHost: host });
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function isLoopbackHost(h: string): boolean {
   const x = (h || "").toLowerCase();
   return x === "127.0.0.1" || x === "localhost" || x === "::1";
@@ -20,6 +72,7 @@ function isPrivateLanHost(h: string): boolean {
 /**
  * Explicit API origin from env (VITE_CLAW_API_BASE or VITE_API_BASE).
  * Empty string = same-origin requests (production API on the same host as the SPA).
+ * @see getRuntimePublicApiBase — use resolveApiBase() in requests so runtime injection can apply.
  */
 export function getApiBase(): string {
   const a = String((import.meta.env.VITE_CLAW_API_BASE as string | undefined) ?? "").trim();
@@ -33,8 +86,9 @@ export function getApiBase(): string {
  * - Dev: falls back to 127.0.0.1:8000 when unset (local backend).
  */
 export function resolveApiBase(): string {
-  const explicit = getApiBase();
+  const explicit = getApiBase() || getRuntimePublicApiBase();
   if (explicit) {
+    logApiBaseResolvedOnce(explicit, getApiBase() ? "env" : "runtime_meta");
     if (!import.meta.env.PROD && typeof window !== "undefined") {
       try {
         const originHost = new URL(window.location.origin).hostname;
@@ -62,7 +116,11 @@ export function resolveApiBase(): string {
     }
     return explicit;
   }
-  if (import.meta.env.PROD) return "";
+  if (import.meta.env.PROD) {
+    logApiBaseResolvedOnce("", "same_origin");
+    return "";
+  }
+  logApiBaseResolvedOnce(DEV_API_FALLBACK, "dev_fallback");
   return DEV_API_FALLBACK;
 }
 

@@ -105,7 +105,11 @@ import {
   resolveGuidedFlowId,
   type GuidedFieldKey,
 } from "./agreementIntakeDraftModel";
-import { isUsablePartialIntakeStructure, meetsMinimalIntakeProgress } from "./intakeGuidedHints";
+import {
+  isStructuredDraftUsableForLocalReviewFallback,
+  isUsablePartialIntakeStructure,
+  meetsMinimalIntakeProgress,
+} from "./intakeGuidedHints";
 import {
   buildLiveDraftPreview,
   getInlineParsedField,
@@ -342,7 +346,6 @@ type Props = {
   firstLawdogSession?: boolean;
 };
 
-const API_BASE = resolveApiBase();
 type MissingKey =
   | "title"
   | "jurisdiction"
@@ -2373,25 +2376,51 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       due_date: rest.due_date ?? null,
       effective_date: rest.effective_date ?? null,
     };
+    const draftUrl = apiUrl("/api/agreements/draft");
     console.log("[AgreementIntake] generate: draft API request");
-    const res = await fetch(`${API_BASE}/api/agreements/draft`, {
+    const res = await fetch(draftUrl, {
       method: "POST",
       headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(apiDraft),
     });
     const payload = await res.json().catch(() => ({}));
+    let apiHost = "";
+    try {
+      apiHost = new URL(draftUrl, typeof window !== "undefined" ? window.location.href : "http://localhost").host;
+    } catch {
+      apiHost = "";
+    }
     console.log("[AgreementIntake] generate: draft API response", {
       ok: res.ok,
+      status: res.status,
+      request_host: apiHost,
       agreement_id: payload?.id != null ? String(payload.id) : "(missing)",
       hasDraftPayload: payload?.draft != null,
     });
     if (!res.ok) {
+      if (import.meta.env.PROD) {
+        // eslint-disable-next-line no-console
+        console.warn("[CLAW] draft POST failed", { status: res.status, path: "/api/agreements/draft" });
+      }
       const errBody = payload as { detail?: { paywall?: boolean; code?: string; message?: string } };
       const d = errBody?.detail;
       if (d && typeof d === "object" && d.paywall) {
         triggerPaywall({ code: d.code, surface: "draft_create" });
       }
-      throw new Error("create_failed");
+      const pe = payload as { detail?: unknown };
+      const detailKind =
+        typeof pe.detail === "string"
+          ? pe.detail.slice(0, 120)
+          : Array.isArray(pe.detail)
+            ? "validation_array"
+            : pe.detail != null && typeof pe.detail === "object"
+              ? "detail_object"
+              : "";
+      if (import.meta.env.PROD) {
+        // eslint-disable-next-line no-console
+        console.warn("[CLAW] draft POST error detail (truncated)", { status: res.status, detailKind });
+      }
+      throw new Error(`create_failed_http_${res.status}`);
     }
     const id = String(payload?.id || "").trim();
     const postDraft = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
@@ -2873,7 +2902,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [createProductionTwoPane, simpleProductFlow]);
 
   const postAgreementFieldUpdate = React.useCallback(async (agreementId: string, field: string, value: unknown) => {
-    const res = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/update-field`, {
+    const res = await fetch(apiUrl(`/api/agreements/${encodeURIComponent(agreementId)}/update-field`), {
       method: "POST",
       headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ field, value }),
@@ -4307,10 +4336,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       const rawIntake = (finalTranscriptRef.current || intakeCombined).trim();
       const model = buildLiveDraftPreview(rawIntake);
-      if (isUsablePartialIntakeStructure(model, rawIntake)) {
+      const structuredOk = isStructuredDraftUsableForLocalReviewFallback(parsed, model, rawIntake);
+      if (structuredOk) {
         setHardError(null);
       } else {
         setHardError(msg);
+      }
+      if (createProductionTwoPane && !hydrate && structuredOk) {
+        setCreateFlowPhase("draft_ready_for_review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setDisplayPhase("intake");
+        setMobileWorkspacePane("preview");
+        setDraftNowCommitted(true);
+        setPreviewPaneRevealed(true);
+        if (import.meta.env.PROD) {
+          // eslint-disable-next-line no-console
+          console.warn("[CLAW] on-page review fallback (draft POST/hydrate failed; structured parse OK)", {
+            err: msg.slice(0, 120),
+          });
+        }
+        setProductionSendBarPhase("idle");
+        setProductionSendBarAgreementId(null);
+        return true;
       }
       setProductionSendBarPhase("idle");
       setProductionSendBarAgreementId(null);
