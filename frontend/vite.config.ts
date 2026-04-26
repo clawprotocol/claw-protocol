@@ -10,6 +10,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
   },
   server: {
+    allowedHosts: ['believable-gentleness-production-3ab6.up.railway.app'],
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8000",
