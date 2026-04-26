@@ -1196,6 +1196,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumTruthPipelineSource, setPremiumTruthPipelineSource] = useState<string | null>(null);
   const [proFullDraftQualityRetry, setProFullDraftQualityRetry] = useState(false);
   const [proFullDraftCustomGateMessage, setProFullDraftCustomGateMessage] = useState<string | null>(null);
+  /** Set when the server returned 200 with an explicit Pro model fallback (payment still valid). */
+  const [premiumServerGenerationDegraded, setPremiumServerGenerationDegraded] = useState<{
+    code: string;
+    message: string;
+  } | null>(null);
   const hydratedPremiumBodyRef = useRef("");
   const agreementDocSyncTimerRef = useRef(0);
   const [reviewDocRefreshTick, setReviewDocRefreshTick] = useState(0);
@@ -2758,6 +2763,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setAdvancedFullDraftPaywallOpen(false);
     setFullDraftUpgradeBannerVisible(false);
     setPremiumPipelineUserMessage(null);
+    setPremiumServerGenerationDegraded(snap.serverGenerationDegraded ?? null);
     setPremiumPersistedFlowActive(true);
     setPremiumSendPathUnlocked(true);
     lastPremiumPipelineRenderSourceRef.current = snap.premiumPipelineRenderSource || "snapshot_server_full_draft";
@@ -3056,9 +3062,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         emitPaidFunnelEvent("premium_checkout_completed", {
           once: true,
           extra: {
-            premium_generation_outcome:
-              result.proIntentGateMessage || result.founderDetailsGateMessage ? "needs_details" : "ok",
+            premium_generation_outcome: result.serverGenerationDegraded
+              ? "degraded"
+              : result.proIntentGateMessage || result.founderDetailsGateMessage
+                ? "needs_details"
+                : "ok",
             render_source: result.premiumRenderSource,
+            ...(result.serverGenerationDegraded?.code
+              ? { server_generation_failure_code: result.serverGenerationDegraded.code }
+              : {}),
           },
         });
         if (import.meta.env.DEV) {
@@ -3072,6 +3084,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
         if (result.staleIntakeOrGeneration) {
+          setPremiumServerGenerationDegraded(null);
           setHardError("Your details changed while we were finishing. Retry Pro draft when you are ready.");
           setProFullDraftQualityRetry(true);
           setPremiumPostCheckoutPhase(null);
@@ -3079,6 +3092,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
         if (result.proIntentGateMessage || result.founderDetailsGateMessage) {
+          setPremiumServerGenerationDegraded(null);
           setProFullDraftCustomGateMessage(
             result.proIntentGateMessage || result.founderDetailsGateMessage || null,
           );
@@ -3118,6 +3132,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
         setProFullDraftCustomGateMessage(null);
+        setPremiumServerGenerationDegraded(result.serverGenerationDegraded ?? null);
         setPremiumRefineReview(result.premiumReview ?? null);
         setPremiumFinalizeAudit(result.premiumFinalizeAudit ?? null);
         setPremiumReviewRoute(result.premiumReviewRoute ?? null);
@@ -3136,6 +3151,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           modalParty2NameRef.current,
         );
         if (hasFullDraftAccess && isUnacceptablePipelineProSource(result.premiumRenderSource)) {
+          setPremiumServerGenerationDegraded(null);
           setPremiumTruthPipelineSource(result.premiumRenderSource);
           setProFullDraftQualityRetry(true);
           setHardError(null);
@@ -3217,8 +3233,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             intentContract: contractIc,
             draft: merged.draft,
             qualityRetryActive: false,
+            serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
           });
           if (!fin.ok) {
+            setPremiumServerGenerationDegraded(null);
             if (contractIc.pro_strict) {
               const d = buildPremiumDetailsGateCopy(contractIc, fin.gate?.validation.reasons ?? fin.reasons);
               setProFullDraftCustomGateMessage(
@@ -3290,6 +3308,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementGenerationId: result.agreementGenerationId,
           intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
           premiumPipelineRenderSource: result.premiumRenderSource,
+          serverGenerationDegraded: result.serverGenerationDegraded ?? null,
         });
         if (import.meta.env.DEV) {
           const snapDoc = snapshotPlain;
@@ -5848,6 +5867,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setProFullDraftQualityRetry(false);
     setProFullDraftCustomGateMessage(null);
+    setPremiumServerGenerationDegraded(null);
     setHardError(null);
     if (!draft) {
       setHardError("We need a draft to retry. Restore your agreement or re-enter your intake, then use Retry Pro draft again.");
@@ -5970,6 +5990,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       stale: false,
       draft: draft ?? null,
       qualityRetryActive: proFullDraftQualityRetry,
+      serverGenerationDegraded: Boolean(premiumServerGenerationDegraded),
     });
   }, [
     hasFullDraftAccess,
@@ -5980,6 +6001,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeCombined,
     draft,
     proFullDraftQualityRetry,
+    premiumServerGenerationDegraded,
     premiumTruthPipelineSource,
     reviewDocRefreshTick,
   ]);
@@ -7895,6 +7917,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           stale: false,
           draft: draft ?? null,
           qualityRetryActive: proFullDraftQualityRetry,
+          serverGenerationDegraded: Boolean(premiumServerGenerationDegraded),
         });
         if (!g.signerCtaAllowed) {
           if (import.meta.env.DEV) {
@@ -7918,6 +7941,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     premiumTruthPipelineSource,
     proFullDraftQualityRetry,
+    premiumServerGenerationDegraded,
     handOffProductionDraftToRecipients,
     bumpPremiumSurfaceGateTick,
     emitPaidFunnelEvent,
@@ -10003,6 +10027,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 ) : null}
                                 {!proFullDraftQualityRetry ? (
                                 <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
+                                  {premiumServerGenerationDegraded ? (
+                                    <div
+                                      className="mb-4 rounded-lg border border-sky-500/40 bg-slate-900/50 px-4 py-3 sm:px-5 sm:py-3.5"
+                                      role="status"
+                                      aria-live="polite"
+                                    >
+                                      <p className="text-sm font-medium leading-relaxed text-slate-100">
+                                        {premiumServerGenerationDegraded.message}
+                                      </p>
+                                      <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
+                                        Your upgrade is on file. You can keep editing what&apos;s below, or try{" "}
+                                        <span className="font-medium text-slate-200">Retry Pro draft</span> in a few
+                                        minutes for a full model-generated pass.
+                                      </p>
+                                    </div>
+                                  ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
                                     <div className="flex flex-col gap-3 border-b border-stone-200/95 bg-gradient-to-b from-[#f4f0e6] to-[#ebe6dc] px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                                       <div className="min-w-0">
