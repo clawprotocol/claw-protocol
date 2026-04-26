@@ -44,11 +44,12 @@ export function resolvePremiumIntentPreflightPolicy(
 
 export function shouldEarlyNeedsDetailsForTierB(args: {
   policy: PremiumIntentPreflightPolicy;
-  generationOutcome?: "ok" | "needs_details";
+  generationOutcome?: "ok" | "needs_details" | "degraded";
   missingMaterialInfo?: string[] | null | undefined;
 }): boolean {
   if (args.policy.tier !== "B") return false;
   if (!args.policy.askMissingFactsEarlier) return false;
+  if (args.generationOutcome === "degraded") return false;
   if (args.generationOutcome === "needs_details") return true;
   const missing = (args.missingMaterialInfo || []).map((x) => (x || "").trim()).filter(Boolean);
   return missing.length > 0;
