@@ -68,6 +68,7 @@ import { DirectComparePanel } from "./DirectComparePanel";
 import { cloneDraftForRecipientPreview } from "./recipientPreviewBaseline";
 import {
   PORTABLE_REVIEW_OCR_FOOTNOTE,
+  PORTABLE_REVIEW_PASTE_LABEL,
   PORTABLE_REVIEW_PASTE_PLACEHOLDER,
   PORTABLE_REVIEW_SUB,
   buildRecipientRevisionText,

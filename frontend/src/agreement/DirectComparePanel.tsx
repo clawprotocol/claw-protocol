@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import { analyzeDirectTextCompare, type ClauseRow, type DirectTextCompareResult } from "../vs01/directAgreementTextCompare";
+import type { RedlineSegment } from "../vs01/agreementRedline";
+import {
+  analyzeDirectTextCompare,
+  type ClauseRow,
+  type DirectTextCompareResult,
+  type TopicHighlight,
+} from "../vs01/directAgreementTextCompare";
 import { DIRECT_COMPARE_DISCLAIMER, DIRECT_COMPARE_MODE_INTRO } from "./portableReviewCopy";
 
 type Props = {
@@ -90,7 +96,7 @@ export function DirectComparePanel({ defaultBefore }: Props) {
 function DirectCompareResultView({ result }: { result: DirectTextCompareResult }) {
   const { redline, clauseRows } = result;
   const showRows = clauseRows.filter(
-    (r) => r.kind === "add" || r.kind === "remove" || r.kind === "edit",
+    (r: ClauseRow) => r.kind === "add" || r.kind === "remove" || r.kind === "edit",
   );
 
   return (
@@ -115,7 +121,7 @@ function DirectCompareResultView({ result }: { result: DirectTextCompareResult }
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Thematic focus</div>
           <ul className="mt-2 space-y-2">
-            {result.topicHighlights.map((h) => (
+            {result.topicHighlights.map((h: TopicHighlight) => (
               <li
                 key={h.id}
                 className="rounded-xl border border-slate-600/50 bg-slate-900/40 p-3 text-xs text-slate-200"
@@ -146,7 +152,7 @@ function DirectCompareResultView({ result }: { result: DirectTextCompareResult }
             {result.removedClauses} removed
           </p>
           <ul className="mt-1 max-h-56 space-y-2 overflow-y-auto pr-1">
-            {showRows.map((row, i) => (
+            {showRows.map((row: ClauseRow, i: number) => (
               <li key={i} className="rounded-lg border border-slate-700/60 bg-slate-950/50 p-2.5 text-[0.7rem] leading-snug text-slate-200">
                 {clauseRowLine(row)}
               </li>
@@ -160,7 +166,7 @@ function DirectCompareResultView({ result }: { result: DirectTextCompareResult }
           <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Text-level changes</div>
           <p className="mb-1 text-[0.65rem] text-slate-500">Word- and line-level view (read-only, same diff engine as LawDog review).</p>
           <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-600/50 bg-white p-3 text-[0.7rem] leading-relaxed text-slate-900">
-            {redline.segments.map((seg, idx) => {
+            {redline.segments.map((seg: RedlineSegment, idx: number) => {
               if (seg.type === "same") return <span key={idx}>{seg.text}</span>;
               if (seg.type === "insert")
                 return (
