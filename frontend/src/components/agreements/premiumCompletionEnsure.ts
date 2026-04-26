@@ -65,6 +65,10 @@ function snapshotMatchesCurrentRequest(
 export async function ensurePremiumCompletion(input: PremiumCompletionInput): Promise<PremiumCompletionResult> {
   const snap = readPremiumCompletionSnapshot();
   if (snap && snapshotMatchesCurrentRequest(snap, input)) {
+    if (import.meta.env.MODE !== "test") {
+      // eslint-disable-next-line no-console
+      console.info("[CLAW] premium hydration start", { source: "session_snapshot" });
+    }
     const txt = (snap.premiumWinningBodyText || snap.premiumReadonlyPlainText || "").trim();
     const hit = gapTraceNeedlesHit(txt);
     console.info("[gap-trace] stage=ensure_premium_completion_snapshot_short_circuit", {

@@ -269,7 +269,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         clearUpgradeCheckoutContext();
       }
       const destination =
-        agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !isSingleAgreementCheckout
+        agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID
           ? appendReturnToQueryParam(returnTo, "premiumCompletion", "1")
           : returnTo;
       navigate(destination);

@@ -176,10 +176,10 @@ import { ensurePremiumCompletion } from "./premiumCompletionEnsure";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import {
   clearPremiumCompletionStateAfterSend,
+  clearPremiumCompletionDoneInLocalStorage,
   markPremiumCompletionDoneInLocalStorage,
   markPremiumPostCheckoutRevealDismissed,
   markPremiumRecipientsSurfaceReleased,
-  peekPremiumCompletionDoneInLocalStorage,
   peekPremiumPostCheckoutRevealDismissed,
   peekPremiumRecipientsSurfaceReleased,
   persistPremiumCompletionSnapshot,
@@ -1711,6 +1711,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return `${b}\n\n${s}`;
   }, [useGuidedSplitIntake, intakeBaselineCommitted, intakeStepBuffer]);
 
+  const intakeCombinedRef = useRef(intakeCombined);
+  intakeCombinedRef.current = intakeCombined;
+
   /** Text snapshot used for heuristics, guided progression, and live preview (debounced + explicit flush only). */
   const intakeGuidanceCombined = useMemo(() => {
     const b = intakeBaselineCommitted.trim();
@@ -2729,20 +2732,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       } catch {
         /* ignore */
       }
-      const c = intakeCombined.trim();
+      const c = intakeCombinedRef.current.trim();
       const r = resumeSnap?.rawIntake?.trim() ?? "";
       const origResume = resumeSnap?.originalUserIntakeRaw?.trim() ?? "";
       const origStore = readOriginalUserIntakeRaw();
       const longest = pickLongestPremiumIntakeCorpus(48, origStore, origResume, c, r, storage);
       if (longest) return longest;
-      const d = draftForFallback ?? draft;
+      const d = draftForFallback ?? draftSnapshotRef.current;
       if (d) {
         const fromDraft = buildReviewCoercionRawIntakeFromDraft(d, "").trim();
         if (fromDraft) return fromDraft;
       }
       return "";
     },
-    [intakeCombined, draft],
+    [],
   );
 
   const currentPremiumMergedIntakeKey = useMemo(() => {
@@ -2752,7 +2755,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const resume = readCreateComplexityResume();
     const notes = (resume?.premiumUpgradeNotes || "").trim() || pendingUpgradePrompt.trim();
     return buildPremiumMergedIntakeWithUserNotes(raw, notes);
-  }, [draft, pendingUpgradePrompt, resolveRawIntakeForPremiumCheckout, reviewDocRefreshTick]);
+  }, [draft, pendingUpgradePrompt, resolveRawIntakeForPremiumCheckout, reviewDocRefreshTick, intakeCombined]);
 
   useLayoutEffect(() => {
     const snap = readCreateComplexityResume();
@@ -2886,18 +2889,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useLayoutEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
-    const snap = readPremiumCompletionSnapshot();
-    if (!snap) return;
-    applyHydrationFromPremiumSnapshot(snap);
+    let u: URL;
     try {
-      const u = new URL(window.location.href);
-      if (u.searchParams.get("premiumCompletion") === "1") {
-        u.searchParams.delete("premiumCompletion");
-        const qs = u.searchParams.toString();
-        window.history.replaceState(window.history.state, "", qs ? `${u.pathname}?${qs}` : u.pathname);
-      }
+      u = new URL(window.location.href);
     } catch {
-      /* ignore */
+      return;
+    }
+    const snap = readPremiumCompletionSnapshot();
+    if (snap) {
+      applyHydrationFromPremiumSnapshot(snap);
+      try {
+        if (u.searchParams.get("premiumCompletion") === "1") {
+          u.searchParams.delete("premiumCompletion");
+          const qs = u.searchParams.toString();
+          window.history.replaceState(window.history.state, "", qs ? `${u.pathname}?${qs}` : u.pathname);
+        }
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    const urlReturn = u.searchParams.get("premiumCompletion") === "1";
+    const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
+    if (urlReturn || grantPending) {
+      clearPremiumCompletionDoneInLocalStorage();
+      if (import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.info("[CLAW] premium return detected", { from: urlReturn ? "url" : "grant_and_resume" });
+        // eslint-disable-next-line no-console
+        console.info("[CLAW] premium hydration start", { from: "layout" });
+      }
+      setPremiumPostCheckoutPhase("processing");
+      setPremiumPipelineUserMessage("Preparing your LawDog Pro agreement...");
     }
   }, [createProductionTwoPane, simpleProductFlow]);
 
@@ -2998,7 +3021,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
-  /** After create-flow checkout: premium completion + reveal before recipients (Stripe `?premiumCompletion=1`). */
+  /** After create-flow checkout: premium completion + reveal before recipients (Stripe `?premiumCompletion=1` or grant+resume). */
   useEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
     let cancelled = false;
@@ -3008,24 +3031,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     } catch {
       return;
     }
-    if (url.searchParams.get("premiumCompletion") !== "1") return;
+    const urlPc = url.searchParams.get("premiumCompletion") === "1";
+    const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
+    if (!urlPc && !grantPending) return;
 
     if (readPremiumCompletionSnapshot()) {
       try {
-        url.searchParams.delete("premiumCompletion");
-        const qs = url.searchParams.toString();
-        window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-
-    if (peekPremiumCompletionDoneInLocalStorage()) {
-      try {
-        url.searchParams.delete("premiumCompletion");
-        const qs = url.searchParams.toString();
-        window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+        if (url.searchParams.get("premiumCompletion") === "1") {
+          url.searchParams.delete("premiumCompletion");
+          const qs = url.searchParams.toString();
+          window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+        }
       } catch {
         /* ignore */
       }
@@ -3040,48 +3056,55 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
 
-    const resumeSnap = readCreateComplexityResume();
-    const origFromResume = resumeSnap?.originalUserIntakeRaw?.trim();
-    if (origFromResume) writeOriginalUserIntakeRawIfRicher(origFromResume);
-    let prior = draftSnapshotRef.current ?? resumeSnap?.pending ?? null;
-    const rawIntakeBase = resolveRawIntakeForPremiumCheckout(prior);
-    if (!rawIntakeBase.trim() || !prior) {
-      console.warn("[premium-flow] premium_rewrite_aborted", {
-        reason: !prior ? "no_prior_draft" : "empty_raw_intake_after_resolve",
-        hasPrior: Boolean(prior),
-      });
-      stripPremiumCompletionQueryParam();
-      setHardError(
-        "We could not restore your draft after checkout (this tab had no saved intake). Use what is on screen or reopen the agreement from your workspace.",
-      );
-      return;
-    }
-    const pendCaptured =
-      (resumeSnap?.premiumUpgradeNotes ?? "").trim() || pendingUpgradePromptRef.current.trim();
-    console.info("[premium-flow] payment_return_detected", {
-      premiumCompletion: true,
-      rawBaseLen: rawIntakeBase.length,
-      pendingUpgradeLen: pendingUpgradePromptRef.current.trim().length,
-      premiumResumeNotesLen: (resumeSnap?.premiumUpgradeNotes ?? "").trim().length,
-      pendCapturedLen: pendCaptured.length,
-    });
-
-    const docSnap = agreementDocumentTextRef.current.trim();
-    if (docSnap) {
-      try {
-        const patch = extractStructuredPatchesFromPreview(docSnap, prior);
-        if (Object.keys(patch).length) prior = { ...prior, ...patch };
-      } catch {
-        /* ignore */
-      }
-    }
-
     const runGen = ++premiumCheckoutRunGenRef.current;
     void (async () => {
       setPremiumPostCheckoutPhase("processing");
-      setPremiumPipelineUserMessage(null);
+      setPremiumPipelineUserMessage("Preparing your LawDog Pro agreement...");
       setHardError(null);
       await finalizeIntakeCapture();
+
+      const resumeSnap = readCreateComplexityResume();
+      const origFromResume = resumeSnap?.originalUserIntakeRaw?.trim();
+      if (origFromResume) writeOriginalUserIntakeRawIfRicher(origFromResume);
+      let prior = draftSnapshotRef.current ?? resumeSnap?.pending ?? null;
+      const rawIntakeBase = resolveRawIntakeForPremiumCheckout(prior);
+      if (!rawIntakeBase.trim() || !prior) {
+        console.warn("[premium-flow] premium_rewrite_aborted", {
+          reason: !prior ? "no_prior_draft" : "empty_raw_intake_after_resolve",
+          hasPrior: Boolean(prior),
+        });
+        stripPremiumCompletionQueryParam();
+        setHardError(
+          "We could not restore your draft after checkout (this tab had no saved intake). Use what is on screen or reopen your agreement from your workspace.",
+        );
+        setPremiumPostCheckoutPhase(null);
+        setPremiumPipelineUserMessage(null);
+        return;
+      }
+      const pendCaptured =
+        (resumeSnap?.premiumUpgradeNotes ?? "").trim() || pendingUpgradePromptRef.current.trim();
+      if (import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.info("[CLAW] premium return detected", { from: "effect", phase: "post_finalized" });
+      }
+      console.info("[premium-flow] payment_return_detected", {
+        premiumCompletion: true,
+        rawBaseLen: rawIntakeBase.length,
+        pendingUpgradeLen: pendingUpgradePromptRef.current.trim().length,
+        premiumResumeNotesLen: (resumeSnap?.premiumUpgradeNotes ?? "").trim().length,
+        pendCapturedLen: pendCaptured.length,
+      });
+
+      const docSnap = agreementDocumentTextRef.current.trim();
+      if (docSnap) {
+        try {
+          const patch = extractStructuredPatchesFromPreview(docSnap, prior);
+          if (Object.keys(patch).length) prior = { ...prior, ...patch };
+        } catch {
+          /* ignore */
+        }
+      }
+
       const mergedIntake = buildPremiumMergedIntakeWithUserNotes(rawIntakeBase, pendCaptured);
       const minMs = 1500 + Math.floor(Math.random() * 1001);
       const started = Date.now();
@@ -3215,6 +3238,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         premiumPipelineOutputBodyRef.current = (result.winningPremiumBodyText || "").trim();
         console.info("[premium-flow] payment_success", { path: "premium_rewrite_apply_success" });
+        if (import.meta.env.MODE !== "test") {
+          if (result.serverGenerationDegraded) {
+            // eslint-disable-next-line no-console
+            console.info("[CLAW] premium fallback degraded", {
+              code: result.serverGenerationDegraded.code,
+              source: result.premiumRenderSource,
+            });
+          } else {
+            // eslint-disable-next-line no-console
+            console.info("[CLAW] premium draft success", { source: result.premiumRenderSource });
+          }
+        }
         clearPremiumForkUserSendMode();
         setPremiumSendModeUserChoice(null);
         setPremiumSendModeTouched(false);
@@ -3588,7 +3623,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }): Promise<void> => {
           if (!runIsCurrent()) return;
           setPremiumPostCheckoutPhase("processing");
-          setPremiumPipelineUserMessage(null);
+          setPremiumPipelineUserMessage("Preparing your LawDog Pro agreement...");
           setPremiumGapQuestions([]);
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
           absoluteTimeoutId = window.setTimeout(failOpenFromTimeout, 30_000);
@@ -3771,11 +3806,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     createProductionTwoPane,
     simpleProductFlow,
-    intakeCombined,
     intakePartyRoleLabels,
     finalizeIntakeCapture,
     syncUpgradeIntentRefs,
-    resolveRawIntakeForPremiumCheckout,
     bumpPremiumSurfaceGateTick,
     hasFullDraftAccess,
   ]);
