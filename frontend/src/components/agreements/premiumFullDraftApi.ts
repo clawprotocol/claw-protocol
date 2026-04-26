@@ -1,4 +1,5 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { apiUrl, readJson } from "../../lib/clawApi";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { IntakePaymentField } from "./intakeCurrencyParse";
@@ -174,6 +175,14 @@ export async function postPremiumFullDraftOnce(args: {
       needles_in_gap_answers: gapTraceNeedlesHit(uga),
     });
   }
+  if (import.meta.env.MODE !== "test") {
+    // eslint-disable-next-line no-console
+    console.info("[CLAW] premium request start", {
+      intake_len: (args.intakeText || "").length,
+      intake_fingerprint: shortIntakeFingerprint(args.intakeText),
+      similarity_regeneration: Boolean(args.similarityRegeneration),
+    });
+  }
   const res = await fetch(apiUrl("/api/agreements/premium-full-draft"), {
     method: "POST",
     headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
@@ -185,18 +194,33 @@ export async function postPremiumFullDraftOnce(args: {
     }),
     signal: args.signal,
   });
+  const bodyText = await res.text();
+  let parsed: Partial<PremiumFullDraftResult> = {};
+  try {
+    if (bodyText) parsed = JSON.parse(bodyText) as Partial<PremiumFullDraftResult>;
+  } catch {
+    parsed = {};
+  }
+  if (import.meta.env.MODE !== "test") {
+    // eslint-disable-next-line no-console
+    console.info("[CLAW] premium response", {
+      http_status: res.status,
+      http_ok: res.ok,
+      generation_outcome: parsed?.generation_outcome,
+      server_generation_failure_code: parsed?.server_generation_failure_code,
+      document_text_len: typeof parsed?.document_text === "string" ? parsed.document_text.length : 0,
+    });
+  }
   if (!res.ok) {
-    const err: unknown = await res.json().catch(() => ({}));
-    const msg = typeof (err as { detail?: { message?: string } })?.detail === "object"
-      ? (err as { detail?: { message?: string } }).detail?.message
-      : null;
+    const err = parsed as { detail?: { message?: string } };
+    const msg = typeof err?.detail === "object" ? err.detail?.message : null;
     if (import.meta.env.PROD) {
       // eslint-disable-next-line no-console
       console.warn("[CLAW] premium-full-draft failed", { status: res.status, path: "/api/agreements/premium-full-draft" });
     }
-    throw new Error(msg || "premium_full_draft_failed");
+    throw new Error((msg as string) || "premium_full_draft_failed");
   }
-  return readJson<PremiumFullDraftResult>(res);
+  return parsed as PremiumFullDraftResult;
 }
 
 /**

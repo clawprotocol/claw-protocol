@@ -31,6 +31,7 @@ const STITCHED_INTRO_BANNED = [
   "fuller sections for serious review",
   "this lawdog pro preview groups related commercial topics",
   "this lawdog pro agreement groups related commercial topics",
+  "the following sections organize your terms for review",
 ] as const;
 
 /** Vesting / founder / startup equity when intake is not about that scenario. */
@@ -211,6 +212,12 @@ export function isPaidProFinishedAgreement(args: {
     draft: args.draft ?? null,
   });
   if (args.intentContract) {
+    const pLine = String(args.pipelineSource || "");
+    const allowPaidSubstantiveStitch =
+      (pLine === "fallback_preview" ||
+        pLine === "fallback_preview_error" ||
+        pLine === "server_full_draft_degraded") &&
+      String(args.text || "").trim().length >= 500;
     const g = canShowPremiumSuccess({
       intentContract: args.intentContract,
       renderSource: args.readonlyRenderSource,
@@ -221,6 +228,8 @@ export function isPaidProFinishedAgreement(args: {
       stale: args.stale,
       draft: args.draft ?? null,
       qualityRetryActive: args.qualityRetryActive,
+      serverGenerationDegraded: Boolean(args.serverGenerationDegraded),
+      allowPaidSubstantiveStitch,
     });
     if (g.state === "premium_success" && g.signerCtaAllowed) {
       if (import.meta.env.MODE !== "test") {

@@ -296,7 +296,7 @@ export function buildAgreementPreviewTextCore(
       : "This draft agreement preview is generated from your structured fields for review only. It is not legal advice and may require edits before signing.";
 
   const introPremiumDynamic =
-    "This LawDog Pro agreement groups related commercial topics for a clearer read than a thin outline. It is not legal advice; confirm material terms before you share or sign.";
+    "The following sections organize your terms for review. It is not legal advice; confirm material terms before you share or sign.";
 
   const lawBlockPremium =
     lawRaw === PREMIUM_JURISDICTION_PLACEHOLDER

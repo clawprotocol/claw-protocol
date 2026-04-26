@@ -268,7 +268,6 @@ import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraf
 import {
   buildPremiumDetailsGateCopy,
   isPaidProFinishedAgreement,
-  isUnacceptablePipelineProSource,
   validatePaidProOutput,
   canShowPremiumSuccess,
 } from "./paidProCorpusAcceptance";
@@ -3236,52 +3235,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           modalParty1NameRef.current,
           modalParty2NameRef.current,
         );
-        if (hasFullDraftAccess && isUnacceptablePipelineProSource(result.premiumRenderSource)) {
-          setPremiumServerGenerationDegraded(null);
-          setPremiumTruthPipelineSource(result.premiumRenderSource);
-          setProFullDraftQualityRetry(true);
-          setHardError(null);
-          clearPremiumForkUserSendMode();
-          setPremiumSendModeUserChoice(null);
-          setPremiumSendModeTouched(false);
-          if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
-          premiumPipelineOutputBodyRef.current = "";
-          setPremiumRefineReview(null);
-          setPremiumFinalizeAudit(null);
-          setPremiumReviewRoute(null);
-          commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft));
-          agreementDocumentDirtyRef.current = false;
-          setAgreementDocumentText(
-            "Your LawDog Pro agreement is ready for review. You can also use Retry Pro draft to run the full Pro pass on your current intake if you want a different version.",
-          );
-          setReviewDocRefreshTick((n) => n + 1);
-          setPremiumPostCheckoutPhase(null);
-          emitPaidFunnelEvent("premium_checkout_completed", {
-            extra: {
-              premium_generation_outcome: "needs_details",
-              render_source: result.premiumRenderSource,
-            },
-          });
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.warn("[pro-quality] blocked paid surface; pipeline or body unacceptable", {
-              source: result.premiumRenderSource,
-            });
-          }
-          return;
-        }
         premiumPipelineOutputBodyRef.current = (result.winningPremiumBodyText || "").trim();
         console.info("[premium-flow] payment_success", { path: "premium_rewrite_apply_success" });
         if (import.meta.env.MODE !== "test") {
           if (result.serverGenerationDegraded) {
             // eslint-disable-next-line no-console
-            console.info("[CLAW] premium draft degraded", {
-              code: result.serverGenerationDegraded.code,
-              source: result.premiumRenderSource,
+            console.info("[CLAW] premium completion pipeline", {
+              pipeline_source: result.premiumRenderSource,
+              server_generation_degraded: true,
+              server_generation_failure_code: result.serverGenerationDegraded.code,
             });
           } else {
             // eslint-disable-next-line no-console
-            console.info("[CLAW] premium draft success", { source: result.premiumRenderSource });
+            console.info("[CLAW] premium completion pipeline", {
+              pipeline_source: result.premiumRenderSource,
+              server_generation_degraded: false,
+            });
           }
         }
         clearPremiumForkUserSendMode();
@@ -3356,7 +3325,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft));
             agreementDocumentDirtyRef.current = false;
             setAgreementDocumentText(
-              "Your LawDog Pro agreement is ready for review. You can use Retry Pro draft to try a fuller pass if you want, or keep editing the text below.",
+              "Your LawDog Pro agreement is ready for review. You can edit any wording before sending.",
             );
             setReviewDocRefreshTick((n) => n + 1);
             setPremiumPostCheckoutPhase(null);
@@ -6110,6 +6079,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft: draft ?? null,
       intentContract: contract,
     });
+    const pLine = String(
+      (premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current || "") as string,
+    ).trim();
+    const allowPaidSubstantiveStitch =
+      (pLine === "fallback_preview" ||
+        pLine === "fallback_preview_error" ||
+        pLine === "server_full_draft_degraded") &&
+      t.length >= 500;
     return canShowPremiumSuccess({
       intentContract: contract,
       renderSource: premiumPaidReadonlyPick.sourceUsed,
@@ -6121,6 +6098,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft: draft ?? null,
       qualityRetryActive: proFullDraftQualityRetry,
       serverGenerationDegraded: Boolean(premiumServerGenerationDegraded),
+      allowPaidSubstantiveStitch,
     });
   }, [
     hasFullDraftAccess,
@@ -10135,7 +10113,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   >
                                     <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
                                       {proFullDraftCustomGateMessage ||
-                                        "Your LawDog Pro agreement is ready for review. If something looks off, you can add detail and use Retry Pro draft, or keep editing in place. Nothing is sent until you continue."}
+                                        "Your LawDog Pro agreement is ready for review. You can edit any wording before sending."}
                                     </p>
                                     <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
                                       Nothing is sent from this step until you choose to continue.

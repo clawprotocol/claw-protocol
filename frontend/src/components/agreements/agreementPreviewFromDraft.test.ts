@@ -109,7 +109,7 @@ describe("buildAgreementPreviewText", () => {
         "Either party may terminate with 45 days written notice; confidentiality and payment for work performed survive as stated herein.",
     };
     const t = buildAgreementPreviewText(d, { premiumDeliverablePreview: true });
-    expect(t).toMatch(/LawDog Pro agreement groups related commercial topics/i);
+    expect(t).toMatch(/following sections organize your terms for review/i);
     expect(t).toMatch(/FEES & SPEND|OWNERSHIP OF ACCOUNTS|REPORTING|SUBCONTRACT|COMPLIANCE/i);
     expect(t).not.toMatch(/1\. SCOPE OF SERVICES/i);
     expect(t.split(AGREEMENT_PREVIEW_ESIGN_NOTICE).length - 1).toBe(1);
@@ -149,7 +149,7 @@ describe("buildAgreementPreviewText", () => {
       duration: "Until terminated on 30 days notice",
     };
     const t = buildAgreementPreviewText(d, { premiumDeliverablePreview: true });
-    expect(t).toMatch(/LawDog Pro agreement groups related commercial topics/i);
+    expect(t).toMatch(/following sections organize your terms for review/i);
     expect(t).toMatch(/FEES\s*&\s*SPEND|REFERRAL,\s*ATTRIBUTION/i);
     expect(t).not.toMatch(/2\.\s+TRANSITION,\s*NOTICE\s*&\s*EXIT/i);
   });
@@ -165,7 +165,7 @@ describe("buildAgreementPreviewText", () => {
       duration: null,
     };
     const t = buildAgreementPreviewText(d, { premiumDeliverablePreview: true });
-    expect(t).toMatch(/LawDog Pro agreement groups related commercial topics/i);
+    expect(t).toMatch(/following sections organize your terms for review/i);
     expect(t).not.toMatch(/^1\. SCOPE OF SERVICES/m);
     expect(t).toMatch(/\$1,200/);
   });

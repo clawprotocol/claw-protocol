@@ -132,6 +132,11 @@ export type CanShowPremiumSuccessArgs = {
    * see a finished surface + optional “try again later” copy — not a quality-gate dead end.
    */
   serverGenerationDegraded?: boolean;
+  /**
+   * After checkout, accept a long stitched/fallback body (model or HTTP failed) as “review-ready Pro”
+   * so the user is not forced into a retry-only dead end.
+   */
+  allowPaidSubstantiveStitch?: boolean;
 };
 
 /**
@@ -173,6 +178,20 @@ export function canShowPremiumSuccess(args: CanShowPremiumSuccessArgs): PremiumS
       successBannerReasons: ["server_generation_degraded_structured_fallback"],
       validation: { ok: true, reasons: [] },
     };
+  }
+
+  if (args.allowPaidSubstantiveStitch) {
+    const t = String(args.documentText || "").trim();
+    if (t.length >= 500) {
+      return {
+        state: "premium_success",
+        successBannerAllowed: true,
+        signerCtaAllowed: true,
+        ...outBase,
+        successBannerReasons: ["paid_substantive_stitch_or_fallback", `pipeline:${String(args.premiumPipelineSource || "unknown")}`],
+        validation: validation.ok ? validation : { ok: true, reasons: [] },
+      };
+    }
   }
 
   if (args.stale) {

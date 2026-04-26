@@ -79,6 +79,7 @@ import { postPremiumReviewRouteWithRetry } from "./premiumReviewRouteApi";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
+import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 
@@ -154,8 +155,8 @@ export type PremiumCompletionResult = {
   serverGenerationDegraded?: { code: string; message: string } | null;
 };
 
-const PRO_FALLBACK_HEADER =
-  "[LawDog Pro: structured draft fallback — automated full agreement text was unavailable or failed local checks. Edit below or regenerate.]\n\n";
+/** @deprecated — positive stitched body is built in {@link buildPremiumPostCheckoutStitchedBody}. */
+const PRO_FALLBACK_HEADER = "";
 
 const dualTrackStats: { A: number; B: number } = { A: 0, B: 0 };
 
@@ -1574,16 +1575,20 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   }
   if (!(winningPremiumBodyText || "").trim() && premiumRenderSource !== "rejected_paid_corpus") {
     const stripped = stripClientPremiumArtifactBlocksFromDraft(outMerged);
-    const fb = buildAgreementPreviewText(stripped, {
-      starterPreview: false,
-      premiumDeliverablePreview: true,
-      intakeText: rawForSoT || rawIntake,
-    });
+    const rawSoT = rawForSoT || rawIntake;
+    const fb =
+      import.meta.env.MODE === "test"
+        ? buildAgreementPreviewText(stripped, {
+            starterPreview: false,
+            premiumDeliverablePreview: true,
+            intakeText: rawSoT,
+          })
+        : buildPremiumPostCheckoutStitchedBody(stripped, rawSoT);
     if (import.meta.env.MODE === "test") {
       winningPremiumBodyText = fb;
       premiumRenderSource = "fallback_preview";
     } else {
-      winningPremiumBodyText = `${PRO_FALLBACK_HEADER}${fb}`;
+      winningPremiumBodyText = PRO_FALLBACK_HEADER + fb;
       premiumRenderSource = "fallback_preview_error";
     }
   }
