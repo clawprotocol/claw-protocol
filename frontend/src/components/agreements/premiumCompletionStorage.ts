@@ -44,6 +44,8 @@ export type PremiumCompletionSnapshot = {
   intakeTextFingerprint?: string;
   /** Pipeline source at completion (for paid Pro quality UI). */
   premiumPipelineRenderSource?: string;
+  /** Set when the server used a non-model structured fallback (LawDog Pro checkout still valid). */
+  serverGenerationDegraded?: { code: string; message: string } | null;
 };
 
 export function persistPremiumCompletionSnapshot(snap: Omit<PremiumCompletionSnapshot, "savedAt">): void {

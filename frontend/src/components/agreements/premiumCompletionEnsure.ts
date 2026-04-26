@@ -22,6 +22,7 @@ export function premiumSnapshotToResult(snap: NonNullable<ReturnType<typeof read
     staleIntakeOrGeneration: false,
     founderDetailsGateMessage: null,
     proIntentGateMessage: null,
+    serverGenerationDegraded: snap.serverGenerationDegraded ?? null,
   };
 }
 

@@ -15,6 +15,7 @@ import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 export type PipelineProSourceString =
   | "server_full_draft"
   | "server_full_draft_retry"
+  | "server_full_draft_degraded"
   | "fallback_preview"
   | "fallback_preview_error"
   | "snapshot_server_full_draft"
@@ -178,7 +179,21 @@ export function isPaidProFinishedAgreement(args: {
   intentContract?: AgreementIntentContract | null;
   draft?: ParsedDraftShape | null;
   qualityRetryActive?: boolean;
+  /** API returned 200 with explicit model-path fallback; payment remains valid. */
+  serverGenerationDegraded?: boolean;
 }): { ok: boolean; reasons: string[]; gate?: ReturnType<typeof canShowPremiumSuccess> } {
+  if (args.serverGenerationDegraded) {
+    if (args.stale) {
+      return { ok: false, reasons: ["stale_generation_or_fingerprint"] };
+    }
+    if (!String(args.text || "").trim()) {
+      return { ok: false, reasons: ["empty_degraded_body"] };
+    }
+    if (isUnacceptablePipelineProSource(args.pipelineSource)) {
+      return { ok: false, reasons: [`pipeline_rejected:${args.pipelineSource ?? "unknown"}`] };
+    }
+    return { ok: true, reasons: [] };
+  }
   const v = validatePaidProOutput({
     text: args.text,
     rawIntake: args.rawIntake,

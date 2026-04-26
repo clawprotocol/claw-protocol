@@ -29,6 +29,8 @@ export type PremiumOutputState =
 const PIPELINE_SUCCESS: ReadonlySet<PipelineProSourceString> = new Set([
   "server_full_draft",
   "server_full_draft_retry",
+  /** Checkout valid; model path returned server-built structured fallback. */
+  "server_full_draft_degraded",
   "snapshot_server_full_draft",
 ]);
 
@@ -125,6 +127,11 @@ export type CanShowPremiumSuccessArgs = {
   draft?: ParsedDraftShape | null;
   /** When true, skip all success (e.g. pipeline already set retry gate) */
   qualityRetryActive?: boolean;
+  /**
+   * API returned 200 with explicit degraded fallback (model unavailable); user paid and should
+   * see a finished surface + optional “try again later” copy — not a quality-gate dead end.
+   */
+  serverGenerationDegraded?: boolean;
 };
 
 /**
@@ -154,6 +161,17 @@ export function canShowPremiumSuccess(args: CanShowPremiumSuccessArgs): PremiumS
       signerCtaAllowed: false,
       ...outBase,
       successBannerReasons: ["quality_retry_active"],
+    };
+  }
+
+  if (args.serverGenerationDegraded) {
+    return {
+      state: "premium_success",
+      successBannerAllowed: true,
+      signerCtaAllowed: true,
+      ...outBase,
+      successBannerReasons: ["server_generation_degraded_structured_fallback"],
+      validation: { ok: true, reasons: [] },
     };
   }
 
