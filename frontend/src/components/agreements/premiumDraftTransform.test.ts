@@ -8,6 +8,7 @@ import {
   isLikelyCategoryOrTradeLabel,
   looksClauseGradePremiumPurpose,
   PREMIUM_JURISDICTION_PLACEHOLDER,
+  resolveFinalGoverningLaw,
   resolvePremiumJurisdiction,
   stripFullDraftExpansionBlock,
   synthesizePremiumScopeAndOperativeFields,
@@ -69,6 +70,19 @@ describe("resolvePremiumJurisdiction", () => {
   it("prefers Oklahoma from intake over a wrong Delaware default from parse", () => {
     const intake = "Contract between A and B. Governing law Oklahoma.";
     expect(resolvePremiumJurisdiction(base({ jurisdiction: "Delaware" }), intake)).toBe("State of Oklahoma");
+  });
+
+  it("treats explicit 'Oklahoma law governs' in raw as State of Oklahoma over Delaware", () => {
+    const intake = "Software build. Oklahoma law governs. Parties Anthem and Sarah.";
+    expect(resolvePremiumJurisdiction(base({ jurisdiction: "Delaware" }), intake)).toBe("State of Oklahoma");
+  });
+});
+
+describe("resolveFinalGoverningLaw", () => {
+  it("prioritizes raw Oklahoma phrasing over parsed Delaware and fallback", () => {
+    const d = base({ jurisdiction: "Delaware" });
+    const raw = "Anthem and Sarah. Oklahoma law governs. Payment $1k/wk.";
+    expect(resolveFinalGoverningLaw(raw, d, "Delaware")).toBe("State of Oklahoma");
   });
 });
 

@@ -51,4 +51,28 @@ describe("buildPremiumPostCheckoutStitchedBody", () => {
     expect(t.toLowerCase()).toContain("oklahoma");
     expect(t.toLowerCase()).not.toContain("delaware");
   });
+
+  it("treats 'Oklahoma law governs' in intake as final governing law, not Delaware", () => {
+    const raw =
+      "Oklahoma law governs. Software development. Anthem Blanchard client, Sarah Collins developer. $4k + $1.2k/wk, 12 weeks.";
+    const t = buildPremiumPostCheckoutStitchedBody(
+      base({
+        jurisdiction: "Delaware",
+        parties: [
+          { name: "Anthem Blanchard", role: "Client" },
+          { name: "Sarah Collins", role: "Service Provider" },
+        ],
+      }),
+      raw,
+    );
+    const low = t.toLowerCase();
+    expect(low).toContain("anthem blanchard");
+    expect(low).toContain("sarah collins");
+    expect(low).toMatch(/oklahoma/);
+    expect(low).not.toMatch(/delaware/);
+    for (const b of ["quality gate", "thin starter", "not a finished pro", "organized for review"]) {
+      expect(low, b).not.toContain(b);
+    }
+    expect(low).not.toMatch(/preview/);
+  });
 });

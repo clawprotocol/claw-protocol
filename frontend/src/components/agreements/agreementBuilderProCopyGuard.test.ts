@@ -39,4 +39,37 @@ describe("canShowPremiumSuccess paid fallback", () => {
     expect(r.state).toBe("premium_success");
     expect(r.signerCtaAllowed).toBe(true);
   });
+
+  it("treats substantive body as success even for live preview render source when allowPaidSubstantiveStitch", () => {
+    const intent = resolveAgreementIntentContract("Software and API build.");
+    const body = "x".repeat(500);
+    const r = canShowPremiumSuccess({
+      intentContract: intent,
+      renderSource: "live_generated_preview",
+      validation: { ok: true, reasons: [] },
+      documentText: body,
+      intakeText: "x",
+      premiumPipelineSource: "fallback_preview",
+      stale: false,
+      allowPaidSubstantiveStitch: true,
+    });
+    expect(r.state).toBe("premium_success");
+    expect(r.signerCtaAllowed).toBe(true);
+  });
+
+  it("still blocks when quality retry is active, even with substantive stitch allowed", () => {
+    const intent = resolveAgreementIntentContract("x");
+    const r = canShowPremiumSuccess({
+      intentContract: intent,
+      renderSource: "live_generated_preview",
+      validation: { ok: true, reasons: [] },
+      documentText: "x".repeat(600),
+      intakeText: "x",
+      premiumPipelineSource: "fallback_preview",
+      stale: false,
+      qualityRetryActive: true,
+      allowPaidSubstantiveStitch: true,
+    });
+    expect(r.signerCtaAllowed).toBe(false);
+  });
 });

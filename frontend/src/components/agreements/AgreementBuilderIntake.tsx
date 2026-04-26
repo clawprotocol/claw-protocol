@@ -6067,6 +6067,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     proFullDraftQualityRetry,
   ]);
 
+  const hasUsablePaidBody = useMemo(
+    () =>
+      Boolean(
+        hasFullDraftAccess &&
+          premiumPersistedFlowActive &&
+          (premiumPaidReadonlyPick.plainText || "").trim().length >= 500,
+      ),
+    [hasFullDraftAccess, premiumPersistedFlowActive, premiumPaidReadonlyPick.plainText, reviewDocRefreshTick],
+  );
+  const shouldShowPaidRetry = Boolean(proFullDraftQualityRetry && !hasUsablePaidBody);
+
   const premiumProTruthGate = useMemo(() => {
     if (!hasFullDraftAccess || !premiumPersistedFlowActive) return null;
     const t = (premiumPaidReadonlyPick.plainText || "").trim();
@@ -6079,14 +6090,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft: draft ?? null,
       intentContract: contract,
     });
-    const pLine = String(
-      ((premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current) || "") as string,
-    ).trim();
-    const allowPaidSubstantiveStitch =
-      (pLine === "fallback_preview" ||
-        pLine === "fallback_preview_error" ||
-        pLine === "server_full_draft_degraded") &&
-      t.length >= 500;
+    const allowPaidSubstantiveStitch = hasUsablePaidBody;
     return canShowPremiumSuccess({
       intentContract: contract,
       renderSource: premiumPaidReadonlyPick.sourceUsed,
@@ -6096,7 +6100,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
       stale: false,
       draft: draft ?? null,
-      qualityRetryActive: proFullDraftQualityRetry,
+      qualityRetryActive: shouldShowPaidRetry,
       serverGenerationDegraded: Boolean(premiumServerGenerationDegraded),
       allowPaidSubstantiveStitch,
     });
@@ -6108,7 +6112,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     currentPremiumMergedIntakeKey,
     intakeCombined,
     draft,
-    proFullDraftQualityRetry,
+    shouldShowPaidRetry,
+    hasUsablePaidBody,
     premiumServerGenerationDegraded,
     premiumTruthPipelineSource,
     reviewDocRefreshTick,
@@ -6152,7 +6157,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       linePipe === "rejected_paid_corpus" ||
       snapPipe === "rejected_paid_corpus" ||
       readonlySrc === "rejected_paid_corpus" ||
-      (proFullDraftQualityRetry && !linePipe && !readonlySrc)
+      (shouldShowPaidRetry && !linePipe && !readonlySrc)
         ? "rejected_paid_corpus"
         : linePipe || readonlySrc || "unknown";
     const extra = buildStrictTruthGateCheckoutRevision({
@@ -6177,7 +6182,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPostCheckoutPhase,
     createUiStage,
     premiumProTruthGate,
-    proFullDraftQualityRetry,
+    shouldShowPaidRetry,
     premiumTruthPipelineSource,
     premiumPaidReadonlyPick.sourceUsed,
     emitPaidFunnelEvent,
@@ -6223,7 +6228,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const premiumReadonlyAgreementHtml = useMemo(() => {
     if (!premiumPaidDocumentSurface) return "";
-    if (proFullDraftQualityRetry) return "";
+    if (shouldShowPaidRetry) return "";
     const rd = reviewDraft ?? draft;
     const corpus = premiumPaidReadonlyPick.plainText;
     const partyNameA = (rd?.parties?.[0]?.name || "").trim() || "Party A";
@@ -6294,7 +6299,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     effectivePremiumSendMode,
     reviewDraft,
     draft,
-    proFullDraftQualityRetry,
+    shouldShowPaidRetry,
   ]);
 
   const preSendTrustLayer = useMemo(
@@ -7433,13 +7438,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (!showUpgradeToFullDraftOnReview && premiumPersistedFlowActive && !peekPremiumRecipientsSurfaceReleased()) {
           const reviewPath = effectivePremiumSendMode === "review";
           const proTruthBlocksPaidContinue =
-            Boolean(premiumProTruthGate && !premiumProTruthGate.signerCtaAllowed) || proFullDraftQualityRetry;
+            Boolean(premiumProTruthGate && !premiumProTruthGate.signerCtaAllowed) || shouldShowPaidRetry;
           return {
             label: reviewPath ? "Continue to reviewer setup" : "Continue to signer setup",
             action: "premium_continue_to_signers",
             disabled: proTruthBlocksPaidContinue,
             reason: proTruthBlocksPaidContinue
-              ? proFullDraftQualityRetry
+              ? shouldShowPaidRetry
                 ? "pro_full_draft_retry_gate"
                 : "premium_pro_truth_gate"
               : undefined,
@@ -7558,7 +7563,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     effectivePremiumSendMode,
     displayLivePreviewModel,
     premiumProTruthGate,
-    proFullDraftQualityRetry,
+    shouldShowPaidRetry,
   ]);
 
   useEffect(() => {
@@ -7654,7 +7659,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const blockedPreviewRenderSource =
     (premiumTruthPipelineSource || premiumPaidReadonlyPick.sourceUsed || lastPremiumPipelineRenderSourceRef.current || "").trim();
   const showStrictRetryNeedsDetailsPanel = shouldShowRetryNeedsDetailsPanel({
-    proFullDraftQualityRetry,
+    proFullDraftQualityRetry: shouldShowPaidRetry,
     premiumProTruthGate,
   });
   const showStrictBlockedDraftPreviewLabel = shouldShowBlockedDraftPreviewLabel({
@@ -8024,8 +8029,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
           stale: false,
           draft: draft ?? null,
-          qualityRetryActive: proFullDraftQualityRetry,
+          qualityRetryActive: shouldShowPaidRetry,
           serverGenerationDegraded: Boolean(premiumServerGenerationDegraded),
+          allowPaidSubstantiveStitch: hasUsablePaidBody,
         });
         if (!g.signerCtaAllowed) {
           if (import.meta.env.DEV) {
@@ -8048,7 +8054,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeCombined,
     draft,
     premiumTruthPipelineSource,
-    proFullDraftQualityRetry,
+    shouldShowPaidRetry,
+    hasUsablePaidBody,
     premiumServerGenerationDegraded,
     handOffProductionDraftToRecipients,
     bumpPremiumSurfaceGateTick,
@@ -10134,7 +10141,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   </div>
                                 </div>
                                 ) : null}
-                                {!proFullDraftQualityRetry ? (
+                                {!shouldShowPaidRetry ? (
                                 <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
                                   {premiumServerGenerationDegraded ? (
                                     <div

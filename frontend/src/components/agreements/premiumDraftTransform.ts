@@ -213,8 +213,46 @@ function jurisdictionAppearsInIntake(jurisdiction: string, rawLower: string): bo
   );
 }
 
+/**
+ * Raw-intake first: explicit phrasing the user chose (e.g. Oklahoma) must beat parse defaults
+ * (often Delaware) on premium fallback/stitch paths.
+ */
+function preferGoverningLawFromRawIntake(raw: string): string | null {
+  const t = (raw || "").trim();
+  if (!t) return null;
+  if (/\boklahoma\s+law\s+governs\b/i.test(t)) return "State of Oklahoma";
+  if (/\blaws?\s+of\s+oklahoma\b/i.test(t)) return "State of Oklahoma";
+  if (/\boklahoma\s+law\b/.test(t)) return "State of Oklahoma";
+  if (/\bgoverning\s+law:?\s*oklahoma\b/i.test(t)) return "State of Oklahoma";
+  if (/\bgoverned\s+by\s+the\s+laws?\s+of\s+oklahoma\b/i.test(t)) return "State of Oklahoma";
+  return null;
+}
+
+/**
+ * Single resolver for Pro output governing law. Priority: explicit raw intake > parsed draft
+ * (structured + jurisdiction field corroboration) > fallback default.
+ */
+export function resolveFinalGoverningLaw(
+  rawIntake: string,
+  parsed: ParsedDraftShape,
+  fallbackDefault: string,
+): string {
+  const p0 = preferGoverningLawFromRawIntake(rawIntake);
+  if (p0) return p0;
+  const r = resolvePremiumJurisdiction(parsed, rawIntake);
+  if (r !== PREMIUM_JURISDICTION_PLACEHOLDER) return r;
+  const pj = nz(parsed.jurisdiction);
+  if (pj && !/^tbd$/i.test(pj) && !isLikelyCategoryOrTradeLabel(pj)) return pj.slice(0, 160);
+  const fd = nz(fallbackDefault);
+  if (fd && !isLikelyCategoryOrTradeLabel(fd)) return fd.slice(0, 160);
+  return PREMIUM_JURISDICTION_PLACEHOLDER;
+}
+
 /** Never invent governing law: structured intake only, else placeholder if not corroborated in raw text. */
 export function resolvePremiumJurisdiction(parsed: ParsedDraftShape, rawIntake: string): string {
+  const pRaw = preferGoverningLawFromRawIntake(rawIntake);
+  if (pRaw) return pRaw;
+
   const rawLower = rawIntake.toLowerCase();
   if (/\boklahoma\b/.test(rawLower) && /\bdelaware\b/.test(nz(parsed.jurisdiction).toLowerCase())) {
     return "State of Oklahoma";
