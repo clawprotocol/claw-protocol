@@ -6080,7 +6080,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intentContract: contract,
     });
     const pLine = String(
-      (premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current || "") as string,
+      ((premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current) || "") as string,
     ).trim();
     const allowPaidSubstantiveStitch =
       (pLine === "fallback_preview" ||

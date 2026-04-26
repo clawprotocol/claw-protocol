@@ -1,6 +1,6 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
-import { apiUrl, readJson } from "../../lib/clawApi";
+import { apiUrl } from "../../lib/clawApi";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { IntakePaymentField } from "./intakeCurrencyParse";
 import {
