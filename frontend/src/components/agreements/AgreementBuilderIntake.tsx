@@ -1075,6 +1075,28 @@ function CreateFlowSendRecipientsPanel({
   );
 }
 
+const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = "Preparing your LawDog Pro agreement…";
+
+/** First paint: enter Pro return processing before effects so the free intake shell does not flash. */
+function readInitialPremiumReturnFromWindow(): {
+  phase: null | "awaiting_gaps" | "processing";
+  pipelineMessage: string | null;
+} {
+  if (typeof window === "undefined") return { phase: null, pipelineMessage: null };
+  try {
+    if (readPremiumCompletionSnapshot()) return { phase: null, pipelineMessage: null };
+    const u = new URL(window.location.href);
+    const urlReturn = u.searchParams.get("premiumCompletion") === "1";
+    const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
+    if (urlReturn || grantPending) {
+      return { phase: "processing", pipelineMessage: CLAW_PREMIUM_PREPARING_AGREEMENT_COPY };
+    }
+  } catch {
+    return { phase: null, pipelineMessage: null };
+  }
+  return { phase: null, pipelineMessage: null };
+}
+
 const AgreementBuilderIntake: React.FC<Props> = ({
   onCreated,
   onCreateHydrateFailed,
@@ -1264,7 +1286,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [agreementTypeAccepted, setAgreementTypeAccepted] = useState(false);
   /** Post-checkout: optional gap form → processing → reveal before recipients. */
   const [premiumPostCheckoutPhase, setPremiumPostCheckoutPhase] = useState<null | "awaiting_gaps" | "processing">(
-    null,
+    () => readInitialPremiumReturnFromWindow().phase,
   );
   const [premiumGapQuestions, setPremiumGapQuestions] = useState<string[]>([]);
   const [premiumGapOneField, setPremiumGapOneField] = useState("");
@@ -1356,7 +1378,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [draft, buildPreviewForCurrentTier],
   );
 
-  const [premiumPipelineUserMessage, setPremiumPipelineUserMessage] = useState<string | null>(null);
+  const [premiumPipelineUserMessage, setPremiumPipelineUserMessage] = useState<string | null>(() => {
+    return readInitialPremiumReturnFromWindow().pipelineMessage;
+  });
   useEffect(() => {
     const prev = premiumModalPrevPhaseRef.current;
     if (premiumPostCheckoutPhase && prev !== premiumPostCheckoutPhase) {
@@ -2920,7 +2944,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         console.info("[CLAW] premium hydration start", { from: "layout" });
       }
       setPremiumPostCheckoutPhase("processing");
-      setPremiumPipelineUserMessage("Preparing your LawDog Pro agreement...");
+      setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
     }
   }, [createProductionTwoPane, simpleProductFlow]);
 
@@ -3049,6 +3073,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
 
     if (!peekAdvancedFullDraftCheckoutGrant()) {
+      if (import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.info("[CLAW] premium hydration failed", { reason: "no_checkout_grant" });
+      }
       stripPremiumCompletionQueryParam();
       setHardError(
         "We could not verify your upgrade from this link. If you just finished checkout, refresh once or open your agreement from your workspace.",
@@ -3059,7 +3087,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const runGen = ++premiumCheckoutRunGenRef.current;
     void (async () => {
       setPremiumPostCheckoutPhase("processing");
-      setPremiumPipelineUserMessage("Preparing your LawDog Pro agreement...");
+      setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
       setHardError(null);
       await finalizeIntakeCapture();
 
@@ -3069,6 +3097,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       let prior = draftSnapshotRef.current ?? resumeSnap?.pending ?? null;
       const rawIntakeBase = resolveRawIntakeForPremiumCheckout(prior);
       if (!rawIntakeBase.trim() || !prior) {
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[CLAW] premium hydration failed", {
+            reason: !prior ? "no_prior_draft" : "empty_raw_intake_after_resolve",
+          });
+        }
         console.warn("[premium-flow] premium_rewrite_aborted", {
           reason: !prior ? "no_prior_draft" : "empty_raw_intake_after_resolve",
           hasPrior: Boolean(prior),
@@ -3241,7 +3275,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (import.meta.env.MODE !== "test") {
           if (result.serverGenerationDegraded) {
             // eslint-disable-next-line no-console
-            console.info("[CLAW] premium fallback degraded", {
+            console.info("[CLAW] premium draft degraded", {
               code: result.serverGenerationDegraded.code,
               source: result.premiumRenderSource,
             });
@@ -3607,6 +3641,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumCheckoutRunGenRef.current += 1;
           console.warn("[premium-modal-timeout]", { timeoutMs: 30_000, ts: new Date().toISOString() });
           console.info("[premium-modal-failopen]", { reason: "absolute_timeout", source: "cached_or_prior_draft" });
+          if (import.meta.env.MODE !== "test") {
+            // eslint-disable-next-line no-console
+            console.info("[CLAW] premium hydration failed", { reason: "modal_timeout" });
+          }
           setPremiumPipelineUserMessage(null);
           setHardError("Premium finalization timed out. Opened your upgraded agreement using the best available version.");
           runPremiumModelPassRef.current = null;
@@ -3623,7 +3661,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }): Promise<void> => {
           if (!runIsCurrent()) return;
           setPremiumPostCheckoutPhase("processing");
-          setPremiumPipelineUserMessage("Preparing your LawDog Pro agreement...");
+          setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
           setPremiumGapQuestions([]);
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
           absoluteTimeoutId = window.setTimeout(failOpenFromTimeout, 30_000);
@@ -3722,6 +3760,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (result) {
             applySuccess(result);
           } else {
+            if (import.meta.env.MODE !== "test") {
+              // eslint-disable-next-line no-console
+              console.info("[CLAW] premium hydration failed", { reason: "model_path_exhausted" });
+            }
             console.warn("[premium-flow] premium_rewrite_request_exhausted", {
               fallback: "party_extract_only",
               note: "Premium model path failed — last saved draft shown; edit or retry checkout flow.",
@@ -3782,6 +3824,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           window.clearTimeout(absoluteTimeoutId);
         }
         premiumModalEscapeHandlerRef.current = null;
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[CLAW] premium hydration failed", { reason: "unexpected_error" });
+        }
         if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
           console.warn("[premium-completion] unexpected failure", e);
         }
@@ -4837,7 +4883,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (displayPhase === "generating_draft" ||
         displayPhase === "hydrating_generated" ||
         displayPhase === "preparing_review")) ||
-    productionCreateWorkspaceShellActive;
+    productionCreateWorkspaceShellActive ||
+    Boolean(
+      premiumPostCheckoutPhase && liveWorkspaceTwoPane && simpleProductFlow && createProductionTwoPane,
+    );
 
   useEffect(() => {
     if (!showFollowUpOnly) {
@@ -4911,7 +4960,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !reviewWorkspaceBootstrapping &&
       createFlowPhase === "capturing_input" &&
       displayPhase === "intake" &&
-      !isEditingDescription,
+      !isEditingDescription &&
+      !premiumPostCheckoutPhase,
   );
   const showLegacyIntakeShell = Boolean(
     createUiStage === CreateUiStage.INPUT &&
@@ -9009,13 +9059,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         id="claw-premium-processing-title"
                         className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
                       >
-                        Finalizing your complete agreement
+                        {CLAW_PREMIUM_PREPARING_AGREEMENT_COPY}
                       </h2>
                       <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
                         We&apos;re strengthening terms and formatting — your upgraded agreement will appear in the
                         preview as soon as this step finishes.
                       </p>
-                      {premiumPipelineUserMessage ? (
+                      {premiumPipelineUserMessage &&
+                      premiumPipelineUserMessage !== CLAW_PREMIUM_PREPARING_AGREEMENT_COPY ? (
                         <p className="mt-3 text-center text-sm font-medium text-amber-200/95" role="status">
                           {premiumPipelineUserMessage}
                         </p>
