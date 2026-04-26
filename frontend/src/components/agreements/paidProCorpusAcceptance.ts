@@ -26,9 +26,11 @@ export type PipelineProSourceString =
 
 const STITCHED_INTRO_BANNED = [
   "this lawdog pro preview organizes",
+  "this lawdog pro agreement is organized for your review",
   "structured fields",
   "fuller sections for serious review",
   "this lawdog pro preview groups related commercial topics",
+  "this lawdog pro agreement groups related commercial topics",
 ] as const;
 
 /** Vesting / founder / startup equity when intake is not about that scenario. */
@@ -182,6 +184,14 @@ export function isPaidProFinishedAgreement(args: {
   /** API returned 200 with explicit model-path fallback; payment remains valid. */
   serverGenerationDegraded?: boolean;
 }): { ok: boolean; reasons: string[]; gate?: ReturnType<typeof canShowPremiumSuccess> } {
+  const serverCoherentPath = (() => {
+    const p = String(args.pipelineSource || "");
+    return (
+      p === "server_full_draft" ||
+      p === "server_full_draft_retry" ||
+      p === "server_full_draft_degraded"
+    );
+  })();
   if (args.serverGenerationDegraded) {
     if (args.stale) {
       return { ok: false, reasons: ["stale_generation_or_fingerprint"] };
@@ -221,6 +231,34 @@ export function isPaidProFinishedAgreement(args: {
         });
       }
       return { ok: true, reasons: [], gate: g };
+    }
+    const textLen = String(args.text || "").trim().length;
+    if (
+      v.ok &&
+      !args.stale &&
+      !args.qualityRetryActive &&
+      serverCoherentPath &&
+      textLen >= 1200
+    ) {
+      const g2: ReturnType<typeof canShowPremiumSuccess> = {
+        ...g,
+        state: "premium_success",
+        successBannerAllowed: true,
+        signerCtaAllowed: true,
+        successBannerReasons: [
+          ...g.successBannerReasons,
+          "server_path_coherent_override_readonly_tier_mismatch",
+        ],
+        validation: g.validation.ok ? g.validation : { ok: true, reasons: [] },
+      };
+      if (import.meta.env.MODE !== "test") {
+        logPremiumTruthTelemetry({
+          ...g2,
+          render_source: String(args.readonlyRenderSource),
+          premium_pipeline_source: String(args.pipelineSource),
+        });
+      }
+      return { ok: true, reasons: [], gate: g2 };
     }
     const reasons = [...g.successBannerReasons, ...(g.validation.ok ? [] : g.validation.reasons)];
     if (import.meta.env.MODE !== "test") {

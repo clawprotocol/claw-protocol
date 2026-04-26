@@ -134,7 +134,7 @@ export function evaluateUniversalPremiumMateriality(
   const reasons: string[] = [];
 
   if (rawLen >= 140) {
-    if (sim > 0.76) reasons.push("lexical_too_close_to_free");
+    if (sim > 0.72) reasons.push("lexical_too_close_to_free");
     if (rawLen > 220 && lenR < 1.12) reasons.push("premium_not_longer_than_free");
     if (cov.total >= 6 && cov.ratio < 0.38) reasons.push("ask_under_covered");
     if (/\buse the numbered operative points\b/i.test(premiumBody) && lenR < 1.35) {

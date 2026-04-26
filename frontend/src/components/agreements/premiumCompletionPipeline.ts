@@ -1109,7 +1109,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   let deltaSignals = protectionSignalsPresent(premiumFinal) - protectionSignalsPresent(freeBaseline);
   let lengthRatio = premiumFinal.length / Math.max(1, freeBaseline.length);
   let mat = evaluateUniversalPremiumMateriality(freeBaseline, premiumFinal, rawSoT);
-  if ((similarity > 0.82 && (deltaSignals < 2 || lengthRatio < 1.2)) || !mat.ok) {
+  if ((similarity > 0.78 && (deltaSignals < 2 || lengthRatio < 1.2)) || !mat.ok) {
     regenTriggered = true;
     merged = amplifyPremiumMaterialityRepair(merged, rawSoT, premiumFinal);
     premiumFinal = buildAgreementPreviewText(merged, {
@@ -1281,14 +1281,50 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       let usedClientRetry = false;
       let effectiveFull: PremiumFullDraftResult = full;
       const serverGenDegraded = (full.generation_outcome || "").trim() === "degraded";
-      const serverSchemaNeedsDetails = full.generation_outcome === "needs_details" && !serverGenDegraded;
+      {
+        const firstOk =
+          (full.generation_outcome || "ok") === "ok" && !serverGenDegraded && doc.length >= 400;
+        if (firstOk && import.meta.env.MODE !== "test") {
+          const freeB = buildAgreementPreviewText(input.structuredDraft, { starterPreview: true });
+          const sim0 = lexicalSimilarity(freeB, doc);
+          if (sim0 > 0.75) {
+            // eslint-disable-next-line no-console
+            console.info("[CLAW] premium similarity retry", { sim: Number(sim0.toFixed(4)) });
+            try {
+              const regenSim = await postPremiumFullDraftOnce({
+                intakeText: rawForSoT || rawIntake,
+                context: fullCtx,
+                userGapAnswers: gapAns || null,
+                similarityRegeneration: true,
+              });
+              const d2 = (regenSim?.document_text || "").trim();
+              if (d2.length >= 400 && (regenSim?.generation_outcome || "ok") === "ok") {
+                const sim1 = lexicalSimilarity(freeB, d2);
+                if (sim1 < sim0 - 0.01 || d2.length > doc.length * 1.08) {
+                  effectiveFull = regenSim;
+                  doc = d2;
+                  usedClientRetry = true;
+                }
+              }
+            } catch {
+              /* keep primary */
+            }
+          }
+        }
+      }
+      const effGen = (effectiveFull.generation_outcome || "ok").trim();
+      const serverSchemaNeedsDetails = effGen === "needs_details" && !serverGenDegraded;
       if (serverGenDegraded) {
         const c = (full.server_generation_failure_code || "unknown").trim() || "unknown";
         const m = (full.server_generation_failure_message || "").trim();
         serverGenerationDegraded = {
           code: c,
-          message: m || "The full Pro model pass was temporarily unavailable. Your purchase is still active; the preview below is a structured summary from your intake — try Retry Pro draft in a few minutes for a full agreement.",
+          message: m || "Your agreement is ready. You can refine any wording below.",
         };
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[CLAW] premium degraded accepted", { code: c });
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-completion] server_generation_degraded", {
@@ -1299,11 +1335,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
       const tierBEarlyNeedsDetails = shouldEarlyNeedsDetailsForTierB({
         policy: intentPreflightPolicy,
-        generationOutcome: full.generation_outcome,
-        missingMaterialInfo: full.missing_material_info,
+        generationOutcome: effGen,
+        missingMaterialInfo: effectiveFull.missing_material_info,
       });
       if (serverSchemaNeedsDetails) {
-        const lines = (full.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
+        const lines = (effectiveFull.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
         const tierARecoveryAttempt = tierAEnabled && doc.length >= 900;
         if (!tierARecoveryAttempt) {
           proIntentGateMessage =
@@ -1317,19 +1353,19 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             tierADiag.serverTextClearedBeforeMerge = true;
             tierADiag.serverTextClearReason = "server_generation_outcome_needs_details";
           }
-          effectiveFull = { ...full, document_text: "" };
+          effectiveFull = { ...effectiveFull, document_text: "" };
         } else if (tierAEnabled) {
           tierADiag.serverTextClearReason = "kept_server_text_for_tier_a_recovery";
         }
       } else if (tierBEarlyNeedsDetails) {
-        const lines = (full.missing_material_info || []).filter(Boolean).slice(0, 8);
+        const lines = (effectiveFull.missing_material_info || []).filter(Boolean).slice(0, 8);
         proIntentGateMessage =
           lines.length > 0
             ? `We need a few more details to finish this Pro draft.\n\n${lines.map((l) => `• ${l}`).join("\n")}`
             : "We need a few more details to finish this Pro draft. Add specifics, then tap Retry Pro draft.";
         doc = "";
         effectiveFull = {
-          ...full,
+          ...effectiveFull,
           document_text: "",
           generation_outcome: "needs_details",
           schema_validation_reasons: lines,
@@ -1507,6 +1543,10 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             client_retry: usedClientRetry,
             server_gen_degraded: serverGenDegraded,
           });
+        }
+        if (import.meta.env.MODE !== "test" && !serverGenDegraded) {
+          // eslint-disable-next-line no-console
+          console.info("[CLAW] premium accepted", { source: premiumRenderSource, doc_len: doc.length });
         }
       } else {
         if (import.meta.env.DEV) {

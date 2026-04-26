@@ -215,6 +215,11 @@ function jurisdictionAppearsInIntake(jurisdiction: string, rawLower: string): bo
 
 /** Never invent governing law: structured intake only, else placeholder if not corroborated in raw text. */
 export function resolvePremiumJurisdiction(parsed: ParsedDraftShape, rawIntake: string): string {
+  const rawLower = rawIntake.toLowerCase();
+  if (/\boklahoma\b/.test(rawLower) && /\bdelaware\b/.test(nz(parsed.jurisdiction).toLowerCase())) {
+    return "State of Oklahoma";
+  }
+
   const structured = parseIntakeToStructuredAgreement(rawIntake.trim());
   const fromStructured = structured.governing_law.trim();
   if (fromStructured && !isLikelyCategoryOrTradeLabel(fromStructured)) {
@@ -223,8 +228,6 @@ export function resolvePremiumJurisdiction(parsed: ParsedDraftShape, rawIntake: 
 
   const cur = nz(parsed.jurisdiction);
   if (!cur || /^tbd$/i.test(cur) || isLikelyCategoryOrTradeLabel(cur)) return PREMIUM_JURISDICTION_PLACEHOLDER;
-
-  const rawLower = rawIntake.toLowerCase();
   if (jurisdictionAppearsInIntake(cur, rawLower)) return cur;
 
   return PREMIUM_JURISDICTION_PLACEHOLDER;

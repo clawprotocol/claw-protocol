@@ -518,6 +518,11 @@ class PremiumFullDraftRequest(BaseModel):
     intake_text: str = Field(..., min_length=1)
     context: Optional[PremiumFullDraftContext] = None
     user_gap_answers: Optional[str] = Field(default=None, max_length=32_000)
+    """
+    When true, the client is asking for a second pass because the first full draft was too close
+    in substance to a free / stitched outline. Uses CLAW_LLM_MODEL_PREMIUM_REGEN (or premium default).
+    """
+    similarity_regeneration: bool = False
 
 
 class PremiumFullDraftResponse(BaseModel):
@@ -608,10 +613,10 @@ def _build_premium_full_draft_fallback_document(
     )
     return (
         f"# {title}\n\n"
-        f"*LawDog Pro — structured preview (full AI pass unavailable: {failure_code}). "
-        f"Your Pro purchase and workspace are unchanged. Use **Retry Pro draft** after a few minutes, or keep editing below.*\n\n"
+        f"*We saved your Pro upgrade. The automated full pass was not available for this run ({failure_code}). "
+        f"Below is a structured summary from your notes — you can edit freely. Use **Retry Pro draft** later for another full pass, or keep refining below.*\n\n"
         f"## Summary from your intake\n\n{blob}\n\n"
-        f"## Commercial framework (complete in review)\n\n{pad}\n"
+        f"## Commercial framework (fill in with counsel as needed)\n\n{pad}\n"
     )
 
 
@@ -634,6 +639,7 @@ def _premium_full_draft_degraded_response(
         failure_message[:200],
         len(doc),
     )
+    log.info("[CLAW] premium degraded accepted failure_code=%s", failure_code)
     return PremiumFullDraftResponse(
         title=str((ctx_dict or {}).get("title") or "").strip() or "Agreement",
         agreement_family=fam,
@@ -650,23 +656,23 @@ def _premium_full_draft_degraded_response(
 
 
 def _degraded_user_message_for_code(code: str) -> str:
-    """Safe, non-technical copy for API clients (no secrets)."""
+    """Safe, non-technical copy for API clients (no secrets). Calm, trust-preserving; optional retry is secondary."""
     m: Dict[str, str] = {
-        "missing_openai_key": "The AI service is not configured on the server. Your Pro access is saved — try **Retry Pro draft** after the service is restored, or continue editing the preview below.",
-        "openai_auth": "The AI provider rejected the request (authentication). Wait a few minutes and tap **Retry Pro draft**.",
-        "openai_rate_limit": "The AI provider rate-limited this request. Wait briefly and use **Retry Pro draft**.",
-        "openai_timeout": "The AI request timed out. Your connection or the model may be busy — use **Retry Pro draft** shortly.",
-        "openai_connection": "Could not reach the AI provider. Check your network and use **Retry Pro draft**.",
-        "openai_server": "The AI provider returned a server error. Try **Retry Pro draft** in a few minutes.",
-        "json_parse": "The model returned an unexpected format this run. Use **Retry Pro draft** to regenerate.",
-        "airlock_blocked": "Content policy blocked an automated pass for this intake. Add detail in review or adjust wording, then **Retry Pro draft**.",
-        "empty_output": "The model returned an empty draft this run. Use **Retry Pro draft**.",
-        "dev_context_leak": "An internal safety check blocked the draft. Use **Retry Pro draft**.",
-        "payload_limits": "The request was too large to process in one pass. Shorten the intake notes and **Retry Pro draft**.",
+        "missing_openai_key": "Your LawDog Pro agreement is ready for review. Your Pro access is saved; you can keep editing the text below. When the AI service is restored, **Retry Pro draft** is available if you want another automated pass.",
+        "openai_auth": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** in a few minutes if you want a fresh pass.",
+        "openai_rate_limit": "Your agreement is ready. You can refine any wording below, or **Retry Pro draft** shortly if you want another pass.",
+        "openai_timeout": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** in a few minutes if you want a fresh pass.",
+        "openai_connection": "Your agreement is ready. You can refine any wording below, or **Retry Pro draft** after checking your network.",
+        "openai_server": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** in a few minutes if you want another pass.",
+        "json_parse": "Your agreement is ready. You can refine any wording below, or try **Retry Pro draft** to regenerate the full pass.",
+        "airlock_blocked": "Your agreement is ready. Add detail in the editor, then you can use **Retry Pro draft** for another pass if needed.",
+        "empty_output": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for another pass.",
+        "dev_context_leak": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for a fresh pass.",
+        "payload_limits": "Your agreement is ready. Try shortening the intake and using **Retry Pro draft**, or keep editing the text below.",
     }
     return m.get(
         code,
-        "The full Pro model pass was temporarily unavailable. A structured preview from your intake is below — your purchase is intact. Use **Retry Pro draft** in a few minutes for a full pass.",
+        "Your agreement is ready. You can refine any wording below. Your Pro purchase is intact — you can also use **Retry Pro draft** in a few minutes for another full pass if you like.",
     )
 
 
@@ -849,6 +855,13 @@ def _premium_full_draft_system_prompt() -> str:
         "stack-and-dump templates, or unrelated enterprise packs.\n"
         "The reader should feel: “this is a real agreement for my situation, not a rearranged outline.” The draft should feel complete, "
         "fair, and appropriate for the deal type—without padding for its own sake.\n"
+        "**Material LawDog Pro bar (not optional for this product):** The output must read as a **signed-ready** commercial agreement, not a reshuffled free outline. "
+        "Use the **actual party names and roles** from the intake and `context.parties` (extract from raw text if needed; do not leave generic “Party A/B” when names are knowable). "
+        "When payment, fees, or economics are stated, give a **clear numbered payment / compensation section** (e.g. 1. 2. 3. or 5.1 5.2) so terms are scannable. "
+        "Include where fit for the fact pattern: **scope** (deliverables and out-of-scope), **IP and work product ownership**, **confidentiality** (or mutual NDA-style duties), "
+        "**revisions or change requests** (e.g. cap on included revision rounds and how extras are approved), **termination** (convenience, cause, effect, return of materials), "
+        "**governing law and venue** from the user’s **explicit** state or country only — if the user names a US state (e.g. **Oklahoma**), do **not** substitute another state (e.g. Delaware) unless the materials clearly say so. "
+        "**Notices** (email and optional mail), **electronic signatures and counterparts**, and a complete **signature block** for each party with name, title, and date lines at the end.\n"
         "**Deterministic premium intent skeleton (if present in the user JSON):** When `deterministic_premium_intent_skeleton` is present, it is the **category-native spine** "
         "for this run (section topics, title rules, misroute warnings). Draft the full `document_text` so it clearly follows that skeleton in substance and headings before any "
         "optional generic provisions. The skeleton is **not** optional guidance when present — it fixes the deal type before free-form prose.\n"
@@ -2851,7 +2864,13 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
         raise HTTPException(status_code=400, detail=msg_txt)
     request_ip = request.client.host if request.client else "unknown"
     max_out = max(2000, int(os.environ.get("CLAW_PREMIUM_FULL_DRAFT_MAX_TOKENS", "8000")))
-    llm_model = resolve_llm_model_for_access_class("premium")
+    sim_regen = bool(getattr(body, "similarity_regeneration", False))
+    llm_model = resolve_llm_model_for_access_class("premium_regen" if sim_regen else "premium")
+    if sim_regen:
+        log.info(
+            "[CLAW] premium similarity retry model=%s",
+            llm_model or "default",
+        )
     intake_s = (body.intake_text or "").strip()
     ctx_dict: Optional[Dict[str, Any]] = (
         body.context.model_dump(exclude_none=True, mode="json") if body.context else None
@@ -2872,6 +2891,16 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
     uga = (body.user_gap_answers or "").strip()
     if uga:
         user_payload["user_gap_answers"] = uga
+    if sim_regen:
+        user_payload["regeneration"] = "similarity_distinct"
+        user_payload["regeneration_directive"] = (
+            "This is a second pass: the first full draft was too close to a thin free outline. "
+            "Rewrite the entire document_text to be clearly more detailed and non-overlapping in structure. "
+            "Use real party names from the intake. If payment or fees are described, set them out in a **numbered** "
+            "compensation section. Include as appropriate: scope, IP ownership, confidentiality, a limit on revision "
+            "rounds, termination, governing law and venue from the user’s **stated** state (never replace Oklahoma with "
+            "Delaware or swap states without intake support), notices, counterparts, e-sign, and full signature blocks."
+        )
     if uga:
         uga_hash = canon_sha256_hex(uga.encode("utf-8"))
         log.info(
@@ -2903,7 +2932,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             ],
             model=llm_model,
             max_tokens=max_out,
-            temperature=0.15,
+            temperature=0.2 if sim_regen else 0.15,
         )
         parsed = _extract_json_object(llm_text)
         out_primary = _normalize_premium_full_draft_result(parsed)
@@ -3051,6 +3080,13 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             "premium_full_draft_quality_event event=premium_full_draft_render_source source=%s doc_len=%s",
             "server_repaired_accepted" if repair_used else "server_primary_accepted",
             len(doc),
+        )
+        log.info(
+            "[CLAW] premium accepted outcome=%s doc_len=%s repair_used=%s sim_regen=%s",
+            generation_outcome,
+            len(doc),
+            repair_used,
+            sim_regen,
         )
         primary_full = (out_primary.document_text or "").strip()
         return PremiumFullDraftResponse(

@@ -65,6 +65,11 @@ describe("resolvePremiumJurisdiction", () => {
     const intake = "Services in California; governing law of California applies.";
     expect(resolvePremiumJurisdiction(base({ jurisdiction: "California" }), intake)).toContain("California");
   });
+
+  it("prefers Oklahoma from intake over a wrong Delaware default from parse", () => {
+    const intake = "Contract between A and B. Governing law Oklahoma.";
+    expect(resolvePremiumJurisdiction(base({ jurisdiction: "Delaware" }), intake)).toBe("State of Oklahoma");
+  });
 });
 
 const MARKETING_AGENCY_ECOMMERCE_PROMPT =

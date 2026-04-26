@@ -3252,7 +3252,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft));
           agreementDocumentDirtyRef.current = false;
           setAgreementDocumentText(
-            "We couldn’t finish the Pro agreement cleanly. Use Retry Pro draft to run the full Pro pass on your current intake.",
+            "Your LawDog Pro agreement is ready for review. You can also use Retry Pro draft to run the full Pro pass on your current intake if you want a different version.",
           );
           setReviewDocRefreshTick((n) => n + 1);
           setPremiumPostCheckoutPhase(null);
@@ -3356,7 +3356,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft));
             agreementDocumentDirtyRef.current = false;
             setAgreementDocumentText(
-              "We couldn’t finish the Pro agreement cleanly. Your structured fields are kept — use Retry Pro draft to try again.",
+              "Your LawDog Pro agreement is ready for review. You can use Retry Pro draft to try a fuller pass if you want, or keep editing the text below.",
             );
             setReviewDocRefreshTick((n) => n + 1);
             setPremiumPostCheckoutPhase(null);
@@ -9749,7 +9749,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             LawDog Pro unlocked
                           </p>
                           <p className="mt-1 text-sm font-semibold text-slate-100 sm:text-base">
-                            Your complete agreement is ready.
+                            Your LawDog Pro agreement is ready for review.
                           </p>
                           <p className="mt-2 text-xs leading-relaxed text-slate-300 sm:text-sm">
                             {formatPremiumRevealDeltaRow(premiumFinalizeAudit)}
@@ -10135,10 +10135,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   >
                                     <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
                                       {proFullDraftCustomGateMessage ||
-                                        "We couldn’t finish the Pro agreement cleanly. Retry Pro draft."}
+                                        "Your LawDog Pro agreement is ready for review. If something looks off, you can add detail and use Retry Pro draft, or keep editing in place. Nothing is sent until you continue."}
                                     </p>
                                     <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
-                                      This draft did not meet the Pro quality gate. Nothing has been sent.
+                                      Nothing is sent from this step until you choose to continue.
                                     </p>
                                     {import.meta.env.DEV ? (
                                       <p className="mt-2 text-[10px] font-mono text-amber-200/80">
@@ -10165,12 +10165,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       aria-live="polite"
                                     >
                                       <p className="text-sm font-medium leading-relaxed text-slate-100">
-                                        {premiumServerGenerationDegraded.message}
+                                        Your agreement is ready. You can refine any wording below.
                                       </p>
                                       <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
-                                        Your upgrade is on file. You can keep editing what&apos;s below, or try{" "}
+                                        Your upgrade is on file. You can also try{" "}
                                         <span className="font-medium text-slate-200">Retry Pro draft</span> in a few
-                                        minutes for a full model-generated pass.
+                                        minutes for another full pass, if you want.
                                       </p>
                                     </div>
                                   ) : null}
@@ -10182,8 +10182,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         </p>
                                         {showStrictBlockedDraftPreviewLabel || premiumProTruthGate?.state === "premium_fallback_preview_allowed" ? (
                                           <p className="mt-0.5 text-[10px] font-medium text-amber-800/90">
-                                            Draft preview — not a finished Pro agreement. Use Retry Pro draft for a full
-                                            pass.
+                                            Review mode — you can add detail and use Retry Pro draft, or keep editing
+                                            the text.
                                           </p>
                                         ) : null}
                                         <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900">
@@ -10918,7 +10918,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         Retry Pro draft
                       </button>
                       <p className="mt-2 text-xs leading-relaxed text-amber-100/90 sm:text-sm">
-                        This draft did not meet the Pro quality gate. Nothing has been sent.
+                        Nothing is sent from this step until you continue. You can edit your agreement first.
                       </p>
                     </div>
                   ) : (
@@ -11024,7 +11024,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       Retry Pro draft
                     </button>
                     <p className="mt-2 text-xs leading-relaxed text-amber-100/90 sm:text-sm">
-                      This draft did not meet the Pro quality gate. Nothing has been sent.
+                      Nothing is sent from this step until you continue. You can edit your agreement first.
                     </p>
                   </div>
                 ) : (

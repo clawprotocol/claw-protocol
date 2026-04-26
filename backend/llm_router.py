@@ -83,6 +83,10 @@ def resolve_llm_model_for_access_class(ai_model_class: Optional[str]) -> Optiona
     if key == "premium":
         m = os.getenv(ENV_CLAW_LLM_MODEL_PREMIUM, "").strip()
         return m or DEFAULT_PREMIUM_CHAT_MODEL
+    # Stronger / distinct pass (e.g. dissimilarity regen from client). Env optional; default = premium id.
+    if key in ("premium_regen", "premium_strong", "premium_distinct"):
+        m = os.getenv("CLAW_LLM_MODEL_PREMIUM_REGEN", "").strip()
+        return m or os.getenv(ENV_CLAW_LLM_MODEL_PREMIUM, "").strip() or DEFAULT_PREMIUM_CHAT_MODEL
     return None
 
 

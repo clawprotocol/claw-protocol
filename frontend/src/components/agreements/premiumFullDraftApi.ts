@@ -162,6 +162,8 @@ export async function postPremiumFullDraftOnce(args: {
   context: PremiumFullDraftContextPayload;
   userGapAnswers?: string | null;
   signal?: AbortSignal;
+  /** Second pass: server uses stronger / distinct pass when output was too close to a free outline. */
+  similarityRegeneration?: boolean;
 }): Promise<PremiumFullDraftResult> {
   const uga = (args.userGapAnswers || "").trim();
   if (import.meta.env.DEV) {
@@ -179,6 +181,7 @@ export async function postPremiumFullDraftOnce(args: {
       intake_text: args.intakeText,
       context: args.context,
       ...(uga ? { user_gap_answers: uga } : {}),
+      ...(args.similarityRegeneration ? { similarity_regeneration: true } : {}),
     }),
     signal: args.signal,
   });

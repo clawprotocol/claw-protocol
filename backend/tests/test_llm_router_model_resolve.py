@@ -45,6 +45,18 @@ def test_basic_and_premium_defaults_differ(monkeypatch: pytest.MonkeyPatch) -> N
     assert resolve_llm_model_for_access_class("basic") != resolve_llm_model_for_access_class("premium")
 
 
+def test_premium_regen_uses_env_then_premium_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAW_LLM_MODEL_PREMIUM_REGEN", "gpt-5.4-xy")
+    monkeypatch.delenv("CLAW_LLM_MODEL_PREMIUM", raising=False)
+    assert resolve_llm_model_for_access_class("premium_regen") == "gpt-5.4-xy"
+
+
+def test_premium_regen_falls_back_to_premium_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CLAW_LLM_MODEL_PREMIUM_REGEN", raising=False)
+    monkeypatch.setenv("CLAW_LLM_MODEL_PREMIUM", "gpt-5.4-p")
+    assert resolve_llm_model_for_access_class("premium_strong") == "gpt-5.4-p"
+
+
 def test_gpt5_uses_max_completion_tokens() -> None:
     assert uses_gpt5_chat_tokens_param("gpt-5.4-mini")
     assert build_chat_completion_tokens_kwargs("gpt-5.4-mini", 1200) == {"max_completion_tokens": 1200}
