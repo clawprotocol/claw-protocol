@@ -7,17 +7,28 @@ import * as storage from "./agreementIntakeStorage";
 const longPrompt =
   "I need a freelance software development agreement. Anthem Blanchard hires Sarah Collins to redesign and optimize the CryptoSpaces.net website for $7,500 total.";
 
+const mockDraftPayment: ParsedDraftShape["payment"] = {
+  amount: 7_500,
+  cadence: "milestone",
+  valid: true,
+};
+
 describe("buildUpgradeSourceTextForPremium", () => {
   const minimalDraft: ParsedDraftShape = {
     title: "Services Agreement",
+    jurisdiction: "Oklahoma",
     purpose: "Party A provides services to Party B.",
-    payment_terms: "Compensation as agreed.",
+    payment_terms: "$7,500 total; $3,000 upfront; $4,500 on final delivery",
     parties: [
       { name: "Party A", role: "Client" },
       { name: "Party B", role: "Provider" },
     ],
-    agreement_family: "independent_contractor",
-  } as ParsedDraftShape;
+    duration: "30 days",
+    due_date: "within 30 days",
+    effective_date: "May 1, 2026",
+    payment: mockDraftPayment,
+    agreement_family: "independent_contractor_agreement",
+  };
 
   beforeEach(() => {
     vi.spyOn(orig, "readOriginalUserIntakeRaw").mockReturnValue("");
@@ -50,7 +61,9 @@ describe("buildUpgradeSourceTextForPremium", () => {
         originalUserIntakeRaw: longPrompt,
       } as any,
       intakeCombined: "",
-      structuredDraft: minimalDraft,
+      // No structured draft here: a full parsed shape can serialize longer than a one-line
+      // `originalUserIntakeRaw` and would otherwise win in pickLongest.
+      structuredDraft: null,
       agreementDocumentText: "",
     });
     expect(out).toContain("Anthem Blanchard");
