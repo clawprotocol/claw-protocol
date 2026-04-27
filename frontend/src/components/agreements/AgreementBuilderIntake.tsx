@@ -62,6 +62,8 @@ import {
 } from "./agreementAdvancedIntentSummary";
 import { simplifyParsedDraftForInstantPath } from "./agreementComplexityGate";
 import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies";
+import { looksLikeRefinementIntent } from "./reviewRefineIntent";
+import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
 import {
   detectFullDraftUpgradeSignals,
   getFullDraftUpgradeComparisonRows,
@@ -723,7 +725,8 @@ type PrimaryCtaAction =
   | "continue_to_recipients"
   | "premium_continue_to_signers"
   | "complete_recipient_details"
-  | "send_agreement";
+  | "send_agreement"
+  | "update_agreement_from_buffer";
 
 type PrimaryCtaState = {
   label: string;
@@ -801,6 +804,8 @@ type CreateFlowSendRecipientsPanelProps = {
   sendDisabled: boolean;
   /** When true, primary action opens the premium send confirmation modal (no email sent yet). */
   sendRequiresConfirmStep: boolean;
+  /** Inline help when the primary CTA is blocked (e.g. missing recipient email). */
+  primaryCtaHelperText?: string | null;
   stripRecipientEmailNoise: (s: string) => string;
   looksLikeEmail: (s: string) => boolean;
 };
@@ -832,6 +837,7 @@ function CreateFlowSendRecipientsPanel({
   onSendClick,
   sendDisabled,
   sendRequiresConfirmStep,
+  primaryCtaHelperText,
   stripRecipientEmailNoise,
   looksLikeEmail,
 }: CreateFlowSendRecipientsPanelProps) {
@@ -845,13 +851,18 @@ function CreateFlowSendRecipientsPanel({
       ? "Recipients read the draft and can suggest changes before anything is finalized."
       : "Recipients read the final terms, then sign when they are ready.";
   const nextStepExplain = sendRequiresConfirmStep
-    ? "Next, you will confirm the exact recipients in one step. Nothing is emailed until then."
-    : "Nothing is emailed until you confirm below.";
+    ? "Next, you will confirm the exact recipients in one step. Nothing is emailed or finalized until then — suggested edits use a review link, and nothing changes until you confirm."
+    : "Review links and signing links are created on the next step — nothing is sent or finalized until you confirm below.";
+  const linkReadyOutbox = isPremiumRecipientSurface;
   const primarySendLabel = sendRequiresConfirmStep
     ? "Continue to confirmation"
     : effectivePremiumSendMode === "review"
-      ? "Send review link"
-      : "Send signing link";
+      ? linkReadyOutbox
+        ? "Send review link"
+        : "Create review link"
+      : linkReadyOutbox
+        ? "Send signing link"
+        : "Create signing link";
 
   const senderInviteTrustStrip = (
     <ul className="mt-3 flex flex-wrap gap-2" aria-label="Trust cues">
@@ -955,7 +966,7 @@ function CreateFlowSendRecipientsPanel({
         <p className={`mt-1 text-sm ${looksLikeEmail(r1e) ? "text-slate-300" : "text-amber-200/90"}`}>{primaryEmailLine}</p>
         {looksLikeEmail(r2e) ? (
           <p className="mt-3 text-xs text-slate-500">
-            Also sends to{" "}
+            Also included for{" "}
             <span className="font-medium text-slate-300">
               {(recipient2Name || "").trim() || "Second recipient"}
             </span>{" "}
@@ -972,6 +983,9 @@ function CreateFlowSendRecipientsPanel({
         >
           {primarySendLabel}
         </button>
+        {primaryCtaHelperText ? (
+          <p className="mt-2 text-center text-sm leading-snug text-amber-200/90">{primaryCtaHelperText}</p>
+        ) : null}
       </div>
       <p className="mt-3 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
         Nothing is emailed or finalized until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""}.
@@ -1069,6 +1083,9 @@ function CreateFlowSendRecipientsPanel({
         >
           {primarySendLabel}
         </button>
+        {primaryCtaHelperText ? (
+          <p className="mb-1 text-center text-sm leading-snug text-amber-200/90">{primaryCtaHelperText}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -4028,6 +4045,105 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     createProductionTwoPane,
     emitPaidFunnelEvent,
+  ]);
+
+  const runPersistedRefineFromStepBuffer = React.useCallback(async (): Promise<boolean> => {
+    const instruction = (intakeStepBufferRef.current || "").trim();
+    if (!instruction) return false;
+    const prior = draft;
+    if (!prior) {
+      setHardError("Your draft is not ready to update yet.");
+      return false;
+    }
+    setHardError(null);
+    setCreateFlowPhase("generating_draft");
+    setDisplayPhase("generating_draft");
+    setLoading(true);
+    await finalizeIntakeCapture();
+    try {
+      const id = await ensureReviewAgreementWorkspaceId();
+      if (!id) {
+        setHardError("We could not open a workspace to update the agreement. Try again in a moment.");
+        return false;
+      }
+      if (import.meta.env.DEV) {
+        console.info("[agreement-refine] request", {
+          agreementId: id,
+          hint: looksLikeRefinementIntent(instruction),
+          length: instruction.length,
+        });
+      }
+      const res = await fetch(apiUrl(`/api/agreements/${encodeURIComponent(id)}/refine`), {
+        method: "POST",
+        headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ instruction }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        const pe = payload as { detail?: { paywall?: boolean; code?: string; message?: string } };
+        const d = pe?.detail;
+        if (d && typeof d === "object" && d.paywall) {
+          triggerPaywall({ code: d.code, surface: "agreement_refine" });
+        }
+        setHardError("We could not apply that update right now. Try a shorter note, or check your connection.");
+        return false;
+      }
+      const rawDraft = payload.draft;
+      const intakeFallback = intakeCombined.trim();
+      const coerced = coerceDraftFromApiPayload(rawDraft, intakeFallback, extractIntakePayment(intakeFallback));
+      let next = mergeProPreservingRefineParsed(prior, coerced);
+      next = runIntakeDefaultsAndRoles(next, intakeFallback, simpleProductFlow, intakePartyRoleLabels);
+      next = alignParsedWithCanonicalType(next, intakeFallback);
+      next = normalizeParsedDraftLegalConcepts(next, intakeFallback);
+      if (simpleInstantProductionSurface) {
+        next = applySimpleFlowSmartDefaults(next, intakeFallback);
+        next = alignParsedWithCanonicalType(next, intakeFallback);
+        next = normalizeParsedDraftLegalConcepts(next, intakeFallback);
+      }
+      const nextMissing = computeMissing(next);
+      setMissing(simpleInstantProductionSurface && nextMissing.length > 0 ? [] : nextMissing);
+      setMissingAnswer("");
+      setComplexityPendingParsed(null);
+      setReviewShowsSimplifiedAdvancedDraft(false);
+      setDraft(next);
+      setFollowUpDetailTotal(0);
+      setDisplayPhase("intake");
+      setDraftNowCommitted(true);
+      setCreateFlowPhase("draft_ready_for_review");
+      setCreateUiStage(CreateUiStage.DRAFT);
+      setMobileWorkspacePane("preview");
+      setPreviewPaneRevealed(true);
+      setIntakeStepBuffer("");
+      setDebouncedStepBuffer("");
+      agreementDocumentDirtyRef.current = false;
+      setReviewDocRefreshTick((n) => n + 1);
+      try {
+        setAgreementDocumentText(buildPreviewForCurrentTier(next));
+      } catch {
+        /* ignore */
+      }
+      window.requestAnimationFrame(() => {
+        scrollLikelyReviewSectionIntoView();
+      });
+      return true;
+    } catch (e) {
+      if (import.meta.env.DEV) console.error("[agreement-refine] failed", e);
+      setHardError("We could not apply that update. Try again in a moment.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    draft,
+    finalizeIntakeCapture,
+    ensureReviewAgreementWorkspaceId,
+    intakeCombined,
+    simpleProductFlow,
+    intakePartyRoleLabels,
+    alignParsedWithCanonicalType,
+    normalizeParsedDraftLegalConcepts,
+    simpleInstantProductionSurface,
+    buildPreviewForCurrentTier,
   ]);
 
   const resolveComplexityChoice = React.useCallback(
@@ -7280,7 +7396,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ? stageAContinueBlocked
         ? "Describe your agreement"
         : "Create draft"
-      : guidedMainCtaLabel;
+      : createProductionTwoPane &&
+          createUiStage === CreateUiStage.DRAFT &&
+          !stageAInputFirst &&
+          (intakeStepBuffer || "").trim()
+        ? "Update agreement"
+        : guidedMainCtaLabel;
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
     if (!simpleCreateUnifiedBottomCta) {
@@ -7361,6 +7482,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             disabled: true,
             reason: "generating_draft",
           };
+        }
+        {
+          const hasRefinementBuffer = (intakeStepBuffer || "").trim().length > 0;
+          if (hasRefinementBuffer && draft) {
+            return {
+              label: "Update agreement",
+              action: "update_agreement_from_buffer",
+              disabled: !draft,
+              reason: !draft ? "no_draft" : undefined,
+            };
+          }
         }
         const premiumForkSurfaceEarly =
           premiumSendPathUnlocked || premiumPersistedFlowActive || premiumRecipientUxActive;
@@ -7469,13 +7601,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               ? "Sending…"
               : premiumSendConfirmGateActive
                 ? "Continue to confirmation"
-                : premiumOutbox
-                  ? effectivePremiumSendMode === "review"
+                : effectivePremiumSendMode === "review"
+                  ? premiumOutbox
                     ? "Send review link"
-                    : "Send signing link"
-                  : streamlineFirstRunReviewUi
-                    ? "Send review link"
-                    : "Send signing link";
+                    : "Create review link"
+                  : premiumOutbox
+                    ? "Send signing link"
+                    : "Create signing link";
           return {
             label: persistSendLabel,
             action: "send_agreement",
@@ -7937,10 +8069,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
     }
     if (intakeStepBufferRef.current.trim()) {
-      const applied = await runProductionLocalDraftParse({ handoffSource: "draft_reparse_intake_buffer" });
+      const applied = await runPersistedRefineFromStepBuffer();
       if (!applied) {
-        console.error("[BLOCKED ACTION] handOff:intake_buffer_parse_not_applied");
-        setHardError("Could not apply your latest edits. Try again or shorten the note.");
+        console.error("[BLOCKED ACTION] handOff:intake_buffer_refine_not_applied");
+        setHardError("Could not apply your latest suggested edits. Try again or shorten the note.");
         return;
       }
     }
@@ -7988,6 +8120,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     missing,
     draft,
     runProductionLocalDraftParse,
+    runPersistedRefineFromStepBuffer,
     setRecipient1Name,
     setRecipient2Name,
     recipient1Email,
@@ -8283,6 +8416,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             await handOffProductionDraftToRecipients();
             return;
           }
+          case "update_agreement_from_buffer": {
+            setHardError(null);
+            await runPersistedRefineFromStepBuffer();
+            return;
+          }
           case "send_agreement": {
             logProductEvent("create_flow_cta_clicked", { cta_click_type: "send" });
             await finalizeIntakeCapture();
@@ -8521,6 +8659,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             await runProductionLocalDraftParse({ handoffSource: "draft_reparse_missing" });
             return;
           }
+          if (intakeStepBufferRef.current.trim()) {
+            const applied = await runPersistedRefineFromStepBuffer();
+            if (!applied) return;
+            return;
+          }
           if (draft && draftHasPlaceholderParties(draft)) {
             setReviewPartyHighlightNonce((n) => n + 1);
             console.debug("[review-placeholder-guard]", {
@@ -8532,10 +8675,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               document.getElementById("claw-review-parties-row")?.scrollIntoView({ behavior: "smooth", block: "center" });
             });
             return;
-          }
-          if (intakeStepBufferRef.current.trim()) {
-            const applied = await runProductionLocalDraftParse({ handoffSource: "draft_reparse_intake_buffer" });
-            if (!applied) return;
           }
           if (upgradeLockActiveRef.current) return;
           if (draft) {
@@ -8883,6 +9022,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           onSendClick={runPrimaryIntakeAction}
           sendDisabled={effectivePrimaryCtaDisabled}
           sendRequiresConfirmStep={premiumSendConfirmGateActive}
+          primaryCtaHelperText={
+            premiumSendConfirmGateActive && !recipientsDeferred && !hasAnyValidRecipientEmail
+              ? "Add at least one recipient email to continue."
+              : null
+          }
           stripRecipientEmailNoise={stripRecipientEmailNoise}
           looksLikeEmail={looksLikeEmail}
         />
@@ -10592,6 +10736,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         onSendClick={runPrimaryIntakeAction}
                         sendDisabled={effectivePrimaryCtaDisabled}
                         sendRequiresConfirmStep={premiumSendConfirmGateActive}
+                        primaryCtaHelperText={
+                          premiumSendConfirmGateActive && !recipientsDeferred && !hasAnyValidRecipientEmail
+                            ? "Add at least one recipient email to continue."
+                            : null
+                        }
                         stripRecipientEmailNoise={stripRecipientEmailNoise}
                         looksLikeEmail={looksLikeEmail}
                       />
