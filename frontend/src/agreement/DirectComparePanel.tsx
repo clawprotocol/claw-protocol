@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import type { RedlineSegment } from "../vs01/agreementRedline";
 import {
   analyzeDirectTextCompare,
@@ -166,26 +166,7 @@ function DirectCompareResultView({ result }: { result: DirectTextCompareResult }
           <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Text-level changes</div>
           <p className="mb-1 text-[0.65rem] text-slate-500">Word- and line-level view (read-only, same diff engine as LawDog review).</p>
           <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-600/50 bg-white p-3 text-[0.7rem] leading-relaxed text-slate-900">
-            {redline.segments.map((seg: RedlineSegment, idx: number) => {
-              if (seg.type === "same") return <span key={idx}>{seg.text}</span>;
-              if (seg.type === "insert")
-                return (
-                  <span
-                    key={idx}
-                    className="bg-emerald-100/95 text-emerald-950 underline decoration-emerald-800/20 decoration-1 underline-offset-2"
-                  >
-                    {seg.text}
-                  </span>
-                );
-              return (
-                <span
-                  key={idx}
-                  className="bg-rose-100/90 text-rose-950 line-through decoration-rose-800/30 decoration-1"
-                >
-                  {seg.text}
-                </span>
-              );
-            })}
+            {redline.segments.map((seg: RedlineSegment, idx: number) => renderRedlineSegment(seg, idx))}
           </div>
         </div>
       ) : (
@@ -195,10 +176,39 @@ function DirectCompareResultView({ result }: { result: DirectTextCompareResult }
   );
 }
 
+function renderRedlineSegment(seg: RedlineSegment, idx: number): ReactNode {
+  if (seg.type === "same") {
+    return <span key={idx}>{seg.text}</span>;
+  }
+  if (seg.type === "insert") {
+    return (
+      <span
+        key={idx}
+        className="bg-emerald-100/95 text-emerald-950 underline decoration-emerald-800/20 decoration-1 underline-offset-2"
+      >
+        {seg.text}
+      </span>
+    );
+  }
+  return (
+    <span
+      key={idx}
+      className="bg-rose-100/90 text-rose-950 line-through decoration-rose-800/30 decoration-1"
+    >
+      {seg.text}
+    </span>
+  );
+}
+
 function clauseRowLine(row: ClauseRow): string {
-  if (row.kind === "add") return `Added: ${row.text.replace(/\s+/g, " ").trim().slice(0, 320)}${row.text.length > 320 ? "…" : ""}`;
+  if (row.kind === "add") {
+    return `Added: ${row.text.replace(/\s+/g, " ").trim().slice(0, 320)}${row.text.length > 320 ? "…" : ""}`;
+  }
   if (row.kind === "remove") {
     return `Removed: ${row.text.replace(/\s+/g, " ").trim().slice(0, 320)}${row.text.length > 320 ? "…" : ""}`;
   }
-  return `Revised: ${row.before.replace(/\s+/g, " ").trim().slice(0, 160)}… → ${row.after.replace(/\s+/g, " ").trim().slice(0, 160)}…`;
+  if (row.kind === "edit") {
+    return `Revised: ${row.before.replace(/\s+/g, " ").trim().slice(0, 160)}… → ${row.after.replace(/\s+/g, " ").trim().slice(0, 160)}…`;
+  }
+  return `Aligned: ${row.text.replace(/\s+/g, " ").trim().slice(0, 320)}${row.text.length > 320 ? "…" : ""}`;
 }
