@@ -62,7 +62,10 @@ export function rejectPremiumBodyForProRender(
   }
   if (/\bschedule\s+a\b/i.test(low)) {
     const schedBlock = /schedule\s+a[\s:.\n]+([\s\S]{120,})/i.exec(body);
-    if (!schedBlock) reasons.push("schedule_a_filler");
+    if (!schedBlock) {
+      /** Pro agreements often “tee up” Schedule A; long bodies carry terms elsewhere. Thin shells only. */
+      if ((body || "").trim().length < 8_000) reasons.push("schedule_a_filler");
+    }
   }
   const uniq = [...new Set(reasons)];
   return { ok: uniq.length === 0, reasons: uniq };
@@ -78,47 +81,142 @@ function partyNameAnchorsPresentInBody(b: string): boolean {
   return false;
 }
 
+export type PaidProSourceFactProbe = {
+  anthem: boolean;
+  sarah: boolean;
+  cryptospaces: boolean;
+  /** Host/path style “site” for CryptoSpaces. */
+  cryptospacesHost: boolean;
+  oklahoma: boolean;
+  pay7500: boolean;
+  pay3000: boolean;
+  pay4500: boolean;
+  may1_2026: boolean;
+  may31_2026: boolean;
+  days30: boolean;
+  revisions2: boolean;
+  preExistToolsLibs: boolean;
+  emailNotices: boolean;
+  /** Non-exhaustive: own IP, deliverables, assignment after payment. */
+  ownDeliverableIp: boolean;
+  /** Confidentiality / trade secrets (operative). */
+  confidentiality: boolean;
+  /** Governing law signal for debug (Oklahoma / Delaware; not legal advice). */
+  governingLawDelawareMention: boolean;
+  governingLawOklahomaMention: boolean;
+};
+
 /**
  * DEV/telemetry: normalized source-fact hits in the body (not full text) for paid-Pro gate debugging.
  */
 export function buildPaidProSourceFactProbe(
   text: string,
   _intake: string,
-): {
-  anthem: boolean;
-  sarah: boolean;
-  cryptospaces: boolean;
-  oklahoma: boolean;
-  pay7500: boolean;
-  pay3000: boolean;
-  pay4500: boolean;
-  may1_2026: boolean;
-  days30: boolean;
-  revisions2: boolean;
-  preExistToolsLibs: boolean;
-  emailNotices: boolean;
-} {
+): PaidProSourceFactProbe {
   const s = (text || "").toLowerCase();
+  const goOk =
+    /oklahoma law|laws? of the state of oklahoma|governed by the laws? of the state of oklahoma|governed by the laws? of oklahoma|state of oklahoma|oklahoma (?:state )?courts?|the state of oklahoma|submits to the jurisdiction of oklahoma|venue in oklahoma(?!,?\s+city)/i.test(
+      s,
+    );
   return {
     anthem: /\banthem\b/.test(s),
     sarah: /\bsarah\b/.test(s),
-    cryptospaces: /\bcryptospaces|crypto[\s-]*space/i.test(s),
-    oklahoma: /(?:\boklahoma\b|oklahoma\s+law|state of oklahoma|governed by (?:\s*the )?laws? of (?:\s*the )?state of oklahoma)/i.test(s),
-    pay7500: /(?:\$\s*7[,.]?\s*500|7500|7\s*500|seven thousand five hundred)/i.test(s),
-    pay3000: /(?:\$\s*3[,.]?\s*000|3000|three thousand)/i.test(s),
-    pay4500: /(?:\$\s*4[,.]?\s*500|4500|four thousand five hundred)/i.test(s),
-    may1_2026: /(?:may\s*1,?\s*2026|05\/01\/2026|5\/1\/2026|1(?:st)?\s+may\s*2026)/i.test(s),
-    days30: /(?:(?:\b30\b|thirty)(?:\s*\(\d+\))?\s*days?|(?:\b30\b|thirty)[-\s]*day)/i.test(s),
-    revisions2:
-      /(?:\b2\b|\btwo)\s*(?:\(\d\))?\s*(?:revision|rounds?)/i.test(s) ||
-      /two\s*revision\s*rounds?/i.test(s) ||
-      /two\s+\(?2\)?\s*revisions?/i.test(s),
-    preExistToolsLibs: /pre[-\s]*existing|third[-\s]*party (?:code|software|libraries?)|\btools?\s*and\s*libraries?/i.test(s),
-    emailNotices:
-      /notices?.*\bemail|notices?.*\belectronic|notices? by (?:e-?mail|email|electronic)|email.*notic|electronic (?:mail|notices?)|notic(?:e|es) by (?:e-?mail|electronic)|(?:\bnotices?[^\n]{0,200}\bemail|\bemail[^\n]{0,200}\bnoti)/i.test(
+    cryptospaces: /\bcryptospaces|crypto[\s-]*space/.test(s),
+    cryptospacesHost: /cryptospaces\.(net|com|io|org)\b|cryptospaces\.net website/i.test(s),
+    /** Substantive Oklahoma law / state references (avoids over-matching a bare “governed by the laws of … Delaware”. */
+    oklahoma: goOk,
+    pay7500:
+      /(?:\$\s*7[,.]?\s*500|7,500\.\d{2}|\b7[,.]?\s*5\s*0\s*0\b|\b7500\b|seven thousand five hundred|seven-thousand-five-hundred|usd\s*7[,.]?\s*500)/i.test(
         s,
       ),
+    pay3000: /(?:\$\s*3,000|3,000(?:\.\d{2})?|\b3[,.]000\b|\b3000\b|three thousand|three-thousand)/i.test(
+      s,
+    ),
+    pay4500: /(?:\$\s*4,500|4,500(?:\.\d{2})?|\b4[,.]500\b|\b4500\b|4\.5\s*k|four thousand five hundred|four-thousand-five-hundred)/i.test(
+      s,
+    ),
+    may1_2026: /(?:may\s*1,?\s*2026|05[\/\-.]0?1[\/\-.]2026|5[\/\-.]0?1[\/\-.]2026|1(?:st)?\s*day\s*of\s*may\s*2026)/i.test(
+      s,
+    ),
+    may31_2026: /(?:may\s*31,?\s*2026|05[\/\-.]31[\/\-.]2026|5[\/\-.]31[\/\-.]2026|31(?:st)?\s+may\s*2026|final date\s+may)/i.test(
+      s,
+    ),
+    days30:
+      /(?:(?:\b30\b|thirty)(?:\s*\(\d+\))?\s*days?|(?:\b30\b|thirty)[-\s]*day(?!\s*care)|30\s*calendar\s*days?|within\s*30\s*days?|no\s*later\s*than\s*30|after\s*may[\s,]*1[\s,]*2026,?\s*within|deadline.*30.*day|due\s*within.*30)/i.test(
+        s,
+      ),
+    revisions2:
+      /(?:\b2\b|\btwo)\s*(?:\(\d\))?\s*(?:rounds?|revision|rev\.?\s*rounds?)/i.test(s) ||
+      /(?:\b2\b)\s*revision(?:\s*rounds?)?/i.test(s) ||
+      /two\s*(\(\s*2\s*\))?\s*(?:revision|rounds?|rounds?\s*of)/i.test(s) ||
+      /revisions?[^.]{0,20}(?:two|2|Ⅱ)/i.test(s),
+    preExistToolsLibs:
+      /pre[-\s]*existing|third[-\s]*party (?:code|software|libraries?)|\bframeworks?\b|developer[’']?s?\s*background|retained[^.]{0,32}\bip\b|background\s*ip|tools?[^.]{0,20}libraries?/i.test(
+        s,
+      ),
+    emailNotices:
+      /notices?[^.]{0,120}?(?:email|e-?mail|electronic)|notices? by|(?:email|e-?mail)[^.]{0,40}notic|acceptable\s*notices?|notic(?:e|es)\s*may.*mail/i.test(
+        s,
+      ) ||
+      (/\bemail\b/.test(s) && /notic|notif|dispatch|communications?\s*clause/i.test(s)),
+    ownDeliverableIp:
+      /client shall own|ownership of (?:all )?deliver\w*|assign(?:ment|ed)?\s*to\s*client|works?\s*for[-\s]?hire|full\s*payment,?\s*(?:the|all)?\s*(?:client|purchaser?)|work\s*made for hire/i.test(
+        s,
+      ),
+    confidentiality: /\bconfidentiality\b|\bconfidential\b|trade secret|proprietary|non-?use|disclosure|nda\b/i.test(
+      s,
+    ),
+    governingLawDelawareMention:
+      /laws? of the state of delaware|governed by the laws? of the state of delaware|governed by the laws? of (?:\s*the )?state of delaware|state of delaware\b(?!,?\s+llc)|\bdelaware law|delaware courts?|venue[^.]{0,160}delaware|choice of law[^.]{0,160}delaware/i.test(
+        s,
+      ),
+    governingLawOklahomaMention: goOk,
   };
+}
+
+/** High-level anchors for [paid-pro-validation-fail] / [premium-completion-debug] (no raw document text). */
+export function buildPaidProValidationDiagnostics(
+  text: string,
+  intake: string,
+): {
+  sourceFactHits: PaidProSourceFactProbe;
+  docLen: number;
+  intakeLen: number;
+  partyAnchorsSatisfied: boolean;
+  projectAnchor: boolean;
+  /** Same idea as `partyNameAnchorsPresentInBody` for logging. */
+  namePairsInBody: { anthemBlanchard: boolean; sarahCollins: boolean };
+} {
+  const s = (text || "").toLowerCase();
+  const p = buildPaidProSourceFactProbe(text, intake);
+  const ab = (/\banthem\b/.test(s) && /\bblanchard\b/.test(s)) || /\banthem\s+blanchard\b/.test(s);
+  const sc = (/\bsarah\b/.test(s) && /\bcollins\b/.test(s)) || /\bsarah\s+collins\b/.test(s);
+  const party =
+    p.cryptospaces ||
+    p.cryptospacesHost ||
+    ab ||
+    sc ||
+    (/\bblanchard\b/.test(s) && (/\banthem\b/.test(s) || p.cryptospaces)) ||
+    (/\bcollins\b/.test(s) && (/\bsarah\b/.test(s) || p.cryptospaces));
+  const project = p.cryptospaces || p.cryptospacesHost || /website|web\s*site|homepage|re[-\s]?design/i.test(s);
+  return {
+    sourceFactHits: p,
+    docLen: (text || "").length,
+    intakeLen: (intake || "").length,
+    partyAnchorsSatisfied: party,
+    projectAnchor: project,
+    namePairsInBody: { anthemBlanchard: ab, sarahCollins: sc },
+  };
+}
+
+/**
+ * Intake said “N days to deliver / final by …”; body may say thirty (30) days, 30 calendar days, or a May 31
+ * end date instead of a loose “30-day” string.
+ */
+function bodyHasProjectDeliveryWindow(low: string): boolean {
+  return /(?:(?:\b30\b|thirty)(?:\s*\(\d+\))?\s*days?|(?:\b30\b|thirty)[-\s]*day(?!\s*care)|30\s*calendar\s*days?|within\s*30\s*days?|may\s*31,?\s*2026|05[\/\-.]31[\/\-.]2026|31(?:st)?\s+of\s*may,?\s*2026|on\s*or\s*before\s*may\s*31|no\s*later\s*than\s*may\s*31|by\s*may\s*31|not\s*later\s*than\s*may|may\s*1,?\s*2026,?\s*and[^.]{0,80}30|final\s*deliver\w*[^.]{0,120}may)/i.test(
+    low,
+  );
 }
 
 /**
@@ -166,9 +264,7 @@ export function rejectProUpgradeSourceFactDrift(
       reasons.push("intake_name_missing_anthem_blanchard");
     }
   }
-  const wantsSarahCollins =
-    /\bsarah collins\b/i.test(il) ||
-    (/\bsarah\b/.test(il) && /\bcollins\b/.test(il) && /(sarah.*collins|collins.*sarah|sarah,\s*collins)/i.test(il));
+  const wantsSarahCollins = /\bsarah collins\b/i.test(il) || (/\bsarah\b/.test(il) && /\bcollins\b/.test(il));
   if (wantsSarahCollins) {
     if (!/\bsarah\s+collins\b/.test(low) && !(/\bsarah\b/.test(low) && /\bcollins\b/.test(low))) {
       reasons.push("intake_name_missing_sarah_collins");
@@ -190,7 +286,7 @@ export function rejectProUpgradeSourceFactDrift(
     /\b30\s*days?\b(?:[\s\S]*?)(?:\bdeliver(?:y)?|\bfinal\w*|\bcomplete\w*|\bmilestone\w*|\bpayment\w*|\bbalance\w*)/i.test(
       il,
     ) &&
-    !/(?:(?:\b30\b|thirty)(?:\s*\(\d+\))?\s*days?|(?:\b30\b|thirty)[-\s]*day)/i.test(low)
+    !bodyHasProjectDeliveryWindow(low)
   ) {
     reasons.push("missing_30_day_delivery");
   }

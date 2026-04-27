@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildPaidProSourceFactProbe, rejectProUpgradeSourceFactDrift } from "./premiumFullDraftClientAcceptance";
+import {
+  buildPaidProSourceFactProbe,
+  buildPaidProValidationDiagnostics,
+  rejectPremiumBodyForProRender,
+  rejectProUpgradeSourceFactDrift,
+} from "./premiumFullDraftClientAcceptance";
 
 const RICH_INTAKE = `
   CryptoSpaces.net website redesign. Anthem Blanchard (client) and Sarah Collins (developer) in Oklahoma.
@@ -52,6 +57,20 @@ Governing law: the laws of the **State of Oklahoma** (and not the laws of the St
   });
 });
 
+describe("rejectPremiumBodyForProRender", () => {
+  it("does not use schedule_a_filler when the document is long and operative (Schedule A may be a stub line)", () => {
+    const intro =
+      "SOFTWARE / WEB DEVELOPMENT MSA\n\n" +
+      "SCHEDULE A — DELIVERABLE SUMMARY (NON-EXHAUSTIVE)\n" +
+      "Schedule A: the parties may update milestones by change order; line-item detail may appear in exhibits.\n\n";
+    const longOperative = " The parties shall cooperate in good faith. Governing law: the laws of the State of Oklahoma. ".repeat(500);
+    const t = (intro + longOperative).trim();
+    const r = rejectPremiumBodyForProRender(t, { intakeLower: "oklahoma" });
+    expect(r.ok, r.reasons.join(", ")).toBe(true);
+    expect(r.reasons).not.toContain("schedule_a_filler");
+  });
+});
+
 describe("buildPaidProSourceFactProbe", () => {
   it("exposes fact booleans without logging full text", () => {
     const p = buildPaidProSourceFactProbe(
@@ -69,5 +88,15 @@ describe("buildPaidProSourceFactProbe", () => {
     expect(p.revisions2).toBe(true);
     expect(p.preExistToolsLibs).toBe(true);
     expect(p.emailNotices).toBe(true);
+  });
+
+  it("buildPaidProValidationDiagnostics groups governing law and anchors without full text", () => {
+    const t =
+      "Governed by Oklahoma law, not Delaware. Client Anthem Blanchard, Developer Sarah Collins, CryptoSpaces.net, $3,000 / $4,500 / 7500, May 31, 2026, thirty (30) days, two 2 revision rounds, pre-existing tools, notices by email, confidential, client owns work product.";
+    const d = buildPaidProValidationDiagnostics(t, "Oklahoma, CryptoSpaces");
+    expect(d.partyAnchorsSatisfied).toBe(true);
+    expect(d.sourceFactHits.governingLawOklahomaMention).toBe(true);
+    expect(d.sourceFactHits.days30).toBe(true);
+    expect(d.sourceFactHits.may31_2026).toBe(true);
   });
 });

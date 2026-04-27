@@ -8,7 +8,7 @@ import {
   isFounderEquityVestingIntent,
 } from "./founderIntentRouter";
 import {
-  buildPaidProSourceFactProbe,
+  buildPaidProValidationDiagnostics,
   isLikelyFiveSectionStarterShellPro,
   rejectPremiumBodyForProRender,
   rejectProUpgradeSourceFactDrift,
@@ -144,13 +144,36 @@ export function validatePaidProOutput(args: {
   const rawI = String(args.rawIntake || "");
   const logVpaidDevFail = (reasons: string[]) => {
     if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
+      const diag = buildPaidProValidationDiagnostics(t, rawI);
       // eslint-disable-next-line no-console
       console.info("[paid-pro-validation-fail]", {
         stage: "validatePaidProOutput",
         validationReasons: reasons,
-        docLen: t.length,
-        intakeLen: rawI.length,
-        sourceFactHits: buildPaidProSourceFactProbe(t, rawI),
+        docLen: diag.docLen,
+        intakeLen: diag.intakeLen,
+        sourceFactHits: diag.sourceFactHits,
+        governingLaw: {
+          delawareOperative: diag.sourceFactHits.governingLawDelawareMention,
+          oklahomaPresent: diag.sourceFactHits.governingLawOklahomaMention,
+        },
+        partyAnchors: {
+          partyAnchorsSatisfied: diag.partyAnchorsSatisfied,
+          namePairsInBody: diag.namePairsInBody,
+        },
+        projectSiteAnchor: diag.projectAnchor,
+        materialAnchors: {
+          pay7500: diag.sourceFactHits.pay7500,
+          pay3000: diag.sourceFactHits.pay3000,
+          pay4500: diag.sourceFactHits.pay4500,
+          may1_2026: diag.sourceFactHits.may1_2026,
+          may31_2026: diag.sourceFactHits.may31_2026,
+          days30OrWindow: diag.sourceFactHits.days30,
+          revisions2: diag.sourceFactHits.revisions2,
+          preExistTools: diag.sourceFactHits.preExistToolsLibs,
+          emailNotices: diag.sourceFactHits.emailNotices,
+          confidentiality: diag.sourceFactHits.confidentiality,
+          ownDeliverableIp: diag.sourceFactHits.ownDeliverableIp,
+        },
       });
     }
   };
