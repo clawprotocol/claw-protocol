@@ -1,6 +1,7 @@
 /**
  * Central Premium (LawDog Pro) “truth” gate: when may we show upgraded success, signers, and finished Pro.
- * Does not implement payment, checkout, or signing — display / persistence integrity only.
+ * **React / readonly surfaces** should obtain gate results via `computeProTruthSurface` in `premiumProTruth.ts`
+ * (validation + this function composed once). Does not implement payment, checkout, or signing.
  */
 import type { AgreementIntentContract } from "./agreementIntentContract";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";

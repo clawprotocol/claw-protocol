@@ -319,12 +319,13 @@ import {
   shortIntakeFingerprint,
 } from "../../lib/agreementGenerationId";
 import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraftApi";
+import { buildPremiumDetailsGateCopy, isPaidProFinishedAgreement } from "./paidProCorpusAcceptance";
 import {
-  buildPremiumDetailsGateCopy,
-  isPaidProFinishedAgreement,
-  validatePaidProOutput,
-  canShowPremiumSuccess,
-} from "./paidProCorpusAcceptance";
+  computeProTruthSurface,
+  proTruthIsPremiumDocumentReady,
+  proTruthIsSignerCtaOpen,
+  validateProTruthReadonlyText,
+} from "./premiumProTruth";
 import { buildStrictTruthGateCheckoutRevision } from "./premiumTruthGateFunnel";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftClientAcceptance";
@@ -3213,11 +3214,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         base0.length > 0 ? buildPremiumMergedIntakeWithUserNotes(base0, pPend || pNotes) : (pPend || pNotes || base0);
       if (bodyCheck.length > 0 && mergedProbe0.trim().length >= 24) {
         const contractS = resolveAgreementIntentContract(mergedProbe0);
-        const vSnap0 = validatePaidProOutput({
+        const vSnap0 = validateProTruthReadonlyText({
           text: bodyCheck,
           rawIntake: mergedProbe0,
           intentContract: contractS,
           draft: postCheckoutReturnSnap.premiumDraft ?? null,
+          premiumPipelineSource: postCheckoutReturnSnap.premiumPipelineRenderSource,
         });
         if (!vSnap0.ok) {
           if (import.meta.env.DEV) {
@@ -7036,11 +7038,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const intakeProbe = (currentPremiumMergedIntakeKey || intakeCombined).trim();
     if (pick.plainText.trim() && intakeProbe.length >= 24) {
       const factContract = resolveAgreementIntentContract(intakeProbe);
-      const vPick = validatePaidProOutput({
+      const vPick = validateProTruthReadonlyText({
         text: pick.plainText,
         rawIntake: intakeProbe,
         intentContract: factContract,
         draft: draft ?? null,
+        premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
       });
       if (!vPick.ok) {
         if (import.meta.env.DEV) {
@@ -7098,45 +7101,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const shouldShowPaidRetry = Boolean(proFullDraftQualityRetry && !hasUsablePaidBody);
 
-  const premiumProTruthGate = useMemo(() => {
+  const premiumProTruthSnapshot = useMemo(() => {
     if (!hasFullDraftAccess || !premiumPersistedFlowActive) return null;
     const t = (premiumPaidReadonlyPick.plainText || "").trim();
     const i = (currentPremiumMergedIntakeKey || intakeCombined).trim() || intakeCombined;
     const contract = resolveAgreementIntentContract(i);
-    if (!t) {
-      return canShowPremiumSuccess({
-        intentContract: contract,
-        renderSource: premiumPaidReadonlyPick.sourceUsed,
-        validation: { ok: false, reasons: ["empty_readonly_paid_corpus"] },
-        documentText: "",
-        intakeText: i,
-        premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
-        stale: false,
-        draft: draft ?? null,
-        qualityRetryActive: shouldShowPaidRetry,
-        serverGenerationDegraded: false,
-        allowPaidSubstantiveStitch: false,
-      });
-    }
-    const v = validatePaidProOutput({
-      text: t,
-      rawIntake: i,
-      draft: draft ?? null,
+    return computeProTruthSurface({
       intentContract: contract,
-    });
-    const allowPaidSubstantiveStitch = hasUsablePaidBody;
-    return canShowPremiumSuccess({
-      intentContract: contract,
-      renderSource: premiumPaidReadonlyPick.sourceUsed,
-      validation: v,
       documentText: t,
-      intakeText: i,
+      renderSource: premiumPaidReadonlyPick.sourceUsed,
       premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
-      stale: false,
+      intakeText: i,
       draft: draft ?? null,
       qualityRetryActive: shouldShowPaidRetry,
       serverGenerationDegraded: Boolean(premiumServerGenerationDegraded),
-      allowPaidSubstantiveStitch,
+      allowPaidSubstantiveStitch: hasUsablePaidBody,
+      stale: false,
     });
   }, [
     hasFullDraftAccess,
@@ -7152,29 +7132,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumTruthPipelineSource,
     reviewDocRefreshTick,
   ]);
+  const premiumProTruthGate = premiumProTruthSnapshot?.gate ?? null;
 
   const canProceedWithPaidProDocument = useMemo(() => {
     if (!premiumPaidDocumentSurface) return true;
     if (proUpgradeUseStarterView) return false;
     const t = (premiumPaidReadonlyPick.plainText || "").trim();
     if (t.length < 500) return false;
-    const g = premiumProTruthGate;
-    if (!g) return false;
-    if (g.state !== "premium_success") return false;
-    if (!g.validation.ok) return false;
-    return true;
-  }, [premiumPaidDocumentSurface, proUpgradeUseStarterView, premiumPaidReadonlyPick.plainText, premiumProTruthGate]);
+    return proTruthIsPremiumDocumentReady(premiumProTruthSnapshot);
+  }, [premiumPaidDocumentSurface, proUpgradeUseStarterView, premiumPaidReadonlyPick.plainText, premiumProTruthSnapshot]);
 
   /** “Continue to reviewer / signer” after checkout while still on DRAFT (before recipients). */
   const proCheckoutRecipientStageAdvanceAllowed = useMemo(() => {
     if (proUpgradeUseStarterView) return true;
     if (!premiumPaidDocumentSurface) return true;
-    return canProceedWithPaidProDocument && Boolean(premiumProTruthGate?.signerCtaAllowed);
+    return canProceedWithPaidProDocument && proTruthIsSignerCtaOpen(premiumProTruthSnapshot);
   }, [
     proUpgradeUseStarterView,
     premiumPaidDocumentSurface,
     canProceedWithPaidProDocument,
-    premiumProTruthGate?.signerCtaAllowed,
+    premiumProTruthSnapshot,
   ]);
 
   useEffect(() => {
@@ -9160,29 +9137,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (t) {
         const i = (currentPremiumMergedIntakeKey || intakeCombined).trim() || intakeCombined;
         const contract = resolveAgreementIntentContract(i);
-        const v = validatePaidProOutput({
-          text: t,
-          rawIntake: i,
-          draft: draft ?? null,
+        const s = computeProTruthSurface({
           intentContract: contract,
-        });
-        const g = canShowPremiumSuccess({
-          intentContract: contract,
-          renderSource: premiumPaidReadonlyPick.sourceUsed,
-          validation: v,
           documentText: t,
-          intakeText: i,
+          renderSource: premiumPaidReadonlyPick.sourceUsed,
           premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
-          stale: false,
+          intakeText: i,
           draft: draft ?? null,
           qualityRetryActive: shouldShowPaidRetry,
           serverGenerationDegraded: Boolean(premiumServerGenerationDegraded),
           allowPaidSubstantiveStitch: hasUsablePaidBody,
+          stale: false,
         });
-        if (!g.signerCtaAllowed) {
+        if (!s.gate.signerCtaAllowed) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.info("[premium-truth-telemetry] continue_to_signers blocked", g);
+            console.info("[premium-truth-telemetry] continue_to_signers blocked", s.gate);
           }
           return;
         }

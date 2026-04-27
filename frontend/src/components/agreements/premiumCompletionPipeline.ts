@@ -1471,6 +1471,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         skipFounderTitleCheck: founderIntent,
         intentContract,
         intentContractMode: intentModeFirst,
+        premiumPipelineSource: "server_full_draft",
       });
       if (intentModeFirst === "full" && !vPaid.ok && !serverSchemaNeedsDetails) {
         proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, vPaid.reasons);
@@ -1501,6 +1502,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
                     draft: mergedForApi,
                     intentContract,
                     intentContractMode: "full",
+                    premiumPipelineSource: "server_full_draft",
                   });
                 }
               }
@@ -1525,6 +1527,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
               draft: mergedForApi,
               intentContract,
               intentContractMode: "full",
+              premiumPipelineSource: "server_full_draft",
             });
             if (!vPaid.ok) {
               proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, vPaid.reasons);
@@ -1539,6 +1542,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             skipFounderTitleCheck: false,
             intentContract,
             intentContractMode: "full",
+            premiumPipelineSource: "server_full_draft",
           });
           if (!vPaid.ok) {
             proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, vPaid.reasons);

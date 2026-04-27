@@ -29,6 +29,17 @@ export type PipelineProSourceString =
   | "rejected_paid_corpus"
   | string;
 
+/** Pipeline sources where the model already returned an accepted full draft; intent title stems are hints, not Pro truth. */
+export function isAuthoritativePremiumPipelineProvenance(s: string | null | undefined): boolean {
+  const p = String(s || "").trim();
+  return (
+    p === "server_full_draft" ||
+    p === "server_full_draft_retry" ||
+    p === "server_full_draft_degraded" ||
+    p === "snapshot_server_full_draft"
+  );
+}
+
 const STITCHED_INTRO_BANNED = [
   "this lawdog pro preview organizes",
   "this lawdog pro agreement is organized for your review",
@@ -139,6 +150,11 @@ export function validatePaidProOutput(args: {
    * `full` (default) runs the intent contract and legacy founder fallback when no contract.
    */
   intentContractMode?: "full" | "base_only";
+  /**
+   * When set, enables intent **title-stem** lenience for an already server-accepted Pro body (not live preview).
+   * See {@link isAuthoritativePremiumPipelineProvenance}; does not relax source-fact, cross-category, or shell checks.
+   */
+  premiumPipelineSource?: PipelineProSourceString | null;
 }): { ok: boolean; reasons: string[] } {
   const t = args.text || "";
   const rawI = String(args.rawIntake || "");
@@ -207,6 +223,7 @@ export function validatePaidProOutput(args: {
       text: t,
       rawIntake: args.rawIntake,
       draftTitle: args.draft?.title,
+      authoritativeProPipelineAccepted: isAuthoritativePremiumPipelineProvenance(args.premiumPipelineSource),
     });
     if (!vi.ok) {
       logVpaidDevFail(vi.reasons);
@@ -227,6 +244,9 @@ export function validatePaidProOutput(args: {
 
 /**
  * Pro surface is allowed only if pipeline + readonly sources are server-backed, text passes checks, and request is not stale.
+ * For **post-apply** / pipeline completion (includes `server_path_coherent_override` for readonly tier).
+ * The live AgreementBuilder **readonly strip** should use `computeProTruthSurface` in `premiumProTruth.ts` instead
+ * of re-pairing validators ad hoc.
  * Pass `intentContract` from `resolveAgreementIntentContract(intake)` so success cannot match on stitched previews for strict intents.
  */
 export function isPaidProFinishedAgreement(args: {
@@ -265,6 +285,7 @@ export function isPaidProFinishedAgreement(args: {
       rawIntake: args.rawIntake,
       intentContract: args.intentContract ?? null,
       draft: args.draft ?? null,
+      premiumPipelineSource: args.pipelineSource,
     });
     if (!vDegraded.ok) {
       return { ok: false, reasons: ["degraded_failed_corpus_check", ...vDegraded.reasons] };
@@ -276,6 +297,7 @@ export function isPaidProFinishedAgreement(args: {
     rawIntake: args.rawIntake,
     intentContract: args.intentContract ?? null,
     draft: args.draft ?? null,
+    premiumPipelineSource: args.pipelineSource,
   });
   if (args.intentContract) {
     const pLine = String(args.pipelineSource || "");

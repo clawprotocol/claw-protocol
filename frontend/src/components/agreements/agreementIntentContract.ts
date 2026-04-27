@@ -132,7 +132,20 @@ function fromDeterministic(
     },
     web_presence: {
       intent: "software_web_dev",
-      extraTerms: ["development", "acceptance", "scope", "site"],
+      extraTerms: [
+        "development",
+        "web",
+        "software",
+        "application",
+        "developer",
+        "client",
+        "acceptance",
+        "scope",
+        "site",
+        "saas",
+        "api",
+        "services",
+      ],
       minSec: "Build scope, acceptance, change orders, IP, warranty/support, fees.",
       forbid: ["at-will", "estate bequest", "vesting for equity holders"],
     },
@@ -409,9 +422,12 @@ function countNeedles(hay: string, terms: string[]): number {
   return n;
 }
 
-/** Long Pro bodies often use drafting synonyms; count operative depth instead of 9 keyword stems. */
-function hasOperativeProDepth(hay: string, docLen: number): boolean {
-  if (docLen < 10_000) return false;
+/**
+ * Whether a long, operative Pro body is substantively “real” (used for material-term and title-hint lenience).
+ * `minDocLen` allows an 8k+ bar when the model returned a full agreement just under 10k tokens-as-chars.
+ */
+function hasOperativeProDepth(hay: string, docLen: number, minDocLen: number = 10_000): boolean {
+  if (docLen < minDocLen) return false;
   let score = 0;
   if (/\bwhereas\b|recital/i.test(hay)) score += 1;
   if (/\bthe\s+parties\b|\bparty\b/i.test(hay)) score += 1;
@@ -513,6 +529,24 @@ function loanOutputEquatesInstallmentToPrincipal(hay: string, principal: number)
 }
 
 /**
+ * When the paid pipeline already accepted a full `server_full_draft` (or equivalent), category **title stem**
+ * match is a hint, not a hard gate: the body + source-fact checks are the Pro truth.
+ */
+function authoritativeTitleCategoryBypassOk(
+  c: AgreementIntentContract,
+  hay: string,
+  docLen: number,
+  authoritativeProPipelineAccepted: boolean,
+): boolean {
+  if (!authoritativeProPipelineAccepted) return false;
+  if (c.intent_id === "design_creative") return false;
+  if (c.intent_id === "founder_equity_vesting") return false;
+  if (docLen >= 10_000 && hasOperativeProDepth(hay, docLen, 10_000)) return true;
+  if (docLen >= 8000 && hasOperativeProDepth(hay, docLen, 8000)) return true;
+  return false;
+}
+
+/**
  * LawDog Pro output check for a **recognized** intent. Unknown / non-strict: lenient.
  */
 export function validateIntentContractForPaidProOutput(args: {
@@ -521,8 +555,14 @@ export function validateIntentContractForPaidProOutput(args: {
   rawIntake: string;
   /** Model or draft title. */
   draftTitle?: string | null;
+  /**
+   * True when the full-draft pipeline already accepted this run (`server_full_draft*`, `snapshot_server_full_draft`).
+   * Softens only **title stem vs. intent_id** mismatch — never cross-intake, loan, or design title rules.
+   */
+  authoritativeProPipelineAccepted?: boolean;
 }): { ok: boolean; reasons: string[] } {
   const c = args.contract;
+  const authoritative = Boolean(args.authoritativeProPipelineAccepted);
   if (!c.pro_strict || c.intent_id === "custom_unknown") {
     return { ok: true, reasons: [] };
   }
@@ -536,6 +576,25 @@ export function validateIntentContractForPaidProOutput(args: {
   const tline = getResolvedTitleForFounderGating((args.draftTitle || "").trim(), text);
   const hay = bodyHay(tline, text);
   const docLen = text.length;
+  const tryTitleMismatchBypass = (reason: string) => {
+    if (
+      reason === `intent:title_mismatch_category:${c.intent_id}` &&
+      authoritative &&
+      authoritativeTitleCategoryBypassOk(c, hay, docLen, authoritative)
+    ) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[paid-pro-intent-hint]", {
+          event: "category_title_stem_bypassed",
+          intent_id: c.intent_id,
+          reason: "authoritative_server_pro_body",
+          docLen,
+        });
+      }
+      return true;
+    }
+    return false;
+  };
   const firstLine = firstLineOrTitle(tline, text).toLowerCase();
   if (firstLine === "agreement" || firstLine === "agreement.") {
     return { ok: false, reasons: ["intent:generic_agreement_title"] };
@@ -551,7 +610,10 @@ export function validateIntentContractForPaidProOutput(args: {
         return { ok: false, reasons: ["intent:design_title_requires_logo_or_design_services"] };
       }
     } else if (!hasExpectedTitleFit(c, tline, text) && c.expected_title_terms.length) {
-      return { ok: false, reasons: [`intent:title_mismatch_category:${c.intent_id}`] };
+      const tmReason = `intent:title_mismatch_category:${c.intent_id}`;
+      if (!tryTitleMismatchBypass(tmReason)) {
+        return { ok: false, reasons: [tmReason] };
+      }
     }
   }
 

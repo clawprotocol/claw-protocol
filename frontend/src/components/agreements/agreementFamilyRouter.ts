@@ -1,5 +1,7 @@
 /**
- * Deterministic local agreement “family” for intake defaults and preview routing.
+ * Deterministic local agreement “family” for intake defaults, starter templates, analytics, and UI routing.
+ * It is **not** LawDog Pro truth: paid Pro completion is gated by authoritative pipeline sources,
+ * `validatePaidProOutput` / source-fact checks, and intent contract substance — not this enum alone.
  * No network / LLM — keyword and phrase rules only.
  */
 export type AgreementFamily =
