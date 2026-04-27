@@ -18,6 +18,7 @@ import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnel
 import { fetchAgreementDraft } from "../../agreement/agreementWorkspaceApi";
 import { apiUrl, resolveApiBase } from "../../lib/clawApi";
 import { PREMIUM_COMPLETION_ATTEMPT_MAX_MS } from "../../lib/premiumCompletionAttemptTimeout";
+import { defaultPostCheckoutRunModelPassInput, getPremiumGenerationIntakeFingerprint } from "../../lib/postCheckoutProFlow";
 import { canApplyLatePremiumCompletionFromModal } from "../../lib/premiumPostCheckoutModalRace";
 import { useAccess } from "../../access/AccessContext";
 import { useLaunchNav } from "../../launch/LaunchNavContext";
@@ -1406,6 +1407,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const [premiumGapQuestions, setPremiumGapQuestions] = useState<string[]>([]);
   const [premiumGapOneField, setPremiumGapOneField] = useState("");
+  /** Background missing-facts (non-blocking); shown as optional post-Pro tips. */
+  const [postCheckoutAdvisoryGaps, setPostCheckoutAdvisoryGaps] = useState<string[]>([]);
   const runPremiumModelPassRef = useRef<
     | ((
         args: { intakeText: string; userGapAnswers: string | null; gapResolverSkippedWithDefaults: boolean },
@@ -1416,6 +1419,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumGapBaseIntakeRef = useRef<string>("");
   const premiumModalEscapeHandlerRef = useRef<null | (() => void)>(null);
   const premiumModalPrevPhaseRef = useRef<null | "awaiting_gaps" | "processing">(null);
+  /** True while `runModelPass` is in flight (post-checkout or retry). */
+  const premiumProRunInFlightRef = useRef(false);
   /** After premium completion, relax draft-stage party friction (Party A/B fallback, etc.). */
   const [premiumSendPathUnlocked, setPremiumSendPathUnlocked] = useState(false);
   /** Premium path: copy + checklist tuned for “add recipients → send”. */
@@ -3254,6 +3259,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
     const runGen = ++premiumCheckoutRunGenRef.current;
     void (async () => {
+      setPostCheckoutAdvisoryGaps([]);
       setPremiumPostCheckoutPhase("processing");
       setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
       setHardError(null);
@@ -3873,6 +3879,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           gapResolverSkippedWithDefaults: boolean;
         }): Promise<void> => {
           if (!runIsCurrent()) return;
+          premiumProRunInFlightRef.current = true;
+          try {
           setPremiumPostCheckoutPhase("processing");
           setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
           setPremiumGapQuestions([]);
@@ -4099,49 +4107,58 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           setPremiumPipelineUserMessage(null);
           runPremiumModelPassRef.current = null;
+        } finally {
+            premiumProRunInFlightRef.current = false;
+          }
         };
 
         runPremiumModelPassRef.current = runModelPass;
 
-        let gapList: { questions: string[] } = { questions: [] };
-        try {
-          gapList = await postPremiumMissingFactsWithRetry({
-            intakeText: mergedIntake,
-            context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[post_checkout_generation_started]", { runGen, guidedFlowId, mergedLen: mergedIntake.length });
+          // eslint-disable-next-line no-console
+          console.info("[missing_facts_non_blocking]", { note: "fetch_in_background_does_not_gate_pro_full_draft" });
+          // eslint-disable-next-line no-console
+          console.info("[missing_facts_skipped_for_critical_path]", { reason: "immediate_ensure_premium" });
+          // eslint-disable-next-line no-console
+          console.info("[premium_generation_intake_fingerprint]", { fp: getPremiumGenerationIntakeFingerprint(mergedIntake) });
+          // eslint-disable-next-line no-console
+          console.info("[modal_open_did_not_bump_generation]", {
+            note: "intentional_bump_only_inside_runModelPass",
+            sessionGenerationIdBeforeProPass: getOrInitSessionAgreementGenerationId(),
           });
-        } catch (ge) {
-          console.warn("[premium-gap] missing-facts request failed, continuing", ge);
         }
-        if (gapList.questions.length > 0 && runIsCurrent()) {
-          premiumModalEscapeHandlerRef.current = () => {
-            if (!runIsCurrent()) return;
-            stripPremiumCompletionQueryParam();
-            setHardError(
-              "The post-checkout form was closed before your full agreement was generated. Your draft on screen is unchanged — use “Use defaults” or “Build my agreement” if this step appears again.",
-            );
-            setPremiumPostCheckoutPhase(null);
-            setPremiumGapQuestions([]);
-            setPremiumGapOneField("");
-            runPremiumModelPassRef.current = null;
-          };
-          premiumGapBaseIntakeRef.current = mergedIntake;
-          setPremiumGapQuestions(gapList.questions);
-          setPremiumGapOneField("");
-          setPremiumPostCheckoutPhase("awaiting_gaps");
-          console.info("[premium-flow] premium_gap_resolver_active", { count: gapList.questions.length, guidedFlowId });
-          return;
-        }
+
+        void (async () => {
+          if (!runIsCurrent()) return;
+          try {
+            const gl = await postPremiumMissingFactsWithRetry({
+              intakeText: mergedIntake,
+              context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+            });
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[post_checkout] missing_facts_background_result", { questionCount: gl.questions.length, runGen, ok: true });
+            }
+            if (runIsCurrent() && gl.questions.length > 0) {
+              setPostCheckoutAdvisoryGaps(gl.questions);
+            }
+          } catch (ge) {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[post_checkout] missing_facts_background_result", { questionCount: 0, runGen, ok: false, err: ge });
+            }
+            console.warn("[premium-gap] missing-facts request failed, continuing (non-blocking)", ge);
+          }
+        })();
 
         console.info("[premium-flow] premium_rewrite_request_start", {
           mergedLen: mergedIntake.length,
           pendCapturedLen: pendCaptured.length,
           guidedFlowId,
         });
-        await runModelPass({
-          intakeText: mergedIntake,
-          userGapAnswers: null,
-          gapResolverSkippedWithDefaults: false,
-        });
+        await runModelPass({ ...defaultPostCheckoutRunModelPassInput(mergedIntake) });
       } catch (e: unknown) {
         if (absoluteTimeoutId) {
           window.clearTimeout(absoluteTimeoutId);
@@ -10025,6 +10042,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       oneField={premiumGapOneField}
                       onOneField={setPremiumGapOneField}
                       onContinue={() => {
+                        if (premiumProRunInFlightRef.current) {
+                          if (import.meta.env.DEV) {
+                            // eslint-disable-next-line no-console
+                            console.info("[gap_modal] build_ignored_during_in_flight_pro", {
+                              reason: "critical_path_already_running",
+                            });
+                          }
+                          return;
+                        }
                         const r = runPremiumModelPassRef.current;
                         if (!r) return;
                         const t = premiumGapOneField.trim();
@@ -10049,6 +10075,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         });
                       }}
                       onUseDefaults={() => {
+                        if (premiumProRunInFlightRef.current) {
+                          if (import.meta.env.DEV) {
+                            // eslint-disable-next-line no-console
+                            console.info("[gap_modal] use_defaults_ignored_during_in_flight_pro", {
+                              reason: "critical_path_already_running",
+                            });
+                          }
+                          return;
+                        }
                         const r = runPremiumModelPassRef.current;
                         if (!r) return;
                         premiumLastGapAnswersRef.current = "";
@@ -10816,6 +10851,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 onClick={() => handlePremiumReviewFirstContinueToSigners()}
                               >
                                 Continue to recipient setup
+                              </button>
+                            </div>
+                          ) : null}
+                          {createUiStage === CreateUiStage.DRAFT &&
+                          createProductionTwoPane &&
+                          simpleProductFlow &&
+                          !premiumPostCheckoutPhase &&
+                          hasUsablePaidBody &&
+                          postCheckoutAdvisoryGaps.length > 0 ? (
+                            <div
+                              className="mb-4 rounded-xl border border-slate-600/50 bg-slate-950/30 px-4 py-3.5 sm:px-5"
+                              role="complementary"
+                              aria-label="Optional post-checkout detail suggestions"
+                            >
+                              <p className="text-sm font-medium text-slate-200 sm:text-[0.9375rem]">
+                                Optional — ideas for stronger detail
+                              </p>
+                              <p className="mt-1.5 text-xs leading-relaxed text-slate-500 sm:text-sm">
+                                This did not slow down your Pro document. You can work these into Refine, or keep what
+                                you have. Nothing is sent until you confirm.
+                              </p>
+                              <ul className="mt-2 list-outside list-disc pl-4 text-sm leading-relaxed text-slate-300">
+                                {postCheckoutAdvisoryGaps.map((q) => (
+                                  <li className="mt-0.5" key={q}>
+                                    {q}
+                                  </li>
+                                ))}
+                              </ul>
+                              <button
+                                type="button"
+                                className="mt-3 text-left text-xs font-medium text-slate-500 underline decoration-slate-600/80 hover:text-slate-400"
+                                onClick={() => setPostCheckoutAdvisoryGaps([])}
+                              >
+                                Dismiss
                               </button>
                             </div>
                           ) : null}

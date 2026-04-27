@@ -3,19 +3,18 @@
  * (Proof-first, tool-not-lawyer posture; user stays in control.)
  */
 
-export const PRO_UPGRADE_WAIT_MODAL_TITLE = "Upgrading your agreement…";
+export const PRO_UPGRADE_WAIT_MODAL_TITLE = "Building your Pro agreement…";
 export const PRO_UPGRADE_WAIT_MODAL_BODY =
-  "LawDog is turning the starter draft into a fuller business agreement.";
+  "Using your original deal terms. You can refine details after it appears.";
 
 export const PRO_UPGRADE_WAIT_ROTATING_LINES: readonly string[] = [
-  "Adding stronger payment and ownership language…",
-  "Checking scope, dates, and governing law…",
-  "Teaching the boilerplate to sit, stay, and heel…",
+  "Tightening scope, payment, and key dates in line with your intake…",
+  "Reconciling parties, titles, and governing law…",
+  "Strengthening the operative clauses the parties care about most…",
   "Almost there — nothing is sent until you say so.",
 ] as const;
 
-export const PRO_UPGRADE_WAIT_REASSURANCE =
-  "This usually takes a few seconds. You stay in control before anything is sent.";
+export const PRO_UPGRADE_WAIT_REASSURANCE = "Nothing is sent until you confirm.";
 
 /** For tests: disallowed in this surface (and related strings). */
 export const PRO_UPGRADE_WAIT_COPY_BAN_SUBSTR = ["legal advice", "legal counsel", "hurry", "asap", "immediately", "hurry up"];
