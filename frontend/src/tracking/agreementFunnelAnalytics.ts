@@ -22,7 +22,13 @@ export type AgreementFunnelEventName =
   | "recipient_submitted_edits"
   | "owner_applied_edits"
   | "signature_flow_started"
-  | "agreement_completed";
+  | "agreement_completed"
+  | "starter_pro_refine_upsell_control_click"
+  | "starter_pro_refine_upsell_variant_click"
+  | "starter_pro_refine_control_impression"
+  | "starter_pro_refine_variant_impression"
+  | "starter_pro_refine_control_checkout_success"
+  | "starter_pro_refine_variant_checkout_success";
 
 export function getFunnelDeviceType(): "mobile" | "desktop" {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return "desktop";

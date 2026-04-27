@@ -454,8 +454,8 @@ async function runFounderProIntentPath(page: Page) {
   // Allow trailing funnel events to flush.
   await page.waitForTimeout(1500);
   const lawdogGreenBanner = page
-    .getByRole("status", { name: "LawDog Pro unlocked" })
-    .or(page.getByLabel("LawDog Pro unlocked", { exact: true }));
+    .getByRole("status", { name: "LawDog Pro ready" })
+    .or(page.getByLabel("LawDog Pro ready", { exact: true }));
   const greenSuccessBannerVisible = await lawdogGreenBanner.isVisible().catch(() => false);
   (page as Page & { __claw_founderGreenBanner?: boolean }).__claw_founderGreenBanner = greenSuccessBannerVisible;
 }
@@ -483,8 +483,8 @@ test("QA intent attribution — logo / design (Test 1)", async ({ page }) => {
   const continueVisible = await continueRecipients.isVisible().catch(() => false);
   const continueEnabled = continueVisible && (await continueRecipients.isEnabled().catch(() => false));
   const greenBannerVisible = await page
-    .getByRole("status", { name: "LawDog Pro unlocked" })
-    .or(page.getByLabel("LawDog Pro unlocked", { exact: true }))
+    .getByRole("status", { name: "LawDog Pro ready" })
+    .or(page.getByLabel("LawDog Pro ready", { exact: true }))
     .isVisible()
     .catch(() => false);
   await page.goto("/app/ops/paid-funnel", { waitUntil: "domcontentloaded" });
@@ -641,7 +641,7 @@ test("QA intent attribution — two founders 60/40 (Test 2, founder harness)", a
     bySession.map((r) => ({ name: r.name, render_source: r.render_source ?? "—" })),
   );
   // eslint-disable-next-line no-console
-  console.log("green success banner (LawDog Pro unlocked):", greenFromPage);
+  console.log("post-checkout support banner (LawDog Pro ready):", greenFromPage);
   // eslint-disable-next-line no-console
   console.log("pass_preflight:", {
     rowCount: bySession.length,

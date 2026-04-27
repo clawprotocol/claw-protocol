@@ -758,6 +758,16 @@ export function AppDashboard() {
             >
               Internal — paid funnel (Pro)
             </button>
+            <span className="text-slate-700" aria-hidden>
+              |
+            </span>
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:text-slate-400"
+              onClick={() => withClearEntry(() => navigate("/app/ops/starter-pro-refine"))}
+            >
+              Internal — Starter Pro Refine
+            </button>
           </span>
         </p>
       ) : null}

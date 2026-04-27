@@ -83,7 +83,21 @@ import {
   REFINE_PERSISTED_UPDATE_FAIL_INLINE,
   REFINE_THIS_DRAFT_PLACEHOLDER,
   REFINE_THIS_DRAFT_SUBCOPY,
+  STARTER_PRO_REFINE_IMPROVEMENT_BODY,
+  STARTER_PRO_REFINE_IMPROVEMENT_BULLETS,
+  STARTER_PRO_REFINE_IMPROVEMENT_CTA,
+  STARTER_PRO_REFINE_IMPROVEMENT_HEADING,
+  STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY,
 } from "./reviewRefineUserCopy";
+import {
+  getStarterProRefineCtaExperiment,
+  starterProRefineImpressionFunnelEvent,
+} from "./starterProRefineCtaExperiment";
+import {
+  isBelowDocumentRefineSectionParentEligible,
+  shouldShowPersistedRefineTextareaBox,
+  shouldShowStarterProRefineUpsellCard,
+} from "./agreementRefineBelowDocumentPolicy";
 import {
   detectFullDraftUpgradeSignals,
   getFullDraftUpgradeComparisonRows,
@@ -796,9 +810,10 @@ function scrollLikelyReviewSectionIntoView(): void {
     partySection.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
   }
-  const refineCard = document.getElementById("claw-refine-this-draft");
-  if (refineCard) {
-    refineCard.scrollIntoView({ behavior: "smooth", block: "start" });
+  const refineOrUpsell =
+    document.getElementById("claw-refine-this-draft") ?? document.getElementById("claw-refine-starter-pro-upsell");
+  if (refineOrUpsell) {
+    refineOrUpsell.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
   const editor = document.getElementById("claw-agreement-preview-editor");
@@ -1209,6 +1224,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const debounceFlushTimerRef = useRef<number>(0);
   const intakeStepBufferRef = useRef(intakeStepBuffer);
   intakeStepBufferRef.current = intakeStepBuffer;
+  /** Kept in sync below `premiumPaidDocumentSurface` for early hooks (e.g. /refine guard). */
+  const premiumPaidDocumentSurfaceRef = useRef(false);
+  /** Unpaid / starter document review: blocks persisted refine, buffer CTA, and false positives on `premiumPaidDocumentSurface`. */
+  const isFreeStarterReviewSurfaceRef = useRef(false);
   const debouncedStepBufferRef = useRef(debouncedStepBuffer);
   debouncedStepBufferRef.current = debouncedStepBuffer;
   const [baselineActionAck, setBaselineActionAck] = useState<string | null>(null);
@@ -1433,6 +1452,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ),
     [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive],
   );
+
+  /** For below-document refine UI: Pro tier / premium flow / post-checkout grant only — not draft text markers. */
+  const entitledToBelowDocumentPersistedRefine = useMemo(
+    () =>
+      Boolean(
+        tierAllowsAdvancedFullDraftReveal(tier) ||
+          premiumSendPathUnlocked ||
+          premiumPersistedFlowActive ||
+          peekAdvancedFullDraftCheckoutGrant(),
+      ),
+    [tier, premiumSendPathUnlocked, premiumPersistedFlowActive],
+  );
+
+  const productionStickyLabelModeRef = useRef<"refine" | "free_draft" | "pro_upgrade" | "generic" | null>(null);
+  const assignLocalDraftParseStickyMode = useCallback(() => {
+    const onProPath =
+      tierAllowsAdvancedFullDraftReveal(tier) ||
+      premiumSendPathUnlocked ||
+      premiumPersistedFlowActive ||
+      peekAdvancedFullDraftCheckoutGrant();
+    const proUpgrade = upgradeIntentDetectedRef.current || Boolean(readCreateComplexityResume()?.awaitingProCheckout);
+    if (!onProPath) {
+      productionStickyLabelModeRef.current = "free_draft";
+    } else if (proUpgrade) {
+      productionStickyLabelModeRef.current = "pro_upgrade";
+    } else {
+      productionStickyLabelModeRef.current = "generic";
+    }
+  }, [tier, premiumSendPathUnlocked, premiumPersistedFlowActive]);
 
   const buildPreviewForCurrentTier = React.useCallback(
     (d: ParsedDraftShape) => {
@@ -3027,6 +3075,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       };
       setAdvancedFullDraftPaywallOpen(false);
       setHardError(null);
+      productionStickyLabelModeRef.current = "pro_upgrade";
       setCreateFlowPhase("generating_draft");
       setDisplayPhase("generating_draft");
       setCreateUiStage(CreateUiStage.DRAFT);
@@ -3082,6 +3131,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setDisplayPhase("intake");
         setCreateFlowPhase("draft_ready_for_review");
       } finally {
+        productionStickyLabelModeRef.current = null;
         setLoading(false);
         optionalFullUpgradeInFlightRef.current = false;
       }
@@ -4009,6 +4059,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createFlowPhase_before: createFlowPhase,
       displayPhase_before: displayPhase,
     });
+    assignLocalDraftParseStickyMode();
     setHardError(null);
     setCreateFlowPhase("generating_draft");
     setDisplayPhase("generating_draft");
@@ -4089,10 +4140,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(CreateUiStage.DRAFT);
       return false;
     } finally {
+      productionStickyLabelModeRef.current = null;
       setLoading(false);
     }
   }, [
     intakeCombined,
+    assignLocalDraftParseStickyMode,
     finalizeIntakeCapture,
     simpleProductFlow,
     intakePartyRoleLabels,
@@ -4107,6 +4160,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(async (): Promise<boolean> => {
+    if (isFreeStarterReviewSurfaceRef.current) return false;
+    if (!premiumPaidDocumentSurfaceRef.current) return false;
     const instruction = (intakeStepBufferRef.current || "").trim();
     if (!instruction) return false;
     const prior = draft;
@@ -4116,6 +4171,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setReviewRefineUserMessage(null);
     setHardError(null);
+    productionStickyLabelModeRef.current = "refine";
     setCreateFlowPhase("generating_draft");
     setDisplayPhase("generating_draft");
     setLoading(true);
@@ -4191,6 +4247,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
       return false;
     } finally {
+      productionStickyLabelModeRef.current = null;
       setLoading(false);
     }
   }, [
@@ -4260,7 +4317,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
-  const beginAdvancedFullDraftCheckout = React.useCallback((draftOverride?: ParsedDraftShape | null) => {
+  const beginAdvancedFullDraftCheckout = React.useCallback(
+    (
+    draftOverride?: ParsedDraftShape | null,
+    opts?: { starterProRefineCtaExperiment?: "control" | "variant" },
+  ) => {
     console.info("[premium-flow] button_click", { button: "unlock_premium_rewrite_checkout" });
     const gateDraft = draftOverride ?? draft;
     const resumeSnap = readCreateComplexityResume();
@@ -4288,6 +4349,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     stashUpgradeCheckoutContext(upgradeContextReasons, {
       completionLabel: buildUpgradeCheckoutCompletionLabel(pending),
       intentSignals: detectUpgradeIntentSignals(`${raw}\n${agreementDocumentText}`),
+      starterProRefineCtaExperiment: opts?.starterProRefineCtaExperiment,
     });
     persistPremiumRecipientHandoffFromDraftAndUi(pending);
     setAdvancedFullDraftPaywallOpen(false);
@@ -4299,7 +4361,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         cadence,
       )}&returnTo=${returnTo}`,
     );
-  }, [navigate, draft, upgradeContextReasons, agreementDocumentText, resolveRawIntakeForPremiumCheckout, persistPremiumRecipientHandoffFromDraftAndUi, emitPaidFunnelEvent]);
+  },
+  [navigate, draft, upgradeContextReasons, agreementDocumentText, resolveRawIntakeForPremiumCheckout, persistPremiumRecipientHandoffFromDraftAndUi, emitPaidFunnelEvent],
+);
 
   const beginAdvancedFullDraftBilling = React.useCallback(() => {
     const resumeSnap = readCreateComplexityResume();
@@ -4804,6 +4868,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createFlowPhase_before: createFlowPhase,
         displayPhase_before: displayPhase,
       });
+      assignLocalDraftParseStickyMode();
       setCreateFlowPhase("generating_draft");
     }
     setDisplayPhase("generating_draft");
@@ -4848,6 +4913,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (import.meta.env.DEV) console.error("[AgreementIntake:send-cta] onGenerate parse/persist path", e);
       setDisplayPhase("intake");
     } finally {
+      if (createProductionTwoPane) {
+        productionStickyLabelModeRef.current = null;
+      }
       setLoading(false);
     }
   };
@@ -5672,6 +5740,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       showUpgradeToFullDraftOnReview,
     ],
   );
+  premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
+
+  /**
+   * Free/starter (non–LawDog-Pro-deliverable) document review. Broader than `!premiumPaidDocumentSurface`
+   * to catch prod misfires: e.g. `hasFullDraftAccess` true from `draftHasFullDraftExpansion` while
+   * `showUpgradeToFullDraftOnReview` is false, which incorrectly raised `premiumPaidDocumentSurface` and
+   * showed the persisted /refine block.
+   */
+  const isFreeStarterReviewSurface = useMemo(() => {
+    if (createUiStage !== CreateUiStage.DRAFT || !draft) return false;
+    if (showUpgradeToFullDraftOnReview) return true;
+    if (!hasFullDraftAccess) return true;
+    if (!premiumPaidDocumentSurface) return true;
+    if (
+      createFlowPhase === "draft_ready_for_review" &&
+      !tierAllowsAdvancedFullDraftReveal(tier) &&
+      !premiumSendPathUnlocked &&
+      !premiumPersistedFlowActive
+    ) {
+      return true;
+    }
+    return false;
+  }, [
+    createUiStage,
+    draft,
+    showUpgradeToFullDraftOnReview,
+    hasFullDraftAccess,
+    premiumPaidDocumentSurface,
+    createFlowPhase,
+    tier,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
+  ]);
+  isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
   useLayoutEffect(() => {
     const surface = premiumPaidDocumentSurface;
@@ -5726,6 +5828,119 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       productionDraftPrimaryReviewSurface,
     ],
   );
+
+  const belowDocumentRefineSectionParentEligible = useMemo(
+    () =>
+      isBelowDocumentRefineSectionParentEligible({
+        createProductionTwoPane,
+        createUiStage,
+        hasDraft: Boolean(draft),
+        productionDraftPrimaryReviewSurface,
+        showFinalizeYourAgreement,
+      }),
+    [
+      createProductionTwoPane,
+      createUiStage,
+      draft,
+      productionDraftPrimaryReviewSurface,
+      showFinalizeYourAgreement,
+    ],
+  );
+
+  const showPersistedRefineBelowDocument = useMemo(
+    () =>
+      isFreeStarterReviewSurface
+        ? false
+        : shouldShowPersistedRefineTextareaBox(
+            belowDocumentRefineSectionParentEligible,
+            entitledToBelowDocumentPersistedRefine,
+            premiumPaidDocumentSurface,
+          ),
+    [
+      isFreeStarterReviewSurface,
+      belowDocumentRefineSectionParentEligible,
+      entitledToBelowDocumentPersistedRefine,
+      premiumPaidDocumentSurface,
+    ],
+  );
+
+  const showStarterProRefineUpsell = useMemo(() => {
+    if (suppressIntakePremiumUpsell) return false;
+    if (isFreeStarterReviewSurface) return belowDocumentRefineSectionParentEligible;
+    return shouldShowStarterProRefineUpsellCard(
+      belowDocumentRefineSectionParentEligible,
+      premiumPaidDocumentSurface,
+      suppressIntakePremiumUpsell,
+    );
+  }, [
+    isFreeStarterReviewSurface,
+    suppressIntakePremiumUpsell,
+    belowDocumentRefineSectionParentEligible,
+    premiumPaidDocumentSurface,
+  ]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (!belowDocumentRefineSectionParentEligible || !draft) return;
+    console.debug("[claw-below-doc-refine]", {
+      component: "AgreementBuilderIntake",
+      isFreeStarterReviewSurface,
+      showPersistedRefineBelowDocument,
+      showStarterProRefineUpsell,
+      premiumPaidDocumentSurface,
+      hasFullDraftAccess,
+      showUpgradeToFullDraftOnReview,
+      entitledToBelowDocumentPersistedRefine,
+      parentBelowDocEligible: belowDocumentRefineSectionParentEligible,
+      createFlowPhase,
+      createUiStage,
+      planTier: String(tier),
+    });
+  }, [
+    belowDocumentRefineSectionParentEligible,
+    isFreeStarterReviewSurface,
+    showPersistedRefineBelowDocument,
+    showStarterProRefineUpsell,
+    premiumPaidDocumentSurface,
+    hasFullDraftAccess,
+    showUpgradeToFullDraftOnReview,
+    entitledToBelowDocumentPersistedRefine,
+    createFlowPhase,
+    createUiStage,
+    draft,
+    tier,
+  ]);
+
+  const starterProRefineCtaExperiment = useMemo(() => getStarterProRefineCtaExperiment(), []);
+  const starterProRefineUpsellCardRef = useRef<HTMLDivElement | null>(null);
+  const starterProRefineUpsellImpressionFiredRef = useRef(false);
+  useEffect(() => {
+    if (!showStarterProRefineUpsell) return;
+    const el = starterProRefineUpsellCardRef.current;
+    if (!el) return;
+    if (starterProRefineUpsellImpressionFiredRef.current) return;
+    if (typeof IntersectionObserver === "undefined") {
+      starterProRefineUpsellImpressionFiredRef.current = true;
+      trackAgreementFunnelEvent(starterProRefineImpressionFunnelEvent(starterProRefineCtaExperiment), {}, { planTier: String(tier) });
+      return;
+    }
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || entry.target !== el) continue;
+          if (starterProRefineUpsellImpressionFiredRef.current) return;
+          starterProRefineUpsellImpressionFiredRef.current = true;
+          obs.disconnect();
+          trackAgreementFunnelEvent(starterProRefineImpressionFunnelEvent(starterProRefineCtaExperiment), {}, {
+            planTier: String(tier),
+          });
+        }
+      },
+      { root: null, rootMargin: "0px", threshold: 0 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [showStarterProRefineUpsell, starterProRefineCtaExperiment, tier]);
 
   /** Starter/basic review editor helper — independent of upgrade lock so copy stays visible while editing. */
   const starterReviewEditableHelperSurface = useMemo(() => {
@@ -5801,7 +6016,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
-  /** “Refine this draft” (persisted /refine) is the only below-doc step buffer for production DRAFT. */
+  /**
+   * Large below-doc step buffer: persisted /refine (Pro or unlocked) only; free Starter shows
+   * a small Pro upsell card instead (see `showPersistedRefineBelowDocument` / `showStarterProRefineUpsell`).
+   */
   const productionDraftRefineReplacesLegacyEditWording = useMemo(
     () =>
       Boolean(
@@ -6080,6 +6298,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Hide fixed bottom bar during upgrade diff review so the in-card upgrade CTA is the only bottom action. */
   const simpleCreateStickyBottomBarVisible =
     simpleCreateUnifiedBottomCta && !showFullDraftDiffPreview;
+  const resolveProductionTwoPaneLoadingUserCopy = (): string => {
+    const m = productionStickyLabelModeRef.current;
+    if (m === "refine") return "Updating your agreement...";
+    if (m === "pro_upgrade") return "Preparing your LawDog Pro agreement...";
+    if (m === "free_draft") return "Creating your draft...";
+    if (m === "generic") return "Working...";
+    return "Working...";
+  };
   /** Production draft parse / hydrate: sticky showed NOTTHING_SENT + busy CTA — one line only. */
   const stickyProductionAgreementCreationLoading = Boolean(
     simpleCreateStickyBottomBarVisible &&
@@ -6088,7 +6314,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         displayPhase === "hydrating_generated" ||
         displayPhase === "preparing_review"),
   );
-  const stickyProductionAgreementCreatingLabel = "Creating your agreement… Please wait";
   const draftPartyRecipientEmailPresent = Boolean(
     (draft?.parties as { email?: string }[] | undefined)?.some((p) =>
       looksLikeEmail(String(p?.email ?? "")),
@@ -7208,8 +7433,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     (displayPhase === "generating_draft" ||
       displayPhase === "hydrating_generated" ||
       displayPhase === "preparing_review")
-      ? "Creating your agreement…"
-      : productFlowBusyShort ?? "Creating your agreement…";
+      ? resolveProductionTwoPaneLoadingUserCopy()
+      : productFlowBusyShort ?? "Working...";
   const busyPreparing = "Preparing your agreement…";
   const primaryBusyLabel = isGenerating
     ? createProductionTwoPane
@@ -7217,7 +7442,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       : displayPhase === "generating_draft"
         ? busyStructuring
         : busyPreparing
-    : productFlowBusyShort ?? "Working…";
+    : productFlowBusyShort ?? "Working...";
   const paneBusyMessage = busyStructuring;
   const hydrateBusyMessage = busyPreparing;
 
@@ -7530,7 +7755,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       : createProductionTwoPane &&
           createUiStage === CreateUiStage.DRAFT &&
           !stageAInputFirst &&
-          (intakeStepBuffer || "").trim()
+          (intakeStepBuffer || "").trim() &&
+          premiumPaidDocumentSurface &&
+          !isFreeStarterReviewSurface
         ? "Update agreement"
         : guidedMainCtaLabel;
 
@@ -7616,7 +7843,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         {
           const hasRefinementBuffer = (intakeStepBuffer || "").trim().length > 0;
-          if (hasRefinementBuffer && draft) {
+          if (hasRefinementBuffer && draft && premiumPaidDocumentSurface && !isFreeStarterReviewSurface) {
             return {
               label: "Update agreement",
               action: "update_agreement_from_buffer",
@@ -7834,6 +8061,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayLivePreviewModel,
     premiumProTruthGate,
     shouldShowPaidRetry,
+    premiumPaidDocumentSurface,
+    isFreeStarterReviewSurface,
   ]);
 
   useEffect(() => {
@@ -8207,7 +8436,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
     }
-    if (intakeStepBufferRef.current.trim()) {
+    if (intakeStepBufferRef.current.trim() && premiumPaidDocumentSurface && !isFreeStarterReviewSurfaceRef.current) {
       const applied = await runPersistedRefineFromStepBuffer();
       if (!applied) {
         console.error("[BLOCKED ACTION] handOff:intake_buffer_refine_not_applied");
@@ -8812,7 +9041,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             await runProductionLocalDraftParse({ handoffSource: "draft_reparse_missing" });
             return;
           }
-          if (intakeStepBufferRef.current.trim()) {
+          if (intakeStepBufferRef.current.trim() && premiumPaidDocumentSurface && !isFreeStarterReviewSurfaceRef.current) {
             const applied = await runPersistedRefineFromStepBuffer();
             if (!applied) return;
             return;
@@ -9715,7 +9944,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             <p>One moment…</p>
                           ) : createProductionTwoPane && isGenerating ? (
                             <>
-                              <p className="font-medium text-slate-200/95">Creating your agreement…</p>
+                              <p className="font-medium text-slate-200/95">
+                                {resolveProductionTwoPaneLoadingUserCopy()}
+                              </p>
                               <ul className="mt-1.5 space-y-0.5 text-[10px] text-slate-400 sm:text-xs">
                                 <li>✓ Structured draft being prepared</li>
                                 <li>✓ Nothing is being sent</li>
@@ -9950,7 +10181,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         : createProductionTwoPane &&
                             createUiStage === CreateUiStage.INPUT &&
                             createFlowPhase === "generating_draft"
-                          ? "Creating your agreement…"
+                          ? resolveProductionTwoPaneLoadingUserCopy()
                           : createProductionTwoPane &&
                               createUiStage === CreateUiStage.RECIPIENTS &&
                               premiumSignersSurfaceReady
@@ -9986,7 +10217,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-400/90 sm:text-[11px]">
                             Review
                           </p>
-                          <p className="mt-2 text-sm font-medium text-slate-200 sm:text-base">Creating your agreement…</p>
+                          <p className="mt-2 text-sm font-medium text-slate-200 sm:text-base">
+                            {resolveProductionTwoPaneLoadingUserCopy()}
+                          </p>
                           <ul className="mt-2 space-y-1 text-xs leading-relaxed text-slate-400 sm:text-sm">
                             <li>✓ Structured draft being prepared</li>
                             <li>✓ Nothing is being sent</li>
@@ -10594,11 +10827,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               />
                             ) : null}
                           </div>
-                            {createProductionTwoPane &&
-                            createUiStage === CreateUiStage.DRAFT &&
-                            draft &&
-                            productionDraftPrimaryReviewSurface &&
-                            !showFinalizeYourAgreement ? (
+                            {showPersistedRefineBelowDocument && !isFreeStarterReviewSurface ? (
                               <div
                                 id="claw-refine-this-draft"
                                 className="mt-4 w-full max-w-[min(100%,58rem)] scroll-mt-4 rounded-2xl border border-emerald-500/30 bg-slate-950/90 p-4 pb-28 shadow-md shadow-emerald-950/10 ring-1 ring-emerald-500/10 sm:mt-5 sm:p-5 sm:pb-32"
@@ -10643,6 +10872,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 <p className="mt-2 text-xs leading-relaxed text-slate-500 sm:text-sm">
                                   Tool-assisted drafting only — this updates the draft in view; it is not a new
                                   agreement and nothing is sent from here. Not legal advice.
+                                </p>
+                              </div>
+                            ) : null}
+                            {showStarterProRefineUpsell ? (
+                              <div
+                                id="claw-refine-starter-pro-upsell"
+                                ref={starterProRefineUpsellCardRef}
+                                className="mt-4 w-full max-w-[min(100%,58rem)] scroll-mt-4 rounded-2xl border border-amber-500/35 bg-slate-950/90 p-4 pb-20 shadow-md shadow-amber-950/10 ring-1 ring-amber-500/15 sm:mt-5 sm:p-5 sm:pb-24"
+                                role="region"
+                                aria-label="Upgrade to improve draft with LawDog Pro"
+                              >
+                                <h3 className="text-base font-semibold tracking-tight text-slate-50 sm:text-lg">
+                                  {STARTER_PRO_REFINE_IMPROVEMENT_HEADING}
+                                </h3>
+                                <p className="mt-2 text-sm leading-relaxed text-slate-400 sm:text-base">
+                                  {STARTER_PRO_REFINE_IMPROVEMENT_BODY}
+                                </p>
+                                <ul className="mt-3 list-outside list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-400 sm:text-base">
+                                  {STARTER_PRO_REFINE_IMPROVEMENT_BULLETS.map((line) => (
+                                    <li key={line}>{line}</li>
+                                  ))}
+                                </ul>
+                                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                                  <button
+                                    type="button"
+                                    className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-950/40 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-sm transition hover:border-amber-400/60 hover:bg-amber-900/50 sm:w-auto"
+                                    onClick={() => {
+                                      if (starterProRefineCtaExperiment === "variant") {
+                                        trackAgreementFunnelEvent("starter_pro_refine_upsell_variant_click", {}, { planTier: String(tier) });
+                                      } else {
+                                        trackAgreementFunnelEvent("starter_pro_refine_upsell_control_click", {}, { planTier: String(tier) });
+                                      }
+                                      void beginAdvancedFullDraftCheckout(null, {
+                                        starterProRefineCtaExperiment: starterProRefineCtaExperiment,
+                                      });
+                                    }}
+                                  >
+                                    {STARTER_PRO_REFINE_IMPROVEMENT_CTA}
+                                  </button>
+                                </div>
+                                <p className="mt-3 text-center text-[11px] leading-snug text-slate-500 sm:mt-2 sm:text-right sm:text-xs">
+                                  {STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY}
                                 </p>
                               </div>
                             ) : null}
@@ -11005,7 +11276,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 aria-live="polite"
               >
                 <p className="text-sm font-medium text-emerald-100/95 sm:text-[0.9375rem]">
-                  Creating your agreement…
+                  Creating your draft...
                 </p>
                 <ul className="mt-2 space-y-0.5 text-xs leading-relaxed text-slate-300 sm:text-[0.8125rem] lg:text-[0.9375rem]">
                   <li>✓ Structured draft being prepared</li>
@@ -11062,7 +11333,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 role="region"
                 aria-label={
                   stickyProductionAgreementCreationLoading
-                    ? stickyProductionAgreementCreatingLabel
+                    ? resolveProductionTwoPaneLoadingUserCopy()
                     : unifiedPrimaryCta.label || "Agreement intake"
                 }
               >
@@ -11297,7 +11568,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       disabled={stickyPrimaryButtonNativeDisabled}
                     >
                       {stickyProductionAgreementCreationLoading ? (
-                        stickyProductionAgreementCreatingLabel
+                        resolveProductionTwoPaneLoadingUserCopy()
                       ) : (
                         <span className="inline-flex items-center justify-center gap-2">
                           {showProductionPremiumInlineSendLoading ? (

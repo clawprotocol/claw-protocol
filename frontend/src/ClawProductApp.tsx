@@ -23,6 +23,7 @@ import { AffiliatePayoutOpsPage } from "./launch/affiliate/AffiliatePayoutOpsPag
 import { AdminConsolePage } from "./launch/AdminConsolePage";
 import { canAccessOperatorGrowthDashboard, OperatorGrowthDashboard } from "./launch/ops/OperatorGrowthDashboard";
 import { OperatorPaidFunnelDashboard } from "./launch/ops/OperatorPaidFunnelDashboard";
+import { OperatorStarterProRefineDashboard } from "./launch/ops/OperatorStarterProRefineDashboard";
 import { UsageReceiptPage } from "./launch/UsageReceiptPage";
 import { IntegrationsPage } from "./launch/IntegrationsPage";
 import { AgreementPublicVerify } from "./agreement/AgreementPublicVerifyView";
@@ -476,7 +477,12 @@ export function ClawProductApp() {
     );
   }
 
-  if ((appMatch?.kind === "opsGrowth" || appMatch?.kind === "opsPaidFunnel") && !canAccessOperatorGrowthDashboard()) {
+  if (
+    (appMatch?.kind === "opsGrowth" ||
+      appMatch?.kind === "opsPaidFunnel" ||
+      appMatch?.kind === "opsStarterProRefine") &&
+    !canAccessOperatorGrowthDashboard()
+  ) {
     return (
       <AppShell
         title="Unavailable"
@@ -535,6 +541,15 @@ export function ClawProductApp() {
         return (
           <AppShell title="Operator — Paid funnel (Pro)" subtitle="Local rows for the LawDog Pro conversion path.">
             <OperatorPaidFunnelDashboard />
+          </AppShell>
+        );
+      case "opsStarterProRefine":
+        return (
+          <AppShell
+            title="Operator — Starter Pro Refine"
+            subtitle="Local experiment stats (this browser; same storage as growth ops)."
+          >
+            <OperatorStarterProRefineDashboard />
           </AppShell>
         );
       case "adminConsole":

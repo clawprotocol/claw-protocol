@@ -16,6 +16,7 @@ describe("matchAppPath", () => {
     expect(matchAppPath("/app/esign/doc-1")).toEqual({ kind: "esign", sub: { id: "doc-1" } });
     expect(matchAppPath("/app/receipts/u1")).toEqual({ kind: "receipt", id: "u1" });
     expect(matchAppPath("/app/ops/growth")).toEqual({ kind: "opsGrowth" });
+    expect(matchAppPath("/app/ops/starter-pro-refine")).toEqual({ kind: "opsStarterProRefine" });
     expect(matchAppPath("/app/admin")).toEqual({ kind: "adminConsole" });
     expect(matchAppPath("/app/create")).toEqual({ kind: "simpleCreate" });
     expect(matchAppPath("/app/quick")).toEqual({ kind: "quickSend" });

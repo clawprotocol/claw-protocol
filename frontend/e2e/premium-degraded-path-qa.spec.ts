@@ -116,9 +116,9 @@ test("paid premium degraded: Pro card, blue panel, no amber dead-end, refresh, r
     timeout: TIMEOUT_MS - 180_000,
   });
 
-  // (1) Pro document card (on review, before “Continue to recipient setup”)
-  await expect(page.getByText("Agreement package (LawDog Pro)")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("LawDog Pro", { exact: true }).first()).toBeVisible();
+  // (1) Pro preview label + version chip (on review, before “Continue to recipient setup”)
+  await expect(page.getByText("Document", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("LawDog Pro Draft", { exact: true })).toBeVisible();
 
   // (2) Blue degraded panel
   await expect(page.getByText("Your upgrade is on file.")).toBeVisible({ timeout: 30_000 });

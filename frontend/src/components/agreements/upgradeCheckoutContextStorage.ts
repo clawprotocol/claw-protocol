@@ -13,11 +13,17 @@ export type UpgradeCheckoutContextV1 = {
   completionLabel?: string;
   /** Same intent signals as upgrade teaser (for loss-aversion line on checkout). */
   intentSignals?: string[];
+  /**
+   * When the user left create flow from the Starter Pro Refine upsell, records which CTA
+   * experiment arm they saw — used after successful create-flow checkout (cleared with context).
+   */
+  starterProRefineCtaExperiment?: "control" | "variant";
 };
 
 export type StashUpgradeCheckoutMeta = {
   completionLabel?: string;
   intentSignals?: readonly string[];
+  starterProRefineCtaExperiment?: "control" | "variant";
 };
 
 export function stashUpgradeCheckoutContext(
@@ -33,6 +39,7 @@ export function stashUpgradeCheckoutContext(
       intentSignals: meta?.intentSignals?.length
         ? Array.from(meta.intentSignals).map(String).slice(0, 8)
         : undefined,
+      starterProRefineCtaExperiment: meta?.starterProRefineCtaExperiment,
     };
     sessionStorage.setItem(KEY, JSON.stringify(body));
   } catch {

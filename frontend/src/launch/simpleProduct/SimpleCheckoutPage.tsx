@@ -33,6 +33,7 @@ import {
   readUpgradeCheckoutContext,
   type UpgradeCheckoutContextV1,
 } from "../../components/agreements/upgradeCheckoutContextStorage";
+import { trackStarterProRefineCheckoutSuccessFromContext } from "../../components/agreements/starterProRefineCheckoutSuccess";
 import { checkoutLossAversionFromIntentSignals } from "../../components/agreements/upgradeContextReasons";
 import { CreateFlowAgreementCheckoutPricing } from "./CreateFlowAgreementCheckoutPricing";
 import { isDevCreateFlowPaymentBypassEnabled } from "../devPaymentBypass";
@@ -271,6 +272,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         { planTier: String(tier.id), agreementId },
       );
       if (agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) {
+        const upgradeCtx = readUpgradeCheckoutContext();
+        trackStarterProRefineCheckoutSuccessFromContext(upgradeCtx, String(tier.id));
         markAdvancedFullDraftCheckoutGranted();
         clearUpgradeCheckoutContext();
       }
@@ -282,7 +285,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       inFlightRef.current = false;
       setProcessing(false);
     },
-    [navigate, returnTo, agreementId, isSingleAgreementCheckout, amountUsd],
+    [navigate, returnTo, agreementId, isSingleAgreementCheckout, amountUsd, tier],
   );
 
   async function onCardPay(e: FormEvent): Promise<void> {
