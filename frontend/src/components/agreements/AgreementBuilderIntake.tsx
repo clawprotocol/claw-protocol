@@ -65,6 +65,19 @@ import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
 import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
 import {
+  PRO_UPGRADE_WAIT_MODAL_BODY,
+  PRO_UPGRADE_WAIT_MODAL_TITLE,
+  PRO_UPGRADE_WAIT_REASSURANCE,
+  PRO_UPGRADE_WAIT_ROTATING_LINES,
+} from "./proUpgradeWaitCopy";
+import { ProUpgradeWaitRotatingText } from "./ProUpgradeWaitRotatingText";
+import {
+  REFINE_PERSISTED_UPDATE_FAIL_INLINE,
+  REFINE_THIS_DRAFT_HEADING,
+  REFINE_THIS_DRAFT_PLACEHOLDER,
+  REFINE_THIS_DRAFT_SUBCOPY,
+} from "./reviewRefineUserCopy";
+import {
   detectFullDraftUpgradeSignals,
   getFullDraftUpgradeComparisonRows,
 } from "./fullDraftUpgradeSignals";
@@ -754,6 +767,11 @@ function scrollLikelyReviewSectionIntoView(): void {
     partySection.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
   }
+  const refineCard = document.getElementById("claw-refine-this-draft");
+  if (refineCard) {
+    refineCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
   const editor = document.getElementById("claw-agreement-preview-editor");
   if (editor) {
     editor.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1091,7 +1109,7 @@ function CreateFlowSendRecipientsPanel({
   );
 }
 
-const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = "Preparing your LawDog Pro agreement…";
+const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = PRO_UPGRADE_WAIT_MODAL_TITLE;
 
 /** First paint: enter Pro return processing before effects so the free intake shell does not flash. */
 function readInitialPremiumReturnFromWindow(): {
@@ -1156,6 +1174,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [baselineActionAck, setBaselineActionAck] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hardError, setHardError] = useState<string | null>(null);
+  /** Calm inline copy when POST /refine fails; do not clear the step buffer. */
+  const [reviewRefineUserMessage, setReviewRefineUserMessage] = useState<string | null>(null);
   const [missing, setMissing] = useState<MissingKey[]>([]);
   const [missingAnswer, setMissingAnswer] = useState("");
   const [draft, setDraft] = useState<ParsedDraftShape | null>(null);
@@ -4052,9 +4072,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!instruction) return false;
     const prior = draft;
     if (!prior) {
-      setHardError("Your draft is not ready to update yet.");
+      setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
       return false;
     }
+    setReviewRefineUserMessage(null);
     setHardError(null);
     setCreateFlowPhase("generating_draft");
     setDisplayPhase("generating_draft");
@@ -4063,7 +4084,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     try {
       const id = await ensureReviewAgreementWorkspaceId();
       if (!id) {
-        setHardError("We could not open a workspace to update the agreement. Try again in a moment.");
+        setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
         return false;
       }
       if (import.meta.env.DEV) {
@@ -4085,7 +4106,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (d && typeof d === "object" && d.paywall) {
           triggerPaywall({ code: d.code, surface: "agreement_refine" });
         }
-        setHardError("We could not apply that update right now. Try a shorter note, or check your connection.");
+        setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
         return false;
       }
       const rawDraft = payload.draft;
@@ -4128,7 +4149,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return true;
     } catch (e) {
       if (import.meta.env.DEV) console.error("[agreement-refine] failed", e);
-      setHardError("We could not apply that update. Try again in a moment.");
+      setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
       return false;
     } finally {
       setLoading(false);
@@ -5738,6 +5759,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  /** “Refine this draft” (persisted /refine) is the only below-doc step buffer for production DRAFT. */
+  const productionDraftRefineReplacesLegacyEditWording = useMemo(
+    () =>
+      Boolean(
+        createProductionTwoPane &&
+          productionDraftPrimaryReviewSurface &&
+          createUiStage === CreateUiStage.DRAFT,
+      ),
+    [createProductionTwoPane, productionDraftPrimaryReviewSurface, createUiStage],
+  );
+
   const fullDraftComparisonRows = useMemo(
     () =>
       showFullDraftDiffPreview
@@ -6575,6 +6607,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleIntakeStepBufferChange = React.useCallback(
     (v: string) => {
       setIntakeStepBuffer(v);
+      setReviewRefineUserMessage(null);
       markIntakeEdit();
       if (!typingLoggedRef.current && v.trim().length > 0 && simpleProductFlow && liveWorkspaceTwoPane) {
         typingLoggedRef.current = true;
@@ -8072,7 +8105,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const applied = await runPersistedRefineFromStepBuffer();
       if (!applied) {
         console.error("[BLOCKED ACTION] handOff:intake_buffer_refine_not_applied");
-        setHardError("Could not apply your latest suggested edits. Try again or shorten the note.");
         return;
       }
     }
@@ -9191,8 +9223,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         {CLAW_PREMIUM_PREPARING_AGREEMENT_COPY}
                       </h2>
                       <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
-                        We&apos;re strengthening terms and formatting — your upgraded agreement will appear in the
-                        preview as soon as this step finishes.
+                        {PRO_UPGRADE_WAIT_MODAL_BODY}
+                      </p>
+                      <ProUpgradeWaitRotatingText
+                        active
+                        lines={PRO_UPGRADE_WAIT_ROTATING_LINES}
+                        intervalMs={2500}
+                        className="mt-4 min-h-[3rem] text-center text-sm leading-relaxed text-slate-300 sm:text-base"
+                      />
+                      <p className="mt-2 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
+                        {PRO_UPGRADE_WAIT_REASSURANCE}
                       </p>
                       {premiumPipelineUserMessage &&
                       premiumPipelineUserMessage !== CLAW_PREMIUM_PREPARING_AGREEMENT_COPY ? (
@@ -9200,8 +9240,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           {premiumPipelineUserMessage}
                         </p>
                       ) : null}
-                      <div className="mt-8 flex justify-center" aria-hidden>
-                        <div className="h-12 w-12 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 motion-safe:animate-spin" />
+                      <div className="mt-6 flex justify-center" aria-hidden>
+                        <div className="h-10 w-10 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 motion-safe:animate-spin sm:h-12 sm:w-12" />
                       </div>
                     </>
                   )}
@@ -10440,6 +10480,67 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               />
                             ) : null}
                           </div>
+                            {createProductionTwoPane &&
+                            createUiStage === CreateUiStage.DRAFT &&
+                            draft &&
+                            productionDraftPrimaryReviewSurface &&
+                            !showFinalizeYourAgreement ? (
+                              <div
+                                id="claw-refine-this-draft"
+                                className="mt-4 w-full max-w-[min(100%,58rem)] scroll-mt-4 rounded-2xl border border-emerald-500/30 bg-slate-950/90 p-4 pb-28 shadow-md shadow-emerald-950/10 ring-1 ring-emerald-500/10 sm:mt-5 sm:p-5 sm:pb-32"
+                                role="region"
+                                aria-label="Refine this agreement draft"
+                              >
+                                <h3 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+                                  {REFINE_THIS_DRAFT_HEADING}
+                                </h3>
+                                <p className="mt-1.5 text-sm leading-relaxed text-slate-400 sm:text-base">
+                                  {REFINE_THIS_DRAFT_SUBCOPY}
+                                </p>
+                                {reviewRefineUserMessage ? (
+                                  <p
+                                    className="mt-2 rounded-lg border border-sky-500/35 bg-slate-900/50 px-3 py-2 text-sm leading-relaxed text-slate-200"
+                                    role="status"
+                                    aria-live="polite"
+                                  >
+                                    {reviewRefineUserMessage}
+                                  </p>
+                                ) : null}
+                                <div className="relative mt-3 sm:mt-4">
+                                  <VoiceAugmentedTextArea
+                                    ref={textareaRef}
+                                    value={intakeStepBuffer}
+                                    onValueChange={handleIntakeStepBufferChange}
+                                    onKeyDown={handleIntakeKeyDown}
+                                    onBlur={handleIntakeBlur}
+                                    onVoiceError={(m) => setVoiceError(humanizeVoiceErrorMessage(m))}
+                                    dictationControlRef={dictationControlRef}
+                                    onDictationPhaseChange={handleDictationPhaseChange}
+                                    disabled={isGenerating || draftPreCommitFreeze}
+                                    readOnly={draftPreCommitFreeze}
+                                    voiceUiEnabled={!draftPreCommitFreeze}
+                                    micIdleAttract={micIdleAttract}
+                                    dictationStartNonce={freshSimpleCreateUx ? dictationStartNonce : 0}
+                                    className="min-h-[7.5rem] w-full rounded-lg border border-emerald-500/30 bg-[#0f1729] px-3 py-3 pb-12 pr-12 text-sm leading-relaxed text-slate-100 placeholder:text-slate-500 sm:min-h-36 sm:px-4 sm:py-3.5 sm:text-base md:min-h-44 md:text-[0.9375rem] lg:min-h-52"
+                                    placeholder={REFINE_THIS_DRAFT_PLACEHOLDER}
+                                    aria-label="Refine this draft: instructions to update the current agreement"
+                                  />
+                                </div>
+                                <p className="mt-2 text-xs leading-relaxed text-slate-500 sm:text-sm">
+                                  Tool-assisted drafting only — this updates the draft in view; it is not a new
+                                  agreement and nothing is sent from here. Not legal advice.
+                                </p>
+                              </div>
+                            ) : null}
+                            {showFinalizeYourAgreement && reviewRefineUserMessage ? (
+                              <p
+                                className="mb-2 rounded-lg border border-sky-500/35 bg-slate-900/50 px-3 py-2 text-sm leading-relaxed text-slate-200 sm:mb-3"
+                                role="status"
+                                aria-live="polite"
+                              >
+                                {reviewRefineUserMessage}
+                              </p>
+                            ) : null}
                             {showFinalizeYourAgreement ? (
                               <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
                                 <FinalizeYourAgreementPanel
@@ -10607,7 +10708,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </details>
                               {starterStrongProtectionsUpsellEl}
                             </>
-                          ) : suppressSimpleFirstPassReviewExtras ? null : (
+                          ) : suppressSimpleFirstPassReviewExtras || productionDraftRefineReplacesLegacyEditWording
+                            ? null
+                            : (
                             <>
                               <div className="mt-4" role="region" aria-label="Agreement description">
                                 {originalWordingIsPremiumOnlyOnStarter ? (
