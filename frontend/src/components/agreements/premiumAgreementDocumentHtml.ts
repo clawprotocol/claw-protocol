@@ -142,6 +142,7 @@ export function buildPremiumAgreementReadonlyHtml(
   plain: string,
   opts: BuildPremiumAgreementReadonlyHtmlOpts,
 ): string {
+  if (!(plain || "").trim()) return "";
   const hints = opts.renderHints ?? null;
   const raw = (plain || "").replace(/\r\n/g, "\n").trimEnd();
   const chunks = raw.split(/\n\n+/);

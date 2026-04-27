@@ -1350,6 +1350,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [fullDraftUpgradeBannerVisible, setFullDraftUpgradeBannerVisible] = useState(false);
   /** Pro output replaced a starter draft after upgrade (in-app or post-checkout); drives subtle line above preview. */
   const [proReplacedStarterAfterUpgrade, setProReplacedStarterAfterUpgrade] = useState(false);
+  /** Pro body rejected/blank: user chose to review starter text instead of a false “Pro” document. */
+  const [proUpgradeUseStarterView, setProUpgradeUseStarterView] = useState(false);
   const [recipientPartyDetailsModalOpen, setRecipientPartyDetailsModalOpen] = useState(false);
   const [modalParty1Name, setModalParty1Name] = useState("");
   const [modalParty2Name, setModalParty2Name] = useState("");
@@ -6639,6 +6641,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, []);
 
   const handleRetryProFullDraft = React.useCallback(() => {
+    setProUpgradeUseStarterView(false);
     const m = runPremiumModelPassRef.current;
     if (!m) {
       setHardError("We couldn’t start a retry from this state. Refresh the page, then try again.");
@@ -6667,6 +6670,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       gapResolverSkippedWithDefaults: !ga,
     });
   }, [draft, resolveRawIntakeForPremiumCheckout]);
+
+  const focusProIntakeRefineForRecovery = React.useCallback(() => {
+    window.requestAnimationFrame(() => {
+      const el = document.getElementById("claw-refine-this-draft");
+      el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      setTimeout(() => textareaRef.current?.focus(), 180);
+    });
+  }, []);
+
+  const handleProUpgradeUseStarterInstead = React.useCallback(() => {
+    setProUpgradeUseStarterView(true);
+    setProFullDraftCustomGateMessage(null);
+    setPremiumServerGenerationDegraded(null);
+    setPremiumReviewDocEditorOpen(false);
+    clearPremiumCompletionSnapshot();
+    const d = draftSnapshotRef.current ?? draft;
+    if (d) {
+      const txt = buildAgreementPreviewText(d, {
+        starterPreview: true,
+        premiumDeliverablePreview: false,
+        intakeText: debouncedStepBuffer,
+      });
+      agreementDocumentDirtyRef.current = true;
+      setAgreementDocumentText(txt);
+      scheduleAgreementDocSync(txt);
+    }
+  }, [draft, debouncedStepBuffer, scheduleAgreementDocSync]);
 
   useEffect(() => {
     if (!premiumPaidDocumentSurface) setPremiumReviewDocEditorOpen(false);
@@ -6769,25 +6799,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     proFullDraftQualityRetry,
   ]);
 
-  /** Authoritative Pro body for `POST /premium-refine` (Finalize + step buffer): prefer live editor, then readonly winner. */
-  const proRefineCurrentDocumentTextForProPanels = useMemo(() => {
-    const fromState = (agreementDocumentText || "").trim();
-    if (fromState.length > 0) return fromState;
-    const fromPick = (premiumPaidReadonlyPick.plainText || "").trim();
-    if (fromPick.length > 0) return fromPick;
-    return (
-      (draft?.premium_full_document_text || draft?.premium_server_full_document_text || draft?.purpose || "").trim() || ""
-    );
-  }, [
-    agreementDocumentText,
-    premiumPaidReadonlyPick.plainText,
-    draft?.premium_full_document_text,
-    draft?.premium_server_full_document_text,
-    draft?.purpose,
-    reviewDocRefreshTick,
-  ]);
-  proRefineCurrentDocumentTextForProPanelsRef.current = proRefineCurrentDocumentTextForProPanels;
-
   const hasUsablePaidBody = useMemo(
     () =>
       Boolean(
@@ -6802,9 +6813,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumProTruthGate = useMemo(() => {
     if (!hasFullDraftAccess || !premiumPersistedFlowActive) return null;
     const t = (premiumPaidReadonlyPick.plainText || "").trim();
-    if (!t) return null;
     const i = (currentPremiumMergedIntakeKey || intakeCombined).trim() || intakeCombined;
     const contract = resolveAgreementIntentContract(i);
+    if (!t) {
+      return canShowPremiumSuccess({
+        intentContract: contract,
+        renderSource: premiumPaidReadonlyPick.sourceUsed,
+        validation: { ok: false, reasons: ["empty_readonly_paid_corpus"] },
+        documentText: "",
+        intakeText: i,
+        premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        stale: false,
+        draft: draft ?? null,
+        qualityRetryActive: shouldShowPaidRetry,
+        serverGenerationDegraded: false,
+        allowPaidSubstantiveStitch: false,
+      });
+    }
     const v = validatePaidProOutput({
       text: t,
       rawIntake: i,
@@ -6839,6 +6864,68 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumTruthPipelineSource,
     reviewDocRefreshTick,
   ]);
+
+  const canProceedWithPaidProDocument = useMemo(() => {
+    if (!premiumPaidDocumentSurface) return true;
+    if (proUpgradeUseStarterView) return false;
+    const t = (premiumPaidReadonlyPick.plainText || "").trim();
+    if (t.length < 500) return false;
+    const g = premiumProTruthGate;
+    if (!g) return false;
+    if (g.state !== "premium_success") return false;
+    if (!g.validation.ok) return false;
+    return true;
+  }, [premiumPaidDocumentSurface, proUpgradeUseStarterView, premiumPaidReadonlyPick.plainText, premiumProTruthGate]);
+
+  /** “Continue to reviewer / signer” after checkout while still on DRAFT (before recipients). */
+  const proCheckoutRecipientStageAdvanceAllowed = useMemo(() => {
+    if (proUpgradeUseStarterView) return true;
+    if (!premiumPaidDocumentSurface) return true;
+    return canProceedWithPaidProDocument && Boolean(premiumProTruthGate?.signerCtaAllowed);
+  }, [
+    proUpgradeUseStarterView,
+    premiumPaidDocumentSurface,
+    canProceedWithPaidProDocument,
+    premiumProTruthGate?.signerCtaAllowed,
+  ]);
+
+  useEffect(() => {
+    if (canProceedWithPaidProDocument) setProUpgradeUseStarterView(false);
+  }, [canProceedWithPaidProDocument]);
+
+  /** Authoritative Pro body for `POST /premium-refine` (Finalize + step buffer): prefer live editor, then readonly winner. */
+  const proRefineCurrentDocumentTextForProPanels = useMemo(() => {
+    if (proUpgradeUseStarterView) {
+      return (agreementDocumentText || "").trim();
+    }
+    if (premiumPersistedFlowActive && hasFullDraftAccess && !canProceedWithPaidProDocument) {
+      return "";
+    }
+    const fromState = (agreementDocumentText || "").trim();
+    if (fromState.length > 0) return fromState;
+    const fromPick = (premiumPaidReadonlyPick.plainText || "").trim();
+    if (fromPick.length > 0) return fromPick;
+    return (
+      (draft?.premium_full_document_text || draft?.premium_server_full_document_text || draft?.purpose || "").trim() || ""
+    );
+  }, [
+    agreementDocumentText,
+    premiumPaidReadonlyPick.plainText,
+    draft?.premium_full_document_text,
+    draft?.premium_server_full_document_text,
+    draft?.purpose,
+    reviewDocRefreshTick,
+    proUpgradeUseStarterView,
+    premiumPersistedFlowActive,
+    hasFullDraftAccess,
+    canProceedWithPaidProDocument,
+  ]);
+  proRefineCurrentDocumentTextForProPanelsRef.current = proRefineCurrentDocumentTextForProPanels;
+
+  const showProLawdogRefineAndFinalize = useMemo(
+    () => showFinalizeYourAgreement && canProceedWithPaidProDocument && !proUpgradeUseStarterView,
+    [showFinalizeYourAgreement, canProceedWithPaidProDocument, proUpgradeUseStarterView],
+  );
 
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
@@ -6964,6 +7051,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const premiumReadonlyAgreementHtml = useMemo(() => {
     if (!premiumPaidDocumentSurface) return "";
+    if (!canProceedWithPaidProDocument) return "";
     if (shouldShowPaidRetry) return "";
     const rd = reviewDraft ?? draft;
     const corpus = premiumPaidReadonlyPick.plainText;
@@ -7031,6 +7119,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, [
     premiumPaidDocumentSurface,
+    canProceedWithPaidProDocument,
     premiumPaidReadonlyPick,
     effectivePremiumSendMode,
     reviewDraft,
@@ -8193,8 +8282,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               : "Continue";
         if (!showUpgradeToFullDraftOnReview && premiumPersistedFlowActive && !peekPremiumRecipientsSurfaceReleased()) {
           const reviewPath = effectivePremiumSendMode === "review";
-          const proTruthBlocksPaidContinue =
-            Boolean(premiumProTruthGate && !premiumProTruthGate.signerCtaAllowed) || shouldShowPaidRetry;
+          const proTruthBlocksPaidContinue = shouldShowPaidRetry || !proCheckoutRecipientStageAdvanceAllowed;
           return {
             label: reviewPath ? "Continue to reviewer setup" : "Continue to signer setup",
             action: "premium_continue_to_signers",
@@ -8329,6 +8417,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     shouldShowPaidRetry,
     premiumPaidDocumentSurface,
     isFreeStarterReviewSurface,
+    proCheckoutRecipientStageAdvanceAllowed,
   ]);
 
   useEffect(() => {
@@ -8431,12 +8520,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumProTruthGate,
     renderSource: blockedPreviewRenderSource,
   });
+  const showProAmberRecoveryPanel = Boolean(
+    premiumPaidDocumentSurface && !proUpgradeUseStarterView && !canProceedWithPaidProDocument,
+  );
   const showRetryAsPrimaryCta = Boolean(
     simpleCreateUnifiedBottomCta &&
       createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
       premiumPaidDocumentSurface &&
-      showStrictRetryNeedsDetailsPanel,
+      (showStrictRetryNeedsDetailsPanel || showProAmberRecoveryPanel),
   );
 
   useEffect(() => {
@@ -10893,7 +10985,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             }
                           >
                             {premiumPaidDocumentSurface
-                              ? "Use Edit wording for the full text, then the Pro review panel below. Not legal advice."
+                              ? canProceedWithPaidProDocument
+                                ? "Use Edit wording for the full text, then the Pro review panel below. Not legal advice."
+                                : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
                               : "Not legal advice. Signer lines are added when you send."}
                           </p>
                           <div
@@ -10908,37 +11002,107 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           >
                             {premiumPaidDocumentSurface ? (
                               <>
-                                {showStrictRetryNeedsDetailsPanel ? (
-                                <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
-                                  <div
-                                    className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-4 py-5 sm:px-6 sm:py-6"
-                                    role="status"
-                                    aria-live="polite"
-                                  >
-                                    <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
-                                      {proFullDraftCustomGateMessage ||
-                                        "Use the document below to review and edit when it appears. Nothing is sent from this step."}
-                                    </p>
-                                    <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
-                                      Nothing is sent from this step until you choose to continue.
-                                    </p>
-                                    {import.meta.env.DEV ? (
-                                      <p className="mt-2 text-[10px] font-mono text-amber-200/80">
-                                        {lastPremiumPipelineRenderSourceRef.current || "—"} | intake{" "}
-                                        {shortIntakeFingerprint(currentPremiumMergedIntakeKey)}
-                                      </p>
-                                    ) : null}
-                                    <button
-                                      type="button"
-                                      className="mt-4 rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25"
-                                      onClick={handleRetryProFullDraft}
-                                    >
-                                      Retry Pro draft
-                                    </button>
-                                  </div>
-                                </div>
+                                {showProAmberRecoveryPanel ? (
+                                  showStrictRetryNeedsDetailsPanel ? (
+                                    <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
+                                      <div
+                                        className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-4 py-5 sm:px-6 sm:py-6"
+                                        role="status"
+                                        aria-live="polite"
+                                      >
+                                        <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
+                                          {proFullDraftCustomGateMessage ||
+                                            "Use the document below to review and edit when it appears. Nothing is sent from this step."}
+                                        </p>
+                                        <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
+                                          Nothing is sent from this step until you choose to continue.
+                                        </p>
+                                        {import.meta.env.DEV ? (
+                                          <p className="mt-2 text-[10px] font-mono text-amber-200/80">
+                                            {lastPremiumPipelineRenderSourceRef.current || "—"} | intake{" "}
+                                            {shortIntakeFingerprint(currentPremiumMergedIntakeKey)}
+                                          </p>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          className="mt-4 rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25"
+                                          onClick={handleRetryProFullDraft}
+                                        >
+                                          Retry Pro draft
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
+                                      <div
+                                        className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-4 py-5 sm:px-6 sm:py-6"
+                                        role="status"
+                                        aria-live="polite"
+                                      >
+                                        <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
+                                          We couldn’t complete the Pro upgrade with your terms yet.
+                                        </p>
+                                        <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
+                                          Your intake is still available. Add or clarify details, retry a full Pro draft, or
+                                          work from your starter version.
+                                        </p>
+                                        <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-2">
+                                          <button
+                                            type="button"
+                                            className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25 sm:w-auto"
+                                            onClick={handleRetryProFullDraft}
+                                          >
+                                            Retry Pro draft
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/40 bg-slate-950/50 px-4 py-2.5 text-sm font-semibold text-amber-100/90 transition hover:bg-slate-900/80 sm:w-auto"
+                                            onClick={focusProIntakeRefineForRecovery}
+                                          >
+                                            Edit details
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-500/50 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800/60 sm:w-auto"
+                                            onClick={handleProUpgradeUseStarterInstead}
+                                          >
+                                            Use starter draft instead
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )
                                 ) : null}
-                                {!shouldShowPaidRetry ? (
+                                {proUpgradeUseStarterView ? (
+                                  <div className="mx-auto w-full max-w-[min(100%,58rem)] px-0 sm:px-1">
+                                    <p className="mb-3 text-sm leading-relaxed text-slate-400">
+                                      You are on your starter draft. Refine the instructions above, or retry LawDog Pro
+                                      when you are ready. Nothing is sent from this page.
+                                    </p>
+                                    <div
+                                      className={`rounded-lg transition-[box-shadow,ring-color] duration-500 ${
+                                        !hasFullDraftAccess
+                                          ? "rounded-xl border border-slate-800/45 bg-slate-950/15 p-0.5"
+                                          : ""
+                                      }`}
+                                    >
+                                      <textarea
+                                        ref={agreementPreviewEditorRef}
+                                        id="claw-agreement-preview-editor"
+                                        className="min-h-[clamp(18rem,52vh,32rem)] max-h-[min(56rem,84vh)] w-full max-w-[min(100%,58rem)] resize-y overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-600/50 bg-[#101c30] px-7 py-8 font-serif text-[16px] leading-[1.92] text-slate-100/95 antialiased outline-none [text-wrap:pretty] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] focus:border-emerald-500/55 focus:ring-2 focus:ring-emerald-400/30 sm:px-9 sm:py-9 sm:text-[17px] sm:leading-[1.95] md:max-w-[60rem]"
+                                        value={agreementDocumentText}
+                                        onChange={(e) => {
+                                          agreementDocumentDirtyRef.current = true;
+                                          setAgreementDocumentText(e.target.value);
+                                          scheduleAgreementDocSync(e.target.value);
+                                        }}
+                                        spellCheck
+                                        disabled={(isGenerating && !draft) || upgradeLockActive}
+                                        aria-label="Agreement document"
+                                      />
+                                    </div>
+                                  </div>
+                                ) : canProceedWithPaidProDocument ? (
                                 <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
                                   {premiumServerGenerationDegraded ? (
                                     <div
@@ -11183,7 +11347,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 </p>
                               </div>
                             ) : null}
-                            {showFinalizeYourAgreement && reviewRefineUserMessage ? (
+                            {showProLawdogRefineAndFinalize && reviewRefineUserMessage ? (
                               <p
                                 className="mb-2 rounded-lg border border-sky-500/35 bg-slate-900/50 px-3 py-2 text-sm leading-relaxed text-slate-200 sm:mb-3"
                                 role="status"
@@ -11192,7 +11356,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 {reviewRefineUserMessage}
                               </p>
                             ) : null}
-                            {showFinalizeYourAgreement ? (
+                            {showProLawdogRefineAndFinalize ? (
                               <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
                                 <FinalizeYourAgreementPanel
                                   draft={reviewDraft ?? draft}
