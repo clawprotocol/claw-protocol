@@ -192,6 +192,7 @@ import {
   pickRecipientNameForHandoff,
   pickRecipientSignerLabelsForHandoff,
 } from "./reviewPlaceholderGuard";
+import { fetchPremiumAdvisoryEnrichmentAfterAccept } from "./premiumAdvisoryPostAccept";
 import {
   buildPremiumMergedIntakeWithUserNotes,
   extractCleanPremiumParties,
@@ -3623,6 +3624,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPipelineRenderSource: result.premiumRenderSource,
           serverGenerationDegraded: result.serverGenerationDegraded ?? null,
         });
+        if (import.meta.env.DEV && usePaidAuthoritativeBody) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-post-accept-body-preserved]", {
+            source: result.premiumRenderSource,
+            docLen: snapshotPlain.length,
+          });
+          // eslint-disable-next-line no-console
+          console.info("[premium-success-hydrate]", {
+            post_accept_snapshot_persisted: true,
+            source: result.premiumRenderSource,
+            bodyLen: snapshotPlain.length,
+          });
+        }
         logPremiumCompletionDebug({
           stage: "ui_session_snapshot_persisted",
           snapshotWritten: true,
@@ -3715,6 +3729,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumRecipientUxActive(false);
         setPremiumPostCheckoutPhase(null);
         bumpPremiumSurfaceGateTick();
+        if (usePaidAuthoritativeBody) {
+          const snapGen = result.agreementGenerationId;
+          void (async () => {
+            const out = await fetchPremiumAdvisoryEnrichmentAfterAccept({
+              draft: merged.draft,
+              rawIntakeForSot: mergedIntake,
+              userGapAnswers: premiumLastGapAnswersRef.current || null,
+              winningBodyText: snapshotPlain,
+            });
+            const cur = readPremiumCompletionSnapshot();
+            if (!cur || String(cur.agreementGenerationId || "") !== String(snapGen ?? "")) {
+              return;
+            }
+            if (!out.premiumReview && !out.premiumFinalizeAudit && !out.premiumReviewRoute) {
+              return;
+            }
+            persistPremiumCompletionSnapshot({
+              ...cur,
+              premiumReview: out.premiumReview ?? cur.premiumReview,
+              premiumFinalizeAudit: out.premiumFinalizeAudit ?? cur.premiumFinalizeAudit,
+              premiumReviewRoute: out.premiumReviewRoute ?? cur.premiumReviewRoute,
+            });
+            if (out.premiumReview) setPremiumRefineReview(out.premiumReview);
+            if (out.premiumFinalizeAudit) setPremiumFinalizeAudit(out.premiumFinalizeAudit);
+            if (out.premiumReviewRoute) setPremiumReviewRoute(out.premiumReviewRoute);
+          })().catch((e) => {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[premium-post-accept-advisory-failed]", {
+                endpoint: "advisory_persist_or_state",
+                status: "unexpected_throw",
+                err: e instanceof Error ? e.message : String(e),
+              });
+            }
+          });
+        }
         writePremiumRecipientHandoffExact(
           {
             name: (merged.draft.parties?.[0]?.name || merged.displayName1 || "").trim(),

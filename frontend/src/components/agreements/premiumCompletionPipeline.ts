@@ -70,13 +70,7 @@ import {
 } from "./premiumFullDraftClientAcceptance";
 import { mapPremiumFullDraftFamilyHint } from "./premiumFullDraftMapFamily";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
-import { buildContextForReview, postPremiumAgreementReviewWithRetry } from "./premiumAgreementReviewApi";
-import {
-  buildPremiumFinalizeAuditContext,
-  postPremiumFinalizeAuditWithRetry,
-} from "./premiumFinalizeAuditApi";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
-import { postPremiumReviewRouteWithRetry } from "./premiumReviewRouteApi";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
@@ -1747,57 +1741,9 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       user_gap_answers_len: (input.userGapAnswers || "").trim().length,
     });
   }
-  let premiumReview: PremiumAgreementReview | null = null;
-  if (fullDraftAccepted) {
-    try {
-      const r = await postPremiumAgreementReviewWithRetry({
-        intakeText: rawForSoT || rawIntake,
-        documentText: (winningPremiumBodyText || "").trim(),
-        context: buildContextForReview(outMerged),
-      });
-      premiumReview = r;
-    } catch (e) {
-      if (import.meta.env.DEV) {
-        console.warn("[premium-review] unexpected failure (ignored)", e);
-      }
-    }
-  }
-
-  let premiumFinalizeAudit: PremiumFinalizeAudit | null = null;
-  if (fullDraftAccepted && (winningPremiumBodyText || "").trim().length >= 80) {
-    try {
-      const doc = (winningPremiumBodyText || "").trim();
-      premiumFinalizeAudit = await postPremiumFinalizeAuditWithRetry({
-        intake_text: (rawForSoT || rawIntake).trim(),
-        document_text: doc,
-        context: buildPremiumFinalizeAuditContext(outMerged, {
-          userGapAnswers: input.userGapAnswers,
-          premiumReview: premiumReview,
-        }),
-      });
-    } catch (e) {
-      if (import.meta.env.DEV) {
-        console.warn("[premium-finalize-audit] unexpected failure (ignored)", e);
-      }
-    }
-  }
-
-  let premiumReviewRoute: PremiumReviewRoute | null = null;
-  if ((winningPremiumBodyText || "").trim().length >= 80) {
-    try {
-      premiumReviewRoute = await postPremiumReviewRouteWithRetry({
-        intake_text: (rawForSoT || rawIntake).trim(),
-        finalize_answers: (input.userGapAnswers || "").trim(),
-        agreement_text: (winningPremiumBodyText || "").trim(),
-        party_count: Math.max(1, (outMerged.parties || []).length || 2),
-        agreement_family: String(outMerged.agreement_family || "").trim(),
-      });
-    } catch (e) {
-      if (import.meta.env.DEV) {
-        console.warn("[premium-review-route] unexpected failure (ignored)", e);
-      }
-    }
-  }
+  const premiumReview: PremiumAgreementReview | null = null;
+  const premiumFinalizeAudit: PremiumFinalizeAudit | null = null;
+  const premiumReviewRoute: PremiumReviewRoute | null = null;
 
   const premiumParties = (outMerged.parties || []).map((p) => ({
     name: nz(p.name),

@@ -79,9 +79,9 @@ async function postOnce(body: PremiumFinalizeAuditRequest, signal?: AbortSignal)
     const err: unknown = await res.json().catch(() => ({}));
     const d = (err as { detail?: { message?: string; code?: string } | string })?.detail;
     const msg = typeof d === "object" && d && "message" in d ? d.message : typeof d === "string" ? d : null;
-    const e = new Error(msg || "premium_finalize_audit_failed");
-    (e as Error & { code?: string }).code =
-      typeof d === "object" && d && "code" in d ? (d as { code?: string }).code : undefined;
+    const e = new Error(msg || "premium_finalize_audit_failed") as Error & { status: number; code?: string };
+    e.code = typeof d === "object" && d && "code" in d ? (d as { code?: string }).code : undefined;
+    e.status = res.status;
     throw e;
   }
   const j = await readJson<Record<string, unknown>>(res);
@@ -94,6 +94,7 @@ async function postOnce(body: PremiumFinalizeAuditRequest, signal?: AbortSignal)
  */
 export async function postPremiumFinalizeAuditWithRetry(
   body: PremiumFinalizeAuditRequest,
+  options?: { logPostAcceptFailure?: boolean },
 ): Promise<PremiumFinalizeAudit | null> {
   if (import.meta.env.MODE === "test") {
     return null;
@@ -110,7 +111,16 @@ export async function postPremiumFinalizeAuditWithRetry(
     }
   }
   if (import.meta.env.DEV) {
-    console.warn("[premium-finalize-audit] failed (fail open)", last);
+    if (options?.logPostAcceptFailure) {
+      const st = (last as Error & { status?: number })?.status;
+      // eslint-disable-next-line no-console
+      console.info("[premium-post-accept-advisory-failed]", {
+        endpoint: "POST /api/agreements/premium-finalize-audit",
+        status: st ?? "unknown",
+      });
+    } else {
+      console.warn("[premium-finalize-audit] failed (fail open)", last);
+    }
   }
   return null;
 }

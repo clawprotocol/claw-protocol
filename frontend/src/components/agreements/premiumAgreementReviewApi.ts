@@ -44,7 +44,9 @@ async function postOnce(args: ReviewRequest, signal?: AbortSignal): Promise<Prem
     const msg = typeof (err as { detail?: { message?: string } })?.detail === "object"
       ? (err as { detail?: { message?: string } }).detail?.message
       : null;
-    throw new Error(msg || "premium_review_failed");
+    const e = new Error(msg || "premium_review_failed") as Error & { status: number };
+    e.status = res.status;
+    throw e;
   }
   const j = await readJson<Record<string, unknown>>(res);
   return mapJsonToReview(j);
@@ -54,7 +56,10 @@ async function postOnce(args: ReviewRequest, signal?: AbortSignal): Promise<Prem
  * After premium body is final; best-effort — returns null on failure.
  * Skipped in Vitest (`import.meta.env.MODE === "test"`) to avoid real HTTP.
  */
-export async function postPremiumAgreementReviewWithRetry(args: ReviewRequest): Promise<PremiumAgreementReview | null> {
+export async function postPremiumAgreementReviewWithRetry(
+  args: ReviewRequest,
+  options?: { logPostAcceptFailure?: boolean },
+): Promise<PremiumAgreementReview | null> {
   if (import.meta.env.MODE === "test") {
     return null;
   }
@@ -71,7 +76,16 @@ export async function postPremiumAgreementReviewWithRetry(args: ReviewRequest): 
     }
   }
   if (import.meta.env.DEV) {
-    console.warn("[premium-review] both attempts failed", last);
+    if (options?.logPostAcceptFailure) {
+      const st = (last as Error & { status?: number })?.status;
+      // eslint-disable-next-line no-console
+      console.info("[premium-post-accept-advisory-failed]", {
+        endpoint: "POST /api/agreements/premium-review",
+        status: st ?? "unknown",
+      });
+    } else {
+      console.warn("[premium-review] both attempts failed", last);
+    }
   }
   return null;
 }

@@ -65,13 +65,18 @@ async function postOnce(args: ReviewRouteRequest, signal?: AbortSignal): Promise
     const err: unknown = await res.json().catch(() => ({}));
     const d = (err as { detail?: { message?: string } | string })?.detail;
     const m = typeof d === "object" && d && "message" in d ? d.message : typeof d === "string" ? d : null;
-    throw new Error(m || "premium_review_route_failed");
+    const e = new Error(m || "premium_review_route_failed") as Error & { status: number };
+    e.status = res.status;
+    throw e;
   }
   const j = await readJson<Record<string, unknown>>(res);
   return mapPremiumReviewRoute(j);
 }
 
-export async function postPremiumReviewRouteWithRetry(args: ReviewRouteRequest): Promise<PremiumReviewRoute | null> {
+export async function postPremiumReviewRouteWithRetry(
+  args: ReviewRouteRequest,
+  options?: { logPostAcceptFailure?: boolean },
+): Promise<PremiumReviewRoute | null> {
   if (import.meta.env.MODE === "test") return null;
   if (!(args.agreement_text || "").trim() || !(args.intake_text || "").trim()) return null;
   let last: unknown;
@@ -83,7 +88,16 @@ export async function postPremiumReviewRouteWithRetry(args: ReviewRouteRequest):
     }
   }
   if (import.meta.env.DEV) {
-    console.warn("[premium-review-route] failed (fail-open)", last);
+    if (options?.logPostAcceptFailure) {
+      const st = (last as Error & { status?: number })?.status;
+      // eslint-disable-next-line no-console
+      console.info("[premium-post-accept-advisory-failed]", {
+        endpoint: "POST /api/agreements/premium-review-route",
+        status: st ?? "unknown",
+      });
+    } else {
+      console.warn("[premium-review-route] failed (fail-open)", last);
+    }
   }
   return null;
 }
