@@ -11,6 +11,7 @@ import {
 } from "./agreementIntentContract";
 import { applyDeterministicIntentToPremiumFullDraftContext } from "./deterministicIntentTitleMapper";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
+import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGuard";
 
 const MAX_CONTEXT_CHARS = 22_000;
@@ -211,6 +212,19 @@ export async function postPremiumFullDraftOnce(args: {
       document_text_len: typeof parsed?.document_text === "string" ? parsed.document_text.length : 0,
     });
   }
+  const genOut = String(parsed?.generation_outcome || "").trim();
+  const degraded = genOut === "degraded";
+  const failCode = String(parsed?.server_generation_failure_code || "").trim();
+  logPremiumCompletionDebug({
+    stage: "premium_full_draft_http",
+    httpStatus: res.status,
+    intakeLen: (args.intakeText || "").length,
+    responseBodyLen: bodyText.length,
+    currentDocLen: typeof parsed?.document_text === "string" ? parsed.document_text.length : 0,
+    generationOutcome: genOut || (res.ok ? "unknown" : "http_error"),
+    degraded,
+    failureCode: failCode || undefined,
+  });
   if (!res.ok) {
     const err = parsed as { detail?: { message?: string } };
     const msg = typeof err?.detail === "object" ? err.detail?.message : null;

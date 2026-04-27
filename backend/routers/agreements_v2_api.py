@@ -3185,6 +3185,27 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             repair_used,
             sim_regen,
         )
+        try:
+            _pfd_sum = {
+                "phase": "success",
+                "model": str(llm_model or ""),
+                "intake_len": len(intake_s),
+                "prompt_len": len(json.dumps(user_payload, ensure_ascii=False)),
+                "llm_response_len": len((llm_text or "").strip()),
+                "parsed_doc_len": len((out_primary.document_text or "").strip()),
+                "final_doc_len": len(doc),
+                "generation_outcome": str(generation_outcome),
+                "failure_code": None,
+                "quality_gate_ok": bool(ok_final),
+                "quality_gate_reasons": [str(x) for x in list(final_reasons)[:24]] if not ok_final else [],
+                "repair_used": bool(repair_used),
+            }
+            log.info("claw_premium route=premium_full_draft json_summary=%s", json.dumps(_pfd_sum, default=str)[:12000])
+        except Exception as jsum_e:
+            log.info(
+                "claw_premium route=premium_full_draft json_summary=unavailable jsum_err=%s",
+                type(jsum_e).__name__,
+            )
         primary_full = (out_primary.document_text or "").strip()
         return PremiumFullDraftResponse(
             title=out.title,
@@ -3199,6 +3220,21 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
         )
     except Exception as exc:
         code, log_detail = _classify_premium_full_draft_failure(exc)
+        try:
+            _pfd_degraded = {
+                "phase": "degraded",
+                "model": str(llm_model or ""),
+                "intake_len": len(intake_s),
+                "prompt_len": len(json.dumps(user_payload, ensure_ascii=False)),
+                "failure_code": str(code),
+                "error_detail": str(log_detail)[:800],
+            }
+            log.info(
+                "claw_premium route=premium_full_draft json_summary=%s",
+                json.dumps(_pfd_degraded, default=str)[:10000],
+            )
+        except Exception as jex:
+            log.info("claw_premium route=premium_full_draft json_summary=unavailable ex=%s", type(jex).__name__)
         log.warning(
             "premium_full_draft event=model_path_failed category=%s detail=%s err_type=%s",
             code,

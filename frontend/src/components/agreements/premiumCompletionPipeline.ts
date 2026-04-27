@@ -78,6 +78,7 @@ import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import { postPremiumReviewRouteWithRetry } from "./premiumReviewRouteApi";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
+import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
@@ -1269,18 +1270,37 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     staleOrFingerprintMismatch: false,
     premiumPipelineSource: "fallback_preview" as PremiumRenderSource,
   };
+  let lastClientGateTrace: {
+    accOk: boolean;
+    accReasons: string[];
+    vPaidOk: boolean;
+    vPaidReasons: string[];
+    docLen: number;
+    effGen: string;
+  } | null = null;
 
   try {
     const mergedForApi = stripClientPremiumArtifactBlocksFromDraft(merged);
     const fullCtx = buildPremiumFullDraftContextForProRequest(rawForSoT || rawIntake, mergedForApi, intentContract);
     setPaidFunnelLastPremiumProContext(getOrCreateLawdogSessionId(), fullCtx);
     const gapAns = (input.userGapAnswers || "").trim();
+    const soT = rawForSoT || rawIntake;
+    logPremiumCompletionDebug({
+      stage: "premium_full_draft_with_retry_start",
+      intakeLen: soT.length,
+    });
     const full = await postPremiumFullDraftWithRetry({
-      intakeText: rawForSoT || rawIntake,
+      intakeText: soT,
       context: fullCtx,
       userGapAnswers: gapAns || null,
     });
     if (!full) {
+      logPremiumCompletionDebug({
+        stage: "premium_full_draft_client_null",
+        intakeLen: soT.length,
+        accepted: false,
+        rejectedReason: "postPremiumFullDraftWithRetry_returned_null",
+      });
       if (import.meta.env.MODE !== "test" && intentContract.pro_strict) {
         proIntentGateMessage = proIntentMessageWhenServerFullDraftFailed(intentContract);
         premiumRenderSource = "rejected_paid_corpus";
@@ -1536,6 +1556,14 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           }
         }
       }
+      lastClientGateTrace = {
+        accOk: acc.ok,
+        accReasons: acc.reasons.slice(0, 20),
+        vPaidOk: vPaid.ok,
+        vPaidReasons: vPaid.reasons.slice(0, 20),
+        docLen: (doc || "").length,
+        effGen: (effectiveFull.generation_outcome || "").trim(),
+      };
       if (acc.ok && vPaid.ok) {
         const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
         const srvFull = (effectiveFull.server_full_document_text || "").trim();
@@ -1568,7 +1596,28 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           // eslint-disable-next-line no-console
           console.info("[CLAW] premium accepted", { source: premiumRenderSource, doc_len: doc.length });
         }
+        logPremiumCompletionDebug({
+          stage: "pipeline_client_gates_passed",
+          docLen: doc.length,
+          generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+          degraded: serverGenDegraded,
+          failureCode: serverGenDegraded ? (effectiveFull.server_generation_failure_code || "").trim() : undefined,
+          accepted: true,
+        });
       } else {
+        logPremiumCompletionDebug({
+          stage: "pipeline_client_gates_rejected",
+          accStructuralOk: acc.ok,
+          accStructuralReasons: acc.reasons.slice(0, 20),
+          validationOk: vPaid.ok,
+          validationReasons: vPaid.reasons.slice(0, 20),
+          docLen: (doc || "").length,
+          generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+          degraded: serverGenDegraded,
+          failureCode: serverGenDegraded ? (effectiveFull.server_generation_failure_code || "").trim() : undefined,
+          accepted: false,
+          rejectedReason: "acc_or_vpaid_failed",
+        });
         if (import.meta.env.DEV) {
           if (!acc.ok) {
             console.warn("[premium-full-draft] client acceptance rejected server body; using fallback", acc.reasons);
@@ -1596,6 +1645,13 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
     }
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logPremiumCompletionDebug({
+      stage: "premium_full_draft_try_catch",
+      accepted: false,
+      rejectedReason: "exception",
+      errSnippet: msg.slice(0, 300),
+    });
     if (import.meta.env.DEV) {
       console.warn("[premium-full-draft] call failed, using dynamic sections", e);
     }
@@ -1742,6 +1798,13 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   const finalWinning = (winningPremiumBodyText || "").trim();
   if (premiumRenderSource === "rejected_paid_corpus") {
     if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+    logPremiumCompletionDebug({
+      stage: "pipeline_return_rejected_paid_corpus",
+      accepted: false,
+      rejectedReason: "rejected_paid_corpus",
+      premiumRenderSource: "rejected_paid_corpus",
+      lastClientGate: lastClientGateTrace,
+    });
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.info("[paid-pro-gate] rejected; omitting fallback stitched body", {

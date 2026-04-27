@@ -323,6 +323,7 @@ import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftCli
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import { postPremiumRefine } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
+import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPanel";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
@@ -3514,6 +3515,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               // eslint-disable-next-line no-console
               console.warn("[pro-quality] render resolver or corpus failed paid gate", { reasons: fin.reasons });
             }
+            logPremiumCompletionDebug({
+              stage: "ui_persist_skipped_paid_pro_gate",
+              snapshotWritten: false,
+              accepted: false,
+              validationOk: false,
+              validationReasons: fin.gate?.validation?.reasons ?? fin.reasons,
+            });
             return;
           }
         }
@@ -3551,6 +3559,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
           premiumPipelineRenderSource: result.premiumRenderSource,
           serverGenerationDegraded: result.serverGenerationDegraded ?? null,
+        });
+        logPremiumCompletionDebug({
+          stage: "ui_session_snapshot_persisted",
+          snapshotWritten: true,
+          intakeLen: mergedIntake.length,
+          currentDocLen: snapshotPlain.length,
+          premiumRenderSource: result.premiumRenderSource,
+          generationOutcome: result.premiumRenderSource,
+          degraded: Boolean(result.serverGenerationDegraded),
         });
         if (import.meta.env.DEV) {
           const snapDoc = snapshotPlain;
@@ -6663,6 +6680,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const notes = (readCreateComplexityResume()?.premiumUpgradeNotes || "").trim() || pendingUpgradePromptRef.current.trim();
     const it = buildPremiumMergedIntakeWithUserNotes(raw, notes);
     const ga = (premiumLastGapAnswersRef.current || "").trim();
+    logPremiumCompletionDebug({
+      stage: "user_retry_pro_full_draft",
+      intakeLen: it.length,
+    });
     setPremiumPostCheckoutPhase("processing");
     void m({
       intakeText: it,
