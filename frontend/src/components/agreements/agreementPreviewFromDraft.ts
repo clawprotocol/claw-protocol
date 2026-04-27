@@ -162,6 +162,8 @@ export type AgreementPreviewBuildOptions = {
   legacyPremiumSnapshotText?: string;
   /** Tier A fallback when draft lacks split server fields (e.g. completion winner). */
   premiumWinningCorpusFallback?: string;
+  /** When the paid pipeline already accepted the Pro body; trust over live preview. */
+  paidAuthoritativeProBody?: string | null;
 };
 
 function buildOperatingAgreementPreviewText(draft: ParsedDraftShape, options?: AgreementPreviewBuildOptions): string {
@@ -380,6 +382,7 @@ export function buildAgreementPreviewText(
       intakeText: options?.intakeText,
       legacySnapshotText: options?.legacyPremiumSnapshotText,
       premiumWinningCorpusFallback: options?.premiumWinningCorpusFallback,
+      paidAuthoritativeProBody: options?.paidAuthoritativeProBody,
       buildLivePreview: () =>
         buildAgreementPreviewTextCore(draft, { ...options, starterPreview: false, premiumDeliverablePreview: true }),
     });

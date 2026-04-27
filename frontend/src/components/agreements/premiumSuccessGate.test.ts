@@ -222,6 +222,26 @@ describe("premium success gate (universal Pro truth)", () => {
     expect(g.state).toBe("premium_success");
   });
 
+  it("8d) server_full_document_text readonly (not live_generated_preview_after_server_tiers_failed) + no recovery flag", () => {
+    const c = resolveAgreementIntentContract("Need a logo, $1,500, two revisions, IP to client");
+    const t = logoServerDoc("LOGO DESIGN SERVICES AGREEMENT");
+    const v = validatePaidProOutput({ text: t, rawIntake: "logo", intentContract: c, draft: null });
+    const g = canShowPremiumSuccess({
+      intentContract: c,
+      renderSource: "server_full_document_text",
+      validation: v,
+      documentText: t,
+      intakeText: "logo",
+      premiumPipelineSource: "server_full_draft",
+      stale: false,
+      qualityRetryActive: false,
+      allowPaidSubstantiveStitch: true,
+    });
+    expect((t || "").length).toBeGreaterThan(500);
+    expect(g.state).toBe("premium_success");
+    expect(g.signerCtaAllowed).toBe(true);
+  });
+
   it("9) server full draft: allowed", () => {
     const c = resolveAgreementIntentContract("roommate and rent split");
     const t = "Lease / roommate. Rent, utilities, premises, and deposit. " + LONG;

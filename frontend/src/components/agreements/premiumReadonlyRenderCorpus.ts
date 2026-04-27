@@ -96,6 +96,11 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   premiumCheckoutCompleted?: boolean;
   /** Raw intake for structural validation (scenario keywords). */
   intakeText?: string;
+  /**
+   * When the paid completion pipeline (or session snapshot) already committed an accepted Pro body;
+   * prevents `live_generated_preview_after_server_tiers_failed` from replacing it.
+   */
+  paidAuthoritativeProBody?: string | null;
 }): PremiumPaidReadonlyPickResult {
   const legacySnap = pickLongestLegacySnapshot({
     premiumReadonlySnapshotText: args.premiumReadonlySnapshotText,
@@ -110,6 +115,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     intakeText: args.intakeText,
     premiumWinningCorpusFallback: args.premiumWinningBodyText,
     legacySnapshotText: legacySnap || undefined,
+    paidAuthoritativeProBody: args.paidAuthoritativeProBody,
     buildLivePreview: () =>
       args.draft
         ? buildAgreementPreviewTextCore(args.draft, {

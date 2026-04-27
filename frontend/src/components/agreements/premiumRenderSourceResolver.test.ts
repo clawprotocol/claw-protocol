@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { resolvePremiumRenderSource } from "./premiumRenderSourceResolver";
+import { isAuthoritativePremiumPipelineRenderSource, resolvePremiumRenderSource } from "./premiumRenderSourceResolver";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: true };
 
@@ -64,7 +64,33 @@ function compactStrictServerDoc(): string {
   ].join("");
 }
 
+describe("isAuthoritativePremiumPipelineRenderSource", () => {
+  it("treats server full draft family and snapshot as authoritative", () => {
+    expect(isAuthoritativePremiumPipelineRenderSource("server_full_draft")).toBe(true);
+    expect(isAuthoritativePremiumPipelineRenderSource("server_full_draft_retry")).toBe(true);
+    expect(isAuthoritativePremiumPipelineRenderSource("server_full_draft_degraded")).toBe(true);
+    expect(isAuthoritativePremiumPipelineRenderSource("snapshot_server_full_draft")).toBe(true);
+    expect(isAuthoritativePremiumPipelineRenderSource("fallback_preview")).toBe(false);
+    expect(isAuthoritativePremiumPipelineRenderSource("rejected_paid_corpus")).toBe(false);
+  });
+});
+
 describe("resolvePremiumRenderSource", () => {
+  it("uses paidAuthoritativeProBody first so paid completion is never replaced by live preview fallbacks", () => {
+    const paid = longValidServerDoc();
+    const d = baseDraft({ premium_server_full_document_text: "too thin" });
+    const r = resolvePremiumRenderSource({
+      draft: d,
+      intakeText: "x",
+      paidAuthoritativeProBody: paid,
+      premiumWinningCorpusFallback: paid,
+      buildLivePreview: () => "LIVE_WOULD_WIN_WITHOUT_AUTHORITY " + "y".repeat(2_200),
+    });
+    expect(r.premium_render_source).toBe("server_full_document_text");
+    expect(r.premium_render_reason).toBe("paid_pipeline_authoritative");
+    expect(r.text.length).toBeGreaterThan(5_000);
+  });
+
   it("prefers structurally valid server full over repair and live", () => {
     const full = longValidServerDoc();
     const repair = full.replace("10%", "12%");

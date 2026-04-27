@@ -184,6 +184,19 @@ export type PremiumRenderResolveResult = {
   premium_validation_result: PremiumRenderValidationResult & { tier_attempted?: string };
 };
 
+/** Pipeline / snapshot sources for which the winning body already passed paid acceptance upstream. */
+const AUTHORITATIVE_PREMIUM_PIPELINE_RENDER_SOURCES = new Set([
+  "server_full_draft",
+  "server_full_draft_retry",
+  "server_full_draft_degraded",
+  "snapshot_server_full_draft",
+]);
+
+export function isAuthoritativePremiumPipelineRenderSource(src: string | null | undefined): boolean {
+  if (!src) return false;
+  return AUTHORITATIVE_PREMIUM_PIPELINE_RENDER_SOURCES.has(String(src).trim());
+}
+
 export type ResolvePremiumRenderSourceArgs = {
   draft: ParsedDraftShape | null;
   /** Raw user intake (optional; draft fields used as fallback probe). */
@@ -199,6 +212,11 @@ export type ResolvePremiumRenderSourceArgs = {
   premiumWinningCorpusFallback?: string | null;
   /** Emergency: persisted snapshot / pipeline buffer (tier D). */
   legacySnapshotText?: string | null;
+  /**
+   * When set, this exact body was already accepted in the post-checkout / paid pipeline; do not
+   * downgrade to live preview because structural re-validation in this resolver would disagree.
+   */
+  paidAuthoritativeProBody?: string | null;
   /** Tier C: deterministic stitched preview (must not read server fields). */
   buildLivePreview: () => string;
   /**
@@ -217,6 +235,25 @@ function trim(s: string | null | undefined): string {
  * Order: (A) structurally valid server full → (B) valid repair → (C) live preview → (D) legacy snapshot.
  */
 export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs): PremiumRenderResolveResult {
+  const paidAuthoritative = trim(args.paidAuthoritativeProBody);
+  if (paidAuthoritative.length >= 500) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[premium-success-hydrate]", {
+        phase: "authoritative_body_short_circuit",
+        bodyLen: paidAuthoritative.length,
+        reason: "paid_pipeline_authoritative",
+        premium_render_source: "server_full_document_text" as const,
+      });
+    }
+    return {
+      text: paidAuthoritative,
+      premium_render_source: "server_full_document_text",
+      premium_render_reason: "paid_pipeline_authoritative",
+      premium_validation_result: { ok: true, reasons: [] },
+    };
+  }
+
   const draft = args.draft;
   const intakeProbe = intakeProbeText(draft, args.intakeText);
 
@@ -296,6 +333,17 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
 
   if (liveRaw) {
     const vLive = validatePremiumRenderBody(liveRaw, { intakeText: intakeProbe, draft, mode: "live" });
+    const fallbackWin = trim(args.premiumWinningCorpusFallback);
+    if (import.meta.env.DEV && fallbackWin.length > 1_200) {
+      // eslint-disable-next-line no-console
+      console.warn("[premium-render-source-blocked]", {
+        reason: "live_fallback_while_long_pipeline_winning_corpus_existed",
+        liveLen: liveRaw.length,
+        winningLen: fallbackWin.length,
+        vLiveOk: vLive.ok,
+        note: "Pass paidAuthoritativeProBody from applySuccess / pick when the paid pipeline already accepted the winning corpus",
+      });
+    }
     return {
       text: liveRaw,
       premium_render_source: "live_generated_preview",

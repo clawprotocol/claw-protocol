@@ -307,7 +307,11 @@ import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { FinalizeYourAgreementPanel } from "./FinalizeYourAgreementPanel";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
-import { emitPremiumRenderResolveLog, resolvePremiumRenderSource } from "./premiumRenderSourceResolver";
+import {
+  emitPremiumRenderResolveLog,
+  isAuthoritativePremiumPipelineRenderSource,
+  resolvePremiumRenderSource,
+} from "./premiumRenderSourceResolver";
 import {
   bumpAgreementGenerationId,
   getOrInitSessionAgreementGenerationId,
@@ -1421,6 +1425,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumModalPrevPhaseRef = useRef<null | "awaiting_gaps" | "processing">(null);
   /** True while `runModelPass` is in flight (post-checkout or retry). */
   const premiumProRunInFlightRef = useRef(false);
+  /** Post-checkout `applySuccess` may run in an effect declared above `scheduleAgreementDocSync`; use a ref. */
+  const scheduleAgreementDocSyncForPremiumHydrateRef = useRef<((t: string) => void) | null>(null);
   /** After premium completion, relax draft-stage party friction (Party A/B fallback, etc.). */
   const [premiumSendPathUnlocked, setPremiumSendPathUnlocked] = useState(false);
   /** Premium path: copy + checklist tuned for “add recipients → send”. */
@@ -3464,10 +3470,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           { ...rc1, name: merged.displayName2 },
         ];
         const winning = (result.winningPremiumBodyText || "").trim();
+        const usePaidAuthoritativeBody =
+          isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) && winning.length >= 500;
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-success-hydrate]", {
+            phase: "before_resolve",
+            bodyLen: winning.length,
+            usePaidAuthoritativeBody,
+            pipelineSource: result.premiumRenderSource,
+            sourceBefore: "unresolved",
+          });
+        }
         const resolvedPersist = resolvePremiumRenderSource({
           draft: merged.draft,
           intakeText: mergedIntake,
           premiumWinningCorpusFallback: winning,
+          paidAuthoritativeProBody: usePaidAuthoritativeBody ? winning : null,
           buildLivePreview: () =>
             buildAgreementPreviewTextCore(merged.draft, {
               starterPreview: false,
@@ -3475,6 +3494,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }),
         });
         emitPremiumRenderResolveLog(resolvedPersist);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-success-hydrate]", {
+            phase: "after_resolve",
+            bodyLen: resolvedPersist.text.length,
+            sourceAfter: resolvedPersist.premium_render_source,
+            renderReason: resolvedPersist.premium_render_reason,
+            usePaidAuthoritativeBody,
+            pendingPaidProFinishedGate: hasFullDraftAccess,
+          });
+        }
         if (import.meta.env.DEV && result.tierADiagnostic?.enabled) {
           // eslint-disable-next-line no-console
           console.info("[premium-tier-a-diagnostic]", {
@@ -3548,6 +3578,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         }
         setProFullDraftQualityRetry(false);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-success-hydrate]", {
+            phase: "post_paid_pro_gate",
+            bodyLen: snapshotPlain.length,
+            sourceAfter: resolvedPersist.premium_render_source,
+            recoveryCleared: true,
+            proQualityRetrySetFalse: true,
+            snapshotWritten: "committing_persist",
+          });
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[dev-premium-bind] persist", {
@@ -3644,8 +3685,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumSendPathUnlocked(true);
         commitParsedDraftToReviewFlow(merged.draft);
         agreementDocumentDirtyRef.current = false;
-        setAgreementDocumentText(collapseDuplicateEsignNoticesInFullPreview(snapshotPlain));
+        const finalDoc = collapseDuplicateEsignNoticesInFullPreview(snapshotPlain);
+        setAgreementDocumentText(finalDoc);
+        hydratedPremiumBodyRef.current = (snapshotPlain || finalDoc).trim();
         setReviewDocRefreshTick((n) => n + 1);
+        scheduleAgreementDocSyncForPremiumHydrateRef.current?.(finalDoc);
         clearCreateComplexityResume();
         clearOriginalUserIntakeRaw();
         clearUpgradeCheckoutContext();
@@ -5801,6 +5845,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
     }, 450);
   }, []);
+  scheduleAgreementDocSyncForPremiumHydrateRef.current = scheduleAgreementDocSync;
 
   applyProRefineOutputToProSurfaceRef.current = (outRaw, opts) => {
     const out = (outRaw || "").trim();
@@ -6908,6 +6953,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const adtHasPremiumMarkers = /\b(lawdog pro|commercial safeguards|raw-intent premium protections|execution\s+—\s+signatures|signatures)\b/i.test(
       adt,
     );
+    const pipelineSrcForAuth =
+      (!snapBindInvalid && snapObj?.premiumPipelineRenderSource) || lastPremiumPipelineRenderSourceRef.current || null;
+    const bestTrustedBody = [winner, pipelineBody, snap, hydratedBody, adt]
+      .map((s) => (s || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length)[0] || "";
+    const paidReadonlyAuthBody =
+      isAuthoritativePremiumPipelineRenderSource(pipelineSrcForAuth) && bestTrustedBody.length >= 500
+        ? bestTrustedBody
+        : null;
     const pick = pickPremiumPaidReadonlyPlainText({
       premiumWinningBodyText: winner,
       premiumReadonlySnapshotText: snap,
@@ -6918,6 +6973,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementDocumentTextHasPremiumMarkers: adtHasPremiumMarkers,
       premiumCheckoutCompleted: premiumPersistedFlowActive || premiumPaidDocumentSurface || Boolean(snapObj),
       intakeText: intakeCombined,
+      paidAuthoritativeProBody: paidReadonlyAuthBody,
     });
     if (import.meta.env.DEV) {
       console.info("[premium-picker-audit]", {
@@ -6978,6 +7034,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeCombined,
     currentPremiumMergedIntakeKey,
     proFullDraftQualityRetry,
+    premiumTruthPipelineSource,
   ]);
 
   const hasUsablePaidBody = useMemo(
