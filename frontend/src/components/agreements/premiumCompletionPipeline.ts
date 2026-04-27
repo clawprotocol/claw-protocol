@@ -64,6 +64,7 @@ import {
   stripDevContextMarkersForModelRetry,
 } from "./premiumOutputDevContextGuard";
 import {
+  buildPaidProSourceFactProbe,
   rejectPremiumBodyForProRender,
   stripClientPremiumArtifactBlocksFromDraft,
 } from "./premiumFullDraftClientAcceptance";
@@ -1605,6 +1606,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           accepted: true,
         });
       } else {
+        const intakeSForGate = (rawForSoT || rawIntake) || "";
         logPremiumCompletionDebug({
           stage: "pipeline_client_gates_rejected",
           accStructuralOk: acc.ok,
@@ -1612,6 +1614,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           validationOk: vPaid.ok,
           validationReasons: vPaid.reasons.slice(0, 20),
           docLen: (doc || "").length,
+          intakeLen: intakeSForGate.length,
+          sourceFactHits: acc.ok && !vPaid.ok ? buildPaidProSourceFactProbe(doc || "", intakeSForGate) : undefined,
           generationOutcome: (effectiveFull.generation_outcome || "").trim(),
           degraded: serverGenDegraded,
           failureCode: serverGenDegraded ? (effectiveFull.server_generation_failure_code || "").trim() : undefined,
@@ -1622,7 +1626,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           if (!acc.ok) {
             console.warn("[premium-full-draft] client acceptance rejected server body; using fallback", acc.reasons);
           } else {
-            console.warn("[premium-full-draft] paid-pro quality gate rejected server body", vPaid.reasons);
+            console.warn("[premium-full-draft] paid-pro quality gate rejected server body", vPaid.reasons, {
+              doc_len: (doc || "").length,
+              intake_len: intakeSForGate.length,
+              source_fact_hits: buildPaidProSourceFactProbe(doc || "", intakeSForGate),
+            });
           }
           // eslint-disable-next-line no-console
           console.info("[premium-completion-accept] gate_fail", {

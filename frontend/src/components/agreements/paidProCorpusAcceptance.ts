@@ -8,6 +8,7 @@ import {
   isFounderEquityVestingIntent,
 } from "./founderIntentRouter";
 import {
+  buildPaidProSourceFactProbe,
   isLikelyFiveSectionStarterShellPro,
   rejectPremiumBodyForProRender,
   rejectProUpgradeSourceFactDrift,
@@ -140,15 +141,40 @@ export function validatePaidProOutput(args: {
   intentContractMode?: "full" | "base_only";
 }): { ok: boolean; reasons: string[] } {
   const t = args.text || "";
+  const rawI = String(args.rawIntake || "");
+  const logVpaidDevFail = (reasons: string[]) => {
+    if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-validation-fail]", {
+        stage: "validatePaidProOutput",
+        validationReasons: reasons,
+        docLen: t.length,
+        intakeLen: rawI.length,
+        sourceFactHits: buildPaidProSourceFactProbe(t, rawI),
+      });
+    }
+  };
   const dcl = rejectDevContextLeakInPremiumBody(t);
-  if (!dcl.ok) return dcl;
-  const intakeLower = (args.rawIntake || "").toLowerCase();
+  if (!dcl.ok) {
+    logVpaidDevFail(dcl.reasons);
+    return dcl;
+  }
+  const intakeLower = rawI.toLowerCase();
   const a = rejectPremiumBodyForProRender(t, { intakeLower });
-  if (!a.ok) return a;
+  if (!a.ok) {
+    logVpaidDevFail(a.reasons);
+    return a;
+  }
   const s = rejectPaidProStitchedOrThinShell(t, intakeLower);
-  if (!s.ok) return s;
+  if (!s.ok) {
+    logVpaidDevFail(s.reasons);
+    return s;
+  }
   const drift = rejectProUpgradeSourceFactDrift(t, { intakeLower });
-  if (!drift.ok) return drift;
+  if (!drift.ok) {
+    logVpaidDevFail(drift.reasons);
+    return drift;
+  }
   if (args.intentContractMode === "base_only") {
     return { ok: true, reasons: [] };
   }
@@ -160,6 +186,7 @@ export function validatePaidProOutput(args: {
       draftTitle: args.draft?.title,
     });
     if (!vi.ok) {
+      logVpaidDevFail(vi.reasons);
       return { ok: false, reasons: vi.reasons };
     }
   } else if (import.meta.env.MODE !== "test" && !args.skipFounderTitleCheck && isFounderEquityVestingIntent(args.rawIntake)) {
@@ -168,6 +195,7 @@ export function validatePaidProOutput(args: {
       t,
     );
     if (!hasRequiredFounderPremiumTitle(titleG, t)) {
+      logVpaidDevFail(["founder_premium_title_phrase_required"]);
       return { ok: false, reasons: ["founder_premium_title_phrase_required"] };
     }
   }

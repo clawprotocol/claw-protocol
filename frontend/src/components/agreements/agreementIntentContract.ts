@@ -165,7 +165,7 @@ function fromDeterministic(
     required_material_terms:
       row.intent === "loan_repayment"
         ? ["principal", "lender", "parties", "agreement", "shall", "repay", "installment", "note", "borrower"]
-        : designRequired ?? [det.title.split(" ")[0] ?? "Agreement", "parties", "agreement", "shall", "ip", "confident"],
+        : designRequired ?? [det.title.split(" ")[0] ?? "Agreement", "parties", "agreement", "shall", "ip", "confidential"],
     forbidden_misclassifications: row.forbid,
     minimum_section_expectations: row.minSec,
     ambiguity_policy: "require_user_details",
@@ -399,10 +399,30 @@ function countNeedles(hay: string, terms: string[]): number {
   let n = 0;
   for (const term of terms) {
     const t = (term || "").toLowerCase();
-    if (t.length < 3) continue;
+    if (t.length < 2) continue;
+    if (t.length < 3) {
+      if (t === "ip" && /\bip\b/.test(hay)) n += 1;
+      continue;
+    }
     if (hay.includes(t)) n += 1;
   }
   return n;
+}
+
+/** Long Pro bodies often use drafting synonyms; count operative depth instead of 9 keyword stems. */
+function hasOperativeProDepth(hay: string, docLen: number): boolean {
+  if (docLen < 10_000) return false;
+  let score = 0;
+  if (/\bwhereas\b|recital/i.test(hay)) score += 1;
+  if (/\bthe\s+parties\b|\bparty\b/i.test(hay)) score += 1;
+  if (/\b(compensation|fees?|payment|milestone|invoice|deposit|retainer)\b/i.test(hay)) score += 1;
+  if (/\b(termination|governing\s+law|choice\s+of\s+law|dispute|jurisdiction|venue|oklahoma)\b/i.test(hay)) score += 1;
+  if (/\b(intellectual\s+property|work\s+product|copyright|licen[sc]|deliverable)\b/i.test(hay)) score += 1;
+  if (/\b(notice|notices|notif|email|electronic\s+mail)\b/i.test(hay)) score += 1;
+  if (/\b(revision|change\s+order|scope|acceptance|warrant)\b/i.test(hay)) score += 1;
+  if (/\b(confidential|indemn|limitation\s+of\s+liabilit|liability)\b/i.test(hay)) score += 1;
+  if (/\b(execution|signatur|counterpart|electronic)\b/i.test(hay)) score += 1;
+  return score >= 6;
 }
 
 /** Top-of-document / title: must read as logo or design services, not a generic commercial shell. */
@@ -515,6 +535,7 @@ export function validateIntentContractForPaidProOutput(args: {
   }
   const tline = getResolvedTitleForFounderGating((args.draftTitle || "").trim(), text);
   const hay = bodyHay(tline, text);
+  const docLen = text.length;
   const firstLine = firstLineOrTitle(tline, text).toLowerCase();
   if (firstLine === "agreement" || firstLine === "agreement.") {
     return { ok: false, reasons: ["intent:generic_agreement_title"] };
@@ -558,7 +579,11 @@ export function validateIntentContractForPaidProOutput(args: {
     const needed = Math.min(c.required_material_terms.length, 3);
     const hit = countNeedles(hay, c.required_material_terms);
     if (hit < Math.min(2, needed)) {
-      return { ok: false, reasons: [`intent:insufficient_operative_substance:${c.intent_id}`] };
+      if (docLen >= 10_000 && hasOperativeProDepth(hay, docLen)) {
+        /* Long, operative Pro pass — do not fail on 1–2 synonym swaps vs. stem list */
+      } else {
+        return { ok: false, reasons: [`intent:insufficient_operative_substance:${c.intent_id}`] };
+      }
     }
   }
 

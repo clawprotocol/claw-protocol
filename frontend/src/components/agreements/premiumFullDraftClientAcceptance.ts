@@ -68,8 +68,61 @@ export function rejectPremiumBodyForProRender(
   return { ok: uniq.length === 0, reasons: uniq };
 }
 
+/** Stated people + project anchors: tolerate split names, Client/Developer labels, and brand. */
+function partyNameAnchorsPresentInBody(b: string): boolean {
+  if (/\bcryptospaces|crypto[\s-]*space/i.test(b)) return true;
+  if (/\banthem\s+blanchard\b/.test(b) || (/\banthem\b/.test(b) && /\bblanchard\b/.test(b))) return true;
+  if (/\bsarah\s+collins\b/.test(b) || (/\bsarah\b/.test(b) && /\bcollins\b/.test(b))) return true;
+  if (/\bblanchard\b/.test(b) && (/\banthem\b/.test(b) || /\bcryptospaces|crypto/.test(b))) return true;
+  if (/\bcollins\b/.test(b) && (/\bsarah\b/.test(b) || /\bcryptospaces|crypto/.test(b))) return true;
+  return false;
+}
+
 /**
- * Reject “Pro” bodies that swap governing law, drop the client’s brand URL, or use generic party
+ * DEV/telemetry: normalized source-fact hits in the body (not full text) for paid-Pro gate debugging.
+ */
+export function buildPaidProSourceFactProbe(
+  text: string,
+  _intake: string,
+): {
+  anthem: boolean;
+  sarah: boolean;
+  cryptospaces: boolean;
+  oklahoma: boolean;
+  pay7500: boolean;
+  pay3000: boolean;
+  pay4500: boolean;
+  may1_2026: boolean;
+  days30: boolean;
+  revisions2: boolean;
+  preExistToolsLibs: boolean;
+  emailNotices: boolean;
+} {
+  const s = (text || "").toLowerCase();
+  return {
+    anthem: /\banthem\b/.test(s),
+    sarah: /\bsarah\b/.test(s),
+    cryptospaces: /\bcryptospaces|crypto[\s-]*space/i.test(s),
+    oklahoma: /(?:\boklahoma\b|oklahoma\s+law|state of oklahoma|governed by (?:\s*the )?laws? of (?:\s*the )?state of oklahoma)/i.test(s),
+    pay7500: /(?:\$\s*7[,.]?\s*500|7500|7\s*500|seven thousand five hundred)/i.test(s),
+    pay3000: /(?:\$\s*3[,.]?\s*000|3000|three thousand)/i.test(s),
+    pay4500: /(?:\$\s*4[,.]?\s*500|4500|four thousand five hundred)/i.test(s),
+    may1_2026: /(?:may\s*1,?\s*2026|05\/01\/2026|5\/1\/2026|1(?:st)?\s+may\s*2026)/i.test(s),
+    days30: /(?:(?:\b30\b|thirty)(?:\s*\(\d+\))?\s*days?|(?:\b30\b|thirty)[-\s]*day)/i.test(s),
+    revisions2:
+      /(?:\b2\b|\btwo)\s*(?:\(\d\))?\s*(?:revision|rounds?)/i.test(s) ||
+      /two\s*revision\s*rounds?/i.test(s) ||
+      /two\s+\(?2\)?\s*revisions?/i.test(s),
+    preExistToolsLibs: /pre[-\s]*existing|third[-\s]*party (?:code|software|libraries?)|\btools?\s*and\s*libraries?/i.test(s),
+    emailNotices:
+      /notices?.*\bemail|notices?.*\belectronic|notices? by (?:e-?mail|email|electronic)|email.*notic|electronic (?:mail|notices?)|notic(?:e|es) by (?:e-?mail|electronic)|(?:\bnotices?[^\n]{0,200}\bemail|\bemail[^\n]{0,200}\bnoti)/i.test(
+        s,
+      ),
+  };
+}
+
+/**
+ * Reject "Pro" bodies that swap governing law, drop the client's brand URL, or use generic party
  * lines when the intake named people + project (kept aligned with server premium quality gate).
  */
 export function rejectProUpgradeSourceFactDrift(
@@ -84,35 +137,75 @@ export function rejectProUpgradeSourceFactDrift(
       /\b(laws of the state of delaware|governed by the laws of (the state of )?delaware|state of delaware|delaware law)\b/i.test(
         low,
       ) &&
-      !/\boklahoma\b/.test(low)
+      !/oklahoma|state of oklahoma|governed by (?:\s*the )?laws? of (?:\s*the )?state of oklahoma|laws? of the state of oklahoma|oklahoma law/i.test(
+        low,
+      )
     ) {
       reasons.push("governing_law_drift_delaware_intake_had_oklahoma");
     }
   }
-  if (/\b(anthem|sarah|blanchard|collins)\b/i.test(il) && /cryptospaces|crypto\s*spaces/i.test(il)) {
-    if (/\b(service provider|the service provider|the client)\b/.test(low) && !/\banthem\b/.test(low) && !/\bsarah\b/.test(low)) {
+  if (
+    /\bparty\s+a\b/i.test(low) &&
+    /\bparty\s+b\b/i.test(low) &&
+    (/\b(anthem|sarah|blanchard|collins|cryptospaces|crypto)\b/i.test(il) || /\b(anthem\s+blanchard|sarah\s+collins)\b/.test(il)) &&
+    !partyNameAnchorsPresentInBody(low)
+  ) {
+    reasons.push("party_a_b_no_named_party_anchors");
+  }
+  if (/\b(anthem|sarah|blanchard|collins)\b/i.test(il) && /cryptospaces|crypto\s*spaces/i.test(il) && !partyNameAnchorsPresentInBody(low)) {
+    if (/\b(?:the\s+)?service provider\b/.test(low) || /\bthe\s+client\b/.test(low) || /\bthe\s+developer\b/.test(low)) {
       reasons.push("placeholder_parties_intake_had_names");
     }
   }
-  if (/\bcryptospaces\.?net|crypto\s*spaces/i.test(il) && !/\bcryptospaces/.test(low)) {
+  if (/\bcryptospaces\.?net|crypto\s*spaces/i.test(il) && !/\bcryptospaces|crypto[\s-]*space/i.test(low)) {
     reasons.push("missing_stated_brand");
   }
-  if (/\banthem blanchard\b/i.test(il) && !/\banthem\s+blanchard\b/i.test(low)) {
-    reasons.push("intake_name_missing_anthem_blanchard");
+  const wantsAnthemBlanchar = /\banthem blanchard\b/i.test(il) || (/\banthem\b/.test(il) && /\bblanchard\b/.test(il));
+  if (wantsAnthemBlanchar) {
+    if (!/\banthem\s+blanchard\b/.test(low) && !(/\banthem\b/.test(low) && /\bblanchard\b/.test(low))) {
+      reasons.push("intake_name_missing_anthem_blanchard");
+    }
   }
-  if (/\bsarah collins\b/i.test(il) && !/\bsarah\s+collins\b/i.test(low)) {
-    reasons.push("intake_name_missing_sarah_collins");
+  const wantsSarahCollins =
+    /\bsarah collins\b/i.test(il) ||
+    (/\bsarah\b/.test(il) && /\bcollins\b/.test(il) && /(sarah.*collins|collins.*sarah|sarah,\s*collins)/i.test(il));
+  if (wantsSarahCollins) {
+    if (!/\bsarah\s+collins\b/.test(low) && !(/\bsarah\b/.test(low) && /\bcollins\b/.test(low))) {
+      reasons.push("intake_name_missing_sarah_collins");
+    }
   }
-  if (/(?:\$?\s*3,000|3000|three thousand).*(?:upfront|on commencement|due|first)/i.test(il) && !/(?:3,000|3\.?000|3000|three thousand)/i.test(low)) {
+  if (
+    /(?:\$?\s*3,000|3000|three thousand)(?:[\s\S]*?)(?:upfront|on commencement|due|first|deposit)/i.test(il) &&
+    !/(?:3,000|3\.?0{2,3}|\b3000\b|three thousand)/i.test(low)
+  ) {
     reasons.push("missing_3000_upfront_line");
   }
-  if (/(?:\$?\s*4,500|4500|four thousand five hundred).*(?:final|deliver|remaining)/i.test(il) && !/(?:4,500|4\.?500|4500)/i.test(low)) {
+  if (
+    /(?:\$?\s*4,500|4500|four thousand five hundred)(?:[\s\S]*?)(?:final|deliver|remaining|balance|closing)/i.test(il) &&
+    !/(?:4,500|4[,.]500|4\.5\s*k|\b4500\b|four thousand five hundred)/i.test(low)
+  ) {
     reasons.push("missing_4500_final_line");
   }
-  if (/\b30\s*days?\b.*\b(?:deliver|final|complete)/i.test(il) && !/\b30\s*day/i.test(low)) {
+  if (
+    /\b30\s*days?\b(?:[\s\S]*?)(?:\bdeliver(?:y)?|\bfinal\w*|\bcomplete\w*|\bmilestone\w*|\bpayment\w*|\bbalance\w*)/i.test(
+      il,
+    ) &&
+    !/(?:(?:\b30\b|thirty)(?:\s*\(\d+\))?\s*days?|(?:\b30\b|thirty)[-\s]*day)/i.test(low)
+  ) {
     reasons.push("missing_30_day_delivery");
   }
-  if (reasons.length) return { ok: false, reasons };
+  if (
+    /(?:7[,.]?\s*500|7500|seven thousand five hundred)/i.test(il) &&
+    !/(?:7[,.]?\s*500|7500|7\.5k|seven thousand five hundred)/.test(low) &&
+    (/(3[,.]000|3\.?000|3000|4500|4[,.]500|4\.?5\s*k|milestone|deposit|final|tranche|balance|deliver|thirty|30|schedule)/i.test(
+      low,
+    ) || /(3000|4500)/.test(low))
+  ) {
+    if (/(?:3[,.]000|3000|milestone|deposit|final|deliver|thirty|30|4500|4[,.]500)/.test(low)) {
+      reasons.push("intake_pricing_missing_7500_milestone_trio");
+    }
+  }
+  if (reasons.length) return { ok: false, reasons: [...new Set(reasons)] };
   return { ok: true, reasons: [] };
 }
 

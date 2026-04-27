@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import {
   isPaidProFinishedAgreement,
   isUnacceptablePipelineProSource,
@@ -6,6 +7,20 @@ import {
   rejectPaidProStitchedOrThinShell,
   validatePaidProOutput,
 } from "./paidProCorpusAcceptance";
+
+const WEB_INTAKE = `
+  SaaS website API work for CryptoSpaces.net. Client Anthem Blanchard, developer Sarah Collins, Oklahoma.
+  $7,500 total: $3,000 on start, $4,500 on final. thirty days. May 1, 2026. two (2) revision rounds.
+  pre-existing code and libraries. Notices by electronic mail. Email notices ok.
+`.trim();
+
+function padProBody(core: string, minLen: number): string {
+  const clause =
+    " The parties shall each perform. Confidentiality, IP, limitation of liability, and indemnity apply. ";
+  let t = core;
+  while (t.length < minLen) t += clause;
+  return t;
+}
 
 describe("paid pro corpus acceptance", () => {
   it("rejects estate intake with founder/vesting/60-40 body (cross-prompt)", () => {
@@ -44,5 +59,38 @@ describe("paid pro corpus acceptance", () => {
       stale: false,
     });
     expect(r.ok).toBe(false);
+  });
+
+  it("validates a long pro web body with client/developer and concrete facts (Oklahoma, CryptoSpaces, amounts, notices)", () => {
+    const contract = resolveAgreementIntentContract(WEB_INTAKE);
+    expect(contract.intent_id).toBe("software_web_dev");
+    const lead = `
+# Web Development Agreement
+
+## Parties
+**Client (Anthem Blanchard)** engages **Developer (Sarah Collins)** for the **CryptoSpaces** engagement.
+
+Governing law: the laws of the **State of Oklahoma** (Oklahoma). Total **$7,500**; **$3,000** deposit, **$4,500** balance.
+Final payment due within **thirty (30) days**; effective **May 1, 2026**. **Two revision** rounds. **Pre-existing** tools. **Notices** by **email** and **electronic mail**. Terms cover **confidential** use and **IP** between the **parties**. The parties **shall** cooperate.
+    `;
+    const text = padProBody(lead, 12_000);
+    const v = validatePaidProOutput({ text, rawIntake: WEB_INTAKE, intentContract: contract, draft: null });
+    expect(v.ok).toBe(true);
+  });
+
+  it("fails a thin five-slot style starter (same gate as isLikelyFiveSectionStarterShellPro + intent contract)", () => {
+    const contract = resolveAgreementIntentContract(WEB_INTAKE);
+    const thin = `1. Scope of Services / Purpose
+Short.
+2. Payment terms
+Short.
+3. Term and effective date
+Short.
+4. Governing law
+Short.
+5. Termination
+Short.`;
+    const v = validatePaidProOutput({ text: thin, rawIntake: WEB_INTAKE, intentContract: contract, draft: null });
+    expect(v.ok).toBe(false);
   });
 });
