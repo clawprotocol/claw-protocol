@@ -238,7 +238,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
                 setSimpleFlowPhase("review");
               }}
             >
-              Send review link
+              Review link path
             </button>
             <button
               type="button"
@@ -249,7 +249,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
                 setSimpleFlowPhase("send");
               }}
             >
-              Send signing link
+              Signing link path
             </button>
           </div>
         </div>

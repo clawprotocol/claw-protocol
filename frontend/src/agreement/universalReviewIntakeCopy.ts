@@ -22,7 +22,8 @@ export const MODE_UPLOAD_FILE = "Upload file";
 export const UPLOAD_FILE_COMPARISON_COMING_SOON = "Upload file comparison coming soon.";
 
 /** Shown under the universal intro in recipient review. */
-export const NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE = "Nothing changes for the owner until they accept.";
+export const NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE =
+  "Nothing changes for the agreement until both sides confirm.";
 
 export const MATERIAL_CHANGE_SUMMARY_LABEL = "Material change summary";
 

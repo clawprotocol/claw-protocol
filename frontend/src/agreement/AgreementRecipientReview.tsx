@@ -63,6 +63,7 @@ import { CANONICAL_PROOF_SENTENCE, JOY_COPY } from "../joy/clawJoyCopy";
 import { JoyMilestoneMark } from "../joy/JoyMilestone";
 import { emitActionCompleted } from "../joy/joyTelemetry";
 import { errorMessageFromResponse, resolveApiBase } from "../lib/clawApi";
+import { trackAgreementFunnelEvent } from "../tracking/agreementFunnelAnalytics";
 import { recipientAgreementReadHeaders } from "./recipientAccessApi";
 import { DirectComparePanel } from "./DirectComparePanel";
 import { cloneDraftForRecipientPreview } from "./recipientPreviewBaseline";
@@ -252,6 +253,7 @@ export function AgreementRecipientReview({
   const [fullyExecutedAtSign, setFullyExecutedAtSign] = useState(false);
   const ceremonyStartedRef = useRef(false);
   const joySignEmittedRef = useRef(false);
+  const recipientFunnelOpenRef = useRef(false);
   const access = useAccess();
 
   const frictionPatterns = useMemo(
@@ -424,6 +426,7 @@ export function AgreementRecipientReview({
   useEffect(() => {
     ceremonyStartedRef.current = false;
     joySignEmittedRef.current = false;
+    recipientFunnelOpenRef.current = false;
     setCeremonyPhase("idle");
     setCeremonyError(null);
     setCeremonyVersionHash("");
@@ -432,6 +435,14 @@ export function AgreementRecipientReview({
     setSignedAtLabel(null);
     setFullyExecutedAtSign(false);
   }, [agreementId]);
+
+  useEffect(() => {
+    if (recipientFunnelOpenRef.current) return;
+    if (loading) return;
+    if (!draft) return;
+    recipientFunnelOpenRef.current = true;
+    trackAgreementFunnelEvent("recipient_opened_link", { entry_kind: entry.kind }, { planTier: String(access.tier), agreementId });
+  }, [loading, draft, entry.kind, access.tier, agreementId]);
 
   useEffect(() => {
     if (entry.kind !== "sign") return;
@@ -470,6 +481,7 @@ export function AgreementRecipientReview({
       setCeremonyVersionHash(r.agreement_version_hash || "");
       setCeremonySignerName((r.participant_display_name || "").trim() || proposerDisplayNameForApi);
       setCeremonyPhase("ready");
+      trackAgreementFunnelEvent("signature_flow_started", { entry_kind: "sign" }, { planTier: String(access.tier), agreementId });
     })();
     return () => {
       cancel = true;
@@ -764,6 +776,7 @@ export function AgreementRecipientReview({
           ),
         );
       }
+      trackAgreementFunnelEvent("recipient_submitted_edits", { entry_kind: entry.kind }, { planTier: String(access.tier), agreementId });
       setInstruction("");
       setExternalAiPaste("");
       setRecipientPreview(null);
@@ -1081,6 +1094,9 @@ export function AgreementRecipientReview({
           : new Date().toLocaleString()
       );
       setFullyExecutedAtSign(Boolean(r.fully_executed));
+      if (r.fully_executed) {
+        trackAgreementFunnelEvent("agreement_completed", { surface: "recipient_ceremony" }, { planTier: String(access.tier), agreementId });
+      }
       setCeremonyPhase("done");
       await refresh();
     }

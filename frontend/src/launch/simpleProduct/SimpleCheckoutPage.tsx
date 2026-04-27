@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useDynamicConfig } from "../../config/dynamicConfig/useDynamicConfig";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
+import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalytics";
 import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
 import {
   createFiatToCryptoOnrampIntent,
@@ -264,6 +265,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       }
       clearPaywallAttribution();
       finishedRef.current = true;
+      trackAgreementFunnelEvent(
+        "checkout_success_returned",
+        { checkout_kind: isSingleAgreementCheckout ? "single_agreement" : "subscription" },
+        { planTier: String(tier.id), agreementId },
+      );
       if (agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) {
         markAdvancedFullDraftCheckoutGranted();
         clearUpgradeCheckoutContext();

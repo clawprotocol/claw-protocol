@@ -222,11 +222,11 @@ export function FinalizeYourAgreementPanel({
     <div
       className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5"
       role="region"
-      aria-label="Finalize your agreement"
+      aria-label="Pro review and next steps"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">Finalize your agreement</h3>
+          <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">Pro review & next steps</h3>
           <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">{tagline}</p>
         </div>
         <p
@@ -341,7 +341,7 @@ export function FinalizeYourAgreementPanel({
             disabled={disabled || busy}
             onClick={() => onReadyForReview()}
           >
-            Ready for review
+            Review first
           </button>
           <button
             type="button"

@@ -11,6 +11,7 @@ import { consumeJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
 import { hasMarkedSimpleFlowSent } from "../simpleFlowSent";
 import { canAccessSimpleSendActions, isSimpleSendPaywallActive } from "../simpleFlowSendUnlock";
 import { isLawdogCsnTraffic, markLawdogFunnelStep } from "../../tracking/lawdogSession";
+import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalytics";
 import { prepareFreshMarketingEntry } from "../marketingSession";
 import { markFirstWorkflowReinforcementDone, shouldShowFirstWorkflowReinforcement } from "../reEngagementStore";
 import { SimpleFlowShell } from "./SimpleFlowShell";
@@ -78,6 +79,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
       setTitle((v?.summary?.title || "").trim() || null);
       if (isSigned && !finalizeLoggedRef.current) {
         finalizeLoggedRef.current = true;
+        trackAgreementFunnelEvent("agreement_completed", { surface: "simple_done" }, { agreementId });
         emitActionCompleted("finalize", { agreementId });
       }
     })();
@@ -89,12 +91,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const headline = signed
     ? JOY_COPY.signSealedProof
     : confirmedSend
-      ? "Agreement sent"
+      ? "Agreement saved"
       : JOY_COPY.readyToSendHeadline;
   const subline = signed
     ? "Everyone who needed to sign has signed."
     : confirmedSend
-      ? "Now part of your Agreement Memory"
+      ? "It’s in your Agreement Memory — share links from there when you are ready."
       : JOY_COPY.readyToSendSubline;
 
   function onInviteOthers(): void {

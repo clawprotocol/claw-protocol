@@ -9,8 +9,8 @@ export type FinalizeReadiness = "needs_details" | "good_draft" | "ready_for_revi
 const READINESS_COPY: Record<FinalizeReadiness, string> = {
   needs_details: "Needs details",
   good_draft: "Good draft",
-  ready_for_review: "Ready for review",
-  ready_for_signature: "Ready for signature",
+  ready_for_review: "In good shape",
+  ready_for_signature: "Ready to send",
 };
 
 export function formatFinalizeReadiness(r: FinalizeReadiness): string {

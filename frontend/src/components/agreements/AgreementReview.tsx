@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
+import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalytics";
 import type { AgreementWorkspaceEntryMode } from "../../agreement/agreementLifecycle";
 import { AI_ASSISTIVE_SHORT, NOT_LEGAL_ADVICE } from "../../compliance/disclosureCopy";
 import { JOY_COPY } from "../../joy/clawJoyCopy";
@@ -1305,6 +1306,7 @@ const AgreementReview: React.FC<Props> = ({
             : "Could not merge that suggestion into your draft. Please try again.",
         );
       }
+      trackAgreementFunnelEvent("owner_applied_edits", { surface: "agreement_review" }, { planTier: String(access.tier), agreementId });
       await loadDraft({ silent: true });
       await loadRendered();
     } catch (e: unknown) {
@@ -1330,7 +1332,7 @@ const AgreementReview: React.FC<Props> = ({
       }
       await loadDraft({ silent: true });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not reject suggestion.");
+      setError(e instanceof Error ? e.message : "Could not record a decline for this suggestion.");
     } finally {
       setRecipientProposalBusy(null);
     }
@@ -2584,7 +2586,7 @@ const AgreementReview: React.FC<Props> = ({
               dec === "accepted"
                 ? "✔ Accepted"
                 : dec === "rejected"
-                  ? "✖ Rejected"
+                  ? "Declined"
                   : dec === "modified"
                     ? "✏ Modified"
                     : "";
@@ -4165,7 +4167,16 @@ const AgreementReview: React.FC<Props> = ({
                 type="button"
                 className="inline-flex shrink-0 items-center justify-center border-l border-slate-700 bg-slate-800/60 px-3 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
                 aria-label="Copy review link"
-                onClick={() => void navigator.clipboard.writeText(reviewUrl).catch(() => {})}
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await navigator.clipboard.writeText(reviewUrl);
+                      trackAgreementFunnelEvent("review_link_created", { surface: "owner_copy" }, { planTier: String(access.tier), agreementId });
+                    } catch {
+                      /* ignore */
+                    }
+                  })();
+                }}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                   <path
@@ -4194,7 +4205,14 @@ const AgreementReview: React.FC<Props> = ({
                 const nb = setReviewSent(agreementId);
                 if (nb) setVersionBundle(nb);
                 void postReviewSentServer(agreementId);
-                void navigator.clipboard.writeText(reviewUrl).catch(() => {});
+                void (async () => {
+                  try {
+                    await navigator.clipboard.writeText(reviewUrl);
+                    trackAgreementFunnelEvent("review_link_created", { surface: isSimpleHomeReview ? "log_copy_simple" : "log_copy" }, { planTier: String(access.tier), agreementId });
+                  } catch {
+                    /* ignore */
+                  }
+                })();
               }}
             >
               {isSimpleHomeReview ? "Log & copy draft link" : "Send"}
@@ -4203,7 +4221,16 @@ const AgreementReview: React.FC<Props> = ({
               <button
                 type="button"
                 className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200"
-                onClick={() => void navigator.clipboard.writeText(reviewUrl)}
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await navigator.clipboard.writeText(reviewUrl);
+                      trackAgreementFunnelEvent("review_link_created", { surface: "owner_copy_draft" }, { planTier: String(access.tier), agreementId });
+                    } catch {
+                      /* ignore */
+                    }
+                  })();
+                }}
               >
                 Copy draft link
               </button>
@@ -4225,10 +4252,19 @@ const AgreementReview: React.FC<Props> = ({
           <code className="mt-3 block min-w-0 truncate rounded border border-emerald-900/40 bg-slate-950/40 px-2 py-1.5 text-[11px] text-emerald-50/95">
             {signingUrl}
           </code>
-          <button
+            <button
             type="button"
             className="btn mt-3 rounded-lg border border-emerald-700/50 bg-emerald-900/30 px-4 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-900/45"
-            onClick={() => void navigator.clipboard.writeText(signingUrl)}
+            onClick={() => {
+              void (async () => {
+                try {
+                  await navigator.clipboard.writeText(signingUrl);
+                  trackAgreementFunnelEvent("signing_link_created", { surface: "owner_copy" }, { planTier: String(access.tier), agreementId });
+                } catch {
+                  /* ignore */
+                }
+              })();
+            }}
           >
             Copy signing link
           </button>
@@ -5421,19 +5457,19 @@ const AgreementReview: React.FC<Props> = ({
                                 Premium path
                               </h3>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                                Choose <span className="font-medium text-slate-200">Send review link</span> or{" "}
-                                <span className="font-medium text-slate-200">Send signing link</span> at the top of this
+                                Choose <span className="font-medium text-slate-200">Review link path</span> or{" "}
+                                <span className="font-medium text-slate-200">Signing link path</span> at the top of this
                                 page — then return here to finish recipients and confirm.
                               </p>
                             </>
                           ) : streamlinedPremiumIntentForCopy === "review" ? (
                             <>
                               <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                                Send review link
+                                Create review links
                               </h3>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                                Share a review link so both sides can propose changes. Nothing is delivered until you
-                                confirm.
+                                Generate secure review links for each recipient — you copy and share them. Nothing
+                                reaches anyone until you do.
                               </p>
                               <div className="mt-4 flex flex-col gap-3">
                                 <button
@@ -5444,9 +5480,9 @@ const AgreementReview: React.FC<Props> = ({
                                 >
                                   {sendInviteReadyCount >= 1
                                     ? sendInviteReadyCount === 1
-                                      ? "Send review link"
-                                      : `Send review link (${sendInviteReadyCount})`
-                                    : "Send review link"}
+                                      ? "Create review links"
+                                      : `Create review links (${sendInviteReadyCount})`
+                                    : "Create review links"}
                                 </button>
                                 {onSimpleFlowBack ? (
                                   <button
@@ -5481,17 +5517,18 @@ const AgreementReview: React.FC<Props> = ({
                                   <span className="text-emerald-400" aria-hidden>
                                     ✓
                                   </span>
-                                  <span>Nothing sent until confirm</span>
+                                  <span>Nothing reaches reviewers until you share a link</span>
                                 </li>
                               </ul>
                             </>
                           ) : (
                             <>
                               <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                                Send signing link
+                                Create signing links
                               </h3>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                                Tracked signature delivery with signer completion and proof on record.
+                                Generate secure signing links — you copy and share them. Tracked completion and proof
+                                stay on record in LawDog.
                               </p>
                               <div className="mt-4 flex flex-col gap-3">
                                 <button
@@ -5500,7 +5537,7 @@ const AgreementReview: React.FC<Props> = ({
                                   disabled={Boolean(savingField) || simpleFlowAdvanceBusy || sendInviteReadyCount < 1}
                                   onClick={() => void handleSimpleSendWithoutPayment()}
                                 >
-                                  Send signing link
+                                  Create signing links
                                 </button>
                                 {onSimpleFlowBack ? (
                                   <button
@@ -5535,7 +5572,7 @@ const AgreementReview: React.FC<Props> = ({
                                   <span className="text-emerald-400" aria-hidden>
                                     ✓
                                   </span>
-                                  <span>Nothing sent until confirm</span>
+                                  <span>Nothing reaches signers until you share a link</span>
                                 </li>
                               </ul>
                             </>
@@ -6068,7 +6105,16 @@ const AgreementReview: React.FC<Props> = ({
                       <button
                         type="button"
                         className="vs01-btn vs01-btn--secondary w-full sm:w-auto"
-                        onClick={() => void navigator.clipboard.writeText(reviewUrl).catch(() => {})}
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await navigator.clipboard.writeText(reviewUrl);
+                              trackAgreementFunnelEvent("review_link_created", { surface: "simple_send_strip" }, { planTier: String(access.tier), agreementId });
+                            } catch {
+                              /* ignore */
+                            }
+                          })();
+                        }}
                       >
                         Copy review link
                       </button>
@@ -6165,7 +6211,7 @@ const AgreementReview: React.FC<Props> = ({
                     onSimpleFlowContinue?.();
                   }}
                 >
-                  {simpleFlowPremiumHandoffIntent === "review" ? "Send review link" : "Send signing link"}
+                  {simpleFlowPremiumHandoffIntent === "review" ? "Continue to links" : "Continue to links"}
                 </button>
                 <p className="text-center text-[11px] leading-relaxed text-slate-500">{CONVERSION_GUARANTEE_INLINE}</p>
                 <p className="text-center text-xs font-medium leading-snug text-slate-300">

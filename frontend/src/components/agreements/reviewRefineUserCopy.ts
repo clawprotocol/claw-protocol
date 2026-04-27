@@ -1,6 +1,12 @@
-/** Calm, proof-first user-facing copy for the below-document “refine this draft” path (not legal advice). */
+/** Calm, proof-first user-facing copy for the below-document refine path (not legal advice). */
 
-export const REFINE_THIS_DRAFT_HEADING = "Refine this draft";
+import { REFINE_FIELD_HEADING_FREE, REFINE_FIELD_HEADING_PRO } from "./draftPreviewLabels";
+
+export { REFINE_FIELD_HEADING_FREE, REFINE_FIELD_HEADING_PRO } from "./draftPreviewLabels";
+
+export const refineFieldHeading = (isProSurface: boolean) =>
+  isProSurface ? REFINE_FIELD_HEADING_PRO : REFINE_FIELD_HEADING_FREE;
+
 export const REFINE_THIS_DRAFT_SUBCOPY =
   "Add changes here. LawDog updates this agreement — nothing new is created and nothing is sent.";
 

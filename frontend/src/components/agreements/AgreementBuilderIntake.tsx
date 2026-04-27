@@ -29,7 +29,6 @@ import {
 import {
   FUNNEL_CTA_SEND_WITH_PRO,
   FUNNEL_FREE_STARTER_BODY,
-  FUNNEL_FREE_STARTER_HEADLINE,
   HOMEPAGE_LONG_INTAKE_EXAMPLE,
   NOTHING_SENT_UNTIL_CONFIRM,
 } from "../../launch/pricingContent";
@@ -72,8 +71,16 @@ import {
 } from "./proUpgradeWaitCopy";
 import { ProUpgradeWaitRotatingText } from "./ProUpgradeWaitRotatingText";
 import {
+  CHIP_STATE_COMMERCIAL,
+  CHIP_STATE_READY,
+  CHIP_VERSION_PRO,
+  CHIP_VERSION_STARTER,
+  PREVIEW_BLOCK_TITLE,
+  PRO_REPLACED_STARTER_PREVIEW,
+} from "./draftPreviewLabels";
+import {
+  refineFieldHeading,
   REFINE_PERSISTED_UPDATE_FAIL_INLINE,
-  REFINE_THIS_DRAFT_HEADING,
   REFINE_THIS_DRAFT_PLACEHOLDER,
   REFINE_THIS_DRAFT_SUBCOPY,
 } from "./reviewRefineUserCopy";
@@ -224,6 +231,12 @@ import { scopeLooksVague } from "./livePreviewSmartSuggestions";
 import { AgreementReadinessCard } from "./AgreementReadinessCard";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import {
+  captureToPostHogIfAvailable,
+  getAgreementFunnelContextProps,
+  markAgreementFunnelLandingT0IfUnset,
+  trackAgreementFunnelEvent,
+} from "../../tracking/agreementFunnelAnalytics";
+import {
   appendPaidFunnelEvent,
   backfillPaidFunnelIntentForSession,
   buildPaidFunnelRowFromPayload,
@@ -293,17 +306,19 @@ import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPanel";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
+import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
+import {
+  POST_CHECKOUT_PREMIUM_SUPPORT_ARIA_LABEL,
+  POST_CHECKOUT_PREMIUM_SUPPORT_BODY,
+  POST_CHECKOUT_PREMIUM_SUPPORT_TITLE,
+} from "./postPaymentPremiumReviewSummary";
 
-/** One-line upgrade proof for post-payment strip; prefers server finalize audit strengths when present. */
-function formatPremiumRevealDeltaRow(audit: PremiumFinalizeAudit | null): string {
+/** Optional one-line from finalize audit; omit generic marketing so chips + title stay primary. */
+function formatPremiumRevealDeltaRow(audit: PremiumFinalizeAudit | null): string | null {
   const strengths = (audit?.resolved_strengths ?? []).map((s) => s.trim()).filter(Boolean);
-  if (strengths.length >= 2) {
-    return strengths.slice(0, 3).join(" · ");
-  }
-  if (strengths.length === 1) {
-    return `${strengths[0]} · Clear review & sign path · Commercially complete structure`;
-  }
-  return "Stronger ownership & payment protections · Clear review & sign path · Commercially complete structure";
+  if (strengths.length === 0) return null;
+  if (strengths.length === 1) return strengths[0];
+  return strengths.slice(0, 3).join(" · ");
 }
 
 export {
@@ -406,23 +421,35 @@ function RecipientOutboxPreviewPanel({
   agreementTitle,
   partyA,
   partyB,
+  inviteKind,
 }: {
   agreementTitle: string;
   partyA: string;
   partyB: string;
+  inviteKind: "review" | "signature";
 }) {
+  const isReview = inviteKind === "review";
+  const intro = isReview
+    ? "LawDog does not auto-email recipients from this step. After you continue, you copy a secure review link and share it however you already work together."
+    : "LawDog does not auto-email recipients from this step. After you continue, you copy a secure signing link and share it when you are ready.";
+  const chip = isReview ? "Open review link" : "Open signing link";
+  const foot = isReview
+    ? "They can read the draft, suggest plain-English edits, paste a revised version, preview changes, and submit suggestions. Both sides confirm before the agreement updates."
+    : "They can read the final terms and sign when ready. Nothing is final until they complete their step.";
+
   return (
-    <div className="mb-3 opacity-[0.92]" role="region" aria-label="What recipients will receive">
+    <div className="mb-3 opacity-[0.92]" role="region" aria-label="How sharing works after you continue">
       <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 sm:text-[11px]">
-        What recipients will receive
+        Optional message you can paste
       </p>
       <div className="rounded-lg border border-slate-700/45 bg-slate-950/55 px-3 py-2.5 text-left shadow-sm shadow-black/15 sm:px-3.5 sm:py-3">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Email subject</p>
-        <p className="mt-0.5 text-sm font-medium text-slate-200/95">Agreement for signature</p>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-slate-400/95 sm:text-[13px]">{intro}</p>
         <div className="mt-2.5 border-t border-slate-800/50 pt-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Body preview</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Example snippet</p>
           <p className="mt-1.5 text-[12px] leading-relaxed text-slate-400/95 sm:text-[13px]">
-            You&apos;ve been invited to sign an agreement (or complete your assigned role).
+            {isReview
+              ? "You have a secure link to review an agreement draft. Open it when you have a few minutes — your suggestions stay in plain language until the owner confirms."
+              : "You have a secure link to review and sign an agreement. Open it when you are ready — nothing is final until you complete your part."}
           </p>
           <ul className="mt-1.5 space-y-1 text-[12px] leading-snug text-slate-400/90 sm:text-[13px]">
             <li className="flex gap-2">
@@ -445,18 +472,20 @@ function RecipientOutboxPreviewPanel({
               </span>
             </li>
           </ul>
-          <p className="mt-2 text-[12px] leading-relaxed text-slate-400/90 sm:text-[13px]">Open securely to sign or respond:</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-400/90 sm:text-[13px]">Secure link button (example):</p>
           <div className="mt-1.5">
             <span className="inline-flex items-center justify-center rounded-md border border-slate-600/50 bg-slate-900/50 px-2.5 py-1 text-[11px] font-medium text-slate-300/95">
-              View Agreement
+              {chip}
             </span>
           </div>
-          <p className="mt-2 text-[12px] leading-relaxed text-slate-400/90 sm:text-[13px]">No account required to sign.</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-400/90 sm:text-[13px]">{foot}</p>
         </div>
-        <p className="mt-2 border-t border-slate-800/40 pt-2 text-center text-[10px] text-slate-600">Sent via LawDog</p>
+        <p className="mt-2 border-t border-slate-800/40 pt-2 text-center text-[10px] text-slate-600">
+          Nothing is sent until you confirm on the prior step.
+        </p>
       </div>
       <p className="mt-1.5 text-center text-[10px] leading-relaxed text-slate-600 sm:text-[11px]">
-        Delivered securely. No account required for recipients.
+        Recipients use the link in a browser. No LawDog account required for them to participate.
       </p>
     </div>
   );
@@ -691,7 +720,7 @@ const PREMIUM_ORIGINAL_WORDING_PLACEHOLDER =
 const PREMIUM_ORIGINAL_WORDING_CTA = FUNNEL_CTA_SEND_WITH_PRO;
 const PREMIUM_ORIGINAL_WORDING_DETAILS_SUMMARY = "Use your exact wording (LawDog Pro)";
 
-const STARTER_REVIEW_HEADLINE = FUNNEL_FREE_STARTER_HEADLINE;
+const STARTER_REVIEW_HEADLINE = PREVIEW_BLOCK_TITLE;
 const STARTER_REVIEW_SUBLINE = FUNNEL_FREE_STARTER_BODY;
 const STARTER_CONTINUE_TO_SEND_UPGRADE_NUDGE =
   "Closing soon? Upgrade to send for a calmer review surface, clearer terms, and professional delivery.";
@@ -862,29 +891,35 @@ function CreateFlowSendRecipientsPanel({
   const r1e = stripRecipientEmailNoise(recipient1Email);
   const r2e = stripRecipientEmailNoise(recipient2Email);
   const primaryName = (recipient1Name || "").trim() || "Recipient";
-  const primaryEmailLine = looksLikeEmail(r1e) ? r1e : "Add an email to send";
+  const r1Invalid = r1e.length > 0 && !looksLikeEmail(r1e);
+  const r2Invalid = r2e.length > 0 && !looksLikeEmail(r2e);
+  const primaryEmailLine = looksLikeEmail(r1e)
+    ? r1e
+    : r1Invalid
+      ? "That email doesn’t look valid yet — check spelling and the part after @."
+      : "Add recipient 1 email (labels your invite; you’ll copy a secure link next)";
   const modeLinkLabel = effectivePremiumSendMode === "review" ? "Review link" : "Signing link";
   const modeExplain =
     effectivePremiumSendMode === "review"
-      ? "Recipients read the draft and can suggest changes before anything is finalized."
-      : "Recipients read the final terms, then sign when they are ready.";
+      ? "Recipients open a secure link to read the draft, suggest plain-English edits, paste a revised version, preview material changes, and submit suggestions. You confirm before anything updates."
+      : "Recipients open a secure link to read the final terms and sign when they are ready.";
   const nextStepExplain = sendRequiresConfirmStep
-    ? "Next, you will confirm the exact recipients in one step. Nothing is emailed or finalized until then — suggested edits use a review link, and nothing changes until you confirm."
-    : "Review links and signing links are created on the next step — nothing is sent or finalized until you confirm below.";
+    ? "Next, you confirm who is on the agreement in one step. LawDog does not auto-email from here — you copy a secure link after save. Nothing reaches recipients until you share it."
+    : "After you continue, the agreement is saved and you get links to copy. Nothing reaches recipients until you share a link.";
   const linkReadyOutbox = isPremiumRecipientSurface;
   const primarySendLabel = sendRequiresConfirmStep
     ? "Continue to confirmation"
     : effectivePremiumSendMode === "review"
       ? linkReadyOutbox
-        ? "Send review link"
+        ? "Continue to review links"
         : "Create review link"
       : linkReadyOutbox
-        ? "Send signing link"
+        ? "Continue to signing links"
         : "Create signing link";
 
   const senderInviteTrustStrip = (
     <ul className="mt-3 flex flex-wrap gap-2" aria-label="Trust cues">
-      {["Secure link", "You choose when it sends", "Named recipients only"].map((t) => (
+      {["Secure link", "You choose when to share", "Named recipients only"].map((t) => (
         <li
           key={t}
           className="rounded-full border border-slate-600/70 bg-slate-950/40 px-2.5 py-1 text-[10px] font-medium text-slate-300"
@@ -982,6 +1017,9 @@ function CreateFlowSendRecipientsPanel({
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Who receives it</p>
         <p className="mt-2 text-lg font-medium tracking-tight text-slate-100">{primaryName}</p>
         <p className={`mt-1 text-sm ${looksLikeEmail(r1e) ? "text-slate-300" : "text-amber-200/90"}`}>{primaryEmailLine}</p>
+        {r2Invalid ? (
+          <p className="mt-2 text-xs text-amber-200/90">Recipient 2 email doesn’t look valid — fix it or clear that field.</p>
+        ) : null}
         {looksLikeEmail(r2e) ? (
           <p className="mt-3 text-xs text-slate-500">
             Also included for{" "}
@@ -1006,7 +1044,8 @@ function CreateFlowSendRecipientsPanel({
         ) : null}
       </div>
       <p className="mt-3 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
-        Nothing is emailed or finalized until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""}.
+        Nothing is sent to recipients until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""} and share
+        a link yourself.
       </p>
       <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
         <button
@@ -1045,17 +1084,18 @@ function CreateFlowSendRecipientsPanel({
             </details>
           ) : !(isPremiumRecipientSurface || showProTierAdvanced) ? (
             <p className="px-3 py-2 text-xs leading-relaxed text-slate-500">
-              Tracked signature and delivery details are included when you send — no extra setup required here.
+              Tracked signing details are configured after you save — this step is only who the agreement is for.
             </p>
           ) : null}
           {(isPremiumRecipientSurface || showProTierAdvanced) && draft ? (
             <details className={advDetailsClass}>
-              <summary className={advSummaryClass}>Shared draft &amp; email preview</summary>
+              <summary className={advSummaryClass}>Shared draft &amp; optional share snippet</summary>
               <div className="border-t border-slate-800/50 px-2 pb-3 pt-2">
                 <RecipientOutboxPreviewPanel
                   agreementTitle={(draft.title || "").trim() || "Your agreement"}
                   partyA={(draft.parties?.[0]?.name || "").trim() || "Party A"}
                   partyB={(draft.parties?.[1]?.name || "").trim() || "Party B"}
+                  inviteKind={effectivePremiumSendMode === "signature" ? "signature" : "review"}
                 />
               </div>
             </details>
@@ -1279,6 +1319,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const upgradeLockActiveRef = useRef(false);
   /** One-time inline banner after optional full-draft upgrade (not persisted across refresh). */
   const [fullDraftUpgradeBannerVisible, setFullDraftUpgradeBannerVisible] = useState(false);
+  /** Pro output replaced a starter draft after upgrade (in-app or post-checkout); drives subtle line above preview. */
+  const [proReplacedStarterAfterUpgrade, setProReplacedStarterAfterUpgrade] = useState(false);
   const [recipientPartyDetailsModalOpen, setRecipientPartyDetailsModalOpen] = useState(false);
   const [modalParty1Name, setModalParty1Name] = useState("");
   const [modalParty2Name, setModalParty2Name] = useState("");
@@ -1622,7 +1664,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       name:
         | "landing_view"
         | "starter_selected"
-        | "first_input"
+        | "first_input_started"
         | "step_completed"
         | "ready_state_reached"
         | "generate_clicked"
@@ -1630,6 +1672,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       payload?: Record<string, unknown>,
     ) => {
       const now = Date.now();
+      if (name === "landing_view") {
+        markAgreementFunnelLandingT0IfUnset();
+      }
       funnelEventTsRef.current[name] = now;
       const enrich =
         simpleProductFlow && liveWorkspaceTwoPane
@@ -1638,17 +1683,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               first_lawdog_session: firstLawdogSession,
             }
           : {};
-      logProductEvent(name, {
+      const funnel = getAgreementFunnelContextProps({ planTier: String(tier) });
+      const merged = {
+        ...funnel,
         flow_started_at_ms: funnelStartedAtRef.current,
         event_ts_ms: now,
         since_start_ms: now - funnelStartedAtRef.current,
         ...enrich,
         ...payload,
-      });
+      };
+      logProductEvent(name, merged);
+      captureToPostHogIfAvailable(name, merged);
     },
-    [simpleProductFlow, liveWorkspaceTwoPane, freshSimpleCreateUx, firstLawdogSession],
+    [simpleProductFlow, liveWorkspaceTwoPane, freshSimpleCreateUx, firstLawdogSession, tier],
   );
   const paidFunnelEmittedRef = useRef<Record<string, boolean>>({});
+  const proDraftLoadedFunnelKeysRef = useRef<Set<string>>(new Set());
   const paidCheckoutCompletedRef = useRef(false);
   /** After checkout, first `premium_checkout_completed` can be `ok` while client truth-gate still blocks; one revision row. */
   const truthGateCheckoutRevisionEmittedRef = useRef(false);
@@ -1679,14 +1729,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         sessionId,
         resolveBestPaidFunnelIntentId({ sessionId, longCorpus, parserHint }),
       );
-      const isMobile =
-        typeof window !== "undefined" &&
-        typeof window.matchMedia === "function" &&
-        window.matchMedia("(max-width: 1023px)").matches;
       const premiumGenerationOutcome = proFullDraftQualityRetry ? "needs_details" : "unknown";
       return {
         agreement_intent_id: bestIntent,
-        device: isMobile ? "mobile" : "desktop",
+        ...getAgreementFunnelContextProps({ planTier: String(tier) }),
         free_title_present: (draft?.title || "").trim() ? "yes" : "no",
         premium_generation_outcome: premiumGenerationOutcome,
         render_source: premiumTruthPipelineSource || "unknown",
@@ -1694,14 +1740,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ...(overrides ?? {}),
       };
     },
-    [
-      draft,
-      proFullDraftQualityRetry,
-      premiumTruthPipelineSource,
-      useGuidedSplitIntake,
-      intakeBaselineCommitted,
-      intakeStepBuffer,
-    ],
+    [draft, proFullDraftQualityRetry, premiumTruthPipelineSource, useGuidedSplitIntake, intakeBaselineCommitted, intakeStepBuffer, tier],
   );
 
   const logPaidFunnelSummary = React.useCallback((rows: PaidFunnelStoredRow[]) => {
@@ -1735,15 +1774,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         console.info("[paid-funnel]", { name, ...payload });
       }
       if (typeof window !== "undefined") {
-        const ph = (window as Window & { posthog?: { capture?: (n: string, p?: Record<string, unknown>) => void } })
-          .posthog;
-        if (ph?.capture) {
-          try {
-            ph.capture(name, payload);
-          } catch {
-            /* ignore optional analytics hook */
-          }
-        }
+        captureToPostHogIfAvailable(name, payload);
         try {
           const ts = Date.now();
           const row = buildPaidFunnelRowFromPayload(name, ts, payload);
@@ -2060,7 +2091,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const chars = intakeCombined.trim().length;
     if (chars < 8) return;
     firstInputTrackedRef.current = true;
-    trackFunnelEvent("first_input", { chars });
+    trackFunnelEvent("first_input_started", { chars });
   }, [intakeCombined, trackFunnelEvent]);
 
   useEffect(() => {
@@ -2087,7 +2118,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         trackFunnelEvent("starter_selected", { starter_chars: t.length });
         if (t.length >= 8 && !firstInputTrackedRef.current) {
           firstInputTrackedRef.current = true;
-          trackFunnelEvent("first_input", { chars: t.length, source: "starter_chip" });
+          trackFunnelEvent("first_input_started", { chars: t.length, source: "starter_chip" });
         }
         setPreviewPaneRevealed(false);
         setIntakeBaselineCommitted(t);
@@ -2655,23 +2686,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return next;
   }
 
-  function stripRecipientEmailNoise(s: string): string {
-    return (s || "").replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/\u00A0/g, " ").trim();
-  }
-
-  /** Loose but practical gate: dotful domains OR longer no-dot hosts (e.g. internal). */
-  function looksLikeEmail(s: string): boolean {
-    const t = stripRecipientEmailNoise(s);
-    if (!t.includes("@")) return false;
-    const at = t.lastIndexOf("@");
-    if (at <= 0 || at === t.length - 1) return false;
-    const local = t.slice(0, at);
-    const domain = t.slice(at + 1);
-    if (!local || !domain || local.includes(" ") || domain.includes(" ") || domain.includes("@")) return false;
-    if (domain.includes(".")) return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
-    return domain.length >= 4;
-  }
-
   function partyEmailAtIndex(
     parties: readonly { name?: string; role?: string; email?: string }[] | null | undefined,
     idx: number,
@@ -3051,6 +3065,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         pendingUpgradePromptRef.current = "";
         syncUpgradeIntentRefs(false);
         if (showSuccessBanner) setFullDraftUpgradeBannerVisible(true);
+        setProReplacedStarterAfterUpgrade(true);
         devLog("[optional-full-draft-upgrade] applied", { rawLen: rawIntake.length });
         if (showSuccessBanner) {
           window.requestAnimationFrame(() => {
@@ -3181,6 +3196,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
       const applySuccess = (result: PremiumCompletionResult) => {
         paidCheckoutCompletedRef.current = true;
+        if (resumeSnap?.resume_kind === "optional_full_upgrade") {
+          setProReplacedStarterAfterUpgrade(true);
+        }
         emitPaidFunnelEvent("premium_checkout_completed", {
           once: true,
           extra: {
@@ -3361,9 +3379,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumReviewRoute(null);
             commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft));
             agreementDocumentDirtyRef.current = false;
-            setAgreementDocumentText(
-              "Your LawDog Pro agreement is ready for review. You can edit any wording before sending.",
-            );
+            setAgreementDocumentText("Review and edit the document below when it appears. Nothing is sent from this step.");
             setReviewDocRefreshTick((n) => n + 1);
             setPremiumPostCheckoutPhase(null);
             emitPaidFunnelEvent("premium_checkout_completed", {
@@ -3442,6 +3458,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         primePremiumCollaborateFirstDefault();
         setPremiumForkPrimedNonce((n) => n + 1);
         markPremiumCompletionDoneInLocalStorage();
+        {
+          const gk = `primary:${String(result.agreementGenerationId || "gen").trim() || "gen"}`;
+          if (!proDraftLoadedFunnelKeysRef.current.has(gk)) {
+            proDraftLoadedFunnelKeysRef.current.add(gk);
+            trackAgreementFunnelEvent(
+              "pro_draft_loaded",
+              { render_source: result.premiumRenderSource || "unknown", path: "primary" },
+              { planTier: String(tier), atMsProDraft: Date.now() },
+            );
+          }
+        }
         setPremiumPersistedFlowActive(true);
         setPremiumSendPathUnlocked(true);
         commitParsedDraftToReviewFlow(merged.draft);
@@ -3564,6 +3591,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         primePremiumCollaborateFirstDefault();
         setPremiumForkPrimedNonce((n) => n + 1);
         markPremiumCompletionDoneInLocalStorage();
+        {
+          const gk = `fallback:${getOrInitSessionAgreementGenerationId() || "fg"}`;
+          if (!proDraftLoadedFunnelKeysRef.current.has(gk)) {
+            proDraftLoadedFunnelKeysRef.current.add(gk);
+            trackAgreementFunnelEvent("pro_draft_loaded", { path: "fallback" }, { planTier: String(tier), atMsProDraft: Date.now() });
+          }
+        }
         commitParsedDraftToReviewFlow(merged.draft);
         agreementDocumentDirtyRef.current = false;
         try {
@@ -3907,6 +3941,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     console.info("[premium-flow] button_click", { button: "upgrade_to_full_draft_modal" });
     logProductEvent("upgrade_clicked", { surface: "agreement_optional_full_draft", intent: "full_draft_upgrade" });
+    trackAgreementFunnelEvent(
+      "premium_upgrade_clicked",
+      { surface: "agreement_optional_full_draft" },
+      { planTier: String(tier) },
+    );
     setPendingUpgradePrompt(raw);
     pendingUpgradePromptRef.current = raw;
     setUpgradeIntentDetected(true);
@@ -4312,6 +4351,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       surface: "agreement_original_wording_premium",
       intent: "exact_wording_checkout",
     });
+    trackAgreementFunnelEvent("premium_upgrade_clicked", { surface: "agreement_original_wording_premium" }, { planTier: String(tier) });
     pendingUpgradePromptRef.current = wording;
     setPendingUpgradePrompt(wording);
     setUpgradeIntentDetected(true);
@@ -4352,6 +4392,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     syncUpgradeIntentRefs,
     resolveRawIntakeForPremiumCheckout,
     persistPremiumRecipientHandoffFromDraftAndUi,
+    tier,
   ]);
 
   const handleProductionInlineWordingSubmit = React.useCallback(async () => {
@@ -4593,6 +4634,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       Boolean(draft);
 
     if (productionRecipientsPersist) {
+      if (!assertRecipientsValidForPremiumSend()) return;
       if (productionSendInFlightRef.current) {
         if (import.meta.env.DEV) devSendCtaTrace("onGenerate skip: production send already in flight");
         return;
@@ -4655,7 +4697,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setProductionSendBarPhase("idle");
           setProductionSendBarAgreementId(null);
           setHardError(
-            "We couldn’t finish sending from this screen. Your agreement is still here — try again in a moment, or reopen it from My agreements.",
+            "We couldn’t finish saving from this screen. Your agreement is still here — try again in a moment, or reopen it from My agreements.",
           );
         }
       } finally {
@@ -4716,13 +4758,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (!ok) {
           setDisplayPhase("intake");
           setHardError(
-            "We couldn’t finish sending from this screen. Your draft is still here — try again in a moment, or reopen review from My agreements.",
+            "We couldn’t finish saving from this screen. Your draft is still here — try again in a moment, or reopen review from My agreements.",
           );
         }
       } catch (e) {
         if (import.meta.env.DEV) console.error("[AgreementIntake:send-cta] simpleWorkspacePersistSend error", e);
         setDisplayPhase("intake");
-        setHardError("Something went wrong while sending. Your draft is still here — try again.");
+        setHardError("Something went wrong while saving. Your draft is still here — try again.");
       } finally {
         setLoading(false);
       }
@@ -4958,7 +5000,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPreviewPaneRevealed(false);
     if (!firstInputTrackedRef.current) {
       firstInputTrackedRef.current = true;
-      trackFunnelEvent("first_input", { chars: step.length, source: "start_cta" });
+      trackFunnelEvent("first_input_started", { chars: step.length, source: "start_cta" });
     }
     return true;
   }, [intakeStepBuffer, trackFunnelEvent]);
@@ -5770,6 +5812,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [createProductionTwoPane, productionDraftPrimaryReviewSurface, createUiStage],
   );
 
+  const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
+    if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
+    if (premiumPaidDocumentSurface) {
+      return { version: CHIP_VERSION_PRO, state: CHIP_STATE_COMMERCIAL };
+    }
+    return { version: CHIP_VERSION_STARTER, state: CHIP_STATE_READY };
+  }, [createUiStage, draft, premiumPaidDocumentSurface]);
+
+  const showProReplacedStarterNudge = useMemo(
+    () =>
+      Boolean(
+        proReplacedStarterAfterUpgrade &&
+          createUiStage === CreateUiStage.DRAFT &&
+          createProductionTwoPane &&
+          productionDraftPrimaryReviewSurface &&
+          premiumPaidDocumentSurface &&
+          !showUpgradeToFullDraftOnReview &&
+          draft,
+      ),
+    [
+      proReplacedStarterAfterUpgrade,
+      createUiStage,
+      createProductionTwoPane,
+      productionDraftPrimaryReviewSurface,
+      premiumPaidDocumentSurface,
+      showUpgradeToFullDraftOnReview,
+      draft,
+    ],
+  );
+
   const fullDraftComparisonRows = useMemo(
     () =>
       showFullDraftDiffPreview
@@ -6024,6 +6096,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const hasAnyValidRecipientEmail =
     [recipient1Email, recipient2Email].some((e) => looksLikeEmail(String(e ?? ""))) || draftPartyRecipientEmailPresent;
+  const recipientEmailsHaveValidationErrors = useMemo(() => {
+    const r1e = stripRecipientEmailNoise(recipient1Email);
+    const r2e = stripRecipientEmailNoise(recipient2Email);
+    if (r1e.length > 0 && !looksLikeEmail(r1e)) return true;
+    if (recipient2Name.trim() && r2e.length > 0 && !looksLikeEmail(r2e)) return true;
+    return false;
+  }, [recipient1Email, recipient2Email, recipient2Name]);
   const productionReadyForPersist = Boolean(
     createProductionTwoPane &&
       createUiStage === CreateUiStage.RECIPIENTS &&
@@ -6065,15 +6144,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumRecipientSetupSubcopy = useMemo(() => {
     if (!premiumSignersSurfaceReady) return "";
     if (!productionReadyForPersist) {
-      return "Add reviewer and signer details below. Nothing sends until your final confirmation step.";
+      return "Add who is on the agreement below. Nothing reaches recipients until you confirm and share a secure link.";
     }
     if (!premiumSendModeTouched) {
-      return "Choose review-first or signature-ready, then confirm recipient emails. You stay in control until final send.";
+      return "Choose review-first or signature-ready, then confirm recipient details. You copy links to share — LawDog does not auto-email from this step.";
     }
     if (effectivePremiumSendMode === "review") {
-      return "Invite reviewers to comment first, then move to signer setup when terms are final.";
+      return "Reviewers use a secure link to suggest plain-English edits; you confirm before the agreement updates.";
     }
-    return "Invite signers for tracked e-signing with timestamped proof and delivery tracking.";
+    return "Signers use a secure link for tracked e-signing when you are ready to share it.";
   }, [
     premiumSignersSurfaceReady,
     productionReadyForPersist,
@@ -6081,18 +6160,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     effectivePremiumSendMode,
   ]);
 
+  const createFlowRecipientPrimaryHelper = useMemo(() => {
+    if (!premiumSendConfirmGateActive || recipientsDeferred) return null;
+    const r1e = stripRecipientEmailNoise(recipient1Email);
+    const r2e = stripRecipientEmailNoise(recipient2Email);
+    if (r1e.length > 0 && !looksLikeEmail(r1e)) return "Fix recipient 1 email before you continue.";
+    if (recipient2Name.trim() && r2e.length > 0 && !looksLikeEmail(r2e))
+      return "Fix recipient 2 email or clear the second recipient.";
+    if (!hasAnyValidRecipientEmail) return "Add at least one valid recipient email to continue.";
+    return null;
+  }, [
+    premiumSendConfirmGateActive,
+    recipientsDeferred,
+    recipient1Email,
+    recipient2Email,
+    recipient2Name,
+    hasAnyValidRecipientEmail,
+  ]);
+
   const premiumRouteMomentumRibbon = useMemo(() => {
     if (!premiumSignersSurfaceReady || !premiumReviewRoute) return null;
     if (effectivePremiumSendMode === "review") {
       return {
-        title: "Keep momentum — invite review now",
-        body: "Counterparties can comment and redline inline in minutes. You stay in control until you confirm send.",
+        title: "Keep momentum — set up review now",
+        body: "Counterparties can suggest edits in plain language. Nothing changes until you confirm together.",
       };
     }
     if (effectivePremiumSendMode === "signature") {
       return {
-        title: "Fast, trustworthy signing",
-        body: "Tracked e-sign works on mobile for every party. Nothing sends until you confirm recipients on the last step.",
+        title: "Calm signing path",
+        body: "Tracked e-sign works on mobile for each party. You confirm recipients, then copy signing links to share.",
       };
     }
     return null;
@@ -6728,6 +6825,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               surface: "starter_review_protections_upsell",
               intent: "unlock_premium_rewrite",
             });
+            trackAgreementFunnelEvent("premium_upgrade_clicked", { surface: "starter_review_protections_upsell" }, { planTier: String(tier) });
             beginAdvancedFullDraftCheckout();
           }}
         >
@@ -6736,7 +6834,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         <p className="mt-2 text-center text-[11px] leading-snug text-slate-400 sm:text-xs">{STARTER_REVIEW_PREMIUM_MICROCOPY}</p>
       </div>
     );
-  }, [originalWordingIsPremiumOnlyOnStarter, beginAdvancedFullDraftCheckout, suppressIntakePremiumUpsell]);
+  }, [originalWordingIsPremiumOnlyOnStarter, beginAdvancedFullDraftCheckout, suppressIntakePremiumUpsell, tier]);
 
   const continueIsSecondary = Boolean(
     simpleProductFlow &&
@@ -7625,21 +7723,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (createUiStage === CreateUiStage.RECIPIENTS) {
         if (productionReadyForPersist) {
           const sendDisabled =
-            !hasAnyValidRecipientEmail || Boolean(loading) || premiumSendConfirmOpen;
+            (!recipientsDeferred && (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)) ||
+            Boolean(loading) ||
+            premiumSendConfirmOpen;
           const premiumOutbox = premiumSignersSurfaceReady;
           const persistSendLabel =
             loading &&
             createUiStage === CreateUiStage.RECIPIENTS &&
             createFlowPhase === "ready_to_send"
-              ? "Sending…"
+              ? "Saving…"
               : premiumSendConfirmGateActive
                 ? "Continue to confirmation"
                 : effectivePremiumSendMode === "review"
                   ? premiumOutbox
-                    ? "Send review link"
+                    ? "Continue to review links"
                     : "Create review link"
                   : premiumOutbox
-                    ? "Send signing link"
+                    ? "Continue to signing links"
                     : "Create signing link";
           return {
             label: persistSendLabel,
@@ -7681,7 +7781,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return {
         label: "Send",
         action: "send_agreement",
-        disabled: (productionReadyForPersist && !hasAnyValidRecipientEmail) || Boolean(loading),
+        disabled:
+          (productionReadyForPersist &&
+            !recipientsDeferred &&
+            (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)) ||
+          Boolean(loading),
       };
     }
     const dis = !intakeCombined.trim();
@@ -7724,6 +7828,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendConfirmGateActive,
     recipient2Email,
     hasAnyValidRecipientEmail,
+    recipientEmailsHaveValidationErrors,
     streamlineFirstRunReviewUi,
     effectivePremiumSendMode,
     displayLivePreviewModel,
@@ -7844,6 +7949,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const sendRelated =
       simpleCreateBottomPrimaryLabel === "Send agreement" ||
       simpleCreateBottomPrimaryLabel === "Send" ||
+      simpleCreateBottomPrimaryLabel === "Saving…" ||
       simpleCreateBottomPrimaryLabel === "Sending…" ||
       createUiStage === CreateUiStage.RECIPIENTS ||
       simpleCreateReadyForSend;
@@ -8208,6 +8314,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
     }
     emitPaidFunnelEvent("premium_continue_recipients_clicked", { extra: { continue_mode: effectivePremiumSendMode } });
+    trackAgreementFunnelEvent("continue_to_recipient_setup", { continue_mode: effectivePremiumSendMode }, { planTier: String(tier) });
     markPremiumRecipientsSurfaceReleased();
     setPremiumRecipientUxActive(true);
     bumpPremiumSurfaceGateTick();
@@ -8357,6 +8464,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     scrollVisibleRecipientSetupIntoView("center");
   }, [recipient1Name, recipient1Email, recipient2Name, recipient2Email]);
 
+  const assertRecipientsValidForPremiumSend = React.useCallback((): boolean => {
+    const r1e = stripRecipientEmailNoise(recipient1Email);
+    const r2e = stripRecipientEmailNoise(recipient2Email);
+    if (r1e && !looksLikeEmail(r1e)) {
+      setHardError("Recipient 1 email doesn’t look valid yet — check spelling or the part after @.");
+      focusFirstMissingRecipientRequirement();
+      return false;
+    }
+    if (recipient2Name.trim() && r2e && !looksLikeEmail(r2e)) {
+      setHardError(
+        "Recipient 2 email doesn’t look valid — enter a correct address or clear the second recipient’s name and email.",
+      );
+      focusFirstMissingRecipientRequirement();
+      return false;
+    }
+    if (!hasAnyValidRecipientEmail) {
+      setHardError("Add at least one valid recipient email, then try again.");
+      focusFirstMissingRecipientRequirement();
+      return false;
+    }
+    return true;
+  }, [recipient1Email, recipient2Email, recipient2Name, hasAnyValidRecipientEmail, focusFirstMissingRecipientRequirement]);
+
   const executePrimaryCta = (cta: PrimaryCtaState) => {
     console.log("[CTA EXECUTE]", {
       stage: createUiStage,
@@ -8456,10 +8586,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           case "send_agreement": {
             logProductEvent("create_flow_cta_clicked", { cta_click_type: "send" });
             await finalizeIntakeCapture();
-            if (!hasAnyValidRecipientEmail) {
-              setHardError("Add at least one valid recipient email, then try again.");
-              return;
-            }
+            if (!assertRecipientsValidForPremiumSend()) return;
             const premiumSendConfirmGate =
               createProductionTwoPane &&
               createUiStage === CreateUiStage.RECIPIENTS &&
@@ -8539,10 +8666,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               premiumSignersSurfaceReady
             ) {
               await finalizeIntakeCapture();
-              if (!hasAnyValidRecipientEmail) {
-                setHardError("Add at least one valid recipient email, then try again.");
-                return;
-              }
+              if (!assertRecipientsValidForPremiumSend()) return;
               if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
               setPremiumSendConfirmOpen(true);
               return;
@@ -8616,10 +8740,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ) {
         if (import.meta.env.DEV) devSendCtaTrace("runPrimary: early RECIPIENTS → finalize + onGenerate");
         await finalizeIntakeCapture();
-        if (!hasAnyValidRecipientEmail) {
-          setHardError("Add at least one valid recipient email, then try again.");
-          return;
-        }
+        if (!assertRecipientsValidForPremiumSend()) return;
         if (premiumSignersSurfaceReady) {
           persistPremiumRecipientHandoffFromDraftAndUi(draft);
           setPremiumSendConfirmOpen(true);
@@ -8756,10 +8877,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (createUiStage === CreateUiStage.RECIPIENTS) {
           if (import.meta.env.DEV) devSendCtaTrace("guided+RECIPIENTS inner fallback → finalize + onGenerate");
           await finalizeIntakeCapture();
-          if (!hasAnyValidRecipientEmail) {
-            setHardError("Add at least one valid recipient email, then try again.");
-            return;
-          }
+          if (!assertRecipientsValidForPremiumSend()) return;
           if (premiumSignersSurfaceReady) {
             if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
             setPremiumSendConfirmOpen(true);
@@ -9054,11 +9172,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           onSendClick={runPrimaryIntakeAction}
           sendDisabled={effectivePrimaryCtaDisabled}
           sendRequiresConfirmStep={premiumSendConfirmGateActive}
-          primaryCtaHelperText={
-            premiumSendConfirmGateActive && !recipientsDeferred && !hasAnyValidRecipientEmail
-              ? "Add at least one recipient email to continue."
-              : null
-          }
+          primaryCtaHelperText={createFlowRecipientPrimaryHelper}
           stripRecipientEmailNoise={stripRecipientEmailNoise}
           looksLikeEmail={looksLikeEmail}
         />
@@ -9072,7 +9186,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       {!workspaceUi ? (
         <div className="text-xs text-slate-400 sm:text-sm sm:leading-relaxed md:text-[0.9375rem] lg:text-[1rem] lg:leading-relaxed lg:text-slate-300/90">
           <span>
-            Draft ready for review. {STRUCTURED_DRAFT_ASSIST_SHORT}
+            Review the document below. {STRUCTURED_DRAFT_ASSIST_SHORT}
           </span>
           <details className="mt-1.5 rounded-md border border-slate-800/50 bg-slate-950/30 px-2 py-1.5 sm:mt-2 [&_summary::-webkit-details-marker]:hidden">
             <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400 sm:text-xs">
@@ -9891,47 +10005,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       ) : null}
                       {draft ? (
                         <>
-                      {fullDraftUpgradeBannerVisible &&
-                      productionDraftPrimaryReviewSurface &&
-                      createUiStage === CreateUiStage.DRAFT ? (
-                        <div
-                          role="status"
-                          className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-950/35 px-4 py-3 shadow-md shadow-emerald-950/25 sm:px-5"
-                        >
-                          <p className="text-sm font-semibold text-emerald-50 sm:text-base">✓ Complete version unlocked</p>
-                          <p className="mt-1 text-sm leading-relaxed text-emerald-100/90">
-                            Your agreement now includes full protections and is ready to send.
-                          </p>
-                        </div>
-                      ) : null}
-                      {createProductionTwoPane &&
-                      simpleProductFlow &&
-                      premiumPostCheckoutSummaryVisible &&
-                      premiumProTruthGate?.successBannerAllowed ? (
-                        <div
-                          className="mb-4 rounded-xl border border-emerald-500/35 bg-emerald-950/25 px-4 py-3 sm:px-5"
-                          role="status"
-                          aria-live="polite"
-                          aria-label="LawDog Pro unlocked"
-                        >
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300/95">
-                            LawDog Pro unlocked
-                          </p>
-                          <p className="mt-1 text-sm font-semibold text-slate-100 sm:text-base">
-                            Your LawDog Pro agreement is ready for review.
-                          </p>
-                          <p className="mt-2 text-xs leading-relaxed text-slate-300 sm:text-sm">
-                            {formatPremiumRevealDeltaRow(premiumFinalizeAudit)}
-                          </p>
-                          <button
-                            type="button"
-                            className="mt-4 w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-center text-sm font-semibold text-emerald-950 shadow-sm transition hover:bg-emerald-400 sm:w-auto sm:min-w-[14rem]"
-                            onClick={() => handlePremiumReviewFirstContinueToSigners()}
-                          >
-                            Continue to recipient setup
-                          </button>
-                        </div>
-                      ) : null}
                       {productionDraftPrimaryReviewSurface ? (
                         <div
                           className={
@@ -9940,6 +10013,57 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               : "mb-3"
                           }
                         >
+                          {createUiStage === CreateUiStage.DRAFT && productionDocumentStatusChips ? (
+                            <div
+                              className="mb-3 flex flex-wrap items-center gap-2"
+                              aria-label="Draft version and status"
+                            >
+                              <span className="inline-flex items-center rounded-md border border-slate-600/70 bg-slate-900/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200">
+                                {productionDocumentStatusChips.version}
+                              </span>
+                              <span className="inline-flex items-center rounded-md border border-emerald-500/25 bg-emerald-950/20 px-2.5 py-1 text-[11px] font-medium tracking-wide text-emerald-100/90">
+                                {productionDocumentStatusChips.state}
+                              </span>
+                            </div>
+                          ) : null}
+                          {showProReplacedStarterNudge ? (
+                            <p
+                              className="mb-3 text-xs leading-relaxed text-slate-500 sm:text-sm"
+                              role="status"
+                            >
+                              {PRO_REPLACED_STARTER_PREVIEW}
+                            </p>
+                          ) : null}
+                          {createUiStage === CreateUiStage.DRAFT &&
+                          createProductionTwoPane &&
+                          simpleProductFlow &&
+                          premiumPostCheckoutSummaryVisible &&
+                          premiumProTruthGate?.successBannerAllowed ? (
+                            <div
+                              className="mb-4 rounded-xl border border-slate-700/55 bg-slate-950/45 px-4 py-3.5 sm:px-5"
+                              role="status"
+                              aria-live="polite"
+                              aria-label={POST_CHECKOUT_PREMIUM_SUPPORT_ARIA_LABEL}
+                            >
+                              <p className="text-sm font-medium text-slate-200 sm:text-[0.9375rem]">
+                                {POST_CHECKOUT_PREMIUM_SUPPORT_TITLE}
+                              </p>
+                              <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+                                {POST_CHECKOUT_PREMIUM_SUPPORT_BODY}
+                              </p>
+                              {((line) =>
+                                line ? (
+                                  <p className="mt-2 text-xs leading-relaxed text-slate-500">{line}</p>
+                                ) : null)(formatPremiumRevealDeltaRow(premiumFinalizeAudit))}
+                              <button
+                                type="button"
+                                className="mt-4 w-full rounded-lg border border-white/10 bg-white px-4 py-2.5 text-center text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100 sm:w-auto sm:min-w-[14rem]"
+                                onClick={() => handlePremiumReviewFirstContinueToSigners()}
+                              >
+                                Continue to recipient setup
+                              </button>
+                            </div>
+                          ) : null}
                           <div className="flex flex-wrap items-center gap-2">
                             {createUiStage === CreateUiStage.RECIPIENTS ? (
                               <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
@@ -9958,21 +10082,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               ) : (
                                 <>
                                   <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                    Draft ready for review
+                                    {PREVIEW_BLOCK_TITLE}
                                   </h2>
                                   <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
-                                    Review the preview, then continue to send. Editable until sent — nothing is sent
-                                    automatically.
+                                    Edits stay on this version until you continue. Nothing is sent automatically.
                                   </p>
                                 </>
                               )
                             ) : showUpgradeToFullDraftOnReview ? (
                               <>
                                 <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                  You have a starter draft ready to review.
+                                  {PREVIEW_BLOCK_TITLE}
                                 </h2>
                                 <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
-                                  Review details, edit anything, then tap Continue. Nothing is sent automatically.
+                                  Review details, then continue. Nothing is sent automatically.
                                 </p>
                                 <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
                                   You can keep going with this version or compare an upgrade below for fuller
@@ -9980,30 +10103,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 </p>
                               </>
                             ) : premiumPostCheckoutSummaryVisible ? (
-                              <>
-                                <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                  Agreement document
-                                </h2>
-                                <p className="mt-1 max-w-[62ch] text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem]">
-                                  Scroll the upgraded text below and edit in place. When you are satisfied, continue
-                                  to recipient setup (review-first; nothing sends automatically).
-                                </p>
-                              </>
+                              premiumProTruthGate?.successBannerAllowed ? null : (
+                                <>
+                                  <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+                                    {PREVIEW_BLOCK_TITLE}
+                                  </h2>
+                                  <p className="mt-1 max-w-[62ch] text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem]">
+                                    Scroll and edit in place, then continue to recipient setup. Nothing sends
+                                    automatically.
+                                  </p>
+                                </>
+                              )
                             ) : (
                               <>
                                 <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                  {premiumPersistedFlowActive && !peekPremiumRecipientsSurfaceReleased()
-                                    ? "Your upgraded agreement is ready"
-                                    : "Your agreement is ready"}
+                                  {PREVIEW_BLOCK_TITLE}
                                 </h2>
                                 <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
                                   {premiumPersistedFlowActive && !peekPremiumRecipientsSurfaceReleased() ? (
                                     <>
-                                      Reviewed, stronger, editable, and ready for counterparties. Nothing sends until
-                                      you confirm.
+                                      Stronger commercial language — editable here. Nothing sends until you confirm.
                                     </>
                                   ) : (
-                                    "Review details, edit anything, then choose if you want to send."
+                                    "Review and edit, then continue when you are ready to send or sign."
                                   )}
                                 </p>
                               </>
@@ -10259,16 +10381,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 );
                               })()
                             : null}
-                          {showUpgradeToFullDraftOnReview && createUiStage === CreateUiStage.DRAFT ? (
-                            <div
-                              id="watermark"
-                              className="pointer-events-none absolute top-3 right-3 z-[2] text-[10px] font-medium uppercase tracking-wide text-slate-500/90"
-                            >
-                              Starter draft
-                            </div>
-                          ) : null}
                           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 sm:text-[11px]">
-                            {premiumPaidDocumentSurface ? "Agreement package (LawDog Pro)" : "Edit your agreement"}
+                            {PREVIEW_BLOCK_TITLE}
                           </p>
                           <p
                             className={
@@ -10280,7 +10394,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             }
                           >
                             {premiumPaidDocumentSurface
-                              ? "Use Edit wording for the text editor, then use Finalize your agreement below to refine and pick review or signature. Not legal advice."
+                              ? "Use Edit wording for the full text, then the Pro review panel below. Not legal advice."
                               : "Not legal advice. Signer lines are added when you send."}
                           </p>
                           <div
@@ -10304,7 +10418,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   >
                                     <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
                                       {proFullDraftCustomGateMessage ||
-                                        "Your LawDog Pro agreement is ready for review. You can edit any wording before sending."}
+                                        "Use the document below to review and edit when it appears. Nothing is sent from this step."}
                                     </p>
                                     <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
                                       Nothing is sent from this step until you choose to continue.
@@ -10492,7 +10606,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 aria-label="Refine this agreement draft"
                               >
                                 <h3 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                  {REFINE_THIS_DRAFT_HEADING}
+                                  {refineFieldHeading(premiumPaidDocumentSurface)}
                                 </h3>
                                 <p className="mt-1.5 text-sm leading-relaxed text-slate-400 sm:text-base">
                                   {REFINE_THIS_DRAFT_SUBCOPY}
@@ -10839,11 +10953,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         onSendClick={runPrimaryIntakeAction}
                         sendDisabled={effectivePrimaryCtaDisabled}
                         sendRequiresConfirmStep={premiumSendConfirmGateActive}
-                        primaryCtaHelperText={
-                          premiumSendConfirmGateActive && !recipientsDeferred && !hasAnyValidRecipientEmail
-                            ? "Add at least one recipient email to continue."
-                            : null
-                        }
+                        primaryCtaHelperText={createFlowRecipientPrimaryHelper}
                         stripRecipientEmailNoise={stripRecipientEmailNoise}
                         looksLikeEmail={looksLikeEmail}
                       />
@@ -11131,9 +11241,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         <span className="mr-1.5 text-emerald-300/95" aria-hidden>
                           ✔
                         </span>
-                        Agreement sent
+                        Agreement saved
                       </p>
-                      <p className="mt-1 text-sm text-emerald-100/80 sm:text-[0.9375rem]">Recipients have been notified</p>
+                      <p className="mt-1 text-sm text-emerald-100/80 sm:text-[0.9375rem]">
+                        {effectivePremiumSendMode === "review"
+                          ? "Next: open your workspace to create and copy a secure review link. Nothing reaches recipients until you share it."
+                          : "Next: open your workspace to create and copy a secure signing link. Nothing reaches signers until you share it."}
+                      </p>
                       <button
                         type="button"
                         className="mt-3 text-sm font-medium text-emerald-100/95 underline decoration-emerald-300/55 underline-offset-[3px] hover:text-white"
@@ -11142,7 +11256,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           navigate(`/app/send/${encodeURIComponent(productionSendBarAgreementId)}`);
                         }}
                       >
-                        View status
+                        Open link setup
                       </button>
                     </div>
                   ) : showRetryAsPrimaryCta ? (
@@ -11237,9 +11351,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       <span className="mr-1.5 text-emerald-300/95" aria-hidden>
                         ✔
                       </span>
-                      Agreement sent
+                      Agreement saved
                     </p>
-                    <p className="mt-1 text-sm text-emerald-100/80 sm:text-[0.9375rem]">Recipients have been notified</p>
+                    <p className="mt-1 text-sm text-emerald-100/80 sm:text-[0.9375rem]">
+                      {effectivePremiumSendMode === "review"
+                        ? "Next: open your workspace to create and copy a secure review link. Nothing reaches recipients until you share it."
+                        : "Next: open your workspace to create and copy a secure signing link. Nothing reaches signers until you share it."}
+                    </p>
                     <button
                       type="button"
                       className="mt-3 text-sm font-medium text-emerald-100/95 underline decoration-emerald-300/55 underline-offset-[3px] hover:text-white"
@@ -11248,7 +11366,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         navigate(`/app/send/${encodeURIComponent(productionSendBarAgreementId)}`);
                       }}
                     >
-                      View status
+                      Open link setup
                     </button>
                   </div>
                 ) : showRetryAsPrimaryCta ? (
@@ -11845,21 +11963,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="premium-send-confirm-title" className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-              {effectivePremiumSendMode === "review" ? "Confirm review link" : "Confirm signing link"}
+              Confirm before saving
             </h2>
             {effectivePremiumSendMode === "signature" ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                Final step before a tracked signing link goes out.
+                You are about to save the agreement and open the signing-link screen. Copy the link there — LawDog does
+                not auto-email recipients from this step.
               </p>
             ) : (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                Final step before a review link goes out.
+                You are about to save the agreement and open the review-link screen. Copy the link there — LawDog does
+                not auto-email recipients from this step.
               </p>
             )}
             <p className="mt-2 text-sm leading-relaxed text-slate-300 sm:text-[0.9375rem]">
               {effectivePremiumSendMode === "review"
-                ? "A secure review link will go to:"
-                : "A secure signing link will go to:"}
+                ? "Named recipients (for your records):"
+                : "Named signers (for your records):"}
             </p>
             {effectivePremiumSendMode === "signature" ? (
               <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
@@ -11889,8 +12009,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             </ul>
             <p className="mt-3 text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem]">
               {effectivePremiumSendMode === "review"
-                ? "They can read the agreement and request changes. Nothing is emailed until you confirm below."
-                : "They read the final terms, then sign when ready. Nothing is emailed until you confirm below."}
+                ? "They can read, suggest plain-English edits, paste a revised draft, preview material changes, and submit suggestions. Both sides confirm before the agreement updates."
+                : "They read the final terms and sign when ready. Nothing reaches them until you share the link."}
             </p>
             {draft ? (
               <div className="mt-4 rounded-lg border border-slate-700/60 bg-slate-950/70 px-3.5 py-3 text-left">
@@ -11919,7 +12039,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 checked={premiumSendCcSelf}
                 onChange={(e) => setPremiumSendCcSelf(e.target.checked)}
               />
-              <span>Send me a copy</span>
+              <span>
+                Email me a copy of this summary when delivery is available{" "}
+                <span className="block text-xs font-normal text-slate-500">Optional — not required to create links.</span>
+              </span>
             </label>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
               <button
@@ -11946,7 +12069,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   void onGenerate();
                 }}
               >
-                {effectivePremiumSendMode === "review" ? "Confirm and send review link" : "Confirm and send signing link"}
+                Confirm and continue
               </button>
             </div>
           </div>
