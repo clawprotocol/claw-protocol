@@ -204,6 +204,24 @@ describe("premium success gate (universal Pro truth)", () => {
     expect(g.state).toBe("premium_needs_details");
   });
 
+  it("8c) with qualityRetryActive cleared (late Pro hydration), valid paid corpus reaches premium_success", () => {
+    const c = resolveAgreementIntentContract("logo 2k");
+    const t = logoServerDoc();
+    const v = validatePaidProOutput({ text: t, rawIntake: "logo 2k", intentContract: c, draft: null });
+    const g = canShowPremiumSuccess({
+      intentContract: c,
+      renderSource: "server_full_document_text",
+      validation: v,
+      documentText: t,
+      intakeText: "x",
+      premiumPipelineSource: "server_full_draft",
+      stale: false,
+      qualityRetryActive: false,
+      allowPaidSubstantiveStitch: true,
+    });
+    expect(g.state).toBe("premium_success");
+  });
+
   it("9) server full draft: allowed", () => {
     const c = resolveAgreementIntentContract("roommate and rent split");
     const t = "Lease / roommate. Rent, utilities, premises, and deposit. " + LONG;

@@ -17,6 +17,7 @@ import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import { fetchAgreementDraft } from "../../agreement/agreementWorkspaceApi";
 import { apiUrl, resolveApiBase } from "../../lib/clawApi";
+import { PREMIUM_COMPLETION_ATTEMPT_MAX_MS } from "../../lib/premiumCompletionAttemptTimeout";
 import { canApplyLatePremiumCompletionFromModal } from "../../lib/premiumPostCheckoutModalRace";
 import { useAccess } from "../../access/AccessContext";
 import { useLaunchNav } from "../../launch/LaunchNavContext";
@@ -3323,6 +3324,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const started = Date.now();
 
       const applySuccess = (result: PremiumCompletionResult) => {
+        const softAtApplyStart = premiumPostCheckoutModalSoftTimeoutFiredRef.current;
+        const runIdForLateApply = getOrInitSessionAgreementGenerationId();
+        const logPremiumLateApply = (tag: string, fields: Record<string, unknown>) => {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info(`[premium-late-apply] ${tag}`, fields);
+          }
+        };
+        try {
         paidCheckoutCompletedRef.current = true;
         if (resumeSnap?.resume_kind === "optional_full_upgrade") {
           setProReplacedStarterAfterUpgrade(true);
@@ -3575,6 +3585,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           generationOutcome: result.premiumRenderSource,
           degraded: Boolean(result.serverGenerationDegraded),
         });
+        if (import.meta.env.DEV && softAtApplyStart) {
+          logPremiumLateApply("applied", {
+            runId: runIdForLateApply,
+            currentRunId: getOrInitSessionAgreementGenerationId(),
+            modalSoftTimeoutHadFired: true,
+            snapshotWritten: true,
+            acceptedDocLen: snapshotPlain.length,
+          });
+          logPremiumLateApply("recovery_cleared", { reason: "session_snapshot_persisted_full_pro" });
+        }
         if (import.meta.env.DEV) {
           const snapDoc = snapshotPlain;
           const hit = gapTraceNeedlesHit(snapDoc);
@@ -3676,6 +3696,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               block: "start",
             });
         });
+        } finally {
+          if (softAtApplyStart) {
+            premiumPostCheckoutModalSoftTimeoutFiredRef.current = false;
+          }
+        }
       };
 
       const applyFailureFallback = (winningBodyText?: string) => {
@@ -3853,6 +3878,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumGapQuestions([]);
           premiumPostCheckoutUserDismissedRef.current = false;
           premiumPostCheckoutModalSoftTimeoutFiredRef.current = false;
+          const sessionGenForPass = bumpAgreementGenerationId();
+          const sessionFpForPass = shortIntakeFingerprint(args.intakeText);
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
           let lastAttemptForLog = 0;
           absoluteTimeoutId = window.setTimeout(failOpenFromTimeout, 30_000);
@@ -3877,7 +3904,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               console.info("[premium-modal-stage]", { retryAttempt: 1, ts: new Date().toISOString() });
             }
             const premiumCompletionAttemptStartedAt = Date.now();
-            const premiumCompletionAttemptTimeoutMs = 90_000;
+            const premiumCompletionAttemptTimeoutMs = PREMIUM_COMPLETION_ATTEMPT_MAX_MS;
             try {
               const originalMergeHint = pickLongestPremiumIntakeCorpus(
                 48,
@@ -3886,8 +3913,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 stripPremiumUserNotesFromMergedIntake(args.intakeText),
                 rawIntakeBase,
               );
-              const startGen = bumpAgreementGenerationId();
-              const startFp = shortIntakeFingerprint(args.intakeText);
               result = await withTimeout(
                 ensurePremiumCompletion({
                   intakeText: args.intakeText,
@@ -3900,9 +3925,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   parseDraft: (raw) => parseDraft(raw, { aiModelClass: "premium" }),
                   userGapAnswers: args.userGapAnswers,
                   gapResolverSkippedWithDefaults: args.gapResolverSkippedWithDefaults,
-                  agreementGenerationId: startGen,
-                  premiumRequestIntakeFingerprint: startFp,
-                  isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === startGen,
+                  agreementGenerationId: sessionGenForPass,
+                  premiumRequestIntakeFingerprint: sessionFpForPass,
+                  isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
                 }),
                 premiumCompletionAttemptTimeoutMs,
                 "premium_completion_attempt",
@@ -3928,6 +3953,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 timed_out: timedOutThisAttempt,
               });
               console.warn("[premium-flow] premium_rewrite_request_failure", { attempt, err: e });
+              if (import.meta.env.DEV && timedOutThisAttempt) {
+                // eslint-disable-next-line no-console
+                console.info("[premium-late-apply] ensure_attempt_wall_timeout", {
+                  runId: sessionGenForPass,
+                  attempt,
+                  sessionAttemptTimeoutMs: premiumCompletionAttemptTimeoutMs,
+                  message: (e as Error)?.message,
+                });
+              }
               if (attempt === 1) {
                 if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
                   console.warn("[premium-completion] apply failed after retry", e);
@@ -3978,6 +4012,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 willHydrateLateSuccess: false,
                 blockedReason: lateApply.reason,
               });
+              // eslint-disable-next-line no-console
+              console.info("[premium-late-apply] blocked", {
+                runId: sessionGenForPass,
+                currentRunId: getOrInitSessionAgreementGenerationId(),
+                modalSoftTimeoutHadFired: premiumPostCheckoutModalSoftTimeoutFiredRef.current,
+                willApply: false,
+                blockedReason: lateApply.reason,
+                hasAcceptedResult: Boolean(result),
+                acceptedDocLen: (result?.winningPremiumBodyText || "").trim().length,
+                snapshotWritten: false,
+              });
             }
             return;
           }
@@ -4011,6 +4056,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 willHydrateLateSuccess: true,
                 modalSoftTimeoutHadFired: timedOut || premiumPostCheckoutModalSoftTimeoutFiredRef.current,
               });
+              if (timedOut || premiumPostCheckoutModalSoftTimeoutFiredRef.current) {
+                // eslint-disable-next-line no-console
+                console.info("[premium-late-apply] accepted_after_timeout", {
+                  runId: sessionGenForPass,
+                  currentRunId: getOrInitSessionAgreementGenerationId(),
+                  modalSoftTimeoutHadFired: true,
+                  willApply: true,
+                  blockedReason: null,
+                  acceptedDocLen: (result.winningPremiumBodyText || "").trim().length,
+                  snapshotWritten: "pending",
+                });
+              }
             }
             applySuccess(result);
           } else {
