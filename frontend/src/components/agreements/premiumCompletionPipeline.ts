@@ -80,6 +80,7 @@ import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
+import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 
@@ -861,12 +862,28 @@ function amplifyPremiumMaterialityRepair(
 export async function runPremiumCompletion(input: PremiumCompletionInput): Promise<PremiumCompletionResult> {
   const rawIntake = input.intakeText.trim();
   const upgradeNotes = extractPremiumUserUpgradeNotes(rawIntake);
+  const baseWithoutNotes = stripPremiumUserNotesFromMergedIntake(rawIntake);
+  const structuredCorpus = buildReviewCoercionRawIntakeFromDraft(
+    input.structuredDraft,
+    (baseWithoutNotes || rawIntake).trim() || baseWithoutNotes,
+  );
   const rawForSoT = pickLongestPremiumIntakeCorpus(
     48,
     input.originalUserIntakeRawForMerge,
-    stripPremiumUserNotesFromMergedIntake(rawIntake),
+    baseWithoutNotes,
     rawIntake,
+    structuredCorpus,
   );
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.info("[premium-upgrade-source] runPremiumCompletion", {
+      intakeTextLen: rawIntake.length,
+      stripNotesLen: baseWithoutNotes.length,
+      originalMergeLen: nz(input.originalUserIntakeRawForMerge).length,
+      structuredCoercedLen: structuredCorpus.length,
+      rawForSoTChosenLen: rawForSoT.length,
+    });
+  }
   const premiumParse = await input.parseDraft(rawIntake);
   let merged = mergePremiumParsePreferFresh(input.structuredDraft, premiumParse, rawForSoT);
   merged = ensureMaterialAsksInAdditional(merged);

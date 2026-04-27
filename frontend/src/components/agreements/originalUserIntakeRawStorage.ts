@@ -33,6 +33,21 @@ export function clearOriginalUserIntakeRaw(): void {
   }
 }
 
+/**
+ * Set at the moment a free/baseline draft is created from a user prompt (before the step buffer is cleared).
+ * Overwrites the prior “richest” hint so post-checkout Pro generation can always rehydrate the full
+ * original commercial text even if `intakeCombined` is later empty or only holds a follow-up line.
+ */
+export function writeOriginalUserIntakeRawAtDraftCommit(text: string, minLen = 20): void {
+  const t = (text || "").trim();
+  if (t.length < minLen) return;
+  try {
+    sessionStorage.setItem(KEY, t);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Pick the longest trimmed candidate meeting min length (primary premium corpus). */
 export function pickLongestPremiumIntakeCorpus(minLen: number, ...parts: (string | null | undefined)[]): string {
   let best = "";

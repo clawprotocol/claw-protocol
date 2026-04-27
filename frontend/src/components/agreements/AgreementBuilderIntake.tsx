@@ -198,8 +198,10 @@ import {
   clearOriginalUserIntakeRaw,
   pickLongestPremiumIntakeCorpus,
   readOriginalUserIntakeRaw,
+  writeOriginalUserIntakeRawAtDraftCommit,
   writeOriginalUserIntakeRawIfRicher,
 } from "./originalUserIntakeRawStorage";
+import { buildUpgradeSourceTextForPremium } from "./premiumUpgradeSourceText";
 import { isLikelyCategoryOrTradeLabel } from "./premiumDraftTransform";
 import {
   hydrateEmailFromHandoff,
@@ -2847,25 +2849,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const resolveRawIntakeForPremiumCheckout = React.useCallback(
     (draftForFallback?: ParsedDraftShape | null): string => {
-      const resumeSnap = readCreateComplexityResume();
-      let storage = "";
-      try {
-        storage = readAgreementCreatorIntakeStorage().trim();
-      } catch {
-        /* ignore */
-      }
-      const c = intakeCombinedRef.current.trim();
-      const r = resumeSnap?.rawIntake?.trim() ?? "";
-      const origResume = resumeSnap?.originalUserIntakeRaw?.trim() ?? "";
-      const origStore = readOriginalUserIntakeRaw();
-      const longest = pickLongestPremiumIntakeCorpus(48, origStore, origResume, c, r, storage);
-      if (longest) return longest;
       const d = draftForFallback ?? draftSnapshotRef.current;
-      if (d) {
-        const fromDraft = buildReviewCoercionRawIntakeFromDraft(d, "").trim();
-        if (fromDraft) return fromDraft;
-      }
-      return "";
+      return buildUpgradeSourceTextForPremium({
+        resume: readCreateComplexityResume(),
+        intakeCombined: intakeCombinedRef.current,
+        structuredDraft: d,
+        agreementDocumentText: agreementDocumentTextRef.current,
+      });
     },
     [],
   );
@@ -3241,6 +3231,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
 
       const mergedIntake = buildPremiumMergedIntakeWithUserNotes(rawIntakeBase, pendCaptured);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[premium-upgrade-source] post_checkout", {
+          originalSessionLen: readOriginalUserIntakeRaw().length,
+          resumeOrigLen: (resumeSnap?.originalUserIntakeRaw ?? "").trim().length,
+          resumeRawIntakeLen: (resumeSnap?.rawIntake ?? "").trim().length,
+          rawIntakeBaseLen: rawIntakeBase.length,
+          mergedIntakeLen: mergedIntake.length,
+          hasPriorDraft: Boolean(prior),
+          generationId: getOrInitSessionAgreementGenerationId(),
+        });
+      }
       const minMs = 1500 + Math.floor(Math.random() * 1001);
       const started = Date.now();
 
@@ -3780,7 +3782,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 48,
                 readOriginalUserIntakeRaw(),
                 readCreateComplexityResume()?.originalUserIntakeRaw,
-                stripPremiumUserNotesFromMergedIntake(rawIntakeBase),
+                stripPremiumUserNotesFromMergedIntake(args.intakeText),
+                rawIntakeBase,
               );
               const startGen = bumpAgreementGenerationId();
               const startFp = shortIntakeFingerprint(args.intakeText);
@@ -4068,6 +4071,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     await finalizeIntakeCapture();
     try {
       let parsed = await parseDraft(rawIntake);
+      writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
+      writeOriginalUserIntakeRawIfRicher(rawIntake);
       parsed = { ...parsed, payment: extractIntakePayment(rawIntake) };
       parsed = runIntakeDefaultsAndRoles(parsed, rawIntake, simpleProductFlow, intakePartyRoleLabels);
       parsed = alignParsedWithCanonicalType(parsed, rawIntake);
