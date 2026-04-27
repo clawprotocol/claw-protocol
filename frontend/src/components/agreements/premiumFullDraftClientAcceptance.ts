@@ -68,6 +68,54 @@ export function rejectPremiumBodyForProRender(
   return { ok: uniq.length === 0, reasons: uniq };
 }
 
+/**
+ * Reject “Pro” bodies that swap governing law, drop the client’s brand URL, or use generic party
+ * lines when the intake named people + project (kept aligned with server premium quality gate).
+ */
+export function rejectProUpgradeSourceFactDrift(
+  body: string,
+  opts: { intakeLower: string },
+): PremiumClientAcceptanceResult {
+  const low = (body || "").trim().toLowerCase();
+  const il = (opts.intakeLower || "").toLowerCase();
+  const reasons: string[] = [];
+  if (/\boklahoma\b/.test(il) && !/\bdelaware\b/.test(il)) {
+    if (
+      /\b(laws of the state of delaware|governed by the laws of (the state of )?delaware|state of delaware|delaware law)\b/i.test(
+        low,
+      ) &&
+      !/\boklahoma\b/.test(low)
+    ) {
+      reasons.push("governing_law_drift_delaware_intake_had_oklahoma");
+    }
+  }
+  if (/\b(anthem|sarah|blanchard|collins)\b/i.test(il) && /cryptospaces|crypto\s*spaces/i.test(il)) {
+    if (/\b(service provider|the service provider|the client)\b/.test(low) && !/\banthem\b/.test(low) && !/\bsarah\b/.test(low)) {
+      reasons.push("placeholder_parties_intake_had_names");
+    }
+  }
+  if (/\bcryptospaces\.?net|crypto\s*spaces/i.test(il) && !/\bcryptospaces/.test(low)) {
+    reasons.push("missing_stated_brand");
+  }
+  if (/\banthem blanchard\b/i.test(il) && !/\banthem\s+blanchard\b/i.test(low)) {
+    reasons.push("intake_name_missing_anthem_blanchard");
+  }
+  if (/\bsarah collins\b/i.test(il) && !/\bsarah\s+collins\b/i.test(low)) {
+    reasons.push("intake_name_missing_sarah_collins");
+  }
+  if (/(?:\$?\s*3,000|3000|three thousand).*(?:upfront|on commencement|due|first)/i.test(il) && !/(?:3,000|3\.?000|3000|three thousand)/i.test(low)) {
+    reasons.push("missing_3000_upfront_line");
+  }
+  if (/(?:\$?\s*4,500|4500|four thousand five hundred).*(?:final|deliver|remaining)/i.test(il) && !/(?:4,500|4\.?500|4500)/i.test(low)) {
+    reasons.push("missing_4500_final_line");
+  }
+  if (/\b30\s*days?\b.*\b(?:deliver|final|complete)/i.test(il) && !/\b30\s*day/i.test(low)) {
+    reasons.push("missing_30_day_delivery");
+  }
+  if (reasons.length) return { ok: false, reasons };
+  return { ok: true, reasons: [] };
+}
+
 /** Strip deterministic client packs that must never ship as part of server full-draft display. */
 export function stripClientPremiumArtifactBlocksFromDraft(draft: ParsedDraftShape): ParsedDraftShape {
   let add = (draft.additional_terms || "").trim();

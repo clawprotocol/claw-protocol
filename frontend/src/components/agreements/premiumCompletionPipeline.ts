@@ -1536,9 +1536,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           }
         }
       }
-      const acceptDegradedServerBody =
-        serverGenDegraded && (doc || "").trim().length > 0 && (!acc.ok || !vPaid.ok);
-      if ((acc.ok && vPaid.ok) || acceptDegradedServerBody) {
+      if (acc.ok && vPaid.ok) {
         const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
         const srvFull = (effectiveFull.server_full_document_text || "").trim();
         const srvRepair = (effectiveFull.server_repair_document_text || "").trim();
@@ -1577,6 +1575,14 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           } else {
             console.warn("[premium-full-draft] paid-pro quality gate rejected server body", vPaid.reasons);
           }
+          // eslint-disable-next-line no-console
+          console.info("[premium-completion-accept] gate_fail", {
+            acc_ok: acc.ok,
+            vpaid_ok: vPaid.ok,
+            server_degraded: serverGenDegraded,
+            doc_len: (doc || "").length,
+            premium_gen_out: (effectiveFull.generation_outcome || "").trim(),
+          });
         }
         if (!proIntentGateMessage && intentContract.pro_strict && (!acc.ok || !vPaid.ok)) {
           proIntentGateMessage = proIntentPlainEnglishForGate(
@@ -1755,7 +1761,9 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       agreementGenerationId: input.agreementGenerationId,
       premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
       founderDetailsGateMessage: founderDetailsGateMessage ?? null,
-      proIntentGateMessage: proIntentGateMessage ?? null,
+      proIntentGateMessage:
+        proIntentGateMessage ||
+        "We couldn’t complete the Pro upgrade with your terms yet. Tap **Retry Pro draft** to try again, or add more deal detail to your intake first.",
       serverGenerationDegraded: null,
       tierADiagnostic: tierADiag,
     };

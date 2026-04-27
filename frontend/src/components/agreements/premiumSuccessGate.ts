@@ -170,13 +170,25 @@ export function canShowPremiumSuccess(args: CanShowPremiumSuccessArgs): PremiumS
   }
 
   if (args.serverGenerationDegraded) {
+    if (!args.validation.ok) {
+      return {
+        state: "premium_needs_details",
+        successBannerAllowed: false,
+        signerCtaAllowed: false,
+        ...outBase,
+        successBannerReasons: [
+          "server_generation_degraded_failed_fact_or_shell_check",
+          ...args.validation.reasons.slice(0, 8),
+        ],
+      };
+    }
     return {
       state: "premium_success",
       successBannerAllowed: true,
       signerCtaAllowed: true,
       ...outBase,
       successBannerReasons: ["server_generation_degraded_structured_fallback"],
-      validation: { ok: true, reasons: [] },
+      validation: args.validation,
     };
   }
 

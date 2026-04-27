@@ -37,6 +37,14 @@ type Props = {
   sendMode: SendMode;
   sendModeTouched: boolean;
   disabled?: boolean;
+  /** Dev-only: logged when `postPremiumRefine` fails; parent supplies flags and ids. */
+  devProRefineContext?: {
+    handlerLabel: string;
+    premiumPersistedFlowActive: boolean;
+    premiumPaidDocumentSurface: boolean;
+    hasFullDraftAccess: boolean;
+    reviewAgreementId: string | null;
+  };
 };
 
 function readinessPillClass(r: FinalizeReadiness): string {
@@ -66,6 +74,7 @@ export function FinalizeYourAgreementPanel({
   sendMode,
   sendModeTouched,
   disabled = false,
+  devProRefineContext,
 }: Props) {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -76,14 +85,34 @@ export function FinalizeYourAgreementPanel({
   const refineTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastRouteActionNonceRef = useRef(0);
 
+  const effectiveCurrentDocumentText = useMemo(() => {
+    const t = (currentDocumentText || "").trim();
+    if (t.length) return t;
+    const p = (draft?.premium_full_document_text || draft?.premium_server_full_document_text || draft?.purpose || "")
+      .trim();
+    return p;
+  }, [currentDocumentText, draft?.premium_full_document_text, draft?.premium_server_full_document_text, draft?.purpose]);
+
+  const effectiveIntakeText = useMemo(() => {
+    const t = (intakeText || "").trim();
+    if (t.length) return t;
+    return (
+      [draft?.title, draft?.jurisdiction, draft?.purpose, draft?.payment_terms, draft?.additional_terms]
+        .map((x) => String(x ?? "").trim())
+        .filter(Boolean)
+        .join("\n\n")
+        .trim() || "LawDog Pro commercial agreement"
+    );
+  }, [intakeText, draft?.title, draft?.jurisdiction, draft?.purpose, draft?.payment_terms, draft?.additional_terms]);
+
   const completenessRows = useMemo(
-    () => computePremiumReviewCompleteness(draft, currentDocumentText),
-    [draft, currentDocumentText],
+    () => computePremiumReviewCompleteness(draft, effectiveCurrentDocumentText),
+    [draft, effectiveCurrentDocumentText],
   );
   const notOkCount = useMemo(() => completenessRows.filter((r) => !r.ok).length, [completenessRows]);
   const missingLines = useMemo(
-    () => buildFinalizeMissingLinesPriority(finalizeAudit, currentDocumentText, review, completenessRows, 3),
-    [finalizeAudit, currentDocumentText, review, completenessRows],
+    () => buildFinalizeMissingLinesPriority(finalizeAudit, effectiveCurrentDocumentText, review, completenessRows, 3),
+    [finalizeAudit, effectiveCurrentDocumentText, review, completenessRows],
   );
   const priorityScore = review?.priority_score ?? 0;
 
@@ -98,9 +127,9 @@ export function FinalizeYourAgreementPanel({
           ? { suggested_next_step: lastRefine.suggested_next_step, readiness_score: lastRefine.readiness_score }
           : null,
         audit: finalizeAudit,
-        documentText: currentDocumentText,
+        documentText: effectiveCurrentDocumentText,
       }),
-    [sendMode, sendModeTouched, notOkCount, priorityScore, lastRefine, finalizeAudit, currentDocumentText],
+    [sendMode, sendModeTouched, notOkCount, priorityScore, lastRefine, finalizeAudit, effectiveCurrentDocumentText],
   );
 
   const tagline = useMemo(
@@ -146,10 +175,20 @@ export function FinalizeYourAgreementPanel({
       setBusy(true);
       setLastRefine(null);
       try {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[agreement-refine] FinalizeYourAgreementPanel#runUpdate (pre-request)", {
+            effectiveCurrentDocumentLen: effectiveCurrentDocumentText.length,
+            effectiveIntakeLen: effectiveIntakeText.length,
+            instructionLen: prompt.trim().length,
+            endpoint: "/api/agreements/premium-refine",
+            ...devProRefineContext,
+          });
+        }
         const r = await postPremiumRefine(
           {
-            current_document_text: currentDocumentText,
-            intake_text: intakeText,
+            current_document_text: effectiveCurrentDocumentText,
+            intake_text: effectiveIntakeText,
             user_refinement_prompt: prompt.trim(),
             action: "update",
           },
@@ -159,15 +198,45 @@ export function FinalizeYourAgreementPanel({
         if ((r.updated_document_text || "").trim()) {
           markDocumentDirty?.();
           onApplyDocumentText(r.updated_document_text);
+          setPrompt("");
+        } else if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[agreement-refine] FinalizeYourAgreementPanel#runUpdate empty model output", { r });
         }
       } catch (e2) {
         if (e2 instanceof Error && e2.name === "AbortError") return;
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[agreement-refine] FinalizeYourAgreementPanel#runUpdate FAILED", {
+            component: "FinalizeYourAgreementPanel",
+            handler: "runUpdate",
+            endpoint: "POST /api/agreements/premium-refine",
+            currentDocumentLen: (currentDocumentText || "").length,
+            effectiveCurrentDocumentLen: effectiveCurrentDocumentText.length,
+            intakeTextPropLen: (intakeText || "").length,
+            effectiveIntakeLen: effectiveIntakeText.length,
+            instructionLen: prompt.trim().length,
+            caught: e2 instanceof Error ? e2.message : String(e2),
+            devProRefineContext,
+          });
+        }
         setErr(e2 instanceof Error ? e2.message : "Something went wrong. Try again.");
       } finally {
         setBusy(false);
       }
     },
-    [busy, currentDocumentText, disabled, intakeText, markDocumentDirty, onApplyDocumentText, prompt],
+    [
+      busy,
+      currentDocumentText,
+      devProRefineContext,
+      disabled,
+      effectiveCurrentDocumentText,
+      effectiveIntakeText,
+      intakeText,
+      markDocumentDirty,
+      onApplyDocumentText,
+      prompt,
+    ],
   );
 
   useEffect(() => {
@@ -190,8 +259,8 @@ export function FinalizeYourAgreementPanel({
       try {
         const r = await postPremiumRefine(
           {
-            current_document_text: currentDocumentText,
-            intake_text: intakeText,
+            current_document_text: effectiveCurrentDocumentText,
+            intake_text: effectiveIntakeText,
             user_refinement_prompt: seed,
             action: "update",
           },
@@ -203,6 +272,20 @@ export function FinalizeYourAgreementPanel({
           onApplyDocumentText(r.updated_document_text);
         }
       } catch (e2) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[agreement-refine] FinalizeYourAgreementPanel#routeAutoRefine FAILED", {
+            component: "FinalizeYourAgreementPanel",
+            handler: "useEffect:routeAutoRefine",
+            endpoint: "POST /api/agreements/premium-refine",
+            currentDocumentLen: (currentDocumentText || "").length,
+            effectiveCurrentDocumentLen: effectiveCurrentDocumentText.length,
+            intakeTextPropLen: (intakeText || "").length,
+            effectiveIntakeLen: effectiveIntakeText.length,
+            caught: e2 instanceof Error ? e2.message : String(e2),
+            devProRefineContext,
+          });
+        }
         setErr(e2 instanceof Error ? e2.message : "Something went wrong. Try again.");
       } finally {
         setBusy(false);
@@ -213,6 +296,9 @@ export function FinalizeYourAgreementPanel({
     reviewRoute,
     currentDocumentText,
     intakeText,
+    effectiveCurrentDocumentText,
+    effectiveIntakeText,
+    devProRefineContext,
     disabled,
     markDocumentDirty,
     onApplyDocumentText,

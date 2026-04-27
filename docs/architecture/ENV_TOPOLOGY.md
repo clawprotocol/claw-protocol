@@ -125,7 +125,7 @@ Companion: **[Operator runbook](../ops/OPERATOR_RUNBOOK.md)**.
 | `CLAW_ADMIN_ANCHOR_RUN_ENABLED` | `0` disables `POST /admin/anchor/run` and `POST /admin/anchor/receipt-batch/requeue` |
 | `CLAW_PUBLIC_AGREEMENT_VERIFY` | Public verify behavior for agreements |
 | `CLAW_BUNDLE_MAX_ZIP_BYTES` / related | Workflow bundle limits (`bundle_service.py`) |
-| `OPENAI_API_KEY`, `CLAW_LLM_MODEL` (fallback when no explicit model; default `gpt-5.4-nano`), `CLAW_LLM_MODEL_BASIC` (default `gpt-5.4-nano`), `CLAW_LLM_MODEL_PREMIUM` (default `gpt-5.4-mini`). Enterprise/concierge assumption: `gpt-5.4` via env or dedicated deploy — not a separate client routing key. | LLM routes (`backend/llm_router.py`) |
+| `OPENAI_API_KEY`, `CLAW_LLM_MODEL` (fallback when no explicit model; default `gpt-4o-mini`), `CLAW_LLM_MODEL_BASIC` (default `gpt-4o-mini`), `CLAW_LLM_MODEL_PREMIUM` (default `gpt-4o`). Set overrides on the API host; models must be ids your OpenAI project actually provides. | LLM routes (`backend/llm_router.py`) |
 
 Treasury ingestion and ledger recording may be triggered from API handlers; DB paths are still **shared core**.
 

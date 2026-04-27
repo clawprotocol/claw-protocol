@@ -57,9 +57,34 @@ export async function postPremiumRefine(
   });
   if (!res.ok) {
     const err: unknown = await res.json().catch(() => ({}));
-    const d = (err as { detail?: { message?: string } | string })?.detail;
-    const msg = typeof d === "object" && d && "message" in d ? d.message : typeof d === "string" ? d : null;
-    throw new Error(msg || "premium_refine_failed");
+    const d = (err as { detail?: { message?: string; code?: string } | string | { msg: string; type: string }[] })
+      .detail;
+    const msg = (() => {
+      if (typeof d === "string") return d;
+      if (d && typeof d === "object" && !Array.isArray(d) && "message" in d && typeof (d as { message: string }).message === "string") {
+        return (d as { message: string }).message;
+      }
+      if (Array.isArray(d) && d[0] && typeof d[0] === "object" && "msg" in d[0]) {
+        return String((d[0] as { msg: string }).msg);
+      }
+      return null;
+    })();
+    const withStatus = msg
+      ? import.meta.env.DEV
+        ? `${msg} (HTTP ${res.status})`
+        : msg
+      : `premium_refine_failed (HTTP ${res.status})`;
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("[premium-refine-api] request failed", {
+        http: res.status,
+        detail: err,
+        current_document_len: (body.current_document_text || "").length,
+        intake_len: (body.intake_text || "").length,
+        instruction_len: (body.user_refinement_prompt || "").length,
+      });
+    }
+    throw new Error(withStatus);
   }
   const j = await readJson<Record<string, unknown>>(res);
   return mapResponse(j);

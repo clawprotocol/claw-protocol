@@ -72,6 +72,7 @@ import {
 import { ProUpgradeWaitRotatingText } from "./ProUpgradeWaitRotatingText";
 import {
   CHIP_STATE_COMMERCIAL,
+  CHIP_STATE_PRO_NEEDS_DRAFT,
   CHIP_STATE_READY,
   CHIP_VERSION_PRO,
   CHIP_VERSION_STARTER,
@@ -220,6 +221,7 @@ import {
   markPremiumRecipientsSurfaceReleased,
   peekPremiumPostCheckoutRevealDismissed,
   peekPremiumRecipientsSurfaceReleased,
+  clearPremiumCompletionSnapshot,
   persistPremiumCompletionSnapshot,
   readPremiumCompletionSnapshot,
   stripPremiumCompletionQueryParam,
@@ -319,6 +321,7 @@ import { buildStrictTruthGateCheckoutRevision } from "./premiumTruthGateFunnel";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftClientAcceptance";
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
+import { postPremiumRefine } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPanel";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
@@ -1312,6 +1315,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [agreementDocumentText, setAgreementDocumentText] = useState("");
   const agreementDocumentDirtyRef = useRef(false);
   const agreementDocumentTextRef = useRef("");
+  const proRefineIntakeTextForProPanelsRef = useRef("");
+  const proRefineCurrentDocumentTextForProPanelsRef = useRef("");
+  const applyProRefineOutputToProSurfaceRef = useRef<
+    ((outRaw: string, opts?: { clearStepBuffer?: boolean; scrollToReview?: boolean }) => void) | null
+  >(null);
   const wasPremiumPaidDocumentSurfaceRef = useRef(false);
   const premiumPipelineOutputBodyRef = useRef("");
   const lastPremiumPipelineRenderSourceRef = useRef<string | null>(null);
@@ -2869,6 +2877,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return buildPremiumMergedIntakeWithUserNotes(raw, notes);
   }, [draft, pendingUpgradePrompt, resolveRawIntakeForPremiumCheckout, reviewDocRefreshTick, intakeCombined]);
 
+  /** Non-empty intake for `POST /premium-refine` when the step buffer was cleared (same sources as post-checkout). */
+  const proRefineIntakeTextForProPanels = useMemo(() => {
+    if (!draft) return "";
+    const a =
+      (currentPremiumMergedIntakeKey || intakeCombined).trim() || resolveRawIntakeForPremiumCheckout(draft) || "";
+    if (a.trim().length) return a.trim();
+    return (
+      [draft.title, draft.jurisdiction, draft.purpose, draft.payment_terms]
+        .map((x) => String(x ?? "").trim())
+        .filter(Boolean)
+        .join("\n\n")
+        .trim() || "LawDog Pro commercial agreement"
+    );
+  }, [draft, currentPremiumMergedIntakeKey, intakeCombined, reviewDocRefreshTick, resolveRawIntakeForPremiumCheckout]);
+  proRefineIntakeTextForProPanelsRef.current = proRefineIntakeTextForProPanels;
+
   useLayoutEffect(() => {
     const snap = readCreateComplexityResume();
     const o = snap?.originalUserIntakeRaw?.trim();
@@ -3150,17 +3174,61 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
     if (!urlPc && !grantPending) return;
 
-    if (readPremiumCompletionSnapshot()) {
-      try {
-        if (url.searchParams.get("premiumCompletion") === "1") {
-          url.searchParams.delete("premiumCompletion");
-          const qs = url.searchParams.toString();
-          window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+    const postCheckoutReturnSnap = readPremiumCompletionSnapshot();
+    if (postCheckoutReturnSnap) {
+      const bodyCheck = (
+        postCheckoutReturnSnap.premiumWinningBodyText ||
+        postCheckoutReturnSnap.premiumReadonlyPlainText ||
+        ""
+      ).trim();
+      const resProbe = readCreateComplexityResume();
+      const o = readOriginalUserIntakeRaw().trim();
+      const oRes = (resProbe?.originalUserIntakeRaw || "").trim();
+      const rRaw = (resProbe?.rawIntake || "").trim();
+      const pNotes = (resProbe?.premiumUpgradeNotes || "").trim();
+      const pPend = pendingUpgradePromptRef.current?.trim() || "";
+      const base0 = [o, oRes, rRaw].sort((a, b) => b.length - a.length)[0] || "";
+      const mergedProbe0 =
+        base0.length > 0 ? buildPremiumMergedIntakeWithUserNotes(base0, pPend || pNotes) : (pPend || pNotes || base0);
+      if (bodyCheck.length > 0 && mergedProbe0.trim().length >= 24) {
+        const contractS = resolveAgreementIntentContract(mergedProbe0);
+        const vSnap0 = validatePaidProOutput({
+          text: bodyCheck,
+          rawIntake: mergedProbe0,
+          intentContract: contractS,
+          draft: postCheckoutReturnSnap.premiumDraft ?? null,
+        });
+        if (!vSnap0.ok) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn("[CLAW] clearing premium snapshot: failed paid fact gate on return", { reasons: vSnap0.reasons });
+          }
+          clearPremiumCompletionSnapshot();
+          // fall through: re-run premium completion
+        } else {
+          try {
+            if (url.searchParams.get("premiumCompletion") === "1") {
+              url.searchParams.delete("premiumCompletion");
+              const qs = url.searchParams.toString();
+              window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+            }
+          } catch {
+            /* ignore */
+          }
+          return;
         }
-      } catch {
-        /* ignore */
+      } else {
+        try {
+          if (url.searchParams.get("premiumCompletion") === "1") {
+            url.searchParams.delete("premiumCompletion");
+            const qs = url.searchParams.toString();
+            window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+          }
+        } catch {
+          /* ignore */
+        }
+        return;
       }
-      return;
     }
 
     if (!peekAdvancedFullDraftCheckoutGrant()) {
@@ -4182,16 +4250,94 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setLoading(true);
     await finalizeIntakeCapture();
     try {
+      if (premiumPersistedFlowActive) {
+        const currentDocumentLen =
+          (agreementDocumentTextRef.current || "").trim().length ||
+          (() => {
+            try {
+              return buildPreviewForCurrentTier(prior).trim().length;
+            } catch {
+              return 0;
+            }
+          })();
+        const rawIntake =
+          (proRefineIntakeTextForProPanelsRef.current || "").trim() ||
+          intakeCombined.trim() ||
+          resolveRawIntakeForPremiumCheckout(prior) ||
+          `${(prior.title || "").trim()}\n\n${(prior.purpose || "").trim()}`.trim() ||
+          "LawDog Pro agreement";
+        const currentDoc =
+          (proRefineCurrentDocumentTextForProPanelsRef.current || "").trim() ||
+          (agreementDocumentTextRef.current || "").trim() ||
+          buildPreviewForCurrentTier(prior);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[agreement-refine] paid_premium path", {
+            surface: "below_document_buffer",
+            starterOrFree: false,
+            proSurface: true,
+            premiumPersistedFlowActive: true,
+            hasReviewWorkspaceId: Boolean((reviewAgreementIdRef.current || "").trim()),
+            currentDocumentLen,
+            instructionLen: instruction.length,
+            endpoint: "/api/agreements/premium-refine",
+            intakeTextLen: rawIntake.length,
+          });
+        }
+        if (!currentDoc.trim() || !rawIntake.trim()) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn("[agreement-refine] paid_premium missing corpus", {
+              hasDoc: Boolean(currentDoc.trim()),
+              hasIntake: Boolean(rawIntake.trim()),
+            });
+          }
+          setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
+          return false;
+        }
+        const r = await postPremiumRefine({
+          current_document_text: currentDoc,
+          intake_text: rawIntake,
+          user_refinement_prompt: instruction,
+          action: "update",
+        });
+        const out = (r.updated_document_text || "").trim();
+        if (!out) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn("[agreement-refine] paid_premium empty model output", { r });
+          }
+          setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
+          return false;
+        }
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[agreement-refine] paid_premium success", {
+            outLen: out.length,
+            suggested_next_step: r.suggested_next_step,
+            summary_changes: r.summary_changes,
+          });
+        }
+        applyProRefineOutputToProSurfaceRef.current?.(out, { clearStepBuffer: true, scrollToReview: true });
+        return true;
+      }
+
       const id = await ensureReviewAgreementWorkspaceId();
       if (!id) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[agreement-refine] no_workspace_id", { premiumPersistedFlowActive, hasDraft: Boolean(prior) });
+        }
         setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
         return false;
       }
       if (import.meta.env.DEV) {
-        console.info("[agreement-refine] request", {
+        // eslint-disable-next-line no-console
+        console.info("[agreement-refine] workspace_refine", {
           agreementId: id,
           hint: looksLikeRefinementIntent(instruction),
           length: instruction.length,
+          endpoint: "POST /api/agreements/{id}/refine",
         });
       }
       const res = await fetch(apiUrl(`/api/agreements/${encodeURIComponent(id)}/refine`), {
@@ -4201,6 +4347,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[agreement-refine] workspace_refine_http", { status: res.status, payload: JSON.stringify(payload).slice(0, 800) });
+        }
         const pe = payload as { detail?: { paywall?: boolean; code?: string; message?: string } };
         const d = pe?.detail;
         if (d && typeof d === "object" && d.paywall) {
@@ -4248,7 +4398,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       return true;
     } catch (e) {
-      if (import.meta.env.DEV) console.error("[agreement-refine] failed", e);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("[agreement-refine] failed", e, e instanceof Error ? e.message : String(e));
+      }
       setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
       return false;
     } finally {
@@ -4266,6 +4419,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     normalizeParsedDraftLegalConcepts,
     simpleInstantProductionSurface,
     buildPreviewForCurrentTier,
+    premiumPersistedFlowActive,
+    resolveRawIntakeForPremiumCheckout,
   ]);
 
   const resolveComplexityChoice = React.useCallback(
@@ -5468,6 +5623,64 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }, 450);
   }, []);
 
+  applyProRefineOutputToProSurfaceRef.current = (outRaw, opts) => {
+    const out = (outRaw || "").trim();
+    if (!out) return;
+    const clearStep = opts?.clearStepBuffer === true;
+    const scroll = opts?.scrollToReview === true;
+    const normalized = collapseDuplicateEsignNoticesInFullPreview(out);
+    agreementDocumentDirtyRef.current = true;
+    premiumPipelineOutputBodyRef.current = normalized;
+    hydratedPremiumBodyRef.current = normalized;
+    setDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            premium_full_document_text: normalized,
+            premium_server_full_document_text: normalized,
+          }
+        : null,
+    );
+    const ex = readPremiumCompletionSnapshot();
+    if (ex) {
+      persistPremiumCompletionSnapshot({
+        premiumDraft: {
+          ...ex.premiumDraft,
+          premium_full_document_text: normalized,
+          premium_server_full_document_text: normalized,
+        },
+        premiumParties: ex.premiumParties,
+        recipientCandidates: ex.recipientCandidates,
+        premiumReadonlyPlainText: normalized,
+        premiumWinningBodyText: normalized,
+        premiumReview: ex.premiumReview,
+        premiumFinalizeAudit: ex.premiumFinalizeAudit,
+        premiumReviewRoute: ex.premiumReviewRoute,
+        agreementGenerationId: ex.agreementGenerationId,
+        intakeTextFingerprint: ex.intakeTextFingerprint,
+        premiumPipelineRenderSource: ex.premiumPipelineRenderSource,
+        serverGenerationDegraded: ex.serverGenerationDegraded,
+      });
+    }
+    setAgreementDocumentText(normalized);
+    scheduleAgreementDocSync(normalized);
+    if (clearStep) {
+      setIntakeStepBuffer("");
+      setDebouncedStepBuffer("");
+    }
+    setDisplayPhase("intake");
+    setCreateFlowPhase("draft_ready_for_review");
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setMobileWorkspacePane("preview");
+    setPreviewPaneRevealed(true);
+    setReviewDocRefreshTick((n) => n + 1);
+    if (scroll) {
+      window.requestAnimationFrame(() => {
+        scrollLikelyReviewSectionIntoView();
+      });
+    }
+  };
+
   useEffect(() => {
     return () => {
       window.clearTimeout(agreementDocSyncTimerRef.current);
@@ -6035,14 +6248,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [createProductionTwoPane, productionDraftPrimaryReviewSurface, createUiStage],
   );
 
-  const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
-    if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
-    if (premiumPaidDocumentSurface) {
-      return { version: CHIP_VERSION_PRO, state: CHIP_STATE_COMMERCIAL };
-    }
-    return { version: CHIP_VERSION_STARTER, state: CHIP_STATE_READY };
-  }, [createUiStage, draft, premiumPaidDocumentSurface]);
-
   const showProReplacedStarterNudge = useMemo(
     () =>
       Boolean(
@@ -6511,6 +6716,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         skipped_reasons: pick.audit.candidates.map((c) => ({ source: c.source, eligible: c.eligible, reason: c.reason })),
       });
     }
+    const intakeProbe = (currentPremiumMergedIntakeKey || intakeCombined).trim();
+    if (pick.plainText.trim() && intakeProbe.length >= 24) {
+      const factContract = resolveAgreementIntentContract(intakeProbe);
+      const vPick = validatePaidProOutput({
+        text: pick.plainText,
+        rawIntake: intakeProbe,
+        intentContract: factContract,
+        draft: draft ?? null,
+      });
+      if (!vPick.ok) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[premium-readonly] fact gate blocked display corpus", { reasons: vPick.reasons });
+        }
+        return {
+          ...pick,
+          plainText: "",
+          sourceUsed: "none",
+          audit: { ...pick.audit, selected: "none" },
+        };
+      }
+    }
     if (premiumPaidDocumentSurface && pick.plainText.trim()) {
       logPremiumLiveTrace("readonly_corpus_picker", {
         source_id: pick.sourceUsed,
@@ -6541,6 +6768,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     currentPremiumMergedIntakeKey,
     proFullDraftQualityRetry,
   ]);
+
+  /** Authoritative Pro body for `POST /premium-refine` (Finalize + step buffer): prefer live editor, then readonly winner. */
+  const proRefineCurrentDocumentTextForProPanels = useMemo(() => {
+    const fromState = (agreementDocumentText || "").trim();
+    if (fromState.length > 0) return fromState;
+    const fromPick = (premiumPaidReadonlyPick.plainText || "").trim();
+    if (fromPick.length > 0) return fromPick;
+    return (
+      (draft?.premium_full_document_text || draft?.premium_server_full_document_text || draft?.purpose || "").trim() || ""
+    );
+  }, [
+    agreementDocumentText,
+    premiumPaidReadonlyPick.plainText,
+    draft?.premium_full_document_text,
+    draft?.premium_server_full_document_text,
+    draft?.purpose,
+    reviewDocRefreshTick,
+  ]);
+  proRefineCurrentDocumentTextForProPanelsRef.current = proRefineCurrentDocumentTextForProPanels;
 
   const hasUsablePaidBody = useMemo(
     () =>
@@ -6593,6 +6839,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumTruthPipelineSource,
     reviewDocRefreshTick,
   ]);
+
+  const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
+    if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
+    if (premiumPaidDocumentSurface) {
+      const g = premiumProTruthGate;
+      if (g && g.state === "premium_success" && (g.successBannerAllowed || g.signerCtaAllowed)) {
+        return { version: CHIP_VERSION_PRO, state: CHIP_STATE_COMMERCIAL };
+      }
+      if (g && (g.state === "premium_needs_details" || g.state === "premium_failed_generation")) {
+        return { version: CHIP_VERSION_PRO, state: CHIP_STATE_PRO_NEEDS_DRAFT };
+      }
+      return { version: CHIP_VERSION_PRO, state: CHIP_STATE_PRO_NEEDS_DRAFT };
+    }
+    return { version: CHIP_VERSION_STARTER, state: CHIP_STATE_READY };
+  }, [createUiStage, draft, premiumPaidDocumentSurface, premiumProTruthGate]);
 
   /**
    * If checkout occurred and strict truth gate blocks success, emit a second (non-once)
@@ -10935,16 +11196,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
                                 <FinalizeYourAgreementPanel
                                   draft={reviewDraft ?? draft}
-                                  currentDocumentText={agreementDocumentText}
-                                  intakeText={intakeCombined.trim()}
+                                  currentDocumentText={proRefineCurrentDocumentTextForProPanels}
+                                  intakeText={proRefineIntakeTextForProPanels}
                                   review={premiumRefineReview}
                                   finalizeAudit={premiumFinalizeAudit}
                                   reviewRoute={premiumReviewRoute}
                                   routePrimaryActionNonce={finalizeRoutePrimaryActionNonce}
                                   onRouteFixPrimary={bumpFinalizeRoutePrimaryActionNonce}
                                   onApplyDocumentText={(t) => {
-                                    setAgreementDocumentText(t);
-                                    scheduleAgreementDocSync(t);
+                                    applyProRefineOutputToProSurfaceRef.current?.(t, { clearStepBuffer: false, scrollToReview: true });
                                   }}
                                   markDocumentDirty={() => {
                                     agreementDocumentDirtyRef.current = true;
@@ -10954,6 +11214,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   sendMode={effectivePremiumSendMode}
                                   sendModeTouched={premiumSendModeTouched}
                                   disabled={(isGenerating && !draft) || upgradeLockActive}
+                                  devProRefineContext={
+                                    import.meta.env.DEV
+                                      ? {
+                                          handlerLabel: "FinalizeYourAgreementPanel (AgreementBuilderIntake host)",
+                                          premiumPersistedFlowActive,
+                                          premiumPaidDocumentSurface,
+                                          hasFullDraftAccess,
+                                          reviewAgreementId: reviewAgreementId,
+                                        }
+                                      : undefined
+                                  }
                                 />
                               </div>
                             ) : null}

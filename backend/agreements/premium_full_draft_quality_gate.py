@@ -311,6 +311,25 @@ def evaluate_premium_full_draft_quality(
         ):
             reasons.append("irrelevant_enterprise_boilerplate")
 
+    # Hard drift checks: do not let generic shells pass as "Pro" (wrong state, placeholder parties).
+    if re.search(r"\boklahoma\b", intake_low) and "delaware" not in intake_low:
+        if re.search(
+            r"\b(laws? of the state of delaware|governed by the laws of (the state of )?delaware|"
+            r"state of delaware|delaware law|delaware corporation|delaware general corporation law)\b",
+            doc_low,
+        ) and "oklahoma" not in doc_low:
+            reasons.append("governing_law_drift:delaware_in_doc_intake_oklahoma")
+    if re.search(r"\b(?:anthem|sarah|blanchard|collins)\b", intake_low) and re.search(
+        r"cryptospaces|crypto\s*spaces", intake_low, re.I
+    ):
+        head = doc_low[:4000] if len(doc) > 4000 else doc_low
+        if re.search(r"\b(service provider|the service provider|the client)\b", head) and (
+            "anthem" not in doc_low and "sarah" not in doc_low
+        ):
+            reasons.append("placeholder_party_line_instead_of_named_intake")
+    if re.search(r"cryptospaces\.?net|crypto\s*spaces", intake_low) and "cryptospaces" not in doc_low:
+        reasons.append("missing_stated_brand_url")
+
     # Dedupe while preserving order
     seen = set()
     uniq: List[str] = []

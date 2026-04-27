@@ -58,7 +58,7 @@ async def extract(file: UploadFile = File(...)):
     """
 
     completion = openai.ChatCompletion.create(
-        model="gpt-5.4-nano",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 

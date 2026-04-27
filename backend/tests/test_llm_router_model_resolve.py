@@ -16,7 +16,7 @@ def test_premium_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_premium_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLAW_LLM_MODEL_PREMIUM", raising=False)
-    assert resolve_llm_model_for_access_class("premium") == "gpt-5.4-mini"
+    assert resolve_llm_model_for_access_class("premium") == "gpt-4o"
 
 
 def test_basic_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,7 +26,7 @@ def test_basic_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_basic_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLAW_LLM_MODEL_BASIC", raising=False)
-    assert resolve_llm_model_for_access_class("basic") == "gpt-5.4-nano"
+    assert resolve_llm_model_for_access_class("basic") == "gpt-4o-mini"
 
 
 def test_premium_class_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -36,7 +36,7 @@ def test_premium_class_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_whitespace_only_env_falls_back_to_default_premium(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CLAW_LLM_MODEL_PREMIUM", "   ")
-    assert resolve_llm_model_for_access_class("premium") == "gpt-5.4-mini"
+    assert resolve_llm_model_for_access_class("premium") == "gpt-4o"
 
 
 def test_basic_and_premium_defaults_differ(monkeypatch: pytest.MonkeyPatch) -> None:

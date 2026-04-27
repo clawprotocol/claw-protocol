@@ -32,13 +32,13 @@ class ExternalAIBlockedError(RuntimeError):
 
 OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
 # When callers omit ``model``, align with BASIC / free tier default (see ``DEFAULT_BASIC_CHAT_MODEL``).
-DEFAULT_MODEL: str = os.getenv("CLAW_LLM_MODEL", "gpt-5.4-nano")
+# Public OpenAI only accepts real model ids; set CLAW_LLM_MODEL / CLAW_LLM_MODEL_PREMIUM on Railway.
+DEFAULT_MODEL: str = os.getenv("CLAW_LLM_MODEL", "gpt-4o-mini")
 
 # Product tier → concrete chat model id (OpenAI). Env ``CLAW_LLM_MODEL_BASIC`` / ``CLAW_LLM_MODEL_PREMIUM`` override.
-# Defaults: free/basic ``gpt-5.4-nano``, paid/premium ``gpt-5.4-mini``. Enterprise / concierge deployments are not
-# a separate ``ai_model_class`` in this router; operators may target ``gpt-5.4`` via env overrides or deployment config.
-DEFAULT_BASIC_CHAT_MODEL: str = "gpt-5.4-nano"
-DEFAULT_PREMIUM_CHAT_MODEL: str = "gpt-5.4-mini"
+# Defaults: valid on api.openai.com. Override in deploy (e.g. gpt-4.1-mini) as needed.
+DEFAULT_BASIC_CHAT_MODEL: str = "gpt-4o-mini"
+DEFAULT_PREMIUM_CHAT_MODEL: str = "gpt-4o"
 ENV_CLAW_LLM_MODEL_BASIC: str = "CLAW_LLM_MODEL_BASIC"
 ENV_CLAW_LLM_MODEL_PREMIUM: str = "CLAW_LLM_MODEL_PREMIUM"
 
@@ -63,10 +63,10 @@ def resolve_llm_model_for_access_class(ai_model_class: Optional[str]) -> Optiona
     Map product ``ai_model_class`` to a concrete OpenAI chat model id.
 
     When this returns ``None``, callers pass ``model=None`` and :func:`call_legal_llm`
-    uses ``DEFAULT_MODEL`` (``CLAW_LLM_MODEL``, default ``gpt-5.4-nano``).
+    uses ``DEFAULT_MODEL`` (``CLAW_LLM_MODEL``, default ``gpt-4o-mini``).
 
-    - ``basic``: ``CLAW_LLM_MODEL_BASIC`` if set, else ``gpt-5.4-nano`` (see ``DEFAULT_BASIC_CHAT_MODEL``).
-    - ``premium``: ``CLAW_LLM_MODEL_PREMIUM`` if set, else ``gpt-5.4-mini`` (see ``DEFAULT_PREMIUM_CHAT_MODEL``;
+    - ``basic``: ``CLAW_LLM_MODEL_BASIC`` if set, else ``gpt-4o-mini`` (see ``DEFAULT_BASIC_CHAT_MODEL``).
+    - ``premium``: ``CLAW_LLM_MODEL_PREMIUM`` if set, else ``gpt-4o`` (see ``DEFAULT_PREMIUM_CHAT_MODEL``;
       never silently falls back to the same id as ``basic`` when tier env overrides are unset).
     - ``None`` / empty / unknown: ``None`` → caller ``DEFAULT_MODEL``.
 
@@ -156,9 +156,9 @@ def call_legal_llm(
 
     Env:
       - OPENAI_API_KEY (required)
-      - CLAW_LLM_MODEL (optional, default: gpt-5.4-nano) — used when ``model`` is omitted
+      - CLAW_LLM_MODEL (optional, default: gpt-4o-mini) — used when ``model`` is omitted
       - CLAW_LLM_MODEL_BASIC / CLAW_LLM_MODEL_PREMIUM — set by :func:`resolve_llm_model_for_access_class`
-        for ``ai_model_class`` basic / premium (defaults ``gpt-5.4-nano`` / ``gpt-5.4-mini`` if unset)
+        for ``ai_model_class`` basic / premium (defaults ``gpt-4o-mini`` / ``gpt-4o`` if unset)
       - CLAW_ENVIRONMENT + CLAW_ALLOW_EXTERNAL_AI_LOCAL — in ``local``/``dev``/``test``/``staging`` only,
         ``CLAW_ALLOW_EXTERNAL_AI_LOCAL=1`` allows the pre-LLM airlock to continue (redact + minimize) when
         privilege heuristics would otherwise block; ``production``/``prod`` never honor this. See

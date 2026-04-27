@@ -1,5 +1,5 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { rejectPremiumBodyForProRender } from "./premiumFullDraftClientAcceptance";
+import { rejectPremiumBodyForProRender, rejectProUpgradeSourceFactDrift } from "./premiumFullDraftClientAcceptance";
 import { isAcceptablePremiumFullDocumentText } from "./premiumFullDraftQuality";
 
 const SECTION_SIGNAL_RES = [
@@ -110,6 +110,13 @@ export function validatePremiumRenderBody(
 
   if (!t) {
     return { ok: false, reasons: ["empty_body"] };
+  }
+
+  if (intakeLow.length >= 32) {
+    const drift = rejectProUpgradeSourceFactDrift(t, { intakeLower: intakeLow });
+    if (!drift.ok) {
+      return { ok: false, reasons: ["source_fact_drift", ...drift.reasons] };
+    }
   }
 
   const acc = rejectPremiumBodyForProRender(t, { intakeLower: intakeLow });

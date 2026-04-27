@@ -240,7 +240,7 @@ describe("premium success gate (universal Pro truth)", () => {
     }
   });
 
-  it("11) server_generation_degraded: success + signer CTA even if validation failed on fallback body", () => {
+  it("11) server_generation_degraded: no fake Pro success when validation fails on fallback body", () => {
     const c = resolveAgreementIntentContract("Need a logo, $1,500, two revisions, IP to client");
     const thin = "Short fallback body.";
     const v = validatePaidProOutput({ text: thin, rawIntake: "logo", intentContract: c, draft: null });
@@ -255,8 +255,26 @@ describe("premium success gate (universal Pro truth)", () => {
       stale: false,
       serverGenerationDegraded: true,
     });
+    expect(g.state).toBe("premium_needs_details");
+    expect(g.signerCtaAllowed).toBe(false);
+    expect(g.successBannerAllowed).toBe(false);
+  });
+
+  it("11b) server_generation_degraded: success when body still validates", () => {
+    const c = resolveAgreementIntentContract("Need a logo, $1,500, two revisions, IP to client");
+    const doc = logoServerDoc("LOGO DESIGN SERVICES AGREEMENT");
+    const v = validatePaidProOutput({ text: doc, rawIntake: "Need a logo, $1,500", intentContract: c, draft: null });
+    const g = canShowPremiumSuccess({
+      intentContract: c,
+      renderSource: "server_full_document_text",
+      validation: v,
+      documentText: doc,
+      intakeText: "logo",
+      premiumPipelineSource: "server_full_draft_degraded",
+      stale: false,
+      serverGenerationDegraded: true,
+    });
     expect(g.state).toBe("premium_success");
     expect(g.signerCtaAllowed).toBe(true);
-    expect(g.successBannerAllowed).toBe(true);
   });
 });

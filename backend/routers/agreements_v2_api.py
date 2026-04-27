@@ -98,6 +98,36 @@ from backend.utils.canon_json import canon_json_bytes, canon_sha256_hex
 
 log = logging.getLogger(__name__)
 
+
+def _openai_key_diagnostics() -> Dict[str, Any]:
+    """
+    For logs only: key presence, length, last 4 chars of key — never log the full secret.
+    Re-reads env at call time (avoids stale module-level snapshot after test monkeypatches).
+    """
+    k = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    if not k:
+        return {"openai_key": "missing"}
+    return {"openai_key": "present", "openai_key_len": len(k), "openai_key_suffix": k[-4:] if len(k) >= 4 else "?"}
+
+
+def _classify_premium_llm_failure(exc: BaseException) -> str:
+    """Single-line reason for operator logs; never include user PII from prompts."""
+    if isinstance(exc, ExternalAIBlockedError):
+        return f"airlock:{getattr(exc, 'block_reason', None) or 'blocked'}"
+    if isinstance(exc, RuntimeError) and "OPENAI_API_KEY" in str(exc):
+        return "openai_key_not_configured"
+    if isinstance(exc, (json.JSONDecodeError, ValueError)):
+        return "llm_output_parse_failed"
+    eid = type(exc).__name__
+    if "Timeout" in eid or "ReadTimeout" in eid or "connect" in eid.lower():
+        return f"network_or_timeout:{eid}"
+    if "OpenAI" in eid or eid in ("APIError", "APIStatusError", "AuthenticationError", "RateLimitError", "InternalServerError"):
+        return f"openai_client:{eid}"
+    if "BadRequest" in eid or "NotFound" in eid:  # invalid model, etc.
+        return f"openai_client:{eid}"
+    return eid
+
+
 router = APIRouter(prefix="/api/agreements", tags=["agreements-v2"])
 
 # Premium paid revision: if normalized draft text is still >= this similar to the prior version, auto-retry LLM.
@@ -562,6 +592,8 @@ def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
             sc = getattr(exc, "status_code", None)
             if sc == 401:
                 return "openai_auth", "openai_http_401"
+            if sc == 404:
+                return "openai_model_not_found", "openai_http_404_model_or_path"
             if sc == 429:
                 return "openai_rate_limit", "openai_http_429"
             if sc is not None and int(sc) >= 500:
@@ -659,6 +691,7 @@ def _degraded_user_message_for_code(code: str) -> str:
     """Safe, non-technical copy for API clients (no secrets). Calm, trust-preserving; optional retry is secondary."""
     m: Dict[str, str] = {
         "missing_openai_key": "Your LawDog Pro agreement is ready for review. Your Pro access is saved; you can keep editing the text below. When the AI service is restored, **Retry Pro draft** is available if you want another automated pass.",
+        "openai_model_not_found": "The configured AI model is not available for this API. Ask your admin to set CLAW_LLM_MODEL_PREMIUM to a valid model id, then use **Retry Pro draft**.",
         "openai_auth": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** in a few minutes if you want a fresh pass.",
         "openai_rate_limit": "Your agreement is ready. You can refine any wording below, or **Retry Pro draft** shortly if you want another pass.",
         "openai_timeout": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** in a few minutes if you want a fresh pass.",
@@ -1203,6 +1236,18 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
     _raw = body.current_document_text or ""
     current_for_norm = _raw[:200_000] if len(_raw) > 200_000 else _raw
 
+    pr_len = len((body.user_refinement_prompt or "").strip()) if body.action == "update" else 0
+    log.info(
+        "claw_premium route=premium_refine action=%s model=%s max_out=%d %s current_document_len=%d "
+        "intake_text_len=%d user_refinement_prompt_len=%d",
+        body.action,
+        (llm_model or ""),
+        max_out,
+        _openai_key_diagnostics(),
+        len(doc),
+        len((body.intake_text or "").strip()),
+        pr_len,
+    )
     try:
         llm_text = call_legal_llm(
             messages=[
@@ -1212,6 +1257,11 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
             model=llm_model,
             max_tokens=max_out,
             temperature=0.2 if body.action == "update" else 0.15,
+        )
+        log.info(
+            "claw_premium route=premium_refine openai_response_chars=%d action=%s",
+            len((llm_text or "").strip()),
+            body.action,
         )
         parsed = _extract_json_object(llm_text)
         if body.action == "ask_missing" and (not isinstance(parsed.get("summary_changes"), list)) and isinstance(
@@ -1224,7 +1274,17 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
         record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
         return out
     except Exception as exc:
-        log.warning("premium_refine failed err=%s action=%s", type(exc).__name__, body.action, exc_info=True)
+        kind = _classify_premium_llm_failure(exc)
+        log.warning(
+            "claw_premium route=premium_refine FAILED class=%s exc_type=%s action=%s model=%s %s err_snip=%s",
+            kind,
+            type(exc).__name__,
+            body.action,
+            (llm_model or ""),
+            _openai_key_diagnostics(),
+            (str(exc) or "")[:500].replace("\n", " "),
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -1750,6 +1810,14 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
         raise HTTPException(status_code=400, detail="Input too large for premium finalize audit")
     llm_model = resolve_llm_model_for_access_class("premium")
     max_out = max(600, int(os.environ.get("CLAW_PREMIUM_FINALIZE_AUDIT_MAX_TOKENS", "3000")))
+    log.info(
+        "claw_premium route=premium_finalize_audit model=%s max_out=%d %s document_len=%d intake_len=%d",
+        (llm_model or ""),
+        max_out,
+        _openai_key_diagnostics(),
+        len(doc),
+        len((body.intake_text or "").strip()),
+    )
     try:
         llm_text = call_legal_llm(
             messages=[
@@ -1760,6 +1828,7 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
             max_tokens=max_out,
             temperature=0.1,
         )
+        log.info("claw_premium route=premium_finalize_audit openai_response_chars=%d", len((llm_text or "").strip()))
         parsed = _extract_json_object(llm_text)
         n = _normalize_premium_finalize_audit_payload(parsed)
         n["placeholder_terms_found"] = _merge_placeholder_terms_model_and_local(
@@ -1784,7 +1853,16 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
         record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
         return out
     except Exception as exc:
-        log.warning("premium_finalize_audit failed err=%s", type(exc).__name__, exc_info=True)
+        kind = _classify_premium_llm_failure(exc)
+        log.warning(
+            "claw_premium route=premium_finalize_audit FAILED class=%s exc_type=%s model=%s %s err_snip=%s",
+            kind,
+            type(exc).__name__,
+            (llm_model or ""),
+            _openai_key_diagnostics(),
+            (str(exc) or "")[:500].replace("\n", " "),
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -2916,6 +2994,15 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
         )
     if len(json.dumps(user_payload, ensure_ascii=False)) > 240_000:
         raise HTTPException(status_code=400, detail="Input too large for premium full draft")
+    log.info(
+        "claw_premium route=premium_full_draft model=%s sim_regen=%s max_out=%s %s intake_len=%s payload_json_len=%s",
+        (llm_model or ""),
+        int(sim_regen),
+        max_out,
+        _openai_key_diagnostics(),
+        len(intake_s),
+        len(json.dumps(user_payload, ensure_ascii=False)),
+    )
     if not (OPENAI_API_KEY or "").strip():
         log.error("premium_full_draft event=config_error category=missing_env OPENAI_API_KEY_unset=1")
         return _premium_full_draft_degraded_response(
@@ -2934,8 +3021,18 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             max_tokens=max_out,
             temperature=0.2 if sim_regen else 0.15,
         )
+        log.info(
+            "claw_premium route=premium_full_draft openai_response_chars=%s model=%s",
+            len((llm_text or "").strip()),
+            (llm_model or ""),
+        )
         parsed = _extract_json_object(llm_text)
         out_primary = _normalize_premium_full_draft_result(parsed)
+        log.info(
+            "claw_premium route=premium_full_draft parse_ok=1 primary_doc_len=%s title_len=%s",
+            len((out_primary.document_text or "").strip()),
+            len((out_primary.title or "").strip()),
+        )
         record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
 
         free_blob = build_free_reference_blob(intake_s, ctx_dict)
@@ -3146,6 +3243,15 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
     plen = len(json.dumps(user_payload, ensure_ascii=False))
     if plen > 260_000:
         raise HTTPException(status_code=400, detail="Input too large for premium review")
+    log.info(
+        "claw_premium route=premium_review model=%s max_out=%d %s document_len=%d intake_len=%d payload_json_len=%d",
+        (llm_model or ""),
+        max_out,
+        _openai_key_diagnostics(),
+        len(doc),
+        len((body.intake_text or "").strip()),
+        plen,
+    )
     try:
         llm_text = call_legal_llm(
             messages=[
@@ -3156,12 +3262,22 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
             max_tokens=max_out,
             temperature=0.2,
         )
+        log.info("claw_premium route=premium_review openai_response_chars=%d", len((llm_text or "").strip()))
         parsed = _extract_json_object(llm_text)
         out = _normalize_premium_agreement_review_result(parsed)
         record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
         return out
     except Exception as exc:
-        log.warning("premium_agreement_review failed err=%s", type(exc).__name__, exc_info=True)
+        kind = _classify_premium_llm_failure(exc)
+        log.warning(
+            "claw_premium route=premium_review FAILED class=%s exc_type=%s model=%s %s err_snip=%s",
+            kind,
+            type(exc).__name__,
+            (llm_model or ""),
+            _openai_key_diagnostics(),
+            (str(exc) or "")[:500].replace("\n", " "),
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=503,
             detail={

@@ -7,7 +7,11 @@ import {
   hasRequiredFounderPremiumTitle,
   isFounderEquityVestingIntent,
 } from "./founderIntentRouter";
-import { isLikelyFiveSectionStarterShellPro, rejectPremiumBodyForProRender } from "./premiumFullDraftClientAcceptance";
+import {
+  isLikelyFiveSectionStarterShellPro,
+  rejectPremiumBodyForProRender,
+  rejectProUpgradeSourceFactDrift,
+} from "./premiumFullDraftClientAcceptance";
 import { rejectDevContextLeakInPremiumBody } from "./premiumOutputDevContextGuard";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 
@@ -143,6 +147,8 @@ export function validatePaidProOutput(args: {
   if (!a.ok) return a;
   const s = rejectPaidProStitchedOrThinShell(t, intakeLower);
   if (!s.ok) return s;
+  const drift = rejectProUpgradeSourceFactDrift(t, { intakeLower });
+  if (!drift.ok) return drift;
   if (args.intentContractMode === "base_only") {
     return { ok: true, reasons: [] };
   }
@@ -202,6 +208,15 @@ export function isPaidProFinishedAgreement(args: {
     }
     if (isUnacceptablePipelineProSource(args.pipelineSource)) {
       return { ok: false, reasons: [`pipeline_rejected:${args.pipelineSource ?? "unknown"}`] };
+    }
+    const vDegraded = validatePaidProOutput({
+      text: args.text,
+      rawIntake: args.rawIntake,
+      intentContract: args.intentContract ?? null,
+      draft: args.draft ?? null,
+    });
+    if (!vDegraded.ok) {
+      return { ok: false, reasons: ["degraded_failed_corpus_check", ...vDegraded.reasons] };
     }
     return { ok: true, reasons: [] };
   }
