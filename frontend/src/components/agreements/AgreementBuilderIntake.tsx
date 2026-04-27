@@ -17,6 +17,7 @@ import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import { fetchAgreementDraft } from "../../agreement/agreementWorkspaceApi";
 import { apiUrl, resolveApiBase } from "../../lib/clawApi";
+import { canApplyLatePremiumCompletionFromModal } from "../../lib/premiumPostCheckoutModalRace";
 import { useAccess } from "../../access/AccessContext";
 import { useLaunchNav } from "../../launch/LaunchNavContext";
 import { triggerPaywall } from "../../launch/triggerPaywall";
@@ -1365,6 +1366,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const fullDraftUpgradeBannerTimerRef = useRef(0);
   const optionalFullUpgradeInFlightRef = useRef(false);
   const premiumCheckoutRunGenRef = useRef(0);
+  /** Set when the 30s visual timeout fires; request may still be in flight (do not invalidate run id). */
+  const premiumPostCheckoutModalSoftTimeoutFiredRef = useRef(false);
+  /** User hit escape on the post-checkout wait — do not apply a late `ensurePremiumCompletion` result. */
+  const premiumPostCheckoutUserDismissedRef = useRef(false);
   const draftSnapshotRef = useRef<ParsedDraftShape | null>(null);
   /** User chose simplified path on an advanced-family gate — show a subtle review label. */
   const [reviewShowsSimplifiedAdvancedDraft, setReviewShowsSimplifiedAdvancedDraft] = useState(false);
@@ -3395,6 +3400,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
         setProFullDraftCustomGateMessage(null);
+        setHardError(null);
         setPremiumServerGenerationDegraded(result.serverGenerationDegraded ?? null);
         setPremiumRefineReview(result.premiumReview ?? null);
         setPremiumFinalizeAudit(result.premiumFinalizeAudit ?? null);
@@ -3817,15 +3823,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const failOpenFromTimeout = () => {
           if (!runIsCurrent()) return;
           timedOut = true;
-          premiumCheckoutRunGenRef.current += 1;
+          /** Do not bump `premiumCheckoutRunGenRef` — the in-flight `ensurePremiumCompletion` may still
+           * resolve; we need `runIsCurrent()` to stay true so a late result can call `applySuccess`
+           * and clear this soft failopen state. */
+          premiumPostCheckoutModalSoftTimeoutFiredRef.current = true;
           console.warn("[premium-modal-timeout]", { timeoutMs: 30_000, ts: new Date().toISOString() });
           console.info("[premium-modal-failopen]", { reason: "absolute_timeout", source: "cached_or_prior_draft" });
           if (import.meta.env.MODE !== "test") {
             // eslint-disable-next-line no-console
-            console.info("[CLAW] premium hydration failed", { reason: "modal_timeout" });
+            console.info("[CLAW] premium hydration still pending after modal wait", { reason: "modal_soft_timeout_failopen" });
           }
           setPremiumPipelineUserMessage(null);
-          setHardError("Premium finalization timed out. Opened your upgraded agreement using the best available version.");
+          setHardError("Premium finalization is taking longer than expected — showing your best available draft. We will still load the full Pro agreement when the server response arrives.");
           runPremiumModelPassRef.current = null;
           applyFailureFallback();
           setPremiumPostCheckoutPhase(null);
@@ -3842,13 +3851,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumPostCheckoutPhase("processing");
           setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
           setPremiumGapQuestions([]);
+          premiumPostCheckoutUserDismissedRef.current = false;
+          premiumPostCheckoutModalSoftTimeoutFiredRef.current = false;
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
+          let lastAttemptForLog = 0;
           absoluteTimeoutId = window.setTimeout(failOpenFromTimeout, 30_000);
           premiumModalEscapeHandlerRef.current = () => {
             if (!runIsCurrent()) return;
             if (absoluteTimeoutId) {
               window.clearTimeout(absoluteTimeoutId);
             }
+            premiumPostCheckoutUserDismissedRef.current = true;
             console.info("[premium-modal-failopen]", { reason: "user_escape", source: "cached_or_prior_draft" });
             setPremiumPipelineUserMessage(null);
             applyFailureFallback();
@@ -3857,6 +3870,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumGapOneField("");
           };
           for (let attempt = 0; attempt < 2; attempt++) {
+            lastAttemptForLog = attempt;
             if (!runIsCurrent()) return;
             if (attempt === 1) {
               setPremiumPipelineUserMessage("We had trouble finalizing your agreement — retrying…");
@@ -3931,15 +3945,87 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           absoluteTimeoutId = 0;
           premiumModalEscapeHandlerRef.current = null;
-          if (timedOut || !runIsCurrent()) return;
+
+          if (!runIsCurrent()) {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[premium-timeout-race]", {
+                attempt: "post_runModelPass",
+                requestStillPending: false,
+                timeoutMs: 30_000,
+                hasAcceptedLateResult: false,
+                currentRecoveryState: "stale_unmounted",
+                willHydrateLateSuccess: false,
+                reason: "run_gen_or_cancel",
+              });
+            }
+            return;
+          }
+
+          const lateApply = canApplyLatePremiumCompletionFromModal({
+            runIsStillCurrent: runIsCurrent(),
+            userDismissedPostCheckoutWait: premiumPostCheckoutUserDismissedRef.current,
+          });
+          if (!lateApply.apply) {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[premium-timeout-race]", {
+                attempt: lastAttemptForLog,
+                requestStillPending: false,
+                timeoutMs: 30_000,
+                hasAcceptedLateResult: Boolean(result),
+                currentRecoveryState: lateApply.reason,
+                willHydrateLateSuccess: false,
+                blockedReason: lateApply.reason,
+              });
+            }
+            return;
+          }
 
           const elapsed = Date.now() - started;
           if (elapsed < minMs) await sleep(minMs - elapsed);
-          if (!runIsCurrent()) return;
+          if (!runIsCurrent()) {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[premium-timeout-race]", {
+                attempt: "post_min_dwell",
+                requestStillPending: false,
+                timeoutMs: 30_000,
+                hasAcceptedLateResult: false,
+                currentRecoveryState: "stale_after_dwell",
+                willHydrateLateSuccess: false,
+              });
+            }
+            return;
+          }
 
           if (result) {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[premium-timeout-race]", {
+                attempt: lastAttemptForLog,
+                requestStillPending: false,
+                timeoutMs: 30_000,
+                hasAcceptedLateResult: true,
+                currentRecoveryState: timedOut || premiumPostCheckoutModalSoftTimeoutFiredRef.current ? "soft_timeout_waited" : "in_time",
+                willHydrateLateSuccess: true,
+                modalSoftTimeoutHadFired: timedOut || premiumPostCheckoutModalSoftTimeoutFiredRef.current,
+              });
+            }
             applySuccess(result);
           } else {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[premium-timeout-race]", {
+                attempt: lastAttemptForLog,
+                requestStillPending: false,
+                timeoutMs: 30_000,
+                hasAcceptedLateResult: false,
+                currentRecoveryState: "model_path_exhausted",
+                willHydrateLateSuccess: false,
+                modalSoftTimeoutHadFired: premiumPostCheckoutModalSoftTimeoutFiredRef.current,
+              });
+            }
             if (import.meta.env.MODE !== "test") {
               // eslint-disable-next-line no-console
               console.info("[CLAW] premium hydration failed", { reason: "model_path_exhausted" });
