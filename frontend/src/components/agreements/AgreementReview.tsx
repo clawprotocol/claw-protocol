@@ -59,6 +59,7 @@ import { NegotiationAssistantPanel } from "../../agreement/NegotiationAssistantP
 import { draftExcerptForClause, htmlToPlainText } from "../../agreement/externalAiHandoff";
 import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+  authoritativeProBypassSimpleSendPaywall,
   buildSendRouteReadonlyHtmlFromPlain,
   pickAuthoritativePlainForSendHandoff,
   shouldMinimalProSendRecipientChrome,
@@ -349,6 +350,8 @@ type Props = {
   simpleFlowPremiumHandoffIntent?: PremiumSendIntent | null;
   /** Optional: run after user picks reviewer-handoff; parent may reset Pro celebration + phase. */
   onContinueToReviewerSetup?: () => void;
+  /** Simple launch: authoritative paid Pro body loaded — parent skips subscription upgrade modal on Continue to send. */
+  onAuthoritativeProBypassChange?: (authoritativeProBypass: boolean) => void;
 };
 
 const API_BASE = resolveApiBase();
@@ -645,6 +648,7 @@ const AgreementReview: React.FC<Props> = ({
   streamlinedSimpleFlow = false,
   simpleFlowPremiumHandoffIntent,
   onContinueToReviewerSetup,
+  onAuthoritativeProBypassChange,
 }) => {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState<string>("");
@@ -737,6 +741,13 @@ const AgreementReview: React.FC<Props> = ({
   const fullTimelineUnlocked = canAccessFullTimeline(monetizationState);
 
   const isSimpleHomeReview = section === "simpleHomeReview";
+
+  useEffect(() => {
+    if (!onAuthoritativeProBypassChange || !isSimpleHomeReview) return;
+    const source = draft ?? initialDraftSnapshot;
+    onAuthoritativeProBypassChange(authoritativeProBypassSimpleSendPaywall(source));
+  }, [draft, initialDraftSnapshot, isSimpleHomeReview, onAuthoritativeProBypassChange]);
+
   const isWorkspace =
     (embeddedInCard && section !== "all") || isSimpleHomeReview;
   /** Free/starter simple-home send intentionally hides rich history widgets for stability. */

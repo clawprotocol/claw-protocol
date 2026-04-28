@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgreementReviewErrorBoundary } from "../../agreement/AgreementReviewErrorBoundary";
 import AgreementReview from "../../components/agreements/AgreementReview";
 import { JoyFlashBanner } from "../../joy/JoyFlashBanner";
@@ -11,6 +11,7 @@ import {
   isSimpleSendPaywallActive,
   markSimpleFlowSendUnlocked,
 } from "../simpleFlowSendUnlock";
+import { authoritativeProBypassSimpleSendPaywall } from "../../components/agreements/sendHandoffAuthoritativeCorpus";
 import {
   clearPostProUnlockCelebrate,
   fetchWorkspaceProEntitlement,
@@ -81,7 +82,29 @@ export function SimpleSendPage(props: { agreementId: string }) {
   );
   const initialDraftSnapshot = sendLanding.primed;
   const streamlinedSimpleFlow = sendLanding.streamlined;
-  const premiumSendUnlocked = canAccessSimpleSendActions(agreementId) || workspaceProEntitled;
+  const [authoritativeProBypass, setAuthoritativeProBypass] = useState(() =>
+    authoritativeProBypassSimpleSendPaywall(initialDraftSnapshot),
+  );
+  /** Re-evaluate `canAccessSimpleSendActions` after session unlock from authoritative Pro load. */
+  const [sendUnlockTick, setSendUnlockTick] = useState(0);
+  const authoritativeProBypassRef = useRef(authoritativeProBypass);
+  authoritativeProBypassRef.current = authoritativeProBypass;
+  const premiumSendUnlocked = useMemo(() => {
+    void sendUnlockTick;
+    return canAccessSimpleSendActions(agreementId) || workspaceProEntitled;
+  }, [agreementId, workspaceProEntitled, sendUnlockTick]);
+
+  useEffect(() => {
+    setAuthoritativeProBypass(authoritativeProBypassSimpleSendPaywall(initialDraftSnapshot));
+  }, [initialDraftSnapshot]);
+
+  useEffect(() => {
+    if (!authoritativeProBypass) return;
+    if (!isSimpleSendPaywallActive()) return;
+    if (canAccessSimpleSendActions(agreementId)) return;
+    markSimpleFlowSendUnlocked(agreementId);
+    setSendUnlockTick((n) => n + 1);
+  }, [authoritativeProBypass, agreementId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +130,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
 
   useEffect(() => {
     const onPaywallRequired = (e: Event) => {
-      if (workspaceProEntitled) return;
+      if (workspaceProEntitled || authoritativeProBypassRef.current) return;
       const d = (e as CustomEvent<Record<string, unknown>>).detail ?? {};
       setPaywallOpen(true);
       const h = d.paywallHeadline;
@@ -276,8 +299,9 @@ export function SimpleSendPage(props: { agreementId: string }) {
             setSimpleFlowPhase("review");
           }}
           onRequestSendUnlock={() => {
-            if (workspaceProEntitled) {
+            if (workspaceProEntitled || authoritativeProBypass) {
               markSimpleFlowSendUnlocked(agreementId);
+              setSendUnlockTick((n) => n + 1);
               return;
             }
             if (isSimpleSendPaywallActive()) {
@@ -288,10 +312,19 @@ export function SimpleSendPage(props: { agreementId: string }) {
             navigate(`/app/ready/${encodeURIComponent(agreementId)}`);
           }}
           onBackToNew={() => navigate("/app/create")}
+          onAuthoritativeProBypassChange={setAuthoritativeProBypass}
           onSimpleFlowContinue={() => {
             if (simpleFlowPhase === "review") {
               logProductEvent("send_clicked", { agreementId, phase: "review" });
-              if (!workspaceProEntitled && isSimpleSendPaywallActive()) {
+              const blockPaywall =
+                !workspaceProEntitled && isSimpleSendPaywallActive() && !authoritativeProBypass;
+              if (import.meta.env.DEV) {
+                console.info("[paid-pro-send-modal-branch]", {
+                  authoritativePro: Boolean(workspaceProEntitled || authoritativeProBypass),
+                  modal: blockPaywall ? "upgrade_paywall" : "none",
+                });
+              }
+              if (blockPaywall) {
                 setPaywallOpen(true);
               } else {
                 setSimpleFlowPhase("send");
