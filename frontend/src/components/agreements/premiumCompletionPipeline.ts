@@ -74,7 +74,10 @@ import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
+import { logDevPostPremiumFullDraftPipelineReturn } from "./premiumFullDraftPostResponseTrace";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
+import { canShowPremiumSuccess } from "./premiumSuccessGate";
+import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
@@ -1804,6 +1807,43 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     premiumDeliverablePreview: true,
     intakeText: rawForSoT || rawIntake,
   });
+
+  if (import.meta.env.DEV) {
+    const src = String(premiumRenderSource || "");
+    const win = (finalWinning || "").trim();
+    if (win.length >= 500 && isAuthoritativePremiumPipelineRenderSource(src)) {
+      const rawSoT = (rawForSoT || rawIntake || "").trim() || rawIntake;
+      const ic = resolveAgreementIntentContract(rawSoT);
+      const vPaidOut = validatePaidProOutput({
+        text: win,
+        rawIntake: rawSoT,
+        intentContract: ic,
+        draft: outMerged,
+        premiumPipelineSource: premiumRenderSource,
+      });
+      const gOut = canShowPremiumSuccess({
+        intentContract: ic,
+        renderSource: "server_full_document_text",
+        validation: vPaidOut,
+        documentText: win,
+        intakeText: rawSoT,
+        premiumPipelineSource: premiumRenderSource,
+        stale: false,
+        draft: outMerged,
+        qualityRetryActive: false,
+        serverGenerationDegraded: Boolean(serverGenerationDegraded),
+        allowPaidSubstantiveStitch: win.length >= 500,
+      });
+      logDevPostPremiumFullDraftPipelineReturn({
+        winningBodyLen: win.length,
+        premiumRenderSource: src,
+        validatePaidProOutputOk: vPaidOut.ok,
+        validatePaidProReasons: vPaidOut.reasons,
+        canShowPremiumSuccessState: gOut.state,
+        successBannerReasons: (gOut as { successBannerReasons?: string[] }).successBannerReasons,
+      });
+    }
+  }
 
   return {
     premiumDraft: outMerged,

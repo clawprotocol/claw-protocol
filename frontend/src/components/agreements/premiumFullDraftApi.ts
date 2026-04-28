@@ -12,6 +12,7 @@ import {
 import { applyDeterministicIntentToPremiumFullDraftContext } from "./deterministicIntentTitleMapper";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
+import { logDevPostPremiumFullDraftHttp } from "./premiumFullDraftPostResponseTrace";
 import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGuard";
 
 const MAX_CONTEXT_CHARS = 22_000;
@@ -224,6 +225,13 @@ export async function postPremiumFullDraftOnce(args: {
     generationOutcome: genOut || (res.ok ? "unknown" : "http_error"),
     degraded,
     failureCode: failCode || undefined,
+  });
+  const docLen = typeof parsed?.document_text === "string" ? parsed.document_text.length : 0;
+  logDevPostPremiumFullDraftHttp({
+    httpStatus: res.status,
+    responseBodyLen: bodyText.length,
+    documentTextLen: docLen,
+    generationOutcome: genOut || undefined,
   });
   if (!res.ok) {
     const err = parsed as { detail?: { message?: string } };

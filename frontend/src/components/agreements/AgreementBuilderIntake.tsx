@@ -319,7 +319,13 @@ import {
   shortIntakeFingerprint,
 } from "../../lib/agreementGenerationId";
 import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraftApi";
-import { buildPremiumDetailsGateCopy, isPaidProFinishedAgreement } from "./paidProCorpusAcceptance";
+import {
+  buildPremiumDetailsGateCopy,
+  isPaidProFinishedAgreement,
+  validatePaidProOutput,
+} from "./paidProCorpusAcceptance";
+import { canShowPremiumSuccess } from "./premiumSuccessGate";
+import { logDevPostPremiumFullDraftApplySuccess } from "./premiumFullDraftPostResponseTrace";
 import {
   computeProTruthSurface,
   proTruthIsPremiumDocumentReady,
@@ -1344,6 +1350,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const hydratedPremiumBodyRef = useRef("");
   /** Winning paid corpus ref — preferred over length-heuristic merges for authoritative pipeline picks. */
   const lastPremiumWinningCorpusRef = useRef("");
+  /**
+   * Set when applySuccess commits an authoritative server full-draft body; used for DEV
+   * `[premium-authoritative-lost]` (UI reverted to live preview / recovery after a good 200).
+   */
+  const lastAuthoritativeProCommitRef = useRef<{
+    winningLen: number;
+    pipelineSource: string;
+    validateOk: boolean;
+    gateState: string;
+    applySuccessCompleted: boolean;
+  } | null>(null);
   const agreementDocSyncTimerRef = useRef(0);
   const [reviewDocRefreshTick, setReviewDocRefreshTick] = useState(0);
   /** Parsed draft held until user picks simplified vs. Pro for advanced instrument intakes. */
@@ -3550,6 +3567,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
         const snapshotPlain = resolvedPersist.text.trim();
+        if (import.meta.env.DEV) {
+          const traceIc = resolveAgreementIntentContract(mergedIntake);
+          const vTrace = validatePaidProOutput({
+            text: snapshotPlain,
+            rawIntake: mergedIntake,
+            intentContract: traceIc,
+            draft: merged.draft,
+            premiumPipelineSource: result.premiumRenderSource,
+          });
+          const gTrace = canShowPremiumSuccess({
+            intentContract: traceIc,
+            renderSource: resolvedPersist.premium_render_source,
+            validation: vTrace,
+            documentText: snapshotPlain,
+            intakeText: mergedIntake,
+            premiumPipelineSource: result.premiumRenderSource,
+            stale: false,
+            draft: merged.draft,
+            qualityRetryActive: false,
+            serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
+            allowPaidSubstantiveStitch: snapshotPlain.length >= 500,
+          });
+          logDevPostPremiumFullDraftApplySuccess({
+            phase: "applySuccess_post_resolve",
+            applySuccessActive: true,
+            winningBodyLen: winning.length,
+            snapshotPlainLen: snapshotPlain.length,
+            premiumRenderSourcePipeline: result.premiumRenderSource,
+            readonlyResolverSource: resolvedPersist.premium_render_source,
+            readonlyResolverReason: resolvedPersist.premium_render_reason,
+            validatePaidProOutputOk: vTrace.ok,
+            validatePaidProOutputReasons: vTrace.reasons,
+            canShowPremiumSuccessState: gTrace.state,
+            proUpgradeUseStarterView: false,
+          });
+        }
         if (hasFullDraftAccess) {
           const contractIc = resolveAgreementIntentContract(mergedIntake);
           const fin = isPaidProFinishedAgreement({
@@ -3742,6 +3795,61 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementDocumentDirtyRef.current = false;
         const finalDoc = collapseDuplicateEsignNoticesInFullPreview(snapshotPlain);
         setAgreementDocumentText(finalDoc);
+        if (import.meta.env.DEV) {
+          const snapAfterWrite = readPremiumCompletionSnapshot();
+          logDevPostPremiumFullDraftApplySuccess({
+            phase: "applySuccess_after_setAgreementDocumentText",
+            applySuccessCompletedSync: true,
+            setAgreementDocumentTextLen: finalDoc.length,
+            persistPremiumCompletionSnapshot: snapAfterWrite
+              ? {
+                  premiumAccepted: snapAfterWrite.premiumAccepted === true,
+                  premiumRenderResolveSource: snapAfterWrite.premiumRenderResolveSource,
+                  premiumPipelineRenderSource: snapAfterWrite.premiumPipelineRenderSource,
+                  storedWinningLen: (snapAfterWrite.premiumWinningBodyText || "").trim().length,
+                }
+              : null,
+          });
+        }
+        if (
+          usePaidAuthoritativeBody &&
+          snapshotPlain.length >= 500 &&
+          isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource)
+        ) {
+          const icHard = resolveAgreementIntentContract(mergedIntake);
+          const vHard = validatePaidProOutput({
+            text: snapshotPlain,
+            rawIntake: mergedIntake,
+            intentContract: icHard,
+            draft: merged.draft,
+            premiumPipelineSource: result.premiumRenderSource,
+          });
+          if (vHard.ok) {
+            const gHard = canShowPremiumSuccess({
+              intentContract: icHard,
+              renderSource: resolvedPersist.premium_render_source,
+              validation: vHard,
+              documentText: snapshotPlain,
+              intakeText: mergedIntake,
+              premiumPipelineSource: result.premiumRenderSource,
+              stale: false,
+              draft: merged.draft,
+              qualityRetryActive: false,
+              serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
+              allowPaidSubstantiveStitch: true,
+            });
+            lastAuthoritativeProCommitRef.current = {
+              winningLen: snapshotPlain.length,
+              pipelineSource: result.premiumRenderSource,
+              validateOk: true,
+              gateState: gHard.state,
+              applySuccessCompleted: true,
+            };
+            setProUpgradeUseStarterView(false);
+            setProFullDraftQualityRetry(false);
+            setPremiumPostCheckoutPhase(null);
+          }
+        }
         const corpusSnapshot = (snapshotPlain || finalDoc).trim();
         hydratedPremiumBodyRef.current = corpusSnapshot;
         lastPremiumWinningCorpusRef.current = corpusSnapshot;
@@ -4213,6 +4321,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   snapshotWritten: "pending",
                 });
               }
+            }
+            if (import.meta.env.DEV && result) {
+              const ri = resolveAgreementIntentContract(args.intakeText);
+              const winPre = (result.winningPremiumBodyText || "").trim();
+              const vPre =
+                winPre.length >= 500
+                  ? validatePaidProOutput({
+                      text: winPre,
+                      rawIntake: args.intakeText,
+                      intentContract: ri,
+                      draft: result.premiumDraft ?? null,
+                      premiumPipelineSource: result.premiumRenderSource,
+                    })
+                  : { ok: false, reasons: ["short_winning_body"] as string[] };
+              logDevPostPremiumFullDraftApplySuccess({
+                phase: "runModelPass_before_applySuccess",
+                willCallApplySuccess: true,
+                premiumRenderSourcePipeline: result.premiumRenderSource,
+                winningBodyLen: winPre.length,
+                staleIntakeOrGeneration: Boolean(result.staleIntakeOrGeneration),
+                validatePaidProOutputOk: vPre.ok,
+              });
             }
             applySuccess(result);
           } else {
@@ -5900,6 +6030,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     if (agreementDocumentDirtyRef.current) return;
+    if (premiumPersistedFlowActive) {
+      const snap = readPremiumCompletionSnapshot();
+      const fromSnap = (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim();
+      const fromRefs = (hydratedPremiumBodyRef.current || lastPremiumWinningCorpusRef.current || "").trim();
+      const saved = fromSnap.length >= fromRefs.length ? fromSnap : fromRefs;
+      if (saved.length >= 500) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[agreement-doc-sync] skip_buildAgreementPreviewText", {
+            reason: "premium_persisted_authoritative_body",
+            savedLen: saved.length,
+            note: "prevents live_generated_preview from clobbering POST /premium-full-draft text",
+          });
+        }
+        return;
+      }
+    }
     try {
       const starterPreview = !(
         tierAllowsAdvancedFullDraftReveal(tier) ||
