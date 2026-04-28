@@ -63,7 +63,7 @@ const structured: ParsedDraftShape = {
   due_date: null,
   effective_date: "As agreed",
   payment: emptyPayment,
-  agreement_family: "software_web_dev",
+  agreement_family: "services_agreement",
 };
 
 describe("runPremiumCompletion (advisory not in hot path)", () => {

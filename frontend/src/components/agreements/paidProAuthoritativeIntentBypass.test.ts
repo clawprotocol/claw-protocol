@@ -143,7 +143,7 @@ describe("end-to-end: web intake + consulting agreement_family draft + authorita
     const broadDraft: ParsedDraftShape = {
       title: "Independent Contractor Agreement",
       jurisdiction: "Oklahoma",
-      agreement_family: "independent_contractor",
+      agreement_family: "independent_contractor_agreement",
       parties: [
         { name: "A", role: "party" },
         { name: "B", role: "party" },
