@@ -67,6 +67,12 @@ export type CreateDraftReviewCardProps = {
   prepareCompact?: boolean;
   /** When true, hide weak starter `payment_terms` fragments behind polished display copy. */
   sanitizeStarterPaymentTerms?: boolean;
+  /** Upper label — default “Draft preview”; use “LawDog Pro agreement” on authoritative Pro surfaces. */
+  eyebrowLabel?: string;
+  /** Main heading — default “Review document”. */
+  cardHeading?: string;
+  /** Intro paragraph; overrides prepareCompact default copy when set. */
+  cardIntro?: string;
 };
 
 export const CreateDraftReviewCard = forwardRef<CreateDraftReviewCardHandle, CreateDraftReviewCardProps>(
@@ -80,18 +86,12 @@ export const CreateDraftReviewCard = forwardRef<CreateDraftReviewCardHandle, Cre
       partyHighlightNonce = 0,
       prepareCompact = false,
       sanitizeStarterPaymentTerms = false,
+      eyebrowLabel = "Draft preview",
+      cardHeading = "Review document",
+      cardIntro,
     } = props;
     const [editing, setEditing] = useState<ReviewInlineField | null>(null);
     const [buf, setBuf] = useState("");
-
-    useEffect(() => {
-      console.debug("[review-card-source]", {
-        source: "props.draft (canonical reviewDraft from parent)",
-        title: nz(draft.title).slice(0, 80),
-        parties: partiesBlock(draft).slice(0, 120),
-        purposeLen: nz(draft.purpose).length,
-      });
-    }, [draft]);
 
     /** After programmatic `beginPartyInlineEdit`, move focus into the parties textarea. */
     useEffect(() => {
@@ -229,7 +229,7 @@ export const CreateDraftReviewCard = forwardRef<CreateDraftReviewCardHandle, Cre
           "rounded-xl border border-emerald-500/25 bg-slate-950/80 p-4 shadow-lg shadow-emerald-950/25 sm:p-5"
         }
         role="region"
-        aria-label="Draft review"
+        aria-label={eyebrowLabel.includes("LawDog Pro") ? "LawDog Pro agreement summary" : "Agreement review summary"}
       >
         <p
           className={
@@ -238,13 +238,14 @@ export const CreateDraftReviewCard = forwardRef<CreateDraftReviewCardHandle, Cre
               : "text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-400/90 sm:text-[11px]"
           }
         >
-          Draft preview
+          {eyebrowLabel}
         </p>
-        <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Review document</h3>
+        <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">{cardHeading}</h3>
         <p className="mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm">
-          {prepareCompact
-            ? "Summary of key terms for this send."
-            : "Summary of your draft — tap a value for quick fixes, or edit the full agreement in the preview below. Fix party names before adding recipients."}
+          {cardIntro ??
+            (prepareCompact
+              ? "Summary of key terms for this send."
+              : "Summary of your draft — tap a value for quick fixes, or edit the full agreement in the preview below. Fix party names before adding recipients.")}
         </p>
         <dl className="mt-4 space-y-3 border-t border-slate-800/80 pt-4 text-sm leading-relaxed text-slate-200 sm:text-[0.9375rem]">
           <div className="flex items-start justify-between gap-2">
