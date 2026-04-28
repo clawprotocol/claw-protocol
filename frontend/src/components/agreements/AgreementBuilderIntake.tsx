@@ -358,8 +358,8 @@ import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import {
   pickAuthoritativeProCorpusForRefine,
   evaluatePremiumRefineCandidate,
+  formatProRefineRejectedShortInline,
   PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
-  PRO_REFINE_REJECTED_SHORT_USER_MESSAGE,
 } from "./premiumRefineAcceptance";
 import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
@@ -477,6 +477,9 @@ const FIELD_CHIPS: Record<MissingKey, string[]> = {
 };
 
 const DEFAULT_SECTION = "rounded-xl border border-slate-800 bg-slate-950/40 p-4";
+
+/** Short starter prompts when Pro is ready — avoids long gap lists (max two chips). */
+const PRO_REFINE_QUICK_SUGGESTION_CHIPS: readonly string[] = ["Add late fee", "Clarify delivery acceptance"];
 
 /** Typed follow-up: Enter submits only after this idle gap (avoids accidental submit mid-typing). */
 const FOLLOW_UP_ENTER_IDLE_MS = 420;
@@ -3728,7 +3731,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumReviewDocEditorOpen(false);
         setPremiumPostCheckoutPhase(null);
         setCreateFlowPhase("draft_ready_for_review");
-        setDisplayPhase("intake");
+        setDisplayPhase("review");
         setCreateUiStage(CreateUiStage.DRAFT);
         setMobileWorkspacePane("preview");
         setPreviewPaneRevealed(true);
@@ -3761,7 +3764,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             hardErrorPresent: false,
           },
           createUiStage: String(CreateUiStage.DRAFT),
-          displayPhase: "intake",
+          displayPhase: "review",
         });
         window.requestAnimationFrame(() => {
           bumpPremiumSurfaceGateTick();
@@ -5434,7 +5437,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return false;
         }
         if (acceptance.decision === "rejected_short") {
-          setHardError(PRO_REFINE_REJECTED_SHORT_USER_MESSAGE);
+          setHardError(null);
+          setReviewRefineUserMessage(formatProRefineRejectedShortInline());
           return false;
         }
         // eslint-disable-next-line no-console
@@ -7704,7 +7708,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setCreateUiStage(CreateUiStage.DRAFT);
         setCreateFlowPhase("draft_ready_for_review");
         setDraftNowCommitted(true);
-        setDisplayPhase("intake");
+        setDisplayPhase(
+          (next.premium_server_full_document_text || next.premium_full_document_text || "").trim().length >= 500
+            ? "review"
+            : "intake",
+        );
         setHardError(null);
         if (rawIntake.trim()) {
           setIntakeBaselineCommitted(rawIntake);
@@ -8191,6 +8199,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDocRefreshTick,
   ]);
   const premiumProTruthGate = premiumProTruthSnapshot?.gate ?? null;
+
+  /** Pro gate green — collapse optional gap bullets into quick chips + simpler refine treatment. */
+  const postCheckoutProReadyForCompactRefineUx = Boolean(
+    premiumProTruthGate?.successBannerAllowed || premiumProTruthGate?.signerCtaAllowed,
+  );
+
+  const showPostCheckoutOptionalRefineCard = Boolean(
+    createUiStage === CreateUiStage.DRAFT &&
+      createProductionTwoPane &&
+      simpleProductFlow &&
+      !premiumPostCheckoutPhase &&
+      hasUsablePaidBody &&
+      (postCheckoutAdvisoryGaps.length > 0 || postCheckoutProReadyForCompactRefineUx),
+  );
 
   const canProceedWithPaidProDocument = useMemo(() => {
     if (!premiumPaidDocumentSurface) return true;
@@ -12020,38 +12042,61 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </button>
                             </div>
                           ) : null}
-                          {createUiStage === CreateUiStage.DRAFT &&
-                          createProductionTwoPane &&
-                          simpleProductFlow &&
-                          !premiumPostCheckoutPhase &&
-                          hasUsablePaidBody &&
-                          postCheckoutAdvisoryGaps.length > 0 ? (
+                          {showPostCheckoutOptionalRefineCard ? (
                             <div
                               className="mb-4 rounded-xl border border-slate-600/50 bg-slate-950/30 px-4 py-3.5 sm:px-5"
                               role="complementary"
-                              aria-label="Optional post-checkout detail suggestions"
+                              aria-label="Adjust Pro agreement"
                             >
                               <p className="text-sm font-medium text-slate-200 sm:text-[0.9375rem]">
-                                Optional — ideas for stronger detail
+                                Want to adjust this agreement?
                               </p>
                               <p className="mt-1.5 text-xs leading-relaxed text-slate-500 sm:text-sm">
-                                These are optional improvements. Add instructions below, or continue with the current Pro
-                                agreement.
+                                Tell LawDog what to change. Your current Pro agreement stays safe unless the update is
+                                accepted.
                               </p>
-                              <ul className="mt-2 list-outside list-disc pl-4 text-sm leading-relaxed text-slate-300">
-                                {postCheckoutAdvisoryGaps.map((q) => (
-                                  <li className="mt-0.5" key={q}>
-                                    {q}
-                                  </li>
-                                ))}
-                              </ul>
+                              {postCheckoutProReadyForCompactRefineUx ? (
+                                <div className="mt-3 flex flex-wrap gap-2" aria-label="Quick suggestions">
+                                  {PRO_REFINE_QUICK_SUGGESTION_CHIPS.map((chip) => (
+                                    <button
+                                      key={chip}
+                                      type="button"
+                                      className="rounded-full border border-slate-600/70 bg-slate-900/80 px-3 py-1 text-xs font-medium text-slate-200 transition hover:border-emerald-500/40 hover:text-emerald-100"
+                                      onClick={() => setProSuggestionsRefineDraft(chip)}
+                                    >
+                                      {chip}
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : postCheckoutAdvisoryGaps.length > 0 ? (
+                                <ul className="mt-2 list-outside list-disc pl-4 text-sm leading-relaxed text-slate-300">
+                                  {postCheckoutAdvisoryGaps.slice(0, 2).map((q) => (
+                                    <li className="mt-0.5" key={q}>
+                                      {q}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              {reviewRefineUserMessage ? (
+                                <p
+                                  className={`mt-3 rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+                                    reviewRefineUserMessage.includes("safely apply")
+                                      ? "border-amber-500/40 bg-amber-950/25 text-amber-100/95"
+                                      : "border-sky-500/35 bg-slate-900/50 text-slate-200"
+                                  }`}
+                                  role="alert"
+                                  aria-live="polite"
+                                >
+                                  {reviewRefineUserMessage}
+                                </p>
+                              ) : null}
                               <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
-                                Refine this Pro agreement (optional)
+                                Your instruction
                                 <textarea
                                   value={proSuggestionsRefineDraft}
                                   onChange={(e) => setProSuggestionsRefineDraft(e.target.value)}
                                   rows={3}
-                                  placeholder="Tell LawDog what to add or change — e.g., define final delivery, add acceptance window, clarify revision deadline..."
+                                  placeholder="Example: Add a late fee clause for invoices over 10 days overdue."
                                   className="mt-1.5 w-full resize-y rounded-lg border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm leading-relaxed text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-500/55"
                                   disabled={loading}
                                 />
@@ -12067,18 +12112,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   }
                                   onClick={() => void handleProRefineFromSuggestions()}
                                 >
-                                  Update Pro agreement
+                                  Apply change
                                 </button>
                                 <button
                                   type="button"
                                   className="text-left text-xs font-medium text-slate-500 underline decoration-slate-600/80 hover:text-slate-400"
-                                  onClick={() => setPostCheckoutAdvisoryGaps([])}
+                                  onClick={() => {
+                                    setPostCheckoutAdvisoryGaps([]);
+                                    setReviewRefineUserMessage(null);
+                                  }}
                                 >
                                   Dismiss
                                 </button>
                               </div>
                               <p className="mt-2 text-[11px] leading-snug text-slate-500">
-                                Nothing is sent automatically. Updates use your current Pro agreement as the base.
+                                Nothing is sent automatically. Accepted updates replace the preview from your full Pro
+                                agreement.
                               </p>
                             </div>
                           ) : null}
@@ -12320,6 +12369,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               draft={reviewDraft ?? draft}
                               prepareCompact
                               sanitizeStarterPaymentTerms={false}
+                              eyebrowLabel={
+                                premiumPaidReadonlyPick.sourceUsed === "server_full_document_text"
+                                  ? "LawDog Pro agreement"
+                                  : "Agreement ready for review"
+                              }
+                              cardHeading="Review summary"
+                              cardIntro={
+                                premiumPaidReadonlyPick.sourceUsed === "server_full_document_text"
+                                  ? "Summary of key terms — the full Pro agreement text is in the preview."
+                                  : undefined
+                              }
                               onInlineCommit={undefined}
                               partyHighlightNonce={reviewPartyHighlightNonce}
                               onNavigateToAgreementDocument={undefined}
@@ -12751,8 +12811,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 </p>
                                 {reviewRefineUserMessage ? (
                                   <p
-                                    className="mt-2 rounded-lg border border-sky-500/35 bg-slate-900/50 px-3 py-2 text-sm leading-relaxed text-slate-200"
-                                    role="status"
+                                    className={`mt-2 rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+                                      reviewRefineUserMessage.includes("safely apply")
+                                        ? "border-amber-500/40 bg-amber-950/25 text-amber-100/95"
+                                        : "border-sky-500/35 bg-slate-900/50 text-slate-200"
+                                    }`}
+                                    role={reviewRefineUserMessage.includes("safely apply") ? "alert" : "status"}
                                     aria-live="polite"
                                   >
                                     {reviewRefineUserMessage}
@@ -12828,8 +12892,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             ) : null}
                             {showProLawdogRefineAndFinalize && reviewRefineUserMessage ? (
                               <p
-                                className="mb-2 rounded-lg border border-sky-500/35 bg-slate-900/50 px-3 py-2 text-sm leading-relaxed text-slate-200 sm:mb-3"
-                                role="status"
+                                className={`mb-2 rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap sm:mb-3 ${
+                                  reviewRefineUserMessage.includes("safely apply")
+                                    ? "border-amber-500/40 bg-amber-950/25 text-amber-100/95"
+                                    : "border-sky-500/35 bg-slate-900/50 text-slate-200"
+                                }`}
+                                role={reviewRefineUserMessage.includes("safely apply") ? "alert" : "status"}
                                 aria-live="polite"
                               >
                                 {reviewRefineUserMessage}

@@ -86,6 +86,18 @@ export function evaluatePremiumRefineCandidate(
   return { decision: "rejected_short", refinedLen, ratio };
 }
 
-/** User-facing when refine returns text that fails length guard vs current Pro body. */
-export const PRO_REFINE_REJECTED_SHORT_USER_MESSAGE =
-  "That update looked incomplete compared to your current agreement. Your Pro agreement is unchanged.";
+/** Primary line: rejected_short near refine UI (inline). */
+export const PRO_REFINE_REJECTED_SHORT_PRIMARY =
+  "We couldn't safely apply that update without shortening your agreement. Your Pro agreement is unchanged.";
+
+/** Secondary hint — optional line shown below the primary. */
+export const PRO_REFINE_REJECTED_SHORT_HINT =
+  "Try a more specific instruction, or use Edit wording for a precise manual change.";
+
+/** Full inline message for textarea-adjacent alerts (two paragraphs). */
+export function formatProRefineRejectedShortInline(): string {
+  return `${PRO_REFINE_REJECTED_SHORT_PRIMARY}\n\n${PRO_REFINE_REJECTED_SHORT_HINT}`;
+}
+
+/** @deprecated Prefer {@link formatProRefineRejectedShortInline} or PRIMARY/HINT. */
+export const PRO_REFINE_REJECTED_SHORT_USER_MESSAGE = PRO_REFINE_REJECTED_SHORT_PRIMARY;
