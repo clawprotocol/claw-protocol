@@ -61,6 +61,7 @@ import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
   buildSendRouteReadonlyHtmlFromPlain,
   pickAuthoritativePlainForSendHandoff,
+  shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
 import { DirectComparePanel } from "../../agreement/DirectComparePanel";
 import { MATERIAL_CHANGE_SUMMARY_LABEL, OWNER_INCOMING_SUGGESTED_EDITS_HEADING } from "../../agreement/universalReviewIntakeCopy";
@@ -1591,6 +1592,47 @@ const AgreementReview: React.FC<Props> = ({
     () => (draft ? pickAuthoritativePlainForSendHandoff(draft) : null),
     [draft],
   );
+
+  const simpleSendAuthoritativeMinimalChrome = useMemo(
+    () =>
+      Boolean(
+        isSimpleHomeReview &&
+          simpleFlowPhase === "send" &&
+          shouldMinimalProSendRecipientChrome({
+            premiumRenderSourceResolved: null,
+            authoritativePick: authoritativeCorpusPick,
+            readonlyPlainText: authoritativeCorpusPick?.text ?? "",
+          }),
+      ),
+    [isSimpleHomeReview, simpleFlowPhase, authoritativeCorpusPick],
+  );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !isSimpleHomeReview || simpleFlowPhase !== "send" || !draft) return;
+    const pick = authoritativeCorpusPick;
+    const purposeLen = (draft.purpose ?? "").trim().length;
+    const hasAuthoritativeCorpus = Boolean(
+      pick &&
+        pick.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN &&
+        pick.field !== "purpose",
+    );
+    // eslint-disable-next-line no-console
+    console.info("[send-stage-ui-source]", {
+      hasAuthoritativeCorpus,
+      authoritativeLen: pick?.text.length ?? 0,
+      renderSource: pick?.field ?? "",
+      reviewCardHidden: simpleSendAuthoritativeMinimalChrome,
+      advancedOptionsHidden: simpleSendAuthoritativeMinimalChrome,
+      purposeLen,
+    });
+  }, [
+    isSimpleHomeReview,
+    simpleFlowPhase,
+    draft,
+    draft?.purpose,
+    authoritativeCorpusPick,
+    simpleSendAuthoritativeMinimalChrome,
+  ]);
 
   const renderedHtmlResolved = useMemo(() => {
     const rh = renderedHtml || "";
@@ -3886,7 +3928,8 @@ const AgreementReview: React.FC<Props> = ({
           Complete the highlighted fields to continue
         </div>
       ) : null}
-      {isSimpleHomeReview ? (
+      {isSimpleHomeReview &&
+      !(simpleFlowPhase === "send" && simpleSendAuthoritativeMinimalChrome) ? (
         <details className="rounded-lg border border-slate-800/60 bg-slate-950/25 px-3 py-2 text-slate-400 [&_summary::-webkit-details-marker]:hidden">
           <summary className="cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-300">
             Understand roles
@@ -3905,7 +3948,7 @@ const AgreementReview: React.FC<Props> = ({
             </li>
           </ul>
         </details>
-      ) : (
+      ) : !isSimpleHomeReview ? (
         <div className="rounded-lg border border-slate-800/70 bg-slate-950/30 p-3">
           <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">What each role means</div>
           <ul className="mt-2 list-inside list-disc space-y-1.5 text-[11px] leading-snug text-slate-400">
@@ -3922,7 +3965,7 @@ const AgreementReview: React.FC<Props> = ({
             </li>
           </ul>
         </div>
-      )}
+      ) : null}
       <div
         className={
           isSimpleHomeReview
@@ -3932,16 +3975,22 @@ const AgreementReview: React.FC<Props> = ({
       >
         <div className="mb-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-            {isSimpleHomeReview ? "Signature delivery" : "People on this agreement"}
+            {isSimpleHomeReview
+              ? simpleSendAuthoritativeMinimalChrome && simpleFlowPhase === "send"
+                ? "Recipients"
+                : "Signature delivery"
+              : "People on this agreement"}
           </div>
           {isSimpleHomeReview && simpleFlowPhase === "send" ? (
             <p className="mt-2 text-[11px] leading-relaxed text-slate-500 sm:text-xs">
-              Parties are listed in the agreement. Only people with emails entered below will receive signature
-              requests.
+              {simpleSendAuthoritativeMinimalChrome
+                ? "LawDog creates a secure review link — it does not email recipients automatically. Add names and emails below so signers are labeled correctly."
+                : "Parties are listed in the agreement. Only people with emails entered below will receive signature requests."}
             </p>
           ) : null}
         </div>
-        {participantRows.length > 0 ? (
+        {participantRows.length > 0 &&
+        !(isSimpleHomeReview && simpleFlowPhase === "send" && simpleSendAuthoritativeMinimalChrome) ? (
           <details
             className={`mb-4 overflow-hidden rounded-lg border border-slate-800/90 bg-slate-950/30 [&_summary::-webkit-details-marker]:hidden ${
               isSimpleHomeReview && simpleFlowPhase === "send" ? "" : "open"
@@ -4145,75 +4194,131 @@ const AgreementReview: React.FC<Props> = ({
             </div>
           </details>
         ) : null}
-        <details
-          className={`rounded-lg border border-slate-800/55 bg-slate-950/20 [&_summary::-webkit-details-marker]:hidden ${
-            isSimpleHomeReview && simpleFlowPhase === "send" ? "" : "open"
-          }`}
-          {...(isSimpleHomeReview && simpleFlowPhase === "send"
-            ? { open: simpleSendRecipientEditorOpen }
-            : { open: true })}
-          onToggle={
-            isSimpleHomeReview && simpleFlowPhase === "send"
-              ? (e) => setSimpleSendRecipientEditorOpen((e.target as HTMLDetailsElement).open)
-              : undefined
-          }
-        >
-          <summary
-            className={`cursor-pointer list-none px-3 py-2.5 text-sm font-medium text-slate-200 marker:hidden hover:bg-slate-900/40 ${
-              isSimpleHomeReview && simpleFlowPhase === "send" ? "" : "hidden"
-            }`}
-          >
-            Edit recipients &amp; routing
-          </summary>
-        <div className={`${isSimpleHomeReview ? "space-y-4" : "space-y-3"} px-1 pb-1 pt-1`}>
-          {(draft.parties || []).map((party, idx) => (
-            <RecipientWorkflowRow
-              key={`recipient_row_${idx}`}
-              index={idx}
-              party={party}
-              variant="workspace"
-              accentName={isSimpleHomeReview}
-              disabled={savingField === "parties"}
-              collectContact={Boolean(
-                isSimpleHomeReview && simpleFlowPhase === "send" && simpleSendActionsUnlocked
-              )}
-              contactValidateAttempted={simpleSendValidateAttempted}
-              contactFieldErrors={simpleSendFieldErrors}
-              contactValidationSeq={contactValidationSeq}
-              shakeContactFieldKey={shakeContactFieldKey}
-              contactWayfindLabel={contactWayfindLabel(
-                idx,
-                party,
-                contactPartyOrdinal(draft.parties, idx),
-                simpleSendFieldErrors,
-                simpleSendValidateAttempted
-              )}
-              onRelieveContactFieldError={relieveContactFieldError}
-              onSave={(nextParty) => {
-                const nextParties = [...(draft.parties || [])];
-                nextParties[idx] = nextParty;
-                void saveParties(nextParties);
-                if (simpleSendValidateAttempted) {
-                  setSimpleSendFieldErrors((prev) => {
-                    const next = { ...prev };
-                    if (!recipientRoleNeedsContactInfo(nextParty.role)) {
-                      (["name", "email", "phone"] as const).forEach((f) => delete next[`${idx}-${f}`]);
-                      return next;
+        {simpleSendAuthoritativeMinimalChrome && isSimpleHomeReview && simpleFlowPhase === "send" ? (
+          <div className="rounded-lg border border-slate-800/55 bg-slate-950/20 px-1 pb-3 pt-1">
+            <p className="mb-3 px-3 pt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Recipient details
+            </p>
+            <div className={`${isSimpleHomeReview ? "space-y-4" : "space-y-3"} px-1 pb-1 pt-1`}>
+              {(draft.parties || []).map((party, idx) => (
+                <RecipientWorkflowRow
+                  key={`recipient_row_${idx}`}
+                  index={idx}
+                  party={party}
+                  variant="workspace"
+                  accentName={isSimpleHomeReview}
+                  disabled={savingField === "parties"}
+                  collectContact={Boolean(
+                    isSimpleHomeReview && simpleFlowPhase === "send" && simpleSendActionsUnlocked
+                  )}
+                  contactValidateAttempted={simpleSendValidateAttempted}
+                  contactFieldErrors={simpleSendFieldErrors}
+                  contactValidationSeq={contactValidationSeq}
+                  shakeContactFieldKey={shakeContactFieldKey}
+                  contactWayfindLabel={contactWayfindLabel(
+                    idx,
+                    party,
+                    contactPartyOrdinal(draft.parties, idx),
+                    simpleSendFieldErrors,
+                    simpleSendValidateAttempted
+                  )}
+                  onRelieveContactFieldError={relieveContactFieldError}
+                  onSave={(nextParty) => {
+                    const nextParties = [...(draft.parties || [])];
+                    nextParties[idx] = nextParty;
+                    void saveParties(nextParties);
+                    if (simpleSendValidateAttempted) {
+                      setSimpleSendFieldErrors((prev) => {
+                        const next = { ...prev };
+                        if (!recipientRoleNeedsContactInfo(nextParty.role)) {
+                          (["name", "email", "phone"] as const).forEach((f) => delete next[`${idx}-${f}`]);
+                          return next;
+                        }
+                        if ((nextParty.name || "").trim()) delete next[`${idx}-name`];
+                        const em = (nextParty.email || "").trim();
+                        if (em && SIMPLE_SEND_EMAIL_RE.test(em)) delete next[`${idx}-email`];
+                        const digits = (nextParty.phone || "").replace(/\D/g, "");
+                        if (digits.length >= 10) delete next[`${idx}-phone`];
+                        return next;
+                      });
                     }
-                    if ((nextParty.name || "").trim()) delete next[`${idx}-name`];
-                    const em = (nextParty.email || "").trim();
-                    if (em && SIMPLE_SEND_EMAIL_RE.test(em)) delete next[`${idx}-email`];
-                    const digits = (nextParty.phone || "").replace(/\D/g, "");
-                    if (digits.length >= 10) delete next[`${idx}-phone`];
-                    return next;
-                  });
-                }
-              }}
-            />
-          ))}
-        </div>
-        </details>
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <details
+            className={`rounded-lg border border-slate-800/55 bg-slate-950/20 [&_summary::-webkit-details-marker]:hidden ${
+              isSimpleHomeReview && simpleFlowPhase === "send" ? "" : "open"
+            }`}
+            {...(isSimpleHomeReview && simpleFlowPhase === "send"
+              ? { open: simpleSendRecipientEditorOpen }
+              : { open: true })}
+            onToggle={
+              isSimpleHomeReview && simpleFlowPhase === "send"
+                ? (e) => setSimpleSendRecipientEditorOpen((e.target as HTMLDetailsElement).open)
+                : undefined
+            }
+          >
+            <summary
+              className={`cursor-pointer list-none px-3 py-2.5 text-sm font-medium text-slate-200 marker:hidden hover:bg-slate-900/40 ${
+                isSimpleHomeReview && simpleFlowPhase === "send" ? "" : "hidden"
+              }`}
+            >
+              Edit recipients &amp; routing
+            </summary>
+            <div className={`${isSimpleHomeReview ? "space-y-4" : "space-y-3"} px-1 pb-1 pt-1`}>
+              {(draft.parties || []).map((party, idx) => (
+                <RecipientWorkflowRow
+                  key={`recipient_row_${idx}`}
+                  index={idx}
+                  party={party}
+                  variant="workspace"
+                  accentName={isSimpleHomeReview}
+                  disabled={savingField === "parties"}
+                  collectContact={Boolean(
+                    isSimpleHomeReview && simpleFlowPhase === "send" && simpleSendActionsUnlocked
+                  )}
+                  contactValidateAttempted={simpleSendValidateAttempted}
+                  contactFieldErrors={simpleSendFieldErrors}
+                  contactValidationSeq={contactValidationSeq}
+                  shakeContactFieldKey={shakeContactFieldKey}
+                  contactWayfindLabel={contactWayfindLabel(
+                    idx,
+                    party,
+                    contactPartyOrdinal(draft.parties, idx),
+                    simpleSendFieldErrors,
+                    simpleSendValidateAttempted
+                  )}
+                  onRelieveContactFieldError={relieveContactFieldError}
+                  onSave={(nextParty) => {
+                    const nextParties = [...(draft.parties || [])];
+                    nextParties[idx] = nextParty;
+                    void saveParties(nextParties);
+                    if (simpleSendValidateAttempted) {
+                      setSimpleSendFieldErrors((prev) => {
+                        const next = { ...prev };
+                        if (!recipientRoleNeedsContactInfo(nextParty.role)) {
+                          (["name", "email", "phone"] as const).forEach((f) => delete next[`${idx}-${f}`]);
+                          return next;
+                        }
+                        if ((nextParty.name || "").trim()) delete next[`${idx}-name`];
+                        const em = (nextParty.email || "").trim();
+                        if (em && SIMPLE_SEND_EMAIL_RE.test(em)) delete next[`${idx}-email`];
+                        const digits = (nextParty.phone || "").replace(/\D/g, "");
+                        if (digits.length >= 10) delete next[`${idx}-phone`];
+                        return next;
+                      });
+                    }
+                  }}
+                />
+              ))}
+            </div>
+          </details>
+        )}
       <p className="text-xs text-slate-500">{recipientsSummaryLine}</p>
+      {!simpleSendAuthoritativeMinimalChrome ? (
       <details className="rounded-lg border border-slate-800/55 bg-slate-950/30 [&_summary::-webkit-details-marker]:hidden">
         <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-slate-200 marker:hidden hover:bg-slate-900/40">
           Advanced options — links &amp; FYI copy
@@ -4355,6 +4460,7 @@ const AgreementReview: React.FC<Props> = ({
       ) : null}
         </div>
       </details>
+      ) : null}
       </div>
     </div>
   )) : (
@@ -5534,7 +5640,47 @@ const AgreementReview: React.FC<Props> = ({
                     simpleSendActionsUnlocked ? (
                       <>
                         <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
-                          {premiumAwaitingStreamlinedFork ? (
+                          {simpleSendAuthoritativeMinimalChrome ? (
+                            <>
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200/95">
+                                Agreement ready
+                              </p>
+                              <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                                {streamlinedPremiumIntentForCopy === "review"
+                                  ? "LawDog creates secure review links — it does not email recipients automatically. Use the button below to generate links you copy and share."
+                                  : "LawDog creates secure signing links — it does not email recipients automatically. Use the button below to generate links you copy and share."}
+                              </p>
+                              <div className="mt-4 flex flex-col gap-3">
+                                <button
+                                  type="button"
+                                  className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
+                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || sendInviteReadyCount < 1}
+                                  onClick={() => void handleSimpleSendWithoutPayment()}
+                                >
+                                  {streamlinedPremiumIntentForCopy === "review"
+                                    ? sendInviteReadyCount >= 1
+                                      ? sendInviteReadyCount === 1
+                                        ? "Create review links"
+                                        : `Create review links (${sendInviteReadyCount})`
+                                      : "Create review links"
+                                    : "Create signing links"}
+                                </button>
+                                {onSimpleFlowBack ? (
+                                  <button
+                                    type="button"
+                                    className="vs01-btn vs01-btn--secondary w-full min-h-[2.75rem] px-6"
+                                    onClick={() => onSimpleFlowBack()}
+                                  >
+                                    Back
+                                  </button>
+                                ) : null}
+                              </div>
+                              <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                                Nothing reaches anyone until you confirm and share a link yourself.
+                              </p>
+                              <div className="mt-5 border-t border-slate-800/50 pt-4">{recipientsBlock}</div>
+                            </>
+                          ) : premiumAwaitingStreamlinedFork ? (
                             <>
                               <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">
                                 Premium path
@@ -5660,40 +5806,46 @@ const AgreementReview: React.FC<Props> = ({
                               </ul>
                             </>
                           )}
-                          <details className="mt-5 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
-                            <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400">
-                              Recipients and delivery setup
-                            </summary>
-                            <div className="mt-3 border-t border-slate-800/50 pt-3">{recipientsBlock}</div>
-                          </details>
-                          <details className="mt-2 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
-                            <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400">
-                              Optional payments
-                            </summary>
-                            <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                              Optional payment only if you expand it below — it never sends on its own.
-                            </p>
-                          </details>
+                          {!simpleSendAuthoritativeMinimalChrome ? (
+                            <>
+                              <details className="mt-5 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
+                                <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400">
+                                  Recipients and delivery setup
+                                </summary>
+                                <div className="mt-3 border-t border-slate-800/50 pt-3">{recipientsBlock}</div>
+                              </details>
+                              <details className="mt-2 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
+                                <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400">
+                                  Optional payments
+                                </summary>
+                                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                                  Optional payment only if you expand it below — it never sends on its own.
+                                </p>
+                              </details>
+                            </>
+                          ) : null}
                         </div>
-                        <SimplePaymentAttachCard
-                          partyALabel={
-                            (draft.parties || [])[0]
-                              ? participantDisplayName((draft.parties || [])[0], 0)
-                              : "Party A"
-                          }
-                          partyBLabel={
-                            (draft.parties || [])[1]
-                              ? participantDisplayName((draft.parties || [])[1], 1)
-                              : "Party B"
-                          }
-                          paymentTerms={draft.payment_terms}
-                          purpose={draft.purpose}
-                          paymentRequired={simplePaymentRequired}
-                          onPaymentRequiredChange={(v) => void persistSimplePaymentRequired(v)}
-                          value={simplePayForm}
-                          onChange={setSimplePayForm}
-                          onPersist={() => void persistSimplePayment()}
-                        />
+                        {!simpleSendAuthoritativeMinimalChrome ? (
+                          <SimplePaymentAttachCard
+                            partyALabel={
+                              (draft.parties || [])[0]
+                                ? participantDisplayName((draft.parties || [])[0], 0)
+                                : "Party A"
+                            }
+                            partyBLabel={
+                              (draft.parties || [])[1]
+                                ? participantDisplayName((draft.parties || [])[1], 1)
+                                : "Party B"
+                            }
+                            paymentTerms={draft.payment_terms}
+                            purpose={draft.purpose}
+                            paymentRequired={simplePaymentRequired}
+                            onPaymentRequiredChange={(v) => void persistSimplePaymentRequired(v)}
+                            value={simplePayForm}
+                            onChange={setSimplePayForm}
+                            onPersist={() => void persistSimplePayment()}
+                          />
+                        ) : null}
                       </>
                     ) : simpleFlowUpsellSuppressed ? (
                       <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">

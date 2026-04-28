@@ -323,6 +323,8 @@ import {
 import {
   longestPlainForAgreementPersist,
   pickAuthoritativePlainForSendHandoff,
+  SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+  shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
 import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
@@ -887,6 +889,8 @@ type CreateFlowSendRecipientsPanelProps = {
   isPremiumRecipientSurface: boolean;
   showProTierAdvanced: boolean;
   productionReadyForPersist: boolean;
+  /** Pro full-document handoff: hide v1 advanced accordions + tighten copy. */
+  minimalProSendRecipientChrome: boolean;
   draft: ParsedDraftShape | null;
   effectivePremiumSendMode: PremiumSendIntent;
   onPremiumSendModePick: (mode: PremiumSendIntent) => void;
@@ -921,6 +925,7 @@ function CreateFlowSendRecipientsPanel({
   isPremiumRecipientSurface,
   showProTierAdvanced,
   productionReadyForPersist,
+  minimalProSendRecipientChrome,
   draft,
   effectivePremiumSendMode,
   onPremiumSendModePick,
@@ -958,13 +963,20 @@ function CreateFlowSendRecipientsPanel({
       ? "That email doesn’t look valid yet — check spelling and the part after @."
       : "Add recipient 1 email (labels your invite; you’ll copy a secure link next)";
   const modeLinkLabel = effectivePremiumSendMode === "review" ? "Review link" : "Signing link";
-  const modeExplain =
-    effectivePremiumSendMode === "review"
+  const modeExplain = minimalProSendRecipientChrome
+    ? effectivePremiumSendMode === "review"
+      ? "LawDog creates a secure review link for this agreement. It does not email recipients automatically — you copy and share the link when you are ready."
+      : "LawDog prepares secure signing links for this agreement. It does not email recipients automatically — you copy and share when you are ready."
+    : effectivePremiumSendMode === "review"
       ? "Recipients open a secure link to read the draft, suggest plain-English edits, paste a revised version, preview material changes, and submit suggestions. You confirm before anything updates."
       : "Recipients open a secure link to read the final terms and sign when they are ready.";
-  const nextStepExplain = sendRequiresConfirmStep
-    ? "Next, you confirm who is on the agreement in one step. LawDog does not auto-email from here — you copy a secure link after save. Nothing reaches recipients until you share it."
-    : "After you continue, the agreement is saved and you get links to copy. Nothing reaches recipients until you share a link.";
+  const nextStepExplain = minimalProSendRecipientChrome
+    ? sendRequiresConfirmStep
+      ? "Next, confirm who receives the agreement. Nothing is emailed from LawDog — you share the link yourself."
+      : "After continue, you copy your secure link from the next step. Nothing reaches recipients until you share it."
+    : sendRequiresConfirmStep
+      ? "Next, you confirm who is on the agreement in one step. LawDog does not auto-email from here — you copy a secure link after save. Nothing reaches recipients until you share it."
+      : "After you continue, the agreement is saved and you get links to copy. Nothing reaches recipients until you share a link.";
   const linkReadyOutbox = isPremiumRecipientSurface;
   const primarySendLabel = sendRequiresConfirmStep
     ? "Continue to confirmation"
@@ -1035,16 +1047,18 @@ function CreateFlowSendRecipientsPanel({
           />
         </label>
       </div>
-      <label className="block text-xs font-medium text-slate-400 sm:text-sm">
-        Optional signer roles / labels
-        <input
-          type="text"
-          value={recipientSignerLabels}
-          onChange={(e) => setRecipientSignerLabels(sanitizeStarterSignerLabelsLine(e.target.value))}
-          placeholder=""
-          className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
-        />
-      </label>
+      {!minimalProSendRecipientChrome ? (
+        <label className="block text-xs font-medium text-slate-400 sm:text-sm">
+          Optional signer roles / labels
+          <input
+            type="text"
+            value={recipientSignerLabels}
+            onChange={(e) => setRecipientSignerLabels(sanitizeStarterSignerLabelsLine(e.target.value))}
+            placeholder=""
+            className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+          />
+        </label>
+      ) : null}
     </div>
   );
 
@@ -1126,62 +1140,64 @@ function CreateFlowSendRecipientsPanel({
           You can send this starter draft now, or upgrade anytime for stronger terms and tracked e-signing.
         </p>
       ) : null}
-      <details className={`${advDetailsClass} mt-5`}>
-        <summary className={advSummaryClass}>
-          <span className="flex items-center justify-between gap-2">
-            <span>Advanced options</span>
-            <span className="text-xs font-normal text-slate-500">Optional</span>
-          </span>
-        </summary>
-        <div className="space-y-3 border-t border-slate-800/50 px-2 pb-4 pt-3 sm:px-3">
-          {(isPremiumRecipientSurface || showProTierAdvanced) && productionReadyForPersist && draft ? (
+      {!minimalProSendRecipientChrome ? (
+        <details className={`${advDetailsClass} mt-5`}>
+          <summary className={advSummaryClass}>
+            <span className="flex items-center justify-between gap-2">
+              <span>Advanced options</span>
+              <span className="text-xs font-normal text-slate-500">Optional</span>
+            </span>
+          </summary>
+          <div className="space-y-3 border-t border-slate-800/50 px-2 pb-4 pt-3 sm:px-3">
+            {(isPremiumRecipientSurface || showProTierAdvanced) && productionReadyForPersist && draft ? (
+              <details className={advDetailsClass}>
+                <summary className={advSummaryClass}>Signature delivery settings</summary>
+                <div className="border-t border-slate-800/50 px-3 pb-4 pt-2">
+                  <PremiumSendNextStepFork compact={false} selected={effectivePremiumSendMode} onPick={onPremiumSendModePick} />
+                </div>
+              </details>
+            ) : !(isPremiumRecipientSurface || showProTierAdvanced) ? (
+              <p className="px-3 py-2 text-xs leading-relaxed text-slate-500">
+                Tracked signing details are configured after you save — this step is only who the agreement is for.
+              </p>
+            ) : null}
+            {(isPremiumRecipientSurface || showProTierAdvanced) && draft ? (
+              <details className={advDetailsClass}>
+                <summary className={advSummaryClass}>Shared draft &amp; optional share snippet</summary>
+                <div className="border-t border-slate-800/50 px-2 pb-3 pt-2">
+                  <RecipientOutboxPreviewPanel
+                    agreementTitle={(draft.title || "").trim() || "Your agreement"}
+                    partyA={(draft.parties?.[0]?.name || "").trim() || "Party A"}
+                    partyB={(draft.parties?.[1]?.name || "").trim() || "Party B"}
+                    inviteKind={effectivePremiumSendMode === "signature" ? "signature" : "review"}
+                  />
+                </div>
+              </details>
+            ) : null}
+            {(isPremiumRecipientSurface || showProTierAdvanced) && (
+              <details className={advDetailsClass}>
+                <summary className={advSummaryClass}>Additional signer routing &amp; FYI copy</summary>
+                <div className="border-t border-slate-800/50 px-3 pb-3 pt-2 text-xs leading-relaxed text-slate-400">
+                  <p>
+                    Second recipient and signer labels control routing and how names appear on the signing path. Edit
+                    fields above or expand <span className="font-medium text-slate-300">Edit recipients</span>.
+                  </p>
+                  <p className="mt-2 text-slate-500">
+                    FYI-only copies use your tools after send — keep this step focused on who signs first.
+                  </p>
+                </div>
+              </details>
+            )}
             <details className={advDetailsClass}>
-              <summary className={advSummaryClass}>Signature delivery settings</summary>
-              <div className="border-t border-slate-800/50 px-3 pb-4 pt-2">
-                <PremiumSendNextStepFork compact={false} selected={effectivePremiumSendMode} onPick={onPremiumSendModePick} />
+              <summary className={advSummaryClass}>Attach payment requests</summary>
+              <div className="border-t border-slate-800/50 px-3 pb-3 pt-2 text-xs leading-relaxed text-slate-500">
+                Payment requests are attached from your agreement after this send step — LawDog keeps payment separate
+                from the calm send moment here.
               </div>
             </details>
-          ) : !(isPremiumRecipientSurface || showProTierAdvanced) ? (
-            <p className="px-3 py-2 text-xs leading-relaxed text-slate-500">
-              Tracked signing details are configured after you save — this step is only who the agreement is for.
-            </p>
-          ) : null}
-          {(isPremiumRecipientSurface || showProTierAdvanced) && draft ? (
-            <details className={advDetailsClass}>
-              <summary className={advSummaryClass}>Shared draft &amp; optional share snippet</summary>
-              <div className="border-t border-slate-800/50 px-2 pb-3 pt-2">
-                <RecipientOutboxPreviewPanel
-                  agreementTitle={(draft.title || "").trim() || "Your agreement"}
-                  partyA={(draft.parties?.[0]?.name || "").trim() || "Party A"}
-                  partyB={(draft.parties?.[1]?.name || "").trim() || "Party B"}
-                  inviteKind={effectivePremiumSendMode === "signature" ? "signature" : "review"}
-                />
-              </div>
-            </details>
-          ) : null}
-          {(isPremiumRecipientSurface || showProTierAdvanced) && (
-            <details className={advDetailsClass}>
-              <summary className={advSummaryClass}>Additional signer routing &amp; FYI copy</summary>
-              <div className="border-t border-slate-800/50 px-3 pb-3 pt-2 text-xs leading-relaxed text-slate-400">
-                <p>
-                  Second recipient and signer labels control routing and how names appear on the signing path. Edit
-                  fields above or expand <span className="font-medium text-slate-300">Edit recipients</span>.
-                </p>
-                <p className="mt-2 text-slate-500">
-                  FYI-only copies use your tools after send — keep this step focused on who signs first.
-                </p>
-              </div>
-            </details>
-          )}
-          <details className={advDetailsClass}>
-            <summary className={advSummaryClass}>Attach payment requests</summary>
-            <div className="border-t border-slate-800/50 px-3 pb-3 pt-2 text-xs leading-relaxed text-slate-500">
-              Payment requests are attached from your agreement after this send step — LawDog keeps payment separate
-              from the calm send moment here.
-            </div>
-          </details>
-        </div>
-      </details>
+          </div>
+        </details>
+      ) : null}
       {!hideDeferOption ? (
         <button
           type="button"
@@ -7722,6 +7738,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumTruthPipelineSource,
   ]);
 
+  const authoritativePickForSendUi = useMemo(() => pickAuthoritativePlainForSendHandoff(draft), [draft]);
+
+  const minimalProSendRecipientChrome = useMemo(
+    () =>
+      shouldMinimalProSendRecipientChrome({
+        premiumRenderSourceResolved: premiumPaidReadonlyPick.sourceUsed,
+        authoritativePick: authoritativePickForSendUi,
+        readonlyPlainText: premiumPaidReadonlyPick.plainText,
+      }),
+    [premiumPaidReadonlyPick.sourceUsed, premiumPaidReadonlyPick.plainText, authoritativePickForSendUi],
+  );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (createUiStage !== CreateUiStage.RECIPIENTS || !productionDraftPrimaryReviewSurface) return;
+    const pick = authoritativePickForSendUi;
+    const purposeLen = (draft?.purpose ?? "").trim().length;
+    const hasAuthoritativeCorpus =
+      premiumPaidReadonlyPick.sourceUsed === "server_full_document_text" ||
+      Boolean(
+        pick &&
+          pick.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN &&
+          pick.field !== "purpose",
+      );
+    // eslint-disable-next-line no-console
+    console.info("[send-stage-ui-source]", {
+      hasAuthoritativeCorpus,
+      authoritativeLen: pick?.text.length ?? 0,
+      renderSource: premiumPaidReadonlyPick.sourceUsed,
+      reviewCardHidden: minimalProSendRecipientChrome,
+      advancedOptionsHidden: minimalProSendRecipientChrome,
+      purposeLen,
+    });
+  }, [
+    createUiStage,
+    productionDraftPrimaryReviewSurface,
+    authoritativePickForSendUi,
+    draft?.purpose,
+    premiumPaidReadonlyPick.sourceUsed,
+    minimalProSendRecipientChrome,
+  ]);
+
   const hasUsablePaidBody = useMemo(
     () =>
       Boolean(
@@ -10619,6 +10677,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           isPremiumRecipientSurface={isPremiumRecipientSurface}
           showProTierAdvanced={showProTierAdvanced}
           productionReadyForPersist={productionReadyForPersist}
+          minimalProSendRecipientChrome={minimalProSendRecipientChrome}
           draft={draft}
           effectivePremiumSendMode={effectivePremiumSendMode}
           onPremiumSendModePick={handlePremiumSendModePick}
@@ -11808,20 +11867,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         </div>
                       ) : null}
                       {productionDraftPrimaryReviewSurface && createUiStage === CreateUiStage.RECIPIENTS ? (
-                        <div className="mb-4" role="region" aria-label="Agreement summary">
-                          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 sm:text-[11px]">
-                            Agreement summary
-                          </p>
-                          <CreateDraftReviewCard
-                            draft={reviewDraft ?? draft}
-                            prepareCompact
-                            sanitizeStarterPaymentTerms={false}
-                            onInlineCommit={undefined}
-                            partyHighlightNonce={reviewPartyHighlightNonce}
-                            onNavigateToAgreementDocument={undefined}
-                            className="rounded-xl border border-slate-700/60 bg-slate-950/85 p-3 shadow-md shadow-black/15 sm:p-4"
-                          />
-                        </div>
+                        minimalProSendRecipientChrome ? (
+                          <div
+                            className="mb-4 rounded-lg border border-emerald-800/35 bg-emerald-950/15 px-3 py-2.5 sm:px-4"
+                            role="status"
+                            aria-label="Agreement ready"
+                          >
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-200/90 sm:text-[11px]">
+                              Agreement ready
+                            </p>
+                            <p className="mt-1 text-[11px] leading-snug text-slate-400 sm:text-xs">
+                              Full text is in the preview — finish recipient details below. Nothing sends until you confirm
+                              and share a secure link.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="mb-4" role="region" aria-label="Agreement summary">
+                            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 sm:text-[11px]">
+                              Agreement summary
+                            </p>
+                            <CreateDraftReviewCard
+                              draft={reviewDraft ?? draft}
+                              prepareCompact
+                              sanitizeStarterPaymentTerms={false}
+                              onInlineCommit={undefined}
+                              partyHighlightNonce={reviewPartyHighlightNonce}
+                              onNavigateToAgreementDocument={undefined}
+                              className="rounded-xl border border-slate-700/60 bg-slate-950/85 p-3 shadow-md shadow-black/15 sm:p-4"
+                            />
+                          </div>
+                        )
                       ) : (
                         <div
                           className={
@@ -12607,6 +12682,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         isPremiumRecipientSurface={premiumSignersSurfaceReady}
                         showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
                         productionReadyForPersist={productionReadyForPersist}
+                        minimalProSendRecipientChrome={minimalProSendRecipientChrome}
                         draft={draft}
                         effectivePremiumSendMode={effectivePremiumSendMode}
                         onPremiumSendModePick={handlePremiumSendModePick}

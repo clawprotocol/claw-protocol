@@ -30,6 +30,24 @@ type CorpusDraftLike = Partial<
 >;
 
 /** Prefer longest authoritative full-text field for `/app/send` and persist handoff. */
+/**
+ * RECIPIENTS / send setup: hide structured summary + v1 advanced accordions when the user already has a
+ * full Pro/agreement body (not a thin summary / purpose-only blob).
+ */
+export function shouldMinimalProSendRecipientChrome(args: {
+  premiumRenderSourceResolved?: string | null;
+  authoritativePick: SendHandoffCorpusPick | null;
+  readonlyPlainText: string;
+}): boolean {
+  const rs = String(args.premiumRenderSourceResolved ?? "").trim();
+  if (rs === "server_full_document_text") return true;
+  const plainLen = String(args.readonlyPlainText ?? "").trim().length;
+  if (plainLen < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return false;
+  const pick = args.authoritativePick;
+  if (pick && pick.field === "purpose") return false;
+  return true;
+}
+
 export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | null | undefined): SendHandoffCorpusPick | null {
   if (!draft) return null;
   const candidates: [SendHandoffCorpusPick["field"], string][] = [
