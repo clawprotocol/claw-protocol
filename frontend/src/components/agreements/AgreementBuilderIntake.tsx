@@ -315,6 +315,7 @@ import {
   isAuthoritativePremiumPipelineRenderSource,
   resolvePremiumRenderSource,
 } from "./premiumRenderSourceResolver";
+import { shouldImmediateAuthoritativePremiumCommit } from "./premiumImmediateAuthoritativeCommitGate";
 import {
   bumpAgreementGenerationId,
   getOrInitSessionAgreementGenerationId,
@@ -347,7 +348,6 @@ import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import {
   logPremiumAuthoritativeVisibleCommitFailed,
-  needsAuthoritativeVisibleSurfaceRepair,
   shouldSkipAgreementDocLivePreviewSync,
 } from "./premiumAuthoritativeVisibleCommit";
 import {
@@ -3440,10 +3440,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           extendedWaitWasActive: boolean;
           hardFailopenWasActive: boolean;
           acceptedPlainLen: number;
+          reason?: string;
+          premiumRenderResolveSource?: string | null;
         },
       ) => {
         if (!isAuthoritativePremiumPipelineRenderSource(pipelineSource) || opts.acceptedPlainLen < 500) return;
         const bodyTrim = collapsedDoc.trim();
+        const agreementDocumentTextLenBefore = agreementDocumentTextRef.current.trim().length;
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-success-immediate-visible-commit] before", {
+            bodyLen: opts.acceptedPlainLen,
+            pipelineSource,
+            agreementDocumentTextLenBefore,
+            premiumRenderResolveSource: opts.premiumRenderResolveSource ?? null,
+            proUpgradeUseStarterView: proUpgradeUseStarterViewRef.current,
+            proFullDraftQualityRetry: proFullDraftQualityRetryRef.current,
+            premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+            reason: opts.reason ?? "unspecified",
+          });
+        }
         logPremiumAuthoritativeVisibleSurface("before", {
           bodyLen: opts.acceptedPlainLen,
           pipelineSource,
@@ -3480,6 +3496,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           logPremiumFailopenOverriddenBySuccess({ bodyLen: opts.acceptedPlainLen, pipelineSource });
         }
         bumpPremiumSurfaceGateTick();
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-success-immediate-visible-commit] after", {
+            bodyLen: opts.acceptedPlainLen,
+            pipelineSource,
+            agreementDocumentTextLenBefore,
+            agreementDocumentTextLenAfter: agreementDocumentTextRef.current.trim().length,
+            premiumRenderResolveSource: opts.premiumRenderResolveSource ?? null,
+            proUpgradeUseStarterView: proUpgradeUseStarterViewRef.current,
+            proFullDraftQualityRetry: proFullDraftQualityRetryRef.current,
+            premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+            reason: opts.reason ?? "unspecified",
+          });
+        }
         logPremiumAuthoritativeVisibleSurface("after", {
           bodyLen: opts.acceptedPlainLen,
           pipelineSource,
@@ -3496,6 +3526,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         window.requestAnimationFrame(() => {
           bumpPremiumSurfaceGateTick();
           setReviewDocRefreshTick((n) => n + 1);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[premium-success-visible-state-after-frame]", {
+              bodyLen: opts.acceptedPlainLen,
+              pipelineSource,
+              agreementDocumentTextLenAfterFrame: agreementDocumentTextRef.current.trim().length,
+              premiumRenderResolveSource: opts.premiumRenderResolveSource ?? null,
+              proUpgradeUseStarterView: proUpgradeUseStarterViewRef.current,
+              proFullDraftQualityRetry: proFullDraftQualityRetryRef.current,
+              premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+            });
+          }
         });
       };
 
@@ -3528,47 +3570,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               logPremiumDuplicateRunBlocked({
                 reason: "applySuccess_authoritative_already_persisted_same_gen",
                 agreementGenerationId: result.agreementGenerationId,
+                note: "telemetry_only_full_apply_success_still_runs_visible_commit",
               });
-              const visibleLen = agreementDocumentTextRef.current.trim().length;
-              if (
-                needsAuthoritativeVisibleSurfaceRepair({
-                  winningBodyLen: wDup.length,
-                  agreementDocumentTextLen: visibleLen,
-                })
-              ) {
-                const fd = collapseDuplicateEsignNoticesInFullPreview(wDup);
-                hydratedPremiumBodyRef.current = wDup.trim();
-                lastPremiumWinningCorpusRef.current = wDup.trim();
-                premiumPipelineOutputBodyRef.current = wDup.trim();
-                lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
-                setPremiumTruthPipelineSource(result.premiumRenderSource);
-                agreementDocumentDirtyRef.current = true;
-                setAgreementDocumentText(fd);
-                agreementDocumentDirtyRef.current = false;
-                setProUpgradeUseStarterView(false);
-                setProFullDraftQualityRetry(false);
-                setHardError(null);
-                setPremiumPipelineUserMessage(null);
-                setProFullDraftCustomGateMessage(null);
-                setPremiumReviewDocEditorOpen(false);
-                setCreateFlowPhase("draft_ready_for_review");
-                setDisplayPhase("intake");
-                setCreateUiStage(CreateUiStage.DRAFT);
-                setMobileWorkspacePane("preview");
-                setPreviewPaneRevealed(true);
-                bumpPremiumSurfaceGateTick();
-                setReviewDocRefreshTick((n) => n + 1);
-                setPremiumPostCheckoutPhase(null);
-                if (import.meta.env.DEV) {
-                  // eslint-disable-next-line no-console
-                  console.warn("[premium-visible-repair]", {
-                    reason: "duplicate_apply_success_snapshot_without_visible_doc",
-                    visibleLen,
-                    winningLen: wDup.length,
-                  });
-                }
-              }
-              return;
             }
           }
         }
@@ -3884,6 +3887,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 premium_server_full_document_text: snapshotPlain,
               }
             : merged.draft;
+        const finalDoc = collapseDuplicateEsignNoticesInFullPreview(snapshotPlain);
+        const icCommitGate = resolveAgreementIntentContract(mergedIntake);
+        const vCommitGate = validatePaidProOutput({
+          text: snapshotPlain,
+          rawIntake: mergedIntake,
+          intentContract: icCommitGate,
+          draft: mergedDraftPersist,
+          premiumPipelineSource: result.premiumRenderSource,
+        });
+        const shouldImmediateAuthoritativeCommit = shouldImmediateAuthoritativePremiumCommit({
+          usePaidAuthoritativeBody,
+          snapshotPlainTrimLen: snapshotPlain.trim().length,
+          premiumPipelineSource: result.premiumRenderSource,
+          validatePaidProOutputOk: vCommitGate.ok,
+          premiumRenderResolveSource: resolvedPersist.premium_render_source,
+        });
+
+        setPremiumPersistedFlowActive(true);
+        setPremiumSendPathUnlocked(true);
+        commitParsedDraftToReviewFlow(mergedDraftPersist);
+        agreementDocumentDirtyRef.current = false;
+        if (shouldImmediateAuthoritativeCommit) {
+          commitAuthoritativePremiumVisibleSurface(finalDoc, result.premiumRenderSource, {
+            extendedWaitWasActive: extendedWaitAtApplyStart,
+            hardFailopenWasActive: hardFailopenAtApplyStart,
+            acceptedPlainLen: snapshotPlain.length,
+            reason: "premium_rewrite_request_success_immediate_commit",
+            premiumRenderResolveSource: resolvedPersist.premium_render_source,
+          });
+          if (extendedWaitAtApplyStart && !hardFailopenAtApplyStart) {
+            console.info("[premium-authoritative-visible-surface] applied_after_soft_timeout", {
+              bodyLen: snapshotPlain.length,
+              pipelineSource: result.premiumRenderSource,
+            });
+          }
+        } else {
+          setAgreementDocumentText(finalDoc);
+        }
         logPremiumLiveTrace("premium_pipeline_output", {
           source_id: "ensurePremiumCompletion_result",
           premium_render_source: resolvedPersist.premium_render_source,
@@ -3991,27 +4032,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             );
           }
         }
-        setPremiumPersistedFlowActive(true);
-        setPremiumSendPathUnlocked(true);
-        commitParsedDraftToReviewFlow(mergedDraftPersist);
-        agreementDocumentDirtyRef.current = false;
-        const finalDoc = collapseDuplicateEsignNoticesInFullPreview(snapshotPlain);
-        if (
-          usePaidAuthoritativeBody &&
-          snapshotPlain.length >= 500 &&
-          isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource)
-        ) {
-          commitAuthoritativePremiumVisibleSurface(finalDoc, result.premiumRenderSource, {
-            extendedWaitWasActive: extendedWaitAtApplyStart,
-            hardFailopenWasActive: hardFailopenAtApplyStart,
-            acceptedPlainLen: snapshotPlain.length,
-          });
-          if (extendedWaitAtApplyStart && !hardFailopenAtApplyStart) {
-            console.info("[premium-authoritative-visible-surface] applied_after_soft_timeout", {
-              bodyLen: snapshotPlain.length,
-              pipelineSource: result.premiumRenderSource,
-            });
-          }
+        if (shouldImmediateAuthoritativeCommit) {
           const icHard = resolveAgreementIntentContract(mergedIntake);
           const vHard = validatePaidProOutput({
             text: snapshotPlain,
@@ -4091,24 +4112,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               }
             });
           }
-        } else {
-          setAgreementDocumentText(finalDoc);
-          if (import.meta.env.DEV) {
-            const snapAfterWrite = readPremiumCompletionSnapshot();
-            logDevPostPremiumFullDraftApplySuccess({
-              phase: "applySuccess_after_setAgreementDocumentText",
-              applySuccessCompletedSync: true,
-              setAgreementDocumentTextLen: finalDoc.length,
-              persistPremiumCompletionSnapshot: snapAfterWrite
-                ? {
-                    premiumAccepted: snapAfterWrite.premiumAccepted === true,
-                    premiumRenderResolveSource: snapAfterWrite.premiumRenderResolveSource,
-                    premiumPipelineRenderSource: snapAfterWrite.premiumPipelineRenderSource,
-                    storedWinningLen: (snapAfterWrite.premiumWinningBodyText || "").trim().length,
-                  }
-                : null,
-            });
-          }
+        } else if (import.meta.env.DEV) {
+          const snapAfterWrite = readPremiumCompletionSnapshot();
+          logDevPostPremiumFullDraftApplySuccess({
+            phase: "applySuccess_after_setAgreementDocumentText",
+            applySuccessCompletedSync: true,
+            setAgreementDocumentTextLen: finalDoc.length,
+            persistPremiumCompletionSnapshot: snapAfterWrite
+              ? {
+                  premiumAccepted: snapAfterWrite.premiumAccepted === true,
+                  premiumRenderResolveSource: snapAfterWrite.premiumRenderResolveSource,
+                  premiumPipelineRenderSource: snapAfterWrite.premiumPipelineRenderSource,
+                  storedWinningLen: (snapAfterWrite.premiumWinningBodyText || "").trim().length,
+                }
+              : null,
+          });
         }
         const corpusSnapshot = (snapshotPlain || finalDoc).trim();
         hydratedPremiumBodyRef.current = corpusSnapshot;
