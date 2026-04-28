@@ -1,6 +1,10 @@
 import { buildAgreementPreviewText, buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { emitPremiumRenderResolveLog, resolvePremiumRenderSource } from "./premiumRenderSourceResolver";
+import {
+  emitPremiumRenderResolveLog,
+  isAuthoritativePremiumPipelineRenderSource,
+  resolvePremiumRenderSource,
+} from "./premiumRenderSourceResolver";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 
 /** @deprecated Use PremiumRenderResolveSource — kept as alias for gradual migration. */
@@ -101,7 +105,46 @@ export function pickPremiumPaidReadonlyPlainText(args: {
    * prevents `live_generated_preview_after_server_tiers_failed` from replacing it.
    */
   paidAuthoritativeProBody?: string | null;
+  /**
+   * In-memory hydrated body after authoritative paid completion (or restore). When present with an
+   * authoritative pipeline source, wins before live preview / thin agreement text.
+   */
+  authoritativeHydratedPlainText?: string | null;
+  /** Latest pipeline render source (e.g. `server_full_draft`) — pairs with `authoritativeHydratedPlainText`. */
+  lastPremiumPipelineRenderSource?: string | null;
 }): PremiumPaidReadonlyPickResult {
+  const pipeSrc = (args.lastPremiumPipelineRenderSource || "").trim();
+  const authHydr = (args.authoritativeHydratedPlainText || "").trim();
+  if (authHydr.length >= 500 && isAuthoritativePremiumPipelineRenderSource(pipeSrc)) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[premium-authoritative-apply] readonly_pick", {
+        picked: "hydrated_authoritative_body",
+        bodyLen: authHydr.length,
+        pipelineSource: pipeSrc,
+      });
+    }
+    const nonThin =
+      authHydr.length >= 1200 || premiumReadonlyCorpusSignalHits(authHydr) >= 3;
+    return {
+      plainText: authHydr,
+      sourceUsed: "server_full_document_text",
+      audit: {
+        selected: "server_full_document_text",
+        forcedPremiumSource: true,
+        candidates: [
+          {
+            source: "server_full_document_text",
+            len: authHydr.length,
+            nonThin,
+            eligible: true,
+            reason: "hydrated_authoritative_pipeline_body_first",
+          },
+        ],
+      },
+    };
+  }
+
   const legacySnap = pickLongestLegacySnapshot({
     premiumReadonlySnapshotText: args.premiumReadonlySnapshotText,
     premiumPipelineOutputBodyText: args.premiumPipelineOutputBodyText,
@@ -110,12 +153,15 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     agreementDocumentTextHasPremiumMarkers: args.agreementDocumentTextHasPremiumMarkers,
   });
 
+  const hydratedHintForResolver = (args.authoritativeHydratedPlainText || "").trim();
+
   const res = resolvePremiumRenderSource({
     draft: args.draft,
     intakeText: args.intakeText,
     premiumWinningCorpusFallback: args.premiumWinningBodyText,
     legacySnapshotText: legacySnap || undefined,
     paidAuthoritativeProBody: args.paidAuthoritativeProBody,
+    hydratedAuthoritativeBodyHint: hydratedHintForResolver.length ? hydratedHintForResolver : undefined,
     buildLivePreview: () =>
       args.draft
         ? buildAgreementPreviewTextCore(args.draft, {

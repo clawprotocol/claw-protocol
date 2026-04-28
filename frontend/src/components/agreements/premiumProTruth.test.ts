@@ -31,6 +31,35 @@ describe("premiumProTruth (canonical surface)", () => {
     expect(a).toEqual(b);
   });
 
+  it("computeProTruthSurface: server_full_document_text + validated body yields premium_success gate", () => {
+    const c = resolveAgreementIntentContract(intake);
+    const body =
+      "WHEREAS parties agree.\n\n1. Services for SaaS website in Oklahoma with milestones.\n2. Fees $5000 May 2026.\n3. IP and confidentiality.\n4. Termination.\n5. Law Oklahoma.\n\n" +
+      "x".repeat(4500);
+    const v = validatePaidProOutput({
+      text: body,
+      rawIntake: intake,
+      intentContract: c,
+      draft: null,
+      premiumPipelineSource: "server_full_draft",
+    });
+    expect(v.ok).toBe(true);
+    const s = computeProTruthSurface({
+      intentContract: c,
+      documentText: body,
+      renderSource: "server_full_document_text",
+      premiumPipelineSource: "server_full_draft",
+      intakeText: intake,
+      draft: null,
+      qualityRetryActive: false,
+      serverGenerationDegraded: false,
+      allowPaidSubstantiveStitch: true,
+      stale: false,
+    });
+    expect(s.gate.state).toBe("premium_success");
+    expect(proTruthIsPremiumDocumentReady(s)).toBe(true);
+  });
+
   it("computeProTruthSurface: empty document is not document-ready and signer CTA is closed", () => {
     const c = resolveAgreementIntentContract(intake);
     const s = computeProTruthSurface({

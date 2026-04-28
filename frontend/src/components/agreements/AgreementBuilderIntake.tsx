@@ -1342,6 +1342,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     message: string;
   } | null>(null);
   const hydratedPremiumBodyRef = useRef("");
+  /** Winning paid corpus ref — preferred over length-heuristic merges for authoritative pipeline picks. */
+  const lastPremiumWinningCorpusRef = useRef("");
   const agreementDocSyncTimerRef = useRef(0);
   const [reviewDocRefreshTick, setReviewDocRefreshTick] = useState(0);
   /** Parsed draft held until user picks simplified vs. Pro for advanced instrument intakes. */
@@ -2932,7 +2934,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPremiumRefineReview(snap.premiumReview ?? null);
     setPremiumFinalizeAudit(snap.premiumFinalizeAudit ?? null);
     setPremiumReviewRoute(snap.premiumReviewRoute ?? null);
-    hydratedPremiumBodyRef.current = (snap.premiumWinningBodyText || snap.premiumReadonlyPlainText || "").trim();
+    const persistedPremiumBody = (snap.premiumWinningBodyText || snap.premiumReadonlyPlainText || "").trim();
+    hydratedPremiumBodyRef.current = persistedPremiumBody;
+    lastPremiumWinningCorpusRef.current = persistedPremiumBody;
+    premiumPipelineOutputBodyRef.current = persistedPremiumBody;
     logPremiumLiveTrace("hydrated_snapshot", {
       source_id: "session_snapshot_hydrate",
       title: snap.premiumDraft?.title || "",
@@ -2940,7 +2945,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       purpose: snap.premiumDraft?.purpose || "",
       additional_terms: snap.premiumDraft?.additional_terms || "",
       party_roles: (snap.premiumDraft?.parties || []).map((p) => (p.role || "").trim()).filter(Boolean),
-      text: (snap.premiumWinningBodyText || snap.premiumReadonlyPlainText || "").trim(),
+      text: persistedPremiumBody,
     });
     const priorDraftForNames = readCreateComplexityResume()?.pending ?? draftSnapshotRef.current;
     clearCreateComplexityResume();
@@ -2958,6 +2963,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPremiumSendPathUnlocked(true);
     lastPremiumPipelineRenderSourceRef.current = snap.premiumPipelineRenderSource || "snapshot_server_full_draft";
     setPremiumTruthPipelineSource(snap.premiumPipelineRenderSource || "snapshot_server_full_draft");
+    if (persistedPremiumBody.length >= 500) {
+      setProUpgradeUseStarterView(false);
+      setProFullDraftQualityRetry(false);
+    }
 
     const recipientsSurfaceReleased = peekPremiumRecipientsSurfaceReleased();
     const revealSeen = peekPremiumPostCheckoutRevealDismissed();
@@ -3013,16 +3022,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     );
 
     agreementDocumentDirtyRef.current = false;
-    try {
-      setAgreementDocumentText(
-        buildAgreementPreviewText(merged.draft, {
-          starterPreview: false,
-          premiumDeliverablePreview: true,
-          intakeText: raw,
-        }),
-      );
-    } catch {
-      setAgreementDocumentText("");
+    if (persistedPremiumBody.length >= 500) {
+      setAgreementDocumentText(collapseDuplicateEsignNoticesInFullPreview(persistedPremiumBody));
+    } else {
+      try {
+        setAgreementDocumentText(
+          buildAgreementPreviewText(merged.draft, {
+            starterPreview: false,
+            premiumDeliverablePreview: true,
+            intakeText: raw,
+          }),
+        );
+      } catch {
+        setAgreementDocumentText("");
+      }
     }
     setReviewDocRefreshTick((n) => n + 1);
 
@@ -3475,6 +3488,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const winning = (result.winningPremiumBodyText || "").trim();
         const usePaidAuthoritativeBody =
           isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) && winning.length >= 500;
+        if (usePaidAuthoritativeBody) {
+          const authoritativePaidBody = winning;
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[premium-authoritative-apply] before_write", {
+              source: result.premiumRenderSource,
+              bodyLen: authoritativePaidBody.length,
+            });
+          }
+          hydratedPremiumBodyRef.current = authoritativePaidBody;
+          lastPremiumWinningCorpusRef.current = authoritativePaidBody;
+          premiumPipelineOutputBodyRef.current = authoritativePaidBody;
+          setProUpgradeUseStarterView(false);
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-success-hydrate]", {
@@ -3490,6 +3517,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           intakeText: mergedIntake,
           premiumWinningCorpusFallback: winning,
           paidAuthoritativeProBody: usePaidAuthoritativeBody ? winning : null,
+          hydratedAuthoritativeBodyHint: usePaidAuthoritativeBody ? winning : undefined,
           buildLivePreview: () =>
             buildAgreementPreviewTextCore(merged.draft, {
               starterPreview: false,
@@ -3624,9 +3652,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementGenerationId: result.agreementGenerationId,
           intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
           premiumPipelineRenderSource: result.premiumRenderSource,
+          premiumRenderResolveSource: resolvedPersist.premium_render_source,
+          premiumAccepted: true,
           serverGenerationDegraded: result.serverGenerationDegraded ?? null,
         });
+        if (usePaidAuthoritativeBody) {
+          bumpPremiumSurfaceGateTick();
+        }
         if (import.meta.env.DEV && usePaidAuthoritativeBody) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-authoritative-apply] after_snapshot", {
+            snapshotWritten: true,
+            bodyLen: snapshotPlain.length,
+            source: result.premiumRenderSource,
+          });
           // eslint-disable-next-line no-console
           console.info("[premium-post-accept-body-preserved]", {
             source: result.premiumRenderSource,
@@ -3703,7 +3742,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementDocumentDirtyRef.current = false;
         const finalDoc = collapseDuplicateEsignNoticesInFullPreview(snapshotPlain);
         setAgreementDocumentText(finalDoc);
-        hydratedPremiumBodyRef.current = (snapshotPlain || finalDoc).trim();
+        const corpusSnapshot = (snapshotPlain || finalDoc).trim();
+        hydratedPremiumBodyRef.current = corpusSnapshot;
+        lastPremiumWinningCorpusRef.current = corpusSnapshot;
         setReviewDocRefreshTick((n) => n + 1);
         scheduleAgreementDocSyncForPremiumHydrateRef.current?.(finalDoc);
         clearCreateComplexityResume();
@@ -7007,14 +7048,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     );
     const pipelineSrcForAuth =
       (!snapBindInvalid && snapObj?.premiumPipelineRenderSource) || lastPremiumPipelineRenderSourceRef.current || null;
-    const bestTrustedBody = [winner, pipelineBody, snap, hydratedBody, adt]
-      .map((s) => (s || "").trim())
-      .filter(Boolean)
-      .sort((a, b) => b.length - a.length)[0] || "";
-    const paidReadonlyAuthBody =
-      isAuthoritativePremiumPipelineRenderSource(pipelineSrcForAuth) && bestTrustedBody.length >= 500
-        ? bestTrustedBody
-        : null;
+    let paidReadonlyAuthBody: string | null = null;
+    if (isAuthoritativePremiumPipelineRenderSource(pipelineSrcForAuth)) {
+      const explicitAuthoritative =
+        (lastPremiumWinningCorpusRef.current || "").trim() ||
+        winner ||
+        snap ||
+        pipelineBody ||
+        hydratedBody;
+      if (explicitAuthoritative.length >= 500) paidReadonlyAuthBody = explicitAuthoritative;
+    }
     const pick = pickPremiumPaidReadonlyPlainText({
       premiumWinningBodyText: winner,
       premiumReadonlySnapshotText: snap,
@@ -7026,6 +7069,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumCheckoutCompleted: premiumPersistedFlowActive || premiumPaidDocumentSurface || Boolean(snapObj),
       intakeText: intakeCombined,
       paidAuthoritativeProBody: paidReadonlyAuthBody,
+      authoritativeHydratedPlainText: hydratedPremiumBodyRef.current,
+      lastPremiumPipelineRenderSource: lastPremiumPipelineRenderSourceRef.current,
     });
     if (import.meta.env.DEV) {
       console.info("[premium-picker-audit]", {
@@ -11465,12 +11510,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               const snapObj = readPremiumCompletionSnapshot();
                                               const snap = snapObj?.premiumReadonlyPlainText?.trim() ?? "";
                                               const winner = snapObj?.premiumWinningBodyText?.trim() ?? "";
+                                              const pipelineBody = premiumPipelineOutputBodyRef.current.trim();
+                                              const hydratedBody = hydratedPremiumBodyRef.current.trim();
+                                              const adt = agreementDocumentText.trim();
+                                              const adtHasPremiumMarkers =
+                                                /\b(lawdog pro|commercial safeguards|raw-intent premium protections|execution\s+—\s+signatures|signatures)\b/i.test(
+                                                  adt,
+                                                );
+                                              const pipelineSrcForAuth =
+                                                snapObj?.premiumPipelineRenderSource ||
+                                                lastPremiumPipelineRenderSourceRef.current ||
+                                                null;
+                                              let paidReadonlyAuthBodyInline: string | null = null;
+                                              if (isAuthoritativePremiumPipelineRenderSource(pipelineSrcForAuth)) {
+                                                const explicitAuthoritative =
+                                                  (lastPremiumWinningCorpusRef.current || "").trim() ||
+                                                  winner ||
+                                                  snap ||
+                                                  pipelineBody ||
+                                                  hydratedBody;
+                                                if (explicitAuthoritative.length >= 500)
+                                                  paidReadonlyAuthBodyInline = explicitAuthoritative;
+                                              }
                                               const pick = pickPremiumPaidReadonlyPlainText({
                                                 premiumWinningBodyText: winner,
                                                 premiumReadonlySnapshotText: snap,
+                                                premiumPipelineOutputBodyText: pipelineBody,
+                                                hydratedPremiumSnapshotText: hydratedBody,
                                                 draft,
                                                 agreementDocumentText,
+                                                agreementDocumentTextHasPremiumMarkers: adtHasPremiumMarkers,
+                                                premiumCheckoutCompleted: Boolean(snapObj),
                                                 intakeText: intakeCombined,
+                                                paidAuthoritativeProBody: paidReadonlyAuthBodyInline,
+                                                authoritativeHydratedPlainText: hydratedPremiumBodyRef.current,
+                                                lastPremiumPipelineRenderSource:
+                                                  lastPremiumPipelineRenderSourceRef.current,
                                               });
                                               if (
                                                 pick.plainText.trim() &&

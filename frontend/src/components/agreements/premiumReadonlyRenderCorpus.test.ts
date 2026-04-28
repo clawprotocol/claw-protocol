@@ -91,6 +91,31 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
     expect(out.plainText.toLowerCase()).not.toMatch(/^term:\s*paid monthly$/m);
   });
 
+  it("prefers authoritative hydrated body over live preview when pipeline source is authoritative", () => {
+    const draft = richConsultingDraft();
+    const authoritative = acceptableFullDocumentStub();
+    const thinLiveWouldWin =
+      "CONSULTING AGREEMENT\n\n1. SCOPE\nCleaning services\n\n2. PAYMENT\n$100\n\n" + "y".repeat(800);
+
+    const out = pickPremiumPaidReadonlyPlainText({
+      premiumReadonlySnapshotText: "",
+      premiumWinningBodyText: "",
+      premiumPipelineOutputBodyText: "",
+      hydratedPremiumSnapshotText: "",
+      authoritativeHydratedPlainText: authoritative,
+      lastPremiumPipelineRenderSource: "server_full_draft",
+      draft,
+      agreementDocumentText: thinLiveWouldWin,
+      intakeText:
+        "Marketing advisory including campaign analytics, CRM integration, and sales partner enablement with exclusivity in the US Northeast.",
+    });
+
+    expect(out.sourceUsed).toBe("server_full_document_text");
+    expect(out.plainText.trim()).toBe(authoritative.trim());
+    expect(out.audit.forcedPremiumSource).toBe(true);
+    expect(out.plainText.toLowerCase()).not.toMatch(/cleaning services/);
+  });
+
   it("rebuilds from draft when snapshot missing and draft is richer than agreementDocumentText", () => {
     const draft = richConsultingDraft();
     const rebuilt = buildPremiumDeliverablePlainTextFromDraft(draft);

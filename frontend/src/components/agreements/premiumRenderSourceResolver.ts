@@ -217,6 +217,11 @@ export type ResolvePremiumRenderSourceArgs = {
    * downgrade to live preview because structural re-validation in this resolver would disagree.
    */
   paidAuthoritativeProBody?: string | null;
+  /**
+   * DEV-only guard: if we fall through to live preview while this matches a long committed body,
+   * log `[premium-render-source-blocked]` (caller forgot `paidAuthoritativeProBody`).
+   */
+  hydratedAuthoritativeBodyHint?: string | null;
   /** Tier C: deterministic stitched preview (must not read server fields). */
   buildLivePreview: () => string;
   /**
@@ -228,6 +233,25 @@ export type ResolvePremiumRenderSourceArgs = {
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
+}
+
+function devWarnLiveWhileAuthoritativeCorpusExists(
+  args: ResolvePremiumRenderSourceArgs,
+  res: PremiumRenderResolveResult,
+): void {
+  if (!import.meta.env.DEV) return;
+  if (res.premium_render_source !== "live_generated_preview") return;
+  const paid = trim(args.paidAuthoritativeProBody);
+  const hint = trim(args.hydratedAuthoritativeBodyHint);
+  if (paid.length >= 500 || hint.length >= 500) {
+    // eslint-disable-next-line no-console
+    console.error("[premium-render-source-blocked]", {
+      reason: "live_generated_preview_while_authoritative_length_corpus_present",
+      paidLen: paid.length,
+      hydratedHintLen: hint.length,
+      premium_render_reason: res.premium_render_reason,
+    });
+  }
 }
 
 /**
@@ -310,12 +334,14 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
           };
         }
       }
-      return {
+      const liveOkRes: PremiumRenderResolveResult = {
         text: liveRaw,
         premium_render_source: "live_generated_preview",
         premium_render_reason: "live_generated_preview_structurally_valid",
         premium_validation_result: { ...vLive, tier_attempted: "live_generated_preview" },
       };
+      devWarnLiveWhileAuthoritativeCorpusExists(args, liveOkRes);
+      return liveOkRes;
     }
   }
 
@@ -344,12 +370,14 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
         note: "Pass paidAuthoritativeProBody from applySuccess / pick when the paid pipeline already accepted the winning corpus",
       });
     }
-    return {
+    const liveFallbackRes: PremiumRenderResolveResult = {
       text: liveRaw,
       premium_render_source: "live_generated_preview",
       premium_render_reason: "live_generated_preview_after_server_tiers_failed",
       premium_validation_result: { ...vLive, tier_attempted: "live_generated_preview" },
     };
+    devWarnLiveWhileAuthoritativeCorpusExists(args, liveFallbackRes);
+    return liveFallbackRes;
   }
 
   if (snap) {

@@ -76,6 +76,21 @@ describe("isAuthoritativePremiumPipelineRenderSource", () => {
 });
 
 describe("resolvePremiumRenderSource", () => {
+  it("never returns live_generated_preview when paidAuthoritativeProBody is long", () => {
+    const paid = longValidServerDoc();
+    const d = baseDraft({ premium_server_full_document_text: "thin", premium_full_document_text: "thin" });
+    const r = resolvePremiumRenderSource({
+      draft: d,
+      intakeText: "commission consulting advisory northeast territory",
+      paidAuthoritativeProBody: paid,
+      premiumWinningCorpusFallback: paid,
+      buildLivePreview: () => "LIVE_FALLBACK_SHOULD_NOT_WIN " + "z".repeat(3_000),
+    });
+    expect(r.premium_render_source).not.toBe("live_generated_preview");
+    expect(r.premium_render_source).toBe("server_full_document_text");
+    expect(r.text.length).toBeGreaterThan(5_000);
+  });
+
   it("uses paidAuthoritativeProBody first so paid completion is never replaced by live preview fallbacks", () => {
     const paid = longValidServerDoc();
     const d = baseDraft({ premium_server_full_document_text: "too thin" });

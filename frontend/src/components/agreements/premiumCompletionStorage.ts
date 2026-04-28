@@ -44,6 +44,10 @@ export type PremiumCompletionSnapshot = {
   intakeTextFingerprint?: string;
   /** Pipeline source at completion (for paid Pro quality UI). */
   premiumPipelineRenderSource?: string;
+  /** Resolver tier at persist (e.g. `server_full_document_text`), distinct from pipeline source strings. */
+  premiumRenderResolveSource?: string;
+  /** True once the paid pipeline committed an accepted Pro document into this snapshot. */
+  premiumAccepted?: boolean;
   /** Set when the server used a non-model structured fallback (LawDog Pro checkout still valid). */
   serverGenerationDegraded?: { code: string; message: string } | null;
 };
