@@ -45,6 +45,18 @@ describe("shouldImmediateAuthoritativePremiumCommit", () => {
     ).toBe(true);
   });
 
+  it("commits for server_full_draft_degraded when resolver pinned server_full_document_text (paid short-circuit)", () => {
+    expect(
+      shouldImmediateAuthoritativePremiumCommit({
+        usePaidAuthoritativeBody: true,
+        snapshotPlainTrimLen: 9000,
+        premiumPipelineSource: "server_full_draft_degraded",
+        validatePaidProOutputOk: false,
+        premiumRenderResolveSource: "server_full_document_text",
+      }),
+    ).toBe(true);
+  });
+
   it("does not commit when snapshot too short even if pipeline says server_full_draft", () => {
     expect(
       shouldImmediateAuthoritativePremiumCommit({

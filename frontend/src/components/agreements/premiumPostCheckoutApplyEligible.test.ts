@@ -29,6 +29,14 @@ describe("premiumPostCheckoutApplyEligible", () => {
     expect(authoritativePremiumPipelineResultForUiApply(mockAuthoritativeResult())).toBe(true);
   });
 
+  it("authoritativePremiumPipelineResultForUiApply is true for server_full_draft_degraded + long corpus (QA degraded-accept path)", () => {
+    expect(
+      authoritativePremiumPipelineResultForUiApply(
+        mockAuthoritativeResult({ premiumRenderSource: "server_full_draft_degraded" }),
+      ),
+    ).toBe(true);
+  });
+
   it("authoritativePremiumPipelineResultForUiApply is false when staleIntakeOrGeneration", () => {
     expect(
       authoritativePremiumPipelineResultForUiApply(

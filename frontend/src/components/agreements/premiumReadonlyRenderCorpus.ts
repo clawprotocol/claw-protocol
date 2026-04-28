@@ -178,7 +178,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       );
     },
   });
-  emitPremiumRenderResolveLog(res);
+  if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
 
   const plain = (res.text || "").trim();
   const nonThin = plain.length >= 1200 || premiumReadonlyCorpusSignalHits(plain) >= 3;

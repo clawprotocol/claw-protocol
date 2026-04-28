@@ -386,7 +386,7 @@ export function buildAgreementPreviewText(
       buildLivePreview: () =>
         buildAgreementPreviewTextCore(draft, { ...options, starterPreview: false, premiumDeliverablePreview: true }),
     });
-    emitPremiumRenderResolveLog(res);
+    if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
     return collapseDuplicateEsignNoticesInFullPreview(res.text);
   }
   return buildAgreementPreviewTextCore(draft, options);

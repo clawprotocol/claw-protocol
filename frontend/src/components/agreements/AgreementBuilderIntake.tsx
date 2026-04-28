@@ -1562,6 +1562,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPersistedFlowActive;
     upgradeLockActiveRef.current = intent && !fullDraftEntitled;
   }, [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive]);
+  /** Ref avoids listing `syncUpgradeIntentRefs` on the post-checkout premium effect — that callback changes whenever `draft`/tier/premium flags move, which aborts the async completion run mid-flight and blocks `applySuccess`. */
+  const syncUpgradeIntentRefsRef = React.useRef(syncUpgradeIntentRefs);
+  syncUpgradeIntentRefsRef.current = syncUpgradeIntentRefs;
 
   /** Includes session premium flags — AccessContext tier does not yet reflect stub checkout. */
   const hasFullDraftAccess = useMemo(
@@ -3730,6 +3733,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         setProFullDraftCustomGateMessage(null);
         setHardError(null);
+        premiumModalExtendedWaitActiveRef.current = false;
+        setPremiumCheckoutModalExtendedWait(false);
+        premiumPostCheckoutModalHardFailopenRef.current = false;
         setPremiumServerGenerationDegraded(result.serverGenerationDegraded ?? null);
         setPremiumRefineReview(result.premiumReview ?? null);
         setPremiumFinalizeAudit(result.premiumFinalizeAudit ?? null);
@@ -4255,7 +4261,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setUpgradeIntentDetected(false);
         setPendingUpgradePrompt("");
         pendingUpgradePromptRef.current = "";
-        syncUpgradeIntentRefs(false);
+        syncUpgradeIntentRefsRef.current(false);
         setAdvancedFullDraftPaywallOpen(false);
         setFullDraftUpgradeBannerVisible(false);
 
@@ -4436,7 +4442,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setUpgradeIntentDetected(false);
         setPendingUpgradePrompt("");
         pendingUpgradePromptRef.current = "";
-        syncUpgradeIntentRefs(false);
+        syncUpgradeIntentRefsRef.current(false);
         setAdvancedFullDraftPaywallOpen(false);
         setFullDraftUpgradeBannerVisible(false);
         if (merged.displayName1) setRecipient1Name(merged.displayName1);
@@ -4943,7 +4949,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleProductFlow,
     intakePartyRoleLabels,
     finalizeIntakeCapture,
-    syncUpgradeIntentRefs,
     bumpPremiumSurfaceGateTick,
   ]);
 
