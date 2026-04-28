@@ -1626,12 +1626,13 @@ const AgreementReview: React.FC<Props> = ({
         isSimpleHomeReview &&
           simpleFlowPhase === "send" &&
           shouldMinimalProSendRecipientChrome({
-            premiumRenderSourceResolved: null,
+            premiumRenderSourceResolved: draft?.premium_render_source ?? null,
             authoritativePick: authoritativeCorpusPick,
             readonlyPlainText: authoritativeCorpusPick?.text ?? "",
+            draft,
           }),
       ),
-    [isSimpleHomeReview, simpleFlowPhase, authoritativeCorpusPick],
+    [isSimpleHomeReview, simpleFlowPhase, authoritativeCorpusPick, draft],
   );
 
   useEffect(() => {

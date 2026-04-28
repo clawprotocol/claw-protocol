@@ -33,6 +33,8 @@ type CorpusDraftLike = Partial<
 /** DEV / routing: explains paid-Pro send modal bypass for `/app/send`. */
 export type PaidProSendBranchMeta = {
   bypass: boolean;
+  /** Explicit alias for send gating — true when paid Pro / authoritative corpus bypasses the conversion upsell. */
+  paidProSendAllowed: boolean;
   premium_render_source: string | null;
   authoritativeLen: number;
   reason: string;
@@ -43,13 +45,33 @@ export type PaidProSendBranchMeta = {
  * RECIPIENTS / send setup: hide structured summary + v1 advanced accordions when the user already has a
  * full Pro/agreement body (not a thin summary / purpose-only blob).
  */
+/** Any premium/server full body field at or above handoff threshold (paid pipeline material). */
+export function materialPremiumPipelineCorpusMaxLen(draft: CorpusDraftLike | null | undefined): number {
+  if (!draft) return 0;
+  const xs = [
+    String(draft.premium_full_document_text ?? "").trim(),
+    String(draft.premium_server_full_document_text ?? "").trim(),
+    String(draft.server_full_document_text ?? "").trim(),
+  ];
+  return xs.reduce((m, t) => (t.length > m ? t.length : m), 0);
+}
+
+export function hasMaterialPremiumPipelineCorpus(draft: CorpusDraftLike | null | undefined): boolean {
+  return materialPremiumPipelineCorpusMaxLen(draft) >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN;
+}
+
+const AUTHORITATIVE_PREMIUM_RENDER_SOURCES = new Set(["server_full_document_text", "server_repair_document_text"]);
+
 export function shouldMinimalProSendRecipientChrome(args: {
   premiumRenderSourceResolved?: string | null;
   authoritativePick: SendHandoffCorpusPick | null;
   readonlyPlainText: string;
+  /** When set, long premium/server corpora bypass purpose-only false negatives (mis-ordered draft fields). */
+  draft?: CorpusDraftLike | null;
 }): boolean {
   const rs = String(args.premiumRenderSourceResolved ?? "").trim();
-  if (rs === "server_full_document_text") return true;
+  if (AUTHORITATIVE_PREMIUM_RENDER_SOURCES.has(rs)) return true;
+  if (args.draft && hasMaterialPremiumPipelineCorpus(args.draft)) return true;
   const plainLen = String(args.readonlyPlainText ?? "").trim().length;
   if (plainLen < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return false;
   const pick = args.authoritativePick;
@@ -68,10 +90,11 @@ export function describePaidProSendModalBranch(draft: CorpusDraftLike | null | u
     premiumRenderSourceResolved: rs || undefined,
     authoritativePick: pick,
     readonlyPlainText: plain,
+    draft,
   });
   let reason: string;
   if (bypass) {
-    if (rs === "server_full_document_text") reason = "server_render_source";
+    if (AUTHORITATIVE_PREMIUM_RENDER_SOURCES.has(rs)) reason = "server_render_source";
     else if (pick && pick.field !== "purpose") reason = "corpus_authoritative";
     else reason = "authoritative_edge";
   } else if (pick?.field === "purpose" && plain.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
@@ -81,10 +104,16 @@ export function describePaidProSendModalBranch(draft: CorpusDraftLike | null | u
   }
   return {
     bypass,
+    paidProSendAllowed: bypass,
     premium_render_source: rs || null,
     authoritativeLen: plain.length,
     reason,
   };
+}
+
+/** Single gate for `/app/send`: skip “Unlock professional send” when user already has paid / authoritative Pro text. */
+export function paidProSendAllowed(draft: CorpusDraftLike | null | undefined): boolean {
+  return describePaidProSendModalBranch(draft).paidProSendAllowed;
 }
 
 /**

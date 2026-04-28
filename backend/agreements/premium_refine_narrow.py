@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 LATE_FEE_PARAGRAPH_DEFAULT = (
     "Late Payment. Any undisputed amount not paid within ten (10) days after it becomes due may accrue "
@@ -150,8 +150,37 @@ def validate_narrow_refined_document(*, original: str, updated: str, kind: str) 
     return True
 
 
+def _first_numbered_subclause_after(tail: str) -> Optional[Tuple[int, int]]:
+    """First ``M.m`` clause heading at line start in ``tail`` (e.g. 3.4 Expenses)."""
+    m = re.search(r"(?m)^\s*(\d+)\.(\d+)\s+", tail)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def _bump_numbered_subclause_lines(suffix: str, major: int, min_from: int) -> str:
+    """Increment ``major.k`` to ``major.(k+1)`` for every line-start clause where ``k >= min_from``."""
+    out: List[str] = []
+    maj_s = str(int(major))
+    rx = re.compile(rf"^(\s*)({re.escape(maj_s)})\.(\d+)(\s.*)$")
+    for line in suffix.splitlines(True):
+        bare = line.rstrip("\r\n")
+        trailing = line[len(bare) :]
+        m = rx.match(bare)
+        if not m:
+            out.append(line)
+            continue
+        k = int(m.group(3))
+        if k < min_from:
+            out.append(line)
+            continue
+        new_bare = f"{m.group(1)}{maj_s}.{k + 1}{m.group(4)}"
+        out.append(new_bare + trailing)
+    return "".join(out)
+
+
 def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
-    """Insert default late-fee paragraph after Payment-style heading, or before Confidentiality. No LLM."""
+    """Insert late-fee after Payment-style heading, or before Confidentiality. No LLM. Renumbers ``M.m`` siblings."""
     patterns = [
         r"(?m)^#{1,3}\s+(?:\d+\.\s*)?(?:Payment|Fees|Compensation|Compensation\s+and\s+Payment|Pricing\s+and\s+Payment|Invoicing|Billing)(?:\s+Terms)?\s*$",
         r"(?m)^(?:\d+\.){1,3}\s+(?:Payment|Fees|Compensation|Pricing)(?:\s+Terms)?\s*$",
@@ -161,8 +190,8 @@ def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
         if not m:
             continue
         head_end = m.end()
-        tail = doc[head_end:]
-        dbl = tail.find("\n\n")
+        tail_before = doc[head_end:]
+        dbl = tail_before.find("\n\n")
         if dbl == -1:
             insert_at = len(doc)
         else:
@@ -172,8 +201,16 @@ def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
             "late payment" in window and "5%" in doc[head_end : min(len(doc), head_end + 2000)]
         ):
             return None
-        block = LATE_FEE_PARAGRAPH_DEFAULT.strip() + "\n\n"
-        return doc[:insert_at] + block + doc[insert_at:]
+        tail_orig = doc[insert_at:]
+        num = _first_numbered_subclause_after(tail_orig)
+        if num:
+            maj, m0 = num
+            block = f"{maj}.{m0} {LATE_FEE_PARAGRAPH_DEFAULT.strip()}\n\n"
+            tail_new = _bump_numbered_subclause_lines(tail_orig, maj, m0)
+        else:
+            block = LATE_FEE_PARAGRAPH_DEFAULT.strip() + "\n\n"
+            tail_new = tail_orig
+        return doc[:insert_at] + block + tail_new
 
     cf = re.search(r"(?m)^#{1,3}\s+Confidentiality\b", doc, re.I)
     if cf:

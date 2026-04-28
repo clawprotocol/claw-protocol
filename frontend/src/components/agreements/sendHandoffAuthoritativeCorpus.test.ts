@@ -7,6 +7,7 @@ import {
   describePaidProSendModalBranch,
   longestPlainForAgreementPersist,
   mergePremiumRenderSourceField,
+  paidProSendAllowed,
   pickAuthoritativePlainForSendHandoff,
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
@@ -94,6 +95,17 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     ).toBe(true);
   });
 
+  it("shouldMinimalProSendRecipientChrome: server_repair_document_text bypasses without long corpus pick", () => {
+    expect(
+      shouldMinimalProSendRecipientChrome({
+        premiumRenderSourceResolved: "server_repair_document_text",
+        authoritativePick: null,
+        readonlyPlainText: "",
+        draft: { purpose: "x" } as AgreementDraft,
+      }),
+    ).toBe(true);
+  });
+
   it("shouldMinimalProSendRecipientChrome: premium corpus >=500 and not purpose enables minimal chrome", () => {
     const corpus = "z".repeat(600);
     const d: AgreementDraft = {
@@ -146,6 +158,7 @@ describe("sendHandoffAuthoritativeCorpus", () => {
         premiumRenderSourceResolved: null,
         authoritativePick: pick,
         readonlyPlainText: purposeLong,
+        draft: d,
       }),
     ).toBe(false);
   });
@@ -211,8 +224,42 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     } as unknown as AgreementDraft;
     const m = describePaidProSendModalBranch(d);
     expect(m.bypass).toBe(true);
+    expect(m.paidProSendAllowed).toBe(true);
     expect(m.reason).toBe("server_render_source");
     expect(m.premium_render_source).toBe("server_full_document_text");
+  });
+
+  it("describePaidProSendModalBranch: server_repair_document_text bypasses send upsell", () => {
+    const d = {
+      premium_render_source: "server_repair_document_text",
+      purpose: "short",
+    } as unknown as AgreementDraft;
+    const m = describePaidProSendModalBranch(d);
+    expect(m.paidProSendAllowed).toBe(true);
+    expect(m.reason).toBe("server_render_source");
+  });
+
+  it("paidProSendAllowed: live preview render source but material premium corpus still bypasses upsell", () => {
+    const corp = "z".repeat(900);
+    const d = {
+      premium_render_source: "live_generated_preview",
+      purpose: "short",
+      premium_server_full_document_text: corp,
+    } as unknown as AgreementDraft;
+    expect(paidProSendAllowed(d)).toBe(true);
+    expect(describePaidProSendModalBranch(d).reason).toBe("corpus_authoritative");
+  });
+
+  it("paidProSendAllowed mirrors bypass for simple send gate regression", () => {
+    const corpus = "y".repeat(15_000);
+    const d = {
+      premium_render_source: "live_generated_preview",
+      premium_full_document_text: corpus,
+      purpose: "stub",
+    } as unknown as AgreementDraft;
+    const m = describePaidProSendModalBranch(d);
+    expect(m.paidProSendAllowed).toBe(m.bypass);
+    expect(m.paidProSendAllowed).toBe(true);
   });
 
   it("describePaidProSendModalBranch: corpus_authoritative when long premium body", () => {

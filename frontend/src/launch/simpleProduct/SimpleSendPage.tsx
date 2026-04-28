@@ -90,8 +90,8 @@ export function SimpleSendPage(props: { agreementId: string }) {
   );
   /** Re-evaluate `canAccessSimpleSendActions` after session unlock from authoritative Pro load. */
   const [sendUnlockTick, setSendUnlockTick] = useState(0);
-  const authoritativeProBypassRef = useRef(paidProSendBranch.bypass);
-  authoritativeProBypassRef.current = paidProSendBranch.bypass;
+  const authoritativeProBypassRef = useRef(paidProSendBranch.paidProSendAllowed);
+  authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
   const premiumSendUnlocked = useMemo(() => {
     void sendUnlockTick;
     return canAccessSimpleSendActions(agreementId) || workspaceProEntitled;
@@ -102,12 +102,12 @@ export function SimpleSendPage(props: { agreementId: string }) {
   }, [initialDraftSnapshot]);
 
   useEffect(() => {
-    if (!paidProSendBranch.bypass) return;
+    if (!paidProSendBranch.paidProSendAllowed) return;
     if (!isSimpleSendPaywallActive()) return;
     if (canAccessSimpleSendActions(agreementId)) return;
     markSimpleFlowSendUnlocked(agreementId);
     setSendUnlockTick((n) => n + 1);
-  }, [paidProSendBranch.bypass, agreementId]);
+  }, [paidProSendBranch.paidProSendAllowed, agreementId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -302,7 +302,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
             setSimpleFlowPhase("review");
           }}
           onRequestSendUnlock={() => {
-            if (workspaceProEntitled || paidProSendBranch.bypass) {
+            if (workspaceProEntitled || paidProSendBranch.paidProSendAllowed) {
               markSimpleFlowSendUnlocked(agreementId);
               setSendUnlockTick((n) => n + 1);
               return;
@@ -320,8 +320,14 @@ export function SimpleSendPage(props: { agreementId: string }) {
             if (simpleFlowPhase === "review") {
               logProductEvent("send_clicked", { agreementId, phase: "review" });
               const blockPaywall =
-                !workspaceProEntitled && isSimpleSendPaywallActive() && !paidProSendBranch.bypass;
+                !workspaceProEntitled && isSimpleSendPaywallActive() && !paidProSendBranch.paidProSendAllowed;
               if (import.meta.env.DEV) {
+                console.info("[premium-send-gate]", {
+                  paidProSendAllowed: paidProSendBranch.paidProSendAllowed,
+                  reason: paidProSendBranch.reason,
+                  corpusLen: paidProSendBranch.authoritativeLen,
+                  source: paidProSendBranch.premium_render_source,
+                });
                 console.info("[paid-pro-send-modal-branch]", {
                   modal: blockPaywall ? "conversion" : "none",
                   reason: paidProSendBranch.reason,

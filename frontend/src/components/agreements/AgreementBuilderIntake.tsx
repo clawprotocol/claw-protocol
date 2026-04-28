@@ -8072,8 +8072,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumRenderSourceResolved: premiumPaidReadonlyPick.sourceUsed,
         authoritativePick: authoritativePickForSendUi,
         readonlyPlainText: premiumPaidReadonlyPick.plainText,
+        draft,
       }),
-    [premiumPaidReadonlyPick.sourceUsed, premiumPaidReadonlyPick.plainText, authoritativePickForSendUi],
+    [premiumPaidReadonlyPick.sourceUsed, premiumPaidReadonlyPick.plainText, authoritativePickForSendUi, draft],
   );
 
   const premiumRecipientSetupTitle = useMemo(() => {
