@@ -2816,7 +2816,7 @@ const App: React.FC = () => {
               <div className="mt-1 text-xs text-slate-400">
                 Connected to: {API_BASE}
                 {apiVersion?.protocol_version && apiVersion?.api_version
-                  ? ` • Protocol ${apiVersion.protocol_version} • API ${apiVersion.api_version}`
+                  ? ` • ${apiVersion.protocol_version} • API ${apiVersion.api_version}`
                   : ""}
                 {backendOnline === false ? " • Backend: Offline" : ""}
               </div>

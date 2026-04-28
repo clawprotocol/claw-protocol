@@ -2,10 +2,10 @@
 
 import { FUNNEL_CTA_SEND_WITH_PRO } from "./pricingContent";
 
-export const PAYWALL_DEFAULT_HEADLINE = "You're ready to send this agreement.";
+export const PAYWALL_DEFAULT_HEADLINE = "Send this as a professional agreement";
 
 export const PAYWALL_DEFAULT_SUB =
-  "Upgrade to send with LawDog Pro — review links, tracked e‑signature, and a proof record. Look professional and close faster on a simple monthly or annual plan.";
+  "Upgrade to remove draft labeling and send a finalized agreement with a verifiable proof record.";
 
 /** Shown after generation / “Your agreement is ready” — send-step contextual monetization. */
 export const PAYWALL_POST_VALUE_HEADLINE = "Your agreement is ready";
@@ -14,17 +14,17 @@ export const PAYWALL_POST_VALUE_SUB =
   "Make this agreement real — send or export it. Upgrade to send for a clean send, saved workspace, and no watermark.";
 
 /** Simple send flow — final modal before basic send unlock (SendConversionModal). */
-export const PAYWALL_SEND_FINAL_HEADLINE = "You're ready to send this agreement.";
+export const PAYWALL_SEND_FINAL_HEADLINE = "Send this as a professional agreement";
 
 export const PAYWALL_SEND_FINAL_SUB =
-  "LawDog Pro gives you review links, tracked signatures, and a proof record — calmer review, clearer terms, and a send that looks deal‑ready.";
+  "Upgrade to remove draft labeling and send a finalized agreement with a verifiable proof record.";
 
 export const PAYWALL_SEND_FINAL_MODE_QUESTION = "How do you want to send it?";
 
 export const PAYWALL_SEND_FINAL_FREE_LINE =
-  "Send a basic draft link with watermark + simple delivery";
+  "Continue with the draft version on screen — professional send unlocks proof-friendly delivery.";
 
-export const PAYWALL_SEND_FINAL_FREE_CTA = "Send basic draft link";
+export const PAYWALL_SEND_FINAL_FREE_CTA = "Continue with draft version";
 
 export const PAYWALL_SEND_FINAL_PREMIUM_PITCH =
   "Review links, tracked signing, and a proof record — business‑ready terms built to help you close faster.";
@@ -63,7 +63,14 @@ export const PAYWALL_SUBSCRIPTION_HOVER_TITLE = "Best for ongoing agreements";
 export const PAYWALL_ONE_TIME_HOVER_TITLE = "Good for one-time use";
 
 /** Direct decision line — no hedging (shown in send conversion surfaces). */
-export const CONVERSION_DECISION_PROMPT = "Are you ready to send this agreement?";
+export const CONVERSION_DECISION_PROMPT = "Choose how you want to send.";
+
+/** Paid Pro — ready to send (no upsell; server authoritative render). */
+export const PAYWALL_PAID_READY_HEADLINE = "You're ready to send";
+
+export const PAYWALL_PAID_READY_SUB = "This agreement is finalized and ready for signature.";
+
+export const PAYWALL_PAID_READY_CTA = "Send agreement";
 
 /** Product-scope reassurance under primary conversion CTAs. */
 export const CONVERSION_GUARANTEE_INLINE =

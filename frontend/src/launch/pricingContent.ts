@@ -73,8 +73,21 @@ export const FUNNEL_PRO_VALUE_BULLETS = [
   "Cleaner final agreement",
 ] as const;
 
-/** Primary conversion CTA on free send upsell (avoid generic “Upgrade” alone). */
-export const FUNNEL_CTA_SEND_WITH_PRO = "Send with LawDog Pro";
+/** Primary conversion CTA on free send upsell — aligned to Create → Send → Prove. */
+export const FUNNEL_CTA_SEND_WITH_PRO = "Unlock professional send";
+
+/** Simple create / intake — first prompt (AgreementBuilderIntake, SimpleCreatePage). */
+export const INTAKE_INTRO_HEADLINE = "Describe your agreement. We'll turn it into something you can send.";
+export const INTAKE_HELPER_LEAD = "Works for anything:";
+export const INTAKE_HELPER_BULLETS = ["freelance work", "NDAs", "partnerships", "simple deals"] as const;
+export const INTAKE_MICRO_TRUST_LINE = "You'll see a real agreement in seconds — ready to send.";
+
+/** AgreementReview — lightweight reassurance above first preview (simple home). */
+export const SIMPLE_HOME_AGREEMENT_READY_LINES = [
+  "✅ This is a complete agreement",
+  "✅ Ready to send for signature",
+  "🔒 Proof record available when you send",
+] as const;
 
 /** Pro / unlock progress (agreement flow). */
 export const FUNNEL_PRO_ACTIVE_TITLE = "LawDog Pro active";

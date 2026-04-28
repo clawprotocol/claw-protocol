@@ -109,7 +109,7 @@ async function assertCanonicalUnpaidSendShell(page: Page) {
   await expect(page.getByText("Send this agreement", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(1);
   await expect(page.getByText("Quick check")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send with LawDog Pro" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Unlock professional send" })).toHaveCount(1);
 
   await expect(page.getByText("Delivery status matrix")).toHaveCount(0);
   await expect(page.getByText(/Attach payment/i)).toHaveCount(0);

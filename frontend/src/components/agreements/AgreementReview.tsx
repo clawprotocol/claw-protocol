@@ -148,14 +148,17 @@ import {
   FUNNEL_PRO_PHASE_REVIEWER_SETUP,
   FUNNEL_PRO_VALUE_BULLETS,
   REVIEW_STRUCTURED_WIN_LINE,
+  SIMPLE_HOME_AGREEMENT_READY_LINES,
 } from "../../launch/pricingContent";
 import { VoiceAugmentedTextArea } from "../../launch/VoiceAugmentedControl";
 import { triggerPaywall } from "../../launch/triggerPaywall";
 import {
-  CONVERSION_DECISION_PROMPT,
   CONVERSION_GUARANTEE_INLINE,
   PAYWALL_DEFAULT_HEADLINE,
   PAYWALL_DEFAULT_SUB,
+  PAYWALL_PAID_READY_CTA,
+  PAYWALL_PAID_READY_HEADLINE,
+  PAYWALL_PAID_READY_SUB,
 } from "../../launch/paywallMessaging";
 import { useAccess } from "../../access/AccessContext";
 import {
@@ -5569,6 +5572,15 @@ const AgreementReview: React.FC<Props> = ({
                     Read-only preview. Nothing is sent until you confirm.
                   </p>
                 </div>
+                {isSimpleHomeReview && draft && simpleFlowPhase === "review" ? (
+                  <div className="mb-3 rounded-lg border border-emerald-900/30 bg-emerald-950/15 px-3 py-2.5 text-[11px] leading-relaxed sm:text-xs">
+                    {SIMPLE_HOME_AGREEMENT_READY_LINES.map((line, i) => (
+                      <p key={line} className={`${i > 0 ? "mt-1 " : ""}text-slate-300 last:text-slate-400`}>
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
                 {simplePreviewBlock}
                 {isSimpleHomeReview && savingField === "conversation" && !pendingRevision ? (
                   <div
@@ -5622,6 +5634,15 @@ const AgreementReview: React.FC<Props> = ({
                   </p>
                 </div>
               )}
+              {isSimpleHomeReview && draft && simpleFlowPhase === "review" ? (
+                <div className="mb-3 rounded-lg border border-emerald-900/30 bg-emerald-950/15 px-3 py-2.5 text-[11px] leading-relaxed sm:text-xs">
+                  {SIMPLE_HOME_AGREEMENT_READY_LINES.map((line, i) => (
+                    <p key={line} className={`${i > 0 ? "mt-1 " : ""}text-slate-300 last:text-slate-400`}>
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
               {simplePreviewBlock}
               {isSimpleHomeReview && savingField === "conversation" && !pendingRevision ? (
                 <div
@@ -6475,47 +6496,70 @@ const AgreementReview: React.FC<Props> = ({
             aria-labelledby="wm-send-title"
           >
             <div className="max-w-md rounded-xl border border-slate-700 bg-slate-950 p-6 shadow-xl">
-              <h2 id="wm-send-title" className="text-lg font-semibold leading-snug text-slate-100">
-                {PAYWALL_DEFAULT_HEADLINE}
-              </h2>
-              <p className="mt-2 text-sm leading-relaxed text-slate-400">{PAYWALL_DEFAULT_SUB}</p>
-              <p className="mt-4 text-sm font-semibold leading-snug text-slate-100">{CONVERSION_DECISION_PROMPT}</p>
-              <p className="mt-3 text-xs font-medium leading-snug text-slate-300">
-                Send with LawDog draft label on preview — continue for delivery on your current plan.
-              </p>
-              <div className="mt-6 flex flex-col gap-3">
-                <button
-                  type="button"
-                  className="w-full min-h-[2.75rem] rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-6 text-sm font-semibold text-slate-950 shadow-[0_4px_22px_rgba(245,158,11,0.3)] transition hover:from-amber-300 hover:to-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/90 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                  onClick={() => {
-                    setWatermarkSendModalOpen(false);
-                    onSimpleFlowContinue?.();
-                  }}
-                >
-                  {simpleFlowPremiumHandoffIntent === "review" ? "Continue to links" : "Continue to links"}
-                </button>
-                <p className="text-center text-[11px] leading-relaxed text-slate-500">{CONVERSION_GUARANTEE_INLINE}</p>
-                <p className="text-center text-xs font-medium leading-snug text-slate-300">
-                  Send professionally with no draft label, faster signatures, and saved proof history
-                </p>
-                <button
-                  type="button"
-                  className="w-full min-h-[2.65rem] rounded-xl border-2 border-emerald-500/55 bg-gradient-to-b from-emerald-950/40 to-slate-950/70 px-6 text-sm font-semibold text-emerald-100 shadow-[0_4px_18px_rgba(16,185,129,0.12)] transition hover:border-emerald-400/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                  onClick={() => {
-                    setWatermarkSendModalOpen(false);
-                    triggerPaywall({ agreementId, reason: "watermark_upgrade" });
-                  }}
-                >
-                  {FUNNEL_CTA_SEND_WITH_PRO}
-                </button>
-                <button
-                  type="button"
-                  className="vs01-btn vs01-btn--secondary w-full"
-                  onClick={() => setWatermarkSendModalOpen(false)}
-                >
-                  Go back
-                </button>
-              </div>
+              {draft && bypassSimpleHomeWatermarkSendGate(draft, economicsOverlay) ? (
+                <>
+                  <h2 id="wm-send-title" className="text-lg font-semibold leading-snug text-slate-100">
+                    {PAYWALL_PAID_READY_HEADLINE}
+                  </h2>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-400">{PAYWALL_PAID_READY_SUB}</p>
+                  <div className="mt-6 flex flex-col gap-3">
+                    <button
+                      type="button"
+                      className="w-full min-h-[2.65rem] rounded-xl border-2 border-emerald-500/55 bg-gradient-to-b from-emerald-950/40 to-slate-950/70 px-6 text-sm font-semibold text-emerald-100 shadow-[0_4px_18px_rgba(16,185,129,0.12)] transition hover:border-emerald-400/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                      onClick={() => {
+                        setWatermarkSendModalOpen(false);
+                        onSimpleFlowContinue?.();
+                      }}
+                    >
+                      {PAYWALL_PAID_READY_CTA}
+                    </button>
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--secondary w-full"
+                      onClick={() => setWatermarkSendModalOpen(false)}
+                    >
+                      Back
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 id="wm-send-title" className="text-lg font-semibold leading-snug text-slate-100">
+                    {PAYWALL_DEFAULT_HEADLINE}
+                  </h2>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-400">{PAYWALL_DEFAULT_SUB}</p>
+                  <div className="mt-6 flex flex-col gap-3">
+                    <button
+                      type="button"
+                      className="w-full min-h-[2.65rem] rounded-xl border-2 border-emerald-500/55 bg-gradient-to-b from-emerald-950/40 to-slate-950/70 px-6 text-sm font-semibold text-emerald-100 shadow-[0_4px_18px_rgba(16,185,129,0.12)] transition hover:border-emerald-400/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                      onClick={() => {
+                        setWatermarkSendModalOpen(false);
+                        triggerPaywall({ agreementId, reason: "watermark_upgrade" });
+                      }}
+                    >
+                      {FUNNEL_CTA_SEND_WITH_PRO}
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full min-h-[2.75rem] rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-6 text-sm font-semibold text-slate-950 shadow-[0_4px_22px_rgba(245,158,11,0.3)] transition hover:from-amber-300 hover:to-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/90 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                      onClick={() => {
+                        setWatermarkSendModalOpen(false);
+                        onSimpleFlowContinue?.();
+                      }}
+                    >
+                      Continue with draft version
+                    </button>
+                    <p className="text-center text-[11px] leading-relaxed text-slate-500">{CONVERSION_GUARANTEE_INLINE}</p>
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--secondary w-full"
+                      onClick={() => setWatermarkSendModalOpen(false)}
+                    >
+                      Back
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         ) : null}

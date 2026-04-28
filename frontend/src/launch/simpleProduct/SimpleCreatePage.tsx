@@ -240,7 +240,7 @@ export function SimpleCreatePage() {
         ) : null}
         {!quickSendTypedArrival && !isFreshSimpleCreateStart ? (
           <p className="mb-3 text-center text-base font-medium leading-relaxed text-slate-300 sm:text-left sm:text-[1.0625rem] md:text-[1.125rem] lg:text-[1.1875rem] lg:leading-[1.55] lg:text-slate-200/95">
-            Describe your agreement in plain English. We&apos;ll structure it instantly.
+            Describe your agreement. We&apos;ll turn it into something you can send.
           </p>
         ) : !quickSendTypedArrival && isFreshSimpleCreateStart ? (
           <p className="mb-2 text-center text-sm font-medium leading-snug text-slate-400 sm:text-left sm:mb-3 sm:text-[0.9375rem] md:text-base">

@@ -33,8 +33,13 @@ import {
   FUNNEL_CTA_SEND_WITH_PRO,
   FUNNEL_FREE_STARTER_BODY,
   HOMEPAGE_LONG_INTAKE_EXAMPLE,
+  INTAKE_HELPER_BULLETS,
+  INTAKE_HELPER_LEAD,
+  INTAKE_INTRO_HEADLINE,
+  INTAKE_MICRO_TRUST_LINE,
   NOTHING_SENT_UNTIL_CONFIRM,
 } from "../../launch/pricingContent";
+import { PAYWALL_PAID_READY_CTA, PAYWALL_PAID_READY_HEADLINE, PAYWALL_PAID_READY_SUB } from "../../launch/paywallMessaging";
 import { LiveAgreementPreview, type IntakeFormationPhase } from "./LiveAgreementPreview";
 import { extractIntakePayment } from "./intakeCurrencyParse";
 import { detectAgreementFamily } from "./agreementFamilyRouter";
@@ -10611,7 +10616,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         <>
           <div className="mb-4">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 sm:text-xs">Your agreement</p>
-            <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-100 sm:text-xl">Describe your agreement</h2>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-100 sm:text-xl">{INTAKE_INTRO_HEADLINE}</h2>
             <p className="mt-1 text-sm text-slate-500">Answer the prompt below in your own words.</p>
           </div>
           {showGuidedFlowProgressBar ? (
@@ -10712,7 +10717,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     ? "Finishing transcription…"
                     : intakeDictationPhase === "recording"
                       ? "Recording — speak at your own pace"
-                      : "Describe your agreement in plain English. We'll structure it instantly."}
+                      : INTAKE_MICRO_TRUST_LINE}
             </p>
           ) : null}
           {intakeCombined.trim() && !isGenerating && !hideIntakeMicrocopy && !guidedStructureComplete ? (
@@ -11095,11 +11100,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             Continue here
                           </p>
                           <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-200 sm:text-xl md:text-[1.25rem]">
-                            Say or type your agreement
+                            {INTAKE_INTRO_HEADLINE}
                           </h2>
-                          <p className="mt-2 text-sm leading-relaxed text-slate-500 sm:text-[0.9375rem]">
-                            Plain English is perfect. We&apos;ll structure it for you.
-                          </p>
                         </>
                       ) : (
                         <>
@@ -11474,8 +11476,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           ? "Finishing transcription…"
                           : intakeDictationPhase === "recording"
                             ? "Recording — speak at your own pace"
-                            : "Describe your agreement in plain English. We'll structure it instantly."}
+                            : stageAInputFirst &&
+                                simpleProductFlow &&
+                                liveWorkspaceTwoPane &&
+                                createUiStage === CreateUiStage.INPUT
+                              ? null
+                              : "Describe your agreement in plain English. We'll structure it instantly."}
                   </p>
+                ) : null}
+                {stageAInputFirst &&
+                simpleProductFlow &&
+                liveWorkspaceTwoPane &&
+                createUiStage === CreateUiStage.INPUT &&
+                !isGenerating ? (
+                  <div className="mt-3 rounded-lg border border-slate-800/60 bg-slate-950/40 px-3 py-2.5 sm:px-4">
+                    <p className="text-xs font-medium text-slate-400 sm:text-sm">{INTAKE_HELPER_LEAD}</p>
+                    <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-xs text-slate-500 sm:text-sm">
+                      {INTAKE_HELPER_BULLETS.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-xs leading-snug text-slate-500 sm:text-sm">{INTAKE_MICRO_TRUST_LINE}</p>
+                  </div>
                 ) : null}
                 {intakeRefinementWarning && !hideIntakeMicrocopy && !isGenerating ? (
                   <p
@@ -13824,15 +13846,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="premium-send-confirm-title" className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-              {minimalProSendRecipientChrome
-                ? effectivePremiumSendMode === "review"
-                  ? "Create secure review link"
-                  : "Create secure signing links"
-                : "Confirm before saving"}
+              {minimalProSendRecipientChrome ? PAYWALL_PAID_READY_HEADLINE : "Confirm before saving"}
             </h2>
             {minimalProSendRecipientChrome ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                LawDog will create a secure link. Nothing is emailed automatically. You choose when and how to share it.
+                {PAYWALL_PAID_READY_SUB}
               </p>
             ) : effectivePremiumSendMode === "signature" ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
@@ -13942,11 +13960,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   void onGenerate();
                 }}
               >
-                {minimalProSendRecipientChrome
-                  ? effectivePremiumSendMode === "review"
-                    ? "Create review link"
-                    : "Create signing links"
-                  : "Confirm and continue"}
+                {minimalProSendRecipientChrome ? PAYWALL_PAID_READY_CTA : "Confirm and continue"}
               </button>
             </div>
           </div>

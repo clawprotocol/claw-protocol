@@ -7,6 +7,8 @@ export type DynamicConfigRoot = {
   home: {
     heroTitle: string;
     heroSupportLine: string;
+    /** Smaller trust line under hero subheadline (homepage only). */
+    heroMicroTrust: string;
     heroPlaceholder: string;
     microSteps: string[];
   };

@@ -170,6 +170,9 @@ export function LaunchHomePage() {
           <p className="mx-auto max-w-3xl text-center text-xl font-medium leading-relaxed text-slate-900 sm:text-[1.45rem] lg:max-w-5xl lg:text-[1.5rem]">
             {home.heroSupportLine}
           </p>
+          <p className="mx-auto mt-2 max-w-3xl text-center text-sm leading-snug text-slate-600 sm:text-[0.95rem] lg:max-w-5xl">
+            {home.heroMicroTrust}
+          </p>
 
           <LawdogValueBulletsList
             variant="light"
