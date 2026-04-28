@@ -1255,33 +1255,40 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
     try:
         if body.action == "update":
             u_narrow = (body.user_refinement_prompt or "").strip()
-            narrow_kind = classify_narrow_amendment_prompt(u_narrow)
-            if narrow_kind:
-                narrow_out = try_apply_narrow_amendment(
-                    kind=narrow_kind,
-                    current_document_text=doc,
-                    user_refinement_prompt=u_narrow,
-                    call_legal_llm_fn=call_legal_llm,
-                    llm_model=llm_model,
+            try:
+                narrow_kind = classify_narrow_amendment_prompt(u_narrow)
+                if narrow_kind:
+                    narrow_out = try_apply_narrow_amendment(
+                        kind=narrow_kind,
+                        current_document_text=doc,
+                        user_refinement_prompt=u_narrow,
+                        call_legal_llm_fn=call_legal_llm,
+                        llm_model=llm_model,
+                    )
+                    if narrow_out is not None:
+                        parsed_narrow = {
+                            "updated_document_text": narrow_out["updated_document_text"],
+                            "summary_changes": narrow_out.get("summary_changes") or [],
+                            "readiness_score": int(narrow_out.get("readiness_score") or 78),
+                            "suggested_next_step": narrow_out.get("suggested_next_step") or "review",
+                        }
+                        out_narrow = _normalize_premium_refine_result(
+                            parsed_narrow, action=body.action, current_doc=current_for_norm
+                        )
+                        log.info(
+                            "claw_premium route=premium_refine narrow_amendment kind=%s out_len=%d current_len=%d",
+                            narrow_kind,
+                            len((out_narrow.updated_document_text or "").strip()),
+                            len(doc),
+                        )
+                        _safe_record_ai_call(request, request_ip)
+                        return out_narrow
+            except Exception as narrow_exc:
+                log.warning(
+                    "claw_premium route=premium_refine narrow_amendment_exception_fallback_to_llm err_type=%s",
+                    type(narrow_exc).__name__,
+                    exc_info=True,
                 )
-                if narrow_out is not None:
-                    parsed_narrow = {
-                        "updated_document_text": narrow_out["updated_document_text"],
-                        "summary_changes": narrow_out.get("summary_changes") or [],
-                        "readiness_score": int(narrow_out.get("readiness_score") or 78),
-                        "suggested_next_step": narrow_out.get("suggested_next_step") or "review",
-                    }
-                    out_narrow = _normalize_premium_refine_result(
-                        parsed_narrow, action=body.action, current_doc=current_for_norm
-                    )
-                    log.info(
-                        "claw_premium route=premium_refine narrow_amendment kind=%s out_len=%d current_len=%d",
-                        narrow_kind,
-                        len((out_narrow.updated_document_text or "").strip()),
-                        len(doc),
-                    )
-                    record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
-                    return out_narrow
 
         llm_text = call_legal_llm(
             messages=[
@@ -1305,7 +1312,7 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
         out = _normalize_premium_refine_result(parsed, action=body.action, current_doc=current_for_norm)
         if body.action == "ready" and not (out.updated_document_text or "").strip():
             out = out.model_copy(update={"updated_document_text": current_for_norm})
-        record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+        _safe_record_ai_call(request, request_ip)
         return out
     except Exception as exc:
         kind = _classify_premium_llm_failure(exc)
@@ -1351,6 +1358,40 @@ class PremiumFinalizeAuditResponse(BaseModel):
     resolved_strengths: List[str] = Field(default_factory=list)
     best_next_step: Literal["edit", "review", "send"] = "review"
     confidence: Literal["low", "medium", "high"] = "medium"
+
+
+def _safe_record_ai_call(request: Request, request_ip: str) -> None:
+    """Usage accounting must not turn a successful LLM/narrow response into HTTP 503."""
+    try:
+        record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+    except Exception as exc:
+        log.warning(
+            "claw_premium record_ai_call skipped err_type=%s",
+            type(exc).__name__,
+            exc_info=True,
+        )
+
+
+def _fallback_premium_agreement_review_response() -> PremiumAgreementReviewResponse:
+    """Advisory-only: empty bullets so Pro send flow is never blocked by review LLM outages."""
+    return PremiumAgreementReviewResponse(
+        strengths=[],
+        missing_or_weak_terms=[],
+        questions_for_user=[],
+        suggested_clause_upgrades=[],
+        priority_score=35,
+    )
+
+
+def _fallback_premium_finalize_audit_response() -> PremiumFinalizeAuditResponse:
+    """Advisory-only: neutral audit shell when finalize-audit LLM is unavailable."""
+    return PremiumFinalizeAuditResponse(
+        deal_specific_missing_terms=[],
+        placeholder_terms_found=[],
+        resolved_strengths=[],
+        best_next_step="review",
+        confidence="medium",
+    )
 
 
 class PremiumReviewRouteRequest(BaseModel):
@@ -1884,12 +1925,12 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
             best_next_step=cast(Literal["edit", "review", "send"], n["best_next_step"]),
             confidence=cast(Literal["low", "medium", "high"], n["confidence"]),
         )
-        record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+        _safe_record_ai_call(request, request_ip)
         return out
     except Exception as exc:
         kind = _classify_premium_llm_failure(exc)
         log.warning(
-            "claw_premium route=premium_finalize_audit FAILED class=%s exc_type=%s model=%s %s err_snip=%s",
+            "claw_premium route=premium_finalize_audit FAILED class=%s exc_type=%s model=%s %s err_snip=%s (fail_open_200)",
             kind,
             type(exc).__name__,
             (llm_model or ""),
@@ -1897,13 +1938,7 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
             (str(exc) or "")[:500].replace("\n", " "),
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "premium_finalize_audit_unavailable",
-                "message": "Deal audit is temporarily unavailable. You can still review and send your agreement.",
-            },
-        ) from exc
+        return _fallback_premium_finalize_audit_response()
 
 
 @router.post("/premium-review-route", response_model=PremiumReviewRouteResponse)
@@ -1944,7 +1979,7 @@ def premium_review_route(request: Request, body: PremiumReviewRouteRequest) -> P
         out = _retune_review_route_thresholds(_normalize_premium_review_route_result(parsed), payload)
         out = _polish_premium_review_route_output(out, payload)
         out = _apply_route_psychology_copy(out)
-        record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+        _safe_record_ai_call(request, request_ip)
         return out
     except Exception as exc:
         log.warning("premium_review_route failed err=%s", type(exc).__name__, exc_info=True)
@@ -3338,12 +3373,12 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
         log.info("claw_premium route=premium_review openai_response_chars=%d", len((llm_text or "").strip()))
         parsed = _extract_json_object(llm_text)
         out = _normalize_premium_agreement_review_result(parsed)
-        record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+        _safe_record_ai_call(request, request_ip)
         return out
     except Exception as exc:
         kind = _classify_premium_llm_failure(exc)
         log.warning(
-            "claw_premium route=premium_review FAILED class=%s exc_type=%s model=%s %s err_snip=%s",
+            "claw_premium route=premium_review FAILED class=%s exc_type=%s model=%s %s err_snip=%s (fail_open_200)",
             kind,
             type(exc).__name__,
             (llm_model or ""),
@@ -3351,13 +3386,7 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
             (str(exc) or "")[:500].replace("\n", " "),
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "premium_review_unavailable",
-                "message": "Agreement review is temporarily unavailable. You can still edit the draft and continue.",
-            },
-        ) from exc
+        return _fallback_premium_agreement_review_response()
 
 
 @router.get("/usage/summary")

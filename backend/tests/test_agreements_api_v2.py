@@ -1102,6 +1102,76 @@ def test_premium_refine_late_fee_narrow_deterministic_skips_llm(monkeypatch, tmp
     assert len(b.get("summary_changes") or []) >= 1
 
 
+def test_premium_refine_late_fee_narrow_still_200_when_record_ai_call_raises(monkeypatch, tmp_path):
+    """Usage accounting failures must not 503 a successful deterministic narrow refine."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def boom_llm(*_a, **_k):
+        raise RuntimeError("llm_should_not_run")
+
+    def boom_record(**_k):
+        raise RuntimeError("usage_store_unavailable")
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom_llm)
+    monkeypatch.setattr(av2, "record_ai_call", boom_record)
+    client = TestClient(app)
+    doc = _premium_refine_long_fixture_doc()
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc,
+            "intake_text": "B2B services.",
+            "user_refinement_prompt": "Add late fee of 5% after 10 days overdue. Preserve all other terms.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["updated_document_text"]
+    assert ("five percent (5%)" in text.lower()) or ("5%" in text)
+    assert len(text) >= int(len(doc) * 0.9)
+
+
+def test_premium_refine_narrow_exception_falls_back_to_full_llm(monkeypatch, tmp_path):
+    """Unexpected narrow-path errors fall back to full refine instead of failing the request."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    doc_local = _premium_refine_long_fixture_doc()
+
+    def boom_narrow(**_k):
+        raise ValueError("narrow_internal_bug")
+
+    def fake_llm(*_a, **_k):
+        return json.dumps(
+            {
+                "updated_document_text": doc_local + "\n\nAPPENDED BY FULL LLM PATH.\n",
+                "summary_changes": ["Applied via full refine fallback"],
+                "readiness_score": 70,
+                "suggested_next_step": "review",
+            }
+        )
+
+    monkeypatch.setattr(av2, "try_apply_narrow_amendment", boom_narrow)
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc_local,
+            "intake_text": "B2B services.",
+            "user_refinement_prompt": "Add late fee of 5% after 10 days overdue. Preserve all other terms.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    assert "APPENDED BY FULL LLM PATH" in res.json()["updated_document_text"]
+
+
 def test_premium_refine_late_fee_narrow_llm_anchor_when_no_payment_header(monkeypatch, tmp_path):
     """Without a Payment heading, narrow path falls back to LLM anchor patch."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
@@ -1188,7 +1258,7 @@ def test_premium_finalize_audit_ok_deal_specific(monkeypatch, tmp_path):
     assert any("TBD" in t for t in b["placeholder_terms_found"])
 
 
-def test_premium_finalize_audit_503_on_llm_failure(monkeypatch, tmp_path):
+def test_premium_finalize_audit_fail_open_200_when_llm_unavailable(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     import backend.routers.agreements_v2_api as av2
@@ -1203,9 +1273,13 @@ def test_premium_finalize_audit_503_on_llm_failure(monkeypatch, tmp_path):
         headers=_ORG_H,
         json={"intake_text": "i", "document_text": "d" * 100},
     )
-    assert res.status_code == 503
-    d = res.json().get("detail")
-    assert isinstance(d, dict) and d.get("code") == "premium_finalize_audit_unavailable"
+    assert res.status_code == 200
+    b = res.json()
+    assert b["deal_specific_missing_terms"] == []
+    assert b["placeholder_terms_found"] == []
+    assert b["resolved_strengths"] == []
+    assert b["best_next_step"] == "review"
+    assert b["confidence"] == "medium"
 
 
 def test_premium_finalize_audit_malformed_payload_normalizes(monkeypatch, tmp_path):
@@ -1627,7 +1701,7 @@ def test_premium_review_route_unresolved_items_rank_business_risk_first(monkeypa
     assert "commission" in first or "net-revenue" in first or "payout" in first
 
 
-def test_premium_agreement_review_503_when_llm_fails(monkeypatch, tmp_path):
+def test_premium_agreement_review_fail_open_200_when_llm_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     import backend.routers.agreements_v2_api as av2
@@ -1645,6 +1719,10 @@ def test_premium_agreement_review_503_when_llm_fails(monkeypatch, tmp_path):
             "document_text": "1. SCOPE. X.\n" * 400,
         },
     )
-    assert res.status_code == 503
-    detail = res.json().get("detail")
-    assert isinstance(detail, dict) and detail.get("code") == "premium_review_unavailable"
+    assert res.status_code == 200
+    b = res.json()
+    assert b["strengths"] == []
+    assert b["missing_or_weak_terms"] == []
+    assert b["questions_for_user"] == []
+    assert b["suggested_clause_upgrades"] == []
+    assert b["priority_score"] == 35

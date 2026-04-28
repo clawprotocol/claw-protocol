@@ -1,7 +1,7 @@
 """
 Narrow premium-refine amendments: insert or anchor-patch without full-document replacement.
 
-Keeps agreements near original length so the frontend length guard can safely accept results.
+Stdlib only — safe to import from ``agreements_v2_api`` (no third-party deps here).
 """
 
 from __future__ import annotations
@@ -58,6 +58,11 @@ def _safe_json_dict(text: str) -> Optional[Dict[str, Any]]:
 
 
 def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
+    """
+    Map a user refinement prompt to a narrow amendment kind, or None for generic refine.
+
+    Kinds: late_fee, governing_law, delivery_acceptance, support_period, termination.
+    """
     p = (prompt or "").strip().lower()
     if not p or len(p) < 8:
         return None
@@ -83,6 +88,7 @@ def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
 
 
 def document_has_late_fee_language(doc: str) -> bool:
+    """Idempotent check: document already contains late-fee style language with 5% / five percent."""
     low = doc.lower()
     if ("late payment" in low or "late fee" in low) and ("5%" in doc or "five percent" in low):
         return True
@@ -109,6 +115,11 @@ def _anchors_preserved(original: str, updated: str) -> bool:
 
 
 def validate_narrow_refined_document(*, original: str, updated: str, kind: str) -> bool:
+    """
+    Server-side guard: updated text must stay within 90–135% of original length and preserve anchors.
+
+    ``kind`` is one of the narrow kinds from ``classify_narrow_amendment_prompt``.
+    """
     if not updated or not original:
         return False
     lo, lu = len(original), len(updated)
@@ -140,6 +151,7 @@ def validate_narrow_refined_document(*, original: str, updated: str, kind: str) 
 
 
 def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
+    """Insert default late-fee paragraph after Payment-style heading, or before Confidentiality. No LLM."""
     patterns = [
         r"(?m)^#{1,3}\s+(?:\d+\.\s*)?(?:Payment|Fees|Compensation|Compensation\s+and\s+Payment|Pricing\s+and\s+Payment|Invoicing|Billing)(?:\s+Terms)?\s*$",
         r"(?m)^(?:\d+\.){1,3}\s+(?:Payment|Fees|Compensation|Pricing)(?:\s+Terms)?\s*$",
@@ -156,7 +168,9 @@ def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
         else:
             insert_at = head_end + dbl + 2
         window = doc[head_end : min(len(doc), insert_at + 500)].lower()
-        if "five percent (5%)" in window or ("late payment" in window and "5%" in doc[head_end : min(len(doc), head_end + 2000)]):
+        if "five percent (5%)" in window or (
+            "late payment" in window and "5%" in doc[head_end : min(len(doc), head_end + 2000)]
+        ):
             return None
         block = LATE_FEE_PARAGRAPH_DEFAULT.strip() + "\n\n"
         return doc[:insert_at] + block + doc[insert_at:]
@@ -177,6 +191,11 @@ def _try_llm_narrow_anchor_patch(
     call_legal_llm_fn: Callable[..., str],
     llm_model: Optional[str],
 ) -> Optional[str]:
+    """
+    Ask the model for ``{ "anchor", "new_paragraph" }`` only; apply server-side if anchor is unique.
+
+    ``call_legal_llm_fn`` must match ``call_legal_llm(messages, model=..., max_tokens=..., temperature=...)``.
+    """
     payload = json.dumps(
         {
             "narrow_amendment_kind": kind,
@@ -229,6 +248,11 @@ def try_apply_narrow_amendment(
     call_legal_llm_fn: Callable[..., str],
     llm_model: Optional[str],
 ) -> Optional[Dict[str, Any]]:
+    """
+    Apply a narrow amendment if validation passes.
+
+    Returns a dict suitable for building ``PremiumRefineResponse``, or None to fall back to full refine.
+    """
     doc = (current_document_text or "").strip()
     if len(doc) < 200:
         return None
@@ -272,3 +296,12 @@ def try_apply_narrow_amendment(
     if alt and validate_narrow_refined_document(original=doc, updated=alt, kind=kind):
         return ok_response(alt, _SUMMARY_FOR_KIND.get(kind, ["Applied requested narrow amendment."]))
     return None
+
+
+__all__ = [
+    "LATE_FEE_PARAGRAPH_DEFAULT",
+    "classify_narrow_amendment_prompt",
+    "document_has_late_fee_language",
+    "try_apply_narrow_amendment",
+    "validate_narrow_refined_document",
+]
