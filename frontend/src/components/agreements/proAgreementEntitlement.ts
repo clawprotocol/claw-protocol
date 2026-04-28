@@ -23,12 +23,12 @@ export function isProEntitledForAgreement(args: {
   draft: ParsedDraftShape | null | undefined;
   premiumSendPathUnlocked: boolean;
   premiumPersistedFlowActive: boolean;
-  premiumCompletionSnapshot: PremiumCompletionSnapshot | null;
+  premiumCompletionSnapshot: PremiumCompletionSnapshot | null | undefined;
 }): boolean {
   if (tierAllowsAdvancedFullDraftReveal(args.tier)) return true;
   if (args.premiumSendPathUnlocked || args.premiumPersistedFlowActive) return true;
 
-  const snap = args.premiumCompletionSnapshot;
+  const snap = args.premiumCompletionSnapshot ?? null;
   if (
     snap?.premiumAccepted &&
     (snap.premiumWinningBodyText || snap.premiumReadonlyPlainText || "").trim().length >= 500
@@ -36,7 +36,9 @@ export function isProEntitledForAgreement(args: {
     return true;
   }
 
-  const d = args.draft;
+  const d = args.draft ?? null;
+  if (d == null) return false;
+
   if (authoritativePremiumBodyOnDraft(d)) return true;
 
   const drs = (d as { premium_render_source?: string | null }).premium_render_source;

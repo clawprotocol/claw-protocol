@@ -84,4 +84,40 @@ describe("proAgreementEntitlement", () => {
       }),
     ).toBe(false);
   });
+
+  it("isProEntitledForAgreement false when draft is null (empty /app/create) without tier or flags", () => {
+    expect(
+      isProEntitledForAgreement({
+        tier: "free",
+        draft: null,
+        premiumSendPathUnlocked: false,
+        premiumPersistedFlowActive: false,
+        premiumCompletionSnapshot: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("isProEntitledForAgreement false when draft is undefined", () => {
+    expect(
+      isProEntitledForAgreement({
+        tier: "free",
+        draft: undefined,
+        premiumSendPathUnlocked: false,
+        premiumPersistedFlowActive: false,
+        premiumCompletionSnapshot: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not throw when draft is null (regression: premium_render_source must not be read on null)", () => {
+    expect(() =>
+      isProEntitledForAgreement({
+        tier: "standard",
+        draft: null,
+        premiumSendPathUnlocked: false,
+        premiumPersistedFlowActive: false,
+        premiumCompletionSnapshot: null,
+      }),
+    ).not.toThrow();
+  });
 });
