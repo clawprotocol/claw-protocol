@@ -1616,15 +1616,29 @@ const AgreementReview: React.FC<Props> = ({
         pick.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN &&
         pick.field !== "purpose",
     );
+    const authLen = pick?.text.length ?? 0;
     // eslint-disable-next-line no-console
     console.info("[send-stage-ui-source]", {
+      minimalProSendRecipientChrome: simpleSendAuthoritativeMinimalChrome,
       hasAuthoritativeCorpus,
-      authoritativeLen: pick?.text.length ?? 0,
+      authoritativeLen: authLen,
       renderSource: pick?.field ?? "",
       reviewCardHidden: simpleSendAuthoritativeMinimalChrome,
       advancedOptionsHidden: simpleSendAuthoritativeMinimalChrome,
       purposeLen,
     });
+    if (
+      simpleSendAuthoritativeMinimalChrome &&
+      purposeLen < 1000 &&
+      authLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN
+    ) {
+      // eslint-disable-next-line no-console
+      console.warn("[send-purpose-short-but-authoritative-ok]", {
+        purposeLen,
+        authoritativeLen: authLen,
+        renderSource: pick?.field ?? "",
+      });
+    }
   }, [
     isSimpleHomeReview,
     simpleFlowPhase,

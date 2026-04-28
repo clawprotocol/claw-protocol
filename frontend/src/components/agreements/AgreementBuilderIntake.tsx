@@ -961,32 +961,40 @@ function CreateFlowSendRecipientsPanel({
     ? r1e
     : r1Invalid
       ? "That email doesn’t look valid yet — check spelling and the part after @."
-      : "Add recipient 1 email (labels your invite; you’ll copy a secure link next)";
+      : minimalProSendRecipientChrome
+        ? "Add email for your records (optional for labeling)"
+        : "Add recipient 1 email (labels your invite; you’ll copy a secure link next)";
   const modeLinkLabel = effectivePremiumSendMode === "review" ? "Review link" : "Signing link";
+  const minimalAgreementFirstBody =
+    effectivePremiumSendMode === "review"
+      ? "LawDog creates a secure review link for this agreement. It does not email recipients automatically — you copy and share the link when you are ready. Nothing is emailed from LawDog."
+      : "LawDog creates secure signing links for this agreement. It does not email recipients automatically — you copy and share when you are ready. Nothing is emailed from LawDog.";
   const modeExplain = minimalProSendRecipientChrome
-    ? effectivePremiumSendMode === "review"
-      ? "LawDog creates a secure review link for this agreement. It does not email recipients automatically — you copy and share the link when you are ready."
-      : "LawDog prepares secure signing links for this agreement. It does not email recipients automatically — you copy and share when you are ready."
+    ? minimalAgreementFirstBody
     : effectivePremiumSendMode === "review"
       ? "Recipients open a secure link to read the draft, suggest plain-English edits, paste a revised version, preview material changes, and submit suggestions. You confirm before anything updates."
       : "Recipients open a secure link to read the final terms and sign when they are ready.";
   const nextStepExplain = minimalProSendRecipientChrome
-    ? sendRequiresConfirmStep
-      ? "Next, confirm who receives the agreement. Nothing is emailed from LawDog — you share the link yourself."
-      : "After continue, you copy your secure link from the next step. Nothing reaches recipients until you share it."
+    ? ""
     : sendRequiresConfirmStep
       ? "Next, you confirm who is on the agreement in one step. LawDog does not auto-email from here — you copy a secure link after save. Nothing reaches recipients until you share it."
       : "After you continue, the agreement is saved and you get links to copy. Nothing reaches recipients until you share a link.";
   const linkReadyOutbox = isPremiumRecipientSurface;
-  const primarySendLabel = sendRequiresConfirmStep
-    ? "Continue to confirmation"
-    : effectivePremiumSendMode === "review"
-      ? linkReadyOutbox
-        ? "Continue to review links"
-        : "Create review link"
-      : linkReadyOutbox
-        ? "Continue to signing links"
-        : "Create signing link";
+  const primarySendLabel = minimalProSendRecipientChrome
+    ? sendRequiresConfirmStep
+      ? "Continue to confirmation"
+      : effectivePremiumSendMode === "review"
+        ? "Create review link"
+        : "Create signing links"
+    : sendRequiresConfirmStep
+      ? "Continue to confirmation"
+      : effectivePremiumSendMode === "review"
+        ? linkReadyOutbox
+          ? "Continue to review links"
+          : "Create review link"
+        : linkReadyOutbox
+          ? "Continue to signing links"
+          : "Create signing link";
 
   const senderInviteTrustStrip = (
     <ul className="mt-3 flex flex-wrap gap-2" aria-label="Trust cues">
@@ -1075,7 +1083,9 @@ function CreateFlowSendRecipientsPanel({
       role="region"
       aria-label="Invite recipients"
     >
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Recipient invite</p>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+        {minimalProSendRecipientChrome ? "Recipient setup" : "Recipient invite"}
+      </p>
       <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">Share this agreement</h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="rounded-full border border-emerald-700/45 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/95">
@@ -1083,11 +1093,19 @@ function CreateFlowSendRecipientsPanel({
         </span>
       </div>
       <p className="mt-3 text-sm leading-relaxed text-slate-300">
-        {modeExplain} {nextStepExplain}
+        {modeExplain}
+        {nextStepExplain ? <> {nextStepExplain}</> : null}
       </p>
-      {senderInviteTrustStrip}
+      {!minimalProSendRecipientChrome ? senderInviteTrustStrip : null}
       <div className="mt-5 rounded-xl border border-slate-700/45 bg-slate-900/35 px-4 py-4 sm:px-5">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Who receives it</p>
+        {minimalProSendRecipientChrome ? (
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            {effectivePremiumSendMode === "review"
+              ? "Add recipients for the review record. You will create a secure link on the next step."
+              : "Add signers for the record. You will create secure links on the next step."}
+          </p>
+        ) : null}
         <p className="mt-2 text-lg font-medium tracking-tight text-slate-100">{primaryName}</p>
         <p className={`mt-1 text-sm ${looksLikeEmail(r1e) ? "text-slate-300" : "text-amber-200/90"}`}>{primaryEmailLine}</p>
         {r2Invalid ? (
@@ -1117,8 +1135,9 @@ function CreateFlowSendRecipientsPanel({
         ) : null}
       </div>
       <p className="mt-3 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
-        Nothing is sent to recipients until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""} and share
-        a link yourself.
+        {minimalProSendRecipientChrome
+          ? "Nothing is emailed from LawDog until you create links and share them yourself."
+          : <>Nothing is sent to recipients until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""} and share a link yourself.</>}
       </p>
       <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
         <button
@@ -1130,7 +1149,7 @@ function CreateFlowSendRecipientsPanel({
         </button>
       </div>
       {editorOpen ? recipientFields : null}
-      {reviewHandoffAgreementEcho ? (
+      {reviewHandoffAgreementEcho && !minimalProSendRecipientChrome ? (
         <p className="mt-4 rounded-lg border border-slate-700/50 bg-slate-900/55 px-3 py-2 text-[11px] leading-snug text-slate-300 sm:text-xs">
           {reviewHandoffAgreementEcho}
         </p>
@@ -7484,36 +7503,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const effectivePremiumSendMode = premiumSendModeUserChoice ?? premiumDefaultSendMode;
 
-  const premiumRecipientSetupTitle = useMemo(() => {
-    if (!premiumSignersSurfaceReady) return "Add recipients";
-    if (productionReadyForPersist && !premiumSendModeTouched) return "Choose reviewer or signer path";
-    return effectivePremiumSendMode === "review" ? "Reviewer Setup" : "Signer Setup";
-  }, [
-    premiumSignersSurfaceReady,
-    productionReadyForPersist,
-    premiumSendModeTouched,
-    effectivePremiumSendMode,
-  ]);
-
-  const premiumRecipientSetupSubcopy = useMemo(() => {
-    if (!premiumSignersSurfaceReady) return "";
-    if (!productionReadyForPersist) {
-      return "Add who is on the agreement below. Nothing reaches recipients until you confirm and share a secure link.";
-    }
-    if (!premiumSendModeTouched) {
-      return "Choose review-first or signature-ready, then confirm recipient details. You copy links to share — LawDog does not auto-email from this step.";
-    }
-    if (effectivePremiumSendMode === "review") {
-      return "Reviewers use a secure link to suggest plain-English edits; you confirm before the agreement updates.";
-    }
-    return "Signers use a secure link for tracked e-signing when you are ready to share it.";
-  }, [
-    premiumSignersSurfaceReady,
-    productionReadyForPersist,
-    premiumSendModeTouched,
-    effectivePremiumSendMode,
-  ]);
-
   const createFlowRecipientPrimaryHelper = useMemo(() => {
     if (!premiumSendConfirmGateActive || recipientsDeferred) return null;
     const r1e = stripRecipientEmailNoise(recipient1Email);
@@ -7750,6 +7739,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [premiumPaidReadonlyPick.sourceUsed, premiumPaidReadonlyPick.plainText, authoritativePickForSendUi],
   );
 
+  const premiumRecipientSetupTitle = useMemo(() => {
+    if (minimalProSendRecipientChrome && premiumSignersSurfaceReady) return "Recipient setup";
+    if (!premiumSignersSurfaceReady) return "Add recipients";
+    if (productionReadyForPersist && !premiumSendModeTouched) return "Choose reviewer or signer path";
+    return effectivePremiumSendMode === "review" ? "Reviewer Setup" : "Signer Setup";
+  }, [
+    minimalProSendRecipientChrome,
+    premiumSignersSurfaceReady,
+    productionReadyForPersist,
+    premiumSendModeTouched,
+    effectivePremiumSendMode,
+  ]);
+
+  const premiumRecipientSetupSubcopy = useMemo(() => {
+    if (!premiumSignersSurfaceReady) return "";
+    if (minimalProSendRecipientChrome) {
+      return effectivePremiumSendMode === "review"
+        ? "Add recipients for the review record. You will create a secure link on the next step."
+        : "Add signers for the record. You will create secure links on the next step.";
+    }
+    if (!productionReadyForPersist) {
+      return "Add who is on the agreement below. Nothing reaches recipients until you confirm and share a secure link.";
+    }
+    if (!premiumSendModeTouched) {
+      return "Choose review-first or signature-ready, then confirm recipient details. You copy links to share — LawDog does not auto-email from this step.";
+    }
+    if (effectivePremiumSendMode === "review") {
+      return "Reviewers use a secure link to suggest plain-English edits; you confirm before the agreement updates.";
+    }
+    return "Signers use a secure link for tracked e-signing when you are ready to share it.";
+  }, [
+    minimalProSendRecipientChrome,
+    premiumSignersSurfaceReady,
+    productionReadyForPersist,
+    premiumSendModeTouched,
+    effectivePremiumSendMode,
+  ]);
+
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     if (createUiStage !== CreateUiStage.RECIPIENTS || !productionDraftPrimaryReviewSurface) return;
@@ -7762,15 +7789,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           pick.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN &&
           pick.field !== "purpose",
       );
+    const authLen = pick?.text.length ?? 0;
     // eslint-disable-next-line no-console
     console.info("[send-stage-ui-source]", {
+      minimalProSendRecipientChrome,
       hasAuthoritativeCorpus,
-      authoritativeLen: pick?.text.length ?? 0,
+      authoritativeLen: authLen,
       renderSource: premiumPaidReadonlyPick.sourceUsed,
       reviewCardHidden: minimalProSendRecipientChrome,
       advancedOptionsHidden: minimalProSendRecipientChrome,
       purposeLen,
     });
+    if (
+      minimalProSendRecipientChrome &&
+      purposeLen < 1000 &&
+      authLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN
+    ) {
+      // eslint-disable-next-line no-console
+      console.warn("[send-purpose-short-but-authoritative-ok]", {
+        purposeLen,
+        authoritativeLen: authLen,
+        renderSource: premiumPaidReadonlyPick.sourceUsed,
+      });
+    }
   }, [
     createUiStage,
     productionDraftPrimaryReviewSurface,
@@ -11782,7 +11823,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 {premiumSignersSurfaceReady ? (
                                   <span className="block text-slate-400">
                                     {premiumRecipientSetupSubcopy}
-                                    {premiumRouteMomentumRibbon ? (
+                                    {!minimalProSendRecipientChrome && premiumRouteMomentumRibbon ? (
                                       <span className="mt-2 block rounded-lg border border-cyan-500/25 bg-cyan-950/20 px-3 py-2 text-[11px] leading-snug text-cyan-100/90 sm:text-xs">
                                         <span className="font-semibold text-cyan-50">{premiumRouteMomentumRibbon.title}</span>
                                         <span className="mt-1 block text-cyan-100/85">{premiumRouteMomentumRibbon.body}</span>
@@ -11986,7 +12027,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               })()
                             : null}
                           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 sm:text-[11px]">
-                            {PREVIEW_BLOCK_TITLE}
+                            {createUiStage === CreateUiStage.RECIPIENTS && minimalProSendRecipientChrome
+                              ? "Agreement"
+                              : PREVIEW_BLOCK_TITLE}
                           </p>
                           <p
                             className={
@@ -11998,9 +12041,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             }
                           >
                             {premiumPaidDocumentSurface
-                              ? canProceedWithPaidProDocument
-                                ? "Use Edit wording for the full text, then the Pro review panel below. Not legal advice."
-                                : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
+                              ? createUiStage === CreateUiStage.RECIPIENTS && minimalProSendRecipientChrome
+                                ? canProceedWithPaidProDocument
+                                  ? "Full agreement below. Not legal advice."
+                                  : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
+                                : canProceedWithPaidProDocument
+                                  ? "Use Edit wording for the full text, then the Pro review panel below. Not legal advice."
+                                  : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
                               : "Not legal advice. Signer lines are added when you send."}
                           </p>
                           <div
@@ -13718,9 +13765,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="premium-send-confirm-title" className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-              Confirm before saving
+              {minimalProSendRecipientChrome
+                ? effectivePremiumSendMode === "review"
+                  ? "Create secure review link"
+                  : "Create secure signing links"
+                : "Confirm before saving"}
             </h2>
-            {effectivePremiumSendMode === "signature" ? (
+            {minimalProSendRecipientChrome ? (
+              effectivePremiumSendMode === "review" ? (
+                <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
+                  You are about to save this agreement and create a secure review link. LawDog does not auto-email
+                  recipients from this step. You choose when and how to share the link.
+                </p>
+              ) : (
+                <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
+                  You are about to save this agreement and create secure signing links. LawDog does not auto-email
+                  recipients from this step. You choose when and how to share each link.
+                </p>
+              )
+            ) : effectivePremiumSendMode === "signature" ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
                 You are about to save the agreement and open the signing-link screen. Copy the link there — LawDog does
                 not auto-email recipients from this step.
@@ -13736,7 +13799,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 ? "Named recipients (for your records):"
                 : "Named signers (for your records):"}
             </p>
-            {effectivePremiumSendMode === "signature" ? (
+            {!minimalProSendRecipientChrome && effectivePremiumSendMode === "signature" ? (
               <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                 <span className="rounded-full border border-slate-700/80 bg-slate-950/60 px-2.5 py-1 text-slate-300">
                   Recipients confirmed
@@ -13762,11 +13825,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   </li>
                 ))}
             </ul>
-            <p className="mt-3 text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem]">
-              {effectivePremiumSendMode === "review"
-                ? "They can read, suggest plain-English edits, paste a revised draft, preview material changes, and submit suggestions. Both sides confirm before the agreement updates."
-                : "They read the final terms and sign when ready. Nothing reaches them until you share the link."}
-            </p>
+            {!minimalProSendRecipientChrome ? (
+              <p className="mt-3 text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem]">
+                {effectivePremiumSendMode === "review"
+                  ? "They can read, suggest plain-English edits, paste a revised draft, preview material changes, and submit suggestions. Both sides confirm before the agreement updates."
+                  : "They read the final terms and sign when ready. Nothing reaches them until you share the link."}
+              </p>
+            ) : null}
             {draft ? (
               <div className="mt-4 rounded-lg border border-slate-700/60 bg-slate-950/70 px-3.5 py-3 text-left">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</p>
@@ -13787,18 +13852,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 </p>
               </div>
             ) : null}
-            <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left text-sm text-slate-300">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500/40"
-                checked={premiumSendCcSelf}
-                onChange={(e) => setPremiumSendCcSelf(e.target.checked)}
-              />
-              <span>
-                Email me a copy of this summary when delivery is available{" "}
-                <span className="block text-xs font-normal text-slate-500">Optional — not required to create links.</span>
-              </span>
-            </label>
+            {!minimalProSendRecipientChrome ? (
+              <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500/40"
+                  checked={premiumSendCcSelf}
+                  onChange={(e) => setPremiumSendCcSelf(e.target.checked)}
+                />
+                <span>
+                  Email me a copy of this summary when delivery is available{" "}
+                  <span className="block text-xs font-normal text-slate-500">Optional — not required to create links.</span>
+                </span>
+              </label>
+            ) : null}
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
               <button
                 type="button"
@@ -13824,7 +13891,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   void onGenerate();
                 }}
               >
-                Confirm and continue
+                {minimalProSendRecipientChrome
+                  ? effectivePremiumSendMode === "review"
+                    ? "Create review link"
+                    : "Create signing links"
+                  : "Confirm and continue"}
               </button>
             </div>
           </div>
