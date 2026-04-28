@@ -20,12 +20,13 @@ describe("Pro refine resilience (paid update path)", () => {
     const j = s.indexOf("const resolveComplexityChoice =", i);
     if (j < 0) throw new Error("missing end anchor");
     const block = s.slice(i, j);
-    expect(block).toContain('setDisplayPhase("intake")');
-    expect(block).toContain('setCreateFlowPhase("draft_ready_for_review")');
+    expect(block).toContain("premiumPersistedFlowActive");
+    expect(block).toContain('setDisplayPhase("review")');
     const finallyI = block.indexOf("} finally {");
     if (finallyI < 0) throw new Error("missing finally");
     const finallyEnd = block.indexOf("}, [", finallyI);
     const finallyBlock = block.slice(finallyI, finallyEnd > 0 ? finallyEnd : undefined);
+    expect(finallyBlock).toContain('setDisplayPhase("review")');
     expect(finallyBlock).toContain('setDisplayPhase("intake")');
     expect(finallyBlock).toContain('setCreateFlowPhase("draft_ready_for_review")');
     expect(finallyBlock).toContain("setLoading(false)");
@@ -64,6 +65,15 @@ describe("PRO_REFINE_UNAVAILABLE_USER_MESSAGE export", () => {
   it("matches copy used in premium-refine API", () => {
     expect(PRO_REFINE_UNAVAILABLE_USER_MESSAGE).toContain("unchanged");
     expect(PRO_REFINE_UNAVAILABLE_USER_MESSAGE.length).toBeGreaterThan(40);
+  });
+});
+
+describe("Pro display phase guard", () => {
+  it("warns and repairs intake when a Pro document is present", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("[STATE GUARD VIOLATION] Pro document fell back to intake");
+    expect(s).toContain("guardProDocumentDisplayPhase");
   });
 });
 

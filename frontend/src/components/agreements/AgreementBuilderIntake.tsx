@@ -487,7 +487,11 @@ type IntakeDisplayPhase =
   | "followup_required"
   | "generating_draft"
   | "hydrating_generated"
-  | "preparing_review";
+  | "preparing_review"
+  /** Post-checkout Pro: document review / refine — never use `intake` (avoids “free mode” confusion). */
+  | "review"
+  /** Pro refine in flight (replaces `generating_draft` for paid persist path; keeps createFlowPhase stable). */
+  | "editing_pro";
 
 function RecipientOutboxPreviewPanel({
   agreementTitle,
@@ -2438,10 +2442,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       displayPhase === "generating_draft" ||
       displayPhase === "hydrating_generated" ||
       displayPhase === "preparing_review" ||
+      displayPhase === "editing_pro" ||
       loading
     ) {
       emitPrep("generating");
     } else if (displayPhase === "followup_required") emitPrep("followup_required");
+    else if (displayPhase === "review") emitPrep("draft_ready");
     else emitPrep("intake");
   }, [displayPhase, loading, hardError, onPrepStateChange]);
 
@@ -5352,8 +5358,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setReviewRefineUserMessage(null);
     setHardError(null);
     productionStickyLabelModeRef.current = "refine";
-    setCreateFlowPhase("generating_draft");
-    setDisplayPhase("generating_draft");
+    if (premiumPersistedFlowActive) {
+      setDisplayPhase("editing_pro");
+    } else {
+      setCreateFlowPhase("generating_draft");
+      setDisplayPhase("generating_draft");
+    }
     setLoading(true);
     await finalizeIntakeCapture();
     try {
@@ -5527,8 +5537,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     } finally {
       productionStickyLabelModeRef.current = null;
       setLoading(false);
-      setDisplayPhase("intake");
-      setCreateFlowPhase("draft_ready_for_review");
+      if (premiumPersistedFlowActive) {
+        setDisplayPhase("review");
+      } else {
+        setDisplayPhase("intake");
+        setCreateFlowPhase("draft_ready_for_review");
+      }
     }
   }, [
     draft,
@@ -6446,6 +6460,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const showMainIntakeForm =
     displayPhase === "intake" ||
+    displayPhase === "review" ||
+    displayPhase === "editing_pro" ||
     (liveWorkspaceTwoPane &&
       (displayPhase === "generating_draft" ||
         displayPhase === "hydrating_generated" ||
@@ -6879,8 +6895,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setIntakeStepBuffer("");
       setDebouncedStepBuffer("");
     }
-    setDisplayPhase("intake");
-    setCreateFlowPhase("draft_ready_for_review");
+    setDisplayPhase("review");
     setCreateUiStage(CreateUiStage.DRAFT);
     setMobileWorkspacePane("preview");
     setPreviewPaneRevealed(true);
@@ -7183,6 +7198,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
   premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
+
+  /** Paid Pro body present: `displayPhase` must never be `intake` (guard below). */
+  const guardProDocumentDisplayPhase = useMemo(
+    () =>
+      Boolean(
+        draft &&
+          premiumPaidDocumentSurface &&
+          (draft.premium_server_full_document_text || draft.premium_full_document_text || "").trim().length >= 400,
+      ),
+    [draft, premiumPaidDocumentSurface],
+  );
+
+  useEffect(() => {
+    if (!guardProDocumentDisplayPhase) return;
+    if (displayPhase === "intake") {
+      console.warn("[STATE GUARD VIOLATION] Pro document fell back to intake", {
+        displayPhase,
+        createFlowPhase,
+        createUiStage,
+      });
+      setDisplayPhase("review");
+    }
+  }, [guardProDocumentDisplayPhase, displayPhase, createFlowPhase, createUiStage]);
 
   /**
    * Free/starter (non–LawDog-Pro-deliverable) document review. Broader than `!premiumPaidDocumentSurface`
@@ -7748,7 +7786,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createProductionTwoPane &&
       (displayPhase === "generating_draft" ||
         displayPhase === "hydrating_generated" ||
-        displayPhase === "preparing_review"),
+        displayPhase === "preparing_review" ||
+        displayPhase === "editing_pro"),
   );
   const draftPartyRecipientEmailPresent = Boolean(
     (draft?.parties as { email?: string }[] | undefined)?.some((p) =>
@@ -9080,14 +9119,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createProductionTwoPane &&
     (displayPhase === "generating_draft" ||
       displayPhase === "hydrating_generated" ||
-      displayPhase === "preparing_review")
+      displayPhase === "preparing_review" ||
+      displayPhase === "editing_pro")
       ? resolveProductionTwoPaneLoadingUserCopy()
       : productFlowBusyShort ?? "Working...";
   const busyPreparing = "Preparing your agreement…";
   const primaryBusyLabel = isGenerating
     ? createProductionTwoPane
       ? busyStructuring
-      : displayPhase === "generating_draft"
+      : displayPhase === "generating_draft" || displayPhase === "editing_pro"
         ? busyStructuring
         : busyPreparing
     : productFlowBusyShort ?? "Working...";
@@ -9096,7 +9136,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const formationPhaseForPreview: IntakeFormationPhase | null =
     isGenerating && liveWorkspaceTwoPane
-      ? displayPhase === "generating_draft"
+      ? displayPhase === "generating_draft" || displayPhase === "editing_pro"
         ? "structuring"
         : displayPhase === "hydrating_generated"
           ? "persisting"
@@ -9481,7 +9521,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: "draft_pre_commit",
           };
         }
-        if (isGenerating && createFlowPhase === "generating_draft") {
+        if (
+          isGenerating &&
+          (createFlowPhase === "generating_draft" || displayPhase === "editing_pro")
+        ) {
           return {
             label: primaryBusyLabel,
             action: "guided_continue",
@@ -9640,7 +9683,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return {
         label: createUiStagePrimaryCta(
           createUiStage,
-          Boolean(isGenerating && createFlowPhase === "generating_draft"),
+          Boolean(
+            isGenerating &&
+              (createFlowPhase === "generating_draft" || displayPhase === "editing_pro"),
+          ),
           primaryBusyLabel,
         ),
         action: "guided_continue",
@@ -9711,6 +9757,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPaidDocumentSurface,
     isFreeStarterReviewSurface,
     proCheckoutRecipientStageAdvanceAllowed,
+    displayPhase,
   ]);
 
   useEffect(() => {

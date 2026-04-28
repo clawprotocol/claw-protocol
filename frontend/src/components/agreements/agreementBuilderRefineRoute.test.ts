@@ -35,6 +35,8 @@ describe("AgreementBuilderIntake review refine path", () => {
     expect(catchBlock).not.toMatch(/setDebouncedStepBuffer/);
     const finallyEnd = block.indexOf("}, [", finallyI);
     const finallyBlock = block.slice(finallyI, finallyEnd > 0 ? finallyEnd : undefined);
+    expect(finallyBlock).toContain("premiumPersistedFlowActive");
+    expect(finallyBlock).toContain('setDisplayPhase("review")');
     expect(finallyBlock).toContain('setDisplayPhase("intake")');
     expect(finallyBlock).toContain('setCreateFlowPhase("draft_ready_for_review")');
   });
