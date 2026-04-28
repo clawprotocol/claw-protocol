@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { VoiceAugmentedTextArea, type VoiceDictationControl } from "../../launch/VoiceAugmentedControl";
+import {
+  evaluatePremiumRefineCandidate,
+  formatProRefineRejectedShortInline,
+  pickAuthoritativeProCorpusForRefine,
+} from "./premiumRefineAcceptance";
 import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
 import { computePremiumReviewCompleteness } from "./premiumReviewCompleteness";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -85,13 +90,13 @@ export function FinalizeYourAgreementPanel({
   const refineTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastRouteActionNonceRef = useRef(0);
 
+  /** Longest authoritative corpus so refine + readiness never use a thin live preview when draft holds the full Pro body. */
   const effectiveCurrentDocumentText = useMemo(() => {
-    const t = (currentDocumentText || "").trim();
-    if (t.length) return t;
-    const p = (draft?.premium_full_document_text || draft?.premium_server_full_document_text || draft?.purpose || "")
-      .trim();
-    return p;
-  }, [currentDocumentText, draft?.premium_full_document_text, draft?.premium_server_full_document_text, draft?.purpose]);
+    return pickAuthoritativeProCorpusForRefine({
+      draft,
+      agreementDocumentText: currentDocumentText || "",
+    }).text;
+  }, [currentDocumentText, draft]);
 
   const effectiveIntakeText = useMemo(() => {
     const t = (intakeText || "").trim();
@@ -185,17 +190,44 @@ export function FinalizeYourAgreementPanel({
             ...devProRefineContext,
           });
         }
+        const baseline = pickAuthoritativeProCorpusForRefine({
+          draft,
+          agreementDocumentText: currentDocumentText || "",
+        });
         const r = await postPremiumRefine(
           {
-            current_document_text: effectiveCurrentDocumentText,
+            current_document_text: baseline.text,
             intake_text: effectiveIntakeText,
             user_refinement_prompt: prompt.trim(),
             action: "update",
           },
           ac.signal,
         );
-        setLastRefine(r);
-        if ((r.updated_document_text || "").trim()) {
+        const out = (r.updated_document_text || "").trim();
+        const acc = evaluatePremiumRefineCandidate(baseline.len, out);
+        // eslint-disable-next-line no-console
+        console.info("[premium-refine-apply]", {
+          currentProLen: baseline.len,
+          refinedCandidateLen: acc.refinedLen,
+          ratio: Number(acc.ratio.toFixed(4)),
+          applyDecision: acc.decision,
+          preservedExistingDoc: acc.decision !== "accepted",
+          chosenSource: baseline.chosenSource,
+          endpoint: "premium-refine",
+          surface: "FinalizeYourAgreementPanel.runUpdate",
+        });
+        if (acc.decision === "rejected_short") {
+          setLastRefine(null);
+          setErr(formatProRefineRejectedShortInline());
+          return;
+        }
+        if (acc.decision === "rejected_empty") {
+          setLastRefine(null);
+          setErr("We couldn't apply that update. Try again.");
+          return;
+        }
+        if (out) {
+          setLastRefine(r);
           markDocumentDirty?.();
           onApplyDocumentText(r.updated_document_text);
           setPrompt("");
@@ -230,6 +262,7 @@ export function FinalizeYourAgreementPanel({
       currentDocumentText,
       devProRefineContext,
       disabled,
+      draft,
       effectiveCurrentDocumentText,
       effectiveIntakeText,
       intakeText,
@@ -257,17 +290,33 @@ export function FinalizeYourAgreementPanel({
       setBusy(true);
       setLastRefine(null);
       try {
+        const baseline = pickAuthoritativeProCorpusForRefine({
+          draft,
+          agreementDocumentText: currentDocumentText || "",
+        });
         const r = await postPremiumRefine(
           {
-            current_document_text: effectiveCurrentDocumentText,
+            current_document_text: baseline.text,
             intake_text: effectiveIntakeText,
             user_refinement_prompt: seed,
             action: "update",
           },
           undefined,
         );
-        setLastRefine(r);
-        if ((r.updated_document_text || "").trim()) {
+        const out = (r.updated_document_text || "").trim();
+        const acc = evaluatePremiumRefineCandidate(baseline.len, out);
+        if (acc.decision === "rejected_short") {
+          setLastRefine(null);
+          setErr(formatProRefineRejectedShortInline());
+          return;
+        }
+        if (acc.decision === "rejected_empty") {
+          setLastRefine(null);
+          setErr("We couldn't apply that update. Try again.");
+          return;
+        }
+        if (out) {
+          setLastRefine(r);
           markDocumentDirty?.();
           onApplyDocumentText(r.updated_document_text);
         }
@@ -295,6 +344,7 @@ export function FinalizeYourAgreementPanel({
     routePrimaryActionNonce,
     reviewRoute,
     currentDocumentText,
+    draft,
     intakeText,
     effectiveCurrentDocumentText,
     effectiveIntakeText,
@@ -395,7 +445,7 @@ export function FinalizeYourAgreementPanel({
           aria-label={PLACEHOLDER}
         />
         {err ? (
-          <p className="text-sm text-amber-300" role="alert">
+          <p className="whitespace-pre-wrap text-sm text-amber-200/95" role="alert">
             {err}
           </p>
         ) : null}
