@@ -57,6 +57,11 @@ import {
 } from "../../agreement/AgreementRecipientReview";
 import { NegotiationAssistantPanel } from "../../agreement/NegotiationAssistantPanel";
 import { draftExcerptForClause, htmlToPlainText } from "../../agreement/externalAiHandoff";
+import {
+  SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+  buildSendRouteReadonlyHtmlFromPlain,
+  pickAuthoritativePlainForSendHandoff,
+} from "./sendHandoffAuthoritativeCorpus";
 import { DirectComparePanel } from "../../agreement/DirectComparePanel";
 import { MATERIAL_CHANGE_SUMMARY_LABEL, OWNER_INCOMING_SUGGESTED_EDITS_HEADING } from "../../agreement/universalReviewIntakeCopy";
 import {
@@ -213,6 +218,16 @@ function parseEconomicsPayload(raw: unknown): AgreementEconomicsOverlay | null {
   };
 }
 
+/** Prefer client primed corpus when it is authoritative (≥500) or longer than GET. */
+function preferLongerPlainCorpus(primed: string | null | undefined, fetched: string | null | undefined): string {
+  const a = String(primed ?? "").trim();
+  const b = String(fetched ?? "").trim();
+  if (a.length >= 500 && a.length >= b.length) return a;
+  if (b.length >= 500 && b.length > a.length) return b;
+  if (b.length > a.length) return b;
+  return a || b;
+}
+
 function mergeSimpleHomeHydrationDraft(
   agreementId: string,
   primedDraft: AgreementDraft | null,
@@ -224,16 +239,30 @@ function mergeSimpleHomeHydrationDraft(
   const keepPrimed = (v: string | null | undefined): boolean => String(v ?? "").trim().length > 0;
   const primedParties = Array.isArray(primed.parties) ? primed.parties : [];
   const fetchedParties = Array.isArray(fetchedDraft.parties) ? fetchedDraft.parties : [];
+  const nz = (s: string) => (s.trim() ? s : null);
   return {
     ...fetchedDraft,
     title: keepPrimed(primed.title) ? primed.title : fetchedDraft.title,
-    purpose: keepPrimed(primed.purpose) ? primed.purpose : fetchedDraft.purpose,
+    purpose: nz(preferLongerPlainCorpus(primed.purpose, fetchedDraft.purpose)) ?? fetchedDraft.purpose,
     payment_terms: keepPrimed(primed.payment_terms) ? primed.payment_terms : fetchedDraft.payment_terms,
     jurisdiction: keepPrimed(primed.jurisdiction) ? primed.jurisdiction : fetchedDraft.jurisdiction,
     duration: keepPrimed(primed.duration) ? primed.duration : fetchedDraft.duration,
     due_date: keepPrimed(primed.due_date) ? primed.due_date : fetchedDraft.due_date,
     effective_date: keepPrimed(primed.effective_date) ? primed.effective_date : fetchedDraft.effective_date,
     parties: primedParties.length > 0 ? primedParties : fetchedParties,
+    premium_full_document_text: nz(
+      preferLongerPlainCorpus(primed.premium_full_document_text, fetchedDraft.premium_full_document_text),
+    ),
+    premium_server_full_document_text: nz(
+      preferLongerPlainCorpus(primed.premium_server_full_document_text, fetchedDraft.premium_server_full_document_text),
+    ),
+    server_full_document_text: nz(
+      preferLongerPlainCorpus(primed.server_full_document_text, fetchedDraft.server_full_document_text),
+    ),
+    document_text: nz(preferLongerPlainCorpus(primed.document_text, fetchedDraft.document_text)),
+    rendered_document_text: nz(
+      preferLongerPlainCorpus(primed.rendered_document_text, fetchedDraft.rendered_document_text),
+    ),
   };
 }
 
@@ -1455,7 +1484,17 @@ const AgreementReview: React.FC<Props> = ({
             simpleHome && initialDraftSnapshotRef.current && String(initialDraftSnapshotRef.current.id || "").trim() === id
               ? normalizeAgreementDraftFromApi(initialDraftSnapshotRef.current, { fallbackAgreementId: id })
               : null;
-          setDraft(simpleHome ? mergeSimpleHomeHydrationDraft(id, primedCurrent, normalized) : normalized);
+          const mergedForSimple = simpleHome ? mergeSimpleHomeHydrationDraft(id, primedCurrent, normalized) : normalized;
+          setDraft(mergedForSimple);
+          if (import.meta.env.DEV && simpleHome && mergedForSimple) {
+            const hp = pickAuthoritativePlainForSendHandoff(mergedForSimple);
+            // eslint-disable-next-line no-console
+            console.info("[send-hydrate-corpus]", {
+              agreementId: id,
+              fieldUsed: hp?.field ?? null,
+              bodyLen: hp?.text.length ?? 0,
+            });
+          }
           onCanonicalDraftLoadedRef.current?.();
           if (import.meta.env.DEV) {
             console.log("[AgreementReview] fetch agreement success", id);
@@ -1548,10 +1587,33 @@ const AgreementReview: React.FC<Props> = ({
     return vb.versions.find((v) => v.id === selectedVid);
   }, [vb, selectedVid]);
 
+  const authoritativeCorpusPick = useMemo(
+    () => (draft ? pickAuthoritativePlainForSendHandoff(draft) : null),
+    [draft],
+  );
+
+  const renderedHtmlResolved = useMemo(() => {
+    const rh = renderedHtml || "";
+    const plainFromRender = htmlToPlainText(rh).trim();
+    if (!isSimpleHomeReview || !authoritativeCorpusPick) return rh;
+    if (authoritativeCorpusPick.text.length < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return rh;
+    if (plainFromRender.length >= authoritativeCorpusPick.text.length - 200) return rh;
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[send-render-corpus]", {
+        agreementId,
+        fieldUsed: authoritativeCorpusPick.field,
+        bodyLen: authoritativeCorpusPick.text.length,
+        renderPlainLen: plainFromRender.length,
+      });
+    }
+    return buildSendRouteReadonlyHtmlFromPlain(authoritativeCorpusPick.text);
+  }, [agreementId, isSimpleHomeReview, authoritativeCorpusPick, renderedHtml]);
+
   const previewHtml = useMemo(() => {
     if (isWorkspace && selectedVer) return selectedVer.rendered_html;
-    return renderedHtml;
-  }, [isWorkspace, selectedVer, renderedHtml]);
+    return renderedHtmlResolved;
+  }, [isWorkspace, selectedVer, renderedHtmlResolved]);
 
   const draftSanitizeContext = useMemo(() => {
     if (!draft) return "";
@@ -1562,6 +1624,27 @@ const AgreementReview: React.FC<Props> = ({
     () => substitutePartyPlaceholdersInUserFacingText(previewHtml || "", draftSanitizeContext),
     [previewHtml, draftSanitizeContext],
   );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || section !== "simpleHomeReview" || !draft) return;
+    const pick = pickAuthoritativePlainForSendHandoff(draft);
+    const previewPlainLen = htmlToPlainText(previewHtmlDisplay || "").trim().length;
+    if (
+      pick &&
+      pick.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN &&
+      previewPlainLen < 400 &&
+      pick.text.length > previewPlainLen + 200
+    ) {
+      // eslint-disable-next-line no-console
+      console.warn("[send-handoff-invariant]", {
+        agreementId,
+        issue: "authoritative_corpus_present_but_preview_short",
+        corpusField: pick.field,
+        corpusLen: pick.text.length,
+        previewPlainLen,
+      });
+    }
+  }, [section, draft, agreementId, previewHtmlDisplay]);
 
   const renderedHtmlDisplay = useMemo(
     () => substitutePartyPlaceholdersInUserFacingText(renderedHtml || "", draftSanitizeContext),

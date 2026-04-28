@@ -320,6 +320,10 @@ import {
   authoritativePremiumCompletionMatchesSession,
   authoritativePremiumPipelineResultForUiApply,
 } from "./premiumPostCheckoutApplyEligible";
+import {
+  longestPlainForAgreementPersist,
+  pickAuthoritativePlainForSendHandoff,
+} from "./sendHandoffAuthoritativeCorpus";
 import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
@@ -1785,30 +1789,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** When the user edits the full agreement preview, persist that blob into `purpose` on POST/PATCH so the server can render it as the primary body (see backend `_purpose_looks_like_full_client_agreement_text`). */
   const mergeParsedForApiPersist = React.useCallback(
     (parsedIn: ParsedDraftShape): ParsedDraftShape => {
-      if (!productionDraftPrimaryReviewSurface) return parsedIn;
-      if (!agreementDocumentDirtyRef.current) return parsedIn;
+      let base = parsedIn;
+      if (productionDraftPrimaryReviewSurface) {
+        const longest = longestPlainForAgreementPersist(parsedIn, agreementDocumentTextRef.current);
+        if (longest.trim().length > String(parsedIn.purpose ?? "").trim().length) {
+          base = { ...parsedIn, purpose: longest };
+        }
+      }
+      if (!productionDraftPrimaryReviewSurface) return base;
+      if (!agreementDocumentDirtyRef.current) return base;
       const doc = agreementDocumentTextRef.current.trim();
-      if (!doc) return parsedIn;
+      if (!doc) return base;
       try {
         const starterPreview = !(
           tierAllowsAdvancedFullDraftReveal(tier) ||
-          draftHasFullDraftExpansion(parsedIn) ||
+          draftHasFullDraftExpansion(base) ||
           premiumSendPathUnlocked ||
           premiumPersistedFlowActive
         );
         if (
           doc ===
-          buildAgreementPreviewText(parsedIn, {
+          buildAgreementPreviewText(base, {
             starterPreview,
             premiumDeliverablePreview: !starterPreview,
             intakeText: debouncedStepBuffer,
           }).trim()
         )
-          return parsedIn;
+          return base;
       } catch {
-        return parsedIn;
+        return base;
       }
-      return { ...parsedIn, purpose: doc };
+      return { ...base, purpose: doc };
     },
     [productionDraftPrimaryReviewSurface, tier, premiumSendPathUnlocked, premiumPersistedFlowActive, debouncedStepBuffer],
   );
@@ -2603,6 +2614,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     partyNameContext?: string,
   ): Promise<{ id: string; postDraft: AgreementDraft | null }> {
     const merged = mergeParsedForApiPersist(parsed);
+    const persistPurpose = longestPlainForAgreementPersist(merged, agreementDocumentTextRef.current).trim() || merged.purpose;
     const {
       payment: _payment,
       termination_summary: _ts,
@@ -2623,11 +2635,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       dissolution_summary: _diss,
       ...rest
     } = merged;
+    const pickPreCreate = pickAuthoritativePlainForSendHandoff({
+      purpose: persistPurpose,
+      premium_full_document_text: merged.premium_full_document_text,
+      premium_server_full_document_text: merged.premium_server_full_document_text,
+    });
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[send-handoff-corpus]", {
+        phase: "before_create",
+        bodyLen: pickPreCreate?.text.length ?? persistPurpose.length,
+        source: pickPreCreate?.field ?? "purpose",
+        agreementGenerationId: getOrInitSessionAgreementGenerationId(),
+      });
+    }
     const apiDraft = {
       title: rest.title,
       jurisdiction: rest.jurisdiction,
       parties: rest.parties,
-      purpose: rest.purpose,
+      purpose: persistPurpose,
       payment_terms: rest.payment_terms,
       duration: rest.duration ?? null,
       due_date: rest.due_date ?? null,
@@ -5548,6 +5574,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (existingId) {
         const merged = mergeParsedForApiPersist(parsed);
         const purposeForApi = (merged.purpose || "").trim() ? merged.purpose : parsed.purpose;
+        const purposeLong = longestPlainForAgreementPersist(merged, agreementDocumentTextRef.current).trim();
+        const purposePush =
+          purposeLong.length >= String(purposeForApi ?? "").trim().length ? purposeLong : purposeForApi;
         const pushField = async (field: string, value: unknown) => {
           try {
             await postAgreementFieldUpdate(id, field, value);
@@ -5555,7 +5584,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             /* non-fatal */
           }
         };
-        await pushField("purpose", purposeForApi);
+        await pushField("purpose", purposePush);
         await pushField("parties", parsed.parties ?? []);
         await pushField("payment_terms", parsed.payment_terms ?? "");
         await pushField("jurisdiction", parsed.jurisdiction ?? "");

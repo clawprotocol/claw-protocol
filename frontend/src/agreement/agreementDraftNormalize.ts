@@ -151,6 +151,23 @@ export function normalizeAgreementDraftFromApi(
       : [],
     payment_request,
     payment_required: Boolean(r.payment_required),
+    premium_full_document_text:
+      r.premium_full_document_text == null || r.premium_full_document_text === ""
+        ? null
+        : String(r.premium_full_document_text),
+    premium_server_full_document_text:
+      r.premium_server_full_document_text == null || r.premium_server_full_document_text === ""
+        ? null
+        : String(r.premium_server_full_document_text),
+    server_full_document_text:
+      r.server_full_document_text == null || r.server_full_document_text === ""
+        ? null
+        : String(r.server_full_document_text),
+    document_text: r.document_text == null || r.document_text === "" ? null : String(r.document_text),
+    rendered_document_text:
+      r.rendered_document_text == null || r.rendered_document_text === ""
+        ? null
+        : String(r.rendered_document_text),
   };
 }
 

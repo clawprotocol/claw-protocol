@@ -2408,6 +2408,9 @@ def _watermark_active_for_agreement(agreement_id: str) -> bool:
 def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
     """When the create-flow document editor persists the full preview into `purpose`, render it as the body (not nested in the short-form template)."""
     t = (purpose or "").strip()
+    # LawDog Pro / paid full drafts: long operative bodies must not be squeezed into the short starter template.
+    if len(t) >= 2400:
+        return True
     if len(t) < 240:
         return False
     low = t.lower()
