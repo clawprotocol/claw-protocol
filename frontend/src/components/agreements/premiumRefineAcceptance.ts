@@ -101,3 +101,6 @@ export function formatProRefineRejectedShortInline(): string {
 
 /** @deprecated Prefer {@link formatProRefineRejectedShortInline} or PRIMARY/HINT. */
 export const PRO_REFINE_REJECTED_SHORT_USER_MESSAGE = PRO_REFINE_REJECTED_SHORT_PRIMARY;
+
+/** Shown inline after a premium refine is accepted and applied. */
+export const PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE = "Change applied.";

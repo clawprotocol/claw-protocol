@@ -4,6 +4,7 @@ import {
   evaluatePremiumRefineCandidate,
   formatProRefineRejectedShortInline,
   pickAuthoritativeProCorpusForRefine,
+  PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
 } from "./premiumRefineAcceptance";
 import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
 import { computePremiumReviewCompleteness } from "./premiumReviewCompleteness";
@@ -84,6 +85,7 @@ export function FinalizeYourAgreementPanel({
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [refineSuccessMessage, setRefineSuccessMessage] = useState<string | null>(null);
   const [lastRefine, setLastRefine] = useState<PremiumRefineResponse | null>(null);
   const dictationRef = useRef<VoiceDictationControl | null>(null);
   const acRef = useRef<AbortController | null>(null);
@@ -173,6 +175,7 @@ export function FinalizeYourAgreementPanel({
         return;
       }
       setErr(null);
+      setRefineSuccessMessage(null);
       await dictationRef.current?.finalizeDictation();
       acRef.current?.abort();
       const ac = new AbortController();
@@ -218,11 +221,13 @@ export function FinalizeYourAgreementPanel({
         });
         if (acc.decision === "rejected_short") {
           setLastRefine(null);
+          setRefineSuccessMessage(null);
           setErr(formatProRefineRejectedShortInline());
           return;
         }
         if (acc.decision === "rejected_empty") {
           setLastRefine(null);
+          setRefineSuccessMessage(null);
           setErr("We couldn't apply that update. Try again.");
           return;
         }
@@ -231,12 +236,14 @@ export function FinalizeYourAgreementPanel({
           markDocumentDirty?.();
           onApplyDocumentText(r.updated_document_text);
           setPrompt("");
+          setRefineSuccessMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
         } else if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[agreement-refine] FinalizeYourAgreementPanel#runUpdate empty model output", { r });
         }
       } catch (e2) {
         if (e2 instanceof Error && e2.name === "AbortError") return;
+        setRefineSuccessMessage(null);
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[agreement-refine] FinalizeYourAgreementPanel#runUpdate FAILED", {
@@ -289,6 +296,7 @@ export function FinalizeYourAgreementPanel({
       if (disabled) return;
       setBusy(true);
       setLastRefine(null);
+      setRefineSuccessMessage(null);
       try {
         const baseline = pickAuthoritativeProCorpusForRefine({
           draft,
@@ -307,11 +315,13 @@ export function FinalizeYourAgreementPanel({
         const acc = evaluatePremiumRefineCandidate(baseline.len, out);
         if (acc.decision === "rejected_short") {
           setLastRefine(null);
+          setRefineSuccessMessage(null);
           setErr(formatProRefineRejectedShortInline());
           return;
         }
         if (acc.decision === "rejected_empty") {
           setLastRefine(null);
+          setRefineSuccessMessage(null);
           setErr("We couldn't apply that update. Try again.");
           return;
         }
@@ -319,8 +329,10 @@ export function FinalizeYourAgreementPanel({
           setLastRefine(r);
           markDocumentDirty?.();
           onApplyDocumentText(r.updated_document_text);
+          setRefineSuccessMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
         }
       } catch (e2) {
+        setRefineSuccessMessage(null);
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[agreement-refine] FinalizeYourAgreementPanel#routeAutoRefine FAILED", {
@@ -447,6 +459,11 @@ export function FinalizeYourAgreementPanel({
         {err ? (
           <p className="whitespace-pre-wrap text-sm text-amber-200/95" role="alert">
             {err}
+          </p>
+        ) : null}
+        {refineSuccessMessage && !err ? (
+          <p className="text-sm text-emerald-200/95" role="status">
+            {refineSuccessMessage}
           </p>
         ) : null}
         {lastRefine && lastRefine.summary_changes.length > 0 ? (

@@ -360,6 +360,7 @@ import {
   evaluatePremiumRefineCandidate,
   formatProRefineRejectedShortInline,
   PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
+  PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
 } from "./premiumRefineAcceptance";
 import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
@@ -5447,6 +5448,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           suggested_next_step: r.suggested_next_step,
           summary_changes: r.summary_changes,
         });
+        setReviewRefineUserMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
         applyProRefineOutputToProSurfaceRef.current?.(out, { clearStepBuffer: true, scrollToReview: true });
         return true;
       }

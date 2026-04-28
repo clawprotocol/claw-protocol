@@ -49,6 +49,16 @@ describe("evaluatePremiumRefineCandidate", () => {
   it("rejects empty candidate", () => {
     expect(evaluatePremiumRefineCandidate(5000, "   ").decision).toBe("rejected_empty");
   });
+
+  it("accepts marginal expansion when late-fee language is appended (mirrors server narrow patch)", () => {
+    const cur = 16_083;
+    const base = "x".repeat(cur);
+    const block =
+      "\n\nLate Payment. Any undisputed amount not paid within ten (10) days after it becomes due may accrue a late fee equal to five percent (5%) of the overdue amount.\n\n";
+    const r = evaluatePremiumRefineCandidate(cur, base + block);
+    expect(r.decision).toBe("accepted");
+    expect(r.ratio).toBeGreaterThanOrEqual(PREMIUM_REFINE_MIN_LENGTH_RATIO);
+  });
 });
 
 describe("formatProRefineRejectedShortInline", () => {

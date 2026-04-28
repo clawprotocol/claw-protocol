@@ -49,6 +49,10 @@ from backend.agreements.premium_full_draft_quality_gate import (
     evaluate_premium_full_draft_quality,
     premium_full_draft_repair_system_prompt,
 )
+from backend.agreements.premium_refine_narrow import (
+    classify_narrow_amendment_prompt,
+    try_apply_narrow_amendment,
+)
 from backend.agreements.premium_intent_schema import (
     build_premium_intent_skeleton,
     evaluate_premium_intent_schema,
@@ -1249,6 +1253,36 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
         pr_len,
     )
     try:
+        if body.action == "update":
+            u_narrow = (body.user_refinement_prompt or "").strip()
+            narrow_kind = classify_narrow_amendment_prompt(u_narrow)
+            if narrow_kind:
+                narrow_out = try_apply_narrow_amendment(
+                    kind=narrow_kind,
+                    current_document_text=doc,
+                    user_refinement_prompt=u_narrow,
+                    call_legal_llm_fn=call_legal_llm,
+                    llm_model=llm_model,
+                )
+                if narrow_out is not None:
+                    parsed_narrow = {
+                        "updated_document_text": narrow_out["updated_document_text"],
+                        "summary_changes": narrow_out.get("summary_changes") or [],
+                        "readiness_score": int(narrow_out.get("readiness_score") or 78),
+                        "suggested_next_step": narrow_out.get("suggested_next_step") or "review",
+                    }
+                    out_narrow = _normalize_premium_refine_result(
+                        parsed_narrow, action=body.action, current_doc=current_for_norm
+                    )
+                    log.info(
+                        "claw_premium route=premium_refine narrow_amendment kind=%s out_len=%d current_len=%d",
+                        narrow_kind,
+                        len((out_narrow.updated_document_text or "").strip()),
+                        len(doc),
+                    )
+                    record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+                    return out_narrow
+
         llm_text = call_legal_llm(
             messages=[
                 {"role": "system", "content": system},

@@ -1054,6 +1054,102 @@ def test_premium_refine_503_on_llm_failure(monkeypatch, tmp_path):
     assert isinstance(detail, dict) and detail.get("code") == "premium_refine_unavailable"
 
 
+def _premium_refine_long_fixture_doc() -> str:
+    parts = ["# Agreement\n\n", "## Parties\n\nA and B.\n\n", "## Scope\n\n"]
+    parts.append("".join(f"Scope detail line {i} with mutual obligations.\n" for i in range(160)))
+    parts.append(
+        "\n## Payment\n\nFees are net 30. Invoices monthly on the first business day.\n\n"
+        "## Intellectual Property\n\nEach party retains pre-existing IP.\n\n"
+        "## Confidentiality\n\nParties agree to mutual confidentiality obligations.\n\n"
+        "## Termination\n\nEither party may terminate on thirty (30) days written notice.\n"
+    )
+    return "".join(parts)
+
+
+def test_premium_refine_late_fee_narrow_deterministic_skips_llm(monkeypatch, tmp_path):
+    """Narrow late-fee path inserts without calling full-document refine LLM."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("call_legal_llm_should_not_run_for_deterministic_late_fee")
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom)
+    client = TestClient(app)
+    doc = _premium_refine_long_fixture_doc()
+    assert len(doc) >= 2500
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc,
+            "intake_text": "B2B services between A and B, US law.",
+            "user_refinement_prompt": "Add late fee of 5% after 10 days overdue. Preserve all other terms.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    b = res.json()
+    text = b["updated_document_text"]
+    low = text.lower()
+    assert ("five percent (5%)" in low) or ("5%" in text)
+    assert "late" in low
+    assert "## Payment" in text
+    assert "Confidentiality" in text
+    assert "Intellectual Property" in text or "IP" in text
+    assert len(text) >= int(len(doc) * 0.9)
+    assert len(b.get("summary_changes") or []) >= 1
+
+
+def test_premium_refine_late_fee_narrow_llm_anchor_when_no_payment_header(monkeypatch, tmp_path):
+    """Without a Payment heading, narrow path falls back to LLM anchor patch."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    body = [
+        "# Agreement\n\n## Scope\n\n",
+        "x" * 1200,
+        "\n\n## Obligations\n\nMutual NDA duties here. Each party will perform in good faith.\n",
+    ]
+    doc = "".join(body)
+
+    anchor = "Mutual NDA duties here. Each party will perform in good faith."
+
+    def fake_llm(messages=None, **kwargs):
+        m = messages or kwargs.get("messages") or []
+        sys = str((m[0] if m else {}).get("content") or "")
+        assert "anchor" in sys.lower() or "exact" in sys.lower()
+        return json.dumps(
+            {
+                "anchor": anchor,
+                "new_paragraph": (
+                    "Late Payment. Any undisputed amount not paid within ten (10) days after it becomes due may accrue "
+                    "a late fee equal to five percent (5%) of the overdue amount, unless prohibited by applicable law."
+                ),
+            }
+        )
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc,
+            "intake_text": "Services agreement.",
+            "user_refinement_prompt": "Add late fee 5% after 10 days overdue.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["updated_document_text"]
+    assert "five percent (5%)" in text.lower()
+    assert anchor in text
+    assert len(text) >= int(len(doc) * 0.9)
+
+
 def test_premium_finalize_audit_ok_deal_specific(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
