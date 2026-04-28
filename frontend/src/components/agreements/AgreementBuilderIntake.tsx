@@ -317,10 +317,10 @@ import {
 } from "./premiumRenderSourceResolver";
 import { shouldImmediateAuthoritativePremiumCommit } from "./premiumImmediateAuthoritativeCommitGate";
 import {
-  bumpAgreementGenerationId,
-  getOrInitSessionAgreementGenerationId,
-  shortIntakeFingerprint,
-} from "../../lib/agreementGenerationId";
+  authoritativePremiumCompletionMatchesSession,
+  authoritativePremiumPipelineResultForUiApply,
+} from "./premiumPostCheckoutApplyEligible";
+import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
@@ -1528,6 +1528,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ),
     [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive],
   );
+  /** Latest access flag — post-checkout `applySuccess` must not close over a stale `hasFullDraftAccess` from effect init. */
+  const hasFullDraftAccessRef = React.useRef(hasFullDraftAccess);
+  hasFullDraftAccessRef.current = hasFullDraftAccess;
 
   /** For below-document refine UI: Pro tier / premium flow / post-checkout grant only — not draft text markers. */
   const entitledToBelowDocumentPersistedRefine = useMemo(
@@ -3449,6 +3452,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const agreementDocumentTextLenBefore = agreementDocumentTextRef.current.trim().length;
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
+          console.info("[premium-success-immediate-visible-commit]", {
+            stage: "commitAuthoritativePremiumVisibleSurface_enter",
+            bodyLen: opts.acceptedPlainLen,
+            pipelineSource,
+            reason: opts.reason ?? "unspecified",
+          });
+          // eslint-disable-next-line no-console
           console.info("[premium-success-immediate-visible-commit] before", {
             bodyLen: opts.acceptedPlainLen,
             pipelineSource,
@@ -3799,7 +3809,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             proUpgradeUseStarterView: false,
           });
         }
-        if (hasFullDraftAccess) {
+        if (import.meta.env.DEV) {
+          const icPre = resolveAgreementIntentContract(mergedIntake);
+          const vPreGate = validatePaidProOutput({
+            text: snapshotPlain,
+            rawIntake: mergedIntake,
+            intentContract: icPre,
+            draft: merged.draft,
+            premiumPipelineSource: result.premiumRenderSource,
+          });
+          // eslint-disable-next-line no-console
+          console.info("[premium-success-branch-check]", {
+            phase: "pre_isPaidProFinishedAgreement",
+            finalDocLen: snapshotPlain.length,
+            pipelineSource: result.premiumRenderSource,
+            accepted: authoritativePremiumPipelineResultForUiApply(result),
+            validationOk: vPreGate.ok,
+            premiumRenderResolveSource: resolvedPersist.premium_render_source,
+            createUiStage: createUiStageRef.current,
+            displayPhase: displayPhaseRef.current,
+            premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+            hasFullDraftAccess: hasFullDraftAccessRef.current,
+          });
+        }
+        if (hasFullDraftAccessRef.current) {
           const contractIc = resolveAgreementIntentContract(mergedIntake);
           const fin = isPaidProFinishedAgreement({
             text: snapshotPlain,
@@ -3812,7 +3845,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             qualityRetryActive: false,
             serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
           });
-          if (!fin.ok) {
+          if (!fin.ok && !authoritativePremiumPipelineResultForUiApply(result)) {
             setPremiumServerGenerationDegraded(null);
             if (contractIc.pro_strict) {
               const d = buildPremiumDetailsGateCopy(contractIc, fin.gate?.validation.reasons ?? fin.reasons);
@@ -3903,6 +3936,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           validatePaidProOutputOk: vCommitGate.ok,
           premiumRenderResolveSource: resolvedPersist.premium_render_source,
         });
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-success-branch-check]", {
+            phase: "immediate_visible_commit_decision",
+            finalDocLen: finalDoc.length,
+            pipelineSource: result.premiumRenderSource,
+            accepted: authoritativePremiumPipelineResultForUiApply(result),
+            validationOk: vCommitGate.ok,
+            shouldImmediateCommit: shouldImmediateAuthoritativeCommit,
+            premiumRenderResolveSource: resolvedPersist.premium_render_source,
+            createUiStage: createUiStageRef.current,
+            displayPhase: displayPhaseRef.current,
+            premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+          });
+        }
 
         setPremiumPersistedFlowActive(true);
         setPremiumSendPathUnlocked(true);
@@ -4464,7 +4512,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumModalExtendedWaitActiveRef.current = false;
           setPremiumCheckoutModalExtendedWait(false);
           premiumPostCheckoutModalHardFailopenRef.current = false;
-          const sessionGenForPass = bumpAgreementGenerationId();
+          const sessionGenForPass = getOrInitSessionAgreementGenerationId();
           const sessionFpForPass = shortIntakeFingerprint(args.intakeText);
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
           let lastAttemptForLog = 0;
@@ -4580,7 +4628,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           clearPostCheckoutModalTimers();
           premiumModalEscapeHandlerRef.current = null;
 
-          if (!runIsCurrent()) {
+          const authoritativeReadyForApply =
+            Boolean(result) &&
+            authoritativePremiumPipelineResultForUiApply(result!) &&
+            authoritativePremiumCompletionMatchesSession(result!, sessionGenForPass) &&
+            !premiumPostCheckoutUserDismissedRef.current;
+
+          if (!runIsCurrent() && !authoritativeReadyForApply) {
             if (import.meta.env.DEV) {
               // eslint-disable-next-line no-console
               console.info("[premium-timeout-race]", {
@@ -4588,17 +4642,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 requestStillPending: false,
                 softTimeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
                 hardTimeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
-                hasAcceptedLateResult: false,
+                hasAcceptedLateResult: Boolean(result && authoritativePremiumPipelineResultForUiApply(result)),
                 currentRecoveryState: "stale_unmounted",
                 willHydrateLateSuccess: false,
                 reason: "run_gen_or_cancel",
+                authoritativeReadyForApply,
               });
             }
             return;
           }
 
           const lateApply = canApplyLatePremiumCompletionFromModal({
-            runIsStillCurrent: runIsCurrent(),
+            runIsStillCurrent: runIsCurrent() || authoritativeReadyForApply,
             userDismissedPostCheckoutWait: premiumPostCheckoutUserDismissedRef.current,
           });
           if (!lateApply.apply) {
@@ -4632,7 +4687,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
           const elapsed = Date.now() - started;
           if (elapsed < minMs) await sleep(minMs - elapsed);
-          if (!runIsCurrent()) {
+          if (!runIsCurrent() && !authoritativeReadyForApply) {
             if (import.meta.env.DEV) {
               // eslint-disable-next-line no-console
               console.info("[premium-timeout-race]", {
@@ -4640,9 +4695,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 requestStillPending: false,
                 softTimeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
                 hardTimeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
-                hasAcceptedLateResult: false,
+                hasAcceptedLateResult: Boolean(result && authoritativePremiumPipelineResultForUiApply(result)),
                 currentRecoveryState: "stale_after_dwell",
                 willHydrateLateSuccess: false,
+                authoritativeReadyForApply,
               });
             }
             return;
@@ -4821,7 +4877,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     finalizeIntakeCapture,
     syncUpgradeIntentRefs,
     bumpPremiumSurfaceGateTick,
-    hasFullDraftAccess,
   ]);
 
   const upgradeContextReasons = useMemo(
