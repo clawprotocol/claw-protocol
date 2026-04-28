@@ -355,6 +355,12 @@ import { buildStrictTruthGateCheckoutRevision } from "./premiumTruthGateFunnel";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftClientAcceptance";
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
+import {
+  pickAuthoritativeProCorpusForRefine,
+  evaluatePremiumRefineCandidate,
+  PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
+  PRO_REFINE_REJECTED_SHORT_USER_MESSAGE,
+} from "./premiumRefineAcceptance";
 import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
@@ -5352,39 +5358,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     await finalizeIntakeCapture();
     try {
       if (premiumPersistedFlowActive) {
-        const currentDocumentLen =
-          (agreementDocumentTextRef.current || "").trim().length ||
-          (() => {
-            try {
-              return buildPreviewForCurrentTier(prior).trim().length;
-            } catch {
-              return 0;
-            }
-          })();
+        const snapForCorpus = readPremiumCompletionSnapshot();
+        const corpusPick = pickAuthoritativeProCorpusForRefine({
+          draft: prior,
+          agreementDocumentText: (agreementDocumentTextRef.current || "").trim(),
+          premiumReadonlyPlain: (snapForCorpus?.premiumReadonlyPlainText || "").trim(),
+          premiumSnapshotWinnerPlain: (snapForCorpus?.premiumWinningBodyText || "").trim(),
+        });
+        const currentDoc = corpusPick.text;
+        const currentProLen = corpusPick.len;
         const rawIntake =
           (proRefineIntakeTextForProPanelsRef.current || "").trim() ||
           intakeCombined.trim() ||
           resolveRawIntakeForPremiumCheckout(prior) ||
           `${(prior.title || "").trim()}\n\n${(prior.purpose || "").trim()}`.trim() ||
           "LawDog Pro agreement";
-        const currentDoc =
-          (proRefineCurrentDocumentTextForProPanelsRef.current || "").trim() ||
-          (agreementDocumentTextRef.current || "").trim() ||
-          buildPreviewForCurrentTier(prior);
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.info("[agreement-refine] paid_premium path", {
-            surface: "below_document_buffer",
-            starterOrFree: false,
-            proSurface: true,
-            premiumPersistedFlowActive: true,
-            hasReviewWorkspaceId: Boolean((reviewAgreementIdRef.current || "").trim()),
-            currentDocumentLen,
-            instructionLen: instruction.length,
-            endpoint: "/api/agreements/premium-refine",
-            intakeTextLen: rawIntake.length,
-          });
-        }
+        // eslint-disable-next-line no-console
+        console.info("[agreement-refine] paid_premium path", {
+          surface: "below_document_buffer",
+          starterOrFree: false,
+          proSurface: true,
+          premiumPersistedFlowActive: true,
+          hasReviewWorkspaceId: Boolean((reviewAgreementIdRef.current || "").trim()),
+          currentProLen,
+          chosenSource: corpusPick.chosenSource,
+          instructionLen: instruction.length,
+          endpoint: "/api/agreements/premium-refine",
+          intakeTextLen: rawIntake.length,
+        });
         if (!currentDoc.trim() || !rawIntake.trim()) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
@@ -5403,7 +5404,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           action: "update",
         });
         const out = (r.updated_document_text || "").trim();
-        if (!out) {
+        const acceptance = evaluatePremiumRefineCandidate(currentProLen, out);
+        // eslint-disable-next-line no-console
+        console.info("[premium-refine-apply]", {
+          currentProLen,
+          refinedCandidateLen: acceptance.refinedLen,
+          ratio: Number(acceptance.ratio.toFixed(4)),
+          applyDecision: acceptance.decision,
+          preservedExistingDoc: acceptance.decision !== "accepted",
+          chosenSource: corpusPick.chosenSource,
+          endpoint: "premium-refine",
+        });
+        if (acceptance.decision === "rejected_empty") {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.warn("[agreement-refine] paid_premium empty model output", { r });
@@ -5411,14 +5423,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
           return false;
         }
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.info("[agreement-refine] paid_premium success", {
-            outLen: out.length,
-            suggested_next_step: r.suggested_next_step,
-            summary_changes: r.summary_changes,
-          });
+        if (acceptance.decision === "rejected_short") {
+          setHardError(PRO_REFINE_REJECTED_SHORT_USER_MESSAGE);
+          return false;
         }
+        // eslint-disable-next-line no-console
+        console.info("[agreement-refine] paid_premium success", {
+          outLen: out.length,
+          suggested_next_step: r.suggested_next_step,
+          summary_changes: r.summary_changes,
+        });
         applyProRefineOutputToProSurfaceRef.current?.(out, { clearStepBuffer: true, scrollToReview: true });
         return true;
       }
@@ -6854,7 +6868,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumReviewRoute: ex.premiumReviewRoute,
         agreementGenerationId: ex.agreementGenerationId,
         intakeTextFingerprint: ex.intakeTextFingerprint,
-        premiumPipelineRenderSource: ex.premiumPipelineRenderSource,
+        premiumPipelineRenderSource: PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
+        premiumRenderResolveSource: PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
         serverGenerationDegraded: ex.serverGenerationDegraded,
       });
     }
@@ -8162,33 +8177,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (canProceedWithPaidProDocument) setProUpgradeUseStarterView(false);
   }, [canProceedWithPaidProDocument]);
 
-  /** Authoritative Pro body for `POST /premium-refine` (Finalize + step buffer): prefer live editor, then readonly winner. */
+  /** Authoritative Pro body for `POST /premium-refine` (Finalize + step buffer): longest corpus — never a thin preview when full Pro exists on draft. */
   const proRefineCurrentDocumentTextForProPanels = useMemo(() => {
     if (proUpgradeUseStarterView) {
       return (agreementDocumentText || "").trim();
     }
-    if (premiumPersistedFlowActive && hasFullDraftAccess && !canProceedWithPaidProDocument) {
-      return "";
-    }
-    const fromState = (agreementDocumentText || "").trim();
-    if (fromState.length > 0) return fromState;
-    const fromPick = (premiumPaidReadonlyPick.plainText || "").trim();
-    if (fromPick.length > 0) return fromPick;
-    return (
-      (draft?.premium_full_document_text || draft?.premium_server_full_document_text || draft?.purpose || "").trim() || ""
-    );
-  }, [
-    agreementDocumentText,
-    premiumPaidReadonlyPick.plainText,
-    draft?.premium_full_document_text,
-    draft?.premium_server_full_document_text,
-    draft?.purpose,
-    reviewDocRefreshTick,
-    proUpgradeUseStarterView,
-    premiumPersistedFlowActive,
-    hasFullDraftAccess,
-    canProceedWithPaidProDocument,
-  ]);
+    const snapWin = readPremiumCompletionSnapshot()?.premiumWinningBodyText || "";
+    return pickAuthoritativeProCorpusForRefine({
+      draft,
+      agreementDocumentText: agreementDocumentText || "",
+      premiumReadonlyPlain: premiumPaidReadonlyPick.plainText || "",
+      premiumSnapshotWinnerPlain: snapWin,
+    }).text;
+  }, [agreementDocumentText, premiumPaidReadonlyPick.plainText, draft, reviewDocRefreshTick, proUpgradeUseStarterView]);
   proRefineCurrentDocumentTextForProPanelsRef.current = proRefineCurrentDocumentTextForProPanels;
 
   const handleProRefineFromSuggestions = React.useCallback(async () => {

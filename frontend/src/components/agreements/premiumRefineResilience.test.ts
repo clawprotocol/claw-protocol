@@ -62,7 +62,16 @@ describe("Pro refine resilience (paid update path)", () => {
 
 describe("PRO_REFINE_UNAVAILABLE_USER_MESSAGE export", () => {
   it("matches copy used in premium-refine API", () => {
-    expect(PRO_REFINE_UNAVAILABLE_USER_MESSAGE).toContain("safe");
+    expect(PRO_REFINE_UNAVAILABLE_USER_MESSAGE).toContain("unchanged");
     expect(PRO_REFINE_UNAVAILABLE_USER_MESSAGE.length).toBeGreaterThan(40);
+  });
+});
+
+describe("Pro refine preserves authoritative pipeline source on apply", () => {
+  it("pins premiumPipelineRenderSource when merging snapshot after refine", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("premiumPipelineRenderSource: PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE");
+    expect(s).toContain("premiumRenderResolveSource: PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE");
   });
 });

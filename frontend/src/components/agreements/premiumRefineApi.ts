@@ -3,7 +3,7 @@ import { readJson, resolveApiBase } from "../../lib/clawApi";
 
 /** User-facing copy when premium-refine is unavailable (503/overload). Also thrown as Error.message. */
 export const PRO_REFINE_UNAVAILABLE_USER_MESSAGE =
-  "We couldn't update the Pro agreement. Your current Pro agreement is safe. Try again.";
+  "We couldn't apply that update. Your current Pro agreement is unchanged. Try again.";
 
 const PREMIUM_REFINE_FETCH_TIMEOUT_MS = 120_000;
 
