@@ -339,6 +339,14 @@ import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import { postPremiumRefine } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
+import {
+  endPremiumEnsureForIntake,
+  logPremiumAuthoritativeVisibleSurface,
+  logPremiumDuplicateRunBlocked,
+  logPremiumFailopenOverriddenBySuccess,
+  shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative,
+  tryBeginPremiumEnsureForIntake,
+} from "./premiumAuthoritativeVisibleSurface";
 import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPanel";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
@@ -1718,6 +1726,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reviewWorkspaceBootstrapping ||
         Boolean(reviewAgreementId?.trim())),
   );
+  const createUiStageRef = useRef(createUiStage);
+  const displayPhaseRef = useRef(displayPhase);
+  const premiumPostCheckoutPhaseRef = useRef(premiumPostCheckoutPhase);
+  const proFullDraftQualityRetryRef = useRef(proFullDraftQualityRetry);
+  const proUpgradeUseStarterViewRef = useRef(proUpgradeUseStarterView);
+  const hardErrorRef = useRef(hardError);
+  createUiStageRef.current = createUiStage;
+  displayPhaseRef.current = displayPhase;
+  premiumPostCheckoutPhaseRef.current = premiumPostCheckoutPhase;
+  proFullDraftQualityRetryRef.current = proFullDraftQualityRetry;
+  proUpgradeUseStarterViewRef.current = proUpgradeUseStarterView;
+  hardErrorRef.current = hardError;
   /** When the user edits the full agreement preview, persist that blob into `purpose` on POST/PATCH so the server can render it as the primary body (see backend `_purpose_looks_like_full_client_agreement_text`). */
   const mergeParsedForApiPersist = React.useCallback(
     (parsedIn: ParsedDraftShape): ParsedDraftShape => {
@@ -3368,6 +3388,59 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const minMs = 1500 + Math.floor(Math.random() * 1001);
       const started = Date.now();
 
+      const applyAuthoritativePremiumSuccessToVisibleSurface = (opts: {
+        bodyLen: number;
+        pipelineSource: string;
+        softTimeoutHadFired: boolean;
+      }) => {
+        if (!isAuthoritativePremiumPipelineRenderSource(opts.pipelineSource) || opts.bodyLen < 500) return;
+        logPremiumAuthoritativeVisibleSurface("before", {
+          bodyLen: opts.bodyLen,
+          pipelineSource: opts.pipelineSource,
+          softTimeoutHadFired: opts.softTimeoutHadFired,
+          previousPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+          previousRecoveryFlags: {
+            proFullDraftQualityRetry: proFullDraftQualityRetryRef.current,
+            proUpgradeUseStarterView: proUpgradeUseStarterViewRef.current,
+            hardErrorPresent: Boolean(hardErrorRef.current),
+          },
+          createUiStage: String(createUiStageRef.current),
+          displayPhase: displayPhaseRef.current,
+        });
+        setHardError(null);
+        setPremiumPipelineUserMessage(null);
+        setProFullDraftCustomGateMessage(null);
+        setProUpgradeUseStarterView(false);
+        setProFullDraftQualityRetry(false);
+        setPremiumPostCheckoutPhase(null);
+        setPremiumReviewDocEditorOpen(false);
+        setCreateFlowPhase("draft_ready_for_review");
+        setDisplayPhase("intake");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setMobileWorkspacePane("preview");
+        setPreviewPaneRevealed(true);
+        if (opts.softTimeoutHadFired) {
+          logPremiumFailopenOverriddenBySuccess({ bodyLen: opts.bodyLen, pipelineSource: opts.pipelineSource });
+        }
+        bumpPremiumSurfaceGateTick();
+        logPremiumAuthoritativeVisibleSurface("after", {
+          bodyLen: opts.bodyLen,
+          pipelineSource: opts.pipelineSource,
+          softTimeoutHadFired: opts.softTimeoutHadFired,
+          previousRecoveryFlags: {
+            proFullDraftQualityRetry: false,
+            proUpgradeUseStarterView: false,
+            hardErrorPresent: false,
+          },
+          createUiStage: String(CreateUiStage.DRAFT),
+          displayPhase: "intake",
+        });
+        window.requestAnimationFrame(() => {
+          bumpPremiumSurfaceGateTick();
+          setReviewDocRefreshTick((n) => n + 1);
+        });
+      };
+
       const applySuccess = (result: PremiumCompletionResult) => {
         const softAtApplyStart = premiumPostCheckoutModalSoftTimeoutFiredRef.current;
         const runIdForLateApply = getOrInitSessionAgreementGenerationId();
@@ -3379,6 +3452,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         };
         try {
         paidCheckoutCompletedRef.current = true;
+        {
+          const wDup = (result.winningPremiumBodyText || "").trim();
+          if (
+            isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) &&
+            wDup.length >= 500 &&
+            result.agreementGenerationId != null
+          ) {
+            const s0 = readPremiumCompletionSnapshot();
+            if (
+              s0?.premiumAccepted &&
+              s0.agreementGenerationId != null &&
+              String(s0.agreementGenerationId) === String(result.agreementGenerationId) &&
+              (s0.premiumWinningBodyText || "").trim().length >= 500
+            ) {
+              logPremiumDuplicateRunBlocked({
+                reason: "applySuccess_authoritative_already_persisted_same_gen",
+                agreementGenerationId: result.agreementGenerationId,
+              });
+              return;
+            }
+          }
+        }
         if (resumeSnap?.resume_kind === "optional_full_upgrade") {
           setProReplacedStarterAfterUpgrade(true);
         }
@@ -3816,6 +3911,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           snapshotPlain.length >= 500 &&
           isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource)
         ) {
+          applyAuthoritativePremiumSuccessToVisibleSurface({
+            bodyLen: snapshotPlain.length,
+            pipelineSource: result.premiumRenderSource,
+            softTimeoutHadFired: premiumPostCheckoutModalSoftTimeoutFiredRef.current,
+          });
           const icHard = resolveAgreementIntentContract(mergedIntake);
           const vHard = validatePaidProOutput({
             text: snapshotPlain,
@@ -3845,9 +3945,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               gateState: gHard.state,
               applySuccessCompleted: true,
             };
-            setProUpgradeUseStarterView(false);
-            setProFullDraftQualityRetry(false);
-            setPremiumPostCheckoutPhase(null);
           }
         }
         const corpusSnapshot = (snapshotPlain || finalDoc).trim();
@@ -4126,6 +4223,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (!runIsCurrent()) return;
           premiumProRunInFlightRef.current = true;
           try {
+          const intakeFpGuard = shortIntakeFingerprint(args.intakeText);
+          if (
+            shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative({
+              intakeFingerprint: intakeFpGuard,
+              snapshot: readPremiumCompletionSnapshot(),
+            })
+          ) {
+            logPremiumDuplicateRunBlocked({
+              reason: "ensure_skipped_snapshot_already_authoritative",
+              intakeFingerprint: intakeFpGuard,
+            });
+            return;
+          }
           setPremiumPostCheckoutPhase("processing");
           setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
           setPremiumGapQuestions([]);
@@ -4158,6 +4268,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
             const premiumCompletionAttemptStartedAt = Date.now();
             const premiumCompletionAttemptTimeoutMs = PREMIUM_COMPLETION_ATTEMPT_MAX_MS;
+            if (!tryBeginPremiumEnsureForIntake(intakeFpGuard)) {
+              logPremiumDuplicateRunBlocked({
+                reason: "premium_ensure_intake_mutex_busy",
+                intakeFingerprint: intakeFpGuard,
+              });
+              return;
+            }
             try {
               const originalMergeHint = pickLongestPremiumIntakeCorpus(
                 48,
@@ -4166,65 +4283,69 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 stripPremiumUserNotesFromMergedIntake(args.intakeText),
                 rawIntakeBase,
               );
-              result = await withTimeout(
-                ensurePremiumCompletion({
-                  intakeText: args.intakeText,
-                  originalUserIntakeRawForMerge: originalMergeHint,
-                  structuredDraft: prior!,
-                  agreementFamily: prior!.agreement_family ?? detectAgreementFamily(args.intakeText),
-                  guidedFlowId,
-                  simpleProductFlow,
-                  partyRoleLabels: intakePartyRoleLabels,
-                  parseDraft: (raw) => parseDraft(raw, { aiModelClass: "premium" }),
-                  userGapAnswers: args.userGapAnswers,
-                  gapResolverSkippedWithDefaults: args.gapResolverSkippedWithDefaults,
-                  agreementGenerationId: sessionGenForPass,
-                  premiumRequestIntakeFingerprint: sessionFpForPass,
-                  isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
-                }),
-                premiumCompletionAttemptTimeoutMs,
-                "premium_completion_attempt",
-              );
-              console.info("[premium-flow] premium_completion_timeout_boundary", {
-                attempt,
-                started_at: new Date(premiumCompletionAttemptStartedAt).toISOString(),
-                elapsed_ms: Date.now() - premiumCompletionAttemptStartedAt,
-                completed_before_timeout: true,
-                timeout_ms: premiumCompletionAttemptTimeoutMs,
-              });
-              console.info("[premium-flow] premium_rewrite_request_success", { attempt });
-              break;
-            } catch (e) {
-              const em = e instanceof Error ? e.message : String(e);
-              const timedOutThisAttempt = em.includes("premium_completion_attempt_timeout_");
-              console.info("[premium-flow] premium_completion_timeout_boundary", {
-                attempt,
-                started_at: new Date(premiumCompletionAttemptStartedAt).toISOString(),
-                elapsed_ms: Date.now() - premiumCompletionAttemptStartedAt,
-                completed_before_timeout: false,
-                timeout_ms: premiumCompletionAttemptTimeoutMs,
-                timed_out: timedOutThisAttempt,
-              });
-              console.warn("[premium-flow] premium_rewrite_request_failure", { attempt, err: e });
-              if (import.meta.env.DEV && timedOutThisAttempt) {
-                // eslint-disable-next-line no-console
-                console.info("[premium-late-apply] ensure_attempt_wall_timeout", {
-                  runId: sessionGenForPass,
+              try {
+                result = await withTimeout(
+                  ensurePremiumCompletion({
+                    intakeText: args.intakeText,
+                    originalUserIntakeRawForMerge: originalMergeHint,
+                    structuredDraft: prior!,
+                    agreementFamily: prior!.agreement_family ?? detectAgreementFamily(args.intakeText),
+                    guidedFlowId,
+                    simpleProductFlow,
+                    partyRoleLabels: intakePartyRoleLabels,
+                    parseDraft: (raw) => parseDraft(raw, { aiModelClass: "premium" }),
+                    userGapAnswers: args.userGapAnswers,
+                    gapResolverSkippedWithDefaults: args.gapResolverSkippedWithDefaults,
+                    agreementGenerationId: sessionGenForPass,
+                    premiumRequestIntakeFingerprint: sessionFpForPass,
+                    isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
+                  }),
+                  premiumCompletionAttemptTimeoutMs,
+                  "premium_completion_attempt",
+                );
+                console.info("[premium-flow] premium_completion_timeout_boundary", {
                   attempt,
-                  sessionAttemptTimeoutMs: premiumCompletionAttemptTimeoutMs,
-                  message: (e as Error)?.message,
+                  started_at: new Date(premiumCompletionAttemptStartedAt).toISOString(),
+                  elapsed_ms: Date.now() - premiumCompletionAttemptStartedAt,
+                  completed_before_timeout: true,
+                  timeout_ms: premiumCompletionAttemptTimeoutMs,
                 });
-              }
-              if (attempt === 1) {
-                if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
-                  console.warn("[premium-completion] apply failed after retry", e);
+                console.info("[premium-flow] premium_rewrite_request_success", { attempt });
+                break;
+              } catch (e) {
+                const em = e instanceof Error ? e.message : String(e);
+                const timedOutThisAttempt = em.includes("premium_completion_attempt_timeout_");
+                console.info("[premium-flow] premium_completion_timeout_boundary", {
+                  attempt,
+                  started_at: new Date(premiumCompletionAttemptStartedAt).toISOString(),
+                  elapsed_ms: Date.now() - premiumCompletionAttemptStartedAt,
+                  completed_before_timeout: false,
+                  timeout_ms: premiumCompletionAttemptTimeoutMs,
+                  timed_out: timedOutThisAttempt,
+                });
+                console.warn("[premium-flow] premium_rewrite_request_failure", { attempt, err: e });
+                if (import.meta.env.DEV && timedOutThisAttempt) {
+                  // eslint-disable-next-line no-console
+                  console.info("[premium-late-apply] ensure_attempt_wall_timeout", {
+                    runId: sessionGenForPass,
+                    attempt,
+                    sessionAttemptTimeoutMs: premiumCompletionAttemptTimeoutMs,
+                    message: (e as Error)?.message,
+                  });
                 }
-                result = null;
-              } else {
-                if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
-                  console.warn("[premium-completion] apply failed, will retry once", e);
+                if (attempt === 1) {
+                  if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+                    console.warn("[premium-completion] apply failed after retry", e);
+                  }
+                  result = null;
+                } else {
+                  if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+                    console.warn("[premium-completion] apply failed, will retry once", e);
+                  }
                 }
               }
+            } finally {
+              endPremiumEnsureForIntake(intakeFpGuard);
             }
           }
           if (absoluteTimeoutId) {
