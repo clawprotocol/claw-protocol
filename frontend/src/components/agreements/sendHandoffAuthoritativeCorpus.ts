@@ -94,6 +94,33 @@ export function authoritativeProBypassSimpleSendPaywall(draft: CorpusDraftLike |
   return describePaidProSendModalBranch(draft).bypass;
 }
 
+/** After GET + primed merge: prefer server hint when either side carries it (Railway QA gap). */
+export function mergePremiumRenderSourceField(
+  primed: string | null | undefined,
+  fetched: string | null | undefined,
+): string | null {
+  const sa = String(primed ?? "").trim();
+  const sb = String(fetched ?? "").trim();
+  if (sa === "server_full_document_text" || sb === "server_full_document_text") return "server_full_document_text";
+  if (sb) return sb;
+  if (sa) return sa;
+  return null;
+}
+
+/**
+ * `/app/send` watermark gate: deterministic from draft + economics tier — not intake/displayPhase.
+ * When economics still says `free` after paid hydrate, draft corpus + render source must win.
+ */
+export function bypassSimpleHomeWatermarkSendGate(
+  draft: CorpusDraftLike | null | undefined,
+  economics: { tier?: string | null } | null | undefined,
+): boolean {
+  if (!draft) return false;
+  const tier = String(economics?.tier ?? "").trim().toLowerCase();
+  if (tier === "paid") return true;
+  return describePaidProSendModalBranch(draft).bypass;
+}
+
 export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | null | undefined): SendHandoffCorpusPick | null {
   if (!draft) return null;
   const candidates: [SendHandoffCorpusPick["field"], string][] = [
@@ -104,7 +131,14 @@ export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | nu
     ["rendered_document_text", String(draft.rendered_document_text ?? "").trim()],
     ["purpose", String(draft.purpose ?? "").trim()],
   ];
+  const nonPurpose = candidates.filter(([f]) => f !== "purpose");
   let best: SendHandoffCorpusPick | null = null;
+  for (const [field, text] of nonPurpose) {
+    if (text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && (!best || text.length > best.text.length)) {
+      best = { field, text };
+    }
+  }
+  if (best) return best;
   for (const [field, text] of candidates) {
     if (text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && (!best || text.length > best.text.length)) {
       best = { field, text };

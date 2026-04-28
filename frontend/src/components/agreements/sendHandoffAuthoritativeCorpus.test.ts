@@ -3,8 +3,10 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
   authoritativeProBypassSimpleSendPaywall,
+  bypassSimpleHomeWatermarkSendGate,
   describePaidProSendModalBranch,
   longestPlainForAgreementPersist,
+  mergePremiumRenderSourceField,
   pickAuthoritativePlainForSendHandoff,
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
@@ -224,5 +226,42 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     expect(m.bypass).toBe(true);
     expect(m.reason).toBe("corpus_authoritative");
     expect(m.authoritativeLen).toBeGreaterThanOrEqual(500);
+  });
+
+  it("mergePremiumRenderSourceField prefers server_full_document_text from either side", () => {
+    expect(mergePremiumRenderSourceField("live_generated_preview", "server_full_document_text")).toBe(
+      "server_full_document_text",
+    );
+    expect(mergePremiumRenderSourceField("server_full_document_text", null)).toBe("server_full_document_text");
+  });
+
+  it("pickAuthoritativePlainForSendHandoff prefers paid corpus over longer purpose when both >= min", () => {
+    const purposeLong = `p${"y".repeat(SEND_HANDOFF_AUTHORITATIVE_MIN_LEN + 100)}`;
+    const premiumCorpus = "z".repeat(SEND_HANDOFF_AUTHORITATIVE_MIN_LEN + 50);
+    const d = {
+      purpose: purposeLong,
+      premium_full_document_text: premiumCorpus,
+    } as unknown as AgreementDraft;
+    const pick = pickAuthoritativePlainForSendHandoff(d);
+    expect(pick?.field).toBe("premium_full_document_text");
+    expect(pick?.text.length).toBe(premiumCorpus.length);
+  });
+
+  it("bypassSimpleHomeWatermarkSendGate: economics tier paid skips watermark gate", () => {
+    const thin = { purpose: "short" } as unknown as AgreementDraft;
+    expect(bypassSimpleHomeWatermarkSendGate(thin, { tier: "paid" })).toBe(true);
+  });
+
+  it("bypassSimpleHomeWatermarkSendGate: free tier + thin draft uses draft branch (no bypass)", () => {
+    const thin = { purpose: "short", premium_render_source: "live_generated_preview" } as unknown as AgreementDraft;
+    expect(bypassSimpleHomeWatermarkSendGate(thin, { tier: "free" })).toBe(false);
+  });
+
+  it("bypassSimpleHomeWatermarkSendGate: stale free economics but server_render_source on draft bypasses", () => {
+    const d = {
+      premium_render_source: "server_full_document_text",
+      purpose: "x",
+    } as unknown as AgreementDraft;
+    expect(bypassSimpleHomeWatermarkSendGate(d, { tier: "free" })).toBe(true);
   });
 });

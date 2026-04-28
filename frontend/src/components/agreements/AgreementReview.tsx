@@ -60,8 +60,10 @@ import { draftExcerptForClause, htmlToPlainText } from "../../agreement/external
 import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
   authoritativeProBypassSimpleSendPaywall,
+  bypassSimpleHomeWatermarkSendGate,
   buildSendRouteReadonlyHtmlFromPlain,
   describePaidProSendModalBranch,
+  mergePremiumRenderSourceField,
   pickAuthoritativePlainForSendHandoff,
   shouldMinimalProSendRecipientChrome,
   type PaidProSendBranchMeta,
@@ -266,6 +268,10 @@ function mergeSimpleHomeHydrationDraft(
     document_text: nz(preferLongerPlainCorpus(primed.document_text, fetchedDraft.document_text)),
     rendered_document_text: nz(
       preferLongerPlainCorpus(primed.rendered_document_text, fetchedDraft.rendered_document_text),
+    ),
+    premium_render_source: mergePremiumRenderSourceField(
+      primed?.premium_render_source,
+      fetchedDraft.premium_render_source,
     ),
   };
 }
@@ -6204,7 +6210,7 @@ const AgreementReview: React.FC<Props> = ({
                                   economicsOverlay?.watermark_required &&
                                   !simpleFlowUpsellSuppressed &&
                                   draft &&
-                                  !authoritativeProBypassSimpleSendPaywall(draft)
+                                  !bypassSimpleHomeWatermarkSendGate(draft, economicsOverlay)
                                 ) {
                                   setWatermarkSendModalOpen(true);
                                   return;
@@ -6241,7 +6247,7 @@ const AgreementReview: React.FC<Props> = ({
                                   economicsOverlay?.watermark_required &&
                                   !simpleFlowUpsellSuppressed &&
                                   draft &&
-                                  !authoritativeProBypassSimpleSendPaywall(draft)
+                                  !bypassSimpleHomeWatermarkSendGate(draft, economicsOverlay)
                                 ) {
                                   setWatermarkSendModalOpen(true);
                                   return;
