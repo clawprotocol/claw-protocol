@@ -1,6 +1,36 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { readJson, resolveApiBase } from "../../lib/clawApi";
 
+/** User-facing copy when premium-refine is unavailable (503/overload). Also thrown as Error.message. */
+export const PRO_REFINE_UNAVAILABLE_USER_MESSAGE =
+  "We couldn't update the Pro agreement. Your current Pro agreement is safe. Try again.";
+
+const PREMIUM_REFINE_FETCH_TIMEOUT_MS = 120_000;
+
+function combineAbortSignals(a: AbortSignal | undefined, b: AbortSignal): AbortSignal {
+  if (!a) return b;
+  const merged = new AbortController();
+  const forward = () => merged.abort();
+  if (a.aborted || b.aborted) {
+    merged.abort();
+    return merged.signal;
+  }
+  a.addEventListener("abort", forward, { once: true });
+  b.addEventListener("abort", forward, { once: true });
+  return merged.signal;
+}
+
+function resolvePremiumRefineFetchSignal(external?: AbortSignal): AbortSignal | undefined {
+  const timeoutFn = (AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal }).timeout;
+  if (typeof timeoutFn !== "function") return external;
+  try {
+    const deadline = timeoutFn.call(AbortSignal, PREMIUM_REFINE_FETCH_TIMEOUT_MS);
+    return combineAbortSignals(external, deadline);
+  } catch {
+    return external;
+  }
+}
+
 export type PremiumRefineAction = "update" | "ask_missing" | "ready";
 
 export type SuggestedNextStep = "edit" | "review" | "send";
@@ -44,6 +74,7 @@ export async function postPremiumRefine(
     };
   }
   const base = resolveApiBase().replace(/\/$/, "");
+  const fetchSignal = resolvePremiumRefineFetchSignal(signal);
   const res = await fetch(`${base}/api/agreements/premium-refine`, {
     method: "POST",
     headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
@@ -53,10 +84,23 @@ export async function postPremiumRefine(
       user_refinement_prompt: body.user_refinement_prompt,
       action: body.action,
     }),
-    signal,
+    signal: fetchSignal,
   });
   if (!res.ok) {
     const err: unknown = await res.json().catch(() => ({}));
+    if (res.status === 503) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn("[premium-refine-api] request failed (service unavailable)", {
+          http: res.status,
+          detail: err,
+          current_document_len: (body.current_document_text || "").length,
+          intake_len: (body.intake_text || "").length,
+          instruction_len: (body.user_refinement_prompt || "").length,
+        });
+      }
+      throw new Error(PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
+    }
     const d = (err as { detail?: { message?: string; code?: string } | string | { msg: string; type: string }[] })
       .detail;
     const msg = (() => {

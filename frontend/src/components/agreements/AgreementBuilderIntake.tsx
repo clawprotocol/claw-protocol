@@ -355,7 +355,7 @@ import { buildStrictTruthGateCheckoutRevision } from "./premiumTruthGateFunnel";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftClientAcceptance";
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
-import { postPremiumRefine } from "./premiumRefineApi";
+import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import {
@@ -5499,11 +5499,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         // eslint-disable-next-line no-console
         console.error("[agreement-refine] failed", e, e instanceof Error ? e.message : String(e));
       }
-      setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
+      if (premiumPersistedFlowActive) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg === PRO_REFINE_UNAVAILABLE_USER_MESSAGE) {
+          setHardError(PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
+        } else {
+          setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
+        }
+      } else {
+        setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
+      }
       return false;
     } finally {
       productionStickyLabelModeRef.current = null;
       setLoading(false);
+      setDisplayPhase("intake");
+      setCreateFlowPhase("draft_ready_for_review");
     }
   }, [
     draft,

@@ -33,6 +33,10 @@ describe("AgreementBuilderIntake review refine path", () => {
     const catchBlock = block.slice(catchI, finallyI);
     expect(catchBlock).not.toMatch(/setIntakeStepBuffer\s*\(/);
     expect(catchBlock).not.toMatch(/setDebouncedStepBuffer/);
+    const finallyEnd = block.indexOf("}, [", finallyI);
+    const finallyBlock = block.slice(finallyI, finallyEnd > 0 ? finallyEnd : undefined);
+    expect(finallyBlock).toContain('setDisplayPhase("intake")');
+    expect(finallyBlock).toContain('setCreateFlowPhase("draft_ready_for_review")');
   });
 
   it("does not call local draft parse from inside the persisted refine callback", () => {
