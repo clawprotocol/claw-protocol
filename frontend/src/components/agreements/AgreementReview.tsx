@@ -61,8 +61,10 @@ import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
   authoritativeProBypassSimpleSendPaywall,
   buildSendRouteReadonlyHtmlFromPlain,
+  describePaidProSendModalBranch,
   pickAuthoritativePlainForSendHandoff,
   shouldMinimalProSendRecipientChrome,
+  type PaidProSendBranchMeta,
 } from "./sendHandoffAuthoritativeCorpus";
 import { DirectComparePanel } from "../../agreement/DirectComparePanel";
 import { MATERIAL_CHANGE_SUMMARY_LABEL, OWNER_INCOMING_SUGGESTED_EDITS_HEADING } from "../../agreement/universalReviewIntakeCopy";
@@ -350,8 +352,8 @@ type Props = {
   simpleFlowPremiumHandoffIntent?: PremiumSendIntent | null;
   /** Optional: run after user picks reviewer-handoff; parent may reset Pro celebration + phase. */
   onContinueToReviewerSetup?: () => void;
-  /** Simple launch: authoritative paid Pro body loaded — parent skips subscription upgrade modal on Continue to send. */
-  onAuthoritativeProBypassChange?: (authoritativeProBypass: boolean) => void;
+  /** Simple launch: paid-Pro send routing metadata — parent skips SendConversionModal when `bypass` is true. */
+  onPaidProSendBranchMeta?: (meta: PaidProSendBranchMeta) => void;
 };
 
 const API_BASE = resolveApiBase();
@@ -648,7 +650,7 @@ const AgreementReview: React.FC<Props> = ({
   streamlinedSimpleFlow = false,
   simpleFlowPremiumHandoffIntent,
   onContinueToReviewerSetup,
-  onAuthoritativeProBypassChange,
+  onPaidProSendBranchMeta,
 }) => {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState<string>("");
@@ -743,10 +745,15 @@ const AgreementReview: React.FC<Props> = ({
   const isSimpleHomeReview = section === "simpleHomeReview";
 
   useEffect(() => {
-    if (!onAuthoritativeProBypassChange || !isSimpleHomeReview) return;
+    if (!onPaidProSendBranchMeta || !isSimpleHomeReview) return;
     const source = draft ?? initialDraftSnapshot;
-    onAuthoritativeProBypassChange(authoritativeProBypassSimpleSendPaywall(source));
-  }, [draft, initialDraftSnapshot, isSimpleHomeReview, onAuthoritativeProBypassChange]);
+    onPaidProSendBranchMeta(describePaidProSendModalBranch(source));
+  }, [draft, initialDraftSnapshot, isSimpleHomeReview, onPaidProSendBranchMeta]);
+
+  const simpleHomePaidAuthoritativeAgreementPreview = useMemo(
+    () => Boolean(isSimpleHomeReview && draft && authoritativeProBypassSimpleSendPaywall(draft)),
+    [isSimpleHomeReview, draft],
+  );
 
   const isWorkspace =
     (embeddedInCard && section !== "all") || isSimpleHomeReview;
@@ -5501,7 +5508,11 @@ const AgreementReview: React.FC<Props> = ({
             </div>
           ) : null}
 
-          {agreementReadiness && !isStreamlinedSimple && !canonicalUnpaidSendShell && !sendShellTierGatePending ? (
+          {agreementReadiness &&
+          !isStreamlinedSimple &&
+          !canonicalUnpaidSendShell &&
+          !sendShellTierGatePending &&
+          !(premiumLawdogSimpleHome && simpleHomePaidAuthoritativeAgreementPreview) ? (
             <div className="mb-6">
               <AgreementReadinessCard
                 result={agreementReadiness}
@@ -6191,7 +6202,9 @@ const AgreementReview: React.FC<Props> = ({
                                   simpleFlowPhase === "review" &&
                                   requiredComplete &&
                                   economicsOverlay?.watermark_required &&
-                                  !simpleFlowUpsellSuppressed
+                                  !simpleFlowUpsellSuppressed &&
+                                  draft &&
+                                  !authoritativeProBypassSimpleSendPaywall(draft)
                                 ) {
                                   setWatermarkSendModalOpen(true);
                                   return;
@@ -6226,7 +6239,9 @@ const AgreementReview: React.FC<Props> = ({
                                   simpleFlowPhase === "review" &&
                                   requiredComplete &&
                                   economicsOverlay?.watermark_required &&
-                                  !simpleFlowUpsellSuppressed
+                                  !simpleFlowUpsellSuppressed &&
+                                  draft &&
+                                  !authoritativeProBypassSimpleSendPaywall(draft)
                                 ) {
                                   setWatermarkSendModalOpen(true);
                                   return;

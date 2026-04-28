@@ -13831,17 +13831,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 : "Confirm before saving"}
             </h2>
             {minimalProSendRecipientChrome ? (
-              effectivePremiumSendMode === "review" ? (
-                <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                  You are about to save this agreement and create a secure review link. LawDog does not auto-email
-                  recipients from this step. You choose when and how to share the link.
-                </p>
-              ) : (
-                <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                  You are about to save this agreement and create secure signing links. LawDog does not auto-email
-                  recipients from this step. You choose when and how to share each link.
-                </p>
-              )
+              <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
+                LawDog will create a secure link. Nothing is emailed automatically. You choose when and how to share it.
+              </p>
             ) : effectivePremiumSendMode === "signature" ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
                 You are about to save the agreement and open the signing-link screen. Copy the link there — LawDog does

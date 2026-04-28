@@ -3,6 +3,7 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
   authoritativeProBypassSimpleSendPaywall,
+  describePaidProSendModalBranch,
   longestPlainForAgreementPersist,
   pickAuthoritativePlainForSendHandoff,
   shouldMinimalProSendRecipientChrome,
@@ -199,5 +200,29 @@ describe("sendHandoffAuthoritativeCorpus", () => {
       purpose: "stub",
     } as unknown as AgreementDraft;
     expect(authoritativeProBypassSimpleSendPaywall(d)).toBe(true);
+  });
+
+  it("describePaidProSendModalBranch: server_render_source reason for telemetry", () => {
+    const d = {
+      premium_render_source: "server_full_document_text",
+      purpose: "short",
+    } as unknown as AgreementDraft;
+    const m = describePaidProSendModalBranch(d);
+    expect(m.bypass).toBe(true);
+    expect(m.reason).toBe("server_render_source");
+    expect(m.premium_render_source).toBe("server_full_document_text");
+  });
+
+  it("describePaidProSendModalBranch: corpus_authoritative when long premium body", () => {
+    const corpus = "z".repeat(600);
+    const d = {
+      premium_render_source: "live_generated_preview",
+      premium_full_document_text: corpus,
+      purpose: "stub",
+    } as unknown as AgreementDraft;
+    const m = describePaidProSendModalBranch(d);
+    expect(m.bypass).toBe(true);
+    expect(m.reason).toBe("corpus_authoritative");
+    expect(m.authoritativeLen).toBeGreaterThanOrEqual(500);
   });
 });

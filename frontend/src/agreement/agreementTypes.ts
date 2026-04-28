@@ -27,6 +27,8 @@ export type AgreementDraft = {
   /** Stub: persisted for “Send → Pay” UX; no live processor yet. */
   payment_request?: PaymentRequestPayload | null;
   payment_required?: boolean;
+  /** Client-side render routing hint from API draft JSON (not always present on older payloads). */
+  premium_render_source?: string | null;
   /** Optional: authoritative Pro / full-draft plain text (mirrors API draft JSON when present). */
   premium_full_document_text?: string | null;
   premium_server_full_document_text?: string | null;

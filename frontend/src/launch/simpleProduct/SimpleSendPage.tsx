@@ -11,7 +11,10 @@ import {
   isSimpleSendPaywallActive,
   markSimpleFlowSendUnlocked,
 } from "../simpleFlowSendUnlock";
-import { authoritativeProBypassSimpleSendPaywall } from "../../components/agreements/sendHandoffAuthoritativeCorpus";
+import {
+  describePaidProSendModalBranch,
+  type PaidProSendBranchMeta,
+} from "../../components/agreements/sendHandoffAuthoritativeCorpus";
 import {
   clearPostProUnlockCelebrate,
   fetchWorkspaceProEntitlement,
@@ -82,29 +85,29 @@ export function SimpleSendPage(props: { agreementId: string }) {
   );
   const initialDraftSnapshot = sendLanding.primed;
   const streamlinedSimpleFlow = sendLanding.streamlined;
-  const [authoritativeProBypass, setAuthoritativeProBypass] = useState(() =>
-    authoritativeProBypassSimpleSendPaywall(initialDraftSnapshot),
+  const [paidProSendBranch, setPaidProSendBranch] = useState<PaidProSendBranchMeta>(() =>
+    describePaidProSendModalBranch(initialDraftSnapshot),
   );
   /** Re-evaluate `canAccessSimpleSendActions` after session unlock from authoritative Pro load. */
   const [sendUnlockTick, setSendUnlockTick] = useState(0);
-  const authoritativeProBypassRef = useRef(authoritativeProBypass);
-  authoritativeProBypassRef.current = authoritativeProBypass;
+  const authoritativeProBypassRef = useRef(paidProSendBranch.bypass);
+  authoritativeProBypassRef.current = paidProSendBranch.bypass;
   const premiumSendUnlocked = useMemo(() => {
     void sendUnlockTick;
     return canAccessSimpleSendActions(agreementId) || workspaceProEntitled;
   }, [agreementId, workspaceProEntitled, sendUnlockTick]);
 
   useEffect(() => {
-    setAuthoritativeProBypass(authoritativeProBypassSimpleSendPaywall(initialDraftSnapshot));
+    setPaidProSendBranch(describePaidProSendModalBranch(initialDraftSnapshot));
   }, [initialDraftSnapshot]);
 
   useEffect(() => {
-    if (!authoritativeProBypass) return;
+    if (!paidProSendBranch.bypass) return;
     if (!isSimpleSendPaywallActive()) return;
     if (canAccessSimpleSendActions(agreementId)) return;
     markSimpleFlowSendUnlocked(agreementId);
     setSendUnlockTick((n) => n + 1);
-  }, [authoritativeProBypass, agreementId]);
+  }, [paidProSendBranch.bypass, agreementId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,7 +302,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
             setSimpleFlowPhase("review");
           }}
           onRequestSendUnlock={() => {
-            if (workspaceProEntitled || authoritativeProBypass) {
+            if (workspaceProEntitled || paidProSendBranch.bypass) {
               markSimpleFlowSendUnlocked(agreementId);
               setSendUnlockTick((n) => n + 1);
               return;
@@ -312,16 +315,18 @@ export function SimpleSendPage(props: { agreementId: string }) {
             navigate(`/app/ready/${encodeURIComponent(agreementId)}`);
           }}
           onBackToNew={() => navigate("/app/create")}
-          onAuthoritativeProBypassChange={setAuthoritativeProBypass}
+          onPaidProSendBranchMeta={setPaidProSendBranch}
           onSimpleFlowContinue={() => {
             if (simpleFlowPhase === "review") {
               logProductEvent("send_clicked", { agreementId, phase: "review" });
               const blockPaywall =
-                !workspaceProEntitled && isSimpleSendPaywallActive() && !authoritativeProBypass;
+                !workspaceProEntitled && isSimpleSendPaywallActive() && !paidProSendBranch.bypass;
               if (import.meta.env.DEV) {
                 console.info("[paid-pro-send-modal-branch]", {
-                  authoritativePro: Boolean(workspaceProEntitled || authoritativeProBypass),
-                  modal: blockPaywall ? "upgrade_paywall" : "none",
+                  modal: blockPaywall ? "conversion" : "none",
+                  reason: paidProSendBranch.reason,
+                  premium_render_source: paidProSendBranch.premium_render_source,
+                  authoritativeLen: paidProSendBranch.authoritativeLen,
                 });
               }
               if (blockPaywall) {

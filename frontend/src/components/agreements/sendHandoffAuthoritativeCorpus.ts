@@ -20,6 +20,7 @@ export type SendHandoffCorpusPick = {
 type CorpusDraftLike = Partial<
   Pick<
     AgreementDraft,
+    | "premium_render_source"
     | "purpose"
     | "premium_full_document_text"
     | "premium_server_full_document_text"
@@ -28,6 +29,14 @@ type CorpusDraftLike = Partial<
     | "rendered_document_text"
   >
 >;
+
+/** DEV / routing: explains paid-Pro send modal bypass for `/app/send`. */
+export type PaidProSendBranchMeta = {
+  bypass: boolean;
+  premium_render_source: string | null;
+  authoritativeLen: number;
+  reason: string;
+};
 
 /** Prefer longest authoritative full-text field for `/app/send` and persist handoff. */
 /**
@@ -49,20 +58,40 @@ export function shouldMinimalProSendRecipientChrome(args: {
 }
 
 /**
- * `/app/send` and related flows: skip subscription upgrade modal when paid Pro body is already authoritative.
- * Reads optional `premium_render_source` if present on hydrated draft JSON (not required on TS type).
+ * `/app/send`: structured bypass decision + DEV telemetry for SendConversionModal routing.
  */
-export function authoritativeProBypassSimpleSendPaywall(draft: CorpusDraftLike | null | undefined): boolean {
-  const rs = String(
-    (draft as { premium_render_source?: string | null } | null | undefined)?.premium_render_source ?? "",
-  ).trim();
+export function describePaidProSendModalBranch(draft: CorpusDraftLike | null | undefined): PaidProSendBranchMeta {
+  const rs = String(draft?.premium_render_source ?? "").trim();
   const pick = pickAuthoritativePlainForSendHandoff(draft);
   const plain = (pick?.text ?? "").trim();
-  return shouldMinimalProSendRecipientChrome({
+  const bypass = shouldMinimalProSendRecipientChrome({
     premiumRenderSourceResolved: rs || undefined,
     authoritativePick: pick,
     readonlyPlainText: plain,
   });
+  let reason: string;
+  if (bypass) {
+    if (rs === "server_full_document_text") reason = "server_render_source";
+    else if (pick && pick.field !== "purpose") reason = "corpus_authoritative";
+    else reason = "authoritative_edge";
+  } else if (pick?.field === "purpose" && plain.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
+    reason = "purpose_only_long";
+  } else {
+    reason = "thin_or_preview";
+  }
+  return {
+    bypass,
+    premium_render_source: rs || null,
+    authoritativeLen: plain.length,
+    reason,
+  };
+}
+
+/**
+ * `/app/send` and related flows: skip subscription upgrade modal when paid Pro body is already authoritative.
+ */
+export function authoritativeProBypassSimpleSendPaywall(draft: CorpusDraftLike | null | undefined): boolean {
+  return describePaidProSendModalBranch(draft).bypass;
 }
 
 export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | null | undefined): SendHandoffCorpusPick | null {

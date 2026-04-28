@@ -151,6 +151,10 @@ export function normalizeAgreementDraftFromApi(
       : [],
     payment_request,
     payment_required: Boolean(r.payment_required),
+    premium_render_source:
+      r.premium_render_source == null || r.premium_render_source === ""
+        ? null
+        : String(r.premium_render_source),
     premium_full_document_text:
       r.premium_full_document_text == null || r.premium_full_document_text === ""
         ? null
