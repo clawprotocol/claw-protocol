@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+  authoritativeProBypassSimpleSendPaywall,
   longestPlainForAgreementPersist,
   pickAuthoritativePlainForSendHandoff,
   shouldMinimalProSendRecipientChrome,
@@ -173,5 +174,30 @@ describe("sendHandoffAuthoritativeCorpus", () => {
       readonlyPlainText: corpus,
     });
     expect(minimal).toBe(true);
+  });
+
+  it("authoritativeProBypassSimpleSendPaywall: server_full_document_text source bypasses paywall", () => {
+    const d = {
+      premium_render_source: "server_full_document_text",
+      purpose: "short",
+    } as unknown as AgreementDraft;
+    expect(authoritativeProBypassSimpleSendPaywall(d)).toBe(true);
+  });
+
+  it("authoritativeProBypassSimpleSendPaywall: purpose-only starter does not bypass", () => {
+    const purposeLong = `p${"y".repeat(SEND_HANDOFF_AUTHORITATIVE_MIN_LEN)}`;
+    const d = {
+      purpose: purposeLong,
+    } as unknown as AgreementDraft;
+    expect(authoritativeProBypassSimpleSendPaywall(d)).toBe(false);
+  });
+
+  it("authoritativeProBypassSimpleSendPaywall: premium corpus >=500 bypasses", () => {
+    const corpus = "z".repeat(600);
+    const d = {
+      premium_server_full_document_text: corpus,
+      purpose: "stub",
+    } as unknown as AgreementDraft;
+    expect(authoritativeProBypassSimpleSendPaywall(d)).toBe(true);
   });
 });

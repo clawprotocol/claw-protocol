@@ -48,6 +48,23 @@ export function shouldMinimalProSendRecipientChrome(args: {
   return true;
 }
 
+/**
+ * `/app/send` and related flows: skip subscription upgrade modal when paid Pro body is already authoritative.
+ * Reads optional `premium_render_source` if present on hydrated draft JSON (not required on TS type).
+ */
+export function authoritativeProBypassSimpleSendPaywall(draft: CorpusDraftLike | null | undefined): boolean {
+  const rs = String(
+    (draft as { premium_render_source?: string | null } | null | undefined)?.premium_render_source ?? "",
+  ).trim();
+  const pick = pickAuthoritativePlainForSendHandoff(draft);
+  const plain = (pick?.text ?? "").trim();
+  return shouldMinimalProSendRecipientChrome({
+    premiumRenderSourceResolved: rs || undefined,
+    authoritativePick: pick,
+    readonlyPlainText: plain,
+  });
+}
+
 export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | null | undefined): SendHandoffCorpusPick | null {
   if (!draft) return null;
   const candidates: [SendHandoffCorpusPick["field"], string][] = [

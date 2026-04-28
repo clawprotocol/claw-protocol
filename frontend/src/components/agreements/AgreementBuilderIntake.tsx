@@ -1498,6 +1498,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumGapOneField, setPremiumGapOneField] = useState("");
   /** Background missing-facts (non-blocking); shown as optional post-Pro tips. */
   const [postCheckoutAdvisoryGaps, setPostCheckoutAdvisoryGaps] = useState<string[]>([]);
+  /** Optional instructions under post-checkout suggestions → premium-refine (authoritative Pro base). */
+  const [proSuggestionsRefineDraft, setProSuggestionsRefineDraft] = useState("");
   const runPremiumModelPassRef = useRef<
     | ((
         args: { intakeText: string; userGapAnswers: string | null; gapResolverSkippedWithDefaults: boolean },
@@ -5152,10 +5154,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     emitPaidFunnelEvent,
   ]);
 
-  const runPersistedRefineFromStepBuffer = React.useCallback(async (): Promise<boolean> => {
+  const runPersistedRefineFromStepBuffer = React.useCallback(async (instructionOverride?: string | null): Promise<boolean> => {
     if (isFreeStarterReviewSurfaceRef.current) return false;
     if (!premiumPaidDocumentSurfaceRef.current) return false;
-    const instruction = (intakeStepBufferRef.current || "").trim();
+    const instruction = (
+      instructionOverride !== undefined && instructionOverride !== null
+        ? instructionOverride
+        : intakeStepBufferRef.current || ""
+    ).trim();
     if (!instruction) return false;
     const prior = draft;
     if (!prior) {
@@ -7917,6 +7923,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     canProceedWithPaidProDocument,
   ]);
   proRefineCurrentDocumentTextForProPanelsRef.current = proRefineCurrentDocumentTextForProPanels;
+
+  const handleProRefineFromSuggestions = React.useCallback(async () => {
+    const instruction = proSuggestionsRefineDraft.trim();
+    if (!instruction) return;
+    const baseLen =
+      proRefineCurrentDocumentTextForProPanels.trim().length ||
+      (premiumPaidReadonlyPick.plainText || "").trim().length;
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[pro-refine-from-suggestions]", {
+        baseLen,
+        instructionLen: instruction.length,
+        source: "post_checkout_suggestions",
+      });
+    }
+    const ok = await runPersistedRefineFromStepBuffer(instruction);
+    if (ok) setProSuggestionsRefineDraft("");
+  }, [
+    proSuggestionsRefineDraft,
+    runPersistedRefineFromStepBuffer,
+    proRefineCurrentDocumentTextForProPanels,
+    premiumPaidReadonlyPick.plainText,
+  ]);
 
   const showProLawdogRefineAndFinalize = useMemo(
     () => showFinalizeYourAgreement && canProceedWithPaidProDocument && !proUpgradeUseStarterView,
@@ -11674,8 +11703,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 Optional — ideas for stronger detail
                               </p>
                               <p className="mt-1.5 text-xs leading-relaxed text-slate-500 sm:text-sm">
-                                This did not slow down your Pro document. You can work these into Refine, or keep what
-                                you have. Nothing is sent until you confirm.
+                                These are optional improvements. Add instructions below, or continue with the current Pro
+                                agreement.
                               </p>
                               <ul className="mt-2 list-outside list-disc pl-4 text-sm leading-relaxed text-slate-300">
                                 {postCheckoutAdvisoryGaps.map((q) => (
@@ -11684,13 +11713,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   </li>
                                 ))}
                               </ul>
-                              <button
-                                type="button"
-                                className="mt-3 text-left text-xs font-medium text-slate-500 underline decoration-slate-600/80 hover:text-slate-400"
-                                onClick={() => setPostCheckoutAdvisoryGaps([])}
-                              >
-                                Dismiss
-                              </button>
+                              <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+                                Refine this Pro agreement (optional)
+                                <textarea
+                                  value={proSuggestionsRefineDraft}
+                                  onChange={(e) => setProSuggestionsRefineDraft(e.target.value)}
+                                  rows={3}
+                                  placeholder="Tell LawDog what to add or change — e.g., define final delivery, add acceptance window, clarify revision deadline..."
+                                  className="mt-1.5 w-full resize-y rounded-lg border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm leading-relaxed text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-500/55"
+                                  disabled={loading}
+                                />
+                              </label>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded-lg bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                                  disabled={
+                                    loading ||
+                                    !proSuggestionsRefineDraft.trim() ||
+                                    !canProceedWithPaidProDocument
+                                  }
+                                  onClick={() => void handleProRefineFromSuggestions()}
+                                >
+                                  Update Pro agreement
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-left text-xs font-medium text-slate-500 underline decoration-slate-600/80 hover:text-slate-400"
+                                  onClick={() => setPostCheckoutAdvisoryGaps([])}
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
+                              <p className="mt-2 text-[11px] leading-snug text-slate-500">
+                                Nothing is sent automatically. Updates use your current Pro agreement as the base.
+                              </p>
                             </div>
                           ) : null}
                           <div className="flex flex-wrap items-center gap-2">
@@ -12898,7 +12955,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             : "text-sm font-semibold text-emerald-50/95 sm:text-[0.9375rem]"
                         }
                       >
-                        Ready for final send
+                        {minimalProSendRecipientChrome ? "Ready to create links" : "Ready for final send"}
                       </p>
                       <p
                         className={
@@ -12907,7 +12964,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             : "mt-0.5 text-[11px] leading-snug text-emerald-100/75 sm:text-xs"
                         }
                       >
-                        Add recipients next, then confirm before anything is sent.
+                        {minimalProSendRecipientChrome
+                          ? "Add recipients, then create a secure link. Nothing is emailed automatically."
+                          : "Add recipients next, then confirm before anything is sent."}
                       </p>
                     </div>
                   ) : null}
