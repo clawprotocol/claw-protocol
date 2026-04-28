@@ -67,6 +67,8 @@ import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
 import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
 import {
+  PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_BODY,
+  PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_TITLE,
   PRO_UPGRADE_WAIT_MODAL_BODY,
   PRO_UPGRADE_WAIT_MODAL_TITLE,
   PRO_UPGRADE_WAIT_REASSURANCE,
@@ -318,6 +320,10 @@ import {
   getOrInitSessionAgreementGenerationId,
   shortIntakeFingerprint,
 } from "../../lib/agreementGenerationId";
+import {
+  PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+  PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
+} from "../../lib/postCheckoutModalTimeout";
 import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraftApi";
 import {
   buildPremiumDetailsGateCopy,
@@ -1401,8 +1407,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const fullDraftUpgradeBannerTimerRef = useRef(0);
   const optionalFullUpgradeInFlightRef = useRef(false);
   const premiumCheckoutRunGenRef = useRef(0);
-  /** Set when the 30s visual timeout fires; request may still be in flight (do not invalidate run id). */
-  const premiumPostCheckoutModalSoftTimeoutFiredRef = useRef(false);
+  /** True while ~30s soft progress copy is shown (does not fail open or touch recovery flags). */
+  const premiumModalExtendedWaitActiveRef = useRef(false);
+  /** True after hard modal failopen (120s ceiling or equivalent); late authoritative success still wins. */
+  const premiumPostCheckoutModalHardFailopenRef = useRef(false);
+  /** True while `ensurePremiumCompletion` is awaited — 30s handler defers failopen only via deferred log + extended copy. */
+  const premiumAuthoritativeRequestInFlightRef = useRef(false);
   /** User hit escape on the post-checkout wait — do not apply a late `ensurePremiumCompletion` result. */
   const premiumPostCheckoutUserDismissedRef = useRef(false);
   const draftSnapshotRef = useRef<ParsedDraftShape | null>(null);
@@ -1438,6 +1448,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumPostCheckoutPhase, setPremiumPostCheckoutPhase] = useState<null | "awaiting_gaps" | "processing">(
     () => readInitialPremiumReturnFromWindow().phase,
   );
+  /** UI-only: longer-wait copy after PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS without closing the modal. */
+  const [premiumCheckoutModalExtendedWait, setPremiumCheckoutModalExtendedWait] = useState(false);
   const [premiumGapQuestions, setPremiumGapQuestions] = useState<string[]>([]);
   const [premiumGapOneField, setPremiumGapOneField] = useState("");
   /** Background missing-facts (non-blocking); shown as optional post-Pro tips. */
@@ -3391,13 +3403,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const applyAuthoritativePremiumSuccessToVisibleSurface = (opts: {
         bodyLen: number;
         pipelineSource: string;
-        softTimeoutHadFired: boolean;
+        extendedWaitWasActive: boolean;
+        hardFailopenWasActive: boolean;
       }) => {
         if (!isAuthoritativePremiumPipelineRenderSource(opts.pipelineSource) || opts.bodyLen < 500) return;
         logPremiumAuthoritativeVisibleSurface("before", {
           bodyLen: opts.bodyLen,
           pipelineSource: opts.pipelineSource,
-          softTimeoutHadFired: opts.softTimeoutHadFired,
+          extendedWaitWasActive: opts.extendedWaitWasActive,
+          hardFailopenWasActive: opts.hardFailopenWasActive,
           previousPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
           previousRecoveryFlags: {
             proFullDraftQualityRetry: proFullDraftQualityRetryRef.current,
@@ -3412,21 +3426,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setProFullDraftCustomGateMessage(null);
         setProUpgradeUseStarterView(false);
         setProFullDraftQualityRetry(false);
-        setPremiumPostCheckoutPhase(null);
         setPremiumReviewDocEditorOpen(false);
         setCreateFlowPhase("draft_ready_for_review");
         setDisplayPhase("intake");
         setCreateUiStage(CreateUiStage.DRAFT);
         setMobileWorkspacePane("preview");
         setPreviewPaneRevealed(true);
-        if (opts.softTimeoutHadFired) {
+        if (opts.hardFailopenWasActive) {
           logPremiumFailopenOverriddenBySuccess({ bodyLen: opts.bodyLen, pipelineSource: opts.pipelineSource });
         }
         bumpPremiumSurfaceGateTick();
         logPremiumAuthoritativeVisibleSurface("after", {
           bodyLen: opts.bodyLen,
           pipelineSource: opts.pipelineSource,
-          softTimeoutHadFired: opts.softTimeoutHadFired,
+          extendedWaitWasActive: opts.extendedWaitWasActive,
+          hardFailopenWasActive: opts.hardFailopenWasActive,
           previousRecoveryFlags: {
             proFullDraftQualityRetry: false,
             proUpgradeUseStarterView: false,
@@ -3442,7 +3456,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       };
 
       const applySuccess = (result: PremiumCompletionResult) => {
-        const softAtApplyStart = premiumPostCheckoutModalSoftTimeoutFiredRef.current;
+        const extendedWaitAtApplyStart = premiumModalExtendedWaitActiveRef.current;
+        const hardFailopenAtApplyStart = premiumPostCheckoutModalHardFailopenRef.current;
         const runIdForLateApply = getOrInitSessionAgreementGenerationId();
         const logPremiumLateApply = (tag: string, fields: Record<string, unknown>) => {
           if (import.meta.env.DEV) {
@@ -3835,11 +3850,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           generationOutcome: result.premiumRenderSource,
           degraded: Boolean(result.serverGenerationDegraded),
         });
-        if (import.meta.env.DEV && softAtApplyStart) {
+        if (import.meta.env.DEV && (extendedWaitAtApplyStart || hardFailopenAtApplyStart)) {
           logPremiumLateApply("applied", {
             runId: runIdForLateApply,
             currentRunId: getOrInitSessionAgreementGenerationId(),
-            modalSoftTimeoutHadFired: true,
+            modalExtendedWaitActive: extendedWaitAtApplyStart,
+            modalHardFailopenWasActive: hardFailopenAtApplyStart,
             snapshotWritten: true,
             acceptedDocLen: snapshotPlain.length,
           });
@@ -3914,8 +3930,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           applyAuthoritativePremiumSuccessToVisibleSurface({
             bodyLen: snapshotPlain.length,
             pipelineSource: result.premiumRenderSource,
-            softTimeoutHadFired: premiumPostCheckoutModalSoftTimeoutFiredRef.current,
+            extendedWaitWasActive: extendedWaitAtApplyStart,
+            hardFailopenWasActive: hardFailopenAtApplyStart,
           });
+          if (extendedWaitAtApplyStart && !hardFailopenAtApplyStart) {
+            console.info("[premium-authoritative-visible-surface] applied_after_soft_timeout", {
+              bodyLen: snapshotPlain.length,
+              pipelineSource: result.premiumRenderSource,
+            });
+          }
           const icHard = resolveAgreementIntentContract(mergedIntake);
           const vHard = validatePaidProOutput({
             text: snapshotPlain,
@@ -4045,8 +4068,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             });
         });
         } finally {
-          if (softAtApplyStart) {
-            premiumPostCheckoutModalSoftTimeoutFiredRef.current = false;
+          if (extendedWaitAtApplyStart) {
+            premiumModalExtendedWaitActiveRef.current = false;
+            setPremiumCheckoutModalExtendedWait(false);
+          }
+          if (hardFailopenAtApplyStart) {
+            premiumPostCheckoutModalHardFailopenRef.current = false;
           }
         }
       };
@@ -4188,26 +4215,62 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
       };
 
-      let absoluteTimeoutId = 0;
+      let modalSoftProgressTimerId = 0;
+      let modalHardFailopenTimerId = 0;
+      const clearPostCheckoutModalTimers = () => {
+        if (modalSoftProgressTimerId) {
+          window.clearTimeout(modalSoftProgressTimerId);
+          modalSoftProgressTimerId = 0;
+        }
+        if (modalHardFailopenTimerId) {
+          window.clearTimeout(modalHardFailopenTimerId);
+          modalHardFailopenTimerId = 0;
+        }
+      };
       try {
         const guidedFlowId = resolveGuidedFlowId(mergedIntake, buildLiveDraftPreview(mergedIntake));
-        let timedOut = false;
         const runIsCurrent = () => !cancelled && runGen === premiumCheckoutRunGenRef.current;
-        const failOpenFromTimeout = () => {
+        const onSoftProgressTimeout = () => {
           if (!runIsCurrent()) return;
-          timedOut = true;
-          /** Do not bump `premiumCheckoutRunGenRef` — the in-flight `ensurePremiumCompletion` may still
-           * resolve; we need `runIsCurrent()` to stay true so a late result can call `applySuccess`
-           * and clear this soft failopen state. */
-          premiumPostCheckoutModalSoftTimeoutFiredRef.current = true;
-          console.warn("[premium-modal-timeout]", { timeoutMs: 30_000, ts: new Date().toISOString() });
-          console.info("[premium-modal-failopen]", { reason: "absolute_timeout", source: "cached_or_prior_draft" });
+          premiumModalExtendedWaitActiveRef.current = true;
+          setPremiumCheckoutModalExtendedWait(true);
+          if (premiumAuthoritativeRequestInFlightRef.current) {
+            console.info("[premium-modal-timeout-deferred]", { reason: "authoritative_request_in_flight" });
+          }
+          console.info("[premium-modal-soft-progress]", {
+            timeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
+            ts: new Date().toISOString(),
+          });
+        };
+        const onHardFailopenTimeout = () => {
+          if (!runIsCurrent()) return;
+          const snap = readPremiumCompletionSnapshot();
+          const hasAuthoritative =
+            Boolean(snap?.premiumAccepted) &&
+            isAuthoritativePremiumPipelineRenderSource(String(snap?.premiumPipelineRenderSource || "")) &&
+            (snap?.premiumWinningBodyText || "").trim().length >= 500;
+          if (hasAuthoritative) return;
+          /** Late `ensurePremiumCompletion` may still resolve; keep run current so `applySuccess` can win. */
+          premiumPostCheckoutModalHardFailopenRef.current = true;
+          console.warn("[premium-modal-timeout]", {
+            timeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+            phase: "hard_ceiling",
+            ts: new Date().toISOString(),
+          });
+          console.info("[premium-modal-failopen]", {
+            reason: "hard_ceiling_timeout",
+            source: "cached_or_prior_draft",
+          });
           if (import.meta.env.MODE !== "test") {
             // eslint-disable-next-line no-console
-            console.info("[CLAW] premium hydration still pending after modal wait", { reason: "modal_soft_timeout_failopen" });
+            console.info("[CLAW] premium hydration still pending after modal wait", { reason: "modal_hard_ceiling_failopen" });
           }
+          premiumModalExtendedWaitActiveRef.current = false;
+          setPremiumCheckoutModalExtendedWait(false);
           setPremiumPipelineUserMessage(null);
-          setHardError("Premium finalization is taking longer than expected — showing your best available draft. We will still load the full Pro agreement when the server response arrives.");
+          setHardError(
+            "Premium finalization is taking longer than expected — showing your best available draft. We will still load the full Pro agreement when the server response arrives.",
+          );
           runPremiumModelPassRef.current = null;
           applyFailureFallback();
           setPremiumPostCheckoutPhase(null);
@@ -4240,17 +4303,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
           setPremiumGapQuestions([]);
           premiumPostCheckoutUserDismissedRef.current = false;
-          premiumPostCheckoutModalSoftTimeoutFiredRef.current = false;
+          premiumModalExtendedWaitActiveRef.current = false;
+          setPremiumCheckoutModalExtendedWait(false);
+          premiumPostCheckoutModalHardFailopenRef.current = false;
           const sessionGenForPass = bumpAgreementGenerationId();
           const sessionFpForPass = shortIntakeFingerprint(args.intakeText);
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
           let lastAttemptForLog = 0;
-          absoluteTimeoutId = window.setTimeout(failOpenFromTimeout, 30_000);
+          modalSoftProgressTimerId = window.setTimeout(onSoftProgressTimeout, PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS);
+          modalHardFailopenTimerId = window.setTimeout(onHardFailopenTimeout, PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS);
           premiumModalEscapeHandlerRef.current = () => {
             if (!runIsCurrent()) return;
-            if (absoluteTimeoutId) {
-              window.clearTimeout(absoluteTimeoutId);
-            }
+            clearPostCheckoutModalTimers();
+            premiumModalExtendedWaitActiveRef.current = false;
+            setPremiumCheckoutModalExtendedWait(false);
             premiumPostCheckoutUserDismissedRef.current = true;
             console.info("[premium-modal-failopen]", { reason: "user_escape", source: "cached_or_prior_draft" });
             setPremiumPipelineUserMessage(null);
@@ -4284,25 +4350,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 rawIntakeBase,
               );
               try {
-                result = await withTimeout(
-                  ensurePremiumCompletion({
-                    intakeText: args.intakeText,
-                    originalUserIntakeRawForMerge: originalMergeHint,
-                    structuredDraft: prior!,
-                    agreementFamily: prior!.agreement_family ?? detectAgreementFamily(args.intakeText),
-                    guidedFlowId,
-                    simpleProductFlow,
-                    partyRoleLabels: intakePartyRoleLabels,
-                    parseDraft: (raw) => parseDraft(raw, { aiModelClass: "premium" }),
-                    userGapAnswers: args.userGapAnswers,
-                    gapResolverSkippedWithDefaults: args.gapResolverSkippedWithDefaults,
-                    agreementGenerationId: sessionGenForPass,
-                    premiumRequestIntakeFingerprint: sessionFpForPass,
-                    isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
-                  }),
-                  premiumCompletionAttemptTimeoutMs,
-                  "premium_completion_attempt",
-                );
+                premiumAuthoritativeRequestInFlightRef.current = true;
+                try {
+                  result = await withTimeout(
+                    ensurePremiumCompletion({
+                      intakeText: args.intakeText,
+                      originalUserIntakeRawForMerge: originalMergeHint,
+                      structuredDraft: prior!,
+                      agreementFamily: prior!.agreement_family ?? detectAgreementFamily(args.intakeText),
+                      guidedFlowId,
+                      simpleProductFlow,
+                      partyRoleLabels: intakePartyRoleLabels,
+                      parseDraft: (raw) => parseDraft(raw, { aiModelClass: "premium" }),
+                      userGapAnswers: args.userGapAnswers,
+                      gapResolverSkippedWithDefaults: args.gapResolverSkippedWithDefaults,
+                      agreementGenerationId: sessionGenForPass,
+                      premiumRequestIntakeFingerprint: sessionFpForPass,
+                      isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
+                    }),
+                    premiumCompletionAttemptTimeoutMs,
+                    "premium_completion_attempt",
+                  );
+                } finally {
+                  premiumAuthoritativeRequestInFlightRef.current = false;
+                }
                 console.info("[premium-flow] premium_completion_timeout_boundary", {
                   attempt,
                   started_at: new Date(premiumCompletionAttemptStartedAt).toISOString(),
@@ -4348,10 +4419,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               endPremiumEnsureForIntake(intakeFpGuard);
             }
           }
-          if (absoluteTimeoutId) {
-            window.clearTimeout(absoluteTimeoutId);
-          }
-          absoluteTimeoutId = 0;
+          clearPostCheckoutModalTimers();
           premiumModalEscapeHandlerRef.current = null;
 
           if (!runIsCurrent()) {
@@ -4360,7 +4428,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               console.info("[premium-timeout-race]", {
                 attempt: "post_runModelPass",
                 requestStillPending: false,
-                timeoutMs: 30_000,
+                softTimeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
+                hardTimeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
                 hasAcceptedLateResult: false,
                 currentRecoveryState: "stale_unmounted",
                 willHydrateLateSuccess: false,
@@ -4380,7 +4449,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               console.info("[premium-timeout-race]", {
                 attempt: lastAttemptForLog,
                 requestStillPending: false,
-                timeoutMs: 30_000,
+                softTimeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
+                hardTimeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
                 hasAcceptedLateResult: Boolean(result),
                 currentRecoveryState: lateApply.reason,
                 willHydrateLateSuccess: false,
@@ -4390,7 +4460,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               console.info("[premium-late-apply] blocked", {
                 runId: sessionGenForPass,
                 currentRunId: getOrInitSessionAgreementGenerationId(),
-                modalSoftTimeoutHadFired: premiumPostCheckoutModalSoftTimeoutFiredRef.current,
+                modalExtendedWaitActive: premiumModalExtendedWaitActiveRef.current,
+                modalHardFailopenWasActive: premiumPostCheckoutModalHardFailopenRef.current,
                 willApply: false,
                 blockedReason: lateApply.reason,
                 hasAcceptedResult: Boolean(result),
@@ -4409,7 +4480,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               console.info("[premium-timeout-race]", {
                 attempt: "post_min_dwell",
                 requestStillPending: false,
-                timeoutMs: 30_000,
+                softTimeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
+                hardTimeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
                 hasAcceptedLateResult: false,
                 currentRecoveryState: "stale_after_dwell",
                 willHydrateLateSuccess: false,
@@ -4424,18 +4496,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               console.info("[premium-timeout-race]", {
                 attempt: lastAttemptForLog,
                 requestStillPending: false,
-                timeoutMs: 30_000,
+                softTimeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
+                hardTimeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
                 hasAcceptedLateResult: true,
-                currentRecoveryState: timedOut || premiumPostCheckoutModalSoftTimeoutFiredRef.current ? "soft_timeout_waited" : "in_time",
+                currentRecoveryState: premiumPostCheckoutModalHardFailopenRef.current
+                  ? "hard_failopen_waited"
+                  : premiumModalExtendedWaitActiveRef.current
+                    ? "extended_wait_only"
+                    : "in_time",
                 willHydrateLateSuccess: true,
-                modalSoftTimeoutHadFired: timedOut || premiumPostCheckoutModalSoftTimeoutFiredRef.current,
+                modalExtendedWaitActive: premiumModalExtendedWaitActiveRef.current,
+                modalHardFailopenWasActive: premiumPostCheckoutModalHardFailopenRef.current,
               });
-              if (timedOut || premiumPostCheckoutModalSoftTimeoutFiredRef.current) {
+              if (premiumPostCheckoutModalHardFailopenRef.current || premiumModalExtendedWaitActiveRef.current) {
                 // eslint-disable-next-line no-console
                 console.info("[premium-late-apply] accepted_after_timeout", {
                   runId: sessionGenForPass,
                   currentRunId: getOrInitSessionAgreementGenerationId(),
-                  modalSoftTimeoutHadFired: true,
+                  modalExtendedWaitActive: premiumModalExtendedWaitActiveRef.current,
+                  modalHardFailopenWasActive: premiumPostCheckoutModalHardFailopenRef.current,
                   willApply: true,
                   blockedReason: null,
                   acceptedDocLen: (result.winningPremiumBodyText || "").trim().length,
@@ -4472,11 +4551,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               console.info("[premium-timeout-race]", {
                 attempt: lastAttemptForLog,
                 requestStillPending: false,
-                timeoutMs: 30_000,
+                softTimeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
+                hardTimeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
                 hasAcceptedLateResult: false,
                 currentRecoveryState: "model_path_exhausted",
                 willHydrateLateSuccess: false,
-                modalSoftTimeoutHadFired: premiumPostCheckoutModalSoftTimeoutFiredRef.current,
+                modalExtendedWaitActive: premiumModalExtendedWaitActiveRef.current,
+                modalHardFailopenWasActive: premiumPostCheckoutModalHardFailopenRef.current,
               });
             }
             if (import.meta.env.MODE !== "test") {
@@ -4548,9 +4629,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         await runModelPass({ ...defaultPostCheckoutRunModelPassInput(mergedIntake) });
       } catch (e: unknown) {
-        if (absoluteTimeoutId) {
-          window.clearTimeout(absoluteTimeoutId);
-        }
+        clearPostCheckoutModalTimers();
         premiumModalEscapeHandlerRef.current = null;
         if (import.meta.env.MODE !== "test") {
           // eslint-disable-next-line no-console
@@ -10510,10 +10589,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         id="claw-premium-processing-title"
                         className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
                       >
-                        {CLAW_PREMIUM_PREPARING_AGREEMENT_COPY}
+                        {premiumCheckoutModalExtendedWait
+                          ? PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_TITLE
+                          : CLAW_PREMIUM_PREPARING_AGREEMENT_COPY}
                       </h2>
                       <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
-                        {PRO_UPGRADE_WAIT_MODAL_BODY}
+                        {premiumCheckoutModalExtendedWait
+                          ? PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_BODY
+                          : PRO_UPGRADE_WAIT_MODAL_BODY}
                       </p>
                       <ProUpgradeWaitRotatingText
                         active

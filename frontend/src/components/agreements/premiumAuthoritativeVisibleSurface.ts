@@ -4,7 +4,12 @@ import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourc
 export type PremiumAuthoritativeVisibleSurfaceLog = {
   bodyLen: number;
   pipelineSource: string;
-  softTimeoutHadFired: boolean;
+  /** 30s soft progress (extended modal copy) was showing — not a hard failopen. */
+  extendedWaitWasActive?: boolean;
+  /** Hard modal failopen (e.g. 120s ceiling) had already fired — late success overrides. */
+  hardFailopenWasActive?: boolean;
+  /** @deprecated use extendedWaitWasActive / hardFailopenWasActive */
+  softTimeoutHadFired?: boolean;
   /** Values captured where possible (may be stale if not synced). */
   previousPostCheckoutPhase?: string | null;
   previousRecoveryFlags?: {
