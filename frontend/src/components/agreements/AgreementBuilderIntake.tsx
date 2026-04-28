@@ -109,6 +109,7 @@ import {
   shouldShowPersistedRefineTextareaBox,
   shouldShowStarterProRefineUpsellCard,
 } from "./agreementRefineBelowDocumentPolicy";
+import { isProEntitledForAgreement } from "./proAgreementEntitlement";
 import {
   detectFullDraftUpgradeSignals,
   getFullDraftUpgradeComparisonRows,
@@ -1455,6 +1456,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [modalParty2Role, setModalParty2Role] = useState("");
   const fullDraftUpgradeBannerTimerRef = useRef(0);
   const optionalFullUpgradeInFlightRef = useRef(false);
+  const entitledPremiumRewriteInFlightRef = useRef(false);
   const premiumCheckoutRunGenRef = useRef(0);
   /** True while ~30s soft progress copy is shown (does not fail open or touch recovery flags). */
   const premiumModalExtendedWaitActiveRef = useRef(false);
@@ -3209,6 +3211,151 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     );
     bumpPremiumSurfaceGateTick();
   }
+
+  /**
+   * Already-paid Pro agreement: run POST /premium pipeline without Stripe when user taps “Improve draft” / upgrade CTAs.
+   * Persists snapshot then reuses layout hydration so entitlement fields stay aligned with checkout success path.
+   */
+  const runEntitledPremiumImprovementRewrite = React.useCallback(async () => {
+    if (entitledPremiumRewriteInFlightRef.current) return;
+    entitledPremiumRewriteInFlightRef.current = true;
+    const gateDraft = draftSnapshotRef.current ?? draft ?? readCreateComplexityResume()?.pending ?? null;
+    const raw = resolveRawIntakeForPremiumCheckout(gateDraft);
+    if (!raw?.trim() || !gateDraft) {
+      entitledPremiumRewriteInFlightRef.current = false;
+      return;
+    }
+    console.info("[premium-flow] entitled_rewrite_start", { rawLen: raw.length });
+    setPremiumPostCheckoutPhase("processing");
+    setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
+    setHardError(null);
+    await finalizeIntakeCapture();
+    const mergedIntake = buildPremiumMergedIntakeWithUserNotes(raw, pendingUpgradePromptRef.current.trim());
+    const sessionGenForPass = getOrInitSessionAgreementGenerationId();
+    const guidedFlowId = resolveGuidedFlowId(mergedIntake, buildLiveDraftPreview(mergedIntake));
+    const originalMergeHint = pickLongestPremiumIntakeCorpus(
+      48,
+      readOriginalUserIntakeRaw(),
+      readCreateComplexityResume()?.originalUserIntakeRaw,
+      stripPremiumUserNotesFromMergedIntake(mergedIntake),
+      raw,
+    );
+    try {
+      const result = await ensurePremiumCompletion({
+        intakeText: mergedIntake,
+        originalUserIntakeRawForMerge: originalMergeHint,
+        structuredDraft: gateDraft,
+        agreementFamily: gateDraft.agreement_family ?? detectAgreementFamily(mergedIntake),
+        guidedFlowId,
+        simpleProductFlow,
+        partyRoleLabels: intakePartyRoleLabels,
+        parseDraft: (r) => parseDraft(r, { aiModelClass: "premium" }),
+        userGapAnswers: null,
+        gapResolverSkippedWithDefaults: true,
+        agreementGenerationId: sessionGenForPass,
+        premiumRequestIntakeFingerprint: shortIntakeFingerprint(mergedIntake),
+        isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
+      });
+      if (result.staleIntakeOrGeneration) {
+        setHardError("Your details changed while we were finishing. Try again when ready.");
+        setPremiumPostCheckoutPhase(null);
+        setPremiumPipelineUserMessage(null);
+        return;
+      }
+      if (result.proIntentGateMessage || result.founderDetailsGateMessage) {
+        setProFullDraftCustomGateMessage(result.proIntentGateMessage || result.founderDetailsGateMessage || null);
+        setProFullDraftQualityRetry(true);
+        setPremiumPostCheckoutPhase(null);
+        setPremiumPipelineUserMessage(null);
+        return;
+      }
+      if (!authoritativePremiumPipelineResultForUiApply(result)) {
+        setHardError("We couldn't refresh your Pro draft right now. Try again in a moment.");
+        setPremiumPostCheckoutPhase(null);
+        setPremiumPipelineUserMessage(null);
+        return;
+      }
+      const priorForMerge = draftSnapshotRef.current ?? readCreateComplexityResume()?.pending ?? gateDraft ?? null;
+      const merged = mergePremiumDraftPartiesWithRecipientPriority(
+        result.premiumDraft,
+        priorForMerge,
+        recipient1NameRef.current,
+        recipient2NameRef.current,
+        result.recipientCandidates[0]?.name,
+        result.recipientCandidates[1]?.name,
+        modalParty1NameRef.current,
+        modalParty2NameRef.current,
+      );
+      const winning = (result.winningPremiumBodyText || "").trim();
+      const usePaidAuthoritativeBody =
+        isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) && winning.length >= 500;
+      const resolvedPersist = resolvePremiumRenderSource({
+        draft: merged.draft,
+        intakeText: mergedIntake,
+        premiumWinningCorpusFallback: winning,
+        paidAuthoritativeProBody: usePaidAuthoritativeBody ? winning : null,
+        hydratedAuthoritativeBodyHint: usePaidAuthoritativeBody ? winning : undefined,
+        buildLivePreview: () =>
+          buildAgreementPreviewTextCore(merged.draft, {
+            starterPreview: false,
+            premiumDeliverablePreview: true,
+          }),
+      });
+      if (import.meta.env.DEV) emitPremiumRenderResolveLog(resolvedPersist);
+      const snapshotPlain = resolvedPersist.text.trim();
+      const mergedDraftPersist =
+        usePaidAuthoritativeBody && snapshotPlain.trim().length >= 500
+          ? {
+              ...merged.draft,
+              premium_full_document_text: snapshotPlain,
+              premium_server_full_document_text: snapshotPlain,
+            }
+          : merged.draft;
+      const rc0 = result.recipientCandidates[0] ?? { name: "", email: "", role: "Party" };
+      const rc1 = result.recipientCandidates[1] ?? { name: "", email: "", role: "Party" };
+      const recipientCandidates = [
+        { ...rc0, name: merged.displayName1 },
+        { ...rc1, name: merged.displayName2 },
+      ];
+      persistPremiumCompletionSnapshot({
+        premiumDraft: mergedDraftPersist,
+        premiumParties: result.premiumParties,
+        recipientCandidates,
+        premiumWinningBodyText: snapshotPlain,
+        premiumReadonlyPlainText: snapshotPlain,
+        premiumReview: result.premiumReview ?? null,
+        premiumFinalizeAudit: result.premiumFinalizeAudit ?? null,
+        premiumReviewRoute: result.premiumReviewRoute ?? null,
+        agreementGenerationId: result.agreementGenerationId,
+        intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
+        premiumPipelineRenderSource: result.premiumRenderSource,
+        premiumRenderResolveSource: resolvedPersist.premium_render_source,
+        premiumAccepted: true,
+        serverGenerationDegraded: result.serverGenerationDegraded ?? null,
+      });
+      const hydrated = readPremiumCompletionSnapshot();
+      if (hydrated) {
+        applyHydrationFromPremiumSnapshot(hydrated);
+      }
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+      bumpPremiumSurfaceGateTick();
+      console.info("[premium-flow] entitled_rewrite_complete", {
+        pipelineSource: result.premiumRenderSource,
+        bodyLen: snapshotPlain.length,
+      });
+    } catch (e: unknown) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn("[premium-flow] entitled_rewrite_failed", e);
+      }
+      setHardError("We couldn't refresh your Pro draft right now. Try again in a moment.");
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+    } finally {
+      entitledPremiumRewriteInFlightRef.current = false;
+    }
+  }, [draft, finalizeIntakeCapture, intakePartyRoleLabels, simpleProductFlow, resolveRawIntakeForPremiumCheckout, bumpPremiumSurfaceGateTick]);
 
   useLayoutEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
@@ -4985,8 +5132,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleUpgradeToFullDraft = React.useCallback(async (draftOverride?: ParsedDraftShape | null) => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
-    if (tierAllowsAdvancedFullDraftReveal(tier)) return;
     const gateDraft = draftOverride ?? draft;
+    if (tierAllowsAdvancedFullDraftReveal(tier)) {
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
+    if (
+      isProEntitledForAgreement({
+        tier,
+        draft: gateDraft,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      })
+    ) {
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
     const raw = resolveRawIntakeForPremiumCheckout(gateDraft);
     if (!raw) {
       console.warn("[premium-flow] upgrade_modal_aborted", { reason: "empty_raw_intake" });
@@ -5036,12 +5198,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleProductFlow,
     draft,
     tier,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
     intakePartyRoleLabels,
     alignParsedWithCanonicalType,
     syncUpgradeIntentRefs,
     upgradeContextReasons,
     agreementDocumentText,
     resolveRawIntakeForPremiumCheckout,
+    runEntitledPremiumImprovementRewrite,
   ]);
 
   const runProductionLocalDraftParse = React.useCallback(
@@ -5428,6 +5593,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       console.warn("[premium-flow] checkout_launch_aborted", { reason: "no_pending_draft" });
       return;
     }
+    if (
+      isProEntitledForAgreement({
+        tier,
+        draft: pending,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      })
+    ) {
+      console.info("[premium-flow] checkout_bypass_already_pro", { surface: "advanced_full_draft_stripe" });
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
     const resumeKind: CreateComplexityResumeKind =
       complexityPendingParsedRef.current != null ? "complexity_gate" : "optional_full_upgrade";
     scrollToPremiumPosAnchor();
@@ -5454,7 +5632,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       )}&returnTo=${returnTo}`,
     );
   },
-  [navigate, draft, upgradeContextReasons, agreementDocumentText, resolveRawIntakeForPremiumCheckout, persistPremiumRecipientHandoffFromDraftAndUi, emitPaidFunnelEvent],
+  [
+    navigate,
+    draft,
+    tier,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
+    upgradeContextReasons,
+    agreementDocumentText,
+    resolveRawIntakeForPremiumCheckout,
+    persistPremiumRecipientHandoffFromDraftAndUi,
+    emitPaidFunnelEvent,
+    runEntitledPremiumImprovementRewrite,
+  ],
 );
 
   const beginAdvancedFullDraftBilling = React.useCallback(() => {
@@ -5463,6 +5653,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       complexityPendingParsedRef.current ?? draft ?? (resumeSnap?.pending ?? null);
     const raw = resolveRawIntakeForPremiumCheckout(pending);
     if (!raw || !pending) return;
+    if (
+      isProEntitledForAgreement({
+        tier,
+        draft: pending,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      })
+    ) {
+      console.info("[premium-flow] billing_bypass_already_pro");
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
     const resumeKind: CreateComplexityResumeKind =
       complexityPendingParsedRef.current != null ? "complexity_gate" : "optional_full_upgrade";
     stashCreateComplexityResume({
@@ -5477,7 +5680,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     setAdvancedFullDraftPaywallOpen(false);
     navigate(`/app/billing?returnTo=${encodeURIComponent("/app/create")}`);
-  }, [navigate, draft, upgradeContextReasons, agreementDocumentText, resolveRawIntakeForPremiumCheckout]);
+  }, [
+    navigate,
+    draft,
+    tier,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
+    upgradeContextReasons,
+    agreementDocumentText,
+    resolveRawIntakeForPremiumCheckout,
+    runEntitledPremiumImprovementRewrite,
+  ]);
 
   const beginPremiumOriginalWordingCheckout = React.useCallback((draftOverride?: ParsedDraftShape | null) => {
     console.info("[premium-flow] button_click", { button: "upgrade_apply_my_wording" });
@@ -5503,13 +5716,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       console.warn("[premium-flow] checkout_launch_aborted", { reason: "no_pending_draft" });
       return;
     }
+    pendingUpgradePromptRef.current = wording;
+    setPendingUpgradePrompt(wording);
+    if (
+      isProEntitledForAgreement({
+        tier,
+        draft: pending,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      })
+    ) {
+      console.info("[premium-flow] checkout_bypass_already_pro", { surface: "exact_wording_stripe" });
+      setUpgradeIntentDetected(false);
+      syncUpgradeIntentRefs(false);
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
     logProductEvent("upgrade_clicked", {
       surface: "agreement_original_wording_premium",
       intent: "exact_wording_checkout",
     });
     trackAgreementFunnelEvent("premium_upgrade_clicked", { surface: "agreement_original_wording_premium" }, { planTier: String(tier) });
-    pendingUpgradePromptRef.current = wording;
-    setPendingUpgradePrompt(wording);
     setUpgradeIntentDetected(true);
     syncUpgradeIntentRefs(true);
     scrollToPremiumPosAnchor();
@@ -5549,6 +5777,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     resolveRawIntakeForPremiumCheckout,
     persistPremiumRecipientHandoffFromDraftAndUi,
     tier,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
+    runEntitledPremiumImprovementRewrite,
   ]);
 
   const handleProductionInlineWordingSubmit = React.useCallback(async () => {
@@ -6896,18 +7127,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     suppressIntakePremiumUpsell,
   ]);
 
+  /** Stable Pro entitlement for this agreement (tier, session flags, snapshot, authoritative premium body). */
+  const proAgreementEntitled = useMemo(
+    () =>
+      isProEntitledForAgreement({
+        tier,
+        draft,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      }),
+    [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive, reviewDocRefreshTick],
+  );
+
   /** Paid simple-home review: full-draft chrome (not starter tease / not free compact). */
   const premiumPaidDocumentSurface = useMemo(
     () =>
       Boolean(
         productionDraftPrimaryReviewSurface &&
           createUiStage === CreateUiStage.DRAFT &&
-          hasFullDraftAccess &&
-          !showUpgradeToFullDraftOnReview,
+          (proAgreementEntitled || (hasFullDraftAccess && !showUpgradeToFullDraftOnReview)),
       ),
     [
       productionDraftPrimaryReviewSurface,
       createUiStage,
+      proAgreementEntitled,
       hasFullDraftAccess,
       showUpgradeToFullDraftOnReview,
     ],
@@ -7038,6 +7282,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showStarterProRefineUpsell = useMemo(() => {
     if (suppressIntakePremiumUpsell) return false;
+    if (proAgreementEntitled) return false;
     if (isFreeStarterReviewSurface) return belowDocumentRefineSectionParentEligible;
     return shouldShowStarterProRefineUpsellCard(
       belowDocumentRefineSectionParentEligible,
@@ -7045,6 +7290,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       suppressIntakePremiumUpsell,
     );
   }, [
+    proAgreementEntitled,
     isFreeStarterReviewSurface,
     suppressIntakePremiumUpsell,
     belowDocumentRefineSectionParentEligible,
