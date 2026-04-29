@@ -29,6 +29,7 @@ def test_classify_narrow_amendment_prompt_late_fee_and_negatives():
         classify_narrow_amendment_prompt("Add late fee of 5% after 10 days overdue. Preserve all other terms.")
         == "late_fee"
     )
+    assert classify_narrow_amendment_prompt("Add late fee of 5% after 10 days overdue.") == "late_fee"
     assert classify_narrow_amendment_prompt("Remove late fee clause") is None
     assert classify_narrow_amendment_prompt("Add governing law of Delaware") == "governing_law"
     assert classify_narrow_amendment_prompt("Clarify delivery acceptance criteria") == "delivery_acceptance"
@@ -140,6 +141,29 @@ Sales tax.
     assert "five percent (5%)" in text.lower()
     assert text.count("3.5 ") == 1
     assert text.count("3.6 ") == 1
+
+
+def test_try_apply_late_fee_under_financial_terms_heading():
+    pad = "## Scope\n\n" + ("Line of scope.\n" * 120)
+    doc = (
+        pad
+        + "\n## Financial Terms\n\n"
+        + "Net 30. Wire transfer acceptable.\n\n"
+        + "## Confidentiality\n\nMutual NDA.\n"
+    )
+
+    def no_llm(*_a, **_k):
+        raise AssertionError("no llm")
+
+    out = try_apply_narrow_amendment(
+        kind="late_fee",
+        current_document_text=doc,
+        user_refinement_prompt="Add late fee of 5% after 10 days overdue. Preserve all other terms.",
+        call_legal_llm_fn=no_llm,
+        llm_model=None,
+    )
+    assert out is not None
+    assert "five percent (5%)" in out["updated_document_text"].lower()
 
 
 def test_try_apply_late_fee_llm_anchor_patch_fallback():

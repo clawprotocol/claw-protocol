@@ -1172,6 +1172,68 @@ def test_premium_refine_narrow_exception_falls_back_to_full_llm(monkeypatch, tmp
     assert "APPENDED BY FULL LLM PATH" in res.json()["updated_document_text"]
 
 
+def test_premium_refine_narrow_exception_full_llm_fail_returns_200_unchanged(monkeypatch, tmp_path):
+    """action=update: narrow throws and full refine fails → 200 with unchanged document (no 503)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    doc_local = _premium_refine_long_fixture_doc()
+
+    def boom_narrow(**_k):
+        raise ValueError("narrow_internal_bug")
+
+    def boom_llm(*_a, **_k):
+        raise RuntimeError("openai_unavailable")
+
+    monkeypatch.setattr(av2, "try_apply_narrow_amendment", boom_narrow)
+    monkeypatch.setattr(av2, "call_legal_llm", boom_llm)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc_local,
+            "intake_text": "B2B services.",
+            "user_refinement_prompt": "Add late fee of 5% after 10 days overdue. Preserve all other terms.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    b = res.json()
+    assert b["updated_document_text"] == doc_local
+    assert av2.PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE in (b.get("summary_changes") or [])
+
+
+def test_premium_refine_update_llm_failure_fail_open_unchanged(monkeypatch, tmp_path):
+    """Non-narrow update: LLM outage returns 200 + unchanged document + warning (not 503)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def boom_llm(*_a, **_k):
+        raise RuntimeError("no_model")
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom_llm)
+    client = TestClient(app)
+    doc = "STARTER AGREEMENT BODY\n" + ("Section line.\n" * 80)
+    assert len(doc) >= 200
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc,
+            "intake_text": "Referral deal between A and B.",
+            "user_refinement_prompt": "Rename Party A to Acme LLC throughout.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    b = res.json()
+    assert b["updated_document_text"] == doc
+    assert av2.PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE in (b.get("summary_changes") or [])
+
+
 def test_premium_refine_late_fee_narrow_llm_anchor_when_no_payment_header(monkeypatch, tmp_path):
     """Without a Payment heading, narrow path falls back to LLM anchor patch."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))

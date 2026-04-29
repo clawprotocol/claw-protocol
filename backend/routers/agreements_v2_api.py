@@ -1143,6 +1143,34 @@ def _normalize_premium_refine_result(
     )
 
 
+PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE = (
+    "We couldn't apply that update. Your current Pro agreement is unchanged. Try again."
+)
+
+
+def _premium_refine_update_fail_open_response(current_doc: str) -> PremiumRefineResponse:
+    """Paid Pro action=update: never leave the client with 503 for LLM/parse outages — preserve document."""
+    d = (current_doc or "").strip()
+    return PremiumRefineResponse(
+        updated_document_text=d,
+        summary_changes=[PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE],
+        readiness_score=35,
+        suggested_next_step="review",
+    )
+
+
+def _log_premium_refine_structured(event: str, fields: Dict[str, Any]) -> None:
+    """Temporary structured trace for Railway QA (premium-refine narrow + full refine)."""
+    payload = {"event": event, **fields}
+    try:
+        blob = json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception:
+        blob = json.dumps({"event": event, "serialization": "failed"}, default=str)
+    if len(blob) > 12_000:
+        blob = blob[:12_000] + "…"
+    log.info("claw_premium_refine_trace %s", blob)
+
+
 def _premium_refine_update_system_prompt() -> str:
     return (
         "You are a precise commercial contract editor in CLAW (a product, not a law firm). The user is refining "
@@ -1252,44 +1280,8 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
         len((body.intake_text or "").strip()),
         pr_len,
     )
-    try:
-        if body.action == "update":
-            u_narrow = (body.user_refinement_prompt or "").strip()
-            try:
-                narrow_kind = classify_narrow_amendment_prompt(u_narrow)
-                if narrow_kind:
-                    narrow_out = try_apply_narrow_amendment(
-                        kind=narrow_kind,
-                        current_document_text=doc,
-                        user_refinement_prompt=u_narrow,
-                        call_legal_llm_fn=call_legal_llm,
-                        llm_model=llm_model,
-                    )
-                    if narrow_out is not None:
-                        parsed_narrow = {
-                            "updated_document_text": narrow_out["updated_document_text"],
-                            "summary_changes": narrow_out.get("summary_changes") or [],
-                            "readiness_score": int(narrow_out.get("readiness_score") or 78),
-                            "suggested_next_step": narrow_out.get("suggested_next_step") or "review",
-                        }
-                        out_narrow = _normalize_premium_refine_result(
-                            parsed_narrow, action=body.action, current_doc=current_for_norm
-                        )
-                        log.info(
-                            "claw_premium route=premium_refine narrow_amendment kind=%s out_len=%d current_len=%d",
-                            narrow_kind,
-                            len((out_narrow.updated_document_text or "").strip()),
-                            len(doc),
-                        )
-                        _safe_record_ai_call(request, request_ip)
-                        return out_narrow
-            except Exception as narrow_exc:
-                log.warning(
-                    "claw_premium route=premium_refine narrow_amendment_exception_fallback_to_llm err_type=%s",
-                    type(narrow_exc).__name__,
-                    exc_info=True,
-                )
 
+    def _run_premium_refine_llm_path() -> PremiumRefineResponse:
         llm_text = call_legal_llm(
             messages=[
                 {"role": "system", "content": system},
@@ -1309,10 +1301,138 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
             parsed.get("suggestions"), list
         ):
             parsed["summary_changes"] = parsed["suggestions"]
-        out = _normalize_premium_refine_result(parsed, action=body.action, current_doc=current_for_norm)
-        if body.action == "ready" and not (out.updated_document_text or "").strip():
-            out = out.model_copy(update={"updated_document_text": current_for_norm})
+        out_llm = _normalize_premium_refine_result(parsed, action=body.action, current_doc=current_for_norm)
+        if body.action == "ready" and not (out_llm.updated_document_text or "").strip():
+            out_llm = out_llm.model_copy(update={"updated_document_text": current_for_norm})
         _safe_record_ai_call(request, request_ip)
+        return out_llm
+
+    try:
+        if body.action == "update":
+            u_narrow = (body.user_refinement_prompt or "").strip()
+            instr_snip = u_narrow[:240] + ("…" if len(u_narrow) > 240 else "")
+            narrow_kind_run: Optional[str] = None
+            narrow_reason = "skipped"
+            _log_premium_refine_structured(
+                "update_enter",
+                {
+                    "action": body.action,
+                    "narrow_kind": None,
+                    "current_document_len": len(doc),
+                    "instruction_snippet": instr_snip,
+                },
+            )
+            try:
+                narrow_kind_run = classify_narrow_amendment_prompt(u_narrow)
+                if narrow_kind_run:
+                    narrow_out = try_apply_narrow_amendment(
+                        kind=narrow_kind_run,
+                        current_document_text=doc,
+                        user_refinement_prompt=u_narrow,
+                        call_legal_llm_fn=call_legal_llm,
+                        llm_model=llm_model,
+                    )
+                    if narrow_out is not None:
+                        narrow_reason = "narrow_apply_ok"
+                        parsed_narrow = {
+                            "updated_document_text": narrow_out["updated_document_text"],
+                            "summary_changes": narrow_out.get("summary_changes") or [],
+                            "readiness_score": int(narrow_out.get("readiness_score") or 78),
+                            "suggested_next_step": narrow_out.get("suggested_next_step") or "review",
+                        }
+                        out_narrow = _normalize_premium_refine_result(
+                            parsed_narrow, action=body.action, current_doc=current_for_norm
+                        )
+                        log.info(
+                            "claw_premium route=premium_refine narrow_amendment kind=%s out_len=%d current_len=%d",
+                            narrow_kind_run,
+                            len((out_narrow.updated_document_text or "").strip()),
+                            len(doc),
+                        )
+                        _log_premium_refine_structured(
+                            "narrow_success",
+                            {
+                                "action": body.action,
+                                "narrow_kind": narrow_kind_run,
+                                "narrow_success_reason": narrow_reason,
+                                "current_document_len": len(doc),
+                                "instruction_snippet": instr_snip,
+                                "out_len": len((out_narrow.updated_document_text or "").strip()),
+                            },
+                        )
+                        _safe_record_ai_call(request, request_ip)
+                        return out_narrow
+                    narrow_reason = "narrow_apply_returned_none"
+                else:
+                    narrow_reason = "not_classified_as_narrow"
+            except Exception as narrow_exc:
+                narrow_reason = f"narrow_exception:{type(narrow_exc).__name__}"
+                log.warning(
+                    "claw_premium route=premium_refine narrow_amendment_exception_fallback_to_llm err_type=%s repr=%r",
+                    type(narrow_exc).__name__,
+                    repr(narrow_exc),
+                    exc_info=True,
+                )
+                _log_premium_refine_structured(
+                    "narrow_exception",
+                    {
+                        "action": body.action,
+                        "narrow_kind": narrow_kind_run,
+                        "narrow_success_reason": narrow_reason,
+                        "current_document_len": len(doc),
+                        "instruction_snippet": instr_snip,
+                        "exception_repr": repr(narrow_exc),
+                    },
+                )
+
+            _log_premium_refine_structured(
+                "full_refine_attempt",
+                {
+                    "action": body.action,
+                    "narrow_kind": narrow_kind_run,
+                    "narrow_success_reason": narrow_reason,
+                    "current_document_len": len(doc),
+                    "instruction_snippet": instr_snip,
+                },
+            )
+            try:
+                out_update = _run_premium_refine_llm_path()
+                _log_premium_refine_structured(
+                    "full_refine_success",
+                    {
+                        "action": body.action,
+                        "narrow_kind": narrow_kind_run,
+                        "narrow_success_reason": narrow_reason,
+                        "fallback_full_refine_success": True,
+                        "current_document_len": len(doc),
+                        "instruction_snippet": instr_snip,
+                        "out_len": len((out_update.updated_document_text or "").strip()),
+                    },
+                )
+                return out_update
+            except Exception as full_exc:
+                _log_premium_refine_structured(
+                    "full_refine_failure_fail_open",
+                    {
+                        "action": body.action,
+                        "narrow_kind": narrow_kind_run,
+                        "narrow_success_reason": narrow_reason,
+                        "fallback_full_refine_success": False,
+                        "fallback_full_refine_failure_reason": type(full_exc).__name__,
+                        "current_document_len": len(doc),
+                        "instruction_snippet": instr_snip,
+                        "exception_repr": repr(full_exc),
+                    },
+                )
+                log.warning(
+                    "claw_premium route=premium_refine update_fail_open err_type=%s repr=%r",
+                    type(full_exc).__name__,
+                    repr(full_exc),
+                    exc_info=True,
+                )
+                return _premium_refine_update_fail_open_response(current_for_norm)
+
+        out = _run_premium_refine_llm_path()
         return out
     except Exception as exc:
         kind = _classify_premium_llm_failure(exc)

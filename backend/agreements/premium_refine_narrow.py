@@ -68,9 +68,14 @@ def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
         return None
     if re.search(r"\b(no|not|without|remove|delete|drop|avoid)\b.*\b(late\s+fee|late\s+payment)\b", p):
         return None
+    # Late fee: match "5% after 10 days", "five percent after ten days overdue", "Preserve all other terms", etc.
     if re.search(r"\b(late\s+fee|late\s+payment|overdue|past\s+due)\b", p) and (
-        re.search(r"\b(5\s*%|five\s+percent|10\s+day|ten\s+\(?10\)?\s*day|days\s+overdue)\b", p)
+        re.search(
+            r"\b(5\s*%|five\s+percent|10\s+day|ten\s+\(?10\)?\s*day|days\s+overdue|after\s+10\s+days)\b",
+            p,
+        )
         or ("fee" in p and "day" in p)
+        or (re.search(r"\b5\s*%", p) and re.search(r"\b10\b", p) and "day" in p)
     ):
         return "late_fee"
     if re.search(r"\b(governing\s+law|choice\s+of\s+law|applicable\s+law)\b", p):
@@ -190,8 +195,10 @@ def _bump_numbered_subclause_lines(suffix: str, major: int, min_from: int) -> st
 def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
     """Insert late-fee after Payment-style heading, or before Confidentiality. No LLM. Renumbers ``M.m`` siblings."""
     patterns = [
-        r"(?m)^#{1,3}\s+(?:\d+\.\s*)?(?:Payment|Fees|Compensation|Compensation\s+and\s+Payment|Pricing\s+and\s+Payment|Invoicing|Billing)(?:\s+Terms)?\s*$",
+        r"(?m)^#{1,3}\s+(?:\d+\.\s*)?(?:Payment|Fees|Compensation|Compensation\s+and\s+Payment|Pricing\s+and\s+Payment|Invoicing|Billing|Financial\s+Terms)(?:\s+Terms)?\s*$",
+        r"(?m)^#{1,3}\s+(?:\d+\.\s*)?(?:Payment\s+and\s+Fees|Fees\s+and\s+Payment)\s*$",
         r"(?m)^(?:\d+\.){1,3}\s+(?:Payment|Fees|Compensation|Pricing)(?:\s+Terms)?\s*$",
+        r"(?m)^(?:\d+\.){1,3}\s+(?:Payment\s+and\s+Fees|Fees\s+and\s+Payment)\s*$",
     ]
     for pat in patterns:
         m = re.compile(pat, re.I).search(doc)
