@@ -69,9 +69,9 @@ def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
     if re.search(r"\b(no|not|without|remove|delete|drop|avoid)\b.*\b(late\s+fee|late\s+payment)\b", p):
         return None
     # Late fee: match "5% after 10 days", "five percent after ten days overdue", "Preserve all other terms", etc.
-    if re.search(r"\b(late\s+fee|late\s+payment|overdue|past\s+due)\b", p) and (
+    if re.search(r"\b(late\s+fees?|late\s+payment|overdue|past\s+due)\b", p) and (
         re.search(
-            r"\b(5\s*%|five\s+percent|10\s+day|ten\s+\(?10\)?\s*day|days\s+overdue|after\s+10\s+days)\b",
+            r"\b(5\s*%|five\s+percent|10\s+day|ten\s+\(?10\)?\s*day|days\s+overdue|after\s+10\s+days|after\s+ten\s+days)\b",
             p,
         )
         or ("fee" in p and "day" in p)
@@ -93,9 +93,17 @@ def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
 
 
 def document_has_late_fee_language(doc: str) -> bool:
-    """Idempotent check: document already contains late-fee style language with 5% / five percent."""
-    low = doc.lower()
-    if ("late payment" in low or "late fee" in low) and ("5%" in doc or "five percent" in low):
+    """
+    Idempotent check: document already has a dedicated late-fee / late-payment penalty clause.
+
+    Intentionally strict — generic payment percentages must not block inserting a late-fee paragraph.
+    """
+    low = (doc or "").lower()
+    if ("late fee" in low or "late payment" in low) and (
+        "five percent (5%)" in low
+        or "five percent" in low
+        or ("5%" in doc and ("overdue" in low or "past due" in low or "late payment" in low))
+    ):
         return True
     return False
 
@@ -221,8 +229,10 @@ def _bump_numbered_subclause_lines(suffix: str, major: int, min_from: int) -> st
 def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
     """Insert late-fee after Payment-style heading, or before Confidentiality. No LLM. Renumbers ``M.m`` siblings."""
     patterns = [
+        r"(?m)^#{1,3}\s+(?:\d+\.[\s]*)?(?:Fees\s+and\s+Payment|Compensation\s+and\s+Payment|Payment\s+and\s+Fees)\s*$",
         r"(?m)^#{1,3}\s+(?:\d+\.\s*)?(?:Payment|Fees|Compensation|Compensation\s+and\s+Payment|Pricing\s+and\s+Payment|Invoicing|Billing|Financial\s+Terms)(?:\s+Terms)?\s*$",
         r"(?m)^#{1,3}\s+(?:\d+\.\s*)?(?:Payment\s+and\s+Fees|Fees\s+and\s+Payment)\s*$",
+        r"(?m)^(?:\d+\.){1,3}\s+(?:Fees\s+and\s+Payment|Compensation\s+and\s+Payment|Payment\s+and\s+Fees)\s*$",
         r"(?m)^(?:\d+\.){1,3}\s+(?:Payment|Fees|Compensation|Pricing)(?:\s+Terms)?\s*$",
         r"(?m)^(?:\d+\.){1,3}\s+(?:Payment\s+and\s+Fees|Fees\s+and\s+Payment)\s*$",
     ]
@@ -232,17 +242,24 @@ def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
             continue
         head_end = m.end()
         tail_before = doc[head_end:]
-        dbl = tail_before.find("\n\n")
-        if dbl == -1:
-            insert_at = len(doc)
+        sched_m = re.search(r"(?m)^\s*(?:#{1,4}\s+|\d+\.\d+\s+)?Payment\s+Schedule\b", tail_before)
+        if sched_m:
+            insert_at = head_end + sched_m.start()
         else:
-            insert_at = head_end + dbl + 2
+            dbl = tail_before.find("\n\n")
+            if dbl == -1:
+                insert_at = len(doc)
+            else:
+                insert_at = head_end + dbl + 2
         window = doc[head_end : min(len(doc), insert_at + 500)].lower()
         if "five percent (5%)" in window or (
             "late payment" in window and "5%" in doc[head_end : min(len(doc), head_end + 2000)]
         ):
             return None
         tail_orig = doc[insert_at:]
+        if sched_m:
+            block = LATE_FEE_PARAGRAPH_DEFAULT.strip() + "\n\n"
+            return doc[:insert_at] + block + tail_orig
         num = _first_numbered_subclause_after(tail_orig)
         if num:
             maj, m0 = num
@@ -348,11 +365,8 @@ def try_apply_narrow_amendment(
 
     if kind == "late_fee":
         if document_has_late_fee_language(doc):
-            if validate_narrow_refined_document(original=doc, updated=doc, kind="late_fee"):
-                return ok_response(
-                    doc,
-                    ["Your agreement already includes late payment / late fee language in line with this request."],
-                )
+            # Do not return "success" with an unchanged body — let full refine run; API layer rejects identical output.
+            return None
         patched = _insert_late_fee_paragraph(doc)
         if patched and validate_narrow_refined_document(original=doc, updated=patched, kind="late_fee"):
             return ok_response(patched, _SUMMARY_FOR_KIND["late_fee"])

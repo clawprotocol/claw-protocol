@@ -1066,6 +1066,93 @@ def _premium_refine_long_fixture_doc() -> str:
     return "".join(parts)
 
 
+def _premium_refine_doc_fees_and_payment_schedule() -> str:
+    parts = ["# Agreement\n\n", "## Parties\n\nA and B.\n\n", "## Scope\n\n"]
+    parts.append("".join(f"Scope detail line {i} with mutual obligations.\n" for i in range(160)))
+    parts.append(
+        "\n## Fees and Payment\n\n"
+        "The total fee is fifty thousand dollars USD.\n\n"
+        "### Payment Schedule\n\n"
+        "Invoices are due net thirty from invoice date.\n\n"
+        "## Confidentiality\n\nParties agree to mutual confidentiality obligations.\n\n"
+        "## Termination\n\nEither party may terminate on thirty (30) days written notice.\n"
+    )
+    return "".join(parts)
+
+
+def test_premium_refine_late_fee_fees_and_payment_section_inserts_before_schedule(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("call_legal_llm_should_not_run_for_deterministic_late_fee")
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom)
+    client = TestClient(app)
+    doc = _premium_refine_doc_fees_and_payment_schedule()
+    assert len(doc) >= 2500
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc,
+            "intake_text": "B2B services between A and B, US law.",
+            "user_refinement_prompt": "Add late fee of 5% after 10 days overdue. Preserve all other terms.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["updated_document_text"]
+    low = text.lower()
+    assert ("five percent (5%)" in low) or ("5%" in text)
+    assert "late" in low
+    assert low.find("late payment") < low.find("payment schedule")
+    assert "## Fees and Payment" in text
+    assert "### Payment Schedule" in text
+    assert len(text) >= int(len(doc) * 0.9)
+
+
+def test_premium_refine_update_identical_llm_output_returns_fail_open(monkeypatch, tmp_path):
+    """Full refine echoing the input must not look like a successful apply (fail-open summary)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    doc_local = "LONG AGREEMENT\n" + ("Body line with enough chars for narrow skip.\n" * 120)
+
+    def no_narrow(**_k):
+        return None
+
+    def echo_llm(*_a, **_k):
+        return json.dumps(
+            {
+                "updated_document_text": doc_local,
+                "summary_changes": ["No changes applied"],
+                "readiness_score": 80,
+                "suggested_next_step": "review",
+            }
+        )
+
+    monkeypatch.setattr(av2, "try_apply_narrow_amendment", no_narrow)
+    monkeypatch.setattr(av2, "call_legal_llm", echo_llm)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc_local,
+            "intake_text": "Services deal.",
+            "user_refinement_prompt": "Add a material indemnity cap clarification throughout.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    b = res.json()
+    assert b["updated_document_text"] == doc_local
+    assert av2.PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE in (b.get("summary_changes") or [])
+
+
 def test_premium_refine_late_fee_narrow_deterministic_skips_llm(monkeypatch, tmp_path):
     """Narrow late-fee path inserts without calling full-document refine LLM."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))

@@ -1148,6 +1148,44 @@ PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE = (
 )
 
 
+def _premium_refine_ws_normalize_for_compare(text: str) -> str:
+    """Whitespace-normalized fingerprint for detecting no-op refine outputs."""
+    return " ".join((text or "").split())
+
+
+def _premium_refine_instruction_is_substantive(user_prompt: str) -> bool:
+    return len((user_prompt or "").strip()) >= 8
+
+
+def _premium_refine_update_reject_unchanged_candidate(
+    out: PremiumRefineResponse,
+    *,
+    current_doc: str,
+    user_prompt: str,
+    source: str,
+) -> PremiumRefineResponse:
+    """
+    action=update: never treat an identical body as a successful refine when the user asked for a real change.
+    """
+    if not _premium_refine_instruction_is_substantive(user_prompt):
+        return out
+    cur = _premium_refine_ws_normalize_for_compare(current_doc)
+    new = _premium_refine_ws_normalize_for_compare(out.updated_document_text)
+    if cur != new:
+        return out
+    base = (current_doc or "").strip()
+    _log_premium_refine_structured(
+        "update_unchanged_candidate_rejected",
+        {
+            "source": source,
+            "current_document_len": len(base),
+            "out_len": len((out.updated_document_text or "").strip()),
+            "instruction_len": len((user_prompt or "").strip()),
+        },
+    )
+    return _premium_refine_update_fail_open_response(base)
+
+
 def _premium_refine_update_fail_open_response(current_doc: str) -> PremiumRefineResponse:
     """Paid Pro action=update: never leave the client with 503 for LLM/parse outages — preserve document."""
     d = (current_doc or "").strip()
@@ -1361,7 +1399,12 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
                             },
                         )
                         _safe_record_ai_call(request, request_ip)
-                        return out_narrow
+                        return _premium_refine_update_reject_unchanged_candidate(
+                            out_narrow,
+                            current_doc=doc,
+                            user_prompt=u_narrow,
+                            source="narrow_amendment",
+                        )
                     narrow_reason = "narrow_apply_returned_none"
                 else:
                     narrow_reason = "not_classified_as_narrow"
@@ -1409,7 +1452,12 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
                         "out_len": len((out_update.updated_document_text or "").strip()),
                     },
                 )
-                return out_update
+                return _premium_refine_update_reject_unchanged_candidate(
+                    out_update,
+                    current_doc=doc,
+                    user_prompt=u_narrow,
+                    source="full_llm_refine",
+                )
             except Exception as full_exc:
                 _log_premium_refine_structured(
                     "full_refine_failure_fail_open",
