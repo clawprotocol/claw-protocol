@@ -756,8 +756,8 @@ const AgreementReview: React.FC<Props> = ({
   useEffect(() => {
     if (!onPaidProSendBranchMeta || !isSimpleHomeReview) return;
     const source = draft ?? initialDraftSnapshot;
-    onPaidProSendBranchMeta(describePaidProSendModalBranch(source));
-  }, [draft, initialDraftSnapshot, isSimpleHomeReview, onPaidProSendBranchMeta]);
+    onPaidProSendBranchMeta(describePaidProSendModalBranch(source, { agreementId }));
+  }, [agreementId, draft, initialDraftSnapshot, isSimpleHomeReview, onPaidProSendBranchMeta]);
 
   const simpleHomePaidAuthoritativeAgreementPreview = useMemo(
     () => Boolean(isSimpleHomeReview && draft && authoritativeProBypassSimpleSendPaywall(draft)),

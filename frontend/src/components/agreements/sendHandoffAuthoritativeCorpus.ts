@@ -1,5 +1,5 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
+import { resolvePaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { escapeHtml } from "./premiumAgreementDocumentHtml";
 
@@ -71,10 +71,7 @@ const AUTHORITATIVE_PREMIUM_RENDER_SOURCES = new Set(["server_full_document_text
  * persisted draft is clearly authoritative: server repair/full render source or material premium corpus.
  */
 export function shouldKeepReviewDisplayAfterProHydrate(draft: CorpusDraftLike | null | undefined): boolean {
-  if (!draft) return false;
-  const rs = String(draft.premium_render_source ?? "").trim();
-  if (AUTHORITATIVE_PREMIUM_RENDER_SOURCES.has(rs)) return true;
-  return hasMaterialPremiumPipelineCorpus(draft);
+  return resolvePaidProAgreementAuthoritative({ draft: draft ?? null }).authoritative;
 }
 
 export function shouldMinimalProSendRecipientChrome(args: {
@@ -97,17 +94,34 @@ export function shouldMinimalProSendRecipientChrome(args: {
 /**
  * `/app/send`: structured bypass decision + DEV telemetry for SendConversionModal routing.
  */
-export function describePaidProSendModalBranch(draft: CorpusDraftLike | null | undefined): PaidProSendBranchMeta {
-  if (hasPaidPremiumCompletionSession()) {
-    return {
+export function describePaidProSendModalBranch(
+  draft: CorpusDraftLike | null | undefined,
+  opts?: { agreementId?: string | null },
+): PaidProSendBranchMeta {
+  const authority = resolvePaidProAgreementAuthoritative({ draft: draft ?? null, agreementId: opts?.agreementId });
+  if (authority.authoritative) {
+    const pick = pickAuthoritativePlainForSendHandoff(draft);
+    const meta: PaidProSendBranchMeta = {
       bypass: true,
       paidProSendAllowed: true,
-      premium_render_source: String(draft?.premium_render_source ?? "").trim() || null,
-      authoritativeLen: (pickAuthoritativePlainForSendHandoff(draft)?.text ?? "").trim().length,
+      premium_render_source: authority.premium_render_source,
+      authoritativeLen: (pick?.text ?? "").trim().length,
       materialPremiumCorpusLen: materialPremiumPipelineCorpusMaxLen(draft),
       hasMaterialPremiumPipelineCorpus: hasMaterialPremiumPipelineCorpus(draft),
-      reason: "paid_checkout_return_session",
+      reason: authority.reason,
     };
+    if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-authority]", {
+        agreementId: opts?.agreementId ?? null,
+        authoritative: true,
+        reason: authority.reason,
+        corpusLen: authority.corpusLen,
+        renderSource: authority.premium_render_source,
+        sessionPaid: authority.reason === "paid_premium_completion_session",
+      });
+    }
+    return meta;
   }
   const rs = String(draft?.premium_render_source ?? "").trim();
   const materialPremiumCorpusLen = materialPremiumPipelineCorpusMaxLen(draft);

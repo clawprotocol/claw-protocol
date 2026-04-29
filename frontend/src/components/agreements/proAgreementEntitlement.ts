@@ -1,18 +1,9 @@
 import type { AccessTier } from "../../access/types";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
-import { hasPaidPremiumCompletionSession, type PremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import { isPaidProAgreementAuthoritative, draftPremiumRenderSourceIndicatesPro } from "./paidProAgreementAuthority";
+import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
 
-/** Read-only / resolver tiers that indicate authoritative Pro paper on the draft when paired with a long body. */
-export function draftPremiumRenderSourceIndicatesPro(rs: string | null | undefined): boolean {
-  const s = String(rs || "").trim();
-  return s === "server_full_document_text" || s === "server_repair_document_text" || s === "legacy_snapshot";
-}
-
-function authoritativePremiumBodyOnDraft(d: ParsedDraftShape | null | undefined): boolean {
-  const t = (d?.premium_server_full_document_text || d?.premium_full_document_text || "").trim();
-  return t.length >= 500;
-}
+export { draftPremiumRenderSourceIndicatesPro };
 
 /**
  * User should not be sent to Stripe / checkout for the same create-flow agreement when Pro is already
@@ -25,25 +16,11 @@ export function isProEntitledForAgreement(args: {
   premiumPersistedFlowActive: boolean;
   premiumCompletionSnapshot: PremiumCompletionSnapshot | null | undefined;
 }): boolean {
-  if (hasPaidPremiumCompletionSession()) return true;
-  if (tierAllowsAdvancedFullDraftReveal(args.tier)) return true;
-  if (args.premiumSendPathUnlocked || args.premiumPersistedFlowActive) return true;
-
-  const snap = args.premiumCompletionSnapshot ?? null;
-  if (
-    snap?.premiumAccepted &&
-    (snap.premiumWinningBodyText || snap.premiumReadonlyPlainText || "").trim().length >= 500
-  ) {
-    return true;
-  }
-
-  const d = args.draft ?? null;
-  if (d == null) return false;
-
-  if (authoritativePremiumBodyOnDraft(d)) return true;
-
-  const drs = (d as { premium_render_source?: string | null }).premium_render_source;
-  if (draftPremiumRenderSourceIndicatesPro(drs) && authoritativePremiumBodyOnDraft(d)) return true;
-
-  return false;
+  return isPaidProAgreementAuthoritative({
+    tier: args.tier,
+    draft: args.draft,
+    premiumSendPathUnlocked: args.premiumSendPathUnlocked,
+    premiumPersistedFlowActive: args.premiumPersistedFlowActive,
+    premiumCompletionSnapshot: args.premiumCompletionSnapshot,
+  });
 }

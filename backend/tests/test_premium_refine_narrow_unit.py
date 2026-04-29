@@ -143,6 +143,49 @@ Sales tax.
     assert text.count("3.6 ") == 1
 
 
+def test_late_fee_insert_monotonic_renumbers_2_3_through_2_7():
+    """After insert, no duplicate ``2.4`` — monotonic pass yields 2.4 Late, 2.5 Disputed, 2.6 Expenses, 2.7 Taxes."""
+    pad = "## Scope\n\n" + ("Scope line.\n" * 120)
+    core = """## Payment
+
+2.3 Invoicing
+
+Net 30.
+
+2.4 Disputed Amounts
+
+Good faith.
+
+2.5 Expenses
+
+Pass-through.
+
+2.6 Taxes
+
+Sales tax.
+"""
+    doc = pad + "\n\n" + core
+
+    def no_llm(*_a, **_k):
+        raise AssertionError("no llm")
+
+    out = try_apply_narrow_amendment(
+        kind="late_fee",
+        current_document_text=doc,
+        user_refinement_prompt="Add late fee of 5% after 10 days overdue. Preserve all other terms.",
+        call_legal_llm_fn=no_llm,
+        llm_model=None,
+    )
+    assert out is not None
+    text = out["updated_document_text"]
+    assert "2.4 " in text
+    assert "2.5 Disputed" in text
+    assert "2.6 Expenses" in text
+    assert "2.7 Taxes" in text
+    assert text.count("2.4 ") == 1
+    assert "five percent (5%)" in text.lower()
+
+
 def test_try_apply_late_fee_under_financial_terms_heading():
     pad = "## Scope\n\n" + ("Line of scope.\n" * 120)
     doc = (

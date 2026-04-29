@@ -227,7 +227,7 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     const m = describePaidProSendModalBranch(d);
     expect(m.bypass).toBe(true);
     expect(m.paidProSendAllowed).toBe(true);
-    expect(m.reason).toBe("server_render_source");
+    expect(m.reason).toBe("strict_server_render_source");
     expect(m.premium_render_source).toBe("server_full_document_text");
     expect(m.hasMaterialPremiumPipelineCorpus).toBe(false);
   });
@@ -239,7 +239,7 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     } as unknown as AgreementDraft;
     const m = describePaidProSendModalBranch(d);
     expect(m.paidProSendAllowed).toBe(true);
-    expect(m.reason).toBe("server_render_source");
+    expect(m.reason).toBe("strict_server_render_source");
   });
 
   it("paidProSendAllowed: live preview render source but material premium corpus still bypasses upsell", () => {
@@ -250,7 +250,7 @@ describe("sendHandoffAuthoritativeCorpus", () => {
       premium_server_full_document_text: corp,
     } as unknown as AgreementDraft;
     expect(paidProSendAllowed(d)).toBe(true);
-    expect(describePaidProSendModalBranch(d).reason).toBe("corpus_authoritative");
+    expect(describePaidProSendModalBranch(d).reason).toBe("long_authoritative_corpus");
   });
 
   it("paidProSendAllowed mirrors bypass for simple send gate regression", () => {
@@ -274,7 +274,7 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     } as unknown as AgreementDraft;
     const m = describePaidProSendModalBranch(d);
     expect(m.bypass).toBe(true);
-    expect(m.reason).toBe("corpus_authoritative");
+    expect(m.reason).toBe("long_authoritative_corpus");
     expect(m.authoritativeLen).toBeGreaterThanOrEqual(500);
   });
 
@@ -302,7 +302,7 @@ describe("sendHandoffAuthoritativeCorpus", () => {
       const m = describePaidProSendModalBranch(d);
       expect(m.bypass).toBe(true);
       expect(m.paidProSendAllowed).toBe(true);
-      expect(m.reason).toBe("paid_checkout_return_session");
+      expect(m.reason).toBe("paid_premium_completion_session");
     });
   });
 

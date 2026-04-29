@@ -91,6 +91,21 @@ describe("proAgreementEntitlement", () => {
     ).toBe(true);
   });
 
+  it("isProEntitledForAgreement true for long server_full_document_text without premium_render_source", () => {
+    expect(
+      isProEntitledForAgreement({
+        tier: "free",
+        draft: minimalDraft({
+          server_full_document_text: "s".repeat(600),
+          premium_render_source: "",
+        } as ParsedDraftShape & { server_full_document_text?: string; premium_render_source?: string }),
+        premiumSendPathUnlocked: false,
+        premiumPersistedFlowActive: false,
+        premiumCompletionSnapshot: null,
+      }),
+    ).toBe(true);
+  });
+
   it("isProEntitledForAgreement false for thin free draft without flags", () => {
     expect(
       isProEntitledForAgreement({

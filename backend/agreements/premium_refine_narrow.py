@@ -163,6 +163,32 @@ def _first_numbered_subclause_after(tail: str) -> Optional[Tuple[int, int]]:
     return int(m.group(1)), int(m.group(2))
 
 
+def _ensure_monotonic_major_subclauses(doc: str, major: int) -> str:
+    """
+    Walk top-to-bottom; for line-start ``major.N`` headings, enforce strictly increasing ``N``.
+
+    Fixes duplicate ``2.4`` / ``2.4`` after inserting a late-fee line that reused the first subclause number.
+    """
+    maj_s = str(int(major))
+    rx = re.compile(rf"^(\s*)({re.escape(maj_s)})\.(\d+)(\s.*)$")
+    last = 0
+    out: List[str] = []
+    for line in doc.splitlines(True):
+        bare = line.rstrip("\r\n")
+        trailing = line[len(bare) :]
+        m = rx.match(bare)
+        if not m:
+            out.append(line)
+            continue
+        k = int(m.group(3))
+        if k <= last:
+            k = last + 1
+        last = k
+        new_bare = f"{m.group(1)}{maj_s}.{k}{m.group(4)}"
+        out.append(new_bare + trailing)
+    return "".join(out)
+
+
 def _bump_numbered_subclause_lines(suffix: str, major: int, min_from: int) -> str:
     """
     Renumber line-start ``major.k`` headings where ``k >= min_from`` to **unique** sequential
@@ -225,7 +251,10 @@ def _insert_late_fee_paragraph(doc: str) -> Optional[str]:
         else:
             block = LATE_FEE_PARAGRAPH_DEFAULT.strip() + "\n\n"
             tail_new = tail_orig
-        return doc[:insert_at] + block + tail_new
+        merged = doc[:insert_at] + block + tail_new
+        if num:
+            return _ensure_monotonic_major_subclauses(merged, maj)
+        return merged
 
     cf = re.search(r"(?m)^#{1,3}\s+Confidentiality\b", doc, re.I)
     if cf:

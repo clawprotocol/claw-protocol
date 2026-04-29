@@ -12,7 +12,7 @@ import {
   markSimpleFlowSendUnlocked,
 } from "../simpleFlowSendUnlock";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
-import { hasPaidPremiumCompletionSession } from "../../components/agreements/premiumCompletionStorage";
+import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
 import {
   describePaidProSendModalBranch,
   type PaidProSendBranchMeta,
@@ -92,8 +92,12 @@ export function SimpleSendPage(props: { agreementId: string }) {
   );
   const initialDraftSnapshot = sendLanding.primed;
   const streamlinedSimpleFlow = sendLanding.streamlined;
+  const sendAuthoritative = useMemo(
+    () => isPaidProAgreementAuthoritative({ draft: initialDraftSnapshot ?? null, agreementId }),
+    [initialDraftSnapshot, agreementId],
+  );
   const [paidProSendBranch, setPaidProSendBranch] = useState<PaidProSendBranchMeta>(() =>
-    describePaidProSendModalBranch(initialDraftSnapshot),
+    describePaidProSendModalBranch(initialDraftSnapshot, { agreementId }),
   );
   /** Re-evaluate `canAccessSimpleSendActions` after session unlock from authoritative Pro load. */
   const [sendUnlockTick, setSendUnlockTick] = useState(0);
@@ -105,8 +109,8 @@ export function SimpleSendPage(props: { agreementId: string }) {
   }, [agreementId, workspaceProEntitled, sendUnlockTick]);
 
   useEffect(() => {
-    setPaidProSendBranch(describePaidProSendModalBranch(initialDraftSnapshot));
-  }, [initialDraftSnapshot]);
+    setPaidProSendBranch(describePaidProSendModalBranch(initialDraftSnapshot, { agreementId }));
+  }, [initialDraftSnapshot, agreementId]);
 
   useEffect(() => {
     if (!paidProSendBranch.paidProSendAllowed) return;
@@ -132,15 +136,17 @@ export function SimpleSendPage(props: { agreementId: string }) {
   }, []);
 
   useEffect(() => {
-    if (!paywallOpen || !workspaceProEntitled) return;
-    markSimpleFlowSendUnlocked(agreementId);
-    setPaywallOpen(false);
-    setPaywallCopy(null);
-  }, [paywallOpen, workspaceProEntitled, agreementId]);
+    if (!paywallOpen) return;
+    if (workspaceProEntitled || sendAuthoritative) {
+      markSimpleFlowSendUnlocked(agreementId);
+      setPaywallOpen(false);
+      setPaywallCopy(null);
+    }
+  }, [paywallOpen, workspaceProEntitled, agreementId, sendAuthoritative]);
 
   useEffect(() => {
     const onPaywallRequired = (e: Event) => {
-      if (workspaceProEntitled || authoritativeProBypassRef.current) return;
+      if (workspaceProEntitled || authoritativeProBypassRef.current || sendAuthoritative) return;
       const d = (e as CustomEvent<Record<string, unknown>>).detail ?? {};
       setPaywallOpen(true);
       const h = d.paywallHeadline;
@@ -153,7 +159,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
     };
     window.addEventListener("claw:paywall-required", onPaywallRequired);
     return () => window.removeEventListener("claw:paywall-required", onPaywallRequired);
-  }, [workspaceProEntitled]);
+  }, [workspaceProEntitled, sendAuthoritative]);
 
   useEffect(() => {
     const intent = sendLanding.premiumIntent ?? peekPremiumSendIntent();
@@ -326,7 +332,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
                 !workspaceProEntitled &&
                 isSimpleSendPaywallActive() &&
                 !paidProSendBranch.paidProSendAllowed &&
-                !hasPaidPremiumCompletionSession();
+                !sendAuthoritative;
               if (import.meta.env.DEV) {
                 console.info("[premium-send-gate]", {
                   paidProSendAllowed: paidProSendBranch.paidProSendAllowed,
@@ -366,7 +372,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
       </AgreementReviewErrorBoundary>
 
       <SendConversionModal
-        open={paywallOpen}
+        open={paywallOpen && !sendAuthoritative}
         agreementId={agreementId}
         paywallHeadline={paywallCopy?.headline ?? PAYWALL_SEND_FINAL_HEADLINE}
         paywallSub={paywallCopy?.sub ?? PAYWALL_SEND_FINAL_SUB}

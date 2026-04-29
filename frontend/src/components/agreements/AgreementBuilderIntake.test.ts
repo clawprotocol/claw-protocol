@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearCreateReviewAgreementResumeId,
@@ -36,5 +38,11 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       premium_server_full_document_text: "",
     };
     expect(shouldKeepReviewDisplayAfterProHydrate(d)).toBe(true);
+  });
+
+  it("runPersistAndOpen must not clear premium completion state (regression: paid Pro → free intake)", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).not.toMatch(/runPersistAndOpen[\s\S]{0,12000}clearPremiumCompletionStateAfterSend/);
   });
 });
