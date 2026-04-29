@@ -2594,6 +2594,15 @@ def _watermark_active_for_agreement(agreement_id: str) -> bool:
     return bool(economics_overlay_for_agreement(agreement_id).get("watermark_required"))
 
 
+def _collapse_duplicate_watermark_labels(text: str, label: str) -> str:
+    """If the draft body already contains repeated watermark footers, keep a single copy."""
+    if not text or not label:
+        return text
+    escaped = re.escape(label)
+    pattern = re.compile(f"(?:{escaped})(?:\\s+{escaped})+")
+    return pattern.sub(label, text)
+
+
 def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
     """When the create-flow document editor persists the full preview into `purpose`, render it as the body (not nested in the short-form template)."""
     t = (purpose or "").strip()
@@ -2615,7 +2624,10 @@ def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
 def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     purpose_raw = (draft.purpose or "").strip()
     if _purpose_looks_like_full_client_agreement_text(purpose_raw):
-        body = html.escape(purpose_raw)
+        purpose_for_body = (
+            _collapse_duplicate_watermark_labels(purpose_raw, WATERMARK_LABEL) if watermark else purpose_raw
+        )
+        body = html.escape(purpose_for_body)
         wm = html.escape(WATERMARK_LABEL)
         article = (
             "<article style='position:relative;max-width:720px;margin:0 auto'>"
@@ -2633,11 +2645,9 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
             return article
         overlay = (
             "<div style='position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2'>"
-            f"<div style='position:absolute;left:50%;top:38%;transform:translate(-50%,-50%) rotate(-26deg);"
-            f"font-size:clamp(18px,3.2vw,26px);color:#64748b;opacity:0.2;font-weight:700;white-space:nowrap;"
-            f"max-width:100%;text-align:center'>{wm}</div></div>"
-            f"<p style='margin-top:1.25rem;padding-top:10px;border-top:1px solid #cbd5e1;font-size:11px;color:#64748b;"
-            f"text-align:center'>{wm}</p>"
+            f"<p style='position:absolute;left:50%;bottom:10px;transform:translateX(-50%);margin:0;"
+            f"padding-top:10px;border-top:1px solid #cbd5e1;font-size:11px;color:#64748b;"
+            f"text-align:center;max-width:calc(100% - 24px)'>{wm}</p></div>"
         )
         return f"<div style='position:relative'>{article}{overlay}</div>"
 
@@ -2698,11 +2708,9 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
         return article
     overlay = (
         "<div style='position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2'>"
-        f"<div style='position:absolute;left:50%;top:38%;transform:translate(-50%,-50%) rotate(-26deg);"
-        f"font-size:clamp(18px,3.2vw,26px);color:#64748b;opacity:0.2;font-weight:700;white-space:nowrap;"
-        f"max-width:100%;text-align:center'>{wm}</div></div>"
-        f"<p style='margin-top:1.25rem;padding-top:10px;border-top:1px solid #cbd5e1;font-size:11px;color:#64748b;"
-        f"text-align:center'>{wm}</p>"
+        f"<p style='position:absolute;left:50%;bottom:10px;transform:translateX(-50%);margin:0;"
+        f"padding-top:10px;border-top:1px solid #cbd5e1;font-size:11px;color:#64748b;"
+        f"text-align:center;max-width:calc(100% - 24px)'>{wm}</p></div>"
     )
     return f"<div style='position:relative'>{article}{overlay}</div>"
 

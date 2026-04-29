@@ -242,12 +242,47 @@ export function longestPlainForAgreementPersist(
   return candidates.reduce((a, b) => (b.length > a.length ? b : a));
 }
 
-export function buildSendRouteReadonlyHtmlFromPlain(plain: string): string {
+export type BuildSendRouteReadonlyHtmlOpts = {
+  /**
+   * Centered label above the body. Default: draft disclaimer for free/starter.
+   * Pass `"Agreement preview"` for paid authoritative send handoff, or `null` to omit the label row.
+   */
+  documentLabel?: string | null;
+};
+
+/** Premium review-link send: allow advancing without a fully populated recipient row (copy/share flow). */
+export function shouldBypassFlexibleSendRecipientValidationForPremiumReview(params: {
+  isWorkspace: boolean;
+  isSimpleHomeReview: boolean;
+  simpleFlowPhase: "review" | "send";
+  simpleSendAuthoritativeMinimalChrome: boolean;
+  streamlinedPremiumIntentForCopy: "review" | "signature" | null;
+}): boolean {
+  return (
+    params.isWorkspace &&
+    params.isSimpleHomeReview &&
+    params.simpleFlowPhase === "send" &&
+    params.simpleSendAuthoritativeMinimalChrome &&
+    params.streamlinedPremiumIntentForCopy === "review"
+  );
+}
+
+export function buildSendRouteReadonlyHtmlFromPlain(
+  plain: string,
+  opts?: BuildSendRouteReadonlyHtmlOpts,
+): string {
   const body = escapeHtml(plain.trim());
+  const label =
+    opts?.documentLabel === undefined ? "Draft Agreement (non-binding template)" : opts.documentLabel;
+  const labelBlock =
+    label === null
+      ? ""
+      : "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>" +
+        escapeHtml(label) +
+        "</p>";
   return (
     "<article style='position:relative;max-width:720px;margin:0 auto'>" +
-    "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>" +
-    "Draft Agreement (non-binding template)</p>" +
+    labelBlock +
     "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;" +
     "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>" +
     body +

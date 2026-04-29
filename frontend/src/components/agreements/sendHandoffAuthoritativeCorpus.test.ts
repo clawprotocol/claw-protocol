@@ -5,11 +5,13 @@ import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
   authoritativeProBypassSimpleSendPaywall,
   bypassSimpleHomeWatermarkSendGate,
+  buildSendRouteReadonlyHtmlFromPlain,
   describePaidProSendModalBranch,
   longestPlainForAgreementPersist,
   mergePremiumRenderSourceField,
   paidProSendAllowed,
   pickAuthoritativePlainForSendHandoff,
+  shouldBypassFlexibleSendRecipientValidationForPremiumReview,
   shouldKeepReviewDisplayAfterProHydrate,
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
@@ -366,5 +368,46 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     const m = describePaidProSendModalBranch(d);
     expect(m.hasMaterialPremiumPipelineCorpus).toBe(true);
     expect(m.materialPremiumCorpusLen).toBeGreaterThanOrEqual(SEND_HANDOFF_AUTHORITATIVE_MIN_LEN);
+  });
+
+  it("buildSendRouteReadonlyHtmlFromPlain uses Agreement preview label for paid authoritative handoff", () => {
+    const html = buildSendRouteReadonlyHtmlFromPlain("Clause one.", { documentLabel: "Agreement preview" });
+    expect(html).toContain("Agreement preview");
+    expect(html).not.toContain("Draft Agreement (non-binding template)");
+  });
+
+  it("buildSendRouteReadonlyHtmlFromPlain defaults to draft disclaimer for free/starter", () => {
+    const html = buildSendRouteReadonlyHtmlFromPlain("Short body");
+    expect(html).toContain("Draft Agreement (non-binding template)");
+  });
+
+  it("shouldBypassFlexibleSendRecipientValidationForPremiumReview is true only for authoritative minimal review send", () => {
+    expect(
+      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
+        isWorkspace: true,
+        isSimpleHomeReview: true,
+        simpleFlowPhase: "send",
+        simpleSendAuthoritativeMinimalChrome: true,
+        streamlinedPremiumIntentForCopy: "review",
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
+        isWorkspace: true,
+        isSimpleHomeReview: true,
+        simpleFlowPhase: "send",
+        simpleSendAuthoritativeMinimalChrome: true,
+        streamlinedPremiumIntentForCopy: "signature",
+      }),
+    ).toBe(false);
+    expect(
+      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
+        isWorkspace: true,
+        isSimpleHomeReview: true,
+        simpleFlowPhase: "send",
+        simpleSendAuthoritativeMinimalChrome: false,
+        streamlinedPremiumIntentForCopy: "review",
+      }),
+    ).toBe(false);
   });
 });

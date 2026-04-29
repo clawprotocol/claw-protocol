@@ -65,6 +65,7 @@ import {
   describePaidProSendModalBranch,
   mergePremiumRenderSourceField,
   pickAuthoritativePlainForSendHandoff,
+  shouldBypassFlexibleSendRecipientValidationForPremiumReview,
   shouldMinimalProSendRecipientChrome,
   type PaidProSendBranchMeta,
 } from "./sendHandoffAuthoritativeCorpus";
@@ -135,6 +136,7 @@ import {
 } from "../../agreement/paymentRequestTypes";
 import { SimplePaymentAttachCard } from "../../launch/simpleProduct/SimplePaymentAttachCard";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
+import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import { normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
 import { mintRecipientAccessToken, putSigningLock } from "../../agreement/recipientAccessApi";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
@@ -1691,8 +1693,13 @@ const AgreementReview: React.FC<Props> = ({
         renderPlainLen: plainFromRender.length,
       });
     }
-    return buildSendRouteReadonlyHtmlFromPlain(authoritativeCorpusPick.text);
-  }, [agreementId, isSimpleHomeReview, authoritativeCorpusPick, renderedHtml]);
+    const paidAuthoritative = Boolean(
+      draft && isPaidProAgreementAuthoritative({ draft, agreementId, includeLocalCompletionMarker: false }),
+    );
+    return buildSendRouteReadonlyHtmlFromPlain(authoritativeCorpusPick.text, {
+      documentLabel: paidAuthoritative ? "Agreement preview" : undefined,
+    });
+  }, [agreementId, draft, isSimpleHomeReview, authoritativeCorpusPick, renderedHtml]);
 
   const previewHtml = useMemo(() => {
     if (isWorkspace && selectedVer) return selectedVer.rendered_html;
@@ -1960,6 +1967,27 @@ const AgreementReview: React.FC<Props> = ({
   const participantRows = useMemo(() => deriveParticipantRows(draft), [draft]);
   const sendInviteReadyCount = useMemo(() => countReadyInviteParties(draft?.parties), [draft?.parties]);
   const sendInviteTotalSlots = useMemo(() => countContactRequiredParties(draft?.parties), [draft?.parties]);
+  const premiumReviewLinkRecipientBypass = useMemo(
+    () =>
+      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
+        isWorkspace,
+        isSimpleHomeReview,
+        simpleFlowPhase,
+        simpleSendAuthoritativeMinimalChrome,
+        streamlinedPremiumIntentForCopy,
+      }),
+    [
+      isWorkspace,
+      isSimpleHomeReview,
+      simpleFlowPhase,
+      simpleSendAuthoritativeMinimalChrome,
+      streamlinedPremiumIntentForCopy,
+    ],
+  );
+  const recipientGateBlocksSend = useMemo(
+    () => !premiumReviewLinkRecipientBypass && sendInviteReadyCount < 1,
+    [premiumReviewLinkRecipientBypass, sendInviteReadyCount],
+  );
 
   const paymentRequestSnap = useMemo(() => {
     if (!draft) return "";
@@ -2082,7 +2110,8 @@ const AgreementReview: React.FC<Props> = ({
     if (
       isWorkspace &&
       isSimpleHomeReview &&
-      simpleFlowPhase === "send"
+      simpleFlowPhase === "send" &&
+      !premiumReviewLinkRecipientBypass
     ) {
       setSimpleSendValidateAttempted(true);
       const contactErrs = validateRecipientContactForFlexibleSend(draft.parties);
@@ -2120,13 +2149,33 @@ const AgreementReview: React.FC<Props> = ({
   }
 
   async function handleSimpleSendWithoutPayment() {
-    if (!onSimpleFlowContinue || !draft || !simpleSendActionsUnlocked) return;
+    const logReviewLinkAction = (actionTaken: string, extra?: Record<string, unknown>) => {
+      if (!import.meta.env.DEV) return;
+      // eslint-disable-next-line no-console
+      console.info("[review-link-action]", {
+        agreementId,
+        createFlowPhase: simpleFlowPhase,
+        createUiStage: section,
+        hasRecipients: sendInviteReadyCount >= 1,
+        actionTaken,
+        ...extra,
+      });
+    };
+    if (!onSimpleFlowContinue || !draft || !simpleSendActionsUnlocked) {
+      logReviewLinkAction("aborted_missing_prereq", {
+        hasOnContinue: Boolean(onSimpleFlowContinue),
+        hasDraft: Boolean(draft),
+        unlocked: simpleSendActionsUnlocked,
+      });
+      return;
+    }
     if (simpleFlowAdvanceBusy) return;
-    if (isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send") {
+    if (isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send" && !premiumReviewLinkRecipientBypass) {
       setSimpleSendValidateAttempted(true);
       const contactErrs = validateRecipientContactForFlexibleSend(draft.parties);
       setSimpleSendFieldErrors(contactErrs);
       if (Object.keys(contactErrs).length > 0) {
+        logReviewLinkAction("blocked_recipient_validation");
         setSimpleSendRecipientEditorOpen(true);
         setContactValidationSeq((n) => n + 1);
         const firstKey = scrollToFirstContactError(contactErrs);
@@ -2144,6 +2193,9 @@ const AgreementReview: React.FC<Props> = ({
       await saveField("payment_required", false);
       await saveField("payment_request", null);
       onSimpleFlowContinue();
+      logReviewLinkAction("advance_confirm_flow", {
+        bypassRecipientValidation: premiumReviewLinkRecipientBypass,
+      });
     } catch {
       /* saveField sets error */
     } finally {
@@ -4699,7 +4751,7 @@ const AgreementReview: React.FC<Props> = ({
                 disabled={
                   Boolean(savingField) ||
                   simpleFlowAdvanceBusy ||
-                  sendInviteReadyCount < 1 ||
+                  recipientGateBlocksSend ||
                   !requiredComplete
                 }
                 onClick={() => void handleSimpleSendWithoutPayment()}
@@ -5718,7 +5770,7 @@ const AgreementReview: React.FC<Props> = ({
                                 <button
                                   type="button"
                                   className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
-                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || sendInviteReadyCount < 1}
+                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || recipientGateBlocksSend}
                                   onClick={() => void handleSimpleSendWithoutPayment()}
                                 >
                                   {streamlinedPremiumIntentForCopy === "review"
@@ -5768,7 +5820,7 @@ const AgreementReview: React.FC<Props> = ({
                                 <button
                                   type="button"
                                   className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
-                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || sendInviteReadyCount < 1}
+                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || recipientGateBlocksSend}
                                   onClick={() => void handleSimpleSendWithoutPayment()}
                                 >
                                   {sendInviteReadyCount >= 1
@@ -5827,7 +5879,7 @@ const AgreementReview: React.FC<Props> = ({
                                 <button
                                   type="button"
                                   className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
-                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || sendInviteReadyCount < 1}
+                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || recipientGateBlocksSend}
                                   onClick={() => void handleSimpleSendWithoutPayment()}
                                 >
                                   Create signing links
@@ -5878,18 +5930,20 @@ const AgreementReview: React.FC<Props> = ({
                                 </summary>
                                 <div className="mt-3 border-t border-slate-800/50 pt-3">{recipientsBlock}</div>
                               </details>
-                              <details className="mt-2 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
-                                <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400">
-                                  Optional payments
-                                </summary>
-                                <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                                  Optional payment only if you expand it below — it never sends on its own.
-                                </p>
-                              </details>
+                              {featureFlags.sendPaymentRequestsUi ? (
+                                <details className="mt-2 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
+                                  <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400">
+                                    Optional payments
+                                  </summary>
+                                  <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                                    Optional payment only if you expand it below — it never sends on its own.
+                                  </p>
+                                </details>
+                              ) : null}
                             </>
                           ) : null}
                         </div>
-                        {!simpleSendAuthoritativeMinimalChrome ? (
+                        {featureFlags.sendPaymentRequestsUi && !simpleSendAuthoritativeMinimalChrome ? (
                           <SimplePaymentAttachCard
                             partyALabel={
                               (draft.parties || [])[0]
@@ -5988,25 +6042,27 @@ const AgreementReview: React.FC<Props> = ({
                           </p>
                           <div className="mt-6">{recipientsBlock}</div>
                         </div>
-                        <SimplePaymentAttachCard
-                          partyALabel={
-                            (draft.parties || [])[0]
-                              ? participantDisplayName((draft.parties || [])[0], 0)
-                              : "Party A"
-                          }
-                          partyBLabel={
-                            (draft.parties || [])[1]
-                              ? participantDisplayName((draft.parties || [])[1], 1)
-                              : "Party B"
-                          }
-                          paymentTerms={draft.payment_terms}
-                          purpose={draft.purpose}
-                          paymentRequired={simplePaymentRequired}
-                          onPaymentRequiredChange={(v) => void persistSimplePaymentRequired(v)}
-                          value={simplePayForm}
-                          onChange={setSimplePayForm}
-                          onPersist={() => void persistSimplePayment()}
-                        />
+                        {featureFlags.sendPaymentRequestsUi ? (
+                          <SimplePaymentAttachCard
+                            partyALabel={
+                              (draft.parties || [])[0]
+                                ? participantDisplayName((draft.parties || [])[0], 0)
+                                : "Party A"
+                            }
+                            partyBLabel={
+                              (draft.parties || [])[1]
+                                ? participantDisplayName((draft.parties || [])[1], 1)
+                                : "Party B"
+                            }
+                            paymentTerms={draft.payment_terms}
+                            purpose={draft.purpose}
+                            paymentRequired={simplePaymentRequired}
+                            onPaymentRequiredChange={(v) => void persistSimplePaymentRequired(v)}
+                            value={simplePayForm}
+                            onChange={setSimplePayForm}
+                            onPersist={() => void persistSimplePayment()}
+                          />
+                        ) : null}
                       </>
                     ) : simpleFlowUpsellSuppressed ? (
                       <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
@@ -6369,9 +6425,7 @@ const AgreementReview: React.FC<Props> = ({
                           disabled={
                             Boolean(savingField) ||
                             simpleFlowAdvanceBusy ||
-                            (isSimpleHomeReview &&
-                              simpleFlowPhase === "send" &&
-                              sendInviteReadyCount < 1)
+                            (isSimpleHomeReview && simpleFlowPhase === "send" && recipientGateBlocksSend)
                           }
                           onClick={() => void handleSimpleSendWithoutPayment()}
                         >

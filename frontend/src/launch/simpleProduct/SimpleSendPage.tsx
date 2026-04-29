@@ -74,19 +74,28 @@ export function SimpleSendPage(props: { agreementId: string }) {
   const [simpleFlowPremiumHandoffIntent, setSimpleFlowPremiumHandoffIntent] = useState(
     () => sendLanding.premiumIntent ?? peekPremiumSendIntent(),
   );
-  const resolveSimpleFlowPhase = useCallback((intent: "review" | "signature" | null): "review" | "send" => {
-    if (typeof window === "undefined") return "review";
-    const q = new URLSearchParams(window.location.search);
-    const urlPhase = q.get("phase") === "send" ? "send" : null;
-    const persistedSendPhase = readPersistedSendPhase(agreementId) === "send" ? "send" : null;
-    return resolveSimpleSendOpenPhase({
-      urlPhase,
-      handoffOpenPhase: sendLanding.openFlowPhase,
-      canAccessSendActions: canAccessSimpleSendActions(agreementId),
-      premiumIntent: intent,
-      persistedSendPhase,
-    });
-  }, [agreementId, sendLanding.openFlowPhase]);
+  const resolveSimpleFlowPhase = useCallback(
+    (intent: "review" | "signature" | null): "review" | "send" => {
+      if (typeof window === "undefined") return "review";
+      const q = new URLSearchParams(window.location.search);
+      const urlPhase = q.get("phase") === "send" ? "send" : null;
+      const persistedSendPhase = readPersistedSendPhase(agreementId) === "send" ? "send" : null;
+      const primed = sendLanding.primed;
+      const canAccessSendActions =
+        canAccessSimpleSendActions(agreementId) ||
+        workspaceProEntitled ||
+        isPaidProAgreementAuthoritative({ draft: primed ?? null, agreementId }) ||
+        describePaidProSendModalBranch(primed, { agreementId }).paidProSendAllowed;
+      return resolveSimpleSendOpenPhase({
+        urlPhase,
+        handoffOpenPhase: sendLanding.openFlowPhase,
+        canAccessSendActions,
+        premiumIntent: intent,
+        persistedSendPhase,
+      });
+    },
+    [agreementId, sendLanding.openFlowPhase, sendLanding.primed, workspaceProEntitled],
+  );
   const [simpleFlowPhase, setSimpleFlowPhase] = useState<"review" | "send">(() =>
     resolveSimpleFlowPhase(sendLanding.premiumIntent ?? peekPremiumSendIntent()),
   );
@@ -105,8 +114,19 @@ export function SimpleSendPage(props: { agreementId: string }) {
   authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
   const premiumSendUnlocked = useMemo(() => {
     void sendUnlockTick;
-    return canAccessSimpleSendActions(agreementId) || workspaceProEntitled;
-  }, [agreementId, workspaceProEntitled, sendUnlockTick]);
+    return (
+      canAccessSimpleSendActions(agreementId) ||
+      workspaceProEntitled ||
+      sendAuthoritative ||
+      paidProSendBranch.paidProSendAllowed
+    );
+  }, [
+    agreementId,
+    workspaceProEntitled,
+    sendAuthoritative,
+    paidProSendBranch.paidProSendAllowed,
+    sendUnlockTick,
+  ]);
 
   useEffect(() => {
     setPaidProSendBranch(describePaidProSendModalBranch(initialDraftSnapshot, { agreementId }));
@@ -178,22 +198,22 @@ export function SimpleSendPage(props: { agreementId: string }) {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("phase") !== "send") return;
-    if (!canAccessSimpleSendActions(agreementId)) {
+    if (!premiumSendUnlocked) {
       navigate(`/app/ready/${encodeURIComponent(agreementId)}`);
       return;
     }
     url.searchParams.delete("phase");
     const qs = url.searchParams.toString();
     window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
-  }, [agreementId, navigate]);
+  }, [agreementId, navigate, premiumSendUnlocked]);
 
   useEffect(() => {
     if (simpleFlowPhase !== "send") return;
-    if (!canAccessSimpleSendActions(agreementId)) {
+    if (!premiumSendUnlocked) {
       setSimpleFlowPhase("review");
       navigate(`/app/ready/${encodeURIComponent(agreementId)}`);
     }
-  }, [agreementId, simpleFlowPhase, navigate]);
+  }, [agreementId, simpleFlowPhase, navigate, premiumSendUnlocked]);
 
   /** After `?phase=send` is stripped from the URL, keep send so refresh on `/app/send/:id` stays on the send step. */
   useEffect(() => {
@@ -205,9 +225,9 @@ export function SimpleSendPage(props: { agreementId: string }) {
   useEffect(() => {
     const intent = simpleFlowPremiumHandoffIntent;
     if (intent !== "signature") return;
-    if (!canAccessSimpleSendActions(agreementId)) return;
+    if (!premiumSendUnlocked) return;
     setSimpleFlowPhase("send");
-  }, [agreementId, paywallOpen, simpleFlowPremiumHandoffIntent]);
+  }, [agreementId, paywallOpen, simpleFlowPremiumHandoffIntent, premiumSendUnlocked]);
 
   /**
    * Reopened in-progress send with no stored intent:
@@ -311,7 +331,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
             setSimpleFlowPhase("review");
           }}
           onRequestSendUnlock={() => {
-            if (workspaceProEntitled || paidProSendBranch.paidProSendAllowed) {
+            if (workspaceProEntitled || paidProSendBranch.paidProSendAllowed || sendAuthoritative) {
               markSimpleFlowSendUnlocked(agreementId);
               setSendUnlockTick((n) => n + 1);
               return;

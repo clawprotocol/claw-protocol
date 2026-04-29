@@ -16,6 +16,7 @@
  * - SERVER_BILLING → GET /v1/orgs/…/keys and subscriptions (default on)
  * - SIMPLE_SEND_PAYWALL → review → ready-to-send bridge before live send/payment (default on)
  * - BYPASS_SIMPLE_SEND_PAYWALL → QA: skip gate (default off)
+ * - SEND_PAYMENT_REQUESTS → optional attach-payment UI on simple send (default off until wired end-to-end)
  * - TRIAL_CHECKOUT → conversion CTA emphasizes trial (default off)
  */
 function getFlag(key: string, defaultOn: boolean): boolean {
@@ -62,4 +63,8 @@ export const featureFlags = {
   sendConversionPaywallExperiment: getFlag("VITE_CLAW_EXPERIMENT_SEND_PAYWALL", true),
   /** Optional: forward each product event to same-origin /api/product-events (non-blocking). */
   productEventsIngestApi: getFlag("VITE_CLAW_FEATURE_PRODUCT_EVENTS_INGEST", false),
+  /**
+   * Simple send: “Attach payment” / optional payment-request UI. Off by default — enable only when invoice/payment UX is fully wired.
+   */
+  sendPaymentRequestsUi: getFlag("VITE_CLAW_FEATURE_SEND_PAYMENT_REQUESTS", false),
 } as const;

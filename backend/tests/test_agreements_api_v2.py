@@ -1788,3 +1788,30 @@ def test_premium_agreement_review_fail_open_200_when_llm_fails(monkeypatch, tmp_
     assert b["questions_for_user"] == []
     assert b["suggested_clause_upgrades"] == []
     assert b["priority_score"] == 35
+
+
+def test_render_html_watermark_emits_label_once_even_when_body_repeats_it():
+    from backend.routers.agreements_v2_api import AgreementDraft, AgreementParty, _render_html
+    from backend.usage_economics.constants import WATERMARK_LABEL
+
+    long_body = "z" * 2500 + "\n\n" + WATERMARK_LABEL + "\n" + WATERMARK_LABEL
+    d = AgreementDraft(
+        id="wm-dup-test",
+        created_at="c",
+        updated_at="u",
+        title="Title",
+        jurisdiction="DE",
+        parties=[
+            AgreementParty(name="Alice", role="party_a"),
+            AgreementParty(name="Bob", role="party_b"),
+        ],
+        purpose=long_body,
+        payment_terms="net 30",
+        duration="1 year",
+        due_date=None,
+        effective_date="2026-01-01",
+        versions=[],
+        audit_log=[],
+    )
+    out = _render_html(d, watermark=True)
+    assert out.count(WATERMARK_LABEL) == 1
