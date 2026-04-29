@@ -243,6 +243,7 @@ import {
   type PremiumCompletionSnapshot,
 } from "./premiumCompletionStorage";
 import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
+import { computeSimpleCreatePaidProReviewReady } from "../../launch/simpleProduct/simpleCreatePaidProReviewShell";
 import { type CreateFlowProductionPhase, isCreateFlowPastCapture } from "./createFlowTypes";
 import { CreateUiStage, createUiStagePrimaryCta } from "./createUiStage";
 import { getCanonicalAgreementTypeForCreate } from "./agreementTypeCanonical";
@@ -453,6 +454,11 @@ type Props = {
   freshSimpleCreateStart?: boolean;
   /** First completed LawDog agreement in this browser (marketing / first-win UX only). */
   firstLawdogSession?: boolean;
+  /**
+   * `/app/create` SimpleFlowShell: when authoritative paid Pro is in DRAFT-stage review, parent hides
+   * starter hero/step 1 chrome (title, stepper, starter chips) without resetting intake stage.
+   */
+  onSimpleCreateShellChrome?: (state: { paidProReviewReady: boolean }) => void;
 };
 
 type MissingKey =
@@ -1316,6 +1322,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   onIntakeTextChange,
   freshSimpleCreateStart = false,
   firstLawdogSession = false,
+  onSimpleCreateShellChrome,
 }) => {
   const [intakeBaselineCommitted, setIntakeBaselineCommitted] = useState("");
   const [intakeStepBuffer, setIntakeStepBuffer] = useState(() =>
@@ -6512,6 +6519,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }),
     [draft, tier, reviewAgreementId, premiumSendPathUnlocked, premiumPersistedFlowActive, reviewDocRefreshTick],
   );
+
+  const paidProReviewReady = computeSimpleCreatePaidProReviewReady({
+    simpleProductFlow,
+    liveWorkspaceTwoPane,
+    paidProAuthoritative,
+    createUiStage,
+    displayPhase,
+  });
+
+  useLayoutEffect(() => {
+    if (!onSimpleCreateShellChrome) return;
+    onSimpleCreateShellChrome({ paidProReviewReady });
+    return () => onSimpleCreateShellChrome({ paidProReviewReady: false });
+  }, [paidProReviewReady, onSimpleCreateShellChrome]);
 
   const returnToIntakeEditing = () => {
     if (paidProAuthoritative) {

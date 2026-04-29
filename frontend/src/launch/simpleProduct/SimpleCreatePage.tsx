@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReEngagementBanner } from "../ReEngagementBanner";
 import { peekCreateOrHomeBanner, type CreateOrHomeBanner } from "../reEngagementStore";
 import { useAccess } from "../../access/AccessContext";
@@ -47,6 +47,11 @@ import type { PremiumSendIntent } from "./premiumSendIntent";
 import { getOrgId } from "../orgContext";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
+import {
+  SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE,
+  SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE,
+  SIMPLE_CREATE_STARTER_HERO_TITLE,
+} from "./simpleCreatePaidProReviewShell";
 
 const STARTER_TEMPLATE =
   "Services Agreement between [Your Company] and [Client]. Scope: [describe work]. Payment: [amount] due [terms]. Governing law: [state].";
@@ -190,28 +195,44 @@ export function SimpleCreatePage() {
 
   const simplifyFirstSession = firstSessionLive;
 
+  const [paidProReviewReadyShell, setPaidProReviewReadyShell] = useState(false);
+  const onSimpleCreateShellChrome = useCallback((state: { paidProReviewReady: boolean }) => {
+    setPaidProReviewReadyShell(state.paidProReviewReady);
+  }, []);
+
+  const shellStep = paidProReviewReadyShell ? 2 : 1;
+  const shellTitle = paidProReviewReadyShell
+    ? SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE
+    : quickSendTypedArrival
+      ? "Shape your draft"
+      : isFreshSimpleCreateStart
+        ? SIMPLE_CREATE_STARTER_HERO_TITLE
+        : "Describe your deal";
+  const shellSubtitle = paidProReviewReadyShell
+    ? SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE
+    : quickSendTypedArrival
+      ? "We turned your input into a structured draft for the same send/sign/proof workflow."
+      : isFreshSimpleCreateStart
+        ? "Type or speak what you need. Review before anything is sent."
+        : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Draft → Send → Sign. You can export and keep your records anytime.";
+  const hideIntakeMarketingChrome = paidProReviewReadyShell;
+
   return (
     <SimpleFlowShell
-      step={1}
+      step={shellStep}
       progressLabels={SIMPLE_FLOW_PROGRESS_LABELS}
-      kicker={quickSendTypedArrival ? "Starting from your typed agreement" : undefined}
-      title={
-        quickSendTypedArrival
-          ? "Shape your draft"
-          : isFreshSimpleCreateStart
-            ? "Create an agreement in minutes."
-            : "Describe your deal"
+      kicker={
+        paidProReviewReadyShell
+          ? undefined
+          : quickSendTypedArrival
+            ? "Starting from your typed agreement"
+            : undefined
       }
-      subtitle={
-        quickSendTypedArrival
-          ? "We turned your input into a structured draft for the same send/sign/proof workflow."
-          : isFreshSimpleCreateStart
-            ? "Type or speak what you need. Review before anything is sent."
-            : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Draft → Send → Sign. You can export and keep your records anytime."
-      }
+      title={shellTitle}
+      subtitle={shellSubtitle}
     >
-      <div className={isFreshSimpleCreateStart ? "pb-28 sm:pb-24" : undefined}>
-        {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival ? (
+      <div className={isFreshSimpleCreateStart || paidProReviewReadyShell ? "pb-28 sm:pb-24" : undefined}>
+        {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival && !hideIntakeMarketingChrome ? (
           <p className="mb-2 text-center text-[11px] font-medium leading-snug text-slate-500 sm:text-left sm:text-xs">
             {NOTHING_SENT_UNTIL_CONFIRM}
           </p>
@@ -224,12 +245,12 @@ export function SimpleCreatePage() {
             navigate={(path) => navigate(path)}
           />
         ) : null}
-        {quickSendTypedArrival ? (
+        {quickSendTypedArrival && !hideIntakeMarketingChrome ? (
           <p className="mb-4 text-center text-sm leading-snug text-slate-400 sm:mb-5 sm:text-left sm:text-base md:text-[1.0625rem] lg:text-[1.125rem] lg:leading-relaxed lg:text-slate-300">
             This draft continues to send, sign, and proof.
           </p>
         ) : null}
-        {!quickSendTypedArrival && showFirstHints && !simplifyFirstSession ? (
+        {!quickSendTypedArrival && showFirstHints && !simplifyFirstSession && !hideIntakeMarketingChrome ? (
           <p className="mb-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-[11px] text-slate-500 sm:justify-start sm:text-xs md:text-sm md:text-slate-400">
             <span>Takes ~30 seconds.</span>
             <span className="hidden text-slate-700 sm:inline" aria-hidden>
@@ -238,16 +259,16 @@ export function SimpleCreatePage() {
             <span>No account needed.</span>
           </p>
         ) : null}
-        {!quickSendTypedArrival && !isFreshSimpleCreateStart ? (
+        {!quickSendTypedArrival && !isFreshSimpleCreateStart && !hideIntakeMarketingChrome ? (
           <p className="mb-3 text-center text-base font-medium leading-relaxed text-slate-300 sm:text-left sm:text-[1.0625rem] md:text-[1.125rem] lg:text-[1.1875rem] lg:leading-[1.55] lg:text-slate-200/95">
             Describe your agreement. We&apos;ll turn it into something you can send.
           </p>
-        ) : !quickSendTypedArrival && isFreshSimpleCreateStart ? (
+        ) : !quickSendTypedArrival && isFreshSimpleCreateStart && !hideIntakeMarketingChrome ? (
           <p className="mb-2 text-center text-sm font-medium leading-snug text-slate-400 sm:text-left sm:mb-3 sm:text-[0.9375rem] md:text-base">
             Tap a starter or describe your deal below — then create your draft.
           </p>
         ) : null}
-        {intakeActive && !isFreshSimpleCreateStart ? (
+        {intakeActive && !isFreshSimpleCreateStart && !hideIntakeMarketingChrome ? (
           <p
             className="mb-4 rounded-lg border border-emerald-900/35 bg-emerald-950/20 px-3 py-2.5 text-center text-sm leading-snug text-emerald-100/95 sm:text-left sm:text-[0.9375rem] md:text-base lg:text-[1.0625rem] lg:leading-relaxed"
             role="status"
@@ -255,7 +276,7 @@ export function SimpleCreatePage() {
             {FIRST_RUN_INTAKE_REASSURANCE}
           </p>
         ) : null}
-        {!quickSendTypedArrival ? (
+        {!quickSendTypedArrival && !hideIntakeMarketingChrome ? (
           <div
             className={`flex flex-wrap justify-center gap-2 sm:justify-start ${isFreshSimpleCreateStart ? "mb-3" : "mb-5"}`}
             aria-label={isFreshSimpleCreateStart ? "Quick starters" : "Example prompts"}
@@ -287,14 +308,14 @@ export function SimpleCreatePage() {
             ) : null}
           </div>
         ) : null}
-        {!quickSendTypedArrival && !simplifyFirstSession ? (
+        {!quickSendTypedArrival && !simplifyFirstSession && !hideIntakeMarketingChrome ? (
           <p className="mb-5 text-center text-sm leading-relaxed text-slate-600 sm:text-left sm:text-[0.9375rem] md:text-base lg:text-[1.0625rem] lg:leading-[1.55] lg:text-slate-400">
             This is a draft workspace — refine with no pressure.{" "}
             <span className="text-slate-500 lg:text-slate-400">Nothing is sent until you review, unlock send, and confirm.</span>
           </p>
         ) : null}
 
-        {trustNudge.suggestEmailForTrust && !simplifyFirstSession ? (
+        {trustNudge.suggestEmailForTrust && !simplifyFirstSession && !hideIntakeMarketingChrome ? (
           <div
             className="mb-4 rounded-lg border border-slate-700/80 bg-slate-950/40 px-3 py-2.5 text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem] md:text-base lg:text-[1.0625rem] lg:leading-[1.55] lg:text-slate-300/90"
             role="status"
@@ -322,7 +343,7 @@ export function SimpleCreatePage() {
           </div>
         ) : null}
 
-        {!quickSendTypedArrival && !simplifyFirstSession ? (
+        {!quickSendTypedArrival && !simplifyFirstSession && !hideIntakeMarketingChrome ? (
           <div className="mb-6 border-b border-slate-800/70 pb-5">
             <button
               type="button"
@@ -435,6 +456,7 @@ export function SimpleCreatePage() {
             initialIntakeText={initialFromHeroOrStorage}
             freshSimpleCreateStart={isFreshSimpleCreateStart}
             firstLawdogSession={firstSessionLive}
+            onSimpleCreateShellChrome={onSimpleCreateShellChrome}
             onIntakeTextChange={(t) => {
               setIntakeActive(t.trim().length > 0);
               if (intakeChangeBootRef.current) {
