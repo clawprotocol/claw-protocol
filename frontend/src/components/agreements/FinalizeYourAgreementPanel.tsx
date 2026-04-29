@@ -39,6 +39,8 @@ type Props = {
   /** Bumps when user picks a route primary CTA so downstream UX can react (e.g. auto-refine loop). */
   routePrimaryActionNonce?: number;
   onRouteFixPrimary?: () => void;
+  /** Fired after a successful refine apply so the host can show a calm “What changed” line under the document. */
+  onProRefineWhatChanged?: (summaryLine: string | null) => void;
   onApplyDocumentText: (text: string) => void;
   onReadyForReview: () => void;
   onSendForSignature: () => void;
@@ -76,6 +78,7 @@ export function FinalizeYourAgreementPanel({
   reviewRoute,
   routePrimaryActionNonce = 0,
   onRouteFixPrimary,
+  onProRefineWhatChanged,
   onApplyDocumentText,
   onReadyForReview,
   onSendForSignature,
@@ -244,6 +247,11 @@ export function FinalizeYourAgreementPanel({
           setLastRefine(r);
           markDocumentDirty?.();
           onApplyDocumentText(r.updated_document_text);
+          const whatChangedLine =
+            Array.isArray(r.summary_changes) && r.summary_changes.length
+              ? r.summary_changes.map((x) => String(x ?? "").trim()).filter(Boolean).join(" ")
+              : null;
+          onProRefineWhatChanged?.(whatChangedLine || null);
           setPrompt("");
           setRefineSuccessMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
         } else if (import.meta.env.DEV) {
@@ -284,6 +292,7 @@ export function FinalizeYourAgreementPanel({
       intakeText,
       markDocumentDirty,
       onApplyDocumentText,
+      onProRefineWhatChanged,
       prompt,
     ],
   );
@@ -344,6 +353,11 @@ export function FinalizeYourAgreementPanel({
           setLastRefine(r);
           markDocumentDirty?.();
           onApplyDocumentText(r.updated_document_text);
+          const whatChangedLine =
+            Array.isArray(r.summary_changes) && r.summary_changes.length
+              ? r.summary_changes.map((x) => String(x ?? "").trim()).filter(Boolean).join(" ")
+              : null;
+          onProRefineWhatChanged?.(whatChangedLine || null);
           setRefineSuccessMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
         }
       } catch (e2) {
@@ -379,6 +393,7 @@ export function FinalizeYourAgreementPanel({
     disabled,
     markDocumentDirty,
     onApplyDocumentText,
+    onProRefineWhatChanged,
   ]);
 
   return (

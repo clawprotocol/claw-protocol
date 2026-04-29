@@ -1458,6 +1458,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   } | null>(null);
   const agreementDocSyncTimerRef = useRef(0);
   const [reviewDocRefreshTick, setReviewDocRefreshTick] = useState(0);
+  /** Shown below the agreement document after a successful Pro refine (summary_changes). */
+  const [proRefineWhatChangedSummary, setProRefineWhatChangedSummary] = useState<string | null>(null);
   /** Parsed draft held until user picks simplified vs. Pro for advanced instrument intakes. */
   const [complexityPendingParsed, setComplexityPendingParsed] = useState<ParsedDraftShape | null>(null);
   const complexityPendingParsedRef = useRef<ParsedDraftShape | null>(null);
@@ -3188,6 +3190,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
     commitParsedDraftToReviewFlow(merged.draft);
     if (recipientsSurfaceReleased) {
+      setDisplayPhase("review");
       setCreateFlowPhase("recipient_setup_required");
       setCreateUiStage(CreateUiStage.RECIPIENTS);
     }
@@ -6136,7 +6139,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (createProductionTwoPane && !hydrate && structuredOk) {
         setCreateFlowPhase("draft_ready_for_review");
         setCreateUiStage(CreateUiStage.DRAFT);
-        setDisplayPhase("intake");
+        setDisplayPhase(
+          isPaidProAgreementAuthoritative({
+            draft: parsed,
+            tier,
+            agreementId: reviewAgreementIdRef.current,
+            premiumSendPathUnlocked,
+            premiumPersistedFlowActive,
+            premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+          })
+            ? "review"
+            : "intake",
+        );
         setMobileWorkspacePane("preview");
         setDraftNowCommitted(true);
         setPreviewPaneRevealed(true);
@@ -6440,7 +6454,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setMissing([]);
     setMissingAnswer("");
     if (createProductionTwoPane) {
-      setDisplayPhase("intake");
+      const authoritative = isPaidProAgreementAuthoritative({
+        draft: filledWithRoles,
+        tier,
+        agreementId: reviewAgreementId,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      });
+      setDisplayPhase(authoritative ? "review" : "intake");
       setDraftNowCommitted(true);
       setCreateFlowPhase("draft_ready_for_review");
       setCreateUiStage(CreateUiStage.DRAFT);
@@ -6487,8 +6509,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     patchedWithRoles = normalizeParsedDraftLegalConcepts(patchedWithRoles, rawIntake);
     if (createProductionTwoPane) {
+      const authoritative = isPaidProAgreementAuthoritative({
+        draft: patchedWithRoles,
+        tier,
+        agreementId: reviewAgreementId,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      });
       setDraft(patchedWithRoles);
-      setDisplayPhase("intake");
+      setDisplayPhase(authoritative ? "review" : "intake");
       setDraftNowCommitted(true);
       setCreateFlowPhase("draft_ready_for_review");
       setCreateUiStage(CreateUiStage.DRAFT);
@@ -6527,6 +6557,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createUiStage,
     displayPhase,
   });
+
+  /** Paid authoritative Pro: recipient setup must stay on review chrome — never starter/intake. */
+  const advancePaidProToRecipientSetup = useCallback(() => {
+    setDisplayPhase("review");
+    setCreateFlowPhase("recipient_setup_required");
+    setCreateUiStage(CreateUiStage.RECIPIENTS);
+    setMobileWorkspacePane("preview");
+  }, []);
 
   useLayoutEffect(() => {
     if (!onSimpleCreateShellChrome) return;
@@ -7197,6 +7235,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedStructureComplete = useMemo(() => {
     if (!simpleProductFlow || !liveWorkspaceTwoPane || !showMainIntakeForm || showFollowUpOnly) return false;
     if (hardError || loading) return false;
+    /** Paid authoritative: never treat production progress as “guided intake incomplete” (avoids INPUT reset on RECIPIENTS). */
+    if (createProductionTwoPane && paidProAuthoritative && createUiStage !== CreateUiStage.INPUT) return true;
     /** Parsed draft exists past INPUT — do not let intake heuristics block production Continue / legacy lane. */
     if (createProductionTwoPane && createUiStage !== CreateUiStage.INPUT && draft) return true;
     const t = intakeGuidanceCombined.trim();
@@ -7214,6 +7254,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createProductionTwoPane,
     createUiStage,
     draft,
+    paidProAuthoritative,
     intakeGuidanceCombined,
     livePreviewModel,
     agreementIntakeDraft,
@@ -7388,11 +7429,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (!guardProDocumentDisplayPhase) return;
     if (displayPhase === "intake") {
-      console.warn("[STATE GUARD VIOLATION] Pro document fell back to intake", {
-        displayPhase,
-        createFlowPhase,
-        createUiStage,
-      });
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn("[STATE GUARD VIOLATION] Pro document fell back to intake", {
+          displayPhase,
+          createFlowPhase,
+          createUiStage,
+        });
+      }
       setDisplayPhase("review");
     }
   }, [guardProDocumentDisplayPhase, displayPhase, createFlowPhase, createUiStage]);
@@ -7738,6 +7782,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (guidedStructureComplete) return;
+    if (paidProAuthoritative) return;
 
     const preserveProductionProgress =
       createProductionTwoPane &&
@@ -7797,6 +7842,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     tier,
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
+    paidProAuthoritative,
   ]);
 
   useEffect(() => {
@@ -10414,13 +10460,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       persistPremiumRecipientHandoffFromDraftAndUi(d, { displayName1: next1, displayName2: next2 });
     }
     setAgreementTypeAccepted(true);
-    setCreateFlowPhase("recipient_setup_required");
-    setCreateUiStage(CreateUiStage.RECIPIENTS);
-    setMobileWorkspacePane("preview");
+    if (paidProAuthoritative) {
+      advancePaidProToRecipientSetup();
+    } else {
+      setCreateFlowPhase("recipient_setup_required");
+      setCreateUiStage(CreateUiStage.RECIPIENTS);
+      setMobileWorkspacePane("preview");
+    }
     window.requestAnimationFrame(() => {
       scrollVisibleRecipientSetupIntoView("start");
     });
   }, [
+    advancePaidProToRecipientSetup,
+    paidProAuthoritative,
     createProductionTwoPane,
     createUiStage,
     missing,
@@ -10433,9 +10485,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient2Email,
     setRecipientSignerLabels,
     setAgreementTypeAccepted,
-    setCreateFlowPhase,
-    setCreateUiStage,
-    setMobileWorkspacePane,
     setHardError,
     setAgreementDocumentText,
     tier,
@@ -11031,9 +11080,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           setAgreementTypeAccepted(true);
-          setCreateFlowPhase("recipient_setup_required");
-          setCreateUiStage(CreateUiStage.RECIPIENTS);
-          setMobileWorkspacePane("preview");
+          if (paidProAuthoritative) {
+            advancePaidProToRecipientSetup();
+          } else {
+            setCreateFlowPhase("recipient_setup_required");
+            setCreateUiStage(CreateUiStage.RECIPIENTS);
+            setMobileWorkspacePane("preview");
+          }
           window.requestAnimationFrame(() => {
             scrollVisibleRecipientSetupIntoView("start");
           });
@@ -13046,6 +13099,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 {buildPreviewForCurrentTier(draft)}
                               </pre>
                             )}
+                            {proRefineWhatChangedSummary && productionDraftPrimaryReviewSurface ? (
+                              <p
+                                className="mt-3 max-w-[min(100%,58rem)] rounded-lg border border-emerald-500/20 bg-emerald-950/15 px-3 py-2 text-sm leading-relaxed text-slate-200/95"
+                                role="status"
+                                aria-live="polite"
+                              >
+                                <span className="font-medium text-emerald-200/90">What changed: </span>
+                                {proRefineWhatChangedSummary}
+                              </p>
+                            ) : null}
                             {showUpgradeToFullDraftOnReview && createUiStage === CreateUiStage.DRAFT ? (
                               <div
                                 className="pointer-events-none absolute bottom-0 left-0 right-0 z-[1] h-12 rounded-b-lg bg-gradient-to-t from-black/55 to-transparent"
@@ -13173,6 +13236,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   onRouteFixPrimary={bumpFinalizeRoutePrimaryActionNonce}
                                   onApplyDocumentText={(t) => {
                                     applyProRefineOutputToProSurfaceRef.current?.(t, { clearStepBuffer: false, scrollToReview: true });
+                                  }}
+                                  onProRefineWhatChanged={(line) => {
+                                    const t = (line || "").trim();
+                                    setProRefineWhatChangedSummary(t.length ? t : null);
                                   }}
                                   markDocumentDirty={() => {
                                     agreementDocumentDirtyRef.current = true;
