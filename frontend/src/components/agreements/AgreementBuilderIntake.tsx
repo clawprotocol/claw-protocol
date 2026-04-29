@@ -327,9 +327,12 @@ import {
   authoritativePremiumPipelineResultForUiApply,
 } from "./premiumPostCheckoutApplyEligible";
 import {
+  hasMaterialPremiumPipelineCorpus,
   longestPlainForAgreementPersist,
+  materialPremiumPipelineCorpusMaxLen,
   pickAuthoritativePlainForSendHandoff,
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+  shouldKeepReviewDisplayAfterProHydrate,
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
 import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
@@ -5949,7 +5952,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         await sleep(dwellMs);
       }
       setFollowUpDetailTotal(0);
-      setDisplayPhase("intake");
+      const keepReviewAfterHydrate =
+        Boolean(simpleProductFlow && liveWorkspaceTwoPane && normalized) &&
+        shouldKeepReviewDisplayAfterProHydrate(normalized);
+      const nextDisplayAfterPersist = keepReviewAfterHydrate ? "review" : "intake";
+      if (import.meta.env.DEV && simpleProductFlow && liveWorkspaceTwoPane && normalized) {
+        const rs = String(normalized.premium_render_source ?? "").trim();
+        const corpusLen = materialPremiumPipelineCorpusMaxLen(normalized);
+        console.info("[paid-pro-hydrate-preserve]", {
+          agreement_id: id,
+          premium_render_source: rs || null,
+          corpusLen,
+          hasMaterialPremiumPipelineCorpus: hasMaterialPremiumPipelineCorpus(normalized),
+          displayPhase_before: displayPhaseRef.current,
+          displayPhase_after: nextDisplayAfterPersist,
+          createUiStage_before: String(createUiStageRef.current),
+          createUiStage_after: String(createUiStageRef.current),
+          source: "runPersistAndOpen",
+        });
+      }
+      setDisplayPhase(nextDisplayAfterPersist);
       clearAgreementCreatorIntakeStorage();
       clearPremiumCompletionStateAfterSend();
       /** Any successful simple-product persist → send/review handoff must not leave a create-page resume id (zombie shell). */
@@ -7210,10 +7232,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     () =>
       Boolean(
         draft &&
-          premiumPaidDocumentSurface &&
-          (draft.premium_server_full_document_text || draft.premium_full_document_text || "").trim().length >= 400,
+          createProductionTwoPane &&
+          createUiStage === CreateUiStage.DRAFT &&
+          (premiumPaidDocumentSurface || shouldKeepReviewDisplayAfterProHydrate(draft)),
       ),
-    [draft, premiumPaidDocumentSurface],
+    [draft, premiumPaidDocumentSurface, createProductionTwoPane, createUiStage],
   );
 
   useEffect(() => {
@@ -7565,6 +7588,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const preserveProductionProgress =
       createProductionTwoPane &&
       (readPremiumCompletionSnapshot() != null ||
+        Boolean(readCreateReviewAgreementResumeId()) ||
         Boolean(reviewAgreementId?.trim()) ||
         draft != null ||
         createUiStage !== CreateUiStage.INPUT ||
@@ -7710,11 +7734,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setCreateUiStage(CreateUiStage.DRAFT);
         setCreateFlowPhase("draft_ready_for_review");
         setDraftNowCommitted(true);
-        setDisplayPhase(
-          (next.premium_server_full_document_text || next.premium_full_document_text || "").trim().length >= 500
-            ? "review"
-            : "intake",
-        );
+        const nextDisplay = shouldKeepReviewDisplayAfterProHydrate(ad) ? "review" : "intake";
+        if (import.meta.env.DEV) {
+          const rs = String(ad.premium_render_source ?? "").trim();
+          const corpusLen = materialPremiumPipelineCorpusMaxLen(ad);
+          console.info("[paid-pro-hydrate-preserve]", {
+            agreement_id: hid,
+            premium_render_source: rs || null,
+            corpusLen,
+            hasMaterialPremiumPipelineCorpus: hasMaterialPremiumPipelineCorpus(ad),
+            displayPhase_before: displayPhaseRef.current,
+            displayPhase_after: nextDisplay,
+            createUiStage_before: String(createUiStageRef.current),
+            createUiStage_after: CreateUiStage.DRAFT,
+            source: "production_resume_hydrate",
+          });
+        }
+        setDisplayPhase(nextDisplay);
         setHardError(null);
         if (rawIntake.trim()) {
           setIntakeBaselineCommitted(rawIntake);

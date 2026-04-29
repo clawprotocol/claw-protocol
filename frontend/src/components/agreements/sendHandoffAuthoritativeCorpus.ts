@@ -37,6 +37,9 @@ export type PaidProSendBranchMeta = {
   paidProSendAllowed: boolean;
   premium_render_source: string | null;
   authoritativeLen: number;
+  /** Max length among premium / server pipeline body fields (same basis as `hasMaterialPremiumPipelineCorpus`). */
+  materialPremiumCorpusLen: number;
+  hasMaterialPremiumPipelineCorpus: boolean;
   reason: string;
 };
 
@@ -62,6 +65,17 @@ export function hasMaterialPremiumPipelineCorpus(draft: CorpusDraftLike | null |
 
 const AUTHORITATIVE_PREMIUM_RENDER_SOURCES = new Set(["server_full_document_text", "server_repair_document_text"]);
 
+/**
+ * After GET hydrate / resume, keep the user on paid Pro **review** chrome (not fresh intake) when the
+ * persisted draft is clearly authoritative: server repair/full render source or material premium corpus.
+ */
+export function shouldKeepReviewDisplayAfterProHydrate(draft: CorpusDraftLike | null | undefined): boolean {
+  if (!draft) return false;
+  const rs = String(draft.premium_render_source ?? "").trim();
+  if (AUTHORITATIVE_PREMIUM_RENDER_SOURCES.has(rs)) return true;
+  return hasMaterialPremiumPipelineCorpus(draft);
+}
+
 export function shouldMinimalProSendRecipientChrome(args: {
   premiumRenderSourceResolved?: string | null;
   authoritativePick: SendHandoffCorpusPick | null;
@@ -84,6 +98,8 @@ export function shouldMinimalProSendRecipientChrome(args: {
  */
 export function describePaidProSendModalBranch(draft: CorpusDraftLike | null | undefined): PaidProSendBranchMeta {
   const rs = String(draft?.premium_render_source ?? "").trim();
+  const materialPremiumCorpusLen = materialPremiumPipelineCorpusMaxLen(draft);
+  const hasMaterialPremiumPipelineCorpusFlag = hasMaterialPremiumPipelineCorpus(draft);
   const pick = pickAuthoritativePlainForSendHandoff(draft);
   const plain = (pick?.text ?? "").trim();
   const bypass = shouldMinimalProSendRecipientChrome({
@@ -107,6 +123,8 @@ export function describePaidProSendModalBranch(draft: CorpusDraftLike | null | u
     paidProSendAllowed: bypass,
     premium_render_source: rs || null,
     authoritativeLen: plain.length,
+    materialPremiumCorpusLen,
+    hasMaterialPremiumPipelineCorpus: hasMaterialPremiumPipelineCorpusFlag,
     reason,
   };
 }

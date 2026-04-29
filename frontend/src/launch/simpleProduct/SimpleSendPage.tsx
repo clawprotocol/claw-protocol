@@ -11,6 +11,7 @@ import {
   isSimpleSendPaywallActive,
   markSimpleFlowSendUnlocked,
 } from "../simpleFlowSendUnlock";
+import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import {
   describePaidProSendModalBranch,
   type PaidProSendBranchMeta,
@@ -59,6 +60,11 @@ function clearPersistedSendPhase(id: string) {
 export function SimpleSendPage(props: { agreementId: string }) {
   const { agreementId } = props;
   const { navigate } = useLaunchNav();
+  const navigateBackToCreateForEdit = useCallback(() => {
+    const id = agreementId.trim();
+    if (id) writeCreateReviewAgreementResumeId(id);
+    void navigate("/app/create");
+  }, [agreementId, navigate]);
   const [flash, setFlash] = useState<"draft_ready" | null>(null);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallCopy, setPaywallCopy] = useState<{ headline: string; sub: string } | null>(null);
@@ -281,11 +287,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
         </div>
       ) : null}
 
-      <AgreementReviewErrorBoundary
-        onBack={() => {
-          navigate(`/app/create`);
-        }}
-      >
+      <AgreementReviewErrorBoundary onBack={navigateBackToCreateForEdit}>
         <AgreementReview
           agreementId={agreementId}
           section="simpleHomeReview"
@@ -314,7 +316,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
             }
             navigate(`/app/ready/${encodeURIComponent(agreementId)}`);
           }}
-          onBackToNew={() => navigate("/app/create")}
+          onBackToNew={navigateBackToCreateForEdit}
           onPaidProSendBranchMeta={setPaidProSendBranch}
           onSimpleFlowContinue={() => {
             if (simpleFlowPhase === "review") {
@@ -327,6 +329,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
                   reason: paidProSendBranch.reason,
                   corpusLen: paidProSendBranch.authoritativeLen,
                   source: paidProSendBranch.premium_render_source,
+                  hasMaterialPremiumPipelineCorpus: paidProSendBranch.hasMaterialPremiumPipelineCorpus,
                 });
                 console.info("[paid-pro-send-modal-branch]", {
                   modal: blockPaywall ? "conversion" : "none",
@@ -353,7 +356,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
               setSimpleFlowPhase("review");
               return;
             }
-            void navigate("/app/create");
+            navigateBackToCreateForEdit();
           }}
         />
       </AgreementReviewErrorBoundary>

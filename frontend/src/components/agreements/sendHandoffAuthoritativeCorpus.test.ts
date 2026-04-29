@@ -9,6 +9,7 @@ import {
   mergePremiumRenderSourceField,
   paidProSendAllowed,
   pickAuthoritativePlainForSendHandoff,
+  shouldKeepReviewDisplayAfterProHydrate,
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -227,6 +228,7 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     expect(m.paidProSendAllowed).toBe(true);
     expect(m.reason).toBe("server_render_source");
     expect(m.premium_render_source).toBe("server_full_document_text");
+    expect(m.hasMaterialPremiumPipelineCorpus).toBe(false);
   });
 
   it("describePaidProSendModalBranch: server_repair_document_text bypasses send upsell", () => {
@@ -310,5 +312,30 @@ describe("sendHandoffAuthoritativeCorpus", () => {
       purpose: "x",
     } as unknown as AgreementDraft;
     expect(bypassSimpleHomeWatermarkSendGate(d, { tier: "free" })).toBe(true);
+  });
+
+  it("shouldKeepReviewDisplayAfterProHydrate: long server_full_document_text without premium_* stays in review", () => {
+    const body = "w".repeat(600);
+    const d = {
+      premium_render_source: "live_generated_preview",
+      server_full_document_text: body,
+      premium_server_full_document_text: "",
+      premium_full_document_text: "",
+    } as unknown as AgreementDraft;
+    expect(shouldKeepReviewDisplayAfterProHydrate(d)).toBe(true);
+  });
+
+  it("describePaidProSendModalBranch includes hasMaterialPremiumPipelineCorpus for server body only", () => {
+    const body = "w".repeat(600);
+    const d = {
+      premium_render_source: "server_full_document_text",
+      server_full_document_text: body,
+      premium_server_full_document_text: "",
+      premium_full_document_text: "",
+      purpose: "stub",
+    } as unknown as AgreementDraft;
+    const m = describePaidProSendModalBranch(d);
+    expect(m.hasMaterialPremiumPipelineCorpus).toBe(true);
+    expect(m.materialPremiumCorpusLen).toBeGreaterThanOrEqual(SEND_HANDOFF_AUTHORITATIVE_MIN_LEN);
   });
 });

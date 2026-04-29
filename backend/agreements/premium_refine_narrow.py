@@ -159,10 +159,17 @@ def _first_numbered_subclause_after(tail: str) -> Optional[Tuple[int, int]]:
 
 
 def _bump_numbered_subclause_lines(suffix: str, major: int, min_from: int) -> str:
-    """Increment ``major.k`` to ``major.(k+1)`` for every line-start clause where ``k >= min_from``."""
+    """
+    Renumber line-start ``major.k`` headings where ``k >= min_from`` to **unique** sequential
+    ``major.(min_from+1)``, ``major.(min_from+2)``, … in document order.
+
+    A plain ``k -> k+1`` bump is wrong when two siblings already share the same ``k`` (both become
+    ``k+1``). Late-fee insert relies on strict monotonic subclause numbering.
+    """
     out: List[str] = []
     maj_s = str(int(major))
     rx = re.compile(rf"^(\s*)({re.escape(maj_s)})\.(\d+)(\s.*)$")
+    next_k = min_from + 1
     for line in suffix.splitlines(True):
         bare = line.rstrip("\r\n")
         trailing = line[len(bare) :]
@@ -174,7 +181,8 @@ def _bump_numbered_subclause_lines(suffix: str, major: int, min_from: int) -> st
         if k < min_from:
             out.append(line)
             continue
-        new_bare = f"{m.group(1)}{maj_s}.{k + 1}{m.group(4)}"
+        new_bare = f"{m.group(1)}{maj_s}.{next_k}{m.group(4)}"
+        next_k += 1
         out.append(new_bare + trailing)
     return "".join(out)
 
