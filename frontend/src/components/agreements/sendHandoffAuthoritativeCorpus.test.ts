@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearPaidPremiumCompletionSession, markPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
@@ -275,6 +276,34 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     expect(m.bypass).toBe(true);
     expect(m.reason).toBe("corpus_authoritative");
     expect(m.authoritativeLen).toBeGreaterThanOrEqual(500);
+  });
+
+  describe("paid checkout return session", () => {
+    const sessionStore = new Map<string, string>();
+    beforeEach(() => {
+      sessionStore.clear();
+      vi.stubGlobal("sessionStorage", {
+        getItem: (k: string) => (sessionStore.has(k) ? sessionStore.get(k)! : null),
+        setItem: (k: string, v: string) => void sessionStore.set(k, v),
+        removeItem: (k: string) => void sessionStore.delete(k),
+      } as Storage);
+      vi.stubGlobal("window", {
+        location: { href: "https://example.test/app/create" },
+      } as unknown as Window & typeof globalThis);
+      markPaidPremiumCompletionSession();
+    });
+    afterEach(() => {
+      clearPaidPremiumCompletionSession();
+      vi.unstubAllGlobals();
+    });
+
+    it("describePaidProSendModalBranch bypasses thin draft while paid-return session is active", () => {
+      const d = { purpose: "short" } as unknown as AgreementDraft;
+      const m = describePaidProSendModalBranch(d);
+      expect(m.bypass).toBe(true);
+      expect(m.paidProSendAllowed).toBe(true);
+      expect(m.reason).toBe("paid_checkout_return_session");
+    });
   });
 
   it("mergePremiumRenderSourceField prefers server_full_document_text from either side", () => {

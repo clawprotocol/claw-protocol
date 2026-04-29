@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearPaidPremiumCompletionSession, markPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   draftPremiumRenderSourceIndicatesPro,
@@ -21,6 +22,23 @@ function minimalDraft(overrides: Partial<ParsedDraftShape> = {}): ParsedDraftSha
 }
 
 describe("proAgreementEntitlement", () => {
+  const sessionStore = new Map<string, string>();
+  beforeEach(() => {
+    sessionStore.clear();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (k: string) => (sessionStore.has(k) ? sessionStore.get(k)! : null),
+      setItem: (k: string, v: string) => void sessionStore.set(k, v),
+      removeItem: (k: string) => void sessionStore.delete(k),
+    } as Storage);
+    vi.stubGlobal("window", {
+      location: { href: "https://example.test/app/create" },
+    } as unknown as Window & typeof globalThis);
+  });
+  afterEach(() => {
+    clearPaidPremiumCompletionSession();
+    vi.unstubAllGlobals();
+  });
+
   it("draftPremiumRenderSourceIndicatesPro recognizes authoritative resolver tiers", () => {
     expect(draftPremiumRenderSourceIndicatesPro("server_full_document_text")).toBe(true);
     expect(draftPremiumRenderSourceIndicatesPro("server_repair_document_text")).toBe(true);
@@ -83,6 +101,19 @@ describe("proAgreementEntitlement", () => {
         premiumCompletionSnapshot: null,
       }),
     ).toBe(false);
+  });
+
+  it("isProEntitledForAgreement true after checkout return session marker (thin draft, no corpus)", () => {
+    markPaidPremiumCompletionSession();
+    expect(
+      isProEntitledForAgreement({
+        tier: "free",
+        draft: minimalDraft(),
+        premiumSendPathUnlocked: false,
+        premiumPersistedFlowActive: false,
+        premiumCompletionSnapshot: null,
+      }),
+    ).toBe(true);
   });
 
   it("isProEntitledForAgreement false when draft is null (empty /app/create) without tier or flags", () => {

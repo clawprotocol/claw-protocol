@@ -227,14 +227,17 @@ import { ensurePremiumCompletion } from "./premiumCompletionEnsure";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import {
   clearPremiumCompletionStateAfterSend,
+  clearPaidPremiumCompletionSession,
   clearPremiumCompletionDoneInLocalStorage,
+  clearPremiumCompletionSnapshot,
+  hasPaidPremiumCompletionSession,
+  markPaidPremiumCompletionSession,
   markPremiumCompletionDoneInLocalStorage,
   markPremiumPostCheckoutRevealDismissed,
   markPremiumRecipientsSurfaceReleased,
+  persistPremiumCompletionSnapshot,
   peekPremiumPostCheckoutRevealDismissed,
   peekPremiumRecipientsSurfaceReleased,
-  clearPremiumCompletionSnapshot,
-  persistPremiumCompletionSnapshot,
   readPremiumCompletionSnapshot,
   stripPremiumCompletionQueryParam,
   type PremiumCompletionSnapshot,
@@ -1267,6 +1270,9 @@ function CreateFlowSendRecipientsPanel({
 }
 
 const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = PRO_UPGRADE_WAIT_MODAL_TITLE;
+
+const PAID_PREMIUM_CONNECTION_RECOVERY_COPY =
+  "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.";
 
 /** First paint: enter Pro return processing before effects so the free intake shell does not flash. */
 function readInitialPremiumReturnFromWindow(): {
@@ -3495,7 +3501,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
           console.warn("[optional-full-draft-upgrade] apply failed", e);
         }
-        setDisplayPhase("intake");
+        setDisplayPhase(hasPaidPremiumCompletionSession() ? "review" : "intake");
         setCreateFlowPhase("draft_ready_for_review");
       } finally {
         productionStickyLabelModeRef.current = null;
@@ -3599,6 +3605,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
     const runGen = ++premiumCheckoutRunGenRef.current;
     void (async () => {
+      markPaidPremiumCompletionSession();
+      bumpPremiumSurfaceGateTick();
       setPostCheckoutAdvisoryGaps([]);
       setPremiumPostCheckoutPhase("processing");
       setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
@@ -3887,6 +3895,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             modalParty2NameRef.current,
           );
           commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(mergedF.draft));
+          if (createProductionTwoPane && simpleProductFlow) {
+            setDisplayPhase("review");
+          }
+          if (hasPaidPremiumCompletionSession()) {
+            setPremiumPersistedFlowActive(true);
+            setPremiumSendPathUnlocked(true);
+          }
           agreementDocumentDirtyRef.current = false;
           setAgreementDocumentText("");
           setReviewDocRefreshTick((n) => n + 1);
@@ -4106,6 +4121,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumFinalizeAudit(null);
             setPremiumReviewRoute(null);
             commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft));
+            if (createProductionTwoPane && simpleProductFlow) {
+              setDisplayPhase("review");
+            }
+            if (hasPaidPremiumCompletionSession()) {
+              setPremiumPersistedFlowActive(true);
+              setPremiumSendPathUnlocked(true);
+            }
             agreementDocumentDirtyRef.current = false;
             setAgreementDocumentText("Review and edit the document below when it appears. Nothing is sent from this step.");
             setReviewDocRefreshTick((n) => n + 1);
@@ -4309,6 +4331,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         primePremiumCollaborateFirstDefault();
         setPremiumForkPrimedNonce((n) => n + 1);
         markPremiumCompletionDoneInLocalStorage();
+        clearPaidPremiumCompletionSession();
+        bumpPremiumSurfaceGateTick();
         {
           const gk = `primary:${String(result.agreementGenerationId || "gen").trim() || "gen"}`;
           if (!proDraftLoadedFunnelKeysRef.current.has(gk)) {
@@ -4524,13 +4548,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
       };
 
-      const applyFailureFallback = (winningBodyText?: string) => {
+      const applyFailureFallback = (
+        winningBodyText?: string,
+        opts?: { paidCheckoutRecovery?: boolean },
+      ) => {
+        const paidRecovery = Boolean(opts?.paidCheckoutRecovery);
         setPremiumRefineReview(null);
         setPremiumFinalizeAudit(null);
         setPremiumReviewRoute(null);
         setPremiumGapQuestions([]);
         setPremiumGapOneField("");
-        runPremiumModelPassRef.current = null;
+        if (!paidRecovery) {
+          runPremiumModelPassRef.current = null;
+        }
         clearPremiumForkUserSendMode();
         setPremiumSendModeUserChoice(null);
         setPremiumSendModeTouched(false);
@@ -4557,32 +4587,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           intakeText: mergedIntake,
         });
         const winningFb = (winningBodyText || readPremiumCompletionSnapshot()?.premiumWinningBodyText || "").trim();
-        persistPremiumCompletionSnapshot({
-          premiumDraft: merged.draft,
-          premiumParties: parties,
-          recipientCandidates: mergedRc,
-          premiumWinningBodyText: winningFb || readPremiumCompletionSnapshot()?.premiumWinningBodyText,
-          premiumReadonlyPlainText: winningFb.length >= readonlyFromDraftFb.length ? winningFb : readonlyFromDraftFb,
-          premiumFinalizeAudit: readPremiumCompletionSnapshot()?.premiumFinalizeAudit ?? null,
-          premiumReviewRoute: readPremiumCompletionSnapshot()?.premiumReviewRoute ?? null,
-        });
-        premiumPipelineOutputBodyRef.current = (winningBodyText || readPremiumCompletionSnapshot()?.premiumWinningBodyText || "").trim();
-        const persisted = readPremiumCompletionSnapshot();
-        logPremiumLiveTrace("persisted_snapshot", {
-          source_id: "session_snapshot_fallback",
-          title: persisted?.premiumDraft?.title || merged.draft.title,
-          payment_terms: persisted?.premiumDraft?.payment_terms || merged.draft.payment_terms,
-          purpose: persisted?.premiumDraft?.purpose || merged.draft.purpose || "",
-          additional_terms: persisted?.premiumDraft?.additional_terms || merged.draft.additional_terms || "",
-          party_roles: (persisted?.premiumDraft?.parties || merged.draft.parties || [])
-            .map((p) => (p.role || "").trim())
-            .filter(Boolean),
-          text: (persisted?.premiumWinningBodyText || persisted?.premiumReadonlyPlainText || "").trim(),
-        });
+        if (!paidRecovery) {
+          persistPremiumCompletionSnapshot({
+            premiumDraft: merged.draft,
+            premiumParties: parties,
+            recipientCandidates: mergedRc,
+            premiumWinningBodyText: winningFb || readPremiumCompletionSnapshot()?.premiumWinningBodyText,
+            premiumReadonlyPlainText: winningFb.length >= readonlyFromDraftFb.length ? winningFb : readonlyFromDraftFb,
+            premiumFinalizeAudit: readPremiumCompletionSnapshot()?.premiumFinalizeAudit ?? null,
+            premiumReviewRoute: readPremiumCompletionSnapshot()?.premiumReviewRoute ?? null,
+          });
+          premiumPipelineOutputBodyRef.current = (
+            winningBodyText ||
+            readPremiumCompletionSnapshot()?.premiumWinningBodyText ||
+            ""
+          ).trim();
+          const persisted = readPremiumCompletionSnapshot();
+          logPremiumLiveTrace("persisted_snapshot", {
+            source_id: "session_snapshot_fallback",
+            title: persisted?.premiumDraft?.title || merged.draft.title,
+            payment_terms: persisted?.premiumDraft?.payment_terms || merged.draft.payment_terms,
+            purpose: persisted?.premiumDraft?.purpose || merged.draft.purpose || "",
+            additional_terms: persisted?.premiumDraft?.additional_terms || merged.draft.additional_terms || "",
+            party_roles: (persisted?.premiumDraft?.parties || merged.draft.parties || [])
+              .map((p) => (p.role || "").trim())
+              .filter(Boolean),
+            text: (persisted?.premiumWinningBodyText || persisted?.premiumReadonlyPlainText || "").trim(),
+          });
+          markPremiumCompletionDoneInLocalStorage();
+        } else {
+          premiumPipelineOutputBodyRef.current = "";
+        }
         primePremiumCollaborateFirstDefault();
         setPremiumForkPrimedNonce((n) => n + 1);
-        markPremiumCompletionDoneInLocalStorage();
-        {
+        if (!paidRecovery) {
           const gk = `fallback:${getOrInitSessionAgreementGenerationId() || "fg"}`;
           if (!proDraftLoadedFunnelKeysRef.current.has(gk)) {
             proDraftLoadedFunnelKeysRef.current.add(gk);
@@ -4590,6 +4628,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         }
         commitParsedDraftToReviewFlow(merged.draft);
+        if (createProductionTwoPane && simpleProductFlow) {
+          setDisplayPhase("review");
+        }
         agreementDocumentDirtyRef.current = false;
         try {
           setAgreementDocumentText(
@@ -4714,11 +4755,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumModalExtendedWaitActiveRef.current = false;
           setPremiumCheckoutModalExtendedWait(false);
           setPremiumPipelineUserMessage(null);
-          setHardError(
-            "Premium finalization is taking longer than expected — showing your best available draft. We will still load the full Pro agreement when the server response arrives.",
-          );
-          runPremiumModelPassRef.current = null;
-          applyFailureFallback();
+          if (hasPaidPremiumCompletionSession()) {
+            setHardError(null);
+            setProFullDraftQualityRetry(true);
+            setProUpgradeUseStarterView(false);
+            setProFullDraftCustomGateMessage(
+              "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
+            );
+            applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+          } else {
+            setHardError(
+              "Premium finalization is taking longer than expected — showing your best available draft. We will still load the full Pro agreement when the server response arrives.",
+            );
+            runPremiumModelPassRef.current = null;
+            applyFailureFallback();
+          }
           setPremiumPostCheckoutPhase(null);
           setPremiumGapQuestions([]);
           setPremiumGapOneField("");
@@ -4766,7 +4817,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumPostCheckoutUserDismissedRef.current = true;
             console.info("[premium-modal-failopen]", { reason: "user_escape", source: "cached_or_prior_draft" });
             setPremiumPipelineUserMessage(null);
-            applyFailureFallback();
+            if (hasPaidPremiumCompletionSession()) {
+              setHardError(null);
+              setProFullDraftQualityRetry(true);
+              setProUpgradeUseStarterView(false);
+              setProFullDraftCustomGateMessage(
+                "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
+              );
+              applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+            } else {
+              applyFailureFallback();
+            }
             setPremiumPostCheckoutPhase(null);
             setPremiumGapQuestions([]);
             setPremiumGapOneField("");
@@ -5018,18 +5079,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               // eslint-disable-next-line no-console
               console.info("[CLAW] premium hydration failed", { reason: "model_path_exhausted" });
             }
-            console.warn("[premium-flow] premium_rewrite_request_exhausted", {
-              fallback: "party_extract_only",
-              note: "Premium model path failed — last saved draft shown; edit or retry checkout flow.",
-            });
-            setHardError(
-              "We could not run the premium agreement rewrite (model path). Your previous draft is shown — you can edit it, or try again shortly.",
-            );
-            applyFailureFallback();
+            if (hasPaidPremiumCompletionSession()) {
+              console.warn("[premium-flow] premium_rewrite_request_exhausted", {
+                fallback: "paid_checkout_recovery",
+                note: "Premium-full-draft failed after checkout — paid recovery state (no unpaid upsell).",
+              });
+              setHardError(null);
+              setProFullDraftQualityRetry(true);
+              setProUpgradeUseStarterView(false);
+              setProFullDraftCustomGateMessage(
+                "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
+              );
+              applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+            } else {
+              console.warn("[premium-flow] premium_rewrite_request_exhausted", {
+                fallback: "party_extract_only",
+                note: "Premium model path failed — last saved draft shown; edit or retry checkout flow.",
+              });
+              setHardError(
+                "We could not run the premium agreement rewrite (model path). Your previous draft is shown — you can edit it, or try again shortly.",
+              );
+              applyFailureFallback();
+            }
             setPremiumPostCheckoutPhase(null);
           }
           setPremiumPipelineUserMessage(null);
-          runPremiumModelPassRef.current = null;
+          if (result != null || !hasPaidPremiumCompletionSession()) {
+            runPremiumModelPassRef.current = null;
+          }
         } finally {
             premiumProRunInFlightRef.current = false;
           }
@@ -5092,15 +5169,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
           console.warn("[premium-completion] unexpected failure", e);
         }
-        setHardError(
-          "Premium completion hit an unexpected error. Your previous draft is shown — you can still edit and continue.",
-        );
-        applyFailureFallback();
+        if (hasPaidPremiumCompletionSession()) {
+          setHardError(null);
+          setProFullDraftQualityRetry(true);
+          setProUpgradeUseStarterView(false);
+          setProFullDraftCustomGateMessage(
+            "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
+          );
+          applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+        } else {
+          setHardError(
+            "Premium completion hit an unexpected error. Your previous draft is shown — you can still edit and continue.",
+          );
+          applyFailureFallback();
+          runPremiumModelPassRef.current = null;
+        }
         setPremiumPostCheckoutPhase(null);
         setPremiumGapQuestions([]);
         setPremiumGapOneField("");
         setPremiumPipelineUserMessage(null);
-        runPremiumModelPassRef.current = null;
       }
     })();
 
@@ -7258,6 +7345,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    * showed the persisted /refine block.
    */
   const isFreeStarterReviewSurface = useMemo(() => {
+    if (hasPaidPremiumCompletionSession()) return false;
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return false;
     if (showUpgradeToFullDraftOnReview) return true;
     if (!hasFullDraftAccess) return true;
@@ -7281,6 +7369,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     tier,
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
+    premiumSurfaceGateTick,
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
@@ -7374,6 +7463,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const showStarterProRefineUpsell = useMemo(() => {
+    if (hasPaidPremiumCompletionSession()) return false;
     if (suppressIntakePremiumUpsell) return false;
     if (proAgreementEntitled) return false;
     if (isFreeStarterReviewSurface) return belowDocumentRefineSectionParentEligible;
@@ -7388,6 +7478,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     suppressIntakePremiumUpsell,
     belowDocumentRefineSectionParentEligible,
     premiumPaidDocumentSurface,
+    premiumSurfaceGateTick,
   ]);
 
   useEffect(() => {
@@ -7963,6 +8054,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, []);
 
   const handleProUpgradeUseStarterInstead = React.useCallback(() => {
+    clearPaidPremiumCompletionSession();
+    bumpPremiumSurfaceGateTick();
     setProUpgradeUseStarterView(true);
     setProFullDraftCustomGateMessage(null);
     setPremiumServerGenerationDegraded(null);
@@ -7979,7 +8072,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setAgreementDocumentText(txt);
       scheduleAgreementDocSync(txt);
     }
-  }, [draft, debouncedStepBuffer, scheduleAgreementDocSync]);
+  }, [draft, debouncedStepBuffer, scheduleAgreementDocSync, bumpPremiumSurfaceGateTick]);
 
   useEffect(() => {
     if (!premiumPaidDocumentSurface) setPremiumReviewDocEditorOpen(false);
@@ -12559,11 +12652,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         aria-live="polite"
                                       >
                                         <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
-                                          {proFullDraftCustomGateMessage ||
-                                            "Use the document below to review and edit when it appears. Nothing is sent from this step."}
+                                          {hasPaidPremiumCompletionSession()
+                                            ? proFullDraftCustomGateMessage || PAID_PREMIUM_CONNECTION_RECOVERY_COPY
+                                            : proFullDraftCustomGateMessage ||
+                                              "Use the document below to review and edit when it appears. Nothing is sent from this step."}
                                         </p>
                                         <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
-                                          Nothing is sent from this step until you choose to continue.
+                                          {hasPaidPremiumCompletionSession()
+                                            ? "No additional checkout — retry uses your existing LawDog Pro purchase."
+                                            : "Nothing is sent from this step until you choose to continue."}
                                         </p>
                                         {import.meta.env.DEV ? (
                                           <p className="mt-2 text-[10px] font-mono text-amber-200/80">
@@ -12571,13 +12668,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             {shortIntakeFingerprint(currentPremiumMergedIntakeKey)}
                                           </p>
                                         ) : null}
-                                        <button
-                                          type="button"
-                                          className="mt-4 rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25"
-                                          onClick={handleRetryProFullDraft}
-                                        >
-                                          Retry Pro draft
-                                        </button>
+                                        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-2">
+                                          <button
+                                            type="button"
+                                            className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25 sm:w-auto"
+                                            onClick={handleRetryProFullDraft}
+                                          >
+                                            {hasPaidPremiumCompletionSession()
+                                              ? "Retry Pro agreement"
+                                              : "Retry Pro draft"}
+                                          </button>
+                                          {hasPaidPremiumCompletionSession() ? (
+                                            <button
+                                              type="button"
+                                              className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-500/50 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800/60 sm:w-auto"
+                                              onClick={handleProUpgradeUseStarterInstead}
+                                            >
+                                              Continue with current draft for now
+                                            </button>
+                                          ) : null}
+                                        </div>
                                       </div>
                                     </div>
                                   ) : (
@@ -12588,11 +12698,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         aria-live="polite"
                                       >
                                         <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
-                                          We couldn’t complete the Pro upgrade with your terms yet.
+                                          {hasPaidPremiumCompletionSession()
+                                            ? PAID_PREMIUM_CONNECTION_RECOVERY_COPY
+                                            : "We couldn’t complete the Pro upgrade with your terms yet."}
                                         </p>
                                         <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
-                                          Your intake is still available. Add or clarify details, retry a full Pro draft, or
-                                          work from your starter version.
+                                          {hasPaidPremiumCompletionSession()
+                                            ? "No additional checkout — retry uses your existing LawDog Pro purchase."
+                                            : "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version."}
                                         </p>
                                         <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-2">
                                           <button
@@ -12600,21 +12713,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25 sm:w-auto"
                                             onClick={handleRetryProFullDraft}
                                           >
-                                            Retry Pro draft
+                                            {hasPaidPremiumCompletionSession()
+                                              ? "Retry Pro agreement"
+                                              : "Retry Pro draft"}
                                           </button>
-                                          <button
-                                            type="button"
-                                            className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/40 bg-slate-950/50 px-4 py-2.5 text-sm font-semibold text-amber-100/90 transition hover:bg-slate-900/80 sm:w-auto"
-                                            onClick={focusProIntakeRefineForRecovery}
-                                          >
-                                            Edit details
-                                          </button>
+                                          {!hasPaidPremiumCompletionSession() ? (
+                                            <button
+                                              type="button"
+                                              className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/40 bg-slate-950/50 px-4 py-2.5 text-sm font-semibold text-amber-100/90 transition hover:bg-slate-900/80 sm:w-auto"
+                                              onClick={focusProIntakeRefineForRecovery}
+                                            >
+                                              Edit details
+                                            </button>
+                                          ) : null}
                                           <button
                                             type="button"
                                             className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-500/50 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800/60 sm:w-auto"
                                             onClick={handleProUpgradeUseStarterInstead}
                                           >
-                                            Use starter draft instead
+                                            {hasPaidPremiumCompletionSession()
+                                              ? "Continue with current draft for now"
+                                              : "Use starter draft instead"}
                                           </button>
                                         </div>
                                       </div>

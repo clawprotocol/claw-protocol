@@ -12,6 +12,7 @@ import {
   markSimpleFlowSendUnlocked,
 } from "../simpleFlowSendUnlock";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
+import { hasPaidPremiumCompletionSession } from "../../components/agreements/premiumCompletionStorage";
 import {
   describePaidProSendModalBranch,
   type PaidProSendBranchMeta,
@@ -322,7 +323,10 @@ export function SimpleSendPage(props: { agreementId: string }) {
             if (simpleFlowPhase === "review") {
               logProductEvent("send_clicked", { agreementId, phase: "review" });
               const blockPaywall =
-                !workspaceProEntitled && isSimpleSendPaywallActive() && !paidProSendBranch.paidProSendAllowed;
+                !workspaceProEntitled &&
+                isSimpleSendPaywallActive() &&
+                !paidProSendBranch.paidProSendAllowed &&
+                !hasPaidPremiumCompletionSession();
               if (import.meta.env.DEV) {
                 console.info("[premium-send-gate]", {
                   paidProSendAllowed: paidProSendBranch.paidProSendAllowed,

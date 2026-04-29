@@ -1,4 +1,5 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { escapeHtml } from "./premiumAgreementDocumentHtml";
 
@@ -97,6 +98,17 @@ export function shouldMinimalProSendRecipientChrome(args: {
  * `/app/send`: structured bypass decision + DEV telemetry for SendConversionModal routing.
  */
 export function describePaidProSendModalBranch(draft: CorpusDraftLike | null | undefined): PaidProSendBranchMeta {
+  if (hasPaidPremiumCompletionSession()) {
+    return {
+      bypass: true,
+      paidProSendAllowed: true,
+      premium_render_source: String(draft?.premium_render_source ?? "").trim() || null,
+      authoritativeLen: (pickAuthoritativePlainForSendHandoff(draft)?.text ?? "").trim().length,
+      materialPremiumCorpusLen: materialPremiumPipelineCorpusMaxLen(draft),
+      hasMaterialPremiumPipelineCorpus: hasMaterialPremiumPipelineCorpus(draft),
+      reason: "paid_checkout_return_session",
+    };
+  }
   const rs = String(draft?.premium_render_source ?? "").trim();
   const materialPremiumCorpusLen = materialPremiumPipelineCorpusMaxLen(draft);
   const hasMaterialPremiumPipelineCorpusFlag = hasMaterialPremiumPipelineCorpus(draft);

@@ -1,7 +1,7 @@
 import type { AccessTier } from "../../access/types";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
-import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import { hasPaidPremiumCompletionSession, type PremiumCompletionSnapshot } from "./premiumCompletionStorage";
 
 /** Read-only / resolver tiers that indicate authoritative Pro paper on the draft when paired with a long body. */
 export function draftPremiumRenderSourceIndicatesPro(rs: string | null | undefined): boolean {
@@ -25,6 +25,7 @@ export function isProEntitledForAgreement(args: {
   premiumPersistedFlowActive: boolean;
   premiumCompletionSnapshot: PremiumCompletionSnapshot | null | undefined;
 }): boolean {
+  if (hasPaidPremiumCompletionSession()) return true;
   if (tierAllowsAdvancedFullDraftReveal(args.tier)) return true;
   if (args.premiumSendPathUnlocked || args.premiumPersistedFlowActive) return true;
 

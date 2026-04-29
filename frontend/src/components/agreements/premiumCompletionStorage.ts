@@ -8,6 +8,47 @@ import { clearPremiumForkUserSendMode } from "./premiumSendForkDefaults";
 
 const KEY = "claw_premium_completion_snapshot_v1";
 
+/**
+ * Session flag: user completed LawDog Pro checkout (Stripe return or equivalent) and must not see
+ * unpaid starter/checkout upsells until Pro generation succeeds or they explicitly continue on starter.
+ */
+const PAID_PREMIUM_COMPLETION_SESSION_KEY = "claw_paid_premium_completion_session_v1";
+
+export function markPaidPremiumCompletionSession(): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(PAID_PREMIUM_COMPLETION_SESSION_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearPaidPremiumCompletionSession(): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(PAID_PREMIUM_COMPLETION_SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** True while `premiumCompletion=1` is in the URL or the paid-return session marker is set. */
+export function hasPaidPremiumCompletionSession(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const u = new URL(window.location.href);
+    if (u.searchParams.get("premiumCompletion") === "1") return true;
+  } catch {
+    /* ignore */
+  }
+  if (typeof sessionStorage === "undefined") return false;
+  try {
+    return sessionStorage.getItem(PAID_PREMIUM_COMPLETION_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 /** Set after the user dismisses the post-checkout success overlay (review-first path continues on-page). */
 const REVEAL_DISMISSED_KEY = "claw_premium_post_checkout_reveal_dismissed_v1";
 

@@ -33,6 +33,7 @@ import {
   readUpgradeCheckoutContext,
   type UpgradeCheckoutContextV1,
 } from "../../components/agreements/upgradeCheckoutContextStorage";
+import { markPaidPremiumCompletionSession } from "../../components/agreements/premiumCompletionStorage";
 import { trackStarterProRefineCheckoutSuccessFromContext } from "../../components/agreements/starterProRefineCheckoutSuccess";
 import { checkoutLossAversionFromIntentSignals } from "../../components/agreements/upgradeContextReasons";
 import { CreateFlowAgreementCheckoutPricing } from "./CreateFlowAgreementCheckoutPricing";
@@ -276,6 +277,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         trackStarterProRefineCheckoutSuccessFromContext(upgradeCtx, String(tier.id));
         markAdvancedFullDraftCheckoutGranted();
         clearUpgradeCheckoutContext();
+        markPaidPremiumCompletionSession();
       }
       const destination =
         agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID
