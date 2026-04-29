@@ -36,7 +36,7 @@ describe("evaluatePremiumRefineCandidate", () => {
   it("rejects ~15k → ~3.9k truncation regression", () => {
     const cur = 15_000;
     const cand = "x".repeat(3900);
-    const r = evaluatePremiumRefineCandidate(cand, cur);
+    const r = evaluatePremiumRefineCandidate(cand, undefined, cur);
     expect(r.decision).toBe("rejected_short");
     expect(r.ratio).toBeLessThan(PREMIUM_REFINE_MIN_LENGTH_RATIO);
   });
@@ -44,13 +44,13 @@ describe("evaluatePremiumRefineCandidate", () => {
   it("accepts ~15k → ~15.2k marginal expansion", () => {
     const cur = 15_000;
     const cand = "y".repeat(15_200);
-    const r = evaluatePremiumRefineCandidate(cand, cur);
+    const r = evaluatePremiumRefineCandidate(cand, undefined, cur);
     expect(r.decision).toBe("accepted");
     expect(r.ratio).toBeGreaterThanOrEqual(PREMIUM_REFINE_MIN_LENGTH_RATIO);
   });
 
   it("rejects empty candidate", () => {
-    expect(evaluatePremiumRefineCandidate("   ", 5000).decision).toBe("rejected_empty");
+    expect(evaluatePremiumRefineCandidate("   ", undefined, 5000).decision).toBe("rejected_empty");
   });
 
   it("accepts marginal expansion when late-fee language is appended (mirrors server narrow patch)", () => {
@@ -58,7 +58,7 @@ describe("evaluatePremiumRefineCandidate", () => {
     const base = "x".repeat(cur);
     const block =
       "\n\nLate Payment. Any undisputed amount not paid within ten (10) days after it becomes due may accrue a late fee equal to five percent (5%) of the overdue amount.\n\n";
-    const r = evaluatePremiumRefineCandidate(base + block, cur);
+    const r = evaluatePremiumRefineCandidate(base + block, undefined, cur);
     expect(r.decision).toBe("accepted");
     expect(r.ratio).toBeGreaterThanOrEqual(PREMIUM_REFINE_MIN_LENGTH_RATIO);
   });
@@ -66,7 +66,7 @@ describe("evaluatePremiumRefineCandidate", () => {
   it("rejects identical refined text vs current Pro (no false-positive apply)", () => {
     const body = "Same\nparagraph\ncontent\n".repeat(200);
     const cur = body.length;
-    const r = evaluatePremiumRefineCandidate(`${body}\n`, cur, body);
+    const r = evaluatePremiumRefineCandidate(`${body}\n`, body, cur);
     expect(r.decision).toBe("rejected_unchanged");
     expect(r.refinedLen).toBeGreaterThan(cur - 5);
   });
@@ -74,7 +74,7 @@ describe("evaluatePremiumRefineCandidate", () => {
   it("rejects when summary_changes contains fail-open unchanged message", () => {
     const cur = 5000;
     const same = "y".repeat(cur);
-    const r = evaluatePremiumRefineCandidate(same, cur, same, [
+    const r = evaluatePremiumRefineCandidate(same, same, cur, [
       PRO_REFINE_UNAVAILABLE_USER_MESSAGE,
     ]);
     expect(r.decision).toBe("rejected_unchanged");

@@ -73,8 +73,8 @@ export function premiumRefineSummaryIsUnchangedFailOpen(summary: string[] | unde
 
 export function evaluatePremiumRefineCandidate(
   refinedCandidate: string,
+  currentProText: string | undefined,
   currentProLen: number,
-  currentProText?: string,
   responseSummary?: string[],
 ): {
   decision: PremiumRefineApplyDecision;

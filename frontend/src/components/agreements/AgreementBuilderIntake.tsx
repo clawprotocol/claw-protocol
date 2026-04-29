@@ -5509,7 +5509,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           action: "update",
         });
         const out = (r.updated_document_text || "").trim();
-        const acceptance = evaluatePremiumRefineCandidate(currentProLen, out);
+        const acceptance = evaluatePremiumRefineCandidate(out, currentDoc, currentProLen, r.summary_changes);
         // eslint-disable-next-line no-console
         console.info("[premium-refine-apply]", {
           currentProLen,
@@ -5520,6 +5520,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           chosenSource: corpusPick.chosenSource,
           endpoint: "premium-refine",
         });
+        if (acceptance.decision === "rejected_unchanged") {
+          setHardError(null);
+          setReviewRefineUserMessage(PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
+          return false;
+        }
         if (acceptance.decision === "rejected_empty") {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
