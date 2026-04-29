@@ -709,6 +709,8 @@ const AgreementReview: React.FC<Props> = ({
   const [governingLawSelect, setGoverningLawSelect] = useState(LEGAL_GOVERNING_LAW_STATE);
   const [governingLawSaveBusy, setGoverningLawSaveBusy] = useState(false);
   const [watermarkSendModalOpen, setWatermarkSendModalOpen] = useState(false);
+  /** Paid authoritative send: auto-open paid-ready modal once per send-phase visit; reset when leaving send. */
+  const autoPaidAuthoritativeSendConfirmPrimedKeyRef = useRef<string | null>(null);
   const [simpleSendValidateAttempted, setSimpleSendValidateAttempted] = useState(false);
   const [simpleSendRecipientEditorOpen, setSimpleSendRecipientEditorOpen] = useState(false);
   const [simpleSendFieldErrors, setSimpleSendFieldErrors] = useState<Record<string, string>>({});
@@ -1983,6 +1985,32 @@ const AgreementReview: React.FC<Props> = ({
   );
   const recipientGateBlocksSend = useMemo(() => sendInviteReadyCount < 1, [sendInviteReadyCount]);
 
+  /** Skip the intermediate “Create review links” card when paid Pro is authoritative and parties already satisfy send. */
+  const paidProAuthoritativeSendHappyPath = useMemo(
+    () =>
+      Boolean(
+        isSimpleHomeReview &&
+          simpleFlowPhase === "send" &&
+          draft &&
+          simpleSendActionsUnlocked &&
+          !recipientGateBlocksSend &&
+          isPaidProAgreementAuthoritative({ draft, agreementId }),
+      ),
+    [agreementId, draft, isSimpleHomeReview, recipientGateBlocksSend, simpleFlowPhase, simpleSendActionsUnlocked],
+  );
+
+  useEffect(() => {
+    if (simpleFlowPhase !== "send") autoPaidAuthoritativeSendConfirmPrimedKeyRef.current = null;
+  }, [simpleFlowPhase]);
+
+  useEffect(() => {
+    if (!paidProAuthoritativeSendHappyPath || !draft) return;
+    if (!bypassSimpleHomeWatermarkSendGate(draft, economicsOverlay)) return;
+    if (autoPaidAuthoritativeSendConfirmPrimedKeyRef.current === agreementId) return;
+    autoPaidAuthoritativeSendConfirmPrimedKeyRef.current = agreementId;
+    setWatermarkSendModalOpen(true);
+  }, [agreementId, draft, economicsOverlay, paidProAuthoritativeSendHappyPath]);
+
   const logCreateReviewLinksClick = useCallback(
     (actionTaken: string, extra?: Record<string, unknown>) => {
       if (!import.meta.env.DEV) return;
@@ -2183,9 +2211,11 @@ const AgreementReview: React.FC<Props> = ({
       if (Object.keys(contactErrs).length > 0) {
         logReviewLinkAction("blocked_recipient_validation");
         setError(
-          streamlinedPremiumIntentForCopy === "review"
-            ? "Add at least one recipient email below, then try Create review links again."
-            : "Add at least one recipient email below, then try again.",
+          draft && isPaidProAgreementAuthoritative({ draft, agreementId })
+            ? "Add at least one recipient before continuing."
+            : streamlinedPremiumIntentForCopy === "review"
+              ? "Add at least one recipient email below, then try Create review links again."
+              : "Add at least one recipient email below, then try again.",
         );
         setSimpleSendRecipientEditorOpen(true);
         setContactValidationSeq((n) => n + 1);
@@ -5773,6 +5803,45 @@ const AgreementReview: React.FC<Props> = ({
                       <>
                         <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
                           {simpleSendAuthoritativeMinimalChrome ? (
+                            paidProAuthoritativeSendHappyPath ? (
+                              <div className="space-y-4">
+                                {!watermarkSendModalOpen ? (
+                                  <p className="text-sm leading-relaxed text-slate-400">
+                                    Final confirmation opens automatically for paid Pro agreements when recipients are
+                                    ready. Use{" "}
+                                    <span className="font-medium text-slate-200">Review and send</span> below if you
+                                    closed the dialog — nothing is sent until you confirm.
+                                  </p>
+                                ) : null}
+                                <div className="flex flex-col gap-3">
+                                  <button
+                                    type="button"
+                                    className={`vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 ${
+                                      watermarkSendModalOpen ? "hidden" : ""
+                                    }`}
+                                    disabled={Boolean(savingField) || simpleFlowAdvanceBusy}
+                                    onClick={() => setWatermarkSendModalOpen(true)}
+                                  >
+                                    Review and send
+                                  </button>
+                                  {onSimpleFlowBack ? (
+                                    <button
+                                      type="button"
+                                      className={`vs01-btn vs01-btn--secondary w-full min-h-[2.75rem] px-6 ${
+                                        watermarkSendModalOpen ? "hidden" : ""
+                                      }`}
+                                      onClick={() => onSimpleFlowBack()}
+                                    >
+                                      Back
+                                    </button>
+                                  ) : null}
+                                </div>
+                                <p className="text-xs leading-relaxed text-slate-500">
+                                  Nothing is sent until you confirm in the dialog.
+                                </p>
+                                <div className="border-t border-slate-800/50 pt-4">{recipientsBlock}</div>
+                              </div>
+                            ) : (
                             <>
                               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200/95">
                                 Agreement ready
@@ -5782,13 +5851,16 @@ const AgreementReview: React.FC<Props> = ({
                                   ? "LawDog creates secure review links — it does not email recipients automatically. Use the button below to generate links you copy and share."
                                   : "LawDog creates secure signing links — it does not email recipients automatically. Use the button below to generate links you copy and share."}
                               </p>
-                              {streamlinedPremiumIntentForCopy === "review" && recipientGateBlocksSend ? (
+                              {recipientGateBlocksSend ? (
                                 <p
                                   className="mt-3 rounded-lg border border-amber-800/45 bg-amber-950/25 px-3 py-2 text-xs leading-relaxed text-amber-100/95"
                                   role="status"
                                 >
-                                  Add at least one recipient email in Recipients below — we need it to label review
-                                  links and continue.
+                                  {draft && isPaidProAgreementAuthoritative({ draft, agreementId })
+                                    ? "Add at least one recipient before continuing."
+                                    : streamlinedPremiumIntentForCopy === "review"
+                                      ? "Add at least one recipient email in Recipients below — we need it to label review links and continue."
+                                      : "Add at least one recipient email in Recipients below before continuing."}
                                 </p>
                               ) : null}
                               <div className="mt-4 flex flex-col gap-3">
@@ -5826,6 +5898,7 @@ const AgreementReview: React.FC<Props> = ({
                               </p>
                               <div className="mt-5 border-t border-slate-800/50 pt-4">{recipientsBlock}</div>
                             </>
+                            )
                           ) : premiumAwaitingStreamlinedFork ? (
                             <>
                               <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">

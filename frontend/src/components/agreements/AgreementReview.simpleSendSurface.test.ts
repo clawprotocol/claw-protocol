@@ -15,6 +15,15 @@ describe("AgreementReview simple paid Pro /app/send surface", () => {
     expect(s).toContain("Recipients and delivery setup");
   });
 
+  it("paid authoritative send: auto-opens paid-ready modal and collapses Create-review-links primary path", () => {
+    const s = readFileSync(agreementReviewPath, "utf8");
+    expect(s).toContain("paidProAuthoritativeSendHappyPath");
+    expect(s).toContain("autoPaidAuthoritativeSendConfirmPrimedKeyRef");
+    expect(s).toContain("setWatermarkSendModalOpen(true)");
+    expect(s).toContain("Review and send");
+    expect(s).toContain("Add at least one recipient before continuing.");
+  });
+
   it("does not reintroduce premium review recipient validation bypass", () => {
     const s = readFileSync(agreementReviewPath, "utf8");
     expect(s).not.toContain("shouldBypassFlexibleSendRecipientValidationForPremiumReview");

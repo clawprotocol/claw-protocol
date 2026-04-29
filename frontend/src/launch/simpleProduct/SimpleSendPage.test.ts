@@ -36,10 +36,11 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("paidProSendBranch.paidProSendAllowed");
   });
 
-  it("Create review links path requires recipient readiness (no silent bypass)", () => {
+  it("Send path still gates on recipient readiness (no silent bypass)", () => {
     const p = join(__dirname, "..", "..", "components", "agreements", "AgreementReview.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("const recipientGateBlocksSend = useMemo(() => sendInviteReadyCount < 1");
     expect(s).toContain("[create-review-links-click]");
+    expect(s).toContain("paidProAuthoritativeSendHappyPath");
   });
 });

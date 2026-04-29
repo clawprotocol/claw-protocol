@@ -45,4 +45,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const s = readFileSync(p, "utf8");
     expect(s).not.toMatch(/runPersistAndOpen[\s\S]{0,12000}clearPremiumCompletionStateAfterSend/);
   });
+
+  it("paid authoritative recipient step uses Review and send CTA copy (not Create review link)", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("paidProAuthoritative");
+    expect(s).toContain('"Review and send"');
+    expect(s).toContain("Add at least one recipient before continuing.");
+  });
 });

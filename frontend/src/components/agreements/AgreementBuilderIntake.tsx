@@ -9888,14 +9888,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             createFlowPhase === "ready_to_send"
               ? "Saving…"
               : premiumSendConfirmGateActive
-                ? "Continue to confirmation"
+                ? paidProAuthoritative
+                  ? "Review and send"
+                  : "Continue to confirmation"
                 : effectivePremiumSendMode === "review"
-                  ? premiumOutbox
-                    ? "Continue to review links"
-                    : "Create review link"
-                  : premiumOutbox
-                    ? "Continue to signing links"
-                    : "Create signing link";
+                  ? paidProAuthoritative
+                    ? "Review and send"
+                    : premiumOutbox
+                      ? "Continue to review links"
+                      : "Create review link"
+                  : paidProAuthoritative
+                    ? "Review and send"
+                    : premiumOutbox
+                      ? "Continue to signing links"
+                      : "Create signing link";
           return {
             label: persistSendLabel,
             action: "send_agreement",
@@ -9984,6 +9990,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     loading,
     premiumSendConfirmOpen,
     premiumSendConfirmGateActive,
+    paidProAuthoritative,
     recipient2Email,
     hasAnyValidRecipientEmail,
     recipientEmailsHaveValidationErrors,
@@ -10668,7 +10675,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             if (import.meta.env.DEV) console.debug("[fix_review] result (disabled path)", res);
             return;
           }
-          setHardError(humanizePrimaryCtaBlockedReason(cta.reason));
+          setHardError(
+            cta.reason === "recipient_email_or_defer" && paidProAuthoritative
+              ? "Add at least one recipient before continuing."
+              : humanizePrimaryCtaBlockedReason(cta.reason),
+          );
           if (cta.action === "complete_recipient_details" || cta.reason === "recipient_email_or_defer") {
             setCreateFlowSendRecipientEditorOpen(true);
             focusFirstMissingRecipientRequirement();
@@ -10860,7 +10871,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (stickyRecipientBlockedNudge) {
       setCreateFlowSendRecipientEditorOpen(true);
       focusFirstMissingRecipientRequirement();
-      setHardError(humanizePrimaryCtaBlockedReason("recipient_email_or_defer"));
+      setHardError(
+        paidProAuthoritative
+          ? "Add at least one recipient before continuing."
+          : humanizePrimaryCtaBlockedReason("recipient_email_or_defer"),
+      );
       if (import.meta.env.DEV) devSendCtaTrace("runPrimary: recipient nudge → focus first missing field");
       return;
     }
