@@ -1,11 +1,10 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { featureFlags } from "../../config/featureFlags";
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
-import {
-  describePaidProSendModalBranch,
-  shouldBypassFlexibleSendRecipientValidationForPremiumReview,
-} from "../../components/agreements/sendHandoffAuthoritativeCorpus";
+import { describePaidProSendModalBranch } from "../../components/agreements/sendHandoffAuthoritativeCorpus";
 
 describe("SimpleSendPage paid-pro send gate (post-hydrate draft shape)", () => {
   it("server_full_document_text corpus bypasses professional-send upsell after persist-style hydrate", () => {
@@ -27,16 +26,20 @@ describe("SimpleSendPage paid-pro send gate (post-hydrate draft shape)", () => {
   it("optional send payment UI flag is off until explicitly enabled", () => {
     expect(featureFlags.sendPaymentRequestsUi).toBe(false);
   });
+});
 
-  it("premium review minimal send bypasses strict recipient gate (Create review links not dead-ended)", () => {
-    expect(
-      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
-        isWorkspace: true,
-        isSimpleHomeReview: true,
-        simpleFlowPhase: "send",
-        simpleSendAuthoritativeMinimalChrome: true,
-        streamlinedPremiumIntentForCopy: "review",
-      }),
-    ).toBe(true);
+describe("SimpleSendPage + AgreementReview integration (static)", () => {
+  it("premiumSendUnlocked includes paid authoritative branches", () => {
+    const p = join(__dirname, "SimpleSendPage.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("sendAuthoritative");
+    expect(s).toContain("paidProSendBranch.paidProSendAllowed");
+  });
+
+  it("Create review links path requires recipient readiness (no silent bypass)", () => {
+    const p = join(__dirname, "..", "..", "components", "agreements", "AgreementReview.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("const recipientGateBlocksSend = useMemo(() => sendInviteReadyCount < 1");
+    expect(s).toContain("[create-review-links-click]");
   });
 });

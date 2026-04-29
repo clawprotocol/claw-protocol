@@ -11,7 +11,6 @@ import {
   mergePremiumRenderSourceField,
   paidProSendAllowed,
   pickAuthoritativePlainForSendHandoff,
-  shouldBypassFlexibleSendRecipientValidationForPremiumReview,
   shouldKeepReviewDisplayAfterProHydrate,
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
@@ -381,33 +380,4 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     expect(html).toContain("Draft Agreement (non-binding template)");
   });
 
-  it("shouldBypassFlexibleSendRecipientValidationForPremiumReview is true only for authoritative minimal review send", () => {
-    expect(
-      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
-        isWorkspace: true,
-        isSimpleHomeReview: true,
-        simpleFlowPhase: "send",
-        simpleSendAuthoritativeMinimalChrome: true,
-        streamlinedPremiumIntentForCopy: "review",
-      }),
-    ).toBe(true);
-    expect(
-      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
-        isWorkspace: true,
-        isSimpleHomeReview: true,
-        simpleFlowPhase: "send",
-        simpleSendAuthoritativeMinimalChrome: true,
-        streamlinedPremiumIntentForCopy: "signature",
-      }),
-    ).toBe(false);
-    expect(
-      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
-        isWorkspace: true,
-        isSimpleHomeReview: true,
-        simpleFlowPhase: "send",
-        simpleSendAuthoritativeMinimalChrome: false,
-        streamlinedPremiumIntentForCopy: "review",
-      }),
-    ).toBe(false);
-  });
 });

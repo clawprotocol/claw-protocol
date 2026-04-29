@@ -6,7 +6,7 @@ import {
   pickAuthoritativeProCorpusForRefine,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
 } from "./premiumRefineAcceptance";
-import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
+import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE, type PremiumRefineResponse } from "./premiumRefineApi";
 import { computePremiumReviewCompleteness } from "./premiumReviewCompleteness";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
@@ -20,7 +20,10 @@ import {
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 
-const PLACEHOLDER = "Add anything else or speak changes";
+const PLACEHOLDER = "Describe the change you want (optional)";
+/** Pro finalize panel — shown above review/signature row; also used for empty refine submit hint. */
+export const FINALIZE_REFINE_ROUTE_HINT =
+  "Need changes? Describe them below, then update the agreement. Otherwise choose review or signature.";
 
 type SendMode = "review" | "signature";
 
@@ -171,7 +174,7 @@ export function FinalizeYourAgreementPanel({
       e?.preventDefault();
       if (disabled || busy) return;
       if (!prompt.trim()) {
-        setErr("Add a short note, or pick a path when you are ready.");
+        setErr(FINALIZE_REFINE_ROUTE_HINT);
         return;
       }
       setErr(null);
@@ -207,7 +210,7 @@ export function FinalizeYourAgreementPanel({
           ac.signal,
         );
         const out = (r.updated_document_text || "").trim();
-        const acc = evaluatePremiumRefineCandidate(baseline.len, out);
+        const acc = evaluatePremiumRefineCandidate(baseline.len, out, baseline.text, r.summary_changes);
         // eslint-disable-next-line no-console
         console.info("[premium-refine-apply]", {
           currentProLen: baseline.len,
@@ -219,6 +222,12 @@ export function FinalizeYourAgreementPanel({
           endpoint: "premium-refine",
           surface: "FinalizeYourAgreementPanel.runUpdate",
         });
+        if (acc.decision === "rejected_unchanged") {
+          setLastRefine(null);
+          setRefineSuccessMessage(null);
+          setErr(PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
+          return;
+        }
         if (acc.decision === "rejected_short") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
@@ -312,7 +321,13 @@ export function FinalizeYourAgreementPanel({
           undefined,
         );
         const out = (r.updated_document_text || "").trim();
-        const acc = evaluatePremiumRefineCandidate(baseline.len, out);
+        const acc = evaluatePremiumRefineCandidate(baseline.len, out, baseline.text, r.summary_changes);
+        if (acc.decision === "rejected_unchanged") {
+          setLastRefine(null);
+          setRefineSuccessMessage(null);
+          setErr(PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
+          return;
+        }
         if (acc.decision === "rejected_short") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
@@ -437,10 +452,7 @@ export function FinalizeYourAgreementPanel({
         </div>
       ) : null}
 
-      <form
-        onSubmit={runUpdate}
-        className="mt-4 space-y-3 border-t border-slate-700/50 pt-4"
-      >
+      <form onSubmit={runUpdate} className="mt-4 space-y-3 border-t border-slate-700/50 pt-4">
         <VoiceAugmentedTextArea
           ref={refineTextareaRef}
           value={prompt}
@@ -476,13 +488,14 @@ export function FinalizeYourAgreementPanel({
             </ul>
           </div>
         ) : null}
+        <p className="text-xs leading-relaxed text-slate-500 sm:text-sm">{FINALIZE_REFINE_ROUTE_HINT}</p>
         <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <button
             type="submit"
             className="rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400 disabled:opacity-50"
-            disabled={disabled || busy}
+            disabled={disabled || busy || !prompt.trim()}
           >
-            {busy ? "Working…" : "Update agreement"}
+            {busy ? "Working…" : prompt.trim() ? "Update agreement" : "Describe a change first"}
           </button>
           <button
             type="button"

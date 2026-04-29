@@ -65,7 +65,6 @@ import {
   describePaidProSendModalBranch,
   mergePremiumRenderSourceField,
   pickAuthoritativePlainForSendHandoff,
-  shouldBypassFlexibleSendRecipientValidationForPremiumReview,
   shouldMinimalProSendRecipientChrome,
   type PaidProSendBranchMeta,
 } from "./sendHandoffAuthoritativeCorpus";
@@ -1967,26 +1966,38 @@ const AgreementReview: React.FC<Props> = ({
   const participantRows = useMemo(() => deriveParticipantRows(draft), [draft]);
   const sendInviteReadyCount = useMemo(() => countReadyInviteParties(draft?.parties), [draft?.parties]);
   const sendInviteTotalSlots = useMemo(() => countContactRequiredParties(draft?.parties), [draft?.parties]);
-  const premiumReviewLinkRecipientBypass = useMemo(
+  /** Paid authoritative `/app/send` v1: flat recipient editor, no accordion / delivery matrix chrome. */
+  const simplePaidProAuthoritativeSendSurface = useMemo(
     () =>
-      shouldBypassFlexibleSendRecipientValidationForPremiumReview({
-        isWorkspace,
-        isSimpleHomeReview,
-        simpleFlowPhase,
-        simpleSendAuthoritativeMinimalChrome,
-        streamlinedPremiumIntentForCopy,
-      }),
+      Boolean(
+        isSimpleHomeReview &&
+          simpleFlowPhase === "send" &&
+          (simpleSendAuthoritativeMinimalChrome || simpleHomePaidAuthoritativeAgreementPreview),
+      ),
     [
-      isWorkspace,
       isSimpleHomeReview,
       simpleFlowPhase,
       simpleSendAuthoritativeMinimalChrome,
-      streamlinedPremiumIntentForCopy,
+      simpleHomePaidAuthoritativeAgreementPreview,
     ],
   );
-  const recipientGateBlocksSend = useMemo(
-    () => !premiumReviewLinkRecipientBypass && sendInviteReadyCount < 1,
-    [premiumReviewLinkRecipientBypass, sendInviteReadyCount],
+  const recipientGateBlocksSend = useMemo(() => sendInviteReadyCount < 1, [sendInviteReadyCount]);
+
+  const logCreateReviewLinksClick = useCallback(
+    (actionTaken: string, extra?: Record<string, unknown>) => {
+      if (!import.meta.env.DEV) return;
+      // eslint-disable-next-line no-console
+      console.info("[create-review-links-click]", {
+        agreementId,
+        createUiStage: section,
+        createFlowPhase: simpleFlowPhase,
+        sendAuthoritative: Boolean(draft && isPaidProAgreementAuthoritative({ draft, agreementId })),
+        hasRecipientEmails: sendInviteReadyCount >= 1,
+        actionTaken,
+        ...extra,
+      });
+    },
+    [agreementId, section, simpleFlowPhase, draft, sendInviteReadyCount],
   );
 
   const paymentRequestSnap = useMemo(() => {
@@ -2107,12 +2118,7 @@ const AgreementReview: React.FC<Props> = ({
   async function handleSimpleSendWithPayment() {
     if (!onSimpleFlowContinue || !draft || !simpleSendActionsUnlocked) return;
     if (simpleFlowAdvanceBusy) return;
-    if (
-      isWorkspace &&
-      isSimpleHomeReview &&
-      simpleFlowPhase === "send" &&
-      !premiumReviewLinkRecipientBypass
-    ) {
+    if (isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send") {
       setSimpleSendValidateAttempted(true);
       const contactErrs = validateRecipientContactForFlexibleSend(draft.parties);
       setSimpleSendFieldErrors(contactErrs);
@@ -2170,12 +2176,17 @@ const AgreementReview: React.FC<Props> = ({
       return;
     }
     if (simpleFlowAdvanceBusy) return;
-    if (isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send" && !premiumReviewLinkRecipientBypass) {
+    if (isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send") {
       setSimpleSendValidateAttempted(true);
       const contactErrs = validateRecipientContactForFlexibleSend(draft.parties);
       setSimpleSendFieldErrors(contactErrs);
       if (Object.keys(contactErrs).length > 0) {
         logReviewLinkAction("blocked_recipient_validation");
+        setError(
+          streamlinedPremiumIntentForCopy === "review"
+            ? "Add at least one recipient email below, then try Create review links again."
+            : "Add at least one recipient email below, then try again.",
+        );
         setSimpleSendRecipientEditorOpen(true);
         setContactValidationSeq((n) => n + 1);
         const firstKey = scrollToFirstContactError(contactErrs);
@@ -2183,6 +2194,12 @@ const AgreementReview: React.FC<Props> = ({
           setShakeContactFieldKey(firstKey);
           window.setTimeout(() => setShakeContactFieldKey(null), 220);
         }
+        window.requestAnimationFrame(() => {
+          document.getElementById("simple-send-recipients-v1-anchor")?.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+        });
         return;
       }
     }
@@ -2193,9 +2210,7 @@ const AgreementReview: React.FC<Props> = ({
       await saveField("payment_required", false);
       await saveField("payment_request", null);
       onSimpleFlowContinue();
-      logReviewLinkAction("advance_confirm_flow", {
-        bypassRecipientValidation: premiumReviewLinkRecipientBypass,
-      });
+      logReviewLinkAction("advance_confirm_flow");
     } catch {
       /* saveField sets error */
     } finally {
@@ -4023,7 +4038,7 @@ const AgreementReview: React.FC<Props> = ({
         </div>
       ) : null}
       {isSimpleHomeReview &&
-      !(simpleFlowPhase === "send" && simpleSendAuthoritativeMinimalChrome) ? (
+      !(simpleFlowPhase === "send" && simplePaidProAuthoritativeSendSurface) ? (
         <details className="rounded-lg border border-slate-800/60 bg-slate-950/25 px-3 py-2 text-slate-400 [&_summary::-webkit-details-marker]:hidden">
           <summary className="cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-300">
             Understand roles
@@ -4061,6 +4076,7 @@ const AgreementReview: React.FC<Props> = ({
         </div>
       ) : null}
       <div
+        id="simple-send-recipients-v1-anchor"
         className={
           isSimpleHomeReview
             ? "rounded-lg border border-slate-800/55 bg-slate-900/25 p-4 sm:p-5"
@@ -4070,21 +4086,21 @@ const AgreementReview: React.FC<Props> = ({
         <div className="mb-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
             {isSimpleHomeReview
-              ? simpleSendAuthoritativeMinimalChrome && simpleFlowPhase === "send"
+              ? simplePaidProAuthoritativeSendSurface && simpleFlowPhase === "send"
                 ? "Recipients"
                 : "Signature delivery"
               : "People on this agreement"}
           </div>
           {isSimpleHomeReview && simpleFlowPhase === "send" ? (
             <p className="mt-2 text-[11px] leading-relaxed text-slate-500 sm:text-xs">
-              {simpleSendAuthoritativeMinimalChrome
+              {simplePaidProAuthoritativeSendSurface
                 ? "LawDog creates a secure review link — it does not email recipients automatically. Add names and emails below so signers are labeled correctly."
                 : "Parties are listed in the agreement. Only people with emails entered below will receive signature requests."}
             </p>
           ) : null}
         </div>
         {participantRows.length > 0 &&
-        !(isSimpleHomeReview && simpleFlowPhase === "send" && simpleSendAuthoritativeMinimalChrome) ? (
+        !(isSimpleHomeReview && simpleFlowPhase === "send" && simplePaidProAuthoritativeSendSurface) ? (
           <details
             className={`mb-4 overflow-hidden rounded-lg border border-slate-800/90 bg-slate-950/30 [&_summary::-webkit-details-marker]:hidden ${
               isSimpleHomeReview && simpleFlowPhase === "send" ? "" : "open"
@@ -4288,7 +4304,7 @@ const AgreementReview: React.FC<Props> = ({
             </div>
           </details>
         ) : null}
-        {simpleSendAuthoritativeMinimalChrome && isSimpleHomeReview && simpleFlowPhase === "send" ? (
+        {simplePaidProAuthoritativeSendSurface && isSimpleHomeReview && simpleFlowPhase === "send" ? (
           <div className="rounded-lg border border-slate-800/55 bg-slate-950/20 px-1 pb-3 pt-1">
             <p className="mb-3 px-3 pt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
               Recipient details
@@ -4412,7 +4428,7 @@ const AgreementReview: React.FC<Props> = ({
           </details>
         )}
       <p className="text-xs text-slate-500">{recipientsSummaryLine}</p>
-      {!simpleSendAuthoritativeMinimalChrome ? (
+      {!simplePaidProAuthoritativeSendSurface ? (
       <details className="rounded-lg border border-slate-800/55 bg-slate-950/30 [&_summary::-webkit-details-marker]:hidden">
         <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-slate-200 marker:hidden hover:bg-slate-900/40">
           Advanced options — links &amp; FYI copy
@@ -5766,12 +5782,26 @@ const AgreementReview: React.FC<Props> = ({
                                   ? "LawDog creates secure review links — it does not email recipients automatically. Use the button below to generate links you copy and share."
                                   : "LawDog creates secure signing links — it does not email recipients automatically. Use the button below to generate links you copy and share."}
                               </p>
+                              {streamlinedPremiumIntentForCopy === "review" && recipientGateBlocksSend ? (
+                                <p
+                                  className="mt-3 rounded-lg border border-amber-800/45 bg-amber-950/25 px-3 py-2 text-xs leading-relaxed text-amber-100/95"
+                                  role="status"
+                                >
+                                  Add at least one recipient email in Recipients below — we need it to label review
+                                  links and continue.
+                                </p>
+                              ) : null}
                               <div className="mt-4 flex flex-col gap-3">
                                 <button
                                   type="button"
                                   className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
                                   disabled={Boolean(savingField) || simpleFlowAdvanceBusy || recipientGateBlocksSend}
-                                  onClick={() => void handleSimpleSendWithoutPayment()}
+                                  onClick={() => {
+                                    logCreateReviewLinksClick("primary_cta_click", {
+                                      intent: streamlinedPremiumIntentForCopy ?? null,
+                                    });
+                                    void handleSimpleSendWithoutPayment();
+                                  }}
                                 >
                                   {streamlinedPremiumIntentForCopy === "review"
                                     ? sendInviteReadyCount >= 1
@@ -5816,12 +5846,26 @@ const AgreementReview: React.FC<Props> = ({
                                 Generate secure review links for each recipient — you copy and share them. Nothing
                                 reaches anyone until you do.
                               </p>
+                              {recipientGateBlocksSend ? (
+                                <p
+                                  className="mt-3 rounded-lg border border-amber-800/45 bg-amber-950/25 px-3 py-2 text-xs leading-relaxed text-amber-100/95"
+                                  role="status"
+                                >
+                                  Add at least one recipient email in Recipients below — we need it to label review
+                                  links and continue.
+                                </p>
+                              ) : null}
                               <div className="mt-4 flex flex-col gap-3">
                                 <button
                                   type="button"
                                   className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
                                   disabled={Boolean(savingField) || simpleFlowAdvanceBusy || recipientGateBlocksSend}
-                                  onClick={() => void handleSimpleSendWithoutPayment()}
+                                  onClick={() => {
+                                    logCreateReviewLinksClick("primary_cta_click", {
+                                      intent: streamlinedPremiumIntentForCopy ?? null,
+                                    });
+                                    void handleSimpleSendWithoutPayment();
+                                  }}
                                 >
                                   {sendInviteReadyCount >= 1
                                     ? sendInviteReadyCount === 1
@@ -5880,7 +5924,12 @@ const AgreementReview: React.FC<Props> = ({
                                   type="button"
                                   className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
                                   disabled={Boolean(savingField) || simpleFlowAdvanceBusy || recipientGateBlocksSend}
-                                  onClick={() => void handleSimpleSendWithoutPayment()}
+                                  onClick={() => {
+                                    logCreateReviewLinksClick("primary_cta_click", {
+                                      intent: streamlinedPremiumIntentForCopy ?? null,
+                                    });
+                                    void handleSimpleSendWithoutPayment();
+                                  }}
                                 >
                                   Create signing links
                                 </button>
@@ -5922,7 +5971,7 @@ const AgreementReview: React.FC<Props> = ({
                               </ul>
                             </>
                           )}
-                          {!simpleSendAuthoritativeMinimalChrome ? (
+                          {!simplePaidProAuthoritativeSendSurface ? (
                             <>
                               <details className="mt-5 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
                                 <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400">
@@ -5943,7 +5992,7 @@ const AgreementReview: React.FC<Props> = ({
                             </>
                           ) : null}
                         </div>
-                        {featureFlags.sendPaymentRequestsUi && !simpleSendAuthoritativeMinimalChrome ? (
+                        {featureFlags.sendPaymentRequestsUi && !simplePaidProAuthoritativeSendSurface ? (
                           <SimplePaymentAttachCard
                             partyALabel={
                               (draft.parties || [])[0]

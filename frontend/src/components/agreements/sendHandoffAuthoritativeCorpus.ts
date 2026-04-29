@@ -250,23 +250,6 @@ export type BuildSendRouteReadonlyHtmlOpts = {
   documentLabel?: string | null;
 };
 
-/** Premium review-link send: allow advancing without a fully populated recipient row (copy/share flow). */
-export function shouldBypassFlexibleSendRecipientValidationForPremiumReview(params: {
-  isWorkspace: boolean;
-  isSimpleHomeReview: boolean;
-  simpleFlowPhase: "review" | "send";
-  simpleSendAuthoritativeMinimalChrome: boolean;
-  streamlinedPremiumIntentForCopy: "review" | "signature" | null;
-}): boolean {
-  return (
-    params.isWorkspace &&
-    params.isSimpleHomeReview &&
-    params.simpleFlowPhase === "send" &&
-    params.simpleSendAuthoritativeMinimalChrome &&
-    params.streamlinedPremiumIntentForCopy === "review"
-  );
-}
-
 export function buildSendRouteReadonlyHtmlFromPlain(
   plain: string,
   opts?: BuildSendRouteReadonlyHtmlOpts,
