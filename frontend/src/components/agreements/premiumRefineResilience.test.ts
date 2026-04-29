@@ -68,6 +68,16 @@ describe("PRO_REFINE_UNAVAILABLE_USER_MESSAGE export", () => {
   });
 });
 
+describe("Premium refine no-op apply guard", () => {
+  it("paid path rejects unchanged candidates without showing Change applied", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain('evaluatePremiumRefineCandidate(out, currentProLen, currentDoc, r.summary_changes)');
+    expect(s).toContain('acceptance.decision === "rejected_unchanged"');
+    expect(s).toContain("PRO_REFINE_UNAVAILABLE_USER_MESSAGE");
+  });
+});
+
 describe("Pro display phase guard", () => {
   it("warns and repairs intake when a Pro document is present", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");

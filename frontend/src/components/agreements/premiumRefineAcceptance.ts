@@ -1,4 +1,5 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 
 /** Post-checkout pipeline / resolver pin for a committed full Pro body (see premiumCompletionStorage). */
 export const PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE = "server_full_document_text";
@@ -57,18 +58,42 @@ export function pickAuthoritativeProCorpusForRefine(args: {
   return { text: best.text, chosenSource: best.source, len: best.text.length };
 }
 
-export type PremiumRefineApplyDecision = "accepted" | "rejected_short" | "rejected_empty";
+export type PremiumRefineApplyDecision = "accepted" | "rejected_short" | "rejected_empty" | "rejected_unchanged";
+
+/** Matches backend whitespace normalization for no-op refine detection. */
+export function normalizePremiumRefineTextForCompare(s: string): string {
+  return s.trim().replace(/\s+/g, " ");
+}
+
+/** True when the API returned the paid update fail-open payload (unchanged document). */
+export function premiumRefineSummaryIsUnchangedFailOpen(summary: string[] | undefined): boolean {
+  const msg = PRO_REFINE_UNAVAILABLE_USER_MESSAGE.trim();
+  return (summary || []).some((line) => line.trim() === msg);
+}
 
 export function evaluatePremiumRefineCandidate(
-  currentProLen: number,
   refinedCandidate: string,
+  currentProLen: number,
+  currentProText?: string,
+  responseSummary?: string[],
 ): {
   decision: PremiumRefineApplyDecision;
   refinedLen: number;
   ratio: number;
 } {
-  const refinedLen = refinedCandidate.trim().length;
+  const refined = refinedCandidate.trim();
+  const refinedLen = refined.length;
   if (refinedLen < 1) return { decision: "rejected_empty", refinedLen, ratio: 0 };
+  const ratioEarly = currentProLen > 0 ? refinedLen / currentProLen : 1;
+  if (premiumRefineSummaryIsUnchangedFailOpen(responseSummary)) {
+    return { decision: "rejected_unchanged", refinedLen, ratio: ratioEarly };
+  }
+  if (
+    currentProText !== undefined &&
+    normalizePremiumRefineTextForCompare(currentProText) === normalizePremiumRefineTextForCompare(refined)
+  ) {
+    return { decision: "rejected_unchanged", refinedLen, ratio: ratioEarly };
+  }
   if (currentProLen < 1) return { decision: "accepted", refinedLen, ratio: 1 };
 
   const ratio = refinedLen / currentProLen;

@@ -210,7 +210,7 @@ export function FinalizeYourAgreementPanel({
           ac.signal,
         );
         const out = (r.updated_document_text || "").trim();
-        const acc = evaluatePremiumRefineCandidate(baseline.len, out, baseline.text, r.summary_changes);
+        const acc = evaluatePremiumRefineCandidate(out, baseline.len, baseline.text, r.summary_changes);
         // eslint-disable-next-line no-console
         console.info("[premium-refine-apply]", {
           currentProLen: baseline.len,
@@ -321,7 +321,7 @@ export function FinalizeYourAgreementPanel({
           undefined,
         );
         const out = (r.updated_document_text || "").trim();
-        const acc = evaluatePremiumRefineCandidate(baseline.len, out, baseline.text, r.summary_changes);
+        const acc = evaluatePremiumRefineCandidate(out, baseline.len, baseline.text, r.summary_changes);
         if (acc.decision === "rejected_unchanged") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
