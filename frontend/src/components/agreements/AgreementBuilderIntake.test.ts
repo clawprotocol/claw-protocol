@@ -115,6 +115,17 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(s).toContain("What changed:");
   });
 
+  it("paid persisted refine uses augmentPremiumRefineUserPrompt and resolvePremiumRefineApplyOutcome", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    const i = s.indexOf("const runPersistedRefineFromStepBuffer =");
+    const j = s.indexOf("const resolveComplexityChoice =", i);
+    const block = s.slice(i, j);
+    expect(block).toContain("augmentPremiumRefineUserPrompt(instruction)");
+    expect(block).toContain("resolvePremiumRefineApplyOutcome");
+    expect(block).toContain("setProRefineWhatChangedSummary");
+  });
+
   it("starter tier gates premiumPaidDocumentSurface only on paid completion session or persisted premium flow", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");

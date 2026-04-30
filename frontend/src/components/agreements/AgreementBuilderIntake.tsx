@@ -365,11 +365,15 @@ import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftCli
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import {
   pickAuthoritativeProCorpusForRefine,
-  evaluatePremiumRefineCandidate,
   formatProRefineRejectedShortInline,
   PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
 } from "./premiumRefineAcceptance";
+import {
+  augmentPremiumRefineUserPrompt,
+  PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE,
+  resolvePremiumRefineApplyOutcome,
+} from "./premiumRefineLateFeeFallback";
 import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
@@ -5594,11 +5598,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const r = await postPremiumRefine({
           current_document_text: currentDoc,
           intake_text: rawIntake,
-          user_refinement_prompt: instruction,
+          user_refinement_prompt: augmentPremiumRefineUserPrompt(instruction),
           action: "update",
         });
-        const out = (r.updated_document_text || "").trim();
-        const acceptance = evaluatePremiumRefineCandidate(out, currentDoc, currentProLen, r.summary_changes);
+        const resolved = resolvePremiumRefineApplyOutcome({
+          apiOut: r.updated_document_text,
+          baselineText: currentDoc,
+          baselineLen: currentProLen,
+          summaryChanges: r.summary_changes,
+          userInstruction: instruction,
+        });
+        const { acceptance, finalText: out, usedLocalLateFeeFallback, whatChangedLine, unchangedDuplicateLateFee } =
+          resolved;
         // eslint-disable-next-line no-console
         console.info("[premium-refine-apply]", {
           currentProLen,
@@ -5608,10 +5619,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           preservedExistingDoc: acceptance.decision !== "accepted",
           chosenSource: corpusPick.chosenSource,
           endpoint: "premium-refine",
+          usedLocalLateFeeFallback,
         });
         if (acceptance.decision === "rejected_unchanged") {
           setHardError(null);
-          setReviewRefineUserMessage(PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
+          setReviewRefineUserMessage(
+            unchangedDuplicateLateFee
+              ? PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE
+              : PRO_REFINE_UNAVAILABLE_USER_MESSAGE,
+          );
           return false;
         }
         if (acceptance.decision === "rejected_empty") {
@@ -5632,8 +5648,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           outLen: out.length,
           suggested_next_step: r.suggested_next_step,
           summary_changes: r.summary_changes,
+          usedLocalLateFeeFallback,
         });
         setReviewRefineUserMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
+        setProRefineWhatChangedSummary(whatChangedLine?.trim() ? whatChangedLine.trim() : null);
         applyProRefineOutputToProSurfaceRef.current?.(out, { clearStepBuffer: true, scrollToReview: true });
         return true;
       }
