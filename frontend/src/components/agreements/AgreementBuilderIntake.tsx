@@ -10801,7 +10801,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "continue_basic_draft": {
-            console.log("[FSM] continue_basic_draft → RECIPIENTS");
+            const eligibleForRecipientSetupAfterStarterPreview =
+              paidProAuthoritative ||
+              premiumPersistedFlowActive ||
+              hasPaidPremiumCompletionSession();
+            if (!eligibleForRecipientSetupAfterStarterPreview) {
+              setHardError(null);
+              await handleUpgradeToFullDraft();
+              return;
+            }
+            if (import.meta.env.DEV) {
+              console.log("[FSM] continue_basic_draft → RECIPIENTS");
+            }
             setHardError(null);
             clearUpgradeLockAndResume();
             await handOffProductionDraftToRecipients();

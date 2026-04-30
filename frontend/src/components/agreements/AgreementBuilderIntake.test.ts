@@ -145,6 +145,57 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
+  it("continue_basic_draft opens full-draft upgrade checkout when not paid authoritative and no premium session flags", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    const i = s.indexOf('case "continue_basic_draft"');
+    expect(i).toBeGreaterThanOrEqual(0);
+    const j = s.indexOf('case "update_agreement_from_buffer"', i);
+    expect(j).toBeGreaterThan(i);
+    const block = s.slice(i, j);
+    expect(block).toContain("paidProAuthoritative");
+    expect(block).toContain("premiumPersistedFlowActive");
+    expect(block).toContain("hasPaidPremiumCompletionSession()");
+    expect(block).toContain("handleUpgradeToFullDraft");
+    expect(block).toContain("handOffProductionDraftToRecipients");
+    const k = block.indexOf("if (!eligibleForRecipientSetupAfterStarterPreview)");
+    expect(k).toBeGreaterThanOrEqual(0);
+    const untilHandOff = block.indexOf("await handOffProductionDraftToRecipients", k);
+    const upgradeCall = block.indexOf("await handleUpgradeToFullDraft()", k);
+    expect(upgradeCall).toBeGreaterThanOrEqual(0);
+    expect(untilHandOff).toBeGreaterThan(upgradeCall);
+    const earlyReturn = block.indexOf("return;", upgradeCall);
+    expect(earlyReturn).toBeGreaterThanOrEqual(0);
+    expect(earlyReturn).toBeLessThan(untilHandOff);
+  });
+
+  it("continue_basic_draft unpaid branch does not call handOffProductionDraftToRecipients before return", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    const i = s.indexOf('case "continue_basic_draft"');
+    const j = s.indexOf('case "update_agreement_from_buffer"', i);
+    const block = s.slice(i, j);
+    expect(block).toMatch(
+      /if\s*\(\s*!eligibleForRecipientSetupAfterStarterPreview\s*\)\s*\{[\s\S]*?await handleUpgradeToFullDraft\(\);\s*return;\s*\}/,
+    );
+    const m = block.match(
+      /if\s*\(\s*!eligibleForRecipientSetupAfterStarterPreview\s*\)\s*\{([\s\S]*?)\}\s*(?:if\s*\(\s*import\.meta\.env\.DEV)/,
+    );
+    expect(m?.[1] ?? "").toContain("await handleUpgradeToFullDraft()");
+    expect(m?.[1] ?? "").not.toContain("handOffProductionDraftToRecipients");
+  });
+
+  it("continue_basic_draft paid or premium-session path still calls handOffProductionDraftToRecipients after clearUpgradeLockAndResume", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    const i = s.indexOf('case "continue_basic_draft"');
+    const j = s.indexOf('case "update_agreement_from_buffer"', i);
+    const block = s.slice(i, j);
+    expect(block).toMatch(
+      /clearUpgradeLockAndResume\(\);\s*await handOffProductionDraftToRecipients\(\);\s*return;/,
+    );
+  });
+
   it("paid authoritative Pro hides top adjust card but keeps lower Finalize panel", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showTopProAdjustCard");
