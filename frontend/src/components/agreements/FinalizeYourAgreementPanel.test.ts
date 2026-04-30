@@ -11,3 +11,19 @@ describe("FinalizeYourAgreementPanel Pro refine → host summary", () => {
     expect(s).toContain("summary_changes");
   });
 });
+
+describe("FinalizeYourAgreementPanel send-for-review framing (copy only)", () => {
+  it("surfaces conversion framing, inevitability cue, and confidence label mapping", () => {
+    const p = join(__dirname, "FinalizeYourAgreementPanel.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("Ready to send for review");
+    expect(s).toContain("Recommended next step");
+    expect(s).toContain(
+      "Send this agreement for review so both sides can confirm details before signing.",
+    );
+    expect(s).toContain("Most agreements are reviewed before signing.");
+    expect(s).toContain("Send for review →");
+    expect(s).toContain("formatRouteConfidenceLabel");
+    expect(s).toContain('return "solid for review"');
+  });
+});

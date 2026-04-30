@@ -114,4 +114,16 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(s).toContain("onProRefineWhatChanged=");
     expect(s).toContain("What changed:");
   });
+
+  it("paid authoritative Pro hides top adjust card but keeps lower Finalize panel", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("showTopProAdjustCard");
+    expect(intake).toMatch(/showTopProAdjustCard\s*=\s*Boolean\([\s\S]*?!paidProAuthoritative/);
+    expect(intake).toContain("Want to adjust this agreement?");
+    expect(intake).toContain("{showTopProAdjustCard ?");
+    expect(intake).toContain("FinalizeYourAgreementPanel");
+    expect(intake).toContain("showProLawdogRefineAndFinalize");
+    const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");
+    expect(finalize).toContain("Ready to send for review");
+  });
 });

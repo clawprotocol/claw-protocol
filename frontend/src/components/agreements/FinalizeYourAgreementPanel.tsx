@@ -65,9 +65,20 @@ function readinessPillClass(r: FinalizeReadiness): string {
   return "border-emerald-500/50 bg-emerald-950/35 text-emerald-100/90";
 }
 
+/** Display-only: forward momentum on the primary review CTA (wiring unchanged). */
+function formatRecommendedCtaLabel(cta: PremiumReviewRoute["recommended_cta"]): string {
+  if (cta === "Send for review") return "Send for review →";
+  return cta;
+}
+
+function formatRouteConfidenceLabel(conf: PremiumReviewRoute["confidence"]): string {
+  if (conf === "medium") return "solid for review";
+  return conf;
+}
+
 /**
  * LawDog Pro: single post-draft surface — checklist, AI gaps, and refinement in one place.
- * Document preview stays the primary focus above.
+ * Document preview stays the primary focus above; panel heading emphasizes send-for-review flow.
  */
 export function FinalizeYourAgreementPanel({
   draft,
@@ -153,7 +164,7 @@ export function FinalizeYourAgreementPanel({
     if (!reviewRoute) return null;
     if (reviewRoute.route === "signature") return "Ready to sign";
     if (reviewRoute.route === "fix") return `Needs ${Math.max(1, Math.min(3, reviewRoute.unresolved_items.length || 2))} quick fixes`;
-    return "Best sent for review first";
+    return "Recommended next step";
   }, [reviewRoute]);
   const routeCopy = useMemo(() => {
     if (!reviewRoute) return "";
@@ -169,7 +180,7 @@ export function FinalizeYourAgreementPanel({
     if (reviewRoute.route === "fix") {
       return `${conf}: clean up a few unresolved items before sending.`;
     }
-    return `${conf}: this deal likely benefits from both sides reviewing terms before signature.`;
+    return "Send this agreement for review so both sides can confirm details before signing.";
   }, [reviewRoute]);
 
   const runUpdate = useCallback(
@@ -400,11 +411,11 @@ export function FinalizeYourAgreementPanel({
     <div
       className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5"
       role="region"
-      aria-label="Pro review and next steps"
+      aria-label="Ready to send for review"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">Pro review & next steps</h3>
+          <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">Ready to send for review</h3>
           <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">{tagline}</p>
         </div>
         <p
@@ -428,10 +439,14 @@ export function FinalizeYourAgreementPanel({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-cyan-100">{routeBadge}</p>
             <p className="rounded-md border border-cyan-500/30 bg-cyan-950/40 px-2 py-0.5 text-[11px] text-cyan-200">
-              Confidence: {reviewRoute.confidence}
+              Confidence: {formatRouteConfidenceLabel(reviewRoute.confidence)}
             </p>
           </div>
-          <p className="mt-1.5 text-sm text-cyan-100/90">{reviewRoute.short_summary || routeCopy}</p>
+          <p className="mt-1.5 text-sm text-cyan-100/90">
+            {reviewRoute.route === "review"
+              ? "Send this agreement for review so both sides can confirm details before signing."
+              : reviewRoute.short_summary || routeCopy}
+          </p>
           {reviewRoute.route === "fix" && reviewRoute.unresolved_items.length > 0 ? (
             <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-cyan-50/95">
               {reviewRoute.unresolved_items.slice(0, 3).map((x) => (
@@ -439,10 +454,13 @@ export function FinalizeYourAgreementPanel({
               ))}
             </ul>
           ) : null}
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <p className="mt-3 text-[11px] leading-snug text-slate-500 sm:text-xs">
+            Most agreements are reviewed before signing.
+          </p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-stretch">
             <button
               type="button"
-              className="rounded-lg bg-cyan-400 px-3.5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-50"
+              className="inline-flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-md shadow-emerald-950/20 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/90 disabled:opacity-50 sm:min-h-[2.85rem] sm:px-5 sm:py-3 sm:text-[0.9375rem]"
               disabled={disabled || busy}
               onClick={() => {
                 if (reviewRoute.route === "fix") {
@@ -453,11 +471,11 @@ export function FinalizeYourAgreementPanel({
                 else onReadyForReview();
               }}
             >
-              {reviewRoute.recommended_cta}
+              {formatRecommendedCtaLabel(reviewRoute.recommended_cta)}
             </button>
             <button
               type="button"
-              className="rounded-lg border border-slate-500/70 bg-slate-900/70 px-3.5 py-2 text-sm text-slate-100 transition hover:border-slate-400"
+              className="inline-flex min-h-[2.75rem] items-center justify-center rounded-lg border border-slate-500/55 bg-slate-950/50 px-3.5 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:bg-slate-900/60 disabled:opacity-50 sm:py-2.5"
               disabled={disabled || busy}
               onClick={() => (reviewRoute.route === "review" ? onSendForSignature() : onReadyForReview())}
             >
