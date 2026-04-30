@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { VoiceAugmentedTextArea, type VoiceDictationControl } from "../../launch/VoiceAugmentedControl";
+import { formatProRefineRejectedShortInline, pickAuthoritativeProCorpusForRefine, PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE } from "./premiumRefineAcceptance";
 import {
-  evaluatePremiumRefineCandidate,
-  formatProRefineRejectedShortInline,
-  pickAuthoritativeProCorpusForRefine,
-  PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
-} from "./premiumRefineAcceptance";
+  augmentPremiumRefineUserPrompt,
+  PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE,
+  resolvePremiumRefineApplyOutcome,
+} from "./premiumRefineLateFeeFallback";
 import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE, type PremiumRefineResponse } from "./premiumRefineApi";
 import { computePremiumReviewCompleteness } from "./premiumReviewCompleteness";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -103,6 +103,7 @@ export function FinalizeYourAgreementPanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [refineSuccessMessage, setRefineSuccessMessage] = useState<string | null>(null);
+  const [refineWhatChangedCaption, setRefineWhatChangedCaption] = useState<string | null>(null);
   const [lastRefine, setLastRefine] = useState<PremiumRefineResponse | null>(null);
   const dictationRef = useRef<VoiceDictationControl | null>(null);
   const acRef = useRef<AbortController | null>(null);
@@ -193,6 +194,7 @@ export function FinalizeYourAgreementPanel({
       }
       setErr(null);
       setRefineSuccessMessage(null);
+      setRefineWhatChangedCaption(null);
       await dictationRef.current?.finalizeDictation();
       acRef.current?.abort();
       const ac = new AbortController();
@@ -218,13 +220,20 @@ export function FinalizeYourAgreementPanel({
           {
             current_document_text: baseline.text,
             intake_text: effectiveIntakeText,
-            user_refinement_prompt: prompt.trim(),
+            user_refinement_prompt: augmentPremiumRefineUserPrompt(prompt.trim()),
             action: "update",
           },
           ac.signal,
         );
-        const out = (r.updated_document_text || "").trim();
-        const acc = evaluatePremiumRefineCandidate(out, baseline.text, baseline.len, r.summary_changes);
+        const resolved = resolvePremiumRefineApplyOutcome({
+          apiOut: r.updated_document_text,
+          baselineText: baseline.text,
+          baselineLen: baseline.len,
+          summaryChanges: r.summary_changes,
+          userInstruction: prompt.trim(),
+        });
+        const { acceptance: acc, finalText: out, usedLocalLateFeeFallback, whatChangedLine, unchangedDuplicateLateFee } =
+          resolved;
         // eslint-disable-next-line no-console
         console.info("[premium-refine-apply]", {
           currentProLen: baseline.len,
@@ -235,11 +244,12 @@ export function FinalizeYourAgreementPanel({
           chosenSource: baseline.chosenSource,
           endpoint: "premium-refine",
           surface: "FinalizeYourAgreementPanel.runUpdate",
+          usedLocalLateFeeFallback,
         });
         if (acc.decision === "rejected_unchanged") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
-          setErr(PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
+          setErr(unchangedDuplicateLateFee ? PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE : PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
           return;
         }
         if (acc.decision === "rejected_short") {
@@ -257,12 +267,10 @@ export function FinalizeYourAgreementPanel({
         if (out) {
           setLastRefine(r);
           markDocumentDirty?.();
-          onApplyDocumentText(r.updated_document_text);
-          const whatChangedLine =
-            Array.isArray(r.summary_changes) && r.summary_changes.length
-              ? r.summary_changes.map((x) => String(x ?? "").trim()).filter(Boolean).join(" ")
-              : null;
-          onProRefineWhatChanged?.(whatChangedLine || null);
+          onApplyDocumentText(out);
+          const wc = whatChangedLine?.trim() ? whatChangedLine.trim() : null;
+          onProRefineWhatChanged?.(wc);
+          setRefineWhatChangedCaption(wc);
           setPrompt("");
           setRefineSuccessMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
         } else if (import.meta.env.DEV) {
@@ -272,6 +280,7 @@ export function FinalizeYourAgreementPanel({
       } catch (e2) {
         if (e2 instanceof Error && e2.name === "AbortError") return;
         setRefineSuccessMessage(null);
+        setRefineWhatChangedCaption(null);
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[agreement-refine] FinalizeYourAgreementPanel#runUpdate FAILED", {
@@ -326,6 +335,7 @@ export function FinalizeYourAgreementPanel({
       setBusy(true);
       setLastRefine(null);
       setRefineSuccessMessage(null);
+      setRefineWhatChangedCaption(null);
       try {
         const baseline = pickAuthoritativeProCorpusForRefine({
           draft,
@@ -335,17 +345,23 @@ export function FinalizeYourAgreementPanel({
           {
             current_document_text: baseline.text,
             intake_text: effectiveIntakeText,
-            user_refinement_prompt: seed,
+            user_refinement_prompt: augmentPremiumRefineUserPrompt(seed),
             action: "update",
           },
           undefined,
         );
-        const out = (r.updated_document_text || "").trim();
-        const acc = evaluatePremiumRefineCandidate(out, baseline.text, baseline.len, r.summary_changes);
+        const resolved = resolvePremiumRefineApplyOutcome({
+          apiOut: r.updated_document_text,
+          baselineText: baseline.text,
+          baselineLen: baseline.len,
+          summaryChanges: r.summary_changes,
+          userInstruction: seed,
+        });
+        const { acceptance: acc, finalText: out, whatChangedLine, unchangedDuplicateLateFee } = resolved;
         if (acc.decision === "rejected_unchanged") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
-          setErr(PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
+          setErr(unchangedDuplicateLateFee ? PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE : PRO_REFINE_UNAVAILABLE_USER_MESSAGE);
           return;
         }
         if (acc.decision === "rejected_short") {
@@ -363,16 +379,15 @@ export function FinalizeYourAgreementPanel({
         if (out) {
           setLastRefine(r);
           markDocumentDirty?.();
-          onApplyDocumentText(r.updated_document_text);
-          const whatChangedLine =
-            Array.isArray(r.summary_changes) && r.summary_changes.length
-              ? r.summary_changes.map((x) => String(x ?? "").trim()).filter(Boolean).join(" ")
-              : null;
-          onProRefineWhatChanged?.(whatChangedLine || null);
+          onApplyDocumentText(out);
+          const wc = whatChangedLine?.trim() ? whatChangedLine.trim() : null;
+          onProRefineWhatChanged?.(wc);
+          setRefineWhatChangedCaption(wc);
           setRefineSuccessMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
         }
       } catch (e2) {
         setRefineSuccessMessage(null);
+        setRefineWhatChangedCaption(null);
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[agreement-refine] FinalizeYourAgreementPanel#routeAutoRefine FAILED", {
@@ -509,6 +524,12 @@ export function FinalizeYourAgreementPanel({
         {refineSuccessMessage && !err ? (
           <p className="text-sm text-emerald-200/95" role="status">
             {refineSuccessMessage}
+          </p>
+        ) : null}
+        {refineWhatChangedCaption && !err ? (
+          <p className="text-sm leading-relaxed text-slate-200/95" role="status" aria-live="polite">
+            <span className="font-medium text-emerald-200/90">What changed: </span>
+            {refineWhatChangedCaption}
           </p>
         ) : null}
         {lastRefine && lastRefine.summary_changes.length > 0 ? (
