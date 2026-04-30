@@ -156,12 +156,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(block).toContain("paidProAuthoritative");
     expect(block).toContain("premiumPersistedFlowActive");
     expect(block).toContain("hasPaidPremiumCompletionSession()");
-    expect(block).toContain("handleUpgradeToFullDraft");
+    expect(block).toContain("launchUpgradeCheckoutFromStarterDraft");
     expect(block).toContain("handOffProductionDraftToRecipients");
     const k = block.indexOf("if (!eligibleForRecipientSetupAfterStarterPreview)");
     expect(k).toBeGreaterThanOrEqual(0);
     const untilHandOff = block.indexOf("await handOffProductionDraftToRecipients", k);
-    const upgradeCall = block.indexOf("await handleUpgradeToFullDraft()", k);
+    const upgradeCall = block.indexOf("await launchUpgradeCheckoutFromStarterDraft()", k);
     expect(upgradeCall).toBeGreaterThanOrEqual(0);
     expect(untilHandOff).toBeGreaterThan(upgradeCall);
     const earlyReturn = block.indexOf("return;", upgradeCall);
@@ -176,13 +176,35 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const j = s.indexOf('case "update_agreement_from_buffer"', i);
     const block = s.slice(i, j);
     expect(block).toMatch(
-      /if\s*\(\s*!eligibleForRecipientSetupAfterStarterPreview\s*\)\s*\{[\s\S]*?await handleUpgradeToFullDraft\(\);\s*return;\s*\}/,
+      /if\s*\(\s*!eligibleForRecipientSetupAfterStarterPreview\s*\)\s*\{[\s\S]*?await launchUpgradeCheckoutFromStarterDraft\(\);\s*return;\s*\}/,
     );
-    const m = block.match(
-      /if\s*\(\s*!eligibleForRecipientSetupAfterStarterPreview\s*\)\s*\{([\s\S]*?)\}\s*(?:if\s*\(\s*import\.meta\.env\.DEV)/,
-    );
-    expect(m?.[1] ?? "").toContain("await handleUpgradeToFullDraft()");
-    expect(m?.[1] ?? "").not.toContain("handOffProductionDraftToRecipients");
+    const gate = block.indexOf("if (!eligibleForRecipientSetupAfterStarterPreview)");
+    const launch = block.indexOf("await launchUpgradeCheckoutFromStarterDraft()", gate);
+    const ret = block.indexOf("return;", launch);
+    const hand = block.indexOf("handOffProductionDraftToRecipients", gate);
+    expect(launch).toBeGreaterThan(gate);
+    expect(ret).toBeGreaterThan(launch);
+    expect(ret).toBeLessThan(hand);
+    const unpaidSlice = block.slice(gate, ret + "return;".length);
+    expect(unpaidSlice).toContain("continue_basic_draft → upgrade_checkout");
+    expect(unpaidSlice).not.toContain("handOffProductionDraftToRecipients");
+    expect(unpaidSlice).not.toContain("recipient_setup_required");
+    expect(unpaidSlice).not.toContain("finalizeIntakeCapture");
+  });
+
+  it("launchUpgradeCheckoutFromStarterDraft does not gate on simpleProductFlow or call parseDraft before paywall", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    const i = s.indexOf("const launchUpgradeCheckoutFromStarterDraft = React.useCallback");
+    expect(i).toBeGreaterThanOrEqual(0);
+    const j = s.indexOf("const runProductionLocalDraftParse = React.useCallback", i);
+    expect(j).toBeGreaterThan(i);
+    const block = s.slice(i, j);
+    expect(block).not.toMatch(/if\s*\(\s*!createProductionTwoPane\s*\|\|\s*!simpleProductFlow\s*\)\s*return/);
+    expect(block).not.toContain("await parseDraft(");
+    expect(block).not.toContain("finalizeIntakeCapture");
+    expect(block).toContain("setAdvancedFullDraftPaywallOpen(true)");
+    expect(block).toContain("stashCreateComplexityResume");
   });
 
   it("continue_basic_draft paid or premium-session path still calls handOffProductionDraftToRecipients after clearUpgradeLockAndResume", () => {

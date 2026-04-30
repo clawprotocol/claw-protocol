@@ -5329,6 +5329,82 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     runEntitledPremiumImprovementRewrite,
   ]);
 
+  /**
+   * Starter “Continue to send” / upgrade-from-review without going through recipients.
+   * Does not require `simpleProductFlow` and does not run `parseDraft` when structured `draft` exists
+   * (avoids stalling checkout on local-parse / save-adjacent failures).
+   */
+  const launchUpgradeCheckoutFromStarterDraft = React.useCallback(async () => {
+    if (!createProductionTwoPane) return;
+    const gateDraft = draft;
+    if (tierAllowsAdvancedFullDraftReveal(tier)) {
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
+    if (
+      isProEntitledForAgreement({
+        tier,
+        draft: gateDraft,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      })
+    ) {
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
+    if (!gateDraft) {
+      console.warn("[premium-flow] upgrade_modal_aborted", { reason: "no_structured_draft", source: "starter_continue_cta" });
+      return;
+    }
+    let raw = (resolveRawIntakeForPremiumCheckout(gateDraft) || "").trim();
+    if (!raw) {
+      raw =
+        [gateDraft.title, gateDraft.jurisdiction, gateDraft.purpose, gateDraft.payment_terms]
+          .map((x) => String(x ?? "").trim())
+          .filter(Boolean)
+          .join("\n\n")
+          .trim() || "LawDog Pro commercial agreement";
+    }
+    if (!raw.trim()) {
+      console.warn("[premium-flow] upgrade_modal_aborted", { reason: "empty_raw_intake", source: "starter_continue_cta" });
+      return;
+    }
+    console.info("[premium-flow] button_click", { button: "upgrade_to_full_draft_modal", source: "continue_basic_draft" });
+    logProductEvent("upgrade_clicked", { surface: "agreement_optional_full_draft", intent: "full_draft_upgrade" });
+    trackAgreementFunnelEvent(
+      "premium_upgrade_clicked",
+      { surface: "agreement_optional_full_draft" },
+      { planTier: String(tier) },
+    );
+    setPendingUpgradePrompt(raw);
+    pendingUpgradePromptRef.current = raw;
+    setUpgradeIntentDetected(true);
+    syncUpgradeIntentRefs(true);
+    stashCreateComplexityResume({
+      rawIntake: raw,
+      pending: gateDraft,
+      awaitingProCheckout: true,
+      resume_kind: "optional_full_upgrade",
+    });
+    stashUpgradeCheckoutContext(upgradeContextReasons, {
+      completionLabel: buildUpgradeCheckoutCompletionLabel(gateDraft),
+      intentSignals: detectUpgradeIntentSignals(`${raw}\n${agreementDocumentText}`),
+    });
+    setAdvancedFullDraftPaywallOpen(true);
+  }, [
+    createProductionTwoPane,
+    draft,
+    tier,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
+    resolveRawIntakeForPremiumCheckout,
+    syncUpgradeIntentRefs,
+    upgradeContextReasons,
+    agreementDocumentText,
+    runEntitledPremiumImprovementRewrite,
+  ]);
+
   const runProductionLocalDraftParse = React.useCallback(
     async (opts?: { rawOverride?: string; handoffSource?: string }): Promise<boolean> => {
     const rawIntake = (opts?.rawOverride ?? intakeCombined).trim();
@@ -10807,7 +10883,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               hasPaidPremiumCompletionSession();
             if (!eligibleForRecipientSetupAfterStarterPreview) {
               setHardError(null);
-              await handleUpgradeToFullDraft();
+              if (import.meta.env.DEV) {
+                console.log("[FSM] continue_basic_draft → upgrade_checkout");
+              }
+              await launchUpgradeCheckoutFromStarterDraft();
               return;
             }
             if (import.meta.env.DEV) {
