@@ -65,4 +65,18 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
     expect(src).toMatch(/\{showStarterProRefineUpsell \? \(/);
     expect(src).toContain("STARTER_PRO_REFINE_IMPROVEMENT_HEADING");
   });
+
+  it("amber Pro recovery stays tied to premiumPaidDocumentSurface (starter cannot get surface without session flags)", () => {
+    expect(src).toContain("const showProAmberRecoveryPanel = Boolean(");
+    expect(src).toMatch(/premiumPaidDocumentSurface\s*&&\s*!proUpgradeUseStarterView/);
+    const i = src.indexOf("const premiumPaidDocumentSurface = useMemo");
+    expect(i).toBeGreaterThan(-1);
+    const frag = src.slice(i, i + 1400);
+    expect(frag).toContain("!tierAllowsAdvancedFullDraftReveal(tier)");
+    expect(frag).toContain("hasPaidPremiumCompletionSession()");
+  });
+
+  it("paid Pro upgrade failure copy remains available for real paid recovery panels", () => {
+    expect(src).toContain("We couldn’t complete the Pro upgrade with your terms yet.");
+  });
 });

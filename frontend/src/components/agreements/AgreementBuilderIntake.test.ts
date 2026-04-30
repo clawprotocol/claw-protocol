@@ -115,6 +115,36 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(s).toContain("What changed:");
   });
 
+  it("starter tier gates premiumPaidDocumentSurface only on paid completion session or persisted premium flow", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    const i = s.indexOf("const premiumPaidDocumentSurface = useMemo");
+    expect(i).toBeGreaterThanOrEqual(0);
+    const frag = s.slice(i, i + 1400);
+    expect(frag).toContain("CRITICAL INVARIANT:");
+    expect(frag).toContain("!tierAllowsAdvancedFullDraftReveal(tier)");
+    expect(frag).toContain(
+      "return Boolean(hasPaidPremiumCompletionSession() || premiumPersistedFlowActive);",
+    );
+    expect(frag).not.toContain("peekAdvancedFullDraftCheckoutGrant()");
+    expect(frag).not.toContain("premiumSendPathUnlocked");
+    expect(frag).toContain("return true");
+  });
+
+  it("premiumCompletion URL is honored via hasPaidPremiumCompletionSession (starter Pro surface path)", () => {
+    const p = join(__dirname, "premiumCompletionStorage.ts");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain('get("premiumCompletion") === "1"');
+  });
+
+  it("basic parse path uses basic_parse_timeout abort reason (not premium_parse_timeout)", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toMatch(
+      /controller\.abort\(\s*isPremium\s*\?\s*"premium_parse_timeout"\s*:\s*"basic_parse_timeout"\s*\)/,
+    );
+  });
+
   it("paid authoritative Pro hides top adjust card but keeps lower Finalize panel", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showTopProAdjustCard");

@@ -2555,7 +2555,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const reqTs = new Date().toISOString();
       const controller = new AbortController();
       const parseTimeoutMs = isPremium ? 60000 : 5000;
-      const parseTimeoutId = window.setTimeout(() => controller.abort("premium_parse_timeout"), parseTimeoutMs);
+      const parseTimeoutId = window.setTimeout(
+        () => controller.abort(isPremium ? "premium_parse_timeout" : "basic_parse_timeout"),
+        parseTimeoutMs,
+      );
       const parseApiBase = resolveApiBase();
       const parseUrl = apiUrl("/api/agreements/parse");
       if (import.meta.env.DEV && isPremium) {
@@ -7394,22 +7397,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive, reviewDocRefreshTick],
   );
 
-  /** Paid simple-home review: full-draft chrome (not starter tease / not free compact). */
-  const premiumPaidDocumentSurface = useMemo(
-    () =>
-      Boolean(
-        productionDraftPrimaryReviewSurface &&
-          createUiStage === CreateUiStage.DRAFT &&
-          (proAgreementEntitled || (hasFullDraftAccess && !showUpgradeToFullDraftOnReview)),
-      ),
-    [
-      productionDraftPrimaryReviewSurface,
-      createUiStage,
-      proAgreementEntitled,
-      hasFullDraftAccess,
-      showUpgradeToFullDraftOnReview,
-    ],
-  );
+  /**
+   * Paid simple-home review: full-draft chrome (not starter tease / not free compact).
+   * Free/starter tier: require an explicit checkout or premium session flag so draft/API heuristics
+   * alone (e.g. long fields after a parse glitch) never show LawDog Pro chips or amber recovery.
+   */
+  const premiumPaidDocumentSurface = useMemo(() => {
+    if (!productionDraftPrimaryReviewSurface || createUiStage !== CreateUiStage.DRAFT) return false;
+    const chromeEligible =
+      proAgreementEntitled || (hasFullDraftAccess && !showUpgradeToFullDraftOnReview);
+    if (!chromeEligible) return false;
+    if (!tierAllowsAdvancedFullDraftReveal(tier)) {
+      // CRITICAL INVARIANT:
+      // Starter/free users must NEVER see Pro-paid document surfaces
+      // unless premiumCompletion session or active premium flow is present.
+      // Do NOT add heuristic signals here.
+      return Boolean(hasPaidPremiumCompletionSession() || premiumPersistedFlowActive);
+    }
+    return true;
+  }, [
+    productionDraftPrimaryReviewSurface,
+    createUiStage,
+    proAgreementEntitled,
+    hasFullDraftAccess,
+    showUpgradeToFullDraftOnReview,
+    tier,
+    premiumPersistedFlowActive,
+  ]);
   premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
 
   /** Paid Pro body present: `displayPhase` must never be `intake` (guard below). */
@@ -7443,9 +7457,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   /**
    * Free/starter (non–LawDog-Pro-deliverable) document review. Broader than `!premiumPaidDocumentSurface`
-   * to catch prod misfires: e.g. `hasFullDraftAccess` true from `draftHasFullDraftExpansion` while
-   * `showUpgradeToFullDraftOnReview` is false, which incorrectly raised `premiumPaidDocumentSurface` and
-   * showed the persisted /refine block.
+   * to catch prod misfires. `premiumPaidDocumentSurface` is additionally gated on starter tier so
+   * `hasFullDraftAccess` / draft heuristics alone cannot surface paid Pro chrome without a checkout/session flag.
    */
   const isFreeStarterReviewSurface = useMemo(() => {
     if (hasPaidPremiumCompletionSession()) return false;
@@ -8458,13 +8471,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumProTruthGate?.successBannerAllowed || premiumProTruthGate?.signerCtaAllowed,
   );
 
-  const showPostCheckoutOptionalRefineCard = Boolean(
+  /** Upper “Want to adjust…” card — hidden for paid authoritative Pro; `FinalizeYourAgreementPanel` below owns refine. */
+  const showTopProAdjustCard = Boolean(
     createUiStage === CreateUiStage.DRAFT &&
       createProductionTwoPane &&
       simpleProductFlow &&
       !premiumPostCheckoutPhase &&
       hasUsablePaidBody &&
-      (postCheckoutAdvisoryGaps.length > 0 || postCheckoutProReadyForCompactRefineUx),
+      (postCheckoutAdvisoryGaps.length > 0 || postCheckoutProReadyForCompactRefineUx) &&
+      !paidProAuthoritative,
   );
 
   const canProceedWithPaidProDocument = useMemo(() => {
@@ -12326,7 +12341,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </button>
                             </div>
                           ) : null}
-                          {showPostCheckoutOptionalRefineCard ? (
+                          {showTopProAdjustCard ? (
                             <div
                               className="mb-4 rounded-xl border border-slate-600/50 bg-slate-950/30 px-4 py-3.5 sm:px-5"
                               role="complementary"

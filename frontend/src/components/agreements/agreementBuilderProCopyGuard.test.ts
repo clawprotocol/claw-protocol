@@ -20,6 +20,13 @@ describe("AgreementBuilderIntake Pro copy guard", () => {
       expect(s.toLowerCase().includes(b.toLowerCase()), `banned: ${b}`).toBe(false);
     }
   });
+
+  it("parseDraft distinguishes basic vs premium parse timeout abort reasons", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("basic_parse_timeout");
+    expect(s).toContain("premium_parse_timeout");
+  });
 });
 
 describe("canShowPremiumSuccess paid fallback", () => {
