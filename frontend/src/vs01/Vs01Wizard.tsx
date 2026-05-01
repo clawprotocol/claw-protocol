@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { JOY_COPY } from "../joy/clawJoyCopy";
 import { useAccess } from "../access/AccessContext";
 import { UpgradeLimitNotice } from "../components/access/UpgradeLimitNotice";
@@ -18,6 +19,10 @@ import { useLaunchNav } from "../launch/LaunchNavContext";
 import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
 import { prepareFreshMarketingEntry } from "../launch/marketingSession";
 import { logProductEvent } from "../lib/experimentation/productEvents";
+import {
+  clearAgreementVs01BridgeSession,
+  readAgreementVs01BridgeSession,
+} from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { sha256Bytes } from "../utils/agreements/hash";
 import type {
   Vs01Counterparty,
@@ -229,6 +234,43 @@ export function Vs01Wizard({
         if (cancelled) return;
         setDocumentId(sid);
         setContentSha256(hex);
+
+        const bridgeParams = new URLSearchParams(window.location.search);
+        const bridge = readAgreementVs01BridgeSession();
+        if (bridgeParams.get("agreement_bridge") === "1" && bridge?.vs01DocumentId === sid) {
+          const cps =
+            bridge.counterparties?.length > 0 ? bridge.counterparties : initialCounterparties();
+          const detailsReady = detailsStepIsValid(
+            bridge.agreementTitle || "",
+            bridge.creatorName || "",
+            bridge.creatorEmail || "",
+            cps,
+          );
+          flushSync(() => {
+            setAgreementTitle(bridge.agreementTitle || "");
+            setCreatorName(bridge.creatorName || "");
+            setCreatorEmail(bridge.creatorEmail || "");
+            setCounterparties(cps);
+            setAgreementTitleUserEdited(Boolean((bridge.agreementTitle || "").trim()));
+            setDocumentMeta({
+              fileName: `${(bridge.agreementTitle || "Agreement").replace(/[/\\]/g, "-")}.pdf`,
+              source: "upload",
+            });
+          });
+          clearAgreementVs01BridgeSession();
+          bridgeParams.delete("agreement_bridge");
+          const qs = bridgeParams.toString();
+          window.history.replaceState(
+            window.history.state,
+            "",
+            qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
+          );
+          const nextStep: Vs01Step = detailsReady && bridge.targetStep >= 2 ? 2 : 1;
+          setFurthestStep((prev) => (nextStep > prev ? nextStep : prev));
+          goToStep(nextStep);
+          return;
+        }
+
         setFurthestStep((prev) => (1 > prev ? 1 : prev));
         goToStep(1);
       } catch (e) {

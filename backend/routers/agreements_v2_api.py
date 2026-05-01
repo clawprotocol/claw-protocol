@@ -79,7 +79,9 @@ from backend.llm_usage_guard import (
 )
 from backend.config.feed_anchor_policy import settlement_anchor_network_hint
 from backend.proof_status.store import ProofLayerStore
+from backend.services import document_service
 from backend.services.agreement_draft_store import list_draft_agreement_ids_newest_first, load_draft, save_draft
+from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
 from backend.services.claw_feed_service import record_public_feed_event_if_applicable
 from backend.services.claw_feed_store import get_claw_feed_store
 from backend.treasury.treasury_usage_hooks import record_usage_ledger_event
@@ -4461,6 +4463,31 @@ def render_agreement(agreement_id: str, request: Request) -> AgreementRenderResp
         id=agreement_id,
         rendered_html=_render_html(draft, watermark=wm),
     )
+
+
+@router.post("/{agreement_id}/vs01-signing-seed")
+def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """
+    Owner-only: render locked agreement HTML to PDF and finalize as a VS01 /v1/documents body
+    (used by paid Pro sender-first → /app/esign/:documentId bridge).
+    """
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="vs01_signing_seed")
+    draft = _load_or_404(agreement_id)
+    wm = _watermark_active_for_agreement(agreement_id)
+    html = _render_html(draft, watermark=wm)
+    try:
+        pdf_bytes = agreement_rendered_html_to_pdf_bytes(html, title=(draft.title or "").strip() or "Agreement")
+    except Exception as exc:
+        log.exception("vs01_signing_seed_pdf_failed agreement_id=%s", agreement_id)
+        raise HTTPException(status_code=500, detail="vs01_signing_seed_pdf_failed") from exc
+    meta = document_service.finalize_document(pdf_bytes, content_type="application/pdf")
+    return {
+        "ok": True,
+        "document_id": meta.get("document_id"),
+        "content_sha256": meta.get("content_sha256"),
+    }
 
 
 @router.post("/{agreement_id}/export-docx")

@@ -28,7 +28,14 @@ import {
   peekPremiumSenderSignFirst,
   writePremiumSendIntent,
 } from "./premiumSendIntent";
+import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
+import {
+  buildAgreementVs01BridgeSession,
+  fetchAgreementVs01SigningSeed,
+  logAgreementToVs01EsignRoute,
+  writeAgreementVs01BridgeSession,
+} from "./agreementToVs01SigningBridge";
 import { resolvePremiumSenderFirstSigningPath } from "./premiumSenderFirstSigningRoute";
 import { getPricingCadencePreference } from "../pricingCadenceStorage";
 import { useLaunchNav } from "../LaunchNavContext";
@@ -41,7 +48,7 @@ const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
 
 const SIMPLE_SEND_PHASE_SS_KEY = (id: string) => `claw_simple_send_phase_v1_${encodeURIComponent(id)}`;
 
-/** Set only after successful navigation to `/agreements/:id/sign` (prevents duplicate redirects). */
+/** After sender-first auto-route (VS01 `/app/esign/...` or `/agreements/.../sign`) to avoid duplicate redirects. */
 const SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY = "claw_premium_sender_sign_first_workspace_routed_v1";
 
 function senderFirstGaveUpStorageKey(agreementId: string): string {
@@ -325,6 +332,42 @@ export function SimpleSendPage(props: { agreementId: string }) {
         parties?.find((p) => (p?.role || "").toLowerCase() === "owner")?.id?.trim() ||
         parties?.[0]?.id?.trim() ||
         null;
+
+      const vs01Seed = await fetchAgreementVs01SigningSeed(id);
+      if (!cancelled && vs01Seed.ok) {
+        const bridge = buildAgreementVs01BridgeSession({
+          agreementId: id,
+          vs01DocumentId: vs01Seed.documentId,
+          draft: (initialDraftSnapshot as AgreementDraft | null) ?? null,
+        });
+        writeAgreementVs01BridgeSession(bridge);
+        try {
+          if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) !== id) {
+            sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);
+            sessionStorage.removeItem(senderFirstGaveUpStorageKey(id));
+          }
+        } catch {
+          return;
+        }
+        const route = `/app/esign/${encodeURIComponent(vs01Seed.documentId)}?agreement_bridge=1`;
+        logAgreementToVs01EsignRoute({
+          agreementId: id,
+          seedDocumentId: vs01Seed.documentId,
+          route,
+          reason: "vs01_signing_seed_ok",
+        });
+        if (startedResolve && !cancelled) setSenderFirstSigningRouteOpening(false);
+        void navigate(route);
+        return;
+      }
+      if (import.meta.env.DEV && !cancelled && !vs01Seed.ok) {
+        logAgreementToVs01EsignRoute({
+          agreementId: id,
+          seedDocumentId: null,
+          route: null,
+          reason: `vs01_bridge_skipped:${vs01Seed.reason}`,
+        });
+      }
 
       let resolved: Awaited<ReturnType<typeof resolvePremiumSenderFirstSigningPath>> = null;
       try {
