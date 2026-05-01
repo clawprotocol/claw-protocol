@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 from pydantic import BaseModel, Field
 
 from backend.config.anchor_network_config import (
@@ -100,7 +101,7 @@ from backend.usage_economics.policy import (
     usage_summary_for_subject,
     workspace_lists_agreement_for_subject,
 )
-from backend.utils.canon_json import canon_json_bytes, canon_sha256_hex
+from backend.utils.canon_json import canon_json_bytes, canon_sha256_hex, sha256_hex
 
 log = logging.getLogger(__name__)
 
@@ -712,6 +713,79 @@ def _degraded_user_message_for_code(code: str) -> str:
     return m.get(
         code,
         "Your agreement is ready. You can refine any wording below. Your Pro purchase is intact — you can also use **Retry Pro draft** in a few minutes for another full pass if you like.",
+    )
+
+
+def _premium_full_draft_sanitize_wire_nested(obj: Any) -> Any:
+    """Ensure all strings are UTF-8-encodable for JSON over HTTP/2 (lone surrogates → replacement)."""
+    if isinstance(obj, str):
+        try:
+            obj.encode("utf-8")
+            return obj
+        except UnicodeEncodeError:
+            return obj.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(obj, dict):
+        return {str(k): _premium_full_draft_sanitize_wire_nested(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_premium_full_draft_sanitize_wire_nested(v) for v in obj]
+    return obj
+
+
+def _premium_full_draft_model_to_wire_dict(model: PremiumFullDraftResponse) -> Dict[str, Any]:
+    dumped = model.model_dump(mode="json")
+    return _premium_full_draft_sanitize_wire_nested(dumped)
+
+
+def _premium_full_draft_finalize_http_response(
+    model: PremiumFullDraftResponse,
+    *,
+    intake_len: int,
+    session_hint: str,
+) -> Response:
+    """
+    Single JSON serialization to bytes — avoids streaming/partial frames and catches wire-unsafe text
+    before any response bytes are committed.
+    """
+    try:
+        wire = _premium_full_draft_model_to_wire_dict(model)
+        raw = json.dumps(wire, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        log.exception(
+            "[premium-full-draft] event=failure stage=response_serialize status=503 code=premium_full_draft_response_serialization_failed "
+            "exc_type=%s intake_len=%s session_hint=%s",
+            type(exc).__name__,
+            intake_len,
+            session_hint,
+        )
+        err = {
+            "detail": {
+                "code": "premium_full_draft_response_serialization_failed",
+                "message": type(exc).__name__,
+                "stage": "response_serialize",
+                "route": "premium-full-draft",
+            }
+        }
+        err_raw = json.dumps(err, ensure_ascii=False, separators=(",", ":"))
+        return Response(
+            status_code=503,
+            content=err_raw.encode("utf-8"),
+            media_type="application/json; charset=utf-8",
+        )
+    body_bytes = raw.encode("utf-8")
+    doc_len = len(wire.get("document_text") or "") if isinstance(wire.get("document_text"), str) else 0
+    log.info(
+        "[premium-full-draft] event=response_build status=200 intake_len=%s body_len=%s document_text_len=%s "
+        "session_hint=%s generation_outcome=%s",
+        intake_len,
+        len(body_bytes),
+        doc_len,
+        session_hint,
+        wire.get("generation_outcome"),
+    )
+    return Response(
+        status_code=200,
+        content=body_bytes,
+        media_type="application/json; charset=utf-8",
     )
 
 
@@ -3181,7 +3255,7 @@ def premium_missing_facts(request: Request, body: PremiumMissingFactsRequest) ->
 
 
 @router.post("/premium-full-draft", response_model=PremiumFullDraftResponse)
-def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> PremiumFullDraftResponse:
+def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Response:
     """
     One-shot premium model: full agreement document (not stitched field transforms).
     Returns JSON with `document_text` as the primary body for LawDog Pro read-only preview.
@@ -3230,7 +3304,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             "Delaware or swap states without intake support), notices, counterparts, e-sign, and full signature blocks."
         )
     if uga:
-        uga_hash = canon_sha256_hex(uga.encode("utf-8"))
+        uga_hash = canon_sha256_hex(uga)
         log.info(
             "[gap-trace-backend] stage=premium_full_draft_prompt_assembly "
             "has_user_gap_answers=1 gap_len=%s gap_hash=%s prompt_label=user_payload.user_gap_answers",
@@ -3244,6 +3318,16 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
         )
     if len(json.dumps(user_payload, ensure_ascii=False)) > 240_000:
         raise HTTPException(status_code=400, detail="Input too large for premium full draft")
+    session_hint = sha256_hex(intake_s.encode("utf-8"))[:16]
+    ctx_title = (str((ctx_dict or {}).get("title") or "")[:120]) if ctx_dict else ""
+    log.info(
+        "[premium-full-draft] event=start agreement_id=n/a session_hint=%s intake_len=%s context_title=%r sim_regen=%s payload_json_len=%s",
+        session_hint,
+        len(intake_s),
+        ctx_title,
+        int(sim_regen),
+        len(json.dumps(user_payload, ensure_ascii=False)),
+    )
     log.info(
         "claw_premium route=premium_full_draft model=%s sim_regen=%s max_out=%s %s intake_len=%s payload_json_len=%s",
         (llm_model or ""),
@@ -3255,11 +3339,19 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
     )
     if not (OPENAI_API_KEY or "").strip():
         log.error("premium_full_draft event=config_error category=missing_env OPENAI_API_KEY_unset=1")
-        return _premium_full_draft_degraded_response(
+        dm = _premium_full_draft_degraded_response(
             intake_s=intake_s,
             ctx_dict=ctx_dict,
             failure_code="missing_openai_key",
             failure_message=_degraded_user_message_for_code("missing_openai_key"),
+        )
+        log.info(
+            "[premium-full-draft] event=failure stage=config status=200 code=missing_openai_key session_hint=%s intake_len=%s",
+            session_hint,
+            len(intake_s),
+        )
+        return _premium_full_draft_finalize_http_response(
+            dm, intake_len=len(intake_s), session_hint=session_hint
         )
     try:
         llm_text = call_legal_llm(
@@ -3283,7 +3375,13 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             len((out_primary.document_text or "").strip()),
             len((out_primary.title or "").strip()),
         )
-        record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+        log.info(
+            "[premium-full-draft] event=llm_success status=200 session_hint=%s document_text_len=%s title_len=%s",
+            session_hint,
+            len((out_primary.document_text or "").strip()),
+            len((out_primary.title or "").strip()),
+        )
+        _safe_record_ai_call(request, request_ip)
 
         free_blob = build_free_reference_blob(intake_s, ctx_dict)
         repair_used = False
@@ -3335,7 +3433,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             )
             parsed_repair = _extract_json_object(llm_repair)
             out = _normalize_premium_full_draft_result(parsed_repair)
-            record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+            _safe_record_ai_call(request, request_ip)
             repair_used = True
             repair_body = (out.document_text or "").strip()
             log.info("premium_full_draft_quality_event event=premium_full_draft_repair_used")
@@ -3372,7 +3470,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             )
             parsed_c = _extract_json_object(llm_clean)
             out_clean = _normalize_premium_full_draft_result(parsed_c)
-            record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=request_ip or "unknown")
+            _safe_record_ai_call(request, request_ip)
             doc_c = (out_clean.document_text or "").strip()
             has_leak2, leak_h2 = premium_document_text_has_dev_context_leak(doc_c)
             if has_leak2 or not doc_c:
@@ -3457,7 +3555,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
                 type(jsum_e).__name__,
             )
         primary_full = (out_primary.document_text or "").strip()
-        return PremiumFullDraftResponse(
+        ok_model = PremiumFullDraftResponse(
             title=out.title,
             agreement_family=out.agreement_family,
             document_text=doc,
@@ -3467,6 +3565,9 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             missing_material_info=out.missing_material_info,
             generation_outcome=generation_outcome,
             schema_validation_reasons=final_reasons,
+        )
+        return _premium_full_draft_finalize_http_response(
+            ok_model, intake_len=len(intake_s), session_hint=session_hint
         )
     except Exception as exc:
         code, log_detail = _classify_premium_full_draft_failure(exc)
@@ -3492,11 +3593,22 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Premi
             type(exc).__name__,
             exc_info=True,
         )
-        return _premium_full_draft_degraded_response(
+        log.warning(
+            "[premium-full-draft] event=failure stage=model_path status=200 code=%s exc_type=%s session_hint=%s intake_len=%s detail=%s",
+            code,
+            type(exc).__name__,
+            session_hint,
+            len(intake_s),
+            str(log_detail)[:500],
+        )
+        dm = _premium_full_draft_degraded_response(
             intake_s=intake_s,
             ctx_dict=ctx_dict,
             failure_code=code,
             failure_message=_degraded_user_message_for_code(code),
+        )
+        return _premium_full_draft_finalize_http_response(
+            dm, intake_len=len(intake_s), session_hint=session_hint
         )
 
 

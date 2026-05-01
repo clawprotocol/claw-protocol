@@ -299,6 +299,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def claw_cors_api_acao_fallback(request: Request, call_next):
+    """
+    If an API response is missing ACAO (e.g. misconfigured allow list + edge/proxy quirks),
+    attach it when the Origin matches CLAW_CORS_ALLOW_ORIGINS so browser retries still see CORS.
+    """
+    response = await call_next(request)
+    if response.headers.get("access-control-allow-origin"):
+        return response
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin or not str(request.url.path).startswith("/api/"):
+        return response
+    allowed = _cors_origins()
+    if not allowed or allowed == ["*"]:
+        return response
+    if origin in allowed:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers.setdefault("Access-Control-Allow-Methods", "*")
+        response.headers.setdefault("Access-Control-Allow-Headers", "*")
+    return response
+
+
 # stores
 usage_store = UsageStore()
 anchor_queue = AnchorQueue()  # proof-anchor queue (agent_anchor /anchor)

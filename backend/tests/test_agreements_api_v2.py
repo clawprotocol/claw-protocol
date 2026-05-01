@@ -823,7 +823,7 @@ def test_premium_full_draft_ok(monkeypatch, tmp_path):
     assert "document_text" in b and len(b["document_text"]) > 1000
     assert b.get("key_terms_found") == ["Fees", "IP"]
     assert "server_full_document_text" in b and len(b.get("server_full_document_text") or "") > 1000
-    assert b.get("server_repair_document_text") in ("", None)
+    assert isinstance(b.get("server_repair_document_text"), str)
 
 
 def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
@@ -842,11 +842,56 @@ def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
         json={"intake_text": "Any intake text for testing failure path."},
     )
     assert res.status_code == 200
+    assert "application/json" in (res.headers.get("content-type") or "")
     body = res.json()
     assert body.get("generation_outcome") == "degraded"
     assert (body.get("server_generation_failure_code") or "") != ""
     assert (body.get("document_text") or "").strip() != ""
     assert "server_full_document_text" in body
+
+
+def test_premium_full_draft_returns_503_structured_when_wire_encode_fails(monkeypatch, tmp_path):
+    """Regression: serialization must return complete JSON (CORS-safe) instead of connection reset."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def fake_llm(*args, **kwargs):
+        return json.dumps(
+            {
+                "title": "T",
+                "agreement_family": "svc",
+                "document_text": "x" * 800,
+                "key_terms_found": [],
+                "missing_material_info": [],
+            }
+        )
+
+    def boom_wire(_model):
+        raise TypeError("simulated_wire_failure")
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    monkeypatch.setattr(av2, "_premium_full_draft_model_to_wire_dict", boom_wire)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_ORG_H,
+        json={"intake_text": "Paid media retainer between two LLCs with net-30 invoicing."},
+    )
+    assert res.status_code == 503
+    assert "application/json" in (res.headers.get("content-type") or "")
+    err = res.json().get("detail") or {}
+    assert err.get("code") == "premium_full_draft_response_serialization_failed"
+    assert err.get("stage") == "response_serialize"
+
+
+def test_premium_full_draft_sanitize_wire_nested_replaces_non_utf8_strings():
+    from backend.routers.agreements_v2_api import _premium_full_draft_sanitize_wire_nested
+
+    raw = "prefix\udcffsuffix"
+    out = _premium_full_draft_sanitize_wire_nested({"document_text": raw, "nested": [raw]})
+    assert "\udcff" not in out["document_text"]
+    assert "\udcff" not in out["nested"][0]
 
 
 def test_premium_agreement_review_ok(monkeypatch, tmp_path):

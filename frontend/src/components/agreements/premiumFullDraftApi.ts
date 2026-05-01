@@ -197,9 +197,9 @@ export async function postPremiumFullDraftOnce(args: {
     signal: args.signal,
   });
   const bodyText = await res.text();
-  let parsed: Partial<PremiumFullDraftResult> = {};
+  let parsed: Partial<PremiumFullDraftResult> & { detail?: unknown } = {};
   try {
-    if (bodyText) parsed = JSON.parse(bodyText) as Partial<PremiumFullDraftResult>;
+    if (bodyText) parsed = JSON.parse(bodyText) as Partial<PremiumFullDraftResult> & { detail?: unknown };
   } catch {
     parsed = {};
   }
@@ -234,11 +234,26 @@ export async function postPremiumFullDraftOnce(args: {
     generationOutcome: genOut || undefined,
   });
   if (!res.ok) {
-    const err = parsed as { detail?: { message?: string } };
+    const err = parsed as { detail?: { message?: string; code?: string } };
     const msg = typeof err?.detail === "object" ? err.detail?.message : null;
+    const detail = err?.detail;
+    const bodyPreview = truncate(bodyText, 4_000);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("[premium-full-draft] http_error", {
+        status: res.status,
+        detail,
+        bodyPreview,
+        path: "/api/agreements/premium-full-draft",
+      });
+    }
     if (import.meta.env.PROD) {
       // eslint-disable-next-line no-console
-      console.warn("[CLAW] premium-full-draft failed", { status: res.status, path: "/api/agreements/premium-full-draft" });
+      console.warn("[CLAW] premium-full-draft failed", {
+        status: res.status,
+        path: "/api/agreements/premium-full-draft",
+        detail: typeof detail === "object" ? detail : undefined,
+      });
     }
     throw new Error((msg as string) || "premium_full_draft_failed");
   }
@@ -276,10 +291,16 @@ export async function postPremiumFullDraftWithRetry(
       });
     } catch (e) {
       lastErr = e;
+      if (import.meta.env.DEV) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // eslint-disable-next-line no-console
+        console.warn("[premium-full-draft] attempt_failed", { attempt: attempt + 1, message: msg });
+      }
     }
   }
   if (import.meta.env.DEV) {
-    console.warn("[premium-full-draft] both attempts failed", lastErr);
+    // eslint-disable-next-line no-console
+    console.warn("[premium-full-draft] both attempts failed", { lastError: lastErr });
   }
   return null;
 }
