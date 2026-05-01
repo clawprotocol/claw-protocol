@@ -16,5 +16,9 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("[vs01-paid-pro-skip-details]");
     expect(s).toContain("paidProAgreementBridgeSkip");
     expect(s).toContain("computePaidProAgreementBridgeSkip");
+    expect(s).toContain("writePaidProVs01PostSignHandoff");
+    expect(s).toContain("[vs01-paid-pro-workspace-navigate]");
+    expect(s).toContain("/app/agreements/");
+    expect(s).toContain("vs01_saved=1");
   });
 });

@@ -27,6 +27,12 @@ import {
   readPaidProAgreementBridgeSkipMarker,
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
+import { buildVs01RecipientSigningUrl } from "./StepReceipt";
+import {
+  clearPaidProVs01PostSignHandoff,
+  writePaidProVs01PostSignHandoff,
+  type PaidProVs01PostSignHandoffV1,
+} from "./vs01PaidProPostSignHandoff";
 import { sha256Bytes } from "../utils/agreements/hash";
 import type {
   Vs01Counterparty,
@@ -432,6 +438,7 @@ export function Vs01Wizard({
   );
 
   const resetAll = useCallback(() => {
+    clearPaidProVs01PostSignHandoff();
     clearPaidProAgreementBridgeSkipMarker();
     clearAgreementVs01BridgeSession();
     bridgeHandoffSnapshotRef.current = null;
@@ -693,7 +700,50 @@ export function Vs01Wizard({
             onError={setError}
             onBack={() => goToStep(2)}
             onContinueToReceipt={() => {
-              if (recipientPlacedFields.length > 0) goToStep(4);
+              if (recipientPlacedFields.length === 0) return;
+              const linkedAgreementId = bridgeHandoffSnapshotRef.current?.agreementId?.trim();
+              const rid = receiptId?.trim();
+              const did = documentId?.trim();
+              if (paidProAgreementBridgeSkip && linkedAgreementId && rid && did) {
+                const named = counterparties
+                  .map((c, recipientIndex) => ({ c, recipientIndex }))
+                  .filter(({ c }) => c.name.trim().length > 0);
+                const signers = named.map(({ c, recipientIndex }) => ({
+                  counterpartyId: c.id,
+                  displayName: c.name.trim(),
+                  email: c.email.trim(),
+                  signingUrl: buildVs01RecipientSigningUrl({
+                    recipientIndex,
+                    recipientName: c.name.trim(),
+                    recipientEmail: c.email.trim(),
+                    counterpartyId: c.id,
+                    documentId: did,
+                    receiptId: rid,
+                    recipientFieldsForSigner: recipientPlacedFields.filter((f) => f.counterpartyId === c.id),
+                  }),
+                }));
+                const payload: PaidProVs01PostSignHandoffV1 = {
+                  v: 1,
+                  agreementId: linkedAgreementId,
+                  agreementTitle: agreementTitle.trim() || "Agreement",
+                  vs01DocumentId: did,
+                  receiptId: rid,
+                  receiptHashSha256: receiptHashSha256?.trim() ?? null,
+                  savedAt: new Date().toISOString(),
+                  signers,
+                };
+                writePaidProVs01PostSignHandoff(payload);
+                // eslint-disable-next-line no-console
+                console.info("[vs01-paid-pro-workspace-navigate]", {
+                  agreementId: linkedAgreementId,
+                  receiptId: rid,
+                  signerCount: signers.length,
+                  vs01DocumentId: did,
+                });
+                navigate(`/app/agreements/${encodeURIComponent(linkedAgreementId)}?vs01_saved=1`);
+                return;
+              }
+              goToStep(4);
             }}
           />
         ) : null}

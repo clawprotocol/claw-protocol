@@ -30,6 +30,7 @@ import {
 } from "../monetization/lawDogMonetization";
 import { UpgradeToProModal } from "../monetization/UpgradeToProModal";
 import { AgreementMemoryAgreementStrip } from "./AgreementMemoryAgreementStrip";
+import { PaidProVs01WorkspaceBanner } from "./PaidProVs01WorkspaceBanner";
 
 function adjacentWizardSteps(
   current: number,
@@ -545,6 +546,10 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
 
         {step > 0 && agreementId?.trim() ? (
           <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} />
+        ) : null}
+
+        {step > 0 && agreementId?.trim() && wizardDraftReady && wizardBoot === "ready" ? (
+          <PaidProVs01WorkspaceBanner agreementId={agreementId.trim()} visible />
         ) : null}
 
         {step === 0 ? (

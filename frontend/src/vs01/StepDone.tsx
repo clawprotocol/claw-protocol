@@ -239,8 +239,14 @@ export function StepDone({
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    {url}
+                    {compactCompletion ? "Open signing link" : "Open signing page"}
                   </a>
+                  <p
+                    className={`vs01-send-signer-url-preview${compactCompletion ? " vs01-send-signer-url-preview--compact" : ""}`}
+                    title={url}
+                  >
+                    {url.length > 96 ? `${url.slice(0, 44)}…${url.slice(-40)}` : url}
+                  </p>
                   <div className="vs01-send-signer-actions">
                     <button
                       type="button"

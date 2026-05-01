@@ -2174,6 +2174,20 @@ button.vs01-upload-btn:disabled {
   color: var(--vs01-color-text-primary);
 }
 
+.vs01-send-signer-url-preview {
+  margin: 0 0 0.5rem;
+  font-family: var(--vs01-font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--vs01-color-text-secondary);
+  opacity: 0.88;
+  word-break: break-all;
+}
+
+.vs01-send-signer-url-preview--compact {
+  opacity: 0.75;
+}
+
 .vs01-send-signer-actions {
   display: flex;
   flex-wrap: wrap;
