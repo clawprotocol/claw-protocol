@@ -1304,6 +1304,24 @@ function devTracePremiumSendIntent(source: string, mode: PremiumSendIntent | nul
   console.info("[premium-send-intent]", { source, mode, senderFirst: Boolean(senderFirst) });
 }
 
+function devPremiumSendChoice(mode: PremiumSendIntent, senderFirst: boolean) {
+  if (!import.meta.env.DEV) return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-send-choice]", { mode, senderFirst });
+}
+
+function devPremiumSendRoute(mode: PremiumSendIntent, senderFirst: boolean, target: string) {
+  if (!import.meta.env.DEV) return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-send-route]", { mode, senderFirst, target });
+}
+
+function devPremiumSendShellGuard(reason: string) {
+  if (!import.meta.env.DEV) return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-send-shell-guard]", { reason });
+}
+
 /** First paint: enter Pro return processing before effects so the free intake shell does not flash. */
 function readInitialPremiumReturnFromWindow(): {
   phase: null | "awaiting_gaps" | "processing";
@@ -6718,8 +6736,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!onSimpleCreateShellChrome) return;
     onSimpleCreateShellChrome({ paidProReviewReady });
+    if (import.meta.env.DEV && paidProReviewReady && createUiStage === CreateUiStage.RECIPIENTS) {
+      devPremiumSendShellGuard("simple_create_shell_paid_pro_recipients");
+    }
     return () => onSimpleCreateShellChrome({ paidProReviewReady: false });
-  }, [paidProReviewReady, onSimpleCreateShellChrome]);
+  }, [paidProReviewReady, onSimpleCreateShellChrome, createUiStage]);
 
   const returnToIntakeEditing = () => {
     if (paidProAuthoritative) {
@@ -8187,7 +8208,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !(draftHasFullDraftExpansion(draft) || tierAllowsAdvancedFullDraftReveal(tier) || premiumSendPathUnlocked),
   );
   /** Hide fixed bottom bar during upgrade diff review so the in-card upgrade CTA is the only bottom action. */
-  const simpleCreateStickyBottomBarVisible =
+  const simpleCreateStickyBottomBarVisibleBase =
     simpleCreateUnifiedBottomCta && !showFullDraftDiffPreview;
   const resolveProductionTwoPaneLoadingUserCopy = (): string => {
     const m = productionStickyLabelModeRef.current;
@@ -8199,7 +8220,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   };
   /** Production draft parse / hydrate: sticky showed NOTTHING_SENT + busy CTA — one line only. */
   const stickyProductionAgreementCreationLoading = Boolean(
-    simpleCreateStickyBottomBarVisible &&
+    simpleCreateStickyBottomBarVisibleBase &&
       createProductionTwoPane &&
       (displayPhase === "generating_draft" ||
         displayPhase === "hydrating_generated" ||
@@ -8744,6 +8765,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     () => showFinalizeYourAgreement && canProceedWithPaidProDocument && !proUpgradeUseStarterView,
     [showFinalizeYourAgreement, canProceedWithPaidProDocument, proUpgradeUseStarterView],
   );
+
+  /** Paid Pro: bottom sticky duplicates “Send for review / signature” on the finalize panel — hide until recipients. */
+  const hideStickyForPaidProFinalizeDeliveryChoice = Boolean(
+    paidProAuthoritative &&
+      createProductionTwoPane &&
+      createUiStage === CreateUiStage.DRAFT &&
+      premiumPersistedFlowActive &&
+      !peekPremiumRecipientsSurfaceReleased() &&
+      showProLawdogRefineAndFinalize &&
+      !shouldShowPaidRetry &&
+      proCheckoutRecipientStageAdvanceAllowed,
+  );
+
+  const simpleCreateStickyBottomBarVisible =
+    simpleCreateStickyBottomBarVisibleBase && !hideStickyForPaidProFinalizeDeliveryChoice;
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !hideStickyForPaidProFinalizeDeliveryChoice) return;
+    devPremiumSendShellGuard("sticky_bar_hidden_finalize_panel_delivery_choice");
+  }, [hideStickyForPaidProFinalizeDeliveryChoice]);
 
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
@@ -10115,7 +10156,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const reviewPath = effectivePremiumSendMode === "review";
           const proTruthBlocksPaidContinue = shouldShowPaidRetry || !proCheckoutRecipientStageAdvanceAllowed;
           return {
-            label: reviewPath ? "Continue to reviewer setup" : "Continue to signer setup",
+            label: reviewPath ? "Send for review" : "Send for signature",
             action: "premium_continue_to_signers",
             disabled: proTruthBlocksPaidContinue,
             reason: proTruthBlocksPaidContinue
@@ -10745,6 +10786,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumDefaultSendMode)
       : effectivePremiumSendMode;
     devTracePremiumSendIntent("recipient_setup_entry", entryTraceMode, peekPremiumSenderSignFirst());
+    devPremiumSendRoute(entryTraceMode, peekPremiumSenderSignFirst(), "recipients_setup");
     emitPaidFunnelEvent("premium_continue_recipients_clicked", { extra: { continue_mode: telemetryMode } });
     trackAgreementFunnelEvent("continue_to_recipient_setup", { continue_mode: telemetryMode }, { planTier: String(tier) });
     markPremiumRecipientsSurfaceReleased();
@@ -10773,12 +10815,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleFinalizeRoutePrimaryAction = React.useCallback(
     (mode: PremiumSendIntent) => {
       devTracePremiumSendIntent("finalize_panel_cta", mode, peekPremiumSenderSignFirst());
+      devPremiumSendChoice(mode, peekPremiumSenderSignFirst());
       handlePremiumSendModePick(mode);
       if (mode === "review" || mode === "signature") {
-        void handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode });
+        if (!paidProAuthoritative || mode === "review") {
+          devPremiumSendRoute(mode, peekPremiumSenderSignFirst(), "recipients_setup");
+          void handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode });
+        } else {
+          devPremiumSendRoute(mode, peekPremiumSenderSignFirst(), "draft_signature_options");
+        }
       }
     },
-    [handlePremiumSendModePick, handlePremiumReviewFirstContinueToSigners],
+    [handlePremiumSendModePick, handlePremiumReviewFirstContinueToSigners, paidProAuthoritative],
   );
 
   const bumpFinalizeRoutePrimaryActionNonce = React.useCallback(() => {
@@ -10988,7 +11036,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           case "premium_continue_to_signers": {
             setHardError(null);
-            handlePremiumReviewFirstContinueToSigners();
+            const m =
+              effectivePremiumSendMode === "signature"
+                ? ("signature" as const)
+                : ("review" as const);
+            handlePremiumSendModePick(m);
+            devPremiumSendChoice(m, peekPremiumSenderSignFirst());
+            devPremiumSendRoute(m, peekPremiumSenderSignFirst(), "recipients_setup");
+            handlePremiumReviewFirstContinueToSigners({ telemetryMode: m });
             return;
           }
           case "continue_to_recipients": {
@@ -12570,13 +12625,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 line ? (
                                   <p className="mt-2 text-xs leading-relaxed text-slate-500">{line}</p>
                                 ) : null)(formatPremiumRevealDeltaRow(premiumFinalizeAudit))}
-                              <button
-                                type="button"
-                                className="mt-4 w-full rounded-lg border border-white/10 bg-white px-4 py-2.5 text-center text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100 sm:w-auto sm:min-w-[14rem]"
-                                onClick={() => handlePremiumReviewFirstContinueToSigners()}
-                              >
-                                Continue to recipient setup
-                              </button>
+                              <p className="mt-4 text-sm leading-relaxed text-slate-300">
+                                Next: use the LawDog Pro panel below to choose{" "}
+                                <span className="font-medium text-slate-100">Send for review</span> (recipients suggest
+                                edits; you approve what applies before signing) or{" "}
+                                <span className="font-medium text-slate-100">Send for signature</span>. For signature, you
+                                can opt to sign first there before adding recipient emails.
+                              </p>
                             </div>
                           ) : null}
                           {showTopProAdjustCard ? (
@@ -13506,6 +13561,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   }}
                                   onSendForSignature={() => handleFinalizeRoutePrimaryAction("signature")}
                                   onReadyForReview={() => handleFinalizeRoutePrimaryAction("review")}
+                                  showSignatureRecipientContinue={
+                                    paidProAuthoritative &&
+                                    effectivePremiumSendMode === "signature" &&
+                                    !premiumSignersSurfaceReady
+                                  }
+                                  onContinueToRecipientSetup={() => {
+                                    devPremiumSendRoute(
+                                      "signature",
+                                      peekPremiumSenderSignFirst(),
+                                      "recipients_setup",
+                                    );
+                                    void handlePremiumReviewFirstContinueToSigners({ telemetryMode: "signature" });
+                                  }}
+                                  draftSignatureSenderFirst={premiumSignatureSenderFirst}
+                                  onDraftSignatureSenderFirstChange={(v) => {
+                                    setPremiumSignatureSenderFirst(v);
+                                    writePremiumSenderSignFirst(v);
+                                    devPremiumSendChoice("signature", v);
+                                  }}
                                   sendMode={effectivePremiumSendMode}
                                   sendModeTouched={premiumSendModeTouched}
                                   disabled={(isGenerating && !draft) || upgradeLockActive}

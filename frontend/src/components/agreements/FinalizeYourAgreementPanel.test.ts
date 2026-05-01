@@ -22,19 +22,22 @@ describe("FinalizeYourAgreementPanel Pro refine → host summary", () => {
 });
 
 describe("FinalizeYourAgreementPanel send-for-review framing (copy only)", () => {
-  it("surfaces conversion framing, inevitability cue, and confidence label mapping", () => {
+  it("surfaces delivery choice heading, conversion framing, and paid Pro signature continue + sender-first hooks", () => {
     const p = join(__dirname, "FinalizeYourAgreementPanel.tsx");
     const s = readFileSync(p, "utf8");
-    expect(s).toContain("Ready to send for review");
+    expect(s).toContain("Choose how to deliver");
     expect(s).toContain("Recommended next step");
     expect(s).toContain(
       "Send this agreement for review so both sides can confirm details before signing.",
     );
     expect(s).toContain("Most agreements are reviewed before signing.");
     expect(s).toContain("Send for review →");
-    expect(s).toContain("Send for signature instead");
+    expect(s).toContain("Send for signature");
+    expect(s).not.toContain("Send for signature instead");
     expect(s).not.toMatch(/>\s*Review first\s*</);
-    expect(s).not.toMatch(/>\s*Send for signature\s*</);
+    expect(s).toContain("showSignatureRecipientContinue");
+    expect(s).toContain("Continue to recipient emails");
+    expect(s).toContain("I&apos;ll sign first");
     expect(s).toContain("formatRouteConfidenceLabel");
     expect(s).toContain('return "solid for review"');
   });

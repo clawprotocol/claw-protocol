@@ -9,7 +9,7 @@ import {
 } from "./simpleCreatePaidProReviewShell";
 
 describe("computeSimpleCreatePaidProReviewReady", () => {
-  it("is true only when simple create + authoritative paid Pro + DRAFT stage + review phase", () => {
+  it("is true for simple create + authoritative paid Pro on DRAFT+review or on RECIPIENTS (suppresses starter shell)", () => {
     const base = {
       simpleProductFlow: true,
       liveWorkspaceTwoPane: true,
@@ -18,6 +18,13 @@ describe("computeSimpleCreatePaidProReviewReady", () => {
       displayPhase: "review",
     };
     expect(computeSimpleCreatePaidProReviewReady(base)).toBe(true);
+    expect(
+      computeSimpleCreatePaidProReviewReady({
+        ...base,
+        createUiStage: CreateUiStage.RECIPIENTS,
+        displayPhase: "review",
+      }),
+    ).toBe(true);
     expect(computeSimpleCreatePaidProReviewReady({ ...base, displayPhase: "intake" })).toBe(false);
     expect(computeSimpleCreatePaidProReviewReady({ ...base, createUiStage: CreateUiStage.INPUT })).toBe(false);
     expect(computeSimpleCreatePaidProReviewReady({ ...base, paidProAuthoritative: false })).toBe(false);

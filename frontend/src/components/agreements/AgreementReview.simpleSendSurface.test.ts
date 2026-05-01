@@ -62,6 +62,11 @@ describe("FinalizeYourAgreementPanel Pro copy", () => {
     expect(FINALIZE_REFINE_ROUTE_HINT).not.toContain("Add a short note");
   });
 
+  it("AgreementReview does not embed generic simple-create marketing headline", () => {
+    const s = readFileSync(join(__dirname, "AgreementReview.tsx"), "utf8");
+    expect(s).not.toContain("Create an agreement in minutes");
+  });
+
   it("Update agreement is gated on non-empty refine prompt", () => {
     const p = join(__dirname, "FinalizeYourAgreementPanel.tsx");
     const s = readFileSync(p, "utf8");

@@ -251,14 +251,17 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("FinalizeYourAgreementPanel");
     expect(intake).toContain("showProLawdogRefineAndFinalize");
     const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");
-    expect(finalize).toContain("Ready to send for review");
+    expect(finalize).toContain("Choose how to deliver");
   });
 
-  it("paid Pro finalize routes wire Send for review vs Send for signature to mode pick + continue (telemetry-safe)", () => {
+  it("paid Pro finalize routes: review pick+continue; authoritative signature waits on draft then continue control", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain('handleFinalizeRoutePrimaryAction("review")');
     expect(intake).toContain('handleFinalizeRoutePrimaryAction("signature")');
-    expect(intake).toContain("handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode })");
+    expect(intake).toMatch(/!paidProAuthoritative\s*\|\|\s*mode\s*===\s*["']review["']/);
+    expect(intake).toContain("draft_signature_options");
+    expect(intake).toContain("showSignatureRecipientContinue");
+    expect(intake).toContain("onContinueToRecipientSetup");
     expect(intake).toContain("Share for review");
     expect(intake).toContain("Create review links");
     expect(intake).toContain("Nothing changes unless you accept it");
@@ -282,5 +285,29 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("premiumSendHandoffIntent");
     expect(intake).toMatch(/inlineContextualSend\s*\|\|\s*paidProAuthoritative/);
+  });
+
+  it("paid Pro post-checkout success card no longer pushes vague Continue to recipient setup", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).not.toContain("Continue to recipient setup");
+    expect(intake).toContain("Send for review");
+    expect(intake).toContain("Send for signature");
+  });
+
+  it("hides sticky bottom CTA while finalize panel owns paid Pro delivery choice", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("hideStickyForPaidProFinalizeDeliveryChoice");
+    expect(intake).toContain("simpleCreateStickyBottomBarVisibleBase");
+    expect(intake).toMatch(
+      /simpleCreateStickyBottomBarVisible\s*=\s*simpleCreateStickyBottomBarVisibleBase\s*&&\s*!hideStickyForPaidProFinalizeDeliveryChoice/,
+    );
+  });
+
+  it("emits premium-send-shell-guard when paid Pro suppresses generic create shell paths", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("[premium-send-shell-guard]");
+    expect(intake).toContain("devPremiumSendShellGuard");
+    expect(intake).toContain("[premium-send-choice]");
+    expect(intake).toContain("[premium-send-route]");
   });
 });

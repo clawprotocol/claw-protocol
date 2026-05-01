@@ -44,6 +44,11 @@ type Props = {
   onApplyDocumentText: (text: string) => void;
   onReadyForReview: () => void;
   onSendForSignature: () => void;
+  /** Paid Pro signature path: after choosing signature, show “I’ll sign first” + continue to recipient emails. */
+  showSignatureRecipientContinue?: boolean;
+  onContinueToRecipientSetup?: () => void;
+  draftSignatureSenderFirst?: boolean;
+  onDraftSignatureSenderFirstChange?: (next: boolean) => void;
   markDocumentDirty?: () => void;
   sendMode: SendMode;
   sendModeTouched: boolean;
@@ -93,6 +98,10 @@ export function FinalizeYourAgreementPanel({
   onApplyDocumentText,
   onReadyForReview,
   onSendForSignature,
+  showSignatureRecipientContinue = false,
+  onContinueToRecipientSetup,
+  draftSignatureSenderFirst = false,
+  onDraftSignatureSenderFirstChange,
   markDocumentDirty,
   sendMode,
   sendModeTouched,
@@ -426,11 +435,11 @@ export function FinalizeYourAgreementPanel({
     <div
       className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5"
       role="region"
-      aria-label="Ready to send for review"
+      aria-label="Choose how to deliver your agreement"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">Ready to send for review</h3>
+          <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">Choose how to deliver</h3>
           <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">{tagline}</p>
         </div>
         <p
@@ -500,9 +509,45 @@ export function FinalizeYourAgreementPanel({
           disabled={disabled || busy}
           onClick={() => onSendForSignature()}
         >
-          Send for signature instead
+          Send for signature
         </button>
       </div>
+
+      {showSignatureRecipientContinue && sendMode === "signature" ? (
+        <div className="mt-4 rounded-xl border border-slate-600/60 bg-slate-950/50 p-3.5 sm:p-4">
+          <p className="text-sm font-medium text-slate-200">Signature delivery</p>
+          <p className="mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm">
+            Add signer emails on the next step. Recipients receive the final version for signature — they cannot edit
+            the agreement text directly.
+          </p>
+          {onDraftSignatureSenderFirstChange ? (
+            <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-left text-sm text-slate-300">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500/40"
+                checked={draftSignatureSenderFirst}
+                onChange={(e) => onDraftSignatureSenderFirstChange(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium text-slate-100">I&apos;ll sign first</span>
+                <span className="mt-1 block text-xs font-normal text-slate-500">
+                  Open your signing workspace first, then share links for other signers.
+                </span>
+              </span>
+            </label>
+          ) : null}
+          {onContinueToRecipientSetup ? (
+            <button
+              type="button"
+              className="mt-4 w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-emerald-950 shadow-sm transition hover:bg-emerald-400 disabled:opacity-50 sm:w-auto"
+              disabled={disabled || busy}
+              onClick={() => onContinueToRecipientSetup()}
+            >
+              Continue to recipient emails
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <form onSubmit={runUpdate} className="mt-4 space-y-3 border-t border-slate-700/50 pt-4">
         <VoiceAugmentedTextArea
