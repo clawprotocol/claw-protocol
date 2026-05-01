@@ -135,6 +135,7 @@ import {
 } from "../../agreement/paymentRequestTypes";
 import { SimplePaymentAttachCard } from "../../launch/simpleProduct/SimplePaymentAttachCard";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
+import { writePremiumSenderSignFirst } from "../../launch/simpleProduct/premiumSendIntent";
 import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import { normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
 import { mintRecipientAccessToken, putSigningLock } from "../../agreement/recipientAccessApi";
@@ -159,7 +160,8 @@ import {
   PAYWALL_DEFAULT_SUB,
   PAYWALL_PAID_READY_CTA,
   PAYWALL_PAID_READY_HEADLINE,
-  PAYWALL_PAID_READY_SUB,
+  PAYWALL_PAID_READY_SUB_REVIEW,
+  PAYWALL_PAID_READY_SUB_SIGNATURE,
 } from "../../launch/paywallMessaging";
 import { useAccess } from "../../access/AccessContext";
 import {
@@ -709,6 +711,7 @@ const AgreementReview: React.FC<Props> = ({
   const [governingLawSelect, setGoverningLawSelect] = useState(LEGAL_GOVERNING_LAW_STATE);
   const [governingLawSaveBusy, setGoverningLawSaveBusy] = useState(false);
   const [watermarkSendModalOpen, setWatermarkSendModalOpen] = useState(false);
+  const [watermarkModalSignFirst, setWatermarkModalSignFirst] = useState(false);
   /** Paid authoritative send: auto-open paid-ready modal once per send-phase visit; reset when leaving send. */
   const autoPaidAuthoritativeSendConfirmPrimedKeyRef = useRef<string | null>(null);
   const [simpleSendValidateAttempted, setSimpleSendValidateAttempted] = useState(false);
@@ -2010,6 +2013,11 @@ const AgreementReview: React.FC<Props> = ({
     autoPaidAuthoritativeSendConfirmPrimedKeyRef.current = agreementId;
     setWatermarkSendModalOpen(true);
   }, [agreementId, draft, economicsOverlay, paidProAuthoritativeSendHappyPath]);
+
+  useEffect(() => {
+    if (!watermarkSendModalOpen) return;
+    setWatermarkModalSignFirst(false);
+  }, [watermarkSendModalOpen]);
 
   const logCreateReviewLinksClick = useCallback(
     (actionTaken: string, extra?: Record<string, unknown>) => {
@@ -5990,11 +5998,11 @@ const AgreementReview: React.FC<Props> = ({
                           ) : (
                             <>
                               <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                                Create signing links
+                                Create signature links
                               </h3>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                                Generate secure signing links — you copy and share them. Tracked completion and proof
-                                stay on record in LawDog.
+                                Generate secure signature links for each signer — you copy and share them. Tracked
+                                completion and proof stay on record in LawDog.
                               </p>
                               <div className="mt-4 flex flex-col gap-3">
                                 <button
@@ -6008,7 +6016,7 @@ const AgreementReview: React.FC<Props> = ({
                                     void handleSimpleSendWithoutPayment();
                                   }}
                                 >
-                                  Create signing links
+                                  Create signature links
                                 </button>
                                 {onSimpleFlowBack ? (
                                   <button
@@ -6682,12 +6690,35 @@ const AgreementReview: React.FC<Props> = ({
                   <h2 id="wm-send-title" className="text-lg font-semibold leading-snug text-slate-100">
                     {PAYWALL_PAID_READY_HEADLINE}
                   </h2>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-400">{PAYWALL_PAID_READY_SUB}</p>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                    {simpleFlowPremiumHandoffIntent === "review"
+                      ? PAYWALL_PAID_READY_SUB_REVIEW
+                      : PAYWALL_PAID_READY_SUB_SIGNATURE}
+                  </p>
+                  {simpleFlowPremiumHandoffIntent === "signature" ? (
+                    <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500/40"
+                        checked={watermarkModalSignFirst}
+                        onChange={(e) => setWatermarkModalSignFirst(e.target.checked)}
+                      />
+                      <span>
+                        <span className="font-medium text-slate-100">I&apos;ll sign first</span>
+                        <span className="mt-1 block text-xs font-normal text-slate-500">
+                          Sign your copy before the other party receives their signing link.
+                        </span>
+                      </span>
+                    </label>
+                  ) : null}
                   <div className="mt-6 flex flex-col gap-3">
                     <button
                       type="button"
                       className="w-full min-h-[2.65rem] rounded-xl border-2 border-emerald-500/55 bg-gradient-to-b from-emerald-950/40 to-slate-950/70 px-6 text-sm font-semibold text-emerald-100 shadow-[0_4px_18px_rgba(16,185,129,0.12)] transition hover:border-emerald-400/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                       onClick={() => {
+                        writePremiumSenderSignFirst(
+                          simpleFlowPremiumHandoffIntent === "signature" && watermarkModalSignFirst,
+                        );
                         setWatermarkSendModalOpen(false);
                         onSimpleFlowContinue?.();
                       }}

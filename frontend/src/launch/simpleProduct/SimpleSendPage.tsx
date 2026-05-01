@@ -21,7 +21,13 @@ import {
   clearPostProUnlockCelebrate,
   fetchWorkspaceProEntitlement,
 } from "../../agreement/agreementProFunnelGate";
-import { clearPremiumSendIntent, peekPremiumSendIntent, writePremiumSendIntent } from "./premiumSendIntent";
+import {
+  clearPremiumSenderSignFirst,
+  clearPremiumSendIntent,
+  peekPremiumSendIntent,
+  peekPremiumSenderSignFirst,
+  writePremiumSendIntent,
+} from "./premiumSendIntent";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
 import { getPricingCadencePreference } from "../pricingCadenceStorage";
 import { useLaunchNav } from "../LaunchNavContext";
@@ -33,6 +39,9 @@ import { FIRST_WORKFLOW_GUARANTEE_SHORT, REVIEW_STRUCTURED_WIN_LINE } from "../p
 const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
 
 const SIMPLE_SEND_PHASE_SS_KEY = (id: string) => `claw_simple_send_phase_v1_${encodeURIComponent(id)}`;
+
+/** One-shot: after sender-first handoff, open full workspace for owner signing without redirect loops. */
+const SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY = "claw_premium_sender_sign_first_workspace_routed_v1";
 
 function readPersistedSendPhase(id: string): "send" | null {
   try {
@@ -110,6 +119,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
   );
   /** Re-evaluate `canAccessSimpleSendActions` after session unlock from authoritative Pro load. */
   const [sendUnlockTick, setSendUnlockTick] = useState(0);
+  const [senderFirstBannerDismissed, setSenderFirstBannerDismissed] = useState(false);
   const authoritativeProBypassRef = useRef(paidProSendBranch.paidProSendAllowed);
   authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
   const premiumSendUnlocked = useMemo(() => {
@@ -266,6 +276,33 @@ export function SimpleSendPage(props: { agreementId: string }) {
 
   const billingReturnTo = `/app/send/${encodeURIComponent(agreementId)}?phase=send`;
 
+  useEffect(() => {
+    setSenderFirstBannerDismissed(false);
+  }, [agreementId]);
+
+  useEffect(() => {
+    const id = agreementId.trim();
+    if (!id || !premiumSendUnlocked) return;
+    if (simpleFlowPremiumHandoffIntent !== "signature") return;
+    if (!peekPremiumSenderSignFirst()) return;
+    if (!sendAuthoritative) return;
+    if (simpleFlowPhase !== "send") return;
+    try {
+      if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) === id) return;
+      sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);
+    } catch {
+      return;
+    }
+    void navigate(`/app/agreements/${encodeURIComponent(id)}`);
+  }, [
+    agreementId,
+    navigate,
+    premiumSendUnlocked,
+    sendAuthoritative,
+    simpleFlowPhase,
+    simpleFlowPremiumHandoffIntent,
+  ]);
+
   return (
     <SimpleFlowShell step={shellStep as 1 | 2 | 3 | 4} progressLabels={FLOW_PROGRESS} title={title} subtitle={subtitle}>
       {flash === "draft_ready" && !streamlinedSimpleFlow ? (
@@ -311,6 +348,27 @@ export function SimpleSendPage(props: { agreementId: string }) {
               Signing link path
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {premiumSendUnlocked &&
+      simpleFlowPremiumHandoffIntent === "signature" &&
+      simpleFlowPhase === "send" &&
+      peekPremiumSenderSignFirst() &&
+      !senderFirstBannerDismissed ? (
+        <div className="mb-4 rounded-lg border border-amber-500/35 bg-amber-950/25 px-4 py-3 text-sm leading-snug text-amber-50/95">
+          <span className="font-semibold">Sign first:</span> complete your signature in the workspace below, then
+          create links for other signers.{" "}
+          <button
+            type="button"
+            className="font-medium text-amber-200 underline decoration-amber-400/50 underline-offset-2 hover:text-amber-50"
+            onClick={() => {
+              clearPremiumSenderSignFirst();
+              setSenderFirstBannerDismissed(true);
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
 

@@ -36,6 +36,14 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("paidProSendBranch.paidProSendAllowed");
   });
 
+  it("sender-first signature handoff can one-shot navigate to full agreement workspace for owner signing", () => {
+    const p = join(__dirname, "SimpleSendPage.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY");
+    expect(s).toContain("peekPremiumSenderSignFirst()");
+    expect(s).toContain('/app/agreements/${encodeURIComponent(id)}');
+  });
+
   it("Send path still gates on recipient readiness (no silent bypass)", () => {
     const p = join(__dirname, "..", "..", "components", "agreements", "AgreementReview.tsx");
     const s = readFileSync(p, "utf8");

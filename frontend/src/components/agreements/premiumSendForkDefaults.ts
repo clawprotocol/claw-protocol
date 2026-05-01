@@ -90,12 +90,7 @@ export function inferPremiumDefaultSendMode(input: InferPremiumDefaultSendModeIn
   if (agreementTextSuggestsNegotiation(agreementDocumentText, intakeCombined)) return "review";
   if (suggestCollaboratePrimed) return "review";
 
-  const canDefaultSignature =
-    hasRecipientsReady &&
-    !getDraftFirstReviewBlocker(draft) &&
-    !agreementDocDirty &&
-    !agreementTextSuggestsNegotiation(agreementDocumentText, intakeCombined) &&
-    !suggestCollaboratePrimed;
-
-  return canDefaultSignature ? "signature" : "review";
+  void hasRecipientsReady;
+  /** Product default: review-first for paid Pro send progression (user may still pick signature explicitly). */
+  return "review";
 }

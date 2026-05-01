@@ -39,7 +39,12 @@ import {
   INTAKE_MICRO_TRUST_LINE,
   NOTHING_SENT_UNTIL_CONFIRM,
 } from "../../launch/pricingContent";
-import { PAYWALL_PAID_READY_CTA, PAYWALL_PAID_READY_HEADLINE, PAYWALL_PAID_READY_SUB } from "../../launch/paywallMessaging";
+import {
+  PAYWALL_PAID_READY_CTA,
+  PAYWALL_PAID_READY_HEADLINE,
+  PAYWALL_PAID_READY_SUB_REVIEW,
+  PAYWALL_PAID_READY_SUB_SIGNATURE,
+} from "../../launch/paywallMessaging";
 import { LiveAgreementPreview, type IntakeFormationPhase } from "./LiveAgreementPreview";
 import { extractIntakePayment } from "./intakeCurrencyParse";
 import { detectAgreementFamily } from "./agreementFamilyRouter";
@@ -1712,6 +1717,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [premiumPostCheckoutPhase]);
   const [premiumSendConfirmOpen, setPremiumSendConfirmOpen] = useState(false);
   const [premiumSendCcSelf, setPremiumSendCcSelf] = useState(false);
+  /** Signature send confirmation only: “I’ll sign first” in the modal (default off each time the modal opens). */
+  const [premiumSendConfirmSignFirst, setPremiumSendConfirmSignFirst] = useState(false);
   /** Signature path only: user opts to self-sign before sharing counterparty signing links (handed off via session). */
   const [premiumSignatureSenderFirst, setPremiumSignatureSenderFirst] = useState(false);
   /** Premium paid review: default read-only HTML document; toggle opens legacy textarea editor. */
@@ -1785,10 +1792,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createFlowSendEditorPrimedRef.current = false;
     }
   }, [createUiStage]);
-
-  useEffect(() => {
-    if (premiumSendConfirmOpen) setPremiumSendCcSelf(false);
-  }, [premiumSendConfirmOpen]);
 
   useEffect(() => {
     if (!premiumSendConfirmOpen) return;
@@ -6366,12 +6369,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           .filter(Boolean)
           .join("\n");
         const inlineContextualSend = Boolean(premiumRecipientUxActive || premiumPersistedFlowActive);
+        const premiumSendHandoffIntent =
+          inlineContextualSend || paidProAuthoritative ? effectivePremiumSendMode : null;
+        const simpleSendOpenPhaseHandoff =
+          inlineContextualSend || paidProAuthoritative ? ("send" as const) : undefined;
         const ok = await runPersistAndOpen(
           draftWithRecipientUi,
           partyCtx,
           inlineContextualSend,
-          inlineContextualSend ? effectivePremiumSendMode : null,
-          inlineContextualSend ? "send" : undefined,
+          premiumSendHandoffIntent,
+          simpleSendOpenPhaseHandoff,
         );
         if (!ok) {
           setDisplayPhase("intake");
@@ -8322,10 +8329,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!premiumSendConfirmOpen) return;
-    if (effectivePremiumSendMode !== "review") return;
-    setPremiumSignatureSenderFirst(false);
-    writePremiumSenderSignFirst(false);
-  }, [premiumSendConfirmOpen, effectivePremiumSendMode]);
+    setPremiumSendCcSelf(false);
+    if (effectivePremiumSendMode === "review") {
+      setPremiumSignatureSenderFirst(false);
+      writePremiumSenderSignFirst(false);
+      setPremiumSendConfirmSignFirst(false);
+    } else if (effectivePremiumSendMode === "signature") {
+      setPremiumSendConfirmSignFirst(premiumSignatureSenderFirst);
+    } else {
+      setPremiumSendConfirmSignFirst(false);
+    }
+  }, [premiumSendConfirmOpen, effectivePremiumSendMode, premiumSignatureSenderFirst]);
 
   const premiumPaidReadonlyPick = useMemo(() => {
     const snapObj = readPremiumCompletionSnapshot();
@@ -14738,7 +14752,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             </h2>
             {minimalProSendRecipientChrome ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                {PAYWALL_PAID_READY_SUB}
+                {effectivePremiumSendMode === "review"
+                  ? PAYWALL_PAID_READY_SUB_REVIEW
+                  : PAYWALL_PAID_READY_SUB_SIGNATURE}
               </p>
             ) : effectivePremiumSendMode === "signature" ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
@@ -14811,6 +14827,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 </p>
               </div>
             ) : null}
+            {effectivePremiumSendMode === "signature" ? (
+              <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500/40"
+                  checked={premiumSendConfirmSignFirst}
+                  onChange={(e) => setPremiumSendConfirmSignFirst(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-slate-100">I&apos;ll sign first</span>
+                  <span className="mt-1 block text-xs font-normal text-slate-500">
+                    Sign your copy before the other party receives their signing link.
+                  </span>
+                </span>
+              </label>
+            ) : null}
             {!minimalProSendRecipientChrome ? (
               <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left text-sm text-slate-300">
                 <input
@@ -14847,9 +14879,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     });
                   }
                   setPremiumSendConfirmOpen(false);
-                  writePremiumSenderSignFirst(
-                    effectivePremiumSendMode === "signature" && premiumSignatureSenderFirst,
-                  );
+                  const signFirst =
+                    effectivePremiumSendMode === "signature" && premiumSendConfirmSignFirst;
+                  setPremiumSignatureSenderFirst(Boolean(signFirst));
+                  writePremiumSenderSignFirst(Boolean(signFirst));
                   void onGenerate();
                 }}
               >

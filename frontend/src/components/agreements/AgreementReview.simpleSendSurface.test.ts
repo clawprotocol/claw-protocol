@@ -25,6 +25,24 @@ describe("AgreementReview simple paid Pro /app/send surface", () => {
     expect(s).toContain("Add at least one signer email to continue.");
   });
 
+  it("paid-ready watermark modal wires I will sign first for signature intent and persists via writePremiumSenderSignFirst", () => {
+    const s = readFileSync(agreementReviewPath, "utf8");
+    expect(s).toContain("watermarkModalSignFirst");
+    expect(s).toContain("I&apos;ll sign first");
+    expect(s).toContain("writePremiumSenderSignFirst");
+    expect(s).toContain("PAYWALL_PAID_READY_SUB_SIGNATURE");
+    expect(s).toContain("PAYWALL_PAID_READY_SUB_REVIEW");
+  });
+
+  it("streamlined premium signature panel copy uses signature links (not review-link heading)", () => {
+    const s = readFileSync(agreementReviewPath, "utf8");
+    const i = s.indexOf("Create signature links");
+    expect(i).toBeGreaterThanOrEqual(0);
+    const window = s.slice(Math.max(0, i - 500), i + 280);
+    expect(window).toContain("Generate secure signature links");
+    expect(window).not.toContain("Create review links");
+  });
+
   it("does not reintroduce premium review recipient validation bypass", () => {
     const s = readFileSync(agreementReviewPath, "utf8");
     expect(s).not.toContain("shouldBypassFlexibleSendRecipientValidationForPremiumReview");

@@ -259,4 +259,17 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       /createUiStage === CreateUiStage\.RECIPIENTS[\s\S]*?effectivePremiumSendMode === "signature"\s*\?[\s\S]*?Sign first before sending/,
     );
   });
+
+  it("paid Pro send confirmation modal includes I will sign first for signature mode only", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("premiumSendConfirmSignFirst");
+    expect(intake).toContain("I&apos;ll sign first");
+    expect(intake).toContain("Sign your copy before the other party receives their signing link.");
+  });
+
+  it("paid authoritative production send passes premium intent into runPersistAndOpen handoff", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("premiumSendHandoffIntent");
+    expect(intake).toMatch(/inlineContextualSend\s*\|\|\s*paidProAuthoritative/);
+  });
 });

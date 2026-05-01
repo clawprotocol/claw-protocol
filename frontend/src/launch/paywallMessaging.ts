@@ -68,7 +68,16 @@ export const CONVERSION_DECISION_PROMPT = "Choose how you want to send.";
 /** Paid Pro — ready to send (no upsell; server authoritative render). */
 export const PAYWALL_PAID_READY_HEADLINE = "You're ready to send";
 
+/** Default minimal-chrome subcopy (signature-biased legacy string). Prefer the intent-specific lines below. */
 export const PAYWALL_PAID_READY_SUB = "This agreement is finalized and ready for signature.";
+
+/** Paid Pro minimal confirmation — user chose tracked signature / signing links. */
+export const PAYWALL_PAID_READY_SUB_SIGNATURE =
+  "This agreement is finalized. Next you’ll get signature links for your signers — nothing is emailed automatically; you copy and share when ready.";
+
+/** Paid Pro minimal confirmation — user chose review links first. */
+export const PAYWALL_PAID_READY_SUB_REVIEW =
+  "This agreement is finalized. Next you’ll get review links — recipients can suggest edits; you decide what applies before anything updates.";
 
 export const PAYWALL_PAID_READY_CTA = "Send agreement";
 

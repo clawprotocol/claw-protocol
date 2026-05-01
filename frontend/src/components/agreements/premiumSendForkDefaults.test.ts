@@ -73,7 +73,7 @@ describe("inferPremiumDefaultSendMode", () => {
     ).toBe("review");
   });
 
-  it("defaults to signature when names resolved, recipients ready, no friction", () => {
+  it("defaults to review even when names resolved and recipients are ready (review-first product default)", () => {
     const draft = baseDraft();
     expect(
       inferPremiumDefaultSendMode({
@@ -81,7 +81,7 @@ describe("inferPremiumDefaultSendMode", () => {
         draft,
         hasRecipientsReady: true,
       }),
-    ).toBe("signature");
+    ).toBe("review");
   });
 
   it("defaults to review when agreement doc is dirty", () => {
