@@ -966,6 +966,10 @@ type CreateFlowSendRecipientsPanelProps = {
   sendRequiresConfirmStep: boolean;
   /** Paid Pro delivery on review column — avoid legacy “Share this agreement” hero. */
   paidProInlineRecipientShell?: boolean;
+  /** Paid Pro: keep recipient inputs mounted while emails are missing/invalid (no collapsed dead-end). */
+  recipientBlockForceExpanded?: boolean;
+  /** Override green primary label (e.g. “Add recipient emails” before gate clears). */
+  premiumPrimarySendLabelOverride?: string | null;
   /** Inline help when the primary CTA is blocked (e.g. missing recipient email). */
   primaryCtaHelperText?: string | null;
   stripRecipientEmailNoise: (s: string) => string;
@@ -1001,6 +1005,8 @@ function CreateFlowSendRecipientsPanel({
   sendDisabled,
   sendRequiresConfirmStep,
   paidProInlineRecipientShell = false,
+  recipientBlockForceExpanded = false,
+  premiumPrimarySendLabelOverride = null,
   primaryCtaHelperText,
   stripRecipientEmailNoise,
   looksLikeEmail,
@@ -1033,21 +1039,23 @@ function CreateFlowSendRecipientsPanel({
       ? "Next, you confirm who is on the agreement in one step. LawDog does not auto-email from here — you copy a secure link after save. Nothing reaches recipients until you share it."
       : "After you continue, the agreement is saved and you get links to copy. Nothing reaches recipients until you share a link.";
   const linkReadyOutbox = isPremiumRecipientSurface;
-  const primarySendLabel = minimalProSendRecipientChrome
-    ? sendRequiresConfirmStep
-      ? "Continue to confirmation"
-      : effectivePremiumSendMode === "review"
-        ? "Create review link"
-        : "Create signing links"
-    : sendRequiresConfirmStep
-      ? "Continue to confirmation"
-      : effectivePremiumSendMode === "review"
-        ? linkReadyOutbox
-          ? "Continue to review links"
-          : "Create review link"
-        : linkReadyOutbox
-          ? "Continue to signing links"
-          : "Create signing link";
+  const primarySendLabel =
+    premiumPrimarySendLabelOverride?.trim() ||
+    (minimalProSendRecipientChrome
+      ? sendRequiresConfirmStep
+        ? "Continue to confirmation"
+        : effectivePremiumSendMode === "review"
+          ? "Create review link"
+          : "Create signing links"
+      : sendRequiresConfirmStep
+        ? "Continue to confirmation"
+        : effectivePremiumSendMode === "review"
+          ? linkReadyOutbox
+            ? "Continue to review links"
+            : "Create review link"
+          : linkReadyOutbox
+            ? "Continue to signing links"
+            : "Create signing link");
 
   const senderInviteTrustStrip = (
     <ul className="mt-3 flex flex-wrap gap-2" aria-label="Trust cues">
@@ -1194,16 +1202,22 @@ function CreateFlowSendRecipientsPanel({
           ? "Nothing is emailed from LawDog until you create links and share them yourself."
           : <>Nothing is sent to recipients until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""} and share a link yourself.</>}
       </p>
-      <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-        <button
-          type="button"
-          className="text-sm font-medium text-emerald-300/95 underline decoration-emerald-500/40 underline-offset-4 hover:text-emerald-200"
-          onClick={() => setEditorOpen((o) => !o)}
-        >
-          {editorOpen ? "Hide recipient fields" : "Edit recipients"}
-        </button>
-      </div>
-      {editorOpen ? recipientFields : null}
+      {!recipientBlockForceExpanded ? (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+          <button
+            type="button"
+            className="text-sm font-medium text-emerald-300/95 underline decoration-emerald-500/40 underline-offset-4 hover:text-emerald-200"
+            onClick={() => setEditorOpen((o) => !o)}
+          >
+            {editorOpen ? "Hide recipient fields" : "Edit recipients"}
+          </button>
+        </div>
+      ) : (
+        <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
+          Enter recipient details below — required before you can send.
+        </p>
+      )}
+      {editorOpen || recipientBlockForceExpanded ? recipientFields : null}
       {reviewHandoffAgreementEcho && !minimalProSendRecipientChrome ? (
         <p className="mt-4 rounded-lg border border-slate-700/50 bg-slate-900/55 px-3 py-2 text-[11px] leading-snug text-slate-300 sm:text-xs">
           {reviewHandoffAgreementEcho}
@@ -1765,6 +1779,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Calm send step: collapsible recipient grid; auto-open once when primary contact incomplete. */
   const [createFlowSendRecipientEditorOpen, setCreateFlowSendRecipientEditorOpen] = useState(false);
   const createFlowSendEditorPrimedRef = useRef(false);
+  const createFlowPhaseRefForRecipientOpen = useRef<string | null>(null);
   const premiumRecipientUxActiveRef = useRef(false);
   const premiumSendAnotherSkipOnCreatedRef = useRef(false);
   const productionSendInFlightRef = useRef(false);
@@ -8089,6 +8104,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const { n1, n2 } = getRecipientHandoffNamesFromDraft(draft);
     setRecipient1Name((prev) => pickRecipientNameForHandoff(prev, n1));
     setRecipient2Name((prev) => pickRecipientNameForHandoff(prev, n2));
+    const p0 = draft.parties?.[0] as { email?: string } | undefined;
+    const p1 = draft.parties?.[1] as { email?: string } | undefined;
+    const e1 = String(p0?.email ?? "").trim();
+    const e2 = String(p1?.email ?? "").trim();
+    if (e1) setRecipient1Email((prev) => (prev.trim() ? prev : e1));
+    if (e2) setRecipient2Email((prev) => (prev.trim() ? prev : e2));
     setRecipientSignerLabels((prev) =>
       pickRecipientSignerLabelsForHandoff(prev, n1, n2, {
         role1: draft.parties?.[0]?.role,
@@ -8291,7 +8312,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft &&
       agreementTypeAccepted &&
       (draft.parties?.length ?? 0) >= 1 &&
-      (recipientsDeferred || hasAnyValidRecipientEmail) &&
+      (recipientsDeferred || hasAnyValidRecipientEmail || paidProRecipientSetupOnDraft) &&
       (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft),
   );
   /** Matches `send_agreement` branch: premium two-pane opens confirm modal instead of sending immediately. */
@@ -8361,6 +8382,70 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient2Name,
     hasAnyValidRecipientEmail,
     effectivePremiumSendMode,
+  ]);
+
+  /** Paid Pro inline recipient card: emails valid and no helper blockers (matches send_agreement gate). */
+  const paidProInlineSignersReady = useMemo(
+    () =>
+      Boolean(
+        !recipientsDeferred &&
+          hasAnyValidRecipientEmail &&
+          !recipientEmailsHaveValidationErrors &&
+          !createFlowRecipientPrimaryHelper,
+      ),
+    [
+      recipientsDeferred,
+      hasAnyValidRecipientEmail,
+      recipientEmailsHaveValidationErrors,
+      createFlowRecipientPrimaryHelper,
+    ],
+  );
+  /** While missing/invalid emails, keep recipient inputs surfaced (no dead-end collapsed card). */
+  const paidProRecipientBlockForceExpanded = Boolean(
+    paidProRecipientSetupOnDraft && !paidProInlineSignersReady,
+  );
+  const premiumRecipientPanelSendLabelOverride =
+    paidProRecipientSetupOnDraft &&
+    !recipientsDeferred &&
+    (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)
+      ? "Add recipient emails"
+      : null;
+
+  useEffect(() => {
+    if (!createProductionTwoPane || !paidProRecipientSetupOnDraft) return;
+    const prev = createFlowPhaseRefForRecipientOpen.current;
+    createFlowPhaseRefForRecipientOpen.current = createFlowPhase;
+    if (createFlowPhase === "recipient_setup_required" && prev !== "recipient_setup_required") {
+      setCreateFlowSendRecipientEditorOpen(true);
+    }
+  }, [createProductionTwoPane, paidProRecipientSetupOnDraft, createFlowPhase]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !paidProRecipientSetupOnDraft) return;
+    const missing =
+      !hasAnyValidRecipientEmail ||
+      recipientEmailsHaveValidationErrors ||
+      Boolean(createFlowRecipientPrimaryHelper);
+    // eslint-disable-next-line no-console
+    console.info("[paid-pro-recipient-fields]", {
+      expanded: Boolean(createFlowSendRecipientEditorOpen || paidProRecipientBlockForceExpanded),
+      signersReady: paidProInlineSignersReady,
+      signerCount: draft?.parties?.length ?? 0,
+      missingEmails: missing,
+      createUiStage,
+      createFlowPhase,
+    });
+  }, [
+    paidProRecipientSetupOnDraft,
+    createFlowSendRecipientEditorOpen,
+    paidProRecipientBlockForceExpanded,
+    paidProInlineSignersReady,
+    draft?.parties?.length,
+    hasAnyValidRecipientEmail,
+    recipientEmailsHaveValidationErrors,
+    createFlowRecipientPrimaryHelper,
+    createUiStage,
+    createFlowPhase,
   ]);
 
   const premiumRouteMomentumRibbon = useMemo(() => {
@@ -10026,8 +10111,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (paidProRecipientSetupOnDraft) {
           const partiesOk = (draft?.parties?.length ?? 0) >= 1;
           const typeOk = agreementTypeAccepted;
-          const recOk = recipientsDeferred || hasAnyValidRecipientEmail;
-          return !draft || !partiesOk || !typeOk || !recOk;
+          return !draft || !partiesOk || !typeOk;
         }
         return !draft;
       }
@@ -10129,23 +10213,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
             createFlowPhase === "ready_to_send"
               ? "Saving…"
-              : premiumSendConfirmGateActive
-                ? paidProAuthoritative
-                  ? effectivePremiumSendMode === "signature"
-                    ? "Confirm and send for signature"
-                    : "Confirm and create review links"
-                  : "Continue to confirmation"
-                : effectivePremiumSendMode === "review"
+              : paidProRecipientSetupOnDraft &&
+                  !recipientsDeferred &&
+                  (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)
+                ? "Add recipient emails"
+                : premiumSendConfirmGateActive
                   ? paidProAuthoritative
-                    ? "Create review links"
-                    : premiumOutbox
-                      ? "Continue to review links"
-                      : "Create review link"
-                  : paidProAuthoritative
-                    ? "Create signing links"
-                    : premiumOutbox
-                      ? "Continue to signing links"
-                      : "Create signing link";
+                    ? effectivePremiumSendMode === "signature"
+                      ? "Confirm and send for signature"
+                      : "Confirm and create review links"
+                    : "Continue to confirmation"
+                  : effectivePremiumSendMode === "review"
+                    ? paidProAuthoritative
+                      ? "Create review links"
+                      : premiumOutbox
+                        ? "Continue to review links"
+                        : "Create review link"
+                    : paidProAuthoritative
+                      ? "Create signing links"
+                      : premiumOutbox
+                        ? "Continue to signing links"
+                        : "Create signing link";
           return {
             label: persistSendLabel,
             action: "send_agreement",
@@ -10450,6 +10538,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRecipientSetupOnDraft,
   ]);
 
+  useEffect(() => {
+    if (!import.meta.env.DEV || !simpleCreateUnifiedBottomCta || !createProductionTwoPane) return;
+    if (createUiStage !== CreateUiStage.RECIPIENTS && !paidProRecipientSetupOnDraft) return;
+    // eslint-disable-next-line no-console
+    console.info("[paid-pro-send-gate]", {
+      action: unifiedPrimaryCta.action,
+      label: unifiedPrimaryCta.label,
+      signersReady: paidProInlineSignersReady,
+      paidProRecipientSetupOnDraft,
+    });
+  }, [
+    simpleCreateUnifiedBottomCta,
+    createProductionTwoPane,
+    createUiStage,
+    paidProRecipientSetupOnDraft,
+    unifiedPrimaryCta.action,
+    unifiedPrimaryCta.label,
+    paidProInlineSignersReady,
+  ]);
+
   const simpleCreateBottomPrimaryLabel = simpleCreateUnifiedBottomCta
     ? unifiedPrimaryCta.label
     : primaryIntakeCtaLabel;
@@ -10479,9 +10587,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleCreateUnifiedBottomCta &&
       createProductionTwoPane &&
       (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
-      unifiedPrimaryCta.action === "complete_recipient_details" &&
-      unifiedPrimaryCta.disabled &&
-      unifiedPrimaryCta.reason === "recipient_email_or_defer",
+      ((unifiedPrimaryCta.action === "complete_recipient_details" &&
+        unifiedPrimaryCta.disabled &&
+        unifiedPrimaryCta.reason === "recipient_email_or_defer") ||
+        (unifiedPrimaryCta.action === "send_agreement" &&
+          unifiedPrimaryCta.disabled &&
+          !recipientsDeferred &&
+          (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors) &&
+          !loading &&
+          !premiumSendConfirmOpen)),
   );
   const stickyPrimaryButtonNativeDisabled = effectivePrimaryCtaDisabled && !stickyRecipientBlockedNudge;
   const blockedPreviewRenderSource =
@@ -11089,16 +11203,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             if (import.meta.env.DEV) console.debug("[fix_review] result (disabled path)", res);
             return;
           }
-          setHardError(
-            cta.reason === "recipient_email_or_defer" && paidProAuthoritative
-              ? effectivePremiumSendMode === "review"
-                ? "Add at least one recipient email to create review links."
-                : "Add at least one signer email to continue."
-              : humanizePrimaryCtaBlockedReason(cta.reason),
-          );
-          if (cta.action === "complete_recipient_details" || cta.reason === "recipient_email_or_defer") {
-            setCreateFlowSendRecipientEditorOpen(true);
-            focusFirstMissingRecipientRequirement();
+          const openForSendEmailGate =
+            cta.action === "send_agreement" &&
+            paidProRecipientSetupOnDraft &&
+            !recipientsDeferred &&
+            (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors);
+          if (openForSendEmailGate) {
+            setHardError(null);
+          } else {
+            setHardError(
+              cta.reason === "recipient_email_or_defer" && paidProAuthoritative
+                ? effectivePremiumSendMode === "review"
+                  ? "Add at least one recipient email to create review links."
+                  : "Add at least one signer email to continue."
+                : humanizePrimaryCtaBlockedReason(cta.reason),
+            );
+          }
+          if (
+            cta.action === "complete_recipient_details" ||
+            cta.reason === "recipient_email_or_defer" ||
+            openForSendEmailGate
+          ) {
+            flushSync(() => {
+              setCreateFlowSendRecipientEditorOpen(true);
+            });
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => focusFirstMissingRecipientRequirement());
+            });
           }
           return;
         }
@@ -11317,8 +11448,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     if (stickyRecipientBlockedNudge) {
-      setCreateFlowSendRecipientEditorOpen(true);
-      focusFirstMissingRecipientRequirement();
+      flushSync(() => {
+        setCreateFlowSendRecipientEditorOpen(true);
+      });
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => focusFirstMissingRecipientRequirement());
+      });
       setHardError(
         paidProAuthoritative
           ? effectivePremiumSendMode === "review"
@@ -11792,6 +11927,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           onSendClick={runPrimaryIntakeAction}
           sendDisabled={effectivePrimaryCtaDisabled}
           sendRequiresConfirmStep={premiumSendConfirmGateActive}
+          recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
+          premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
           primaryCtaHelperText={createFlowRecipientPrimaryHelper}
           stripRecipientEmailNoise={stripRecipientEmailNoise}
           looksLikeEmail={looksLikeEmail}
@@ -13725,6 +13862,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       onSendClick={runPrimaryIntakeAction}
                                       sendDisabled={effectivePrimaryCtaDisabled}
                                       sendRequiresConfirmStep={premiumSendConfirmGateActive}
+                                      recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
+                                      premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
                                       primaryCtaHelperText={createFlowRecipientPrimaryHelper}
                                       stripRecipientEmailNoise={stripRecipientEmailNoise}
                                       looksLikeEmail={looksLikeEmail}
@@ -13977,6 +14116,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     <div className="mb-4">
                       <CreateFlowSendRecipientsPanel
                         variant="workspace"
+                        paidProInlineRecipientShell={paidProRecipientSetupOnDraft}
                         isPremiumRecipientSurface={premiumSignersSurfaceReady}
                         showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
                         productionReadyForPersist={productionReadyForPersist}
@@ -14006,6 +14146,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         onSendClick={runPrimaryIntakeAction}
                         sendDisabled={effectivePrimaryCtaDisabled}
                         sendRequiresConfirmStep={premiumSendConfirmGateActive}
+                        recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
+                        premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
                         primaryCtaHelperText={createFlowRecipientPrimaryHelper}
                         stripRecipientEmailNoise={stripRecipientEmailNoise}
                         looksLikeEmail={looksLikeEmail}

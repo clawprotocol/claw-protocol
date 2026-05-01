@@ -296,6 +296,20 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
+  it("paid Pro recipient_setup_required: productionReadyForPersist tolerates missing emails; inputs forced + CTA nudge", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toMatch(/recipientsDeferred \|\| hasAnyValidRecipientEmail \|\| paidProRecipientSetupOnDraft/);
+    expect(intake).toContain("paidProRecipientBlockForceExpanded");
+    expect(intake).toContain("recipientBlockForceExpanded");
+    expect(intake).toContain("premiumRecipientPanelSendLabelOverride");
+    expect(intake).toContain("editorOpen || recipientBlockForceExpanded");
+    expect(intake).toContain("[paid-pro-recipient-fields]");
+    expect(intake).toContain("[paid-pro-send-gate]");
+    expect(intake).toMatch(/stickyRecipientBlockedNudge[\s\S]*"send_agreement"/);
+    expect(intake).toContain("openForSendEmailGate");
+    expect(intake).toMatch(/runPrimaryIntakeAction[\s\S]*flushSync/);
+  });
+
   it("unified primary CTA: paid draft recipient surface resolves send_agreement before DRAFT continue_to_recipients", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const unifiedStart = intake.indexOf("const unifiedPrimaryCta = useMemo(");
