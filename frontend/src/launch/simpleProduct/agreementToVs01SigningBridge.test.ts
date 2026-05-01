@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import { buildAgreementVs01BridgeSession, fetchAgreementVs01SigningSeed } from "./agreementToVs01SigningBridge";
+import {
+  buildAgreementVs01BridgeSession,
+  fetchAgreementVs01SigningSeed,
+  logAgreementVs01SeedBlocked,
+} from "./agreementToVs01SigningBridge";
 
 describe("buildAgreementVs01BridgeSession", () => {
   it("maps owner to creator and other parties to counterparties", () => {
@@ -28,14 +32,56 @@ describe("buildAgreementVs01BridgeSession", () => {
 });
 
 describe("paid Pro sender-first VS01 route shape (static)", () => {
-  it("SimpleSendPage seeds VS01 esign before agreement /sign fallback", () => {
+  it("SimpleSendPage seeds VS01 then navigates to esign; seed failure hard-blocks without resolvePremiumSenderFirstSigningPath", () => {
     const p = join(__dirname, "SimpleSendPage.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("fetchAgreementVs01SigningSeed");
     expect(s).toContain("/app/esign/");
     expect(s).toContain("agreement_bridge=1");
     expect(s).toContain("logAgreementToVs01EsignRoute");
+    expect(s).toContain("logAgreementVs01SeedBlocked");
     expect(s).toContain("vs01_seed_failed");
+    expect(s).toContain("senderFirstVs01SeedFailure");
+    expect(s).not.toContain("resolvePremiumSenderFirstSigningPath");
+    expect(s).not.toContain("premiumSenderFirstSigningRoute");
+    const seedCall = s.indexOf("fetchAgreementVs01SigningSeed(id)");
+    const blockedCall = s.indexOf("logAgreementVs01SeedBlocked(");
+    expect(seedCall).toBeGreaterThanOrEqual(0);
+    expect(blockedCall).toBeGreaterThan(seedCall);
+  });
+});
+
+describe("agreementToVs01SigningBridge logging (static)", () => {
+  it("logs seed success and route in all environments", () => {
+    const p = join(__dirname, "agreementToVs01SigningBridge.ts");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("[agreement-vs01-seed-success]");
+    expect(s).toContain("[agreement-to-vs01-esign-route]");
+    expect(s).toContain("[agreement-vs01-seed-blocked]");
+    expect(s).toContain("logAgreementVs01SeedBlocked");
+    expect(s).not.toMatch(/logAgreementToVs01EsignRoute[\s\S]*import\.meta\.env\.DEV/);
+  });
+});
+
+describe("logAgreementVs01SeedBlocked", () => {
+  it("logs paid_pro_sender_first with agreementId, status, and detail", () => {
+    const w = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logAgreementVs01SeedBlocked({
+      agreementId: "agr-block",
+      status: 503,
+      detail: { code: "vs01_down", message: "try later" },
+      source: "paid_pro_sender_first",
+    });
+    expect(w).toHaveBeenCalledWith(
+      "[agreement-vs01-seed-blocked]",
+      expect.objectContaining({
+        agreementId: "agr-block",
+        status: 503,
+        detail: { code: "vs01_down", message: "try later" },
+        source: "paid_pro_sender_first",
+      }),
+    );
+    w.mockRestore();
   });
 });
 
@@ -45,7 +91,7 @@ describe("fetchAgreementVs01SigningSeed", () => {
   });
 
   it("maps structured FastAPI detail to reason and preserves status", async () => {
-    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({

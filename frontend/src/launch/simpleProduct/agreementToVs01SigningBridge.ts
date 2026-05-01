@@ -90,14 +90,23 @@ export type AgreementVs01SigningSeedResult =
  * POST /api/agreements/:id/vs01-signing-seed — returns VS01 document_id for `/app/esign/:documentId`.
  */
 export function logAgreementToVs01EsignRoute(payload: Record<string, unknown>): void {
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.info("[agreement-to-vs01-esign-route]", {
-      source: "paid_pro_sender_first",
-      signerFirst: true,
-      ...payload,
-    });
-  }
+  // eslint-disable-next-line no-console
+  console.info("[agreement-to-vs01-esign-route]", {
+    source: "paid_pro_sender_first",
+    signerFirst: true,
+    ...payload,
+  });
+}
+
+/** Paid Pro sender-first: VS01 seed failed; user stays on SimpleSend (no alternate route). */
+export function logAgreementVs01SeedBlocked(payload: {
+  agreementId: string;
+  status: number | null;
+  detail: unknown;
+  source: "paid_pro_sender_first";
+}): void {
+  // eslint-disable-next-line no-console
+  console.warn("[agreement-vs01-seed-blocked]", payload);
 }
 
 function vs01SeedFailureReason(detail: unknown, httpStatus: number): string {
@@ -124,29 +133,32 @@ export async function fetchAgreementVs01SigningSeed(agreementId: string): Promis
     if (!res.ok) {
       const d = j.detail;
       const reason = vs01SeedFailureReason(d, res.status);
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.info("[agreement-vs01-seed-failed]", {
-          agreementId: id,
-          status: res.status,
-          detail: d,
-        });
-      }
+      // eslint-disable-next-line no-console
+      console.warn("[agreement-vs01-seed-failed]", {
+        agreementId: id,
+        status: res.status,
+        detail: d,
+        raw: j,
+      });
       return { ok: false, reason, httpStatus: res.status, detail: d };
     }
     const docId = typeof j.document_id === "string" ? j.document_id.trim() : "";
     if (!docId) return { ok: false, reason: "missing_document_id" };
     const hash = typeof j.content_sha256 === "string" ? j.content_sha256.trim() : null;
+    // eslint-disable-next-line no-console
+    console.info("[agreement-vs01-seed-success]", {
+      agreementId: id,
+      documentId: docId,
+      content_sha256: hash,
+    });
     return { ok: true, documentId: docId, contentSha256: hash };
   } catch {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.info("[agreement-vs01-seed-failed]", {
-        agreementId: id,
-        status: 0,
-        detail: "network",
-      });
-    }
+    // eslint-disable-next-line no-console
+    console.warn("[agreement-vs01-seed-failed]", {
+      agreementId: id,
+      status: 0,
+      detail: "network",
+    });
     return { ok: false, reason: "network", httpStatus: 0, detail: "network" };
   }
 }

@@ -36,28 +36,21 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("paidProSendBranch.paidProSendAllowed");
   });
 
-  it("sender-first paid Pro signature navigates to professional e-sign path (/agreements/:id/sign), not workspace wizard", () => {
+  it("sender-first paid Pro uses VS01 seed only: no /agreements sign, no /app/send navigate, hard-block UI on seed failure", () => {
     const p = join(__dirname, "SimpleSendPage.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY");
-    expect(s).toContain("senderFirstGaveUpStorageKey");
+    expect(s).not.toContain("senderFirstGaveUpStorageKey");
     expect(s).toContain("peekPremiumSenderSignFirst()");
-    expect(s).toContain("resolvePremiumSenderFirstSigningPath");
-    expect(s).toContain("./premiumSenderFirstSigningRoute");
-    expect(s).toMatch(/\[sender-first-professional-esign-route\][\s\S]*tokenStatus[\s\S]*lockedVersionId/);
-    expect(s).not.toContain("navigate(`/app/agreements/");
-    expect(s).not.toContain("void navigate(`/app/agreements/");
-    expect(s).not.toMatch(/resolved\?\.path\s*\?\?\s*[`'"]\/app\/send/);
-    expect(s).toContain('resolved?.path.startsWith("/agreements/")');
-  });
-
-  it("sender-first gave-up session key is written only after resolution fails, not before route check", () => {
-    const p = join(__dirname, "SimpleSendPage.tsx");
-    const s = readFileSync(p, "utf8");
-    const routeGate = s.indexOf('resolved?.path.startsWith("/agreements/")');
-    const gaveUpSet = s.indexOf("sessionStorage.setItem(senderFirstGaveUpStorageKey(id)");
-    expect(routeGate).toBeGreaterThanOrEqual(0);
-    expect(gaveUpSet).toBeGreaterThan(routeGate);
+    expect(s).not.toContain("resolvePremiumSenderFirstSigningPath");
+    expect(s).not.toContain("premiumSenderFirstSigningRoute");
+    expect(s).not.toMatch(/navigate\([^)]*\/agreements\/[^)]*sign/);
+    expect(s).not.toMatch(/navigate\(`\/app\/send\//);
+    expect(s).toContain("logAgreementVs01SeedBlocked");
+    expect(s).toContain("senderFirstVs01SeedBlocked");
+    expect(s).toContain("We could not open the e-sign workspace.");
+    expect(s).toContain("Continue without VS01 e-sign");
+    expect(s).toContain("const route = `/app/esign/${encodeURIComponent(vs01Seed.documentId)}?agreement_bridge=1`");
   });
 
   it("sender-first redirect is gated on signature handoff intent and peekPremiumSenderSignFirst", () => {

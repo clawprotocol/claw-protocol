@@ -34,9 +34,9 @@ import {
   buildAgreementVs01BridgeSession,
   fetchAgreementVs01SigningSeed,
   logAgreementToVs01EsignRoute,
+  logAgreementVs01SeedBlocked,
   writeAgreementVs01BridgeSession,
 } from "./agreementToVs01SigningBridge";
-import { resolvePremiumSenderFirstSigningPath } from "./premiumSenderFirstSigningRoute";
 import { getPricingCadencePreference } from "../pricingCadenceStorage";
 import { useLaunchNav } from "../LaunchNavContext";
 import { SimpleFlowShell } from "./SimpleFlowShell";
@@ -48,12 +48,8 @@ const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
 
 const SIMPLE_SEND_PHASE_SS_KEY = (id: string) => `claw_simple_send_phase_v1_${encodeURIComponent(id)}`;
 
-/** After sender-first auto-route (VS01 `/app/esign/...` or `/agreements/.../sign`) to avoid duplicate redirects. */
+/** After sender-first auto-route to VS01 `/app/esign/...` to avoid duplicate redirects. */
 const SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY = "claw_premium_sender_sign_first_workspace_routed_v1";
-
-function senderFirstGaveUpStorageKey(agreementId: string): string {
-  return `claw_premium_sender_sign_first_route_gave_up_v1_${encodeURIComponent(agreementId.trim())}`;
-}
 
 function readPersistedSendPhase(id: string): "send" | null {
   try {
@@ -77,6 +73,15 @@ function clearPersistedSendPhase(id: string) {
   } catch {
     /* ignore */
   }
+}
+
+function formatVs01SeedFailureDetail(detail: unknown): string {
+  if (detail == null || typeof detail !== "object") return "";
+  const o = detail as Record<string, unknown>;
+  const stage = typeof o.stage === "string" ? o.stage.trim() : "";
+  const code = typeof o.code === "string" ? o.code.trim() : "";
+  const msg = typeof o.message === "string" ? o.message.trim() : "";
+  return [stage && `stage=${stage}`, code && `code=${code}`, msg && `message=${msg}`].filter(Boolean).join(" ");
 }
 
 export function SimpleSendPage(props: { agreementId: string }) {
@@ -133,7 +138,14 @@ export function SimpleSendPage(props: { agreementId: string }) {
   const [sendUnlockTick, setSendUnlockTick] = useState(0);
   const [senderFirstBannerDismissed, setSenderFirstBannerDismissed] = useState(false);
   const [senderFirstSigningRouteOpening, setSenderFirstSigningRouteOpening] = useState(false);
-  const [senderFirstSigningRouteFallback, setSenderFirstSigningRouteFallback] = useState(false);
+  /** VS01 seed failed: stay on page, blocking card (no /agreements/.../sign, no premium signing-route fallback). */
+  const [senderFirstVs01SeedBlocked, setSenderFirstVs01SeedBlocked] = useState(false);
+  /** Structured API error when POST vs01-signing-seed fails (shown in banner; logged via logAgreementToVs01EsignRoute). */
+  const [senderFirstVs01SeedFailure, setSenderFirstVs01SeedFailure] = useState<{
+    reason: string;
+    httpStatus?: number;
+    detail?: unknown;
+  } | null>(null);
   const [senderFirstRouteRetryTick, setSenderFirstRouteRetryTick] = useState(0);
   const authoritativeProBypassRef = useRef(paidProSendBranch.paidProSendAllowed);
   authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
@@ -293,8 +305,9 @@ export function SimpleSendPage(props: { agreementId: string }) {
 
   useEffect(() => {
     setSenderFirstBannerDismissed(false);
-    setSenderFirstSigningRouteFallback(false);
+    setSenderFirstVs01SeedBlocked(false);
     setSenderFirstSigningRouteOpening(false);
+    setSenderFirstVs01SeedFailure(null);
   }, [agreementId]);
 
   useEffect(() => {
@@ -312,29 +325,16 @@ export function SimpleSendPage(props: { agreementId: string }) {
       } catch {
         return;
       }
-      try {
-        if (sessionStorage.getItem(senderFirstGaveUpStorageKey(id)) === "1") {
-          if (!cancelled) setSenderFirstSigningRouteFallback(true);
-          return;
-        }
-      } catch {
-        /* ignore */
-      }
-
       startedResolve = true;
       if (!cancelled) {
         setSenderFirstSigningRouteOpening(true);
-        setSenderFirstSigningRouteFallback(false);
+        setSenderFirstVs01SeedBlocked(false);
+        setSenderFirstVs01SeedFailure(null);
       }
-
-      const parties = initialDraftSnapshot?.parties as ReadonlyArray<{ id?: string; role?: string }> | undefined;
-      const ownerPid =
-        parties?.find((p) => (p?.role || "").toLowerCase() === "owner")?.id?.trim() ||
-        parties?.[0]?.id?.trim() ||
-        null;
 
       const vs01Seed = await fetchAgreementVs01SigningSeed(id);
       if (!cancelled && vs01Seed.ok) {
+        setSenderFirstVs01SeedFailure(null);
         const bridge = buildAgreementVs01BridgeSession({
           agreementId: id,
           vs01DocumentId: vs01Seed.documentId,
@@ -344,7 +344,6 @@ export function SimpleSendPage(props: { agreementId: string }) {
         try {
           if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) !== id) {
             sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);
-            sessionStorage.removeItem(senderFirstGaveUpStorageKey(id));
           }
         } catch {
           return;
@@ -360,7 +359,12 @@ export function SimpleSendPage(props: { agreementId: string }) {
         void navigate(route);
         return;
       }
-      if (import.meta.env.DEV && !cancelled && !vs01Seed.ok) {
+      if (!cancelled && !vs01Seed.ok) {
+        setSenderFirstVs01SeedFailure({
+          reason: vs01Seed.reason,
+          httpStatus: vs01Seed.httpStatus,
+          detail: vs01Seed.detail,
+        });
         logAgreementToVs01EsignRoute({
           agreementId: id,
           seedDocumentId: null,
@@ -369,65 +373,18 @@ export function SimpleSendPage(props: { agreementId: string }) {
           status: vs01Seed.httpStatus ?? null,
           detail: vs01Seed.detail ?? vs01Seed.reason,
         });
-      }
-
-      let resolved: Awaited<ReturnType<typeof resolvePremiumSenderFirstSigningPath>> = null;
-      try {
-        resolved = await resolvePremiumSenderFirstSigningPath({
+        logAgreementVs01SeedBlocked({
           agreementId: id,
-          ownerPartyId: ownerPid,
+          status: vs01Seed.httpStatus ?? null,
+          detail: vs01Seed.detail ?? vs01Seed.reason,
+          source: "paid_pro_sender_first",
         });
-      } catch {
-        resolved = null;
-      }
-      if (cancelled) return;
-
-      if (resolved?.path.startsWith("/agreements/")) {
-        try {
-          if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) === id) return;
-          sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);
-          sessionStorage.removeItem(senderFirstGaveUpStorageKey(id));
-        } catch {
-          return;
-        }
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.info("[sender-first-professional-esign-route]", {
-            agreementId: id,
-            ownerPartyId: ownerPid,
-            route: resolved.path,
-            tokenStatus: resolved.tokenStatus,
-            lockedVersionId: resolved.lockedVersionId,
-            reason: resolved.reason,
-            from: "/app/send",
-            surface: "AgreementRecipientReview_sign",
-          });
-        }
-        void navigate(resolved.path);
+        if (startedResolve && !cancelled) setSenderFirstSigningRouteOpening(false);
+        if (!cancelled) setSenderFirstVs01SeedBlocked(true);
         return;
       }
 
       if (startedResolve && !cancelled) setSenderFirstSigningRouteOpening(false);
-
-      try {
-        sessionStorage.setItem(senderFirstGaveUpStorageKey(id), "1");
-      } catch {
-        /* ignore */
-      }
-      if (!cancelled) setSenderFirstSigningRouteFallback(true);
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.info("[sender-first-professional-esign-route]", {
-          agreementId: id,
-          ownerPartyId: ownerPid,
-          route: null,
-          tokenStatus: "unresolved",
-          lockedVersionId: null,
-          reason: "fallback_activated_send_surface",
-          event: "fallback_blocked",
-          surface: "AgreementRecipientReview_sign",
-        });
-      }
     })();
     return () => {
       cancelled = true;
@@ -497,36 +454,55 @@ export function SimpleSendPage(props: { agreementId: string }) {
       simpleFlowPhase === "send" &&
       peekPremiumSenderSignFirst() &&
       !senderFirstBannerDismissed ? (
-        senderFirstSigningRouteFallback ? (
-          <div className="mb-4 rounded-lg border border-rose-500/35 bg-rose-950/20 px-4 py-3 text-sm leading-snug text-rose-50/95">
-            <span className="font-semibold">Sign first:</span> We could not open your signing step yet. Create
-            signature links below or try again.{" "}
-            <button
-              type="button"
-              className="font-medium text-rose-200 underline decoration-rose-400/50 underline-offset-2 hover:text-rose-50"
-              onClick={() => {
-                const aid = agreementId.trim();
-                try {
-                  sessionStorage.removeItem(senderFirstGaveUpStorageKey(aid));
-                } catch {
-                  /* ignore */
-                }
-                setSenderFirstSigningRouteFallback(false);
-                setSenderFirstRouteRetryTick((n) => n + 1);
-              }}
-            >
-              Try again
-            </button>{" "}
-            <button
-              type="button"
-              className="font-medium text-rose-200 underline decoration-rose-400/50 underline-offset-2 hover:text-rose-50"
-              onClick={() => {
-                clearPremiumSenderSignFirst();
-                setSenderFirstBannerDismissed(true);
-              }}
-            >
-              Dismiss
-            </button>
+        senderFirstVs01SeedBlocked ? (
+          <div
+            role="alert"
+            className="mb-4 rounded-xl border border-rose-500/40 bg-rose-950/25 px-4 py-4 text-sm leading-snug text-rose-50/95 sm:px-5"
+          >
+            <p className="font-semibold text-rose-100">We could not open the e-sign workspace.</p>
+            <p className="mt-2 text-xs text-rose-100/90">
+              {senderFirstVs01SeedFailure?.httpStatus != null ? (
+                <span className="font-mono">Status {senderFirstVs01SeedFailure.httpStatus}</span>
+              ) : (
+                <span className="font-mono">Request failed</span>
+              )}
+              {senderFirstVs01SeedFailure ? (
+                <>
+                  {" "}
+                  <span className="block font-mono text-[11px] leading-relaxed text-rose-100/85 sm:mt-1">
+                    {senderFirstVs01SeedFailure.reason}
+                    {formatVs01SeedFailureDetail(senderFirstVs01SeedFailure.detail)
+                      ? ` · ${formatVs01SeedFailureDetail(senderFirstVs01SeedFailure.detail)}`
+                      : ""}
+                  </span>
+                </>
+              ) : null}
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                onClick={() => {
+                  setSenderFirstVs01SeedBlocked(false);
+                  setSenderFirstVs01SeedFailure(null);
+                  setSenderFirstRouteRetryTick((n) => n + 1);
+                }}
+              >
+                Try again
+              </button>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm text-slate-200"
+                onClick={() => {
+                  clearPremiumSenderSignFirst();
+                  setSenderFirstVs01SeedBlocked(false);
+                  setSenderFirstVs01SeedFailure(null);
+                  setSenderFirstSigningRouteOpening(false);
+                }}
+              >
+                Continue without VS01 e-sign
+              </button>
+            </div>
           </div>
         ) : senderFirstSigningRouteOpening ? (
           <div className="mb-4 rounded-lg border border-amber-500/35 bg-amber-950/25 px-4 py-3 text-sm leading-snug text-amber-50/95">
