@@ -347,14 +347,15 @@ export function SimpleSendPage(props: { agreementId: string }) {
         }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
-          console.info("[premium-sender-first-route]", {
+          console.info("[sender-first-professional-esign-route]", {
             agreementId: id,
-            from: "/app/send",
-            to: resolved.path,
-            reason: resolved.reason,
+            ownerPartyId: ownerPid,
+            route: resolved.path,
             tokenStatus: resolved.tokenStatus,
             lockedVersionId: resolved.lockedVersionId,
-            ownerPartyId: ownerPid,
+            reason: resolved.reason,
+            from: "/app/send",
+            surface: "AgreementRecipientReview_sign",
           });
         }
         void navigate(resolved.path);
@@ -371,14 +372,15 @@ export function SimpleSendPage(props: { agreementId: string }) {
       if (!cancelled) setSenderFirstSigningRouteFallback(true);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.info("[premium-sender-first-route]", {
+        console.info("[sender-first-professional-esign-route]", {
           agreementId: id,
-          from: "/app/send",
-          to: null,
-          reason: "no_professional_signing_route",
+          ownerPartyId: ownerPid,
+          route: null,
           tokenStatus: "unresolved",
           lockedVersionId: null,
-          ownerPartyId: ownerPid,
+          reason: "fallback_activated_send_surface",
+          event: "fallback_blocked",
+          surface: "AgreementRecipientReview_sign",
         });
       }
     })();

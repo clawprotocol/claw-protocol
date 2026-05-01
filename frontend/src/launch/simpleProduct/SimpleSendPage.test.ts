@@ -44,11 +44,20 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("peekPremiumSenderSignFirst()");
     expect(s).toContain("resolvePremiumSenderFirstSigningPath");
     expect(s).toContain("./premiumSenderFirstSigningRoute");
-    expect(s).toMatch(/\[premium-sender-first-route\][\s\S]*tokenStatus[\s\S]*lockedVersionId/);
+    expect(s).toMatch(/\[sender-first-professional-esign-route\][\s\S]*tokenStatus[\s\S]*lockedVersionId/);
     expect(s).not.toContain("navigate(`/app/agreements/");
     expect(s).not.toContain("void navigate(`/app/agreements/");
     expect(s).not.toMatch(/resolved\?\.path\s*\?\?\s*[`'"]\/app\/send/);
     expect(s).toContain('resolved?.path.startsWith("/agreements/")');
+  });
+
+  it("sender-first gave-up session key is written only after resolution fails, not before route check", () => {
+    const p = join(__dirname, "SimpleSendPage.tsx");
+    const s = readFileSync(p, "utf8");
+    const routeGate = s.indexOf('resolved?.path.startsWith("/agreements/")');
+    const gaveUpSet = s.indexOf("sessionStorage.setItem(senderFirstGaveUpStorageKey(id)");
+    expect(routeGate).toBeGreaterThanOrEqual(0);
+    expect(gaveUpSet).toBeGreaterThan(routeGate);
   });
 
   it("sender-first redirect is gated on signature handoff intent and peekPremiumSenderSignFirst", () => {
