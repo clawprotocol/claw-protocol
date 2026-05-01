@@ -12,10 +12,11 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config.storage_runtime import unified_artifact_store_enabled
 
@@ -26,22 +27,64 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _legacy_storage_bases() -> Tuple[Path, ...]:
+    """
+    Ordered roots for VS01 legacy on-disk bodies (first writable wins on write).
+
+    Railway / PaaS: prefer explicit dirs, then process temp (writable even when cwd is read-only),
+    then repo-relative ``artifacts/documents`` for local dev only.
+    """
+    raw: List[Path] = []
+    cd = os.getenv("CLAW_DOCUMENTS_DIR", "").strip()
+    if cd:
+        raw.append(Path(cd).expanduser())
+    dd = os.getenv("CLAW_DATA_DIR", "").strip()
+    if dd:
+        raw.append(Path(dd).expanduser() / "documents")
+    raw.append(Path(tempfile.gettempdir()) / "claw-documents")
+    raw.append(Path("artifacts/documents"))
+    seen: set[str] = set()
+    bases: List[Path] = []
+    for p in raw:
+        try:
+            rp = p.resolve()
+        except OSError:
+            rp = p.expanduser()
+        key = str(rp)
+        if key not in seen:
+            seen.add(key)
+            bases.append(rp)
+    return tuple(bases)
+
+
 def documents_root() -> Path:
-    return Path(os.getenv("CLAW_DOCUMENTS_DIR", "artifacts/documents")).expanduser().resolve()
+    """Primary legacy root (first configured candidate); see ``_legacy_storage_bases``."""
+    bases = _legacy_storage_bases()
+    return bases[0] if bases else Path(tempfile.gettempdir()) / "claw-documents"
+
+
+def document_storage_seed_error_context() -> Dict[str, Any]:
+    """Structured fields for VS01 signing-seed errors (safe for API detail + logs)."""
+    candidates: List[str] = []
+    for p in _legacy_storage_bases():
+        try:
+            candidates.append(str(p.resolve()))
+        except OSError:
+            candidates.append(str(p))
+    return {
+        "documents_candidates": candidates,
+        "unified_artifact_store_enabled": unified_artifact_store_enabled(),
+    }
 
 
 def _legacy_mirror_enabled() -> bool:
     return os.getenv("CLAW_VS01_LEGACY_FILE_MIRROR", "1").strip().lower() in ("1", "true", "yes")
 
 
-def _doc_dir(document_id: str) -> Path:
+def _write_legacy_layout_at_base(base: Path, document_id: str, content: bytes, meta: Dict[str, Any]) -> None:
     if not document_id or "/" in document_id or ".." in document_id:
         raise ValueError("invalid_document_id")
-    return documents_root() / document_id
-
-
-def _write_legacy_layout(document_id: str, content: bytes, meta: Dict[str, Any]) -> None:
-    root = _doc_dir(document_id)
+    root = base / document_id
     root.mkdir(parents=True, exist_ok=True)
     (root / "body.bin").write_bytes(content)
     (root / "meta.json").write_text(
@@ -50,32 +93,50 @@ def _write_legacy_layout(document_id: str, content: bytes, meta: Dict[str, Any])
     )
 
 
+def _write_legacy_layout(document_id: str, content: bytes, meta: Dict[str, Any]) -> None:
+    """Write legacy mirror; try every configured base until one succeeds (Railway read-only cwd, etc.)."""
+    last_exc: Optional[BaseException] = None
+    for base in _legacy_storage_bases():
+        try:
+            _write_legacy_layout_at_base(base, document_id, content, meta)
+            log.info("finalize_document legacy write ok base=%s document_id=%s", base, document_id)
+            return
+        except (OSError, ValueError) as exc:
+            last_exc = exc
+            log.warning(
+                "finalize_document legacy write failed base=%s document_id=%s err_type=%s",
+                base,
+                document_id,
+                type(exc).__name__,
+            )
+            continue
+    raise OSError(
+        f"vs01_legacy_write_exhausted:{type(last_exc).__name__}:{str(last_exc)[:500]}"
+    ) from last_exc
+
+
 def _read_legacy_meta(document_id: str) -> Optional[Dict[str, Any]]:
-    try:
-        d = _doc_dir(document_id)
-    except ValueError:
-        return None
-    meta_path = d / "meta.json"
-    if not meta_path.is_file():
-        return None
-    try:
-        return json.loads(meta_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    for base in _legacy_storage_bases():
+        meta_path = base / document_id / "meta.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            return json.loads(meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return None
 
 
 def _read_legacy_body(document_id: str) -> Optional[bytes]:
-    try:
-        d = _doc_dir(document_id)
-    except ValueError:
-        return None
-    body = d / "body.bin"
-    if not body.is_file():
-        return None
-    try:
-        return body.read_bytes()
-    except OSError:
-        return None
+    for base in _legacy_storage_bases():
+        body = base / document_id / "body.bin"
+        if not body.is_file():
+            continue
+        try:
+            return body.read_bytes()
+        except OSError:
+            continue
+    return None
 
 
 def finalize_document(
@@ -100,10 +161,11 @@ def finalize_document(
         "content_type": ct,
     }
 
-    try:
-        documents_root().mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
+    for base in _legacy_storage_bases():
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
 
     if unified_artifact_store_enabled():
         try:
@@ -135,6 +197,12 @@ def finalize_document(
                     _write_legacy_layout(document_id, content, meta)
                 except FileExistsError:
                     pass
+                except Exception as mirror_exc:
+                    log.warning(
+                        "finalize_document: legacy mirror after unified write skipped (%s: %s)",
+                        type(mirror_exc).__name__,
+                        str(mirror_exc)[:400],
+                    )
             return meta
         except NotImplementedError as exc:
             log.warning(

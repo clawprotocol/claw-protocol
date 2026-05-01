@@ -2035,6 +2035,50 @@ def test_vs01_signing_seed_endpoint_ok(monkeypatch, tmp_path):
     assert isinstance(hsh, str) and len(hsh) == 64
 
 
+def test_vs01_signing_seed_ok_when_economics_watermark_raises(monkeypatch, tmp_path):
+    """Regression Railway: economics_overlay / store failures must not 503 VS01 signing seed."""
+    import backend.routers.agreements_v2_api as agreements_v2_api
+
+    pytest.importorskip("fitz")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    client = TestClient(app)
+    h = {"X-Claw-Org-Id": "test-vs01-seed-econ-fail"}
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "VS01 Seed Econ FailOpen",
+            "jurisdiction": "Delaware",
+            "parties": [
+                {"name": "Owner Co", "role": "owner", "email": "o@example.com"},
+                {"name": "Other Co", "role": "signer", "email": "s@example.com"},
+            ],
+            "purpose": "Testing VS01 seed when economics watermark lookup fails.",
+            "payment_terms": "$1",
+            "duration": "1 month",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    agreement_id = create_res.json()["id"]
+
+    def _boom_wm(_agreement_id: str):
+        raise RuntimeError("simulated_economics_store_down")
+
+    monkeypatch.setattr(agreements_v2_api, "_watermark_active_for_agreement", _boom_wm)
+    seed = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=h,
+        json={},
+    )
+    assert seed.status_code == 200, seed.text
+    body = seed.json()
+    assert body.get("document_id", "").startswith("doc_")
+    assert len(body.get("content_sha256", "")) == 64
+
+
 def test_vs01_signing_seed_structured_detail_when_render_html_raises(monkeypatch, tmp_path):
     """Unexpected errors in render must return JSON detail with stage/code, not a bare 500 body."""
     import backend.routers.agreements_v2_api as agreements_v2_api
@@ -2080,6 +2124,57 @@ def test_vs01_signing_seed_structured_detail_when_render_html_raises(monkeypatch
     assert detail.get("stage") == "render_html"
     assert detail.get("code") == "vs01_signing_seed_render_failed"
     assert detail.get("exc_type") == "RuntimeError"
+
+
+def test_vs01_signing_seed_structured_detail_when_finalize_storage_exhausted(monkeypatch, tmp_path):
+    """503 detail includes documents_candidates when legacy finalize cannot write anywhere."""
+    from backend.services import document_service as ds
+
+    pytest.importorskip("fitz")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setattr("backend.services.document_service.unified_artifact_store_enabled", lambda: False)
+
+    def _always_fail(*_a, **_k):
+        raise OSError("simulated_no_writable_root")
+
+    monkeypatch.setattr(ds, "_write_legacy_layout", _always_fail)
+    client = TestClient(app)
+    h = {"X-Claw-Org-Id": "test-vs01-seed-storage-exhausted"}
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "VS01 Seed Storage Exhausted",
+            "jurisdiction": "Delaware",
+            "parties": [
+                {"name": "Owner Co", "role": "owner", "email": "o@example.com"},
+                {"name": "Other Co", "role": "signer", "email": "s@example.com"},
+            ],
+            "purpose": "Testing finalize structured storage context.",
+            "payment_terms": "$1",
+            "duration": "1 month",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    agreement_id = create_res.json()["id"]
+    seed = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=h,
+        json={},
+    )
+    assert seed.status_code == 503, seed.text
+    detail = seed.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail.get("agreement_id") == agreement_id
+    assert detail.get("stage") == "finalize_document"
+    assert detail.get("code") == "vs01_finalize_failed"
+    assert detail.get("exc_type") == "OSError"
+    assert "documents_candidates" in detail
+    assert isinstance(detail.get("documents_candidates"), list)
+    assert len(detail["documents_candidates"]) >= 1
 
 
 def test_vs01_signing_seed_structured_detail_when_finalize_meta_missing_document_id(

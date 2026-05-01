@@ -4584,6 +4584,7 @@ def _vs01_signing_seed_error_detail(
     code: str,
     message: str,
     exc: Optional[BaseException] = None,
+    extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "code": code,
@@ -4593,6 +4594,10 @@ def _vs01_signing_seed_error_detail(
     }
     if exc is not None:
         out["exc_type"] = type(exc).__name__
+    if extra:
+        for k, v in extra.items():
+            if v is not None:
+                out[k] = v
     return out
 
 
@@ -4666,24 +4671,19 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
             ),
         ) from exc
 
-    # --- economics_watermark ---
+    # --- economics_watermark (fail-open: seed must not depend on usage-economics DB uptime) ---
     try:
         wm = _watermark_active_for_agreement(aid)
     except Exception as exc:
-        log.exception(
-            "[agreement-vs01-seed] event=failure agreement_id=%s stage=economics_watermark status=503 code=economics",
+        log.warning(
+            "[agreement-vs01-seed] event=warning agreement_id=%s stage=economics_watermark status=200 "
+            "code=economics_overlay_skipped exc_type=%s msg=%s — using watermark=false for VS01 seed",
             aid,
+            type(exc).__name__,
+            (str(exc) or "")[:400],
+            exc_info=True,
         )
-        raise HTTPException(
-            status_code=503,
-            detail=_vs01_signing_seed_error_detail(
-                agreement_id=aid,
-                stage="economics_watermark",
-                code="vs01_signing_seed_economics_failed",
-                message=str(exc) or type(exc).__name__,
-                exc=exc,
-            ),
-        ) from exc
+        wm = False
 
     # --- render_html ---
     try:
@@ -4744,14 +4744,19 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
             built.pdf_bytes, content_type="application/pdf"
         )
     except Exception as exc:
+        _seed_store_ctx = document_service.document_storage_seed_error_context()
         log.exception(
             "[agreement-vs01-seed] event=failure agreement_id=%s stage=finalize_document status=503 "
-            "html_len=%s pdf_len=%s render_mode=%s exc_type=%s",
+            "code=vs01_finalize_failed html_len=%s pdf_len=%s render_mode=%s exc_type=%s msg=%s "
+            "documents_candidates=%s unified_artifact_store=%s",
             aid,
             html_len,
             pdf_len,
             getattr(built, "render_mode", None),
             type(exc).__name__,
+            (str(exc) or "")[:500],
+            _seed_store_ctx.get("documents_candidates"),
+            _seed_store_ctx.get("unified_artifact_store_enabled"),
         )
         raise HTTPException(
             status_code=503,
@@ -4761,6 +4766,7 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
                 code="vs01_finalize_failed",
                 message=str(exc) or type(exc).__name__,
                 exc=exc,
+                extra=_seed_store_ctx,
             ),
         ) from exc
 

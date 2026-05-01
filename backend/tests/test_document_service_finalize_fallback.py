@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -44,3 +46,56 @@ def test_finalize_document_falls_back_to_legacy_when_put_artifact_not_implemente
     assert (root / "body.bin").is_file()
     meta_disk = json.loads((root / "meta.json").read_text(encoding="utf-8"))
     assert meta_disk.get("document_id") == doc_id
+
+
+def test_finalize_document_legacy_uses_fallback_base_when_primary_unusable(monkeypatch, tmp_path):
+    """Regression: Railway cwd may be read-only; CLAW_DATA_DIR/documents must still accept writes."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "blocked"))
+    (tmp_path / "blocked").write_text("not-a-directory", encoding="utf-8")
+    monkeypatch.setenv("CLAW_UNIFIED_ARTIFACT_STORE", "0")
+
+    meta = document_service.finalize_document(b"%PDF-1.4 ok", content_type="application/pdf")
+    doc_id = meta["document_id"]
+    fallback = tmp_path / "data" / "documents" / doc_id
+    assert (fallback / "body.bin").is_file()
+    assert json.loads((fallback / "meta.json").read_text(encoding="utf-8")).get("document_id") == doc_id
+
+
+def test_finalize_document_writes_temp_claw_documents_when_data_and_documents_dirs_unset(
+    monkeypatch, tmp_path,
+):
+    """Regression Railway: without CLAW_DATA_DIR / CLAW_DOCUMENTS_DIR, use temp dir (not cwd artifacts)."""
+    monkeypatch.delenv("CLAW_DOCUMENTS_DIR", raising=False)
+    monkeypatch.delenv("CLAW_DATA_DIR", raising=False)
+    monkeypatch.setenv("CLAW_UNIFIED_ARTIFACT_STORE", "0")
+    reset_artifact_repository_singleton()
+    meta = document_service.finalize_document(b"%PDF-1.4 temp-only", content_type="application/pdf")
+    doc_id = meta["document_id"]
+    expected = Path(tempfile.gettempdir()) / "claw-documents" / doc_id / "body.bin"
+    assert expected.is_file()
+
+
+def test_finalize_document_unified_success_ignores_legacy_mirror_failure(monkeypatch, tmp_path):
+    """Non-critical legacy mirror must not fail finalize when unified store already persisted."""
+    calls = {"n": 0}
+
+    def _mirror_boom(did: str, content: bytes, meta: dict):
+        calls["n"] += 1
+        raise OSError("simulated_read_only_mirror")
+
+    monkeypatch.setattr(document_service, "_write_legacy_layout", _mirror_boom)
+    meta = document_service.finalize_document(b"%PDF-1.4 mirror-fail", content_type="application/pdf")
+    assert meta.get("document_id", "").startswith("doc_")
+    assert calls["n"] == 1
+
+
+def test_document_storage_seed_error_context_lists_candidates(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "d1"))
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path / "data"))
+    ctx = document_service.document_storage_seed_error_context()
+    assert ctx.get("unified_artifact_store_enabled") is True
+    c = ctx.get("documents_candidates") or []
+    assert any("d1" in str(x) for x in c)
+    assert any("documents" in str(x) for x in c)
+    assert any("claw-documents" in str(x) for x in c)
