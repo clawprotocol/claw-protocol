@@ -36,12 +36,23 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("paidProSendBranch.paidProSendAllowed");
   });
 
-  it("sender-first signature handoff can one-shot navigate to full agreement workspace for owner signing", () => {
+  it("sender-first paid Pro signature navigates to professional e-sign path (/agreements/:id/sign), not workspace wizard", () => {
     const p = join(__dirname, "SimpleSendPage.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY");
     expect(s).toContain("peekPremiumSenderSignFirst()");
-    expect(s).toContain('/app/agreements/${encodeURIComponent(id)}');
+    expect(s).toContain("resolvePremiumSenderFirstSigningPath");
+    expect(s).toContain("agreementSigningPath");
+    expect(s).toContain("[premium-sender-first-route]");
+    expect(s).not.toContain("navigate(`/app/agreements/");
+    expect(s).not.toContain("void navigate(`/app/agreements/");
+  });
+
+  it("sender-first redirect is gated on signature handoff intent and peekPremiumSenderSignFirst", () => {
+    const p = join(__dirname, "SimpleSendPage.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toMatch(/simpleFlowPremiumHandoffIntent\s*!==\s*["']signature["']/);
+    expect(s).toContain("peekPremiumSenderSignFirst()");
   });
 
   it("Send path still gates on recipient readiness (no silent bypass)", () => {

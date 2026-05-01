@@ -12,6 +12,8 @@ import {
   markSimpleFlowSendUnlocked,
 } from "../simpleFlowSendUnlock";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
+import { agreementSigningPath } from "../../agreement/AgreementRecipientReview";
+import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
 import {
   describePaidProSendModalBranch,
@@ -29,6 +31,8 @@ import {
   writePremiumSendIntent,
 } from "./premiumSendIntent";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
+import { mintRecipientAccessToken } from "../../agreement/recipientAccessApi";
+import { resolveApiBase } from "../../lib/clawApi";
 import { getPricingCadencePreference } from "../pricingCadenceStorage";
 import { useLaunchNav } from "../LaunchNavContext";
 import { SimpleFlowShell } from "./SimpleFlowShell";
@@ -40,7 +44,7 @@ const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
 
 const SIMPLE_SEND_PHASE_SS_KEY = (id: string) => `claw_simple_send_phase_v1_${encodeURIComponent(id)}`;
 
-/** One-shot: after sender-first handoff, open full workspace for owner signing without redirect loops. */
+/** One-shot: after sender-first handoff, avoid re-running navigate (professional `/agreements/:id/sign` or send fallback). */
 const SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY = "claw_premium_sender_sign_first_workspace_routed_v1";
 
 function readPersistedSendPhase(id: string): "send" | null {
@@ -65,6 +69,58 @@ function clearPersistedSendPhase(id: string) {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Owner “sign first” after paid Pro send: land on the same recipient signing surface as counterparty signers
+ * (`/agreements/:id/sign` → AgreementRecipientReview), not the agreement workspace wizard.
+ */
+async function resolvePremiumSenderFirstSigningPath(params: {
+  agreementId: string;
+  ownerPartyId?: string | null;
+}): Promise<{ path: string; reason: string } | null> {
+  const id = params.agreementId.trim();
+  if (!id) return null;
+  const mintKey =
+    (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env
+      ?.VITE_RECIPIENT_LINK_MINT_KEY || "";
+  try {
+    const minted = await mintRecipientAccessToken(id, { mode: "sign", role: "signer" }, mintKey);
+    if (minted?.token?.trim() && minted.locked_version_id?.trim()) {
+      return {
+        path: agreementSigningPath(
+          id,
+          minted.locked_version_id.trim(),
+          minted.token.trim(),
+          params.ownerPartyId ?? undefined,
+        ),
+        reason: "minted_sign_token",
+      };
+    }
+  } catch {
+    /* fall through to GET signing_lock */
+  }
+  try {
+    const res = await fetch(`${resolveApiBase()}/api/agreements/${encodeURIComponent(id)}`, {
+      headers: clawAgreementHeaders(),
+    });
+    if (!res.ok) return null;
+    const pl = (await res.json()) as Record<string, unknown>;
+    const sl = pl.signing_lock as Record<string, unknown> | null | undefined;
+    const lv =
+      sl && typeof sl.locked_version_id === "string" && sl.locked_version_id.trim()
+        ? sl.locked_version_id.trim()
+        : "";
+    if (lv) {
+      return {
+        path: agreementSigningPath(id, lv, undefined, params.ownerPartyId ?? undefined),
+        reason: "signing_lock_get",
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export function SimpleSendPage(props: { agreementId: string }) {
@@ -287,13 +343,42 @@ export function SimpleSendPage(props: { agreementId: string }) {
     if (!peekPremiumSenderSignFirst()) return;
     if (!sendAuthoritative) return;
     if (simpleFlowPhase !== "send") return;
-    try {
-      if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) === id) return;
-      sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);
-    } catch {
-      return;
-    }
-    void navigate(`/app/agreements/${encodeURIComponent(id)}`);
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) === id) return;
+      } catch {
+        return;
+      }
+      const ownerPid = (initialDraftSnapshot?.parties?.[0] as { id?: string } | undefined)?.id?.trim() || null;
+      const resolved = await resolvePremiumSenderFirstSigningPath({
+        agreementId: id,
+        ownerPartyId: ownerPid,
+      });
+      if (cancelled) return;
+      try {
+        if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) === id) return;
+        sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);
+      } catch {
+        return;
+      }
+      const fallbackSend = `/app/send/${encodeURIComponent(id)}?phase=send`;
+      const to = resolved?.path ?? fallbackSend;
+      const reason = resolved?.reason ?? "fallback_send_surface_no_signing_context";
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[premium-sender-first-route]", {
+          agreementId: id,
+          from: "/app/send",
+          to,
+          reason,
+        });
+      }
+      void navigate(to);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     agreementId,
     navigate,
@@ -301,6 +386,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
     sendAuthoritative,
     simpleFlowPhase,
     simpleFlowPremiumHandoffIntent,
+    initialDraftSnapshot,
   ]);
 
   return (
