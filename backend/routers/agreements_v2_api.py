@@ -4465,86 +4465,245 @@ def render_agreement(agreement_id: str, request: Request) -> AgreementRenderResp
     )
 
 
+def _vs01_signing_seed_error_detail(
+    *,
+    agreement_id: str,
+    stage: str,
+    code: str,
+    message: str,
+    exc: Optional[BaseException] = None,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "code": code,
+        "message": (message or "")[:2000],
+        "agreement_id": agreement_id,
+        "stage": stage,
+    }
+    if exc is not None:
+        out["exc_type"] = type(exc).__name__
+    return out
+
+
 @router.post("/{agreement_id}/vs01-signing-seed")
 def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dict[str, Any]:
     """
     Owner-only: render locked agreement HTML to PDF and finalize as a VS01 /v1/documents body
     (used by paid Pro sender-first → /app/esign/:documentId bridge).
     """
+    aid = (agreement_id or "").strip()
+    if not aid:
+        log.info(
+            "[agreement-vs01-seed] event=rejected agreement_id= stage=validate status=400 code=missing_agreement_id"
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id="",
+                stage="validate",
+                code="missing_agreement_id",
+                message="agreement_id is required",
+            ),
+        )
+
     if not _agreements_write_allowed():
+        log.info(
+            "[agreement-vs01-seed] event=rejected agreement_id=%s stage=policy status=403 code=verifier_only",
+            aid,
+        )
         raise HTTPException(status_code=403, detail="verifier_only")
-    _owner_mutation_guards(request, agreement_id, surface="vs01_signing_seed")
-    draft = _load_or_404(agreement_id)
-    wm = _watermark_active_for_agreement(agreement_id)
-    html = _render_html(draft, watermark=wm)
+
+    # --- auth_guards ---
+    try:
+        _owner_mutation_guards(request, aid, surface="vs01_signing_seed")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception(
+            "[agreement-vs01-seed] event=failure agreement_id=%s stage=auth_guards status=503 code=auth_guards",
+            aid,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="auth_guards",
+                code="vs01_signing_seed_auth_failed",
+                message=str(exc) or type(exc).__name__,
+                exc=exc,
+            ),
+        ) from exc
+
+    # --- load_agreement ---
+    try:
+        draft = _load_or_404(aid)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception(
+            "[agreement-vs01-seed] event=failure agreement_id=%s stage=load_agreement status=422 code=load_failed",
+            aid,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="load_agreement",
+                code="vs01_signing_seed_load_failed",
+                message=str(exc) or type(exc).__name__,
+                exc=exc,
+            ),
+        ) from exc
+
+    # --- economics_watermark ---
+    try:
+        wm = _watermark_active_for_agreement(aid)
+    except Exception as exc:
+        log.exception(
+            "[agreement-vs01-seed] event=failure agreement_id=%s stage=economics_watermark status=503 code=economics",
+            aid,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="economics_watermark",
+                code="vs01_signing_seed_economics_failed",
+                message=str(exc) or type(exc).__name__,
+                exc=exc,
+            ),
+        ) from exc
+
+    # --- render_html ---
+    try:
+        html = _render_html(draft, watermark=wm)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception(
+            "[agreement-vs01-seed] event=failure agreement_id=%s stage=render_html status=503 code=render_failed",
+            aid,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="render_html",
+                code="vs01_signing_seed_render_failed",
+                message=str(exc) or type(exc).__name__,
+                exc=exc,
+            ),
+        ) from exc
+
     html_len = len(html or "")
     log.info(
-        "[agreement-vs01-seed] start agreement_id=%s html_len=%s watermark=%s",
-        agreement_id,
+        "[agreement-vs01-seed] event=progress agreement_id=%s stage=render_html status=200 html_len=%s watermark=%s",
+        aid,
         html_len,
         bool(wm),
     )
+
+    # --- html_to_pdf ---
+    title = (draft.title or "").strip() or "Agreement"
     try:
-        built = agreement_rendered_html_to_pdf_bytes(
-            html, title=(draft.title or "").strip() or "Agreement"
-        )
+        built = agreement_rendered_html_to_pdf_bytes(html, title=title)
     except Exception as exc:
-        _em = (str(exc) or "")[:500]
         log.exception(
-            "[agreement-vs01-seed] failure agreement_id=%s html_len=%s render_mode=n/a "
-            "exc_type=%s exc_msg=%s",
-            agreement_id,
+            "[agreement-vs01-seed] event=failure agreement_id=%s stage=html_to_pdf status=503 "
+            "html_len=%s exc_type=%s",
+            aid,
             html_len,
             type(exc).__name__,
-            _em,
         )
         raise HTTPException(
-            status_code=500,
-            detail={
-                "code": "vs01_signing_seed_pdf_failed",
-                "message": type(exc).__name__,
-            },
+            status_code=503,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="html_to_pdf",
+                code="vs01_signing_seed_pdf_failed",
+                message=str(exc) or type(exc).__name__,
+                exc=exc,
+            ),
         ) from exc
 
-    pdf_len = len(built.pdf_bytes)
+    pdf_len = len(built.pdf_bytes or b"")
+    # --- finalize_document ---
     try:
         meta = document_service.finalize_document(
             built.pdf_bytes, content_type="application/pdf"
         )
     except Exception as exc:
-        _em = (str(exc) or "")[:500]
         log.exception(
-            "[agreement-vs01-seed] finalize_failure agreement_id=%s html_len=%s pdf_len=%s "
-            "render_mode=%s exc_type=%s exc_msg=%s",
-            agreement_id,
+            "[agreement-vs01-seed] event=failure agreement_id=%s stage=finalize_document status=503 "
+            "html_len=%s pdf_len=%s render_mode=%s exc_type=%s",
+            aid,
             html_len,
             pdf_len,
-            built.render_mode,
+            getattr(built, "render_mode", None),
             type(exc).__name__,
-            _em,
         )
         raise HTTPException(
             status_code=503,
-            detail={
-                "code": "vs01_finalize_failed",
-                "message": type(exc).__name__,
-            },
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="finalize_document",
+                code="vs01_finalize_failed",
+                message=str(exc) or type(exc).__name__,
+                exc=exc,
+            ),
         ) from exc
 
+    # --- response_serialization (defensive) ---
+    doc_id = meta.get("document_id") if isinstance(meta, dict) else None
+    if not doc_id or not isinstance(doc_id, str) or not doc_id.strip():
+        log.error(
+            "[agreement-vs01-seed] event=failure agreement_id=%s stage=response_serialization status=503 "
+            "html_len=%s pdf_len=%s reason=missing_document_id_in_meta",
+            aid,
+            html_len,
+            pdf_len,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="response_serialization",
+                code="vs01_finalize_incomplete",
+                message="finalize_document returned no document_id",
+            ),
+        )
+
+    hsh = meta.get("content_sha256") if isinstance(meta, dict) else None
     log.info(
-        "[agreement-vs01-seed] success agreement_id=%s html_len=%s pdf_len=%s render_mode=%s "
-        "document_id=%s",
-        agreement_id,
+        "[agreement-vs01-seed] event=success agreement_id=%s stage=complete status=200 html_len=%s pdf_len=%s "
+        "render_mode=%s document_id=%s content_sha256=%s",
+        aid,
         html_len,
         pdf_len,
-        built.render_mode,
-        meta.get("document_id"),
+        getattr(built, "render_mode", None),
+        doc_id,
+        hsh if isinstance(hsh, str) else None,
     )
-    return {
-        "ok": True,
-        "document_id": meta.get("document_id"),
-        "content_sha256": meta.get("content_sha256"),
-    }
+    try:
+        return {
+            "ok": True,
+            "document_id": doc_id,
+            "content_sha256": hsh if isinstance(hsh, str) else None,
+        }
+    except Exception as exc:
+        log.exception(
+            "[agreement-vs01-seed] event=failure agreement_id=%s stage=response_serialization status=500",
+            aid,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="response_serialization",
+                code="vs01_signing_seed_response_failed",
+                message=str(exc) or type(exc).__name__,
+                exc=exc,
+            ),
+        ) from exc
 
 
 @router.post("/{agreement_id}/export-docx")

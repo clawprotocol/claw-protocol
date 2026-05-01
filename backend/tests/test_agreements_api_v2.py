@@ -1988,3 +1988,95 @@ def test_vs01_signing_seed_endpoint_ok(monkeypatch, tmp_path):
     assert isinstance(doc_id, str) and doc_id.startswith("doc_")
     hsh = body.get("content_sha256")
     assert isinstance(hsh, str) and len(hsh) == 64
+
+
+def test_vs01_signing_seed_structured_detail_when_render_html_raises(monkeypatch, tmp_path):
+    """Unexpected errors in render must return JSON detail with stage/code, not a bare 500 body."""
+    import backend.routers.agreements_v2_api as agreements_v2_api
+
+    pytest.importorskip("fitz")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    client = TestClient(app)
+    h = {"X-Claw-Org-Id": "test-vs01-seed-render-err"}
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "VS01 Seed Render Fail",
+            "jurisdiction": "Delaware",
+            "parties": [
+                {"name": "Owner Co", "role": "owner", "email": "o@example.com"},
+                {"name": "Other Co", "role": "signer", "email": "s@example.com"},
+            ],
+            "purpose": "Testing VS01 signing seed structured errors.",
+            "payment_terms": "$1",
+            "duration": "1 month",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    agreement_id = create_res.json()["id"]
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("simulated_render_failure")
+
+    monkeypatch.setattr(agreements_v2_api, "_render_html", _boom)
+    seed = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=h,
+        json={},
+    )
+    assert seed.status_code == 503, seed.text
+    detail = seed.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail.get("agreement_id") == agreement_id
+    assert detail.get("stage") == "render_html"
+    assert detail.get("code") == "vs01_signing_seed_render_failed"
+    assert detail.get("exc_type") == "RuntimeError"
+
+
+def test_vs01_signing_seed_structured_detail_when_finalize_meta_missing_document_id(
+    monkeypatch, tmp_path,
+):
+    pytest.importorskip("fitz")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    client = TestClient(app)
+    h = {"X-Claw-Org-Id": "test-vs01-seed-bad-meta"}
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "VS01 Seed Bad Meta",
+            "jurisdiction": "Delaware",
+            "parties": [
+                {"name": "Owner Co", "role": "owner", "email": "o3@example.com"},
+                {"name": "Other Co", "role": "signer", "email": "s3@example.com"},
+            ],
+            "purpose": "Testing finalize incomplete response.",
+            "payment_terms": "$1",
+            "duration": "1 month",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    agreement_id = create_res.json()["id"]
+
+    monkeypatch.setattr(
+        "backend.routers.agreements_v2_api.document_service.finalize_document",
+        lambda *_a, **_k: {},
+    )
+    seed = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=h,
+        json={},
+    )
+    assert seed.status_code == 503, seed.text
+    detail = seed.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail.get("agreement_id") == agreement_id
+    assert detail.get("stage") == "response_serialization"
+    assert detail.get("code") == "vs01_finalize_incomplete"
