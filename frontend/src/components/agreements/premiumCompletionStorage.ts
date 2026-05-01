@@ -5,6 +5,7 @@ import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { clearPremiumPartyNamesHandoff } from "./premiumPartyNamesHandoff";
 import { clearPremiumForkUserSendMode } from "./premiumSendForkDefaults";
+import { clearPremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 
 const KEY = "claw_premium_completion_snapshot_v1";
 
@@ -191,6 +192,7 @@ export function clearPremiumCompletionStateAfterSend(): void {
   clearPremiumCompletionSnapshot();
   clearPremiumCompletionDoneInLocalStorage();
   clearPremiumForkUserSendMode();
+  clearPremiumSendIntent();
   clearPremiumPartyNamesHandoff();
 }
 

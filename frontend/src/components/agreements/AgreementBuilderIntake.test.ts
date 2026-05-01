@@ -51,9 +51,20 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const s = readFileSync(p, "utf8");
     expect(s).toContain("paidProAuthoritative");
     expect(s).toContain('"Review and send"');
+    expect(s).toContain('"Confirm and send for signature"');
     expect(s).toContain("Add at least one recipient email to create review links.");
     expect(s).toContain("Add at least one signer email to continue.");
     expect(s).toContain("Sign first before sending");
+  });
+
+  it("paid Pro durable send intent: ref + session keys + handoff resolution + dev trace", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("paidProPremiumSendIntentRef");
+    expect(s).toMatch(/handlePremiumSendModePick[\s\S]{0,900}writePremiumSendIntent/m);
+    expect(s).toMatch(/paidProResolvedHandoffIntent[\s\S]{0,900}premiumSendHandoffIntent/s);
+    expect(s).toContain("[premium-send-intent]");
+    expect(s).toMatch(/peekPremiumForkUserSendMode\(\)\s*\?\?\s*peekPremiumSendIntent\(\)/);
   });
 
   it("paid authoritative recipient handoff uses advancePaidProToRecipientSetup in both handOff and runPrimary paths", () => {

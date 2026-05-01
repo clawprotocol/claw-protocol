@@ -303,7 +303,14 @@ import {
   writeCreateReviewAgreementResumeId,
 } from "./agreementIntakeStorage";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
-import { clearPremiumSenderSignFirst, writePremiumSenderSignFirst } from "../../launch/simpleProduct/premiumSendIntent";
+import {
+  clearPremiumSendIntent,
+  clearPremiumSenderSignFirst,
+  peekPremiumSendIntent,
+  peekPremiumSenderSignFirst,
+  writePremiumSendIntent,
+  writePremiumSenderSignFirst,
+} from "../../launch/simpleProduct/premiumSendIntent";
 import {
   clearPremiumCollaborateFirstDefaultPrimed,
   clearPremiumForkUserSendMode,
@@ -1291,6 +1298,12 @@ const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = PRO_UPGRADE_WAIT_MODAL_TITLE;
 const PAID_PREMIUM_CONNECTION_RECOVERY_COPY =
   "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.";
 
+function devTracePremiumSendIntent(source: string, mode: PremiumSendIntent | null, senderFirst?: boolean) {
+  if (!import.meta.env.DEV) return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-send-intent]", { source, mode, senderFirst: Boolean(senderFirst) });
+}
+
 /** First paint: enter Pro return processing before effects so the free intake shell does not flash. */
 function readInitialPremiumReturnFromWindow(): {
   phase: null | "awaiting_gaps" | "processing";
@@ -1724,9 +1737,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Premium paid review: default read-only HTML document; toggle opens legacy textarea editor. */
   const [premiumReviewDocEditorOpen, setPremiumReviewDocEditorOpen] = useState(false);
   const [premiumSendModeUserChoice, setPremiumSendModeUserChoice] = useState<PremiumSendIntent | null>(() =>
-    peekPremiumForkUserSendMode(),
+    peekPremiumForkUserSendMode() ?? peekPremiumSendIntent(),
   );
-  const [premiumSendModeTouched, setPremiumSendModeTouched] = useState(() => Boolean(peekPremiumForkUserSendMode()));
+  const [premiumSendModeTouched, setPremiumSendModeTouched] = useState(() =>
+    Boolean(peekPremiumForkUserSendMode() ?? peekPremiumSendIntent()),
+  );
+  /** Paid Pro: synchronous durable send intent until fork reset (pairs with sessionStorage + React state). */
+  const paidProPremiumSendIntentRef = useRef<PremiumSendIntent | null>(null);
   /** Bumps when premium completion primes sessionStorage collaborate-default (re-runs fork default inference). */
   const [premiumForkPrimedNonce, setPremiumForkPrimedNonce] = useState(0);
   /** Premium-style production send: success replaces bottom CTA (no full-screen ceremony). */
@@ -1785,7 +1802,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setPremiumSendConfirmOpen(false);
       setPremiumSendModeUserChoice(null);
       setPremiumSendModeTouched(false);
+      paidProPremiumSendIntentRef.current = null;
       clearPremiumForkUserSendMode();
+      clearPremiumSendIntent();
       clearPremiumSenderSignFirst();
       setPremiumSignatureSenderFirst(false);
       setCreateFlowSendRecipientEditorOpen(false);
@@ -3899,6 +3918,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setProFullDraftQualityRetry(true);
           setHardError(null);
           clearPremiumForkUserSendMode();
+          paidProPremiumSendIntentRef.current = null;
+          clearPremiumSendIntent();
           setPremiumSendModeUserChoice(null);
           setPremiumSendModeTouched(false);
           if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
@@ -3980,6 +4001,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         }
         clearPremiumForkUserSendMode();
+        paidProPremiumSendIntentRef.current = null;
+        clearPremiumSendIntent();
         setPremiumSendModeUserChoice(null);
         setPremiumSendModeTouched(false);
         if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
@@ -4139,6 +4162,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setProFullDraftQualityRetry(true);
             setHardError(null);
             clearPremiumForkUserSendMode();
+            paidProPremiumSendIntentRef.current = null;
+            clearPremiumSendIntent();
             setPremiumSendModeUserChoice(null);
             setPremiumSendModeTouched(false);
             if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
@@ -4588,6 +4613,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           runPremiumModelPassRef.current = null;
         }
         clearPremiumForkUserSendMode();
+        paidProPremiumSendIntentRef.current = null;
+        clearPremiumSendIntent();
         setPremiumSendModeUserChoice(null);
         setPremiumSendModeTouched(false);
         const parties = extractCleanPremiumParties(mergedIntake, prior!);
@@ -6369,8 +6396,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           .filter(Boolean)
           .join("\n");
         const inlineContextualSend = Boolean(premiumRecipientUxActive || premiumPersistedFlowActive);
+        const paidProResolvedHandoffIntent =
+          premiumSendModeUserChoice ??
+          paidProPremiumSendIntentRef.current ??
+          peekPremiumForkUserSendMode() ??
+          peekPremiumSendIntent() ??
+          premiumDefaultSendMode;
         const premiumSendHandoffIntent =
-          inlineContextualSend || paidProAuthoritative ? effectivePremiumSendMode : null;
+          inlineContextualSend || paidProAuthoritative
+            ? paidProAuthoritative
+              ? paidProResolvedHandoffIntent
+              : effectivePremiumSendMode
+            : null;
+        if (import.meta.env.DEV && paidProAuthoritative) {
+          devTracePremiumSendIntent("onGenerate_handoff", paidProResolvedHandoffIntent, peekPremiumSenderSignFirst());
+        }
         const simpleSendOpenPhaseHandoff =
           inlineContextualSend || paidProAuthoritative ? ("send" as const) : undefined;
         const ok = await runPersistAndOpen(
@@ -8205,7 +8245,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, [draft, agreementDocumentText, intakeCombined, hasAnyValidRecipientEmail, premiumForkPrimedNonce]);
 
-  const effectivePremiumSendMode = premiumSendModeUserChoice ?? premiumDefaultSendMode;
+  const effectivePremiumSendMode = useMemo((): PremiumSendIntent => {
+    if (paidProAuthoritative) {
+      return (
+        premiumSendModeUserChoice ??
+        paidProPremiumSendIntentRef.current ??
+        peekPremiumForkUserSendMode() ??
+        peekPremiumSendIntent() ??
+        premiumDefaultSendMode
+      );
+    }
+    return premiumSendModeUserChoice ?? premiumDefaultSendMode;
+  }, [
+    paidProAuthoritative,
+    premiumSendModeUserChoice,
+    premiumDefaultSendMode,
+    premiumForkPrimedNonce,
+    premiumSurfaceGateTick,
+  ]);
 
   const createFlowRecipientPrimaryHelper = useMemo(() => {
     if (!premiumSendConfirmGateActive || recipientsDeferred) return null;
@@ -8248,8 +8305,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [premiumSignersSurfaceReady, premiumReviewRoute, effectivePremiumSendMode]);
 
   const handlePremiumSendModePick = React.useCallback((mode: PremiumSendIntent) => {
+    paidProPremiumSendIntentRef.current = mode;
     clearPremiumCollaborateFirstDefaultPrimed();
     persistPremiumForkUserSendMode(mode);
+    writePremiumSendIntent(mode);
+    devTracePremiumSendIntent("premium_send_mode_pick", mode, peekPremiumSenderSignFirst());
     setPremiumForkPrimedNonce((n) => n + 1);
     setPremiumSendModeUserChoice(mode);
     setPremiumSendModeTouched(true);
@@ -10086,7 +10146,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               ? "Saving…"
               : premiumSendConfirmGateActive
                 ? paidProAuthoritative
-                  ? "Review and send"
+                  ? effectivePremiumSendMode === "signature"
+                    ? "Confirm and send for signature"
+                    : "Review and send"
                   : "Continue to confirmation"
                 : effectivePremiumSendMode === "review"
                   ? paidProAuthoritative
@@ -10095,7 +10157,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       ? "Continue to review links"
                       : "Create review link"
                   : paidProAuthoritative
-                    ? "Review and send"
+                    ? "Create signing links"
                     : premiumOutbox
                       ? "Continue to signing links"
                       : "Create signing link";
@@ -10675,6 +10737,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
     }
     const telemetryMode = opts?.telemetryMode ?? effectivePremiumSendMode;
+    const entryTraceMode = paidProAuthoritative
+      ? (premiumSendModeUserChoice ??
+          paidProPremiumSendIntentRef.current ??
+          peekPremiumForkUserSendMode() ??
+          peekPremiumSendIntent() ??
+          premiumDefaultSendMode)
+      : effectivePremiumSendMode;
+    devTracePremiumSendIntent("recipient_setup_entry", entryTraceMode, peekPremiumSenderSignFirst());
     emitPaidFunnelEvent("premium_continue_recipients_clicked", { extra: { continue_mode: telemetryMode } });
     trackAgreementFunnelEvent("continue_to_recipient_setup", { continue_mode: telemetryMode }, { planTier: String(tier) });
     markPremiumRecipientsSurfaceReleased();
@@ -10695,10 +10765,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     bumpPremiumSurfaceGateTick,
     emitPaidFunnelEvent,
     effectivePremiumSendMode,
+    paidProAuthoritative,
+    premiumSendModeUserChoice,
+    premiumDefaultSendMode,
   ]);
 
   const handleFinalizeRoutePrimaryAction = React.useCallback(
     (mode: PremiumSendIntent) => {
+      devTracePremiumSendIntent("finalize_panel_cta", mode, peekPremiumSenderSignFirst());
       handlePremiumSendModePick(mode);
       if (mode === "review" || mode === "signature") {
         void handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode });
@@ -10975,6 +11049,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               premiumSignersSurfaceReady;
             if (premiumSendConfirmGate) {
               if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
+              if (import.meta.env.DEV && paidProAuthoritative) {
+                const modalIntent =
+                  premiumSendModeUserChoice ??
+                  paidProPremiumSendIntentRef.current ??
+                  peekPremiumForkUserSendMode() ??
+                  peekPremiumSendIntent() ??
+                  premiumDefaultSendMode;
+                devTracePremiumSendIntent("confirm_modal_open", modalIntent, peekPremiumSenderSignFirst());
+              }
               setPremiumSendConfirmOpen(true);
               return;
             }
