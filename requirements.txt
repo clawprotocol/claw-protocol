@@ -8,6 +8,10 @@ fastapi
 uvicorn[standard]
 python-multipart
 
+# VS01 agreement signing-seed HTML→PDF (Docker/Railway installs this file; keep in sync with backend needs)
+pypdf>=6.0.0
+pymupdf>=1.24.0
+
 openai
 
 eth-abi

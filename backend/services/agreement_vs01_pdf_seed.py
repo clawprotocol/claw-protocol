@@ -3,17 +3,60 @@
 from __future__ import annotations
 
 import io
+import logging
 import re
 from dataclasses import dataclass
 from html import escape
-from typing import Final
+from typing import Any, Final, Optional
+
+log = logging.getLogger(__name__)
 
 _MAX_HTML_CHARS: Final[int] = 1_200_000
 _MAX_STORY_PAGES: Final[int] = 400
 
 
+def _import_fitz_module() -> Optional[Any]:
+    """Return PyMuPDF module or None (patchable for tests)."""
+    try:
+        import fitz  # type: ignore[import-not-found,import-untyped]
+
+        return fitz
+    except ImportError:
+        return None
+
+
+def _pdf_bytes_embedded_minimal_letter() -> tuple[bytes, str]:
+    """
+    Valid single-page Letter PDF (612×792) with no third-party dependencies.
+
+    Used when PyMuPDF and pypdf are both unavailable or pypdf fails at runtime.
+    """
+    header = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
+    o1 = b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+    o2 = b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+    o3 = b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n"
+    body = header + o1 + o2 + o3
+    off1 = len(header)
+    off2 = off1 + len(o1)
+    off3 = off2 + len(o2)
+    xref_start = len(body)
+    xref = b"xref\n0 4\n0000000000 65535 f \n"
+    xref += f"{off1:010d} 00000 n \n".encode("ascii")
+    xref += f"{off2:010d} 00000 n \n".encode("ascii")
+    xref += f"{off3:010d} 00000 n \n".encode("ascii")
+    trailer = (
+        b"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n"
+        + str(xref_start).encode("ascii")
+        + b"\n%%EOF\n"
+    )
+    raw = body + xref + trailer
+    if not raw.startswith(b"%PDF"):
+        raise RuntimeError("embedded_minimal_invalid")
+    return raw, "embedded_minimal_letter_stdlib"
+
+
 def _pdf_bytes_pypdf_letter_blank() -> tuple[bytes, str]:
-    """Valid Letter-sized PDF without PyMuPDF (VS01 seed fallback when fitz is unavailable)."""
+    """Valid Letter-sized PDF via pypdf (preferred when PyMuPDF is unavailable)."""
     from io import BytesIO
 
     from pypdf import PdfWriter
@@ -26,6 +69,19 @@ def _pdf_bytes_pypdf_letter_blank() -> tuple[bytes, str]:
     if not raw.startswith(b"%PDF"):
         raise RuntimeError("pypdf_blank_invalid")
     return raw, "pypdf_blank_no_fitz"
+
+
+def _pdf_bytes_letter_fallback() -> tuple[bytes, str]:
+    """pypdf blank page, then stdlib-embedded minimal PDF (never fails for missing deps alone)."""
+    try:
+        return _pdf_bytes_pypdf_letter_blank()
+    except Exception as exc:
+        log.warning(
+            "VS01 PDF seed: pypdf blank page unavailable (%s: %s); using embedded minimal PDF",
+            type(exc).__name__,
+            (str(exc) or "")[:400],
+        )
+        return _pdf_bytes_embedded_minimal_letter()
 
 
 @dataclass(frozen=True)
@@ -74,14 +130,14 @@ def agreement_rendered_html_to_pdf_bytes(
     Best-effort HTML → multi-page Letter PDF via PyMuPDF Story + DocumentWriter (in-memory).
 
     Uses ``io.BytesIO`` + ``writer.close()`` so output is valid (see PyMuPDF DocumentWriter docs).
-    Falls back to plain-text layout if Story fails. If PyMuPDF is unavailable, uses a pypdf blank
-    Letter page (still a valid VS01 document body).
+    Falls back to plain-text layout if Story fails. If PyMuPDF is unavailable or fails, uses pypdf
+    blank Letter, then a stdlib-only minimal valid PDF so VS01 seed never fails solely on optional
+    PDF libraries missing from the image.
     """
     body_inner = _strip_scripts_and_styles(html)
-    try:
-        import fitz  # type: ignore[import-not-found,import-untyped]
-    except ImportError:
-        pdf_bytes, mode = _pdf_bytes_pypdf_letter_blank()
+    fitz = _import_fitz_module()
+    if fitz is None:
+        pdf_bytes, mode = _pdf_bytes_letter_fallback()
         return AgreementVs01PdfBuild(pdf_bytes=pdf_bytes, render_mode=mode)
 
     try:
@@ -131,5 +187,5 @@ def agreement_rendered_html_to_pdf_bytes(
             render_mode="plaintext_after_story_error",
         )
     except Exception:
-        pdf_bytes, mode = _pdf_bytes_pypdf_letter_blank()
+        pdf_bytes, mode = _pdf_bytes_letter_fallback()
         return AgreementVs01PdfBuild(pdf_bytes=pdf_bytes, render_mode=mode)
