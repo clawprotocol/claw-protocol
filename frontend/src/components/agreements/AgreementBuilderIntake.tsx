@@ -964,6 +964,8 @@ type CreateFlowSendRecipientsPanelProps = {
   sendDisabled: boolean;
   /** When true, primary action opens the premium send confirmation modal (no email sent yet). */
   sendRequiresConfirmStep: boolean;
+  /** Paid Pro delivery on review column — avoid legacy “Share this agreement” hero. */
+  paidProInlineRecipientShell?: boolean;
   /** Inline help when the primary CTA is blocked (e.g. missing recipient email). */
   primaryCtaHelperText?: string | null;
   stripRecipientEmailNoise: (s: string) => string;
@@ -998,6 +1000,7 @@ function CreateFlowSendRecipientsPanel({
   onSendClick,
   sendDisabled,
   sendRequiresConfirmStep,
+  paidProInlineRecipientShell = false,
   primaryCtaHelperText,
   stripRecipientEmailNoise,
   looksLikeEmail,
@@ -1136,7 +1139,9 @@ function CreateFlowSendRecipientsPanel({
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
         {minimalProSendRecipientChrome ? "Recipient setup" : "Recipient invite"}
       </p>
-      <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">Share this agreement</h2>
+      <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">
+        {paidProInlineRecipientShell ? "Add recipient emails" : "Share this agreement"}
+      </h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="rounded-full border border-emerald-700/45 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/95">
           {modeLinkLabel}
@@ -1617,16 +1622,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           (premiumPersistedFlowActive && peekPremiumRecipientsSurfaceReleased()),
       ),
     [premiumRecipientUxActive, premiumPersistedFlowActive, premiumSurfaceGateTick],
-  );
-  /** Matches `send_agreement` branch: premium two-pane recipients step opens confirm modal instead of sending immediately. */
-  const premiumSendConfirmGateActive = useMemo(
-    () =>
-      Boolean(
-        createProductionTwoPane &&
-          createUiStage === CreateUiStage.RECIPIENTS &&
-          premiumSignersSurfaceReady,
-      ),
-    [createProductionTwoPane, createUiStage, premiumSignersSurfaceReady],
   );
   /** Keep intent/lock refs aligned with state for same-tick handlers (e.g. clear lock then continue). */
   const syncUpgradeIntentRefs = React.useCallback((intent: boolean) => {
@@ -3244,7 +3239,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (recipientsSurfaceReleased) {
       setDisplayPhase("review");
       setCreateFlowPhase("recipient_setup_required");
-      setCreateUiStage(CreateUiStage.RECIPIENTS);
+      const hydratePaidAuthoritative = isPaidProAgreementAuthoritative({
+        draft: merged.draft,
+        tier,
+        agreementId: reviewAgreementIdRef.current,
+        premiumSendPathUnlocked: true,
+        premiumPersistedFlowActive: true,
+        premiumCompletionSnapshot: snap,
+      });
+      setCreateUiStage(hydratePaidAuthoritative ? CreateUiStage.DRAFT : CreateUiStage.RECIPIENTS);
     }
     setMobileWorkspacePane("preview");
     setPreviewPaneRevealed(true);
@@ -6348,11 +6351,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       [recipient1Email, recipient2Email].some((e) => looksLikeEmail(String(e ?? ""))) || draftPartyEmailsReadyForSend;
     const productionRecipientsPersist =
       createProductionTwoPane &&
-      createUiStage === CreateUiStage.RECIPIENTS &&
       draft &&
       agreementTypeAccepted &&
       (draft.parties?.length ?? 0) >= 1 &&
-      (recipientsDeferred || hasProductionRecipientEmail);
+      (recipientsDeferred || hasProductionRecipientEmail) &&
+      (paidProAuthoritative
+        ? (createUiStage === CreateUiStage.DRAFT || createUiStage === CreateUiStage.RECIPIENTS) &&
+          premiumSignersSurfaceReady &&
+          (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send")
+        : createUiStage === CreateUiStage.RECIPIENTS);
 
     /** Continuity handoff disables `createProductionTwoPane` but sticky can still show Send + `simpleCreateReadyForSend` — must not require raw intake. */
     const simpleWorkspacePersistSend =
@@ -6368,6 +6375,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (import.meta.env.DEV) devSendCtaTrace("onGenerate skip: production send already in flight");
         return;
       }
+      if (paidProAuthoritative) {
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setDisplayPhase("review");
+      }
       productionSendInFlightRef.current = true;
       const draftWithRecipientUi = buildCanonicalSimpleProductHandoffDraft(draft, {
         recipient1Name,
@@ -6382,7 +6393,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (import.meta.env.DEV) devSendCtaTrace("onGenerate branch: productionRecipientsPersist → runPersistAndOpen");
       console.debug("[handoff-start]", {
         source: "onGenerate_production_recipients",
-        createUiStage,
+        createUiStage: paidProAuthoritative ? CreateUiStage.DRAFT : createUiStage,
         createFlowPhase_before: createFlowPhase,
         displayPhase_before: displayPhase,
       });
@@ -6725,22 +6736,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase,
   });
 
-  /** Paid authoritative Pro: recipient setup must stay on review chrome — never starter/intake. */
+  useEffect(() => {
+    if (!paidProAuthoritative || createUiStage !== CreateUiStage.RECIPIENTS) return;
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("[invariant-violation] paid Pro should not enter RECIPIENTS — coercing to DRAFT + review");
+    }
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setDisplayPhase("review");
+  }, [paidProAuthoritative, createUiStage]);
+
+  /** Paid authoritative Pro: recipient setup stays on the Pro review surface (DRAFT) — never legacy RECIPIENTS shell. */
   const advancePaidProToRecipientSetup = useCallback(() => {
     setDisplayPhase("review");
     setCreateFlowPhase("recipient_setup_required");
-    setCreateUiStage(CreateUiStage.RECIPIENTS);
+    setCreateUiStage(CreateUiStage.DRAFT);
     setMobileWorkspacePane("preview");
   }, []);
 
   useLayoutEffect(() => {
     if (!onSimpleCreateShellChrome) return;
     onSimpleCreateShellChrome({ paidProReviewReady });
-    if (import.meta.env.DEV && paidProReviewReady && createUiStage === CreateUiStage.RECIPIENTS) {
+    if (
+      import.meta.env.DEV &&
+      paidProReviewReady &&
+      paidProAuthoritative &&
+      createUiStage === CreateUiStage.DRAFT &&
+      (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send")
+    ) {
       devPremiumSendShellGuard("simple_create_shell_paid_pro_recipients");
     }
     return () => onSimpleCreateShellChrome({ paidProReviewReady: false });
-  }, [paidProReviewReady, onSimpleCreateShellChrome, createUiStage]);
+  }, [paidProReviewReady, onSimpleCreateShellChrome, createUiStage, paidProAuthoritative, createFlowPhase]);
 
   const returnToIntakeEditing = () => {
     if (paidProAuthoritative) {
@@ -8241,13 +8268,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (recipient2Name.trim() && r2e.length > 0 && !looksLikeEmail(r2e)) return true;
     return false;
   }, [recipient1Email, recipient2Email, recipient2Name]);
+  /** Paid authoritative Pro: premium recipient/send UI on the Pro review column (DRAFT), not legacy RECIPIENTS. */
+  const paidProRecipientSetupOnDraft = useMemo(
+    () =>
+      Boolean(
+        paidProAuthoritative &&
+          createProductionTwoPane &&
+          createUiStage === CreateUiStage.DRAFT &&
+          premiumSignersSurfaceReady &&
+          (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send"),
+      ),
+    [
+      paidProAuthoritative,
+      createProductionTwoPane,
+      createUiStage,
+      premiumSignersSurfaceReady,
+      createFlowPhase,
+    ],
+  );
   const productionReadyForPersist = Boolean(
     createProductionTwoPane &&
-      createUiStage === CreateUiStage.RECIPIENTS &&
       draft &&
       agreementTypeAccepted &&
       (draft.parties?.length ?? 0) >= 1 &&
-      (recipientsDeferred || hasAnyValidRecipientEmail),
+      (recipientsDeferred || hasAnyValidRecipientEmail) &&
+      (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft),
+  );
+  /** Matches `send_agreement` branch: premium two-pane opens confirm modal instead of sending immediately. */
+  const premiumSendConfirmGateActive = useMemo(
+    () =>
+      Boolean(
+        createProductionTwoPane &&
+          premiumSignersSurfaceReady &&
+          (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft),
+      ),
+    [createProductionTwoPane, premiumSignersSurfaceReady, createUiStage, paidProRecipientSetupOnDraft],
   );
   const simpleCreateReadyForSend = Boolean(
     productionReadyForPersist ||
@@ -8597,7 +8652,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    if (createUiStage !== CreateUiStage.RECIPIENTS || !productionDraftPrimaryReviewSurface) return;
+    if (
+      (!paidProRecipientSetupOnDraft && createUiStage !== CreateUiStage.RECIPIENTS) ||
+      !productionDraftPrimaryReviewSurface
+    )
+      return;
     const pick = authoritativePickForSendUi;
     const purposeLen = (draft?.purpose ?? "").trim().length;
     const hasAuthoritativeCorpus =
@@ -8632,6 +8691,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [
     createUiStage,
+    paidProRecipientSetupOnDraft,
     productionDraftPrimaryReviewSurface,
     authoritativePickForSendUi,
     draft?.purpose,
@@ -9363,7 +9423,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       humanized === INTAKE_HARD_SAVE_GENERIC
     ) {
       if (
-        createUiStage === CreateUiStage.RECIPIENTS &&
+        (createUiStage === CreateUiStage.RECIPIENTS ||
+          (paidProAuthoritative && createUiStage === CreateUiStage.DRAFT && premiumSignersSurfaceReady)) &&
         createFlowPhase === "recipient_setup_required"
       ) {
         return null;
@@ -9386,6 +9447,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
     loading,
     draft,
+    paidProAuthoritative,
+    premiumSignersSurfaceReady,
   ]);
   const errorIsHydrate = Boolean(hardError && isHydrateIntakeErrorRaw(hardError));
 
@@ -9959,7 +10022,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (createUiStage === CreateUiStage.INPUT) {
         return !intakeCombined.trim() || !guidedStructureComplete;
       }
-      if (createUiStage === CreateUiStage.DRAFT) return !draft;
+      if (createUiStage === CreateUiStage.DRAFT) {
+        if (paidProRecipientSetupOnDraft) {
+          const partiesOk = (draft?.parties?.length ?? 0) >= 1;
+          const typeOk = agreementTypeAccepted;
+          const recOk = recipientsDeferred || hasAnyValidRecipientEmail;
+          return !draft || !partiesOk || !typeOk || !recOk;
+        }
+        return !draft;
+      }
       if (createUiStage === CreateUiStage.RECIPIENTS) {
         const partiesOk = (draft?.parties?.length ?? 0) >= 1;
         const typeOk = agreementTypeAccepted;
@@ -10173,7 +10244,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           reason: !draft ? "no_draft" : undefined,
         };
       }
-      if (createUiStage === CreateUiStage.RECIPIENTS) {
+      if (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) {
         if (productionReadyForPersist) {
           const sendDisabled =
             (!recipientsDeferred && (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)) ||
@@ -10182,14 +10253,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const premiumOutbox = premiumSignersSurfaceReady;
           const persistSendLabel =
             loading &&
-            createUiStage === CreateUiStage.RECIPIENTS &&
+            (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
             createFlowPhase === "ready_to_send"
               ? "Saving…"
               : premiumSendConfirmGateActive
                 ? paidProAuthoritative
                   ? effectivePremiumSendMode === "signature"
                     ? "Confirm and send for signature"
-                    : "Review and send"
+                    : "Confirm and create review links"
                   : "Continue to confirmation"
                 : effectivePremiumSendMode === "review"
                   ? paidProAuthoritative
@@ -10303,13 +10374,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     isFreeStarterReviewSurface,
     proCheckoutRecipientStageAdvanceAllowed,
     displayPhase,
+    paidProRecipientSetupOnDraft,
   ]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !simpleCreateUnifiedBottomCta) return;
     const cta = unifiedPrimaryCta;
-    if (cta.action === "send_agreement" && createUiStage !== CreateUiStage.RECIPIENTS && createProductionTwoPane) {
-      console.error("[CTA invariant] send_agreement action outside RECIPIENTS", {
+    if (
+      cta.action === "send_agreement" &&
+      createProductionTwoPane &&
+      createUiStage !== CreateUiStage.RECIPIENTS &&
+      !paidProRecipientSetupOnDraft
+    ) {
+      console.error("[CTA invariant] send_agreement action outside RECIPIENTS/paid inline recipients", {
         createUiStage,
         createFlowPhase,
         label: cta.label,
@@ -10320,7 +10397,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (
       cta.action === "send_agreement" &&
       createProductionTwoPane &&
-      createUiStage === CreateUiStage.RECIPIENTS &&
+      (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
       !simpleCreateReadyForSend
     ) {
       console.error("[CTA invariant] send_agreement while simpleCreateReadyForSend is false", {
@@ -10329,7 +10406,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         label: cta.label,
       });
     }
-    if (createProductionTwoPane && createUiStage === CreateUiStage.DRAFT && cta.action === "send_agreement") {
+    if (
+      createProductionTwoPane &&
+      createUiStage === CreateUiStage.DRAFT &&
+      cta.action === "send_agreement" &&
+      !paidProRecipientSetupOnDraft
+    ) {
       console.error("[CTA invariant] send_agreement in DRAFT stage", { createFlowPhase, label: cta.label });
     }
     if (createProductionTwoPane && createUiStage === CreateUiStage.RECIPIENTS && cta.action === "continue_to_recipients") {
@@ -10345,7 +10427,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         console.error("[CTA invariant] premium_continue_to_signers unexpectedly disabled in DRAFT", cta);
       }
     }
-    if (import.meta.env.DEV && createUiStage === CreateUiStage.DRAFT && cta.action === "send_agreement") {
+    if (
+      import.meta.env.DEV &&
+      createUiStage === CreateUiStage.DRAFT &&
+      cta.action === "send_agreement" &&
+      !paidProRecipientSetupOnDraft
+    ) {
       console.error("[FSM VIOLATION] Send shown in DRAFT", cta);
     }
     if (import.meta.env.DEV && createUiStage === CreateUiStage.RECIPIENTS && cta.action === "continue_basic_draft") {
@@ -10359,6 +10446,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
     simpleCreateReadyForSend,
     productionReadyForPersist,
+    paidProRecipientSetupOnDraft,
   ]);
 
   const simpleCreateBottomPrimaryLabel = simpleCreateUnifiedBottomCta
@@ -10367,9 +10455,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const productionPremiumInlineSendSurface = Boolean(
     createProductionTwoPane &&
-      createUiStage === CreateUiStage.RECIPIENTS &&
       productionReadyForPersist &&
-      premiumSignersSurfaceReady,
+      premiumSignersSurfaceReady &&
+      (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft),
   );
   const showProductionPremiumInlineSendSuccess = Boolean(
     productionPremiumInlineSendSurface && productionSendBarPhase === "sent" && productionSendBarAgreementId,
@@ -10389,7 +10477,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const stickyRecipientBlockedNudge = Boolean(
     simpleCreateUnifiedBottomCta &&
       createProductionTwoPane &&
-      createUiStage === CreateUiStage.RECIPIENTS &&
+      (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
       unifiedPrimaryCta.action === "complete_recipient_details" &&
       unifiedPrimaryCta.disabled &&
       unifiedPrimaryCta.reason === "recipient_email_or_defer",
@@ -10424,6 +10512,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       simpleCreateBottomPrimaryLabel === "Saving…" ||
       simpleCreateBottomPrimaryLabel === "Sending…" ||
       createUiStage === CreateUiStage.RECIPIENTS ||
+      paidProRecipientSetupOnDraft ||
       simpleCreateReadyForSend;
     if (!sendRelated) return;
     devSendCtaTrace("render: send-related snapshot", {
@@ -10464,6 +10553,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipientsDeferred,
     loading,
     createProductionTwoPane,
+    paidProRecipientSetupOnDraft,
   ]);
 
   const simpleCreateBarCoolToneForBasicContinuePath = Boolean(upgradeLockActive);
@@ -11098,11 +11188,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             logProductEvent("create_flow_cta_clicked", { cta_click_type: "send" });
             await finalizeIntakeCapture();
             if (!assertRecipientsValidForPremiumSend()) return;
-            const premiumSendConfirmGate =
-              createProductionTwoPane &&
-              createUiStage === CreateUiStage.RECIPIENTS &&
-              premiumSignersSurfaceReady;
-            if (premiumSendConfirmGate) {
+            if (premiumSendConfirmGateActive) {
               if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
               if (import.meta.env.DEV && paidProAuthoritative) {
                 const modalIntent =
@@ -11180,11 +11266,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               handleDraftNowCommit();
               return;
             }
-            if (
-              createProductionTwoPane &&
-              createUiStage === CreateUiStage.RECIPIENTS &&
-              premiumSignersSurfaceReady
-            ) {
+            if (createProductionTwoPane && premiumSendConfirmGateActive) {
               await finalizeIntakeCapture();
               if (!assertRecipientsValidForPremiumSend()) return;
               if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
@@ -11258,7 +11340,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       /** Recipients-stage send must not depend on guided intake completeness (resume / empty intake buffers). */
       if (
         createProductionTwoPane &&
-        createUiStage === CreateUiStage.RECIPIENTS &&
+        (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
         draft &&
         agreementTypeAccepted &&
         (draft.parties?.length ?? 0) >= 1 &&
@@ -12724,7 +12806,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             </div>
                           ) : null}
                           <div className="flex flex-wrap items-center gap-2">
-                            {createUiStage === CreateUiStage.RECIPIENTS ? (
+                            {createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft ? (
                               <>
                                 <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
                                   {premiumSignersSurfaceReady ? premiumRecipientSetupTitle : "Add recipients"}
@@ -12799,7 +12881,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             {reviewShowsSimplifiedAdvancedDraft &&
                             !streamlineFirstRunReviewUi &&
                             !(
-                              createUiStage === CreateUiStage.RECIPIENTS && premiumSignersSurfaceReady
+                              (createUiStage === CreateUiStage.RECIPIENTS && premiumSignersSurfaceReady) ||
+                              paidProRecipientSetupOnDraft
                             ) ? (
                               <>
                                 <span className="rounded-full border border-slate-600/70 bg-slate-900/80 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
@@ -12848,14 +12931,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           </div>
                           <p
                             className={
-                              createUiStage === CreateUiStage.RECIPIENTS
+                              createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft
                                 ? "mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm"
                                 : showUpgradeToFullDraftOnReview
                                   ? "mt-0.5 text-sm leading-snug text-slate-400"
                                   : "mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm"
                             }
                           >
-                            {createUiStage === CreateUiStage.RECIPIENTS ? (
+                            {createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft ? (
                               <>
                                 {premiumSignersSurfaceReady ? (
                                   <span className="block text-slate-400">
@@ -13075,7 +13158,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               })()
                             : null}
                           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 sm:text-[11px]">
-                            {createUiStage === CreateUiStage.RECIPIENTS && minimalProSendRecipientChrome
+                            {(createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
+                            minimalProSendRecipientChrome
                               ? "Agreement"
                               : PREVIEW_BLOCK_TITLE}
                           </p>
@@ -13089,7 +13173,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             }
                           >
                             {premiumPaidDocumentSurface
-                              ? createUiStage === CreateUiStage.RECIPIENTS && minimalProSendRecipientChrome
+                              ? (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
+                                  minimalProSendRecipientChrome
                                 ? canProceedWithPaidProDocument
                                   ? "Full agreement below. Not legal advice."
                                   : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
@@ -13595,6 +13680,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       : undefined
                                   }
                                 />
+                                {paidProRecipientSetupOnDraft ? (
+                                  <div className="mt-5 w-full sm:pr-0 md:max-w-3xl" id="claw-recipient-setup">
+                                    <CreateFlowSendRecipientsPanel
+                                      variant="workspace"
+                                      paidProInlineRecipientShell
+                                      isPremiumRecipientSurface={premiumSignersSurfaceReady}
+                                      showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
+                                      productionReadyForPersist={productionReadyForPersist}
+                                      minimalProSendRecipientChrome={minimalProSendRecipientChrome}
+                                      draft={draft}
+                                      effectivePremiumSendMode={effectivePremiumSendMode}
+                                      onPremiumSendModePick={handlePremiumSendModePick}
+                                      recipient1Name={recipient1Name}
+                                      setRecipient1Name={setRecipient1Name}
+                                      recipient1Email={recipient1Email}
+                                      setRecipient1Email={setRecipient1Email}
+                                      recipient2Name={recipient2Name}
+                                      setRecipient2Name={setRecipient2Name}
+                                      recipient2Email={recipient2Email}
+                                      setRecipient2Email={setRecipient2Email}
+                                      recipientSignerLabels={recipientSignerLabels}
+                                      setRecipientSignerLabels={setRecipientSignerLabels}
+                                      reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
+                                      showStarterRecipientsReassurance={showStarterRecipientsReassurance}
+                                      editorOpen={createFlowSendRecipientEditorOpen}
+                                      setEditorOpen={setCreateFlowSendRecipientEditorOpen}
+                                      onDeferRecipients={() => {
+                                        setRecipientsDeferred(true);
+                                        setCreateFlowPhase("ready_to_send");
+                                      }}
+                                      hideDeferOption={premiumSignersSurfaceReady}
+                                      onSendClick={runPrimaryIntakeAction}
+                                      sendDisabled={effectivePrimaryCtaDisabled}
+                                      sendRequiresConfirmStep={premiumSendConfirmGateActive}
+                                      primaryCtaHelperText={createFlowRecipientPrimaryHelper}
+                                      stripRecipientEmailNoise={stripRecipientEmailNoise}
+                                      looksLikeEmail={looksLikeEmail}
+                                    />
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
                         </div>
@@ -14005,7 +14130,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     </div>
                   ) : null}
                   {createProductionTwoPane &&
-                  createUiStage === CreateUiStage.RECIPIENTS &&
+                  (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
                   paidProAuthoritative &&
                   premiumSignersSurfaceReady &&
                   effectivePremiumSendMode === "signature" ? (

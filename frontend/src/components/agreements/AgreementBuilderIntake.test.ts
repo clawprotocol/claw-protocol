@@ -50,7 +50,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("paidProAuthoritative");
-    expect(s).toContain('"Review and send"');
+    expect(s).toContain('"Confirm and create review links"');
     expect(s).toContain('"Confirm and send for signature"');
     expect(s).toContain("Add at least one recipient email to create review links.");
     expect(s).toContain("Add at least one signer email to continue.");
@@ -270,8 +270,41 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("sign-first control is gated to paid signature recipients (not review mode)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toMatch(
-      /createUiStage === CreateUiStage\.RECIPIENTS[\s\S]*?effectivePremiumSendMode === "signature"\s*\?[\s\S]*?Sign first before sending/,
+      /\(createUiStage === CreateUiStage\.RECIPIENTS \|\| paidProRecipientSetupOnDraft\)[\s\S]*?effectivePremiumSendMode === "signature"\s*\?[\s\S]*?Sign first before sending/,
     );
+  });
+
+  it("paid authoritative advance keeps DRAFT and uses paidProRecipientSetupOnDraft for production send gates", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const adv = intake.indexOf("const advancePaidProToRecipientSetup = useCallback");
+    expect(adv).toBeGreaterThanOrEqual(0);
+    const advBlock = intake.slice(adv, adv + 420);
+    expect(advBlock).toContain("setCreateUiStage(CreateUiStage.DRAFT)");
+    expect(advBlock).not.toContain("CreateUiStage.RECIPIENTS");
+    expect(intake).toContain("paidProRecipientSetupOnDraft");
+    expect(intake).toContain("paidProInlineRecipientShell");
+    expect(intake).toContain("Confirm and create review links");
+  });
+
+  it("paid Pro recipient fields mount below finalize with inline shell (not legacy Share headline constant)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toMatch(
+      /\{paidProRecipientSetupOnDraft \? \([\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
+    );
+    expect(intake).toMatch(
+      /\{paidProInlineRecipientShell \? "Add recipient emails" : "Share this agreement"\}/,
+    );
+  });
+
+  it("paid authoritative Pro: snapshot hydration prefers DRAFT; persist coerces RECIPIENTS; invariant self-heals", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("hydratePaidAuthoritative");
+    expect(intake).toMatch(/setCreateUiStage\(\s*hydratePaidAuthoritative \? CreateUiStage\.DRAFT : CreateUiStage\.RECIPIENTS\s*\)/);
+    expect(intake).toMatch(
+      /paidProAuthoritative\s*\?[\s\S]*?createUiStage === CreateUiStage\.DRAFT \|\| createUiStage === CreateUiStage\.RECIPIENTS/,
+    );
+    expect(intake).toMatch(/if \(paidProAuthoritative\) \{[\s\S]*?setCreateUiStage\(CreateUiStage\.DRAFT\)/);
+    expect(intake).toContain("[invariant-violation] paid Pro should not enter RECIPIENTS");
   });
 
   it("paid Pro send confirmation modal includes I will sign first for signature mode only", () => {
