@@ -11,6 +11,8 @@ export type CounterpartyListProps = {
   signerCapacityTitle?: string;
   /** Field-keyed errors from {@link buildDetailsStepFieldErrors} (e.g. `counterpartyName:<id>`). */
   detailsFieldErrors?: Record<string, string>;
+  /** Quick / agreement-seed flows: omit mobile (not required at launch). */
+  hidePhoneFields?: boolean;
 };
 
 function newSignerRow(): Vs01Counterparty {
@@ -21,13 +23,19 @@ function newSignerRow(): Vs01Counterparty {
   return { id, name: "", email: "", phone: "" };
 }
 
-function isSignerRowBlank(c: Vs01Counterparty): boolean {
-  const phone = c.phone ?? "";
-  return !c.name.trim() && !c.email.trim() && !phone.trim();
+function isSignerRowBlank(c: Vs01Counterparty, ignorePhone: boolean): boolean {
+  const name = c.name.trim();
+  const email = c.email.trim();
+  const phone = (c.phone ?? "").trim();
+  if (!name && !email) {
+    if (ignorePhone) return true;
+    return !phone;
+  }
+  return false;
 }
 
 /**
- * Editable other-signer rows: name, optional email, optional phone.
+ * Editable other-signer rows: name, optional email, optional phone (unless hidePhoneFields).
  */
 export function CounterpartyList({
   counterparties,
@@ -36,8 +44,9 @@ export function CounterpartyList({
   signerCapacityReached = false,
   signerCapacityTitle,
   detailsFieldErrors,
+  hidePhoneFields = false,
 }: CounterpartyListProps) {
-  const hasBlankRow = counterparties.some(isSignerRowBlank);
+  const hasBlankRow = counterparties.some((c) => isSignerRowBlank(c, hidePhoneFields));
 
   const update = (id: string, patch: Partial<Pick<Vs01Counterparty, "name" | "email" | "phone">>) => {
     onChange(
@@ -61,7 +70,9 @@ export function CounterpartyList({
         Other signers
       </h3>
       <p className="vs01-subtle-hint" id="vs01-cp-hint">
-        Add each person who should sign after you. Email or text is optional for now.
+        {hidePhoneFields
+          ? "Add each person who should sign after you. Email is optional for now."
+          : "Add each person who should sign after you. Email or text is optional for now."}
       </p>
       {counterparties.map((c) => {
         const nameErrKey = counterpartyNameErrorKey(c.id);
@@ -108,21 +119,23 @@ export function CounterpartyList({
               onValueChange={(v) => update(c.id, { email: v })}
             />
           </div>
-          <div className="vs01-field">
-            <label className="vs01-subfield-label" htmlFor={`vs01-cp-phone-${c.id}`}>
-              Mobile / text number (optional)
-            </label>
-            <VoiceAugmentedInput
-              id={`vs01-cp-phone-${c.id}`}
-              className="vs01-input vs01-input--with-voice"
-              type="tel"
-              value={c.phone ?? ""}
-              disabled={disabled}
-              placeholder="(555) 123-4567"
-              autoComplete="tel"
-              onValueChange={(v) => update(c.id, { phone: v })}
-            />
-          </div>
+          {hidePhoneFields ? null : (
+            <div className="vs01-field">
+              <label className="vs01-subfield-label" htmlFor={`vs01-cp-phone-${c.id}`}>
+                Mobile / text number (optional)
+              </label>
+              <VoiceAugmentedInput
+                id={`vs01-cp-phone-${c.id}`}
+                className="vs01-input vs01-input--with-voice"
+                type="tel"
+                value={c.phone ?? ""}
+                disabled={disabled}
+                placeholder="(555) 123-4567"
+                autoComplete="tel"
+                onValueChange={(v) => update(c.id, { phone: v })}
+              />
+            </div>
+          )}
           <button
             type="button"
             className="vs01-btn vs01-btn--secondary vs01-btn--row-action"

@@ -121,6 +121,7 @@ export function Vs01Wizard({
     navigate("/app/create");
   }, [navigate]);
   const countedSignatureReceiptRef = useRef<string | null>(null);
+  const didLogVs01RouteMount = useRef(false);
   const [step, setStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.step ?? initialStep);
   /** Furthest step visited — gates Receipt until assign step satisfied. */
   const [furthestStep, setFurthestStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.furthestStep ?? initialStep);
@@ -158,6 +159,14 @@ export function Vs01Wizard({
   const [receiptId, setReceiptId] = useState<string | null>(() => VS01_URL_BOOT?.receiptId ?? null);
   const [receiptHashSha256, setReceiptHashSha256] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<unknown>(null);
+
+  useEffect(() => {
+    const seed = (seedDocumentId || "").trim();
+    if (!seed || didLogVs01RouteMount.current) return;
+    didLogVs01RouteMount.current = true;
+    // eslint-disable-next-line no-console
+    console.info("[vs01-route-mounted]", { seedDocumentId: seed, hideStepper });
+  }, [seedDocumentId, hideStepper]);
 
   useEffect(() => {
     if (!VS01_URL_BOOT) return;
@@ -266,6 +275,15 @@ export function Vs01Wizard({
             qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
           );
           const nextStep: Vs01Step = detailsReady && bridge.targetStep >= 2 ? 2 : 1;
+          // eslint-disable-next-line no-console
+          console.info("[vs01-bridge-hydrate]", {
+            agreementId: bridge.agreementId,
+            vs01DocumentId: bridge.vs01DocumentId,
+            agreementTitle: bridge.agreementTitle,
+            targetStep: bridge.targetStep,
+            nextStep,
+            counterpartiesCount: cps.length,
+          });
           setFurthestStep((prev) => (nextStep > prev ? nextStep : prev));
           goToStep(nextStep);
           return;
@@ -379,6 +397,20 @@ export function Vs01Wizard({
   const namedCounterpartyCount = useMemo(
     () => counterparties.filter((c) => c.name.trim().length > 0).length,
     [counterparties]
+  );
+
+  /** Paid Pro `/app/esign/:id` — avoid Step 0 upload UI + documents rail flash while bytes load. */
+  const seedDirectLayout = useMemo(
+    () => Boolean((seedDocumentId || "").trim() && hideStepper),
+    [seedDocumentId, hideStepper],
+  );
+  const seedAwaitingContentSha = useMemo(
+    () => seedDirectLayout && !((contentSha256 || "").trim()),
+    [seedDirectLayout, contentSha256],
+  );
+  const showVs01DocumentsRail = useMemo(
+    () => !(hideStepper && (seedDocumentId || "").trim()),
+    [hideStepper, seedDocumentId],
   );
   const counterpartyGate = access.check("add_vs01_counterparty", {
     vs01NamedCounterpartyCount: namedCounterpartyCount,
@@ -505,7 +537,11 @@ export function Vs01Wizard({
         data-vs01-receipt-hash={receiptHashSha256 ?? ""}
         data-vs01-receipt-present={receipt != null ? "1" : "0"}
       >
-        {step === 0 ? (
+        {seedAwaitingContentSha ? (
+          <div className="vs01-details-step" aria-busy="true" aria-live="polite">
+            <p className="vs01-card-help text-center text-slate-300">Loading your document…</p>
+          </div>
+        ) : step === 0 ? (
           <StepDocument
             loading={loading}
             setLoading={setLoading}
@@ -554,6 +590,7 @@ export function Vs01Wizard({
               namedCounterpartyCount >= access.entitlements.max_vs01_counterparties
             }
             counterpartyCapacityHint={counterpartyGate.message}
+            hidePhoneFields={hideStepper}
           />
         ) : null}
         {step === 2 ? (
@@ -607,15 +644,17 @@ export function Vs01Wizard({
         ) : null}
       </div>
 
-      <Vs01DocumentsList
-        documentMeta={documentMeta}
-        documentId={documentId}
-        agreementTitle={agreementTitle}
-        counterparties={counterparties}
-        step={step}
-        goToStep={goToStep}
-        updatedAtMs={vs01DocumentsUpdatedMs}
-      />
+      {showVs01DocumentsRail ? (
+        <Vs01DocumentsList
+          documentMeta={documentMeta}
+          documentId={documentId}
+          agreementTitle={agreementTitle}
+          counterparties={counterparties}
+          step={step}
+          goToStep={goToStep}
+          updatedAtMs={vs01DocumentsUpdatedMs}
+        />
+      ) : null}
     </>
   );
 }

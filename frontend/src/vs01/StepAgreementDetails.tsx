@@ -21,6 +21,8 @@ export type StepAgreementDetailsProps = {
   onContinue?: () => void;
   counterpartyCapacityReached?: boolean;
   counterpartyCapacityHint?: string;
+  /** Quick / agreement-seed: hide mobile fields (launch scope). */
+  hidePhoneFields?: boolean;
 };
 
 const STEP_ID = "details" as const;
@@ -45,6 +47,7 @@ export function StepAgreementDetails({
   onContinue,
   counterpartyCapacityReached = false,
   counterpartyCapacityHint,
+  hidePhoneFields = false,
 }: StepAgreementDetailsProps) {
   const busy = loading !== "idle";
   const [detailsValidateAttempted, setDetailsValidateAttempted] = useState(false);
@@ -165,6 +168,7 @@ export function StepAgreementDetails({
               signerCapacityReached={counterpartyCapacityReached}
               signerCapacityTitle={counterpartyCapacityHint}
               detailsFieldErrors={fieldErrors}
+              hidePhoneFields={hidePhoneFields}
             />
 
             <div className="vs01-field">

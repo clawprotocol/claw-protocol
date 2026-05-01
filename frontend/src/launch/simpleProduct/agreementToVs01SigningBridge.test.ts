@@ -29,6 +29,24 @@ describe("buildAgreementVs01BridgeSession", () => {
     expect(b.counterparties[0].email).toBe("signer@example.com");
     expect(b.targetStep).toBe(2);
   });
+
+  it("clears counterparty email when it matches creator email (case-insensitive)", () => {
+    const draft = {
+      title: "MSA",
+      parties: [
+        { id: "o1", name: "Owner Co", role: "owner", email: "Same@Example.com" },
+        { id: "s1", name: "Signer LLC", role: "signer", email: "same@example.com" },
+      ],
+    } as AgreementDraft;
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "agr-dedupe",
+      vs01DocumentId: "doc_x",
+      draft,
+    });
+    expect(b.creatorEmail).toBe("Same@Example.com");
+    expect(b.counterparties[0].email).toBe("");
+    expect(b.counterparties[0].name).toBe("Signer LLC");
+  });
 });
 
 describe("paid Pro sender-first VS01 route shape (static)", () => {
