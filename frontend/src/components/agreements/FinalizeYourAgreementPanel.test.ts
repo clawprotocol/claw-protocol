@@ -30,13 +30,13 @@ describe("FinalizeYourAgreementPanel send-for-review framing (copy only)", () =>
     expect(s).toContain(
       "Send this agreement for review so both sides can confirm details before signing.",
     );
-    expect(s).toContain("Most agreements are reviewed before signing.");
+    expect(s).toContain("Most agreements are reviewed by all parties before signing.");
     expect(s).toContain("Send for review →");
     expect(s).toContain("Send for signature");
     expect(s).not.toContain("Send for signature instead");
     expect(s).not.toMatch(/>\s*Review first\s*</);
     expect(s).toContain("showSignatureRecipientContinue");
-    expect(s).toContain("Continue to recipient emails");
+    expect(s).toContain("Add recipient emails");
     expect(s).toContain("I&apos;ll sign first");
     expect(s).toContain("formatRouteConfidenceLabel");
     expect(s).toContain('return "solid for review"');

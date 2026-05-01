@@ -40,12 +40,15 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     const p = join(__dirname, "SimpleSendPage.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY");
+    expect(s).toContain("senderFirstGaveUpStorageKey");
     expect(s).toContain("peekPremiumSenderSignFirst()");
     expect(s).toContain("resolvePremiumSenderFirstSigningPath");
-    expect(s).toContain("agreementSigningPath");
-    expect(s).toContain("[premium-sender-first-route]");
+    expect(s).toContain("./premiumSenderFirstSigningRoute");
+    expect(s).toMatch(/\[premium-sender-first-route\][\s\S]*tokenStatus[\s\S]*lockedVersionId/);
     expect(s).not.toContain("navigate(`/app/agreements/");
     expect(s).not.toContain("void navigate(`/app/agreements/");
+    expect(s).not.toMatch(/resolved\?\.path\s*\?\?\s*[`'"]\/app\/send/);
+    expect(s).toContain('resolved?.path.startsWith("/agreements/")');
   });
 
   it("sender-first redirect is gated on signature handoff intent and peekPremiumSenderSignFirst", () => {

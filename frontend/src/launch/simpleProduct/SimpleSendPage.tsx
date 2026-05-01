@@ -12,8 +12,6 @@ import {
   markSimpleFlowSendUnlocked,
 } from "../simpleFlowSendUnlock";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
-import { agreementSigningPath } from "../../agreement/AgreementRecipientReview";
-import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
 import {
   describePaidProSendModalBranch,
@@ -31,8 +29,7 @@ import {
   writePremiumSendIntent,
 } from "./premiumSendIntent";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
-import { mintRecipientAccessToken } from "../../agreement/recipientAccessApi";
-import { resolveApiBase } from "../../lib/clawApi";
+import { resolvePremiumSenderFirstSigningPath } from "./premiumSenderFirstSigningRoute";
 import { getPricingCadencePreference } from "../pricingCadenceStorage";
 import { useLaunchNav } from "../LaunchNavContext";
 import { SimpleFlowShell } from "./SimpleFlowShell";
@@ -44,8 +41,12 @@ const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
 
 const SIMPLE_SEND_PHASE_SS_KEY = (id: string) => `claw_simple_send_phase_v1_${encodeURIComponent(id)}`;
 
-/** One-shot: after sender-first handoff, avoid re-running navigate (professional `/agreements/:id/sign` or send fallback). */
+/** Set only after successful navigation to `/agreements/:id/sign` (prevents duplicate redirects). */
 const SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY = "claw_premium_sender_sign_first_workspace_routed_v1";
+
+function senderFirstGaveUpStorageKey(agreementId: string): string {
+  return `claw_premium_sender_sign_first_route_gave_up_v1_${encodeURIComponent(agreementId.trim())}`;
+}
 
 function readPersistedSendPhase(id: string): "send" | null {
   try {
@@ -69,58 +70,6 @@ function clearPersistedSendPhase(id: string) {
   } catch {
     /* ignore */
   }
-}
-
-/**
- * Owner “sign first” after paid Pro send: land on the same recipient signing surface as counterparty signers
- * (`/agreements/:id/sign` → AgreementRecipientReview), not the agreement workspace wizard.
- */
-async function resolvePremiumSenderFirstSigningPath(params: {
-  agreementId: string;
-  ownerPartyId?: string | null;
-}): Promise<{ path: string; reason: string } | null> {
-  const id = params.agreementId.trim();
-  if (!id) return null;
-  const mintKey =
-    (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env
-      ?.VITE_RECIPIENT_LINK_MINT_KEY || "";
-  try {
-    const minted = await mintRecipientAccessToken(id, { mode: "sign", role: "signer" }, mintKey);
-    if (minted?.token?.trim() && minted.locked_version_id?.trim()) {
-      return {
-        path: agreementSigningPath(
-          id,
-          minted.locked_version_id.trim(),
-          minted.token.trim(),
-          params.ownerPartyId ?? undefined,
-        ),
-        reason: "minted_sign_token",
-      };
-    }
-  } catch {
-    /* fall through to GET signing_lock */
-  }
-  try {
-    const res = await fetch(`${resolveApiBase()}/api/agreements/${encodeURIComponent(id)}`, {
-      headers: clawAgreementHeaders(),
-    });
-    if (!res.ok) return null;
-    const pl = (await res.json()) as Record<string, unknown>;
-    const sl = pl.signing_lock as Record<string, unknown> | null | undefined;
-    const lv =
-      sl && typeof sl.locked_version_id === "string" && sl.locked_version_id.trim()
-        ? sl.locked_version_id.trim()
-        : "";
-    if (lv) {
-      return {
-        path: agreementSigningPath(id, lv, undefined, params.ownerPartyId ?? undefined),
-        reason: "signing_lock_get",
-      };
-    }
-  } catch {
-    return null;
-  }
-  return null;
 }
 
 export function SimpleSendPage(props: { agreementId: string }) {
@@ -176,6 +125,9 @@ export function SimpleSendPage(props: { agreementId: string }) {
   /** Re-evaluate `canAccessSimpleSendActions` after session unlock from authoritative Pro load. */
   const [sendUnlockTick, setSendUnlockTick] = useState(0);
   const [senderFirstBannerDismissed, setSenderFirstBannerDismissed] = useState(false);
+  const [senderFirstSigningRouteOpening, setSenderFirstSigningRouteOpening] = useState(false);
+  const [senderFirstSigningRouteFallback, setSenderFirstSigningRouteFallback] = useState(false);
+  const [senderFirstRouteRetryTick, setSenderFirstRouteRetryTick] = useState(0);
   const authoritativeProBypassRef = useRef(paidProSendBranch.paidProSendAllowed);
   authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
   const premiumSendUnlocked = useMemo(() => {
@@ -334,6 +286,8 @@ export function SimpleSendPage(props: { agreementId: string }) {
 
   useEffect(() => {
     setSenderFirstBannerDismissed(false);
+    setSenderFirstSigningRouteFallback(false);
+    setSenderFirstSigningRouteOpening(false);
   }, [agreementId]);
 
   useEffect(() => {
@@ -344,40 +298,93 @@ export function SimpleSendPage(props: { agreementId: string }) {
     if (!sendAuthoritative) return;
     if (simpleFlowPhase !== "send") return;
     let cancelled = false;
+    let startedResolve = false;
     void (async () => {
       try {
         if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) === id) return;
       } catch {
         return;
       }
-      const ownerPid = (initialDraftSnapshot?.parties?.[0] as { id?: string } | undefined)?.id?.trim() || null;
-      const resolved = await resolvePremiumSenderFirstSigningPath({
-        agreementId: id,
-        ownerPartyId: ownerPid,
-      });
-      if (cancelled) return;
       try {
-        if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) === id) return;
-        sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);
+        if (sessionStorage.getItem(senderFirstGaveUpStorageKey(id)) === "1") {
+          if (!cancelled) setSenderFirstSigningRouteFallback(true);
+          return;
+        }
       } catch {
+        /* ignore */
+      }
+
+      startedResolve = true;
+      if (!cancelled) {
+        setSenderFirstSigningRouteOpening(true);
+        setSenderFirstSigningRouteFallback(false);
+      }
+
+      const parties = initialDraftSnapshot?.parties as ReadonlyArray<{ id?: string; role?: string }> | undefined;
+      const ownerPid =
+        parties?.find((p) => (p?.role || "").toLowerCase() === "owner")?.id?.trim() ||
+        parties?.[0]?.id?.trim() ||
+        null;
+
+      let resolved: Awaited<ReturnType<typeof resolvePremiumSenderFirstSigningPath>> = null;
+      try {
+        resolved = await resolvePremiumSenderFirstSigningPath({
+          agreementId: id,
+          ownerPartyId: ownerPid,
+        });
+      } catch {
+        resolved = null;
+      }
+      if (cancelled) return;
+
+      if (resolved?.path.startsWith("/agreements/")) {
+        try {
+          if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) === id) return;
+          sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);
+          sessionStorage.removeItem(senderFirstGaveUpStorageKey(id));
+        } catch {
+          return;
+        }
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[premium-sender-first-route]", {
+            agreementId: id,
+            from: "/app/send",
+            to: resolved.path,
+            reason: resolved.reason,
+            tokenStatus: resolved.tokenStatus,
+            lockedVersionId: resolved.lockedVersionId,
+            ownerPartyId: ownerPid,
+          });
+        }
+        void navigate(resolved.path);
         return;
       }
-      const fallbackSend = `/app/send/${encodeURIComponent(id)}?phase=send`;
-      const to = resolved?.path ?? fallbackSend;
-      const reason = resolved?.reason ?? "fallback_send_surface_no_signing_context";
+
+      if (startedResolve && !cancelled) setSenderFirstSigningRouteOpening(false);
+
+      try {
+        sessionStorage.setItem(senderFirstGaveUpStorageKey(id), "1");
+      } catch {
+        /* ignore */
+      }
+      if (!cancelled) setSenderFirstSigningRouteFallback(true);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.info("[premium-sender-first-route]", {
           agreementId: id,
           from: "/app/send",
-          to,
-          reason,
+          to: null,
+          reason: "no_professional_signing_route",
+          tokenStatus: "unresolved",
+          lockedVersionId: null,
+          ownerPartyId: ownerPid,
         });
       }
-      void navigate(to);
     })();
     return () => {
       cancelled = true;
+      if (startedResolve) setSenderFirstSigningRouteOpening(false);
     };
   }, [
     agreementId,
@@ -387,6 +394,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
     simpleFlowPhase,
     simpleFlowPremiumHandoffIntent,
     initialDraftSnapshot,
+    senderFirstRouteRetryTick,
   ]);
 
   return (
@@ -442,20 +450,57 @@ export function SimpleSendPage(props: { agreementId: string }) {
       simpleFlowPhase === "send" &&
       peekPremiumSenderSignFirst() &&
       !senderFirstBannerDismissed ? (
-        <div className="mb-4 rounded-lg border border-amber-500/35 bg-amber-950/25 px-4 py-3 text-sm leading-snug text-amber-50/95">
-          <span className="font-semibold">Sign first:</span> complete your signature in the workspace below, then
-          create links for other signers.{" "}
-          <button
-            type="button"
-            className="font-medium text-amber-200 underline decoration-amber-400/50 underline-offset-2 hover:text-amber-50"
-            onClick={() => {
-              clearPremiumSenderSignFirst();
-              setSenderFirstBannerDismissed(true);
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
+        senderFirstSigningRouteFallback ? (
+          <div className="mb-4 rounded-lg border border-rose-500/35 bg-rose-950/20 px-4 py-3 text-sm leading-snug text-rose-50/95">
+            <span className="font-semibold">Sign first:</span> We could not open your signing step yet. Create
+            signature links below or try again.{" "}
+            <button
+              type="button"
+              className="font-medium text-rose-200 underline decoration-rose-400/50 underline-offset-2 hover:text-rose-50"
+              onClick={() => {
+                const aid = agreementId.trim();
+                try {
+                  sessionStorage.removeItem(senderFirstGaveUpStorageKey(aid));
+                } catch {
+                  /* ignore */
+                }
+                setSenderFirstSigningRouteFallback(false);
+                setSenderFirstRouteRetryTick((n) => n + 1);
+              }}
+            >
+              Try again
+            </button>{" "}
+            <button
+              type="button"
+              className="font-medium text-rose-200 underline decoration-rose-400/50 underline-offset-2 hover:text-rose-50"
+              onClick={() => {
+                clearPremiumSenderSignFirst();
+                setSenderFirstBannerDismissed(true);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : senderFirstSigningRouteOpening ? (
+          <div className="mb-4 rounded-lg border border-amber-500/35 bg-amber-950/25 px-4 py-3 text-sm leading-snug text-amber-50/95">
+            <span className="font-semibold">Sign first:</span> Opening your signing step…
+          </div>
+        ) : (
+          <div className="mb-4 rounded-lg border border-amber-500/35 bg-amber-950/25 px-4 py-3 text-sm leading-snug text-amber-50/95">
+            <span className="font-semibold">Sign first:</span> when your signing step opens, complete it there, then
+            return here to create links for other signers.{" "}
+            <button
+              type="button"
+              className="font-medium text-amber-200 underline decoration-amber-400/50 underline-offset-2 hover:text-amber-50"
+              onClick={() => {
+                clearPremiumSenderSignFirst();
+                setSenderFirstBannerDismissed(true);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )
       ) : null}
 
       <AgreementReviewErrorBoundary onBack={navigateBackToCreateForEdit}>

@@ -479,7 +479,7 @@ export function FinalizeYourAgreementPanel({
             </ul>
           ) : null}
           <p className="mt-3 text-[11px] leading-snug text-slate-500 sm:text-xs">
-            Most agreements are reviewed before signing.
+            Most agreements are reviewed by all parties before signing.
           </p>
           {reviewRoute.route === "fix" ? (
             <button
@@ -543,7 +543,7 @@ export function FinalizeYourAgreementPanel({
               disabled={disabled || busy}
               onClick={() => onContinueToRecipientSetup()}
             >
-              Continue to recipient emails
+              Add recipient emails
             </button>
           ) : null}
         </div>

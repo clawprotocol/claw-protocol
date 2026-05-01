@@ -87,6 +87,53 @@ export async function validateRecipientAccessToken(
   return { ok: true, data: raw as ValidatedRecipientAccess };
 }
 
+export type MintRecipientAccessTokenSuccess = {
+  token: string;
+  expires_in_seconds: number;
+  locked_version_id: string;
+};
+
+export type MintRecipientAccessTokenResult =
+  | { ok: true; data: MintRecipientAccessTokenSuccess }
+  | { ok: false; status: number; detail?: string };
+
+/** Same as POST mint but surfaces HTTP status (e.g. 409) for recoverable routing without guessing from null. */
+export async function mintRecipientAccessTokenResult(
+  agreementId: string,
+  body: {
+    mode?: "sign" | "review";
+    role?: "recipient" | "reviewer" | "signer";
+    ttl_seconds?: number;
+    recipient_party_id?: string;
+    inviter_display_name?: string;
+    single_use?: boolean;
+    recipient_subject?: string;
+  },
+  mintKey?: string
+): Promise<MintRecipientAccessTokenResult> {
+  const headers: Record<string, string> = {
+    ...(clawAgreementHeaders({ "Content-Type": "application/json" }) as Record<string, string>),
+  };
+  if (mintKey?.trim()) headers["X-Claw-Recipient-Link-Mint-Key"] = mintKey.trim();
+  const res = await fetch(
+    `${API_BASE.replace(/\/$/, "")}/api/agreements/${encodeURIComponent(agreementId)}/recipient-access-token`,
+    { method: "POST", headers, body: JSON.stringify(body) }
+  );
+  const raw = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail =
+      raw && typeof raw === "object" && "detail" in raw
+        ? String((raw as { detail?: unknown }).detail ?? "")
+        : "";
+    return { ok: false, status: res.status, detail: detail || undefined };
+  }
+  const data = raw as MintRecipientAccessTokenSuccess;
+  if (!data?.token?.trim() || !data?.locked_version_id?.trim()) {
+    return { ok: false, status: res.status || 500, detail: "invalid_mint_payload" };
+  }
+  return { ok: true, data };
+}
+
 export async function mintRecipientAccessToken(
   agreementId: string,
   body: {
@@ -100,16 +147,9 @@ export async function mintRecipientAccessToken(
   },
   mintKey?: string
 ): Promise<{ token: string; expires_in_seconds: number; locked_version_id: string } | null> {
-  const headers: Record<string, string> = {
-    ...(clawAgreementHeaders({ "Content-Type": "application/json" }) as Record<string, string>),
-  };
-  if (mintKey?.trim()) headers["X-Claw-Recipient-Link-Mint-Key"] = mintKey.trim();
-  const res = await fetch(
-    `${API_BASE.replace(/\/$/, "")}/api/agreements/${encodeURIComponent(agreementId)}/recipient-access-token`,
-    { method: "POST", headers, body: JSON.stringify(body) }
-  );
-  if (!res.ok) return null;
-  return (await res.json()) as { token: string; expires_in_seconds: number; locked_version_id: string };
+  const r = await mintRecipientAccessTokenResult(agreementId, body, mintKey);
+  if (!r.ok) return null;
+  return r.data;
 }
 
 export async function putSigningLock(
