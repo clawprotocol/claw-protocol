@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from backend.config.storage_runtime import unified_artifact_store_enabled
+
+log = logging.getLogger(__name__)
 
 
 def _utc_now_iso() -> str:
@@ -39,7 +42,7 @@ def _doc_dir(document_id: str) -> Path:
 
 def _write_legacy_layout(document_id: str, content: bytes, meta: Dict[str, Any]) -> None:
     root = _doc_dir(document_id)
-    root.mkdir(parents=True, exist_ok=False)
+    root.mkdir(parents=True, exist_ok=True)
     (root / "body.bin").write_bytes(content)
     (root / "meta.json").write_text(
         json.dumps(meta, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
@@ -97,35 +100,61 @@ def finalize_document(
         "content_type": ct,
     }
 
-    if unified_artifact_store_enabled():
-        from backend.storage.artifact_repository import get_artifact_repository
+    try:
+        documents_root().mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
-        repo = get_artifact_repository()
-        repo.put_artifact(
-            artifact_type="vs01_document",
-            logical_ref=document_id,
-            data=content,
-            content_type=ct,
-            visibility="downloadable",
-            metadata={"role": "signed_document_body"},
-        )
-        meta_json = json.dumps(
-            meta, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        ).encode("utf-8")
-        repo.put_artifact(
-            artifact_type="vs01_document_meta",
-            logical_ref=document_id,
-            data=meta_json,
-            content_type="application/json",
-            visibility="private",
-            metadata={"role": "signed_document_meta"},
-        )
-        if _legacy_mirror_enabled():
-            try:
-                _write_legacy_layout(document_id, content, meta)
-            except FileExistsError:
-                pass
-        return meta
+    if unified_artifact_store_enabled():
+        try:
+            from backend.storage.artifact_repository import get_artifact_repository
+
+            repo = get_artifact_repository()
+            repo.init_schema()
+            repo.put_artifact(
+                artifact_type="vs01_document",
+                logical_ref=document_id,
+                data=content,
+                content_type=ct,
+                visibility="downloadable",
+                metadata={"role": "signed_document_body"},
+            )
+            meta_json = json.dumps(
+                meta, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+            repo.put_artifact(
+                artifact_type="vs01_document_meta",
+                logical_ref=document_id,
+                data=meta_json,
+                content_type="application/json",
+                visibility="private",
+                metadata={"role": "signed_document_meta"},
+            )
+            if _legacy_mirror_enabled():
+                try:
+                    _write_legacy_layout(document_id, content, meta)
+                except FileExistsError:
+                    pass
+            return meta
+        except NotImplementedError as exc:
+            log.warning(
+                "finalize_document: unified artifact store unavailable (%s: %s); using legacy layout only",
+                type(exc).__name__,
+                str(exc)[:300],
+            )
+        except OSError as exc:
+            log.warning(
+                "finalize_document: unified store write failed (%s: %s); using legacy layout only",
+                type(exc).__name__,
+                str(exc)[:300],
+            )
+        except Exception as exc:
+            log.warning(
+                "finalize_document: unified artifact path failed (%s: %s); using legacy layout only",
+                type(exc).__name__,
+                str(exc)[:500],
+                exc_info=True,
+            )
 
     _write_legacy_layout(document_id, content, meta)
     return meta

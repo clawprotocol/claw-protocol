@@ -1904,6 +1904,53 @@ def test_render_html_watermark_emits_label_once_even_when_body_repeats_it():
     assert out.count(WATERMARK_LABEL) == 1
 
 
+def test_vs01_signing_seed_endpoint_ok_with_s3_backend_uses_legacy_finalize(monkeypatch, tmp_path):
+    """S3/Object stub must not 503 VS01 seed — finalize_document falls back to legacy files."""
+    from backend.storage.artifact_repository import reset_artifact_repository_singleton
+
+    pytest.importorskip("fitz")
+    reset_artifact_repository_singleton()
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_UNIFIED_ARTIFACT_STORE", "1")
+    monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(tmp_path / "artifact_registry.sqlite3"))
+    monkeypatch.setenv("CLAW_BLOB_ROOT", str(tmp_path / "blobs"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
+    reset_artifact_repository_singleton()
+    client = TestClient(app)
+    h = {"X-Claw-Org-Id": "test-vs01-seed-s3-fallback"}
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "VS01 Seed S3 Fallback",
+            "jurisdiction": "Delaware",
+            "parties": [
+                {"name": "Owner Co", "role": "owner", "email": "o2@example.com"},
+                {"name": "Other Co", "role": "signer", "email": "s2@example.com"},
+            ],
+            "purpose": "Testing VS01 signing seed with S3 stub backend.",
+            "payment_terms": "$1",
+            "duration": "1 month",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    agreement_id = create_res.json()["id"]
+    seed = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=h,
+        json={},
+    )
+    assert seed.status_code == 200, seed.text
+    body = seed.json()
+    assert body.get("document_id", "").startswith("doc_")
+    assert len(body.get("content_sha256", "")) == 64
+    reset_artifact_repository_singleton()
+
+
 def test_vs01_signing_seed_endpoint_ok(monkeypatch, tmp_path):
     pytest.importorskip("fitz")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))

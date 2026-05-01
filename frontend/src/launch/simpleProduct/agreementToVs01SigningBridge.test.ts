@@ -45,6 +45,7 @@ describe("fetchAgreementVs01SigningSeed", () => {
   });
 
   it("maps structured FastAPI detail to reason and preserves status", async () => {
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -62,6 +63,15 @@ describe("fetchAgreementVs01SigningSeed", () => {
       expect(r.httpStatus).toBe(503);
       expect(r.detail).toEqual({ code: "vs01_finalize_failed", message: "OSError" });
     }
+    expect(logSpy).toHaveBeenCalledWith(
+      "[agreement-vs01-seed-failed]",
+      expect.objectContaining({
+        agreementId: "ag_test",
+        status: 503,
+        detail: { code: "vs01_finalize_failed", message: "OSError" },
+      }),
+    );
+    logSpy.mockRestore();
   });
 
   it("returns document id on 200", async () => {

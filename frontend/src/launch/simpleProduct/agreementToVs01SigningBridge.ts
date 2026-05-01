@@ -124,6 +124,14 @@ export async function fetchAgreementVs01SigningSeed(agreementId: string): Promis
     if (!res.ok) {
       const d = j.detail;
       const reason = vs01SeedFailureReason(d, res.status);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[agreement-vs01-seed-failed]", {
+          agreementId: id,
+          status: res.status,
+          detail: d,
+        });
+      }
       return { ok: false, reason, httpStatus: res.status, detail: d };
     }
     const docId = typeof j.document_id === "string" ? j.document_id.trim() : "";
@@ -131,6 +139,14 @@ export async function fetchAgreementVs01SigningSeed(agreementId: string): Promis
     const hash = typeof j.content_sha256 === "string" ? j.content_sha256.trim() : null;
     return { ok: true, documentId: docId, contentSha256: hash };
   } catch {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[agreement-vs01-seed-failed]", {
+        agreementId: id,
+        status: 0,
+        detail: "network",
+      });
+    }
     return { ok: false, reason: "network", httpStatus: 0, detail: "network" };
   }
 }

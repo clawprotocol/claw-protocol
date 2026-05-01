@@ -4488,23 +4488,6 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
         built = agreement_rendered_html_to_pdf_bytes(
             html, title=(draft.title or "").strip() or "Agreement"
         )
-    except ImportError as exc:
-        _em = (str(exc) or "")[:500]
-        log.warning(
-            "[agreement-vs01-seed] failure agreement_id=%s html_len=%s render_mode=n/a "
-            "exc_type=%s exc_msg=%s",
-            agreement_id,
-            html_len,
-            type(exc).__name__,
-            _em,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "vs01_seed_dependency_missing",
-                "message": "PyMuPDF (pymupdf) is required for VS01 signing seed.",
-            },
-        ) from exc
     except Exception as exc:
         _em = (str(exc) or "")[:500]
         log.exception(
