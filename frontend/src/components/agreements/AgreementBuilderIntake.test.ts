@@ -408,4 +408,31 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect((matches ?? []).length).toBeGreaterThanOrEqual(2);
     expect(intake).toMatch(/Inline Pro recipient rail requires/);
   });
+
+  it("runPersistAndOpen clears stale hardError before persist and after successful hydrate (free/basic retry)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const handoff = intake.indexOf("async function runPersistAndOpen");
+    expect(handoff).toBeGreaterThanOrEqual(0);
+    const tryOpen = intake.indexOf("try {", handoff);
+    expect(tryOpen).toBeGreaterThan(handoff);
+    const slice = intake.slice(tryOpen, tryOpen + 320);
+    expect(slice).toMatch(/setHardError\(null\);[\s\S]*?const existingId = reviewAgreementIdRef/);
+    const hydrateOk = intake.indexOf('console.log("[AgreementIntake] persistence + hydrate OK');
+    expect(hydrateOk).toBeGreaterThan(0);
+    const afterHydrate = intake.slice(hydrateOk, hydrateOk + 420);
+    expect(afterHydrate).toMatch(/setHardError\(null\);[\s\S]*?setReviewAgreementId\(id\)/);
+    expect(afterHydrate).toContain("setDraft(normalized as unknown as ParsedDraftShape)");
+    expect(afterHydrate).toContain("setCreateFlowPhase(\"draft_ready_for_review\")");
+  });
+
+  it("hardErrorForUi suppresses generic save banner when persisted agreement id matches draft id", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("persistedRowMatchesDraft");
+    expect(intake).toMatch(
+      /\!draftHasPlaceholderParties\(draft\) \|\| persistedRowMatchesDraft/,
+    );
+    expect(intake).toMatch(
+      /workspaceUi\s*&&\s*\n\s*\!simpleProductFlow[\s\S]*persistedRowMatchesDraft/,
+    );
+  });
 });

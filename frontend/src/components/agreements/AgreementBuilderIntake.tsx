@@ -6145,6 +6145,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ): Promise<boolean> {
     let postedId = "";
     try {
+      /** Clear stale save/hydrate errors before a new persist attempt (e.g. prior basic_parse_timeout then retry). */
+      setHardError(null);
       const existingId = reviewAgreementIdRef.current?.trim();
       let id: string;
       let postDraft: AgreementDraft | null;
@@ -6196,6 +6198,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       const normalized = await hydrateCreatedAgreement(id, postDraft, partyNameContext);
       console.log("[AgreementIntake] persistence + hydrate OK, advancing wizard", id);
+      setHardError(null);
+      setReviewAgreementId(id);
+      setDraft(normalized as unknown as ParsedDraftShape);
+      if (simpleProductFlow && liveWorkspaceTwoPane && !continuitySourcePanel) {
+        setCreateFlowPhase("draft_ready_for_review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setDraftNowCommitted(true);
+      }
       const elapsedMs = Date.now() - funnelStartedAtRef.current;
       funnelGeneratedRef.current = true;
       trackFunnelEvent("agreement_generated", {
@@ -9501,6 +9511,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const hardErrorForUi = useMemo(() => {
     if (!hardError) return null;
     const humanized = humanizeHardIntakeError(hardError);
+    const draftId = String((draft as { id?: unknown } | null)?.id ?? "").trim();
+    const rid = (reviewAgreementId || "").trim();
+    const persistedRowMatchesDraft = Boolean(draftId && rid && draftId === rid);
     if (
       simpleProductFlow &&
       createProductionTwoPane &&
@@ -9518,10 +9531,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createUiStage === CreateUiStage.DRAFT &&
         createFlowPhase === "draft_ready_for_review" &&
         draft &&
-        !draftHasPlaceholderParties(draft)
+        (!draftHasPlaceholderParties(draft) || persistedRowMatchesDraft)
       ) {
         return null;
       }
+    }
+    /** Wizard `/app/agreements/new` (no two-pane): same stale generic save line after successful POST + id. */
+    if (
+      workspaceUi &&
+      !simpleProductFlow &&
+      !loading &&
+      humanized === INTAKE_HARD_SAVE_GENERIC &&
+      draft &&
+      persistedRowMatchesDraft &&
+      createUiStage === CreateUiStage.DRAFT &&
+      (createFlowPhase === "draft_ready_for_review" || createFlowPhase === "generating_draft")
+    ) {
+      return null;
     }
     return humanized;
   }, [
@@ -9534,6 +9560,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     paidProAuthoritative,
     premiumSignersSurfaceReady,
+    workspaceUi,
+    reviewAgreementId,
   ]);
   const errorIsHydrate = Boolean(hardError && isHydrateIntakeErrorRaw(hardError));
 
