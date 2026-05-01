@@ -51,6 +51,8 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("We could not open the e-sign workspace.");
     expect(s).toContain("Continue without VS01 e-sign");
     expect(s).toContain("const route = `/app/esign/${encodeURIComponent(vs01Seed.documentId)}?agreement_bridge=1`");
+    expect(s).toContain("[agreement-vs01-bridge-session-written]");
+    expect(s).toContain("setPaidProAgreementBridgeSkipMarker");
   });
 
   it("sender-first redirect is gated on signature handoff intent and peekPremiumSenderSignFirst", () => {

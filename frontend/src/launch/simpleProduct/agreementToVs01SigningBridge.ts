@@ -5,6 +5,8 @@ import type { Vs01Counterparty } from "../../vs01/types";
 import { resolveApiBase } from "../../lib/clawApi";
 
 const BRIDGE_SESSION_KEY = "claw_agreement_vs01_bridge_handoff_v1";
+/** Survives Strict Mode / URL strip so Vs01Wizard still knows to skip details (value = document id). */
+const PAID_PRO_AGREEMENT_SKIP_MARKER_KEY = "claw_vs01_paid_pro_agreement_skip_v1";
 
 export type AgreementVs01BridgeSession = {
   vs01DocumentId: string;
@@ -20,7 +22,57 @@ export type AgreementVs01BridgeSession = {
    * and open signing/field placement when {@link lawdogSenderFirstBridgeMetadataReady} passes.
    */
   senderFirstLawdogHandoff?: boolean;
+  /** Identifies LawDog paid Pro sender-first → VS01 handoff (for logs and future guards). */
+  source?: "paid_pro_sender_first";
+  /** Mirrors premium sender-first intent on the LawDog send surface. */
+  signerFirst?: boolean;
 };
+
+export function setPaidProAgreementBridgeSkipMarker(documentId: string): void {
+  const id = (documentId || "").trim();
+  if (!id) return;
+  try {
+    sessionStorage.setItem(PAID_PRO_AGREEMENT_SKIP_MARKER_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readPaidProAgreementBridgeSkipMarker(documentId: string | null | undefined): boolean {
+  const id = (documentId || "").trim();
+  if (!id) return false;
+  try {
+    return sessionStorage.getItem(PAID_PRO_AGREEMENT_SKIP_MARKER_KEY) === id;
+  } catch {
+    return false;
+  }
+}
+
+export function clearPaidProAgreementBridgeSkipMarker(): void {
+  try {
+    sessionStorage.removeItem(PAID_PRO_AGREEMENT_SKIP_MARKER_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Paid Pro `/app/esign/:doc?agreement_bridge=1` — skip VS01 “Who needs to sign?” (LawDog already collected signers).
+ * Uses persisted marker and/or live URL + bridge session (document ids must match).
+ */
+export function computePaidProAgreementBridgeSkip(
+  seedDocumentId: string | null | undefined,
+  hideStepper: boolean,
+): boolean {
+  if (!hideStepper || !(seedDocumentId || "").trim()) return false;
+  const sid = (seedDocumentId || "").trim();
+  if (readPaidProAgreementBridgeSkipMarker(sid)) return true;
+  if (typeof window === "undefined") return false;
+  const q = new URLSearchParams(window.location.search);
+  if (q.get("agreement_bridge") !== "1") return false;
+  const b = readAgreementVs01BridgeSession();
+  return Boolean(b && b.vs01DocumentId.trim() === sid);
+}
 
 /** Whether LawDog Pro already supplied enough signer metadata to skip VS01 “Who needs to sign?”. */
 export function lawdogSenderFirstBridgeMetadataReady(
@@ -68,6 +120,7 @@ export function buildAgreementVs01BridgeSession(params: {
           };
         })
       : [{ id: newCpId(), name: "", email: "", phone: "" }];
+  const senderFirst = Boolean(params.senderFirstLawdogHandoff);
   return {
     vs01DocumentId: params.vs01DocumentId.trim(),
     agreementId: params.agreementId.trim(),
@@ -76,7 +129,10 @@ export function buildAgreementVs01BridgeSession(params: {
     creatorEmail,
     counterparties,
     targetStep: 2,
-    senderFirstLawdogHandoff: Boolean(params.senderFirstLawdogHandoff),
+    senderFirstLawdogHandoff: senderFirst,
+    ...(senderFirst
+      ? ({ source: "paid_pro_sender_first" as const, signerFirst: true } as const)
+      : {}),
   };
 }
 

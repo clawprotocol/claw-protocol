@@ -1,12 +1,16 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   buildAgreementVs01BridgeSession,
+  clearPaidProAgreementBridgeSkipMarker,
+  computePaidProAgreementBridgeSkip,
   fetchAgreementVs01SigningSeed,
   lawdogSenderFirstBridgeMetadataReady,
   logAgreementVs01SeedBlocked,
+  readPaidProAgreementBridgeSkipMarker,
+  setPaidProAgreementBridgeSkipMarker,
 } from "./agreementToVs01SigningBridge";
 
 describe("buildAgreementVs01BridgeSession", () => {
@@ -64,6 +68,51 @@ describe("buildAgreementVs01BridgeSession", () => {
       senderFirstLawdogHandoff: true,
     });
     expect(b.senderFirstLawdogHandoff).toBe(true);
+    expect(b.source).toBe("paid_pro_sender_first");
+    expect(b.signerFirst).toBe(true);
+  });
+});
+
+describe("computePaidProAgreementBridgeSkip", () => {
+  const ssStore: Record<string, string> = {};
+  const mockSessionStorage = {
+    getItem: (k: string) => (k in ssStore ? ssStore[k] : null),
+    setItem: (k: string, v: string) => {
+      ssStore[k] = v;
+    },
+    removeItem: (k: string) => {
+      delete ssStore[k];
+    },
+    clear: () => {
+      Object.keys(ssStore).forEach((k) => delete ssStore[k]);
+    },
+    key: () => null,
+    get length() {
+      return Object.keys(ssStore).length;
+    },
+  } as Storage;
+
+  beforeEach(() => {
+    Object.keys(ssStore).forEach((k) => delete ssStore[k]);
+    vi.stubGlobal("sessionStorage", mockSessionStorage);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Object.keys(ssStore).forEach((k) => delete ssStore[k]);
+  });
+
+  it("is true when skip marker matches seed id", () => {
+    setPaidProAgreementBridgeSkipMarker("doc_marker");
+    expect(computePaidProAgreementBridgeSkip("doc_marker", true)).toBe(true);
+    expect(readPaidProAgreementBridgeSkipMarker("doc_marker")).toBe(true);
+    clearPaidProAgreementBridgeSkipMarker();
+    expect(computePaidProAgreementBridgeSkip("doc_marker", true)).toBe(false);
+  });
+
+  it("is false for /app/quick (no seed document id)", () => {
+    setPaidProAgreementBridgeSkipMarker("doc_x");
+    expect(computePaidProAgreementBridgeSkip("", true)).toBe(false);
   });
 });
 

@@ -35,6 +35,7 @@ import {
   fetchAgreementVs01SigningSeed,
   logAgreementToVs01EsignRoute,
   logAgreementVs01SeedBlocked,
+  setPaidProAgreementBridgeSkipMarker,
   writeAgreementVs01BridgeSession,
 } from "./agreementToVs01SigningBridge";
 import { getPricingCadencePreference } from "../pricingCadenceStorage";
@@ -339,8 +340,19 @@ export function SimpleSendPage(props: { agreementId: string }) {
           agreementId: id,
           vs01DocumentId: vs01Seed.documentId,
           draft: (initialDraftSnapshot as AgreementDraft | null) ?? null,
+          senderFirstLawdogHandoff: true,
         });
         writeAgreementVs01BridgeSession(bridge);
+        setPaidProAgreementBridgeSkipMarker(vs01Seed.documentId);
+        // eslint-disable-next-line no-console
+        console.info("[agreement-vs01-bridge-session-written]", {
+          source: bridge.source,
+          signerFirst: bridge.signerFirst,
+          senderFirstLawdogHandoff: bridge.senderFirstLawdogHandoff,
+          hasCreatorEmail: Boolean((bridge.creatorEmail || "").trim()),
+          counterpartyCount: bridge.counterparties?.length ?? 0,
+          vs01DocumentId: bridge.vs01DocumentId,
+        });
         try {
           if (sessionStorage.getItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY) !== id) {
             sessionStorage.setItem(SENDER_FIRST_WORKSPACE_ROUTED_SS_KEY, id);

@@ -21,8 +21,11 @@ import { prepareFreshMarketingEntry } from "../launch/marketingSession";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import {
   clearAgreementVs01BridgeSession,
-  lawdogSenderFirstBridgeMetadataReady,
+  clearPaidProAgreementBridgeSkipMarker,
+  computePaidProAgreementBridgeSkip,
   readAgreementVs01BridgeSession,
+  readPaidProAgreementBridgeSkipMarker,
+  type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { sha256Bytes } from "../utils/agreements/hash";
 import type {
@@ -123,6 +126,12 @@ export function Vs01Wizard({
   }, [navigate]);
   const countedSignatureReceiptRef = useRef<string | null>(null);
   const didLogVs01RouteMount = useRef(false);
+  /** Paid Pro `/app/esign/:id?agreement_bridge=1` — LawDog already collected signers; never show VS01 details step. */
+  const [paidProAgreementBridgeSkip] = useState(() =>
+    computePaidProAgreementBridgeSkip(seedDocumentId, hideStepper),
+  );
+  const bridgeHydratedSeedSid = useRef<string | null>(null);
+  const bridgeHandoffSnapshotRef = useRef<AgreementVs01BridgeSession | null>(null);
   const [step, setStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.step ?? initialStep);
   /** Furthest step visited — gates Receipt until assign step satisfied. */
   const [furthestStep, setFurthestStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.furthestStep ?? initialStep);
@@ -170,6 +179,11 @@ export function Vs01Wizard({
   }, [seedDocumentId, hideStepper]);
 
   useEffect(() => {
+    bridgeHandoffSnapshotRef.current = null;
+    bridgeHydratedSeedSid.current = null;
+  }, [seedDocumentId]);
+
+  useEffect(() => {
     if (!VS01_URL_BOOT) return;
     let cancelled = false;
     void (async () => {
@@ -209,7 +223,7 @@ export function Vs01Wizard({
     (id: Vs01Step): boolean => {
       if (id === 0) return true;
       if (id === 1) return docFinalized;
-      if (id === 2) return docFinalized && detailsOk;
+      if (id === 2) return docFinalized && (paidProAgreementBridgeSkip || detailsOk);
       if (id === 3) return !!receiptId;
       if (id === 4) {
         return (
@@ -220,7 +234,7 @@ export function Vs01Wizard({
       }
       return false;
     },
-    [docFinalized, detailsOk, receiptId, furthestStep, recipientPlacedFields.length]
+    [docFinalized, detailsOk, paidProAgreementBridgeSkip, receiptId, furthestStep, recipientPlacedFields.length]
   );
 
   const goToStep = useCallback((target: Vs01Step) => {
@@ -228,6 +242,21 @@ export function Vs01Wizard({
     setFurthestStep((prev) => (target > prev ? target : prev));
     setError(null);
   }, []);
+
+  useEffect(() => {
+    if (!paidProAgreementBridgeSkip) return;
+    if (step !== 1) return;
+    goToStep(2);
+  }, [paidProAgreementBridgeSkip, step, goToStep]);
+
+  useEffect(() => {
+    if (!paidProAgreementBridgeSkip) return;
+    if (step !== 2 || !docFinalized) return;
+    const t = window.setTimeout(() => {
+      clearPaidProAgreementBridgeSkipMarker();
+    }, 2000);
+    return () => window.clearTimeout(t);
+  }, [paidProAgreementBridgeSkip, step, docFinalized]);
 
   /** Deep link: /app/esign/:documentId — fetch content and bind hash so steps 1+ unlock. */
   useEffect(() => {
@@ -245,18 +274,34 @@ export function Vs01Wizard({
         setDocumentId(sid);
         setContentSha256(hex);
 
+        if (bridgeHydratedSeedSid.current === sid) {
+          return;
+        }
+
         const bridgeParams = new URLSearchParams(window.location.search);
-        const bridge = readAgreementVs01BridgeSession();
-        if (bridgeParams.get("agreement_bridge") === "1" && bridge?.vs01DocumentId === sid) {
+        const agreementBridgeQuery = bridgeParams.get("agreement_bridge") === "1";
+        const rawBridge = readAgreementVs01BridgeSession();
+        const bridge: AgreementVs01BridgeSession | null =
+          rawBridge && rawBridge.vs01DocumentId.trim() === sid
+            ? rawBridge
+            : bridgeHandoffSnapshotRef.current &&
+                bridgeHandoffSnapshotRef.current.vs01DocumentId.trim() === sid
+              ? bridgeHandoffSnapshotRef.current
+              : null;
+
+        const paidProAgreementHandoff =
+          hideStepper &&
+          Boolean(sid) &&
+          (readPaidProAgreementBridgeSkipMarker(sid) ||
+            (agreementBridgeQuery &&
+              bridge !== null &&
+              bridge.vs01DocumentId.trim() === sid));
+
+        if (paidProAgreementHandoff && bridge && bridge.vs01DocumentId.trim() === sid) {
+          bridgeHandoffSnapshotRef.current = bridge;
+          bridgeHydratedSeedSid.current = sid;
           const cps =
             bridge.counterparties?.length > 0 ? bridge.counterparties : initialCounterparties();
-          const detailsReady = detailsStepIsValid(
-            bridge.agreementTitle || "",
-            bridge.creatorName || "",
-            bridge.creatorEmail || "",
-            cps,
-          );
-          const senderFirstSkipDetails = lawdogSenderFirstBridgeMetadataReady(bridge, cps);
           const titleForUi = (bridge.agreementTitle || "").trim() || "Agreement";
           flushSync(() => {
             setAgreementTitle(titleForUi);
@@ -269,19 +314,15 @@ export function Vs01Wizard({
               source: "upload",
             });
           });
-          clearAgreementVs01BridgeSession();
-          bridgeParams.delete("agreement_bridge");
-          const qs = bridgeParams.toString();
-          window.history.replaceState(
-            window.history.state,
-            "",
-            qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
-          );
-          const nextStep: Vs01Step = senderFirstSkipDetails
-            ? 2
-            : detailsReady && bridge.targetStep >= 2
-              ? 2
-              : 1;
+          const nextStep: Vs01Step = 2;
+          // eslint-disable-next-line no-console
+          console.info("[vs01-paid-pro-skip-details]", {
+            seedDocumentId: sid,
+            bridgeSource: bridge.source ?? null,
+            signerFirst: bridge.signerFirst ?? null,
+            senderFirstLawdogHandoff: bridge.senderFirstLawdogHandoff ?? null,
+            nextStep,
+          });
           // eslint-disable-next-line no-console
           console.info("[vs01-bridge-hydrate]", {
             agreementId: bridge.agreementId,
@@ -289,16 +330,29 @@ export function Vs01Wizard({
             agreementTitle: bridge.agreementTitle,
             targetStep: bridge.targetStep,
             nextStep,
-            senderFirstLawdogHandoff: Boolean(bridge.senderFirstLawdogHandoff),
-            senderFirstSkipDetails,
-            detailsReady,
+            paidProAgreementHandoff: true,
             counterpartiesCount: cps.length,
           });
           setFurthestStep((prev) => (nextStep > prev ? nextStep : prev));
           goToStep(nextStep);
+          bridgeParams.delete("agreement_bridge");
+          const qs = bridgeParams.toString();
+          window.setTimeout(() => {
+            try {
+              clearAgreementVs01BridgeSession();
+              window.history.replaceState(
+                window.history.state,
+                "",
+                qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
+              );
+            } catch {
+              /* ignore */
+            }
+          }, 0);
           return;
         }
 
+        bridgeHydratedSeedSid.current = sid;
         setFurthestStep((prev) => (1 > prev ? 1 : prev));
         goToStep(1);
       } catch (e) {
@@ -309,7 +363,7 @@ export function Vs01Wizard({
     return () => {
       cancelled = true;
     };
-  }, [seedDocumentId, goToStep]);
+  }, [seedDocumentId, goToStep, hideStepper]);
 
   const handleFinalized = useCallback(
     (payload: Vs01FinalizeDocumentPayload) => {
@@ -336,11 +390,12 @@ export function Vs01Wizard({
   );
 
   useEffect(() => {
+    if (paidProAgreementBridgeSkip) return;
     if (step !== 1) return;
     if (agreementTitleUserEdited) return;
     if (!documentMeta) return;
     setAgreementTitle(defaultAgreementTitle(documentMeta));
-  }, [step, documentMeta, agreementTitleUserEdited]);
+  }, [paidProAgreementBridgeSkip, step, documentMeta, agreementTitleUserEdited]);
 
   const handleSigned = useCallback(
     (payload: {
@@ -377,6 +432,10 @@ export function Vs01Wizard({
   );
 
   const resetAll = useCallback(() => {
+    clearPaidProAgreementBridgeSkipMarker();
+    clearAgreementVs01BridgeSession();
+    bridgeHandoffSnapshotRef.current = null;
+    bridgeHydratedSeedSid.current = null;
     setAgreementTitle("");
     setAgreementTitleUserEdited(false);
     setDocumentMeta(null);
@@ -549,7 +608,9 @@ export function Vs01Wizard({
       >
         {seedAwaitingContentSha ? (
           <div className="vs01-details-step" aria-busy="true" aria-live="polite">
-            <p className="vs01-card-help text-center text-slate-300">Loading your document…</p>
+            <p className="vs01-card-help text-center text-slate-300">
+              {paidProAgreementBridgeSkip ? "Loading signing workspace…" : "Loading your document…"}
+            </p>
           </div>
         ) : step === 0 ? (
           <StepDocument
@@ -570,7 +631,7 @@ export function Vs01Wizard({
             }}
           />
         ) : null}
-        {step === 1 ? (
+        {step === 1 && !paidProAgreementBridgeSkip ? (
           <StepAgreementDetails
             agreementTitle={agreementTitle}
             onAgreementTitleChange={(v) => {
@@ -615,7 +676,7 @@ export function Vs01Wizard({
             onSigned={handleSigned}
             counterparties={counterparties}
             senderMessage={senderMessage}
-            onBack={() => goToStep(1)}
+            onBack={() => goToStep(paidProAgreementBridgeSkip ? 0 : 1)}
             onContinue={() => {
               if (receiptId) goToStep(3);
             }}
