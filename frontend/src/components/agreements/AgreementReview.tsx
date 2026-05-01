@@ -2212,7 +2212,9 @@ const AgreementReview: React.FC<Props> = ({
         logReviewLinkAction("blocked_recipient_validation");
         setError(
           draft && isPaidProAgreementAuthoritative({ draft, agreementId })
-            ? "Add at least one recipient before continuing."
+            ? streamlinedPremiumIntentForCopy === "signature"
+              ? "Add at least one signer email to continue."
+              : "Add at least one recipient email to create review links."
             : streamlinedPremiumIntentForCopy === "review"
               ? "Add at least one recipient email below, then try Create review links again."
               : "Add at least one recipient email below, then try again.",
@@ -5857,7 +5859,9 @@ const AgreementReview: React.FC<Props> = ({
                                   role="status"
                                 >
                                   {draft && isPaidProAgreementAuthoritative({ draft, agreementId })
-                                    ? "Add at least one recipient before continuing."
+                                    ? streamlinedPremiumIntentForCopy === "signature"
+                                      ? "Add at least one signer email to continue."
+                                      : "Add at least one recipient email to create review links."
                                     : streamlinedPremiumIntentForCopy === "review"
                                       ? "Add at least one recipient email in Recipients below — we need it to label review links and continue."
                                       : "Add at least one recipient email in Recipients below before continuing."}
@@ -5881,7 +5885,7 @@ const AgreementReview: React.FC<Props> = ({
                                         ? "Create review links"
                                         : `Create review links (${sendInviteReadyCount})`
                                       : "Create review links"
-                                    : "Create signing links"}
+                                    : "Review and send"}
                                 </button>
                                 {onSimpleFlowBack ? (
                                   <button

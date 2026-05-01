@@ -46,12 +46,14 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(s).not.toMatch(/runPersistAndOpen[\s\S]{0,12000}clearPremiumCompletionStateAfterSend/);
   });
 
-  it("paid authoritative recipient step uses Review and send CTA copy (not Create review link)", () => {
+  it("paid authoritative recipient step uses intent-specific validation copy (review vs signature)", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("paidProAuthoritative");
     expect(s).toContain('"Review and send"');
-    expect(s).toContain("Add at least one recipient before continuing.");
+    expect(s).toContain("Add at least one recipient email to create review links.");
+    expect(s).toContain("Add at least one signer email to continue.");
+    expect(s).toContain("Sign first before sending");
   });
 
   it("paid authoritative recipient handoff uses advancePaidProToRecipientSetup in both handOff and runPrimary paths", () => {
@@ -239,5 +241,22 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("showProLawdogRefineAndFinalize");
     const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");
     expect(finalize).toContain("Ready to send for review");
+  });
+
+  it("paid Pro finalize routes wire Send for review vs Send for signature to mode pick + continue (telemetry-safe)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain('handleFinalizeRoutePrimaryAction("review")');
+    expect(intake).toContain('handleFinalizeRoutePrimaryAction("signature")');
+    expect(intake).toContain("handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode })");
+    expect(intake).toContain("Share for review");
+    expect(intake).toContain("Create review links");
+    expect(intake).toContain("Nothing changes unless you accept it");
+  });
+
+  it("sign-first control is gated to paid signature recipients (not review mode)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toMatch(
+      /createUiStage === CreateUiStage\.RECIPIENTS[\s\S]*?effectivePremiumSendMode === "signature"\s*\?[\s\S]*?Sign first before sending/,
+    );
   });
 });

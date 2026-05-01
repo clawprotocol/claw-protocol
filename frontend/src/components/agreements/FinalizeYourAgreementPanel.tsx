@@ -23,7 +23,7 @@ import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 const PLACEHOLDER = "Describe the change you want (optional)";
 /** Pro finalize panel — shown above review/signature row; also used for empty refine submit hint. */
 export const FINALIZE_REFINE_ROUTE_HINT =
-  "Need changes? Describe them below, then update the agreement. Otherwise choose review or signature.";
+  "Need changes? Describe them below, then update the agreement. When you’re ready, use Send for review or Send for signature above.";
 
 type SendMode = "review" | "signature";
 
@@ -472,33 +472,37 @@ export function FinalizeYourAgreementPanel({
           <p className="mt-3 text-[11px] leading-snug text-slate-500 sm:text-xs">
             Most agreements are reviewed before signing.
           </p>
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-stretch">
+          {reviewRoute.route === "fix" ? (
             <button
               type="button"
-              className="inline-flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-md shadow-emerald-950/20 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/90 disabled:opacity-50 sm:min-h-[2.85rem] sm:px-5 sm:py-3 sm:text-[0.9375rem]"
+              className="mt-3 inline-flex min-h-[2.75rem] w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-md shadow-emerald-950/20 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/90 disabled:opacity-50 sm:min-h-[2.85rem] sm:px-5 sm:py-3 sm:text-[0.9375rem]"
               disabled={disabled || busy}
-              onClick={() => {
-                if (reviewRoute.route === "fix") {
-                  onRouteFixPrimary?.();
-                  return;
-                }
-                if (reviewRoute.route === "signature") onSendForSignature();
-                else onReadyForReview();
-              }}
+              onClick={() => onRouteFixPrimary?.()}
             >
               {formatRecommendedCtaLabel(reviewRoute.recommended_cta)}
             </button>
-            <button
-              type="button"
-              className="inline-flex min-h-[2.75rem] items-center justify-center rounded-lg border border-slate-500/55 bg-slate-950/50 px-3.5 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:bg-slate-900/60 disabled:opacity-50 sm:py-2.5"
-              disabled={disabled || busy}
-              onClick={() => (reviewRoute.route === "review" ? onSendForSignature() : onReadyForReview())}
-            >
-              {reviewRoute.route === "review" ? "Send for signature anyway" : "Invite reviewer first"}
-            </button>
-          </div>
+          ) : null}
         </div>
       ) : null}
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-stretch">
+        <button
+          type="button"
+          className="inline-flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-md shadow-emerald-950/20 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/90 disabled:opacity-50 sm:min-h-[2.85rem] sm:flex-1 sm:px-5 sm:py-3 sm:text-[0.9375rem]"
+          disabled={disabled || busy}
+          onClick={() => onReadyForReview()}
+        >
+          Send for review →
+        </button>
+        <button
+          type="button"
+          className="inline-flex min-h-[2.75rem] items-center justify-center rounded-lg border border-slate-500/55 bg-slate-950/50 px-3.5 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:bg-slate-900/60 disabled:opacity-50 sm:min-h-[2.85rem] sm:flex-1 sm:py-2.5"
+          disabled={disabled || busy}
+          onClick={() => onSendForSignature()}
+        >
+          Send for signature instead
+        </button>
+      </div>
 
       <form onSubmit={runUpdate} className="mt-4 space-y-3 border-t border-slate-700/50 pt-4">
         <VoiceAugmentedTextArea
@@ -550,30 +554,6 @@ export function FinalizeYourAgreementPanel({
             disabled={disabled || busy || !prompt.trim()}
           >
             {busy ? "Working…" : prompt.trim() ? "Update agreement" : "Describe a change first"}
-          </button>
-          <button
-            type="button"
-            className={`rounded-lg border px-4 py-2.5 text-sm font-medium transition disabled:opacity-50 ${
-              sendModeTouched && sendMode === "review"
-                ? "border-emerald-500/80 bg-emerald-950/35 text-emerald-100 hover:border-emerald-400/80"
-                : "border-slate-500/70 bg-slate-800/80 text-slate-100 hover:border-slate-400 hover:bg-slate-800"
-            }`}
-            disabled={disabled || busy}
-            onClick={() => onReadyForReview()}
-          >
-            Review first
-          </button>
-          <button
-            type="button"
-            className={`rounded-lg border px-4 py-2.5 text-sm font-medium transition disabled:opacity-50 ${
-              sendModeTouched && sendMode === "signature"
-                ? "border-emerald-500/80 bg-emerald-950/35 text-emerald-100 hover:border-emerald-400/80"
-                : "border-slate-500/70 bg-slate-800/80 text-slate-100 hover:border-slate-400 hover:bg-slate-800"
-            }`}
-            disabled={disabled || busy}
-            onClick={() => onSendForSignature()}
-          >
-            Send for signature
           </button>
         </div>
       </form>

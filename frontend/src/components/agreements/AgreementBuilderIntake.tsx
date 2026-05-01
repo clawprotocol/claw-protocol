@@ -298,6 +298,7 @@ import {
   writeCreateReviewAgreementResumeId,
 } from "./agreementIntakeStorage";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
+import { clearPremiumSenderSignFirst, writePremiumSenderSignFirst } from "../../launch/simpleProduct/premiumSendIntent";
 import {
   clearPremiumCollaborateFirstDefaultPrimed,
   clearPremiumForkUserSendMode,
@@ -1711,6 +1712,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [premiumPostCheckoutPhase]);
   const [premiumSendConfirmOpen, setPremiumSendConfirmOpen] = useState(false);
   const [premiumSendCcSelf, setPremiumSendCcSelf] = useState(false);
+  /** Signature path only: user opts to self-sign before sharing counterparty signing links (handed off via session). */
+  const [premiumSignatureSenderFirst, setPremiumSignatureSenderFirst] = useState(false);
   /** Premium paid review: default read-only HTML document; toggle opens legacy textarea editor. */
   const [premiumReviewDocEditorOpen, setPremiumReviewDocEditorOpen] = useState(false);
   const [premiumSendModeUserChoice, setPremiumSendModeUserChoice] = useState<PremiumSendIntent | null>(() =>
@@ -1776,6 +1779,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setPremiumSendModeUserChoice(null);
       setPremiumSendModeTouched(false);
       clearPremiumForkUserSendMode();
+      clearPremiumSenderSignFirst();
+      setPremiumSignatureSenderFirst(false);
       setCreateFlowSendRecipientEditorOpen(false);
       createFlowSendEditorPrimedRef.current = false;
     }
@@ -8202,7 +8207,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (r1e.length > 0 && !looksLikeEmail(r1e)) return "Fix recipient 1 email before you continue.";
     if (recipient2Name.trim() && r2e.length > 0 && !looksLikeEmail(r2e))
       return "Fix recipient 2 email or clear the second recipient.";
-    if (!hasAnyValidRecipientEmail) return "Add at least one valid recipient email to continue.";
+    if (!hasAnyValidRecipientEmail) {
+      return effectivePremiumSendMode === "review"
+        ? "Add at least one recipient email to create review links."
+        : "Add at least one signer email to continue.";
+    }
     return null;
   }, [
     premiumSendConfirmGateActive,
@@ -8211,20 +8220,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient2Email,
     recipient2Name,
     hasAnyValidRecipientEmail,
+    effectivePremiumSendMode,
   ]);
 
   const premiumRouteMomentumRibbon = useMemo(() => {
     if (!premiumSignersSurfaceReady || !premiumReviewRoute) return null;
     if (effectivePremiumSendMode === "review") {
       return {
-        title: "Keep momentum — set up review now",
-        body: "Counterparties can suggest edits in plain language. Nothing changes until you confirm together.",
+        title: "Share for review",
+        body: "Recipients can read the draft, suggest plain-English edits, and approve. Nothing changes unless you accept it.",
       };
     }
     if (effectivePremiumSendMode === "signature") {
       return {
-        title: "Calm signing path",
-        body: "Tracked e-sign works on mobile for each party. You confirm recipients, then copy signing links to share.",
+        title: "Send for signature",
+        body: "Recipients receive the final version for signature. They can sign or request changes, but they cannot edit the agreement directly.",
       };
     }
     return null;
@@ -8236,6 +8246,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPremiumForkPrimedNonce((n) => n + 1);
     setPremiumSendModeUserChoice(mode);
     setPremiumSendModeTouched(true);
+    if (mode === "review") {
+      setPremiumSignatureSenderFirst(false);
+      writePremiumSenderSignFirst(false);
+    }
   }, []);
 
   const handleRetryProFullDraft = React.useCallback(() => {
@@ -8305,6 +8319,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (!premiumPaidDocumentSurface) setPremiumReviewDocEditorOpen(false);
   }, [premiumPaidDocumentSurface]);
+
+  useEffect(() => {
+    if (!premiumSendConfirmOpen) return;
+    if (effectivePremiumSendMode !== "review") return;
+    setPremiumSignatureSenderFirst(false);
+    writePremiumSenderSignFirst(false);
+  }, [premiumSendConfirmOpen, effectivePremiumSendMode]);
 
   const premiumPaidReadonlyPick = useMemo(() => {
     const snapObj = readPremiumCompletionSnapshot();
@@ -8435,10 +8456,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const premiumRecipientSetupTitle = useMemo(() => {
-    if (minimalProSendRecipientChrome && premiumSignersSurfaceReady) return "Recipient setup";
+    if (minimalProSendRecipientChrome && premiumSignersSurfaceReady) {
+      return effectivePremiumSendMode === "review" ? "Share for review" : "Send for signature";
+    }
     if (!premiumSignersSurfaceReady) return "Add recipients";
-    if (productionReadyForPersist && !premiumSendModeTouched) return "Choose reviewer or signer path";
-    return effectivePremiumSendMode === "review" ? "Reviewer Setup" : "Signer Setup";
+    if (productionReadyForPersist && !premiumSendModeTouched) return "Choose how to send next";
+    return effectivePremiumSendMode === "review" ? "Share for review" : "Send for signature";
   }, [
     minimalProSendRecipientChrome,
     premiumSignersSurfaceReady,
@@ -8451,19 +8474,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!premiumSignersSurfaceReady) return "";
     if (minimalProSendRecipientChrome) {
       return effectivePremiumSendMode === "review"
-        ? "Add recipients for the review record. You will create a secure link on the next step."
-        : "Add signers for the record. You will create secure links on the next step.";
+        ? "Recipients can read the draft, suggest plain-English edits, and approve. Nothing changes unless you accept it."
+        : "Recipients receive the final version for signature. They can sign or request changes, but they cannot edit the agreement directly.";
     }
     if (!productionReadyForPersist) {
       return "Add who is on the agreement below. Nothing reaches recipients until you confirm and share a secure link.";
     }
     if (!premiumSendModeTouched) {
-      return "Choose review-first or signature-ready, then confirm recipient details. You copy links to share — LawDog does not auto-email from this step.";
+      return "Choose review links or a signature workflow next. You copy links to share — LawDog does not auto-email from this step.";
     }
     if (effectivePremiumSendMode === "review") {
-      return "Reviewers use a secure link to suggest plain-English edits; you confirm before the agreement updates.";
+      return "Recipients can read the draft, suggest plain-English edits, and approve. Nothing changes unless you accept it.";
     }
-    return "Signers use a secure link for tracked e-signing when you are ready to share it.";
+    return "Recipients receive the final version for signature. They can sign or request changes, but they cannot edit the agreement directly.";
   }, [
     minimalProSendRecipientChrome,
     premiumSignersSurfaceReady,
@@ -8471,6 +8494,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendModeTouched,
     effectivePremiumSendMode,
   ]);
+
+  const premiumRecipientIntentBadge = useMemo(() => {
+    if (!premiumSignersSurfaceReady || !paidProAuthoritative) return null;
+    return effectivePremiumSendMode === "review" ? "Review link" : "Signature link";
+  }, [premiumSignersSurfaceReady, paidProAuthoritative, effectivePremiumSendMode]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -10048,7 +10076,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   : "Continue to confirmation"
                 : effectivePremiumSendMode === "review"
                   ? paidProAuthoritative
-                    ? "Review and send"
+                    ? "Create review links"
                     : premiumOutbox
                       ? "Continue to review links"
                       : "Create review link"
@@ -10605,7 +10633,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     applyHandoffAgreementPreviewOrAuthoritative,
   ]);
 
-  const handlePremiumReviewFirstContinueToSigners = React.useCallback(() => {
+  const handlePremiumReviewFirstContinueToSigners = React.useCallback((opts?: { telemetryMode?: PremiumSendIntent }) => {
     if (hasFullDraftAccess) {
       const t = (premiumPaidReadonlyPick.plainText || "").trim();
       if (t) {
@@ -10632,8 +10660,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
       }
     }
-    emitPaidFunnelEvent("premium_continue_recipients_clicked", { extra: { continue_mode: effectivePremiumSendMode } });
-    trackAgreementFunnelEvent("continue_to_recipient_setup", { continue_mode: effectivePremiumSendMode }, { planTier: String(tier) });
+    const telemetryMode = opts?.telemetryMode ?? effectivePremiumSendMode;
+    emitPaidFunnelEvent("premium_continue_recipients_clicked", { extra: { continue_mode: telemetryMode } });
+    trackAgreementFunnelEvent("continue_to_recipient_setup", { continue_mode: telemetryMode }, { planTier: String(tier) });
     markPremiumRecipientsSurfaceReleased();
     setPremiumRecipientUxActive(true);
     bumpPremiumSurfaceGateTick();
@@ -10658,7 +10687,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     (mode: PremiumSendIntent) => {
       handlePremiumSendModePick(mode);
       if (mode === "review" || mode === "signature") {
-        void handlePremiumReviewFirstContinueToSigners();
+        void handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode });
       }
     },
     [handlePremiumSendModePick, handlePremiumReviewFirstContinueToSigners],
@@ -10835,7 +10864,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           setHardError(
             cta.reason === "recipient_email_or_defer" && paidProAuthoritative
-              ? "Add at least one recipient before continuing."
+              ? effectivePremiumSendMode === "review"
+                ? "Add at least one recipient email to create review links."
+                : "Add at least one signer email to continue."
               : humanizePrimaryCtaBlockedReason(cta.reason),
           );
           if (cta.action === "complete_recipient_details" || cta.reason === "recipient_email_or_defer") {
@@ -11045,7 +11076,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       focusFirstMissingRecipientRequirement();
       setHardError(
         paidProAuthoritative
-          ? "Add at least one recipient before continuing."
+          ? effectivePremiumSendMode === "review"
+            ? "Add at least one recipient email to create review links."
+            : "Add at least one signer email to continue."
           : humanizePrimaryCtaBlockedReason("recipient_email_or_defer"),
       );
       if (import.meta.env.DEV) devSendCtaTrace("runPrimary: recipient nudge → focus first missing field");
@@ -12533,16 +12566,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 </button>
                               </div>
                               <p className="mt-2 text-[11px] leading-snug text-slate-500">
-                                Nothing is sent automatically. Accepted updates replace the preview from your full Pro
-                                agreement.
+                                Counterparty suggestions stay suggestions until you accept them — your Pro agreement does
+                                not change automatically. Nothing is sent automatically.
                               </p>
                             </div>
                           ) : null}
                           <div className="flex flex-wrap items-center gap-2">
                             {createUiStage === CreateUiStage.RECIPIENTS ? (
-                              <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                {premiumSignersSurfaceReady ? premiumRecipientSetupTitle : "Add recipients"}
-                              </h2>
+                              <>
+                                <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+                                  {premiumSignersSurfaceReady ? premiumRecipientSetupTitle : "Add recipients"}
+                                </h2>
+                                {premiumRecipientIntentBadge ? (
+                                  <span className="rounded-full border border-cyan-500/35 bg-cyan-950/30 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-100/90 sm:text-[11px]">
+                                    {premiumRecipientIntentBadge}
+                                  </span>
+                                ) : null}
+                              </>
                             ) : streamlineFirstRunReviewUi ? (
                               starterReviewEditableHelperSurface ? (
                                 <>
@@ -13793,6 +13833,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       <FullDraftUpgradeIntakeCallout onUpgrade={handleUpgradeToFullDraft} />
                     </div>
                   ) : null}
+                  {createProductionTwoPane &&
+                  createUiStage === CreateUiStage.RECIPIENTS &&
+                  paidProAuthoritative &&
+                  premiumSignersSurfaceReady &&
+                  effectivePremiumSendMode === "signature" ? (
+                    <div className="mb-3 mx-auto max-w-lg rounded-lg border border-slate-600/50 bg-slate-950/50 px-3 py-2.5 text-left sm:px-4">
+                      <label className="flex cursor-pointer items-start gap-2.5 text-sm text-slate-200">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 shrink-0 rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500/40"
+                          checked={premiumSignatureSenderFirst}
+                          onChange={(e) => setPremiumSignatureSenderFirst(e.target.checked)}
+                        />
+                        <span>
+                          <span className="font-medium text-slate-100">Sign first before sending</span>
+                          <span className="mt-0.5 block text-xs font-normal text-slate-400">
+                            Optional. Signing first can signal commitment, but you can also send unsigned and let the
+                            other party sign first.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  ) : null}
                   {productionReviewReadyToSendLine ? (
                     <div className="mb-2 text-center" role="status" aria-live="polite">
                       <p
@@ -14679,13 +14742,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               </p>
             ) : effectivePremiumSendMode === "signature" ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                You are about to save the agreement and open the signing-link screen. Copy the link there — LawDog does
-                not auto-email recipients from this step.
+                {premiumSignatureSenderFirst
+                  ? "You are about to save the agreement, complete your signature first, then open the signing-link screen for other signers. LawDog does not auto-email recipients from this step."
+                  : "You are about to save the agreement and open the signing-link screen. Copy the link there — LawDog does not auto-email recipients from this step."}
               </p>
             ) : (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                You are about to save the agreement and open the review-link screen. Copy the link there — LawDog does
-                not auto-email recipients from this step.
+                You are about to save the agreement and open the review-link screen. Recipients can suggest edits; you
+                accept changes before the draft updates. Copy the link there — LawDog does not auto-email recipients from
+                this step.
               </p>
             )}
             <p className="mt-2 text-sm leading-relaxed text-slate-300 sm:text-[0.9375rem]">
@@ -14722,8 +14787,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             {!minimalProSendRecipientChrome ? (
               <p className="mt-3 text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem]">
                 {effectivePremiumSendMode === "review"
-                  ? "They can read, suggest plain-English edits, paste a revised draft, preview material changes, and submit suggestions. Both sides confirm before the agreement updates."
-                  : "They read the final terms and sign when ready. Nothing reaches them until you share the link."}
+                  ? "Recipients can read the draft, suggest plain-English edits, and approve. Nothing changes unless you accept it."
+                  : "Recipients receive the final version for signature. They can sign or request changes, but they cannot edit the agreement directly. Nothing reaches them until you share the link."}
               </p>
             ) : null}
             {draft ? (
@@ -14782,6 +14847,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     });
                   }
                   setPremiumSendConfirmOpen(false);
+                  writePremiumSenderSignFirst(
+                    effectivePremiumSendMode === "signature" && premiumSignatureSenderFirst,
+                  );
                   void onGenerate();
                 }}
               >

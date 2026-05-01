@@ -32,6 +32,9 @@ describe("FinalizeYourAgreementPanel send-for-review framing (copy only)", () =>
     );
     expect(s).toContain("Most agreements are reviewed before signing.");
     expect(s).toContain("Send for review →");
+    expect(s).toContain("Send for signature instead");
+    expect(s).not.toMatch(/>\s*Review first\s*</);
+    expect(s).not.toMatch(/>\s*Send for signature\s*</);
     expect(s).toContain("formatRouteConfidenceLabel");
     expect(s).toContain('return "solid for review"');
   });

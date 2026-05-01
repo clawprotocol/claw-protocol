@@ -21,7 +21,8 @@ describe("AgreementReview simple paid Pro /app/send surface", () => {
     expect(s).toContain("autoPaidAuthoritativeSendConfirmPrimedKeyRef");
     expect(s).toContain("setWatermarkSendModalOpen(true)");
     expect(s).toContain("Review and send");
-    expect(s).toContain("Add at least one recipient before continuing.");
+    expect(s).toContain("Add at least one recipient email to create review links.");
+    expect(s).toContain("Add at least one signer email to continue.");
   });
 
   it("does not reintroduce premium review recipient validation bypass", () => {
@@ -39,7 +40,7 @@ describe("AgreementReview simple paid Pro /app/send surface", () => {
 describe("FinalizeYourAgreementPanel Pro copy", () => {
   it("exports the route hint used above review/signature actions", () => {
     expect(FINALIZE_REFINE_ROUTE_HINT).toContain("Need changes?");
-    expect(FINALIZE_REFINE_ROUTE_HINT).toContain("Otherwise choose review or signature");
+    expect(FINALIZE_REFINE_ROUTE_HINT).toContain("Send for review or Send for signature above");
     expect(FINALIZE_REFINE_ROUTE_HINT).not.toContain("Add a short note");
   });
 
