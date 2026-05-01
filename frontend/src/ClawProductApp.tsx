@@ -585,10 +585,16 @@ export function ClawProductApp() {
         }
         const shellKey = `esign-${sub.id}`;
         const seed = sub.id;
+        const rawSearch = search?.startsWith("?") ? search.slice(1) : search || "";
+        const agreementBridgeEntry = new URLSearchParams(rawSearch).get("agreement_bridge") === "1";
         return (
           <AppShell
-            title="Continue your document"
-            subtitle="Same path as Quick — you confirm before anything goes out."
+            title={agreementBridgeEntry ? "Sign your document" : "Continue your document"}
+            subtitle={
+              agreementBridgeEntry
+                ? "Place signature fields and sign — signer details were confirmed on the prior step."
+                : "Same path as Quick — you confirm before anything goes out."
+            }
           >
             <Vs01Wizard key={shellKey} seedDocumentId={seed} hideStepper />
           </AppShell>

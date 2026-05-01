@@ -21,6 +21,7 @@ import { prepareFreshMarketingEntry } from "../launch/marketingSession";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import {
   clearAgreementVs01BridgeSession,
+  lawdogSenderFirstBridgeMetadataReady,
   readAgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { sha256Bytes } from "../utils/agreements/hash";
@@ -255,14 +256,16 @@ export function Vs01Wizard({
             bridge.creatorEmail || "",
             cps,
           );
+          const senderFirstSkipDetails = lawdogSenderFirstBridgeMetadataReady(bridge, cps);
+          const titleForUi = (bridge.agreementTitle || "").trim() || "Agreement";
           flushSync(() => {
-            setAgreementTitle(bridge.agreementTitle || "");
+            setAgreementTitle(titleForUi);
             setCreatorName(bridge.creatorName || "");
             setCreatorEmail(bridge.creatorEmail || "");
             setCounterparties(cps);
             setAgreementTitleUserEdited(Boolean((bridge.agreementTitle || "").trim()));
             setDocumentMeta({
-              fileName: `${(bridge.agreementTitle || "Agreement").replace(/[/\\]/g, "-")}.pdf`,
+              fileName: `${titleForUi.replace(/[/\\]/g, "-")}.pdf`,
               source: "upload",
             });
           });
@@ -274,7 +277,11 @@ export function Vs01Wizard({
             "",
             qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
           );
-          const nextStep: Vs01Step = detailsReady && bridge.targetStep >= 2 ? 2 : 1;
+          const nextStep: Vs01Step = senderFirstSkipDetails
+            ? 2
+            : detailsReady && bridge.targetStep >= 2
+              ? 2
+              : 1;
           // eslint-disable-next-line no-console
           console.info("[vs01-bridge-hydrate]", {
             agreementId: bridge.agreementId,
@@ -282,6 +289,9 @@ export function Vs01Wizard({
             agreementTitle: bridge.agreementTitle,
             targetStep: bridge.targetStep,
             nextStep,
+            senderFirstLawdogHandoff: Boolean(bridge.senderFirstLawdogHandoff),
+            senderFirstSkipDetails,
+            detailsReady,
             counterpartiesCount: cps.length,
           });
           setFurthestStep((prev) => (nextStep > prev ? nextStep : prev));

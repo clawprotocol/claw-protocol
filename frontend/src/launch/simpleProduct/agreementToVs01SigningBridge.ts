@@ -1,5 +1,6 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
 import { resolveApiBase } from "../../lib/clawApi";
 
@@ -14,7 +15,24 @@ export type AgreementVs01BridgeSession = {
   counterparties: Vs01Counterparty[];
   /** VS01 step index: 2 = Signing (field placement); step 3 requires receipt from step 2. */
   targetStep: 1 | 2;
+  /**
+   * Paid Pro sender-first: signers were collected on LawDog send — skip VS01 details step
+   * and open signing/field placement when {@link lawdogSenderFirstBridgeMetadataReady} passes.
+   */
+  senderFirstLawdogHandoff?: boolean;
 };
+
+/** Whether LawDog Pro already supplied enough signer metadata to skip VS01 “Who needs to sign?”. */
+export function lawdogSenderFirstBridgeMetadataReady(
+  bridge: Pick<AgreementVs01BridgeSession, "senderFirstLawdogHandoff" | "creatorName" | "creatorEmail">,
+  counterparties: Vs01Counterparty[],
+): boolean {
+  if (!bridge.senderFirstLawdogHandoff) return false;
+  if (!bridge.creatorName?.trim()) return false;
+  const em = bridge.creatorEmail?.trim();
+  if (!em || !isPlausibleEmail(em)) return false;
+  return counterparties.some((c) => c.name.trim().length > 0 || c.email.trim().length > 0);
+}
 
 function newCpId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -26,6 +44,8 @@ export function buildAgreementVs01BridgeSession(params: {
   agreementId: string;
   vs01DocumentId: string;
   draft: AgreementDraft | null;
+  /** Set when bridging from paid Pro sender-first `/app/send` → VS01 e-sign. */
+  senderFirstLawdogHandoff?: boolean;
 }): AgreementVs01BridgeSession {
   const parties = (params.draft?.parties ?? []) as AgreementParty[];
   const owner =
@@ -56,6 +76,7 @@ export function buildAgreementVs01BridgeSession(params: {
     creatorEmail,
     counterparties,
     targetStep: 2,
+    senderFirstLawdogHandoff: Boolean(params.senderFirstLawdogHandoff),
   };
 }
 

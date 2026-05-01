@@ -13,5 +13,7 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("goToStep(2)");
     expect(s).toContain("seedAwaitingContentSha");
     expect(s).toContain("showVs01DocumentsRail");
+    expect(s).toContain("lawdogSenderFirstBridgeMetadataReady");
+    expect(s).toContain("senderFirstSkipDetails");
   });
 });

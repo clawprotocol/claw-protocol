@@ -5,6 +5,7 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   buildAgreementVs01BridgeSession,
   fetchAgreementVs01SigningSeed,
+  lawdogSenderFirstBridgeMetadataReady,
   logAgreementVs01SeedBlocked,
 } from "./agreementToVs01SigningBridge";
 
@@ -46,6 +47,56 @@ describe("buildAgreementVs01BridgeSession", () => {
     expect(b.creatorEmail).toBe("Same@Example.com");
     expect(b.counterparties[0].email).toBe("");
     expect(b.counterparties[0].name).toBe("Signer LLC");
+  });
+
+  it("sets senderFirstLawdogHandoff when requested", () => {
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "o1", name: "Owner", role: "owner", email: "o@example.com" },
+        { id: "s1", name: "Sig", role: "signer", email: "s@example.com" },
+      ],
+    } as AgreementDraft;
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "a1",
+      vs01DocumentId: "doc1",
+      draft,
+      senderFirstLawdogHandoff: true,
+    });
+    expect(b.senderFirstLawdogHandoff).toBe(true);
+  });
+});
+
+describe("lawdogSenderFirstBridgeMetadataReady", () => {
+  it("is true when handoff flag set and creator + recipient identity present", () => {
+    expect(
+      lawdogSenderFirstBridgeMetadataReady(
+        {
+          senderFirstLawdogHandoff: true,
+          creatorName: "Owner",
+          creatorEmail: "o@example.com",
+        },
+        [{ id: "1", name: "", email: "signer@example.com", phone: "" }],
+      ),
+    ).toBe(true);
+  });
+
+  it("is false without handoff flag (normal agreement_bridge)", () => {
+    expect(
+      lawdogSenderFirstBridgeMetadataReady(
+        { senderFirstLawdogHandoff: false, creatorName: "A", creatorEmail: "a@b.com" },
+        [{ id: "1", name: "R", email: "r@b.com", phone: "" }],
+      ),
+    ).toBe(false);
+  });
+
+  it("is false when recipient row is empty", () => {
+    expect(
+      lawdogSenderFirstBridgeMetadataReady(
+        { senderFirstLawdogHandoff: true, creatorName: "Owner", creatorEmail: "o@example.com" },
+        [{ id: "1", name: "", email: "", phone: "" }],
+      ),
+    ).toBe(false);
   });
 });
 
