@@ -296,6 +296,46 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
+  it("unified primary CTA: paid draft recipient surface resolves send_agreement before DRAFT continue_to_recipients", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const unifiedStart = intake.indexOf("const unifiedPrimaryCta = useMemo(");
+    expect(unifiedStart).toBeGreaterThanOrEqual(0);
+    const unifiedRegion = intake.slice(unifiedStart, unifiedStart + 14000);
+    const sendSurface = unifiedRegion.indexOf(
+      "if (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) {",
+    );
+    const draftBranch = unifiedRegion.indexOf("if (createUiStage === CreateUiStage.DRAFT) {");
+    expect(sendSurface).toBeGreaterThanOrEqual(0);
+    expect(draftBranch).toBeGreaterThan(sendSurface);
+    const draftAfterSendSurface = unifiedRegion.indexOf(
+      "      if (createUiStage === CreateUiStage.DRAFT) {",
+      sendSurface + 40,
+    );
+    expect(draftAfterSendSurface).toBeGreaterThan(sendSurface);
+    const sendBlock = unifiedRegion.slice(sendSurface, draftAfterSendSurface);
+    expect(sendBlock).toMatch(/action:\s*"send_agreement"/);
+    expect(sendBlock).not.toMatch(/action:\s*"continue_to_recipients"/);
+    expect(sendBlock).toContain('"Confirm and create review links"');
+    expect(sendBlock).toContain('"Confirm and send for signature"');
+  });
+
+  it("send_agreement handler traces premium-send-draft-surface-submit when paidProRecipientSetupOnDraft", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("[premium-send-draft-surface-submit]");
+    expect(intake).toMatch(
+      /case\s+"send_agreement"\s*:\s*\{[\s\S]*?\[premium-send-draft-surface-submit\][\s\S]*?paidProRecipientSetupOnDraft/,
+    );
+  });
+
+  it("send_agreement falls through to onGenerate when premium confirm gate is inactive", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const i = intake.indexOf('case "send_agreement":');
+    expect(i).toBeGreaterThanOrEqual(0);
+    const block = intake.slice(i, i + 3500);
+    expect(block).toMatch(/if\s*\(\s*premiumSendConfirmGateActive\s*\)/);
+    expect(block).toMatch(/await onGenerate\(\)/);
+  });
+
   it("paid authoritative Pro: snapshot hydration prefers DRAFT; persist coerces RECIPIENTS; invariant self-heals", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("hydratePaidAuthoritative");

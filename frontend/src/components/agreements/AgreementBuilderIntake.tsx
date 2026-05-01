@@ -10116,6 +10116,58 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : undefined,
         };
       }
+      /** Paid Pro delivery on DRAFT must resolve here — the DRAFT branch below would otherwise return `continue_to_recipients` (dead). */
+      if (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) {
+        if (productionReadyForPersist) {
+          const sendDisabled =
+            (!recipientsDeferred && (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)) ||
+            Boolean(loading) ||
+            premiumSendConfirmOpen;
+          const premiumOutbox = premiumSignersSurfaceReady;
+          const persistSendLabel =
+            loading &&
+            (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
+            createFlowPhase === "ready_to_send"
+              ? "Saving…"
+              : premiumSendConfirmGateActive
+                ? paidProAuthoritative
+                  ? effectivePremiumSendMode === "signature"
+                    ? "Confirm and send for signature"
+                    : "Confirm and create review links"
+                  : "Continue to confirmation"
+                : effectivePremiumSendMode === "review"
+                  ? paidProAuthoritative
+                    ? "Create review links"
+                    : premiumOutbox
+                      ? "Continue to review links"
+                      : "Create review link"
+                  : paidProAuthoritative
+                    ? "Create signing links"
+                    : premiumOutbox
+                      ? "Continue to signing links"
+                      : "Create signing link";
+          return {
+            label: persistSendLabel,
+            action: "send_agreement",
+            disabled: sendDisabled,
+          };
+        }
+        const partiesOk = (draft?.parties?.length ?? 0) >= 1;
+        const typeOk = agreementTypeAccepted;
+        const recOk = recipientsDeferred || hasAnyValidRecipientEmail;
+        const dis = !draft || !partiesOk || !typeOk || !recOk;
+        let reason: string | undefined;
+        if (!draft) reason = "no_draft";
+        else if (!partiesOk) reason = "parties";
+        else if (!typeOk) reason = "agreement_type_not_accepted";
+        else if (!recOk) reason = "recipient_email_or_defer";
+        return {
+          label: "Add recipients",
+          action: "complete_recipient_details",
+          disabled: dis,
+          reason,
+        };
+      }
       if (createUiStage === CreateUiStage.DRAFT) {
         if (premiumPostCheckoutPhase === "awaiting_gaps" || premiumPostCheckoutPhase === "processing") {
           return {
@@ -10242,57 +10294,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           action: "continue_to_recipients",
           disabled: !draft,
           reason: !draft ? "no_draft" : undefined,
-        };
-      }
-      if (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) {
-        if (productionReadyForPersist) {
-          const sendDisabled =
-            (!recipientsDeferred && (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)) ||
-            Boolean(loading) ||
-            premiumSendConfirmOpen;
-          const premiumOutbox = premiumSignersSurfaceReady;
-          const persistSendLabel =
-            loading &&
-            (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
-            createFlowPhase === "ready_to_send"
-              ? "Saving…"
-              : premiumSendConfirmGateActive
-                ? paidProAuthoritative
-                  ? effectivePremiumSendMode === "signature"
-                    ? "Confirm and send for signature"
-                    : "Confirm and create review links"
-                  : "Continue to confirmation"
-                : effectivePremiumSendMode === "review"
-                  ? paidProAuthoritative
-                    ? "Create review links"
-                    : premiumOutbox
-                      ? "Continue to review links"
-                      : "Create review link"
-                  : paidProAuthoritative
-                    ? "Create signing links"
-                    : premiumOutbox
-                      ? "Continue to signing links"
-                      : "Create signing link";
-          return {
-            label: persistSendLabel,
-            action: "send_agreement",
-            disabled: sendDisabled,
-          };
-        }
-        const partiesOk = (draft?.parties?.length ?? 0) >= 1;
-        const typeOk = agreementTypeAccepted;
-        const recOk = recipientsDeferred || hasAnyValidRecipientEmail;
-        const dis = !draft || !partiesOk || !typeOk || !recOk;
-        let reason: string | undefined;
-        if (!draft) reason = "no_draft";
-        else if (!partiesOk) reason = "parties";
-        else if (!typeOk) reason = "agreement_type_not_accepted";
-        else if (!recOk) reason = "recipient_email_or_defer";
-        return {
-          label: "Add recipients",
-          action: "complete_recipient_details",
-          disabled: dis,
-          reason,
         };
       }
       return {
@@ -11186,6 +11187,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           case "send_agreement": {
             logProductEvent("create_flow_cta_clicked", { cta_click_type: "send" });
+            if (import.meta.env.DEV && paidProRecipientSetupOnDraft) {
+              // eslint-disable-next-line no-console
+              console.info("[premium-send-draft-surface-submit]", {
+                mode: effectivePremiumSendMode,
+                senderFirst: peekPremiumSenderSignFirst(),
+                createUiStage,
+                createFlowPhase,
+                ready: productionReadyForPersist,
+              });
+            }
             await finalizeIntakeCapture();
             if (!assertRecipientsValidForPremiumSend()) return;
             if (premiumSendConfirmGateActive) {
