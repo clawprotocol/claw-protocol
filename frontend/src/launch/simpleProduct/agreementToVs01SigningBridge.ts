@@ -84,7 +84,7 @@ export function clearAgreementVs01BridgeSession(): void {
 
 export type AgreementVs01SigningSeedResult =
   | { ok: true; documentId: string; contentSha256: string | null }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; httpStatus?: number; detail?: unknown };
 
 /**
  * POST /api/agreements/:id/vs01-signing-seed — returns VS01 document_id for `/app/esign/:documentId`.
@@ -100,6 +100,18 @@ export function logAgreementToVs01EsignRoute(payload: Record<string, unknown>): 
   }
 }
 
+function vs01SeedFailureReason(detail: unknown, httpStatus: number): string {
+  if (typeof detail === "string" && detail.trim()) return detail.trim();
+  if (detail && typeof detail === "object") {
+    const o = detail as Record<string, unknown>;
+    const code = o.code;
+    if (typeof code === "string" && code.trim()) return code.trim();
+    const message = o.message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+  }
+  return `http_${httpStatus}`;
+}
+
 export async function fetchAgreementVs01SigningSeed(agreementId: string): Promise<AgreementVs01SigningSeedResult> {
   const id = agreementId.trim();
   if (!id) return { ok: false, reason: "missing_agreement_id" };
@@ -111,14 +123,14 @@ export async function fetchAgreementVs01SigningSeed(agreementId: string): Promis
     const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
       const d = j.detail;
-      const msg = typeof d === "string" ? d : `http_${res.status}`;
-      return { ok: false, reason: msg };
+      const reason = vs01SeedFailureReason(d, res.status);
+      return { ok: false, reason, httpStatus: res.status, detail: d };
     }
     const docId = typeof j.document_id === "string" ? j.document_id.trim() : "";
     if (!docId) return { ok: false, reason: "missing_document_id" };
     const hash = typeof j.content_sha256 === "string" ? j.content_sha256.trim() : null;
     return { ok: true, documentId: docId, contentSha256: hash };
   } catch {
-    return { ok: false, reason: "network" };
+    return { ok: false, reason: "network", httpStatus: 0, detail: "network" };
   }
 }

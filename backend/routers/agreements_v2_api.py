@@ -4477,12 +4477,86 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
     draft = _load_or_404(agreement_id)
     wm = _watermark_active_for_agreement(agreement_id)
     html = _render_html(draft, watermark=wm)
+    html_len = len(html or "")
+    log.info(
+        "[agreement-vs01-seed] start agreement_id=%s html_len=%s watermark=%s",
+        agreement_id,
+        html_len,
+        bool(wm),
+    )
     try:
-        pdf_bytes = agreement_rendered_html_to_pdf_bytes(html, title=(draft.title or "").strip() or "Agreement")
+        built = agreement_rendered_html_to_pdf_bytes(
+            html, title=(draft.title or "").strip() or "Agreement"
+        )
+    except ImportError as exc:
+        _em = (str(exc) or "")[:500]
+        log.warning(
+            "[agreement-vs01-seed] failure agreement_id=%s html_len=%s render_mode=n/a "
+            "exc_type=%s exc_msg=%s",
+            agreement_id,
+            html_len,
+            type(exc).__name__,
+            _em,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "vs01_seed_dependency_missing",
+                "message": "PyMuPDF (pymupdf) is required for VS01 signing seed.",
+            },
+        ) from exc
     except Exception as exc:
-        log.exception("vs01_signing_seed_pdf_failed agreement_id=%s", agreement_id)
-        raise HTTPException(status_code=500, detail="vs01_signing_seed_pdf_failed") from exc
-    meta = document_service.finalize_document(pdf_bytes, content_type="application/pdf")
+        _em = (str(exc) or "")[:500]
+        log.exception(
+            "[agreement-vs01-seed] failure agreement_id=%s html_len=%s render_mode=n/a "
+            "exc_type=%s exc_msg=%s",
+            agreement_id,
+            html_len,
+            type(exc).__name__,
+            _em,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "vs01_signing_seed_pdf_failed",
+                "message": type(exc).__name__,
+            },
+        ) from exc
+
+    pdf_len = len(built.pdf_bytes)
+    try:
+        meta = document_service.finalize_document(
+            built.pdf_bytes, content_type="application/pdf"
+        )
+    except Exception as exc:
+        _em = (str(exc) or "")[:500]
+        log.exception(
+            "[agreement-vs01-seed] finalize_failure agreement_id=%s html_len=%s pdf_len=%s "
+            "render_mode=%s exc_type=%s exc_msg=%s",
+            agreement_id,
+            html_len,
+            pdf_len,
+            built.render_mode,
+            type(exc).__name__,
+            _em,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "vs01_finalize_failed",
+                "message": type(exc).__name__,
+            },
+        ) from exc
+
+    log.info(
+        "[agreement-vs01-seed] success agreement_id=%s html_len=%s pdf_len=%s render_mode=%s "
+        "document_id=%s",
+        agreement_id,
+        html_len,
+        pdf_len,
+        built.render_mode,
+        meta.get("document_id"),
+    )
     return {
         "ok": True,
         "document_id": meta.get("document_id"),

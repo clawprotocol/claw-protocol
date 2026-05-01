@@ -365,7 +365,9 @@ export function SimpleSendPage(props: { agreementId: string }) {
           agreementId: id,
           seedDocumentId: null,
           route: null,
-          reason: `vs01_bridge_skipped:${vs01Seed.reason}`,
+          reason: "vs01_seed_failed",
+          status: vs01Seed.httpStatus ?? null,
+          detail: vs01Seed.detail ?? vs01Seed.reason,
         });
       }
 

@@ -1902,3 +1902,42 @@ def test_render_html_watermark_emits_label_once_even_when_body_repeats_it():
     )
     out = _render_html(d, watermark=True)
     assert out.count(WATERMARK_LABEL) == 1
+
+
+def test_vs01_signing_seed_endpoint_ok(monkeypatch, tmp_path):
+    pytest.importorskip("fitz")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    client = TestClient(app)
+    h = {"X-Claw-Org-Id": "test-vs01-seed-org"}
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "VS01 Seed Test",
+            "jurisdiction": "Delaware",
+            "parties": [
+                {"name": "Owner Co", "role": "owner", "email": "o@example.com"},
+                {"name": "Other Co", "role": "signer", "email": "s@example.com"},
+            ],
+            "purpose": "Testing VS01 signing seed PDF pipeline.",
+            "payment_terms": "$1",
+            "duration": "1 month",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    agreement_id = create_res.json()["id"]
+    seed = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=h,
+        json={},
+    )
+    assert seed.status_code == 200, seed.text
+    body = seed.json()
+    assert body.get("ok") is True
+    doc_id = body.get("document_id")
+    assert isinstance(doc_id, str) and doc_id.startswith("doc_")
+    hsh = body.get("content_sha256")
+    assert isinstance(hsh, str) and len(hsh) == 64
