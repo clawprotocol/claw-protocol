@@ -67,16 +67,18 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(s).toMatch(/peekPremiumForkUserSendMode\(\)\s*\?\?\s*peekPremiumSendIntent\(\)/);
   });
 
-  it("paid authoritative recipient handoff uses advancePaidProToRecipientSetup in both handOff and runPrimary paths", () => {
+  it("paid authoritative recipient handoff uses advancePaidPro only when premium signers surface is ready (handOff + runPrimary)", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     const matches = [
-      ...s.matchAll(/if\s*\(\s*paidProAuthoritative\s*\)\s*\{[\s\S]*?advancePaidProToRecipientSetup\(\)/g),
+      ...s.matchAll(
+        /if\s*\(\s*paidProAuthoritative\s*&&\s*premiumSignersSurfaceReady\s*\)\s*\{[\s\S]*?advancePaidProToRecipientSetup\(\)/g,
+      ),
     ];
     expect(matches.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("handOffProductionDraftToRecipients advances paid authoritative via advancePaidProToRecipientSetup only when paid", () => {
+  it("handOffProductionDraftToRecipients gates advancePaidPro on premiumSignersSurfaceReady", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     const i = s.indexOf("const handOffProductionDraftToRecipients");
@@ -84,7 +86,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const j = s.indexOf("const handlePremiumReviewFirstContinueToSigners", i);
     expect(j).toBeGreaterThan(i);
     const block = s.slice(i, j);
-    expect(block).toMatch(/if\s*\(\s*paidProAuthoritative\s*\)[\s\S]*advancePaidProToRecipientSetup/);
+    expect(block).toMatch(
+      /if\s*\(\s*paidProAuthoritative\s*&&\s*premiumSignersSurfaceReady\s*\)[\s\S]*advancePaidProToRecipientSetup/,
+    );
     expect(block).toMatch(/else\s*\{[\s\S]*setCreateFlowPhase\("recipient_setup_required"\)/);
   });
 
@@ -396,5 +400,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("devPremiumSendShellGuard");
     expect(intake).toContain("[premium-send-choice]");
     expect(intake).toContain("[premium-send-route]");
+  });
+
+  it("continue to send: authoritative without premium signers surface uses RECIPIENTS shell (basic recipient_setup_required visible)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const matches = intake.match(/paidProAuthoritative && premiumSignersSurfaceReady/g);
+    expect((matches ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(intake).toMatch(/Inline Pro recipient rail requires/);
   });
 });

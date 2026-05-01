@@ -10919,7 +10919,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       persistPremiumRecipientHandoffFromDraftAndUi(d, { displayName1: next1, displayName2: next2 });
     }
     setAgreementTypeAccepted(true);
-    if (paidProAuthoritative) {
+    /** Inline Pro recipient rail requires {@link premiumSignersSurfaceReady}; otherwise stay on legacy RECIPIENTS shell. */
+    if (paidProAuthoritative && premiumSignersSurfaceReady) {
       advancePaidProToRecipientSetup();
     } else {
       setCreateFlowPhase("recipient_setup_required");
@@ -10932,6 +10933,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     advancePaidProToRecipientSetup,
     paidProAuthoritative,
+    premiumSignersSurfaceReady,
     createProductionTwoPane,
     createUiStage,
     missing,
@@ -11616,7 +11618,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           setAgreementTypeAccepted(true);
-          if (paidProAuthoritative) {
+          if (paidProAuthoritative && premiumSignersSurfaceReady) {
             advancePaidProToRecipientSetup();
           } else {
             setCreateFlowPhase("recipient_setup_required");
