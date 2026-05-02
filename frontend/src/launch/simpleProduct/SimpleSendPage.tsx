@@ -35,7 +35,10 @@ import {
   fetchAgreementVs01SigningSeed,
   logAgreementToVs01EsignRoute,
   logAgreementVs01BridgePreflight,
+  logAgreementVs01RecipientEmailMergeDiagnostics,
   logAgreementVs01SeedBlocked,
+  mergeLiveDraftWithRecipientSetupForVs01Bridge,
+  recipientSetupPlausibleInputFlags,
   setPaidProAgreementBridgeSkipMarker,
   writeAgreementVs01BridgeSession,
 } from "./agreementToVs01SigningBridge";
@@ -342,11 +345,23 @@ export function SimpleSendPage(props: { agreementId: string }) {
       const vs01Seed = await fetchAgreementVs01SigningSeed(id);
       if (!cancelled && vs01Seed.ok) {
         setSenderFirstVs01SeedFailure(null);
-        const draftForBridge = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+        const live = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+        const recipientSetup =
+          live != null
+            ? {
+                recipient1Email: (live.parties?.[0] as { email?: string } | undefined)?.email,
+                recipient2Email: (live.parties?.[1] as { email?: string } | undefined)?.email,
+              }
+            : null;
+        const finalBridgeDraft = mergeLiveDraftWithRecipientSetupForVs01Bridge(live, recipientSetup);
+        logAgreementVs01RecipientEmailMergeDiagnostics(
+          finalBridgeDraft,
+          recipientSetupPlausibleInputFlags(recipientSetup),
+        );
         const bridge = buildAgreementVs01BridgeSession({
           agreementId: id,
           vs01DocumentId: vs01Seed.documentId,
-          draft: draftForBridge,
+          draft: finalBridgeDraft,
           senderFirstLawdogHandoff: true,
         });
         logAgreementVs01BridgePreflight(bridge);

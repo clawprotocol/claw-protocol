@@ -315,7 +315,7 @@ import {
   writePremiumSenderSignFirst,
 } from "../../launch/simpleProduct/premiumSendIntent";
 import {
-  mergePaidProRecipientSetupEmailsIntoDraft,
+  mergeLiveDraftWithRecipientSetupForVs01Bridge,
   tryNavigatePaidProAgreementSenderFirstVs01Esign,
 } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
 import {
@@ -6342,6 +6342,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           : {}),
       };
 
+      const primedForHandoff =
+        mergeLiveDraftWithRecipientSetupForVs01Bridge(normalized as unknown as AgreementDraft, {
+          recipient1Email: recipient1EmailRef.current,
+          recipient2Email: recipient2EmailRef.current,
+        }) ?? (normalized as unknown as AgreementDraft);
+
       if (premiumSendAnotherSkipOnCreatedRef.current) {
         premiumSendAnotherSkipOnCreatedRef.current = false;
         setProductionSendBarPhase("idle");
@@ -6354,13 +6360,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setProductionSendBarAgreementId(id);
         paidAgreementSentRef.current = true;
         emitPaidFunnelEvent("agreement_sent", { extra: { agreement_id: id, send_path: "inline_contextual" } });
-        const primed = normalized;
         window.setTimeout(() => {
-          onCreated(id, primed, createdHandoff);
+          onCreated(id, primedForHandoff, createdHandoff);
         }, 420);
         return true;
       }
-      onCreated(id, normalized, createdHandoff);
+      onCreated(id, primedForHandoff, createdHandoff);
       return true;
     } catch (e: unknown) {
       const msg =
@@ -10737,16 +10742,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
       });
     if (sig) {
-      const draftForBridge =
-        mergePaidProRecipientSetupEmailsIntoDraft(draft as unknown as AgreementDraft, [
-          looksLikeEmail(recipient1Email) ? stripRecipientEmailNoise(recipient1Email) : undefined,
-          looksLikeEmail(recipient2Email) ? stripRecipientEmailNoise(recipient2Email) : undefined,
-        ]) ?? (draft as unknown as AgreementDraft);
       const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
         navigate: (to) => void navigate(to),
         agreementId: id,
-        draft: draftForBridge,
+        draft: draft as unknown as AgreementDraft,
         logReason: "intake_inline_send_success_cta",
+        recipientSetup: {
+          recipient1Email: recipient1EmailRef.current,
+          recipient2Email: recipient2EmailRef.current,
+        },
       });
       if (ok) {
         clearPaidProStarterSignatureSendFromCreateFlow();
@@ -10759,10 +10763,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
       }
     }
+    const primedForSendShell =
+      mergeLiveDraftWithRecipientSetupForVs01Bridge(draft as unknown as AgreementDraft, {
+        recipient1Email: recipient1EmailRef.current,
+        recipient2Email: recipient2EmailRef.current,
+      }) ?? (draft as unknown as AgreementDraft);
     navigate(`/app/send/${encodeURIComponent(id)}`, {
       simpleSendHandoff: buildSimpleSendHandoff({
         agreementId: id,
-        primedDraft: draft as unknown as AgreementDraft,
+        primedDraft: primedForSendShell,
         streamlinedSimpleFlow: freshSimpleCreateUx,
         premiumSendIntent: effectivePremiumSendMode,
         openFlowPhase: "send",

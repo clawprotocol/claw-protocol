@@ -1,5 +1,6 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
 import { resolveApiBase } from "../../lib/clawApi";
@@ -114,21 +115,95 @@ export function logAgreementVs01BridgePreflight(bridge: AgreementVs01BridgeSessi
   });
 }
 
+export type RecipientSetupEmailInput = {
+  recipient1Email?: string | null | undefined;
+  recipient2Email?: string | null | undefined;
+};
+
+function normalizeRecipientSetupSlot(raw: string | null | undefined): string | undefined {
+  const s = stripRecipientEmailNoise(String(raw ?? ""));
+  if (!s || !isPlausibleEmail(s)) return undefined;
+  return s;
+}
+
+export function recipientSetupPlausibleInputFlags(
+  setup: RecipientSetupEmailInput | null | undefined,
+): { hasRecipient1Email: boolean; hasRecipient2Email: boolean } {
+  return {
+    hasRecipient1Email: Boolean(normalizeRecipientSetupSlot(setup?.recipient1Email)),
+    hasRecipient2Email: Boolean(normalizeRecipientSetupSlot(setup?.recipient2Email)),
+  };
+}
+
+/**
+ * Privacy-safe: logs only booleans, party email counts, and domains (no local-parts).
+ */
+export function logAgreementVs01RecipientEmailMergeDiagnostics(
+  mergedDraft: AgreementDraft | null,
+  inputFlags: { hasRecipient1Email: boolean; hasRecipient2Email: boolean },
+): void {
+  if (!mergedDraft) return;
+  const preview = buildAgreementVs01BridgeSession({
+    agreementId: "__merge_diag__",
+    vs01DocumentId: "__merge_diag__",
+    draft: mergedDraft,
+  });
+  const mergedPartiesWithEmailCount = (mergedDraft.parties ?? []).filter((p) =>
+    isPlausibleEmail(stripRecipientEmailNoise(String((p as { email?: string }).email ?? ""))),
+  ).length;
+  const mergedCounterpartiesWithEmailCount = preview.counterparties.filter((c) =>
+    isPlausibleEmail(stripRecipientEmailNoise(String(c.email ?? ""))),
+  ).length;
+  // eslint-disable-next-line no-console
+  console.info("[agreement-vs01-recipient-email-merge]", {
+    ...inputFlags,
+    mergedPartiesWithEmailCount,
+    mergedCreatorEmailDomain: emailDomainForBridgeLog(preview.creatorEmail),
+    mergedCounterpartiesWithEmailCount,
+  });
+}
+
+/** Last-mile merge for Paid Pro VS01 bridge: live draft + optional recipient-setup slots (by party index). */
+export function mergeLiveDraftWithRecipientSetupForVs01Bridge(
+  liveDraft: AgreementDraft | null,
+  recipientSetup?: RecipientSetupEmailInput | null,
+): AgreementDraft | null {
+  if (!liveDraft) return null;
+  if (!recipientSetup) return liveDraft;
+  const next = mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, recipientSetup);
+  return next ?? liveDraft;
+}
+
 /**
  * Merges recipient-setup / inline UI emails into `draft.parties[i].email` by index before VS01 bridge build.
  * Only sets plausible addresses; leaves parties unchanged when nothing to apply.
+ * Pass either slot array (legacy) or `{ recipient1Email, recipient2Email }` for party indices 0 and 1.
  */
 export function mergePaidProRecipientSetupEmailsIntoDraft(
   draft: AgreementDraft | null,
-  slotEmails: readonly (string | null | undefined)[],
+  slotEmails: readonly (string | null | undefined)[] | RecipientSetupEmailInput,
 ): AgreementDraft | null {
   if (!draft) return null;
-  if (!slotEmails.length) return draft;
+
+  let normalizedSlots: (string | undefined)[];
+  if (Array.isArray(slotEmails)) {
+    if (!slotEmails.length) return draft;
+    normalizedSlots = slotEmails.map((x) => normalizeRecipientSetupSlot(x ?? undefined));
+    if (!normalizedSlots.some(Boolean)) return draft;
+  } else {
+    const setup = slotEmails as RecipientSetupEmailInput;
+    normalizedSlots = [
+      normalizeRecipientSetupSlot(setup.recipient1Email),
+      normalizeRecipientSetupSlot(setup.recipient2Email),
+    ];
+    if (!normalizedSlots[0] && !normalizedSlots[1]) return draft;
+  }
+
   const parties = [...(draft.parties ?? [])] as AgreementParty[];
   let changed = false;
-  for (let i = 0; i < slotEmails.length && i < parties.length; i++) {
-    const raw = (slotEmails[i] ?? "").trim();
-    if (!raw || !isPlausibleEmail(raw)) continue;
+  for (let i = 0; i < normalizedSlots.length && i < parties.length; i++) {
+    const raw = normalizedSlots[i];
+    if (!raw) continue;
     const prev = (parties[i].email ?? "").trim();
     if (prev === raw) continue;
     parties[i] = { ...parties[i], email: raw };
@@ -324,15 +399,19 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
   agreementId: string;
   draft: AgreementDraft | null;
   logReason: string;
+  /** Live recipient-setup emails (LawDog intake); merged onto draft before bridge build. */
+  recipientSetup?: RecipientSetupEmailInput | null;
 }): Promise<boolean> {
   const id = String(options.agreementId || "").trim();
   if (!id) return false;
   const vs01Seed = await fetchAgreementVs01SigningSeed(id);
   if (!vs01Seed.ok) return false;
+  const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, options.recipientSetup ?? null);
+  logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(options.recipientSetup));
   const bridge = buildAgreementVs01BridgeSession({
     agreementId: id,
     vs01DocumentId: vs01Seed.documentId,
-    draft: options.draft,
+    draft: merged,
     senderFirstLawdogHandoff: true,
   });
   logAgreementVs01BridgePreflight(bridge);

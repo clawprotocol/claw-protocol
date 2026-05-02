@@ -14,9 +14,12 @@ import {
   fetchAgreementVs01SigningSeed,
   lawdogSenderFirstBridgeMetadataReady,
   logAgreementVs01BridgePreflight,
+  logAgreementVs01RecipientEmailMergeDiagnostics,
   logAgreementVs01SeedBlocked,
+  mergeLiveDraftWithRecipientSetupForVs01Bridge,
   mergePaidProRecipientSetupEmailsIntoDraft,
   readPaidProAgreementBridgeSkipMarker,
+  recipientSetupPlausibleInputFlags,
   setPaidProAgreementBridgeSkipMarker,
 } from "./agreementToVs01SigningBridge";
 
@@ -202,6 +205,83 @@ describe("mergePaidProRecipientSetupEmailsIntoDraft + paid Pro sender-first brid
       ],
     } as AgreementDraft;
     expect(mergePaidProRecipientSetupEmailsIntoDraft(draft, ["", "not-an-email"])).toBe(draft);
+  });
+
+  it("mergeLiveDraftWithRecipientSetup applies UI recipient emails when draft.parties emails are empty", () => {
+    const draft = {
+      title: "Deal",
+      parties: [
+        { id: "p0", name: "Anthem Blanchard", role: "owner", email: "" },
+        { id: "p1", name: "Sarah", role: "signer", email: "" },
+      ],
+    } as AgreementDraft;
+    const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(draft, {
+      recipient1Email: "anthemhayek@me.com",
+      recipient2Email: "anthemhayek@gmail.com",
+    });
+    expect(merged).not.toBe(draft);
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "ag-ui",
+      vs01DocumentId: "doc-ui",
+      draft: merged,
+      senderFirstLawdogHandoff: true,
+    });
+    expect(b.creatorEmail).toBe("anthemhayek@me.com");
+    expect(b.counterparties[0]?.email).toBe("anthemhayek@gmail.com");
+    expect(
+      lawdogSenderFirstBridgeMetadataReady(
+        {
+          senderFirstLawdogHandoff: true,
+          creatorName: b.creatorName,
+          creatorEmail: b.creatorEmail,
+        },
+        b.counterparties,
+      ),
+    ).toBe(true);
+  });
+
+  it("mergeLiveDraft ignores invalid recipient2 while applying plausible recipient1", () => {
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "a", name: "A", role: "owner", email: "" },
+        { id: "b", name: "B", role: "signer", email: "" },
+      ],
+    } as AgreementDraft;
+    const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(draft, {
+      recipient1Email: "ok@valid.com",
+      recipient2Email: "bogus",
+    });
+    expect((merged?.parties?.[0] as { email?: string })?.email).toBe("ok@valid.com");
+    expect((merged?.parties?.[1] as { email?: string })?.email).toBe("");
+  });
+
+  it("logAgreementVs01RecipientEmailMergeDiagnostics omits raw local parts", () => {
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "a", name: "A", role: "owner", email: "z99@alpha.test" },
+        { id: "b", name: "B", role: "signer", email: "w88@beta.test" },
+      ],
+    } as AgreementDraft;
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+    logAgreementVs01RecipientEmailMergeDiagnostics(draft, recipientSetupPlausibleInputFlags(null));
+    const row = spy.mock.calls.find((c) => c[0] === "[agreement-vs01-recipient-email-merge]")?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(row).toEqual(
+      expect.objectContaining({
+        hasRecipient1Email: false,
+        hasRecipient2Email: false,
+        mergedPartiesWithEmailCount: 2,
+        mergedCreatorEmailDomain: "alpha.test",
+        mergedCounterpartiesWithEmailCount: 1,
+      }),
+    );
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/z99/);
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/w88/);
+    spy.mockRestore();
   });
 });
 

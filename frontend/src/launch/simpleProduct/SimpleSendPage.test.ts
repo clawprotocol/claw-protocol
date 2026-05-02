@@ -53,6 +53,7 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("const route = `/app/esign/${encodeURIComponent(vs01Seed.documentId)}?agreement_bridge=1`");
     expect(s).toContain("[agreement-vs01-bridge-session-written]");
     expect(s).toContain("logAgreementVs01BridgePreflight");
+    expect(s).toContain("logAgreementVs01RecipientEmailMergeDiagnostics");
     expect(s).toContain("bridgeHandoffDraftRef");
     expect(s).toContain("onBridgeHandoffDraftSnapshot");
     expect(s).toContain("setPaidProAgreementBridgeSkipMarker");
