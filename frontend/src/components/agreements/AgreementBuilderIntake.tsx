@@ -315,6 +315,10 @@ import {
   writePremiumSenderSignFirst,
 } from "../../launch/simpleProduct/premiumSendIntent";
 import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
+import {
+  shouldBlockIntakeReviewDisplayPhaseForVs01,
+  shouldSuppressReviewPipelineTelemetry,
+} from "../../vs01/vs01SignatureDashboardFlow";
 import { buildSimpleSendHandoff } from "../../launch/simpleProduct/simpleSendHandoff";
 import {
   clearPremiumCollaborateFirstDefaultPrimed,
@@ -7088,6 +7092,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!createProductionTwoPane) return;
+    if (shouldSuppressReviewPipelineTelemetry()) return;
     console.debug("[review-handoff]", {
       createUiStage,
       createFlowPhase,
@@ -7119,6 +7124,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!createProductionTwoPane) return;
+    if (shouldSuppressReviewPipelineTelemetry()) return;
     console.debug("[review-gate]", {
       createUiStage,
       createFlowPhase,
@@ -7143,11 +7149,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!productionDraftPrimaryReviewSurface) return;
+    if (shouldSuppressReviewPipelineTelemetry()) return;
     console.debug("[review-editor-mount]");
     return () => {
       console.debug("[review-editor-unmount]");
     };
   }, [productionDraftPrimaryReviewSurface]);
+
+  useEffect(() => {
+    if (displayPhase !== "review") return;
+    if (!shouldBlockIntakeReviewDisplayPhaseForVs01()) return;
+    if (!simpleProductFlow || !createProductionTwoPane) return;
+    // eslint-disable-next-line no-console
+    console.warn("[flow-guard] blocked review after VS01", { displayPhase });
+    // eslint-disable-next-line no-console
+    console.info("[flow] review_blocked_after_vs01", { displayPhase });
+    setDisplayPhase("editing_pro");
+  }, [displayPhase, simpleProductFlow, createProductionTwoPane]);
 
   /** Canonical structured model for review card + agreement preview (same as `draft` once review exists). */
   const reviewDraft = draft;

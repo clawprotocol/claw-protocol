@@ -131,6 +131,12 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
     return false;
   }, [search, agreementId, wizardBoot]);
 
+  useEffect(() => {
+    if (!postVs01SignatureFirstLanding || !agreementId?.trim() || wizardBoot !== "ready") return;
+    // eslint-disable-next-line no-console
+    console.info("[flow] dashboard_landing_post_sign", { agreementId: agreementId.trim() });
+  }, [postVs01SignatureFirstLanding, agreementId, wizardBoot]);
+
   const stepCount = STEPS.length;
 
   const goToLanding = useCallback(() => {
@@ -579,6 +585,7 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
         className="vs01-card vs01-card--envelope vs01-agreement-wizard-card relative"
         data-vs01-agreement-step={step}
         data-vs01-wizard-draft-ready={wizardDraftReady ? "1" : "0"}
+        data-vs01-post-sign-landing={postVs01SignatureFirstLanding ? "1" : "0"}
         data-vs01-prep={creatorPrepState}
       >
         {showWizardLoadingOverlay ? (
@@ -609,11 +616,15 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
           </>
         )}
 
+        {step > 0 && agreementId?.trim() && wizardDraftReady && wizardBoot === "ready" && postVs01SignatureFirstLanding ? (
+          <PaidProVs01WorkspaceBanner agreementId={agreementId.trim()} visible />
+        ) : null}
+
         {step > 0 && agreementId?.trim() ? (
           <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} />
         ) : null}
 
-        {step > 0 && agreementId?.trim() && wizardDraftReady && wizardBoot === "ready" ? (
+        {step > 0 && agreementId?.trim() && wizardDraftReady && wizardBoot === "ready" && !postVs01SignatureFirstLanding ? (
           <PaidProVs01WorkspaceBanner agreementId={agreementId.trim()} visible />
         ) : null}
 

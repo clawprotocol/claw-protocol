@@ -107,22 +107,26 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
 
   const title = handoff.agreementTitle.trim() || "Agreement";
   const signers = handoff.signers;
-  const primary = signers[0];
-  const firstSigningUrl = primary?.signingUrl?.trim() ?? "";
+  const primaryForLink = signers.find((s) => s.signingUrl?.trim()) ?? signers[0];
+  const firstSigningUrl = primaryForLink?.signingUrl?.trim() ?? "";
 
+  const namedPending = signers.filter((s) => s.displayName?.trim().length);
+  const firstNamed = namedPending[0];
   const awaitingStatus =
-    signers.length === 0
+    namedPending.length === 0
       ? "Awaiting signature"
-      : signers.length === 1
-        ? `Awaiting signature · ${primary.displayName}`
-        : `Awaiting signature · ${signers.length} signers`;
+      : namedPending.length === 1
+        ? `Awaiting ${firstNamed!.displayName.trim()}`
+        : "Awaiting signatures";
 
   const completionLine =
     signers.length === 0
       ? "Your signature is complete. Add recipients from the workspace when you are ready to collect remaining signatures."
-      : signers.length === 1
-        ? `Your signature is complete. ${primary.displayName} still needs to sign.`
-        : `Your signature is complete. ${signers.length} people still need to sign.`;
+      : namedPending.length === 1
+        ? `Your signature is complete. ${firstNamed!.displayName.trim()} still needs to sign.`
+        : signers.length > 1
+          ? "Your signature is complete. Other signers still need to sign."
+          : "Your signature is complete. One signer still needs to sign.";
 
   return (
     <section
@@ -200,7 +204,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
             ))}
           </ul>
         </details>
-      ) : signers.length === 1 ? (
+      ) : signers.length === 1 && firstSigningUrl ? (
         <p className="mt-3 border-t border-slate-800/60 pt-3 font-mono text-[10px] text-slate-600" title={firstSigningUrl}>
           {truncateMiddle(firstSigningUrl, 72)}
         </p>

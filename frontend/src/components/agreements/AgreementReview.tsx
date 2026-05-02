@@ -1218,10 +1218,12 @@ const AgreementReview: React.FC<Props> = ({
       (!vb || !vb.reviewSentAt)
     ) {
       const pend = pendingSignerModel.rows.filter((r) => r.status !== "signed");
-      if (pend.length > 0) {
+      if (pend.length === 1) {
         const nm = pend[0]!.name.trim();
         if (nm) return `Awaiting ${nm}`;
+        return "Awaiting signature";
       }
+      if (pend.length > 1) return "Awaiting signatures";
       return "Awaiting signature";
     }
     return workspaceStatusPillLabel(status);
@@ -1243,11 +1245,17 @@ const AgreementReview: React.FC<Props> = ({
     if (lockActive) {
       if (postVs01SignatureFirstLanding && !reviewSent) {
         const pend = pendingSignerModel.rows.filter((r) => r.status !== "signed");
-        const nextName = pend[0]?.name?.trim();
-        return {
-          title: nextName ? `Awaiting signature from ${nextName}` : "Awaiting signature",
-          detail: pendingSignerModel.summary,
-        };
+        const named = pend.map((r) => r.name.trim()).filter(Boolean);
+        if (named.length === 1) {
+          return {
+            title: `Awaiting signature from ${named[0]}`,
+            detail: pendingSignerModel.summary,
+          };
+        }
+        if (named.length > 1) {
+          return { title: "Awaiting signatures", detail: pendingSignerModel.summary };
+        }
+        return { title: "Awaiting signature", detail: pendingSignerModel.summary };
       }
       return {
         title: "Pending signature",
@@ -1272,11 +1280,17 @@ const AgreementReview: React.FC<Props> = ({
     if (requiredComplete) {
       if (postVs01SignatureFirstLanding && !reviewSent) {
         const pend = pendingSignerModel.rows.filter((r) => r.status !== "signed");
-        const nextName = pend[0]?.name?.trim();
-        return {
-          title: nextName ? `Awaiting signature from ${nextName}` : "Awaiting signature",
-          detail: pendingSignerModel.summary,
-        };
+        const named = pend.map((r) => r.name.trim()).filter(Boolean);
+        if (named.length === 1) {
+          return {
+            title: `Awaiting signature from ${named[0]}`,
+            detail: pendingSignerModel.summary,
+          };
+        }
+        if (named.length > 1) {
+          return { title: "Awaiting signatures", detail: pendingSignerModel.summary };
+        }
+        return { title: "Awaiting signature", detail: pendingSignerModel.summary };
       }
       return {
         title: "Ready for review",
@@ -2066,6 +2080,7 @@ const AgreementReview: React.FC<Props> = ({
   const logCreateReviewLinksClick = useCallback(
     (actionTaken: string, extra?: Record<string, unknown>) => {
       if (!import.meta.env.DEV) return;
+      if (postVs01SignatureFirstLanding) return;
       // eslint-disable-next-line no-console
       console.info("[create-review-links-click]", {
         agreementId,
@@ -2077,7 +2092,7 @@ const AgreementReview: React.FC<Props> = ({
         ...extra,
       });
     },
-    [agreementId, section, simpleFlowPhase, draft, sendInviteReadyCount],
+    [agreementId, section, simpleFlowPhase, draft, sendInviteReadyCount, postVs01SignatureFirstLanding],
   );
 
   const paymentRequestSnap = useMemo(() => {
@@ -2237,6 +2252,7 @@ const AgreementReview: React.FC<Props> = ({
   async function handleSimpleSendWithoutPayment() {
     const logReviewLinkAction = (actionTaken: string, extra?: Record<string, unknown>) => {
       if (!import.meta.env.DEV) return;
+      if (postVs01SignatureFirstLanding) return;
       // eslint-disable-next-line no-console
       console.info("[review-link-action]", {
         agreementId,

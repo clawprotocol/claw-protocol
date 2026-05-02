@@ -734,6 +734,13 @@ export function Vs01Wizard({
                 };
                 writePaidProVs01PostSignHandoff(payload);
                 // eslint-disable-next-line no-console
+                console.info("[flow] vs01_signature_complete", {
+                  agreementId: linkedAgreementId,
+                  receiptId: rid,
+                  signerCount: signers.length,
+                  vs01DocumentId: did,
+                });
+                // eslint-disable-next-line no-console
                 console.info("[vs01-paid-pro-workspace-navigate]", {
                   agreementId: linkedAgreementId,
                   receiptId: rid,

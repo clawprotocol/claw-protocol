@@ -50,6 +50,7 @@ import {
 } from "./premiumSendIntent";
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
 import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
+import { shouldSuppressReviewPipelineTelemetry } from "../../vs01/vs01SignatureDashboardFlow";
 import { getOrgId } from "../orgContext";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
@@ -487,7 +488,10 @@ export function SimpleCreatePage() {
               clearHeroIntakeHandoffAfterApply();
               setJoyFlash("draft_ready");
               emitActionCompleted("draft", { agreementId });
-              if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+              if (
+                (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV &&
+                !shouldSuppressReviewPipelineTelemetry()
+              ) {
                 console.debug("[SimpleCreate] navigate to review with agreement id", agreementId);
               }
               void (async () => {
