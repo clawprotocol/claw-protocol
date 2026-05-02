@@ -4,7 +4,15 @@
 import type { Vs01Counterparty, Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { FieldManifestEntry } from "./vs01Api";
 
-export type SigningFieldType = "signature" | "initials" | "printed_name" | "text" | "date";
+export type SigningFieldType = "signature" | "initials" | "printed_name" | "text" | "email" | "date";
+
+/** Context for default values when placing sender signing fields. */
+export type SigningPlacementValueContext = {
+  typedName: string;
+  initials: string;
+  /** Creator/signer email when known (Step 3 Email tool default). */
+  signerEmail?: string;
+};
 
 export type PlacedSigningField = {
   id: string;
@@ -27,6 +35,7 @@ export const SIGNING_FIELD_TOOLS: { type: SigningFieldType; label: string }[] = 
   { type: "initials", label: "Initials" },
   { type: "printed_name", label: "Printed name" },
   { type: "text", label: "Text" },
+  { type: "email", label: "Email" },
   { type: "date", label: "Date" },
 ];
 
@@ -36,6 +45,7 @@ export const RECIPIENT_FIELD_TOOLS: { type: Vs01RecipientFieldType; label: strin
   { type: "initials", label: "Initials" },
   { type: "printed_name", label: "Printed name" },
   { type: "text", label: "Text" },
+  { type: "email", label: "Email" },
   { type: "date", label: "Date" },
 ];
 
@@ -53,7 +63,9 @@ export function defaultSizeForRecipientField(t: Vs01RecipientFieldType): { width
     case "printed_name":
       return { width: 0.2, height: 0.052 };
     case "text":
-      return { width: 0.34, height: 0.07 };
+      return { width: 0.42, height: 0.088 };
+    case "email":
+      return { width: 0.44, height: 0.088 };
     case "date":
       return defaultSizeForType("date");
     default:
@@ -94,7 +106,9 @@ export function defaultSizeForType(t: SigningFieldType): { width: number; height
     case "printed_name":
       return { width: 0.2, height: 0.052 };
     case "text":
-      return { width: 0.34, height: 0.07 };
+      return { width: 0.42, height: 0.088 };
+    case "email":
+      return { width: 0.44, height: 0.088 };
     case "date":
       return { width: 0.17, height: 0.052 };
     default:
@@ -120,9 +134,58 @@ export function computeRectFromClick(
 }
 
 /** Bottom-right auto initials: normalized margins from page edges (x = 1 - marginX - width). */
-const AUTO_INITIALS_MARGIN_X = 0.04;
-/** Slightly higher bottom anchor so auto initials sit in margin above draft footer / watermark band. */
-const AUTO_INITIALS_MARGIN_Y = 0.056;
+const AUTO_INITIALS_MARGIN_X = 0.052;
+/** Higher bottom anchor so auto initials sit above draft footer / watermark band and typical body fields. */
+const AUTO_INITIALS_MARGIN_Y = 0.09;
+
+const SENDER_AUTO_INITIALS_AVOID_TYPES: SigningFieldType[] = ["text", "date", "email"];
+
+const RECIPIENT_AUTO_INITIALS_AVOID_TYPES: Vs01RecipientFieldType[] = ["text", "date", "email"];
+
+function normRectsOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+  pad: number
+): boolean {
+  return (
+    a.x - pad < b.x + b.width + pad &&
+    a.x + a.width + pad > b.x - pad &&
+    a.y - pad < b.y + b.height + pad &&
+    a.y + a.height + pad > b.y - pad
+  );
+}
+
+/**
+ * Nudge a bottom-anchored initials rect up (then left) so it does not overlap normalized obstacle rects.
+ */
+export function nudgeAutoInitialsRectClearOfNormRects(
+  rect: { x: number; y: number; width: number; height: number },
+  obstacles: Array<{ x: number; y: number; width: number; height: number }>,
+  pad = 0.014
+): { x: number; y: number; width: number; height: number } {
+  const { width: rw, height: rh } = rect;
+  let { x, y } = rect;
+  const overlaps = () => obstacles.some((b) => normRectsOverlap({ x, y, width: rw, height: rh }, b, pad));
+  if (!overlaps()) return { x, y, width: rw, height: rh };
+
+  const step = 0.016;
+  const startX = x;
+  const startY = y;
+  for (let leg = 0; leg < 96; leg++) {
+    if (!overlaps()) return { x, y, width: rw, height: rh };
+    if (y - step >= 0) {
+      y -= step;
+      continue;
+    }
+    if (x - step >= 0) {
+      x -= step;
+      y = startY;
+      continue;
+    }
+    break;
+  }
+  return { x: startX, y: startY, width: rw, height: rh };
+}
 
 export function autoInitialsLayout(): { x: number; y: number; width: number; height: number } {
   const { width, height } = defaultSizeForType("initials");
@@ -133,7 +196,7 @@ export function autoInitialsLayout(): { x: number; y: number; width: number; hei
   return { width, height, x, y };
 }
 
-export function defaultValueForType(t: SigningFieldType, ctx: { typedName: string; initials: string }): string {
+export function defaultValueForType(t: SigningFieldType, ctx: SigningPlacementValueContext): string {
   switch (t) {
     case "signature":
       return ctx.typedName.trim() || "Signature";
@@ -143,6 +206,8 @@ export function defaultValueForType(t: SigningFieldType, ctx: { typedName: strin
       return ctx.typedName.trim();
     case "text":
       return "";
+    case "email":
+      return (ctx.signerEmail ?? "").trim();
     case "date": {
       const d = new Date();
       return d.toISOString().slice(0, 10);
@@ -153,7 +218,11 @@ export function defaultValueForType(t: SigningFieldType, ctx: { typedName: strin
 }
 
 /** Recipient placement (Step 4): signature/initials blank; printed name stores label snapshot; date defaults to today. */
-export function defaultRecipientFieldValue(t: Vs01RecipientFieldType, recipientDisplayName: string): string {
+export function defaultRecipientFieldValue(
+  t: Vs01RecipientFieldType,
+  recipientDisplayName: string,
+  recipientEmail?: string
+): string {
   switch (t) {
     case "signature":
     case "initials":
@@ -162,6 +231,8 @@ export function defaultRecipientFieldValue(t: Vs01RecipientFieldType, recipientD
       return recipientDisplayName.trim();
     case "text":
       return "";
+    case "email":
+      return (recipientEmail ?? "").trim();
     case "date": {
       const d = new Date();
       return d.toISOString().slice(0, 10);
@@ -346,7 +417,16 @@ export function rebuildRecipientAutoInitialsEveryPage(
   for (let p = 0; p < numPages; p++) {
     if (skippedPages.has(p)) continue;
     const pair = layoutRecipientInitialsPairForPage(p, senderPlacedFields);
-    autos.push(createRecipientAutoInitialsField(counterpartyId, p, pair.auto));
+    const obstacles = rest
+      .filter(
+        (o) =>
+          o.page === p &&
+          !o.autoInitials &&
+          RECIPIENT_AUTO_INITIALS_AVOID_TYPES.includes(o.type)
+      )
+      .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
+    const autoLayout = nudgeAutoInitialsRectClearOfNormRects(pair.auto, obstacles);
+    autos.push(createRecipientAutoInitialsField(counterpartyId, p, autoLayout));
   }
 
   return dedupeRecipientAutoInitialsByRecipientPage([...rest, ...autos]);
@@ -392,9 +472,18 @@ export function repositionAllRecipientAutoInitialsNonOverlapping(
     if (idx < 0) return f;
 
     const pair = layoutRecipientInitialsPairForPage(f.page, senderPlacedFields);
-    const { width: w, height: h, y } = pair.auto;
+    const pageObs = fields
+      .filter(
+        (o) =>
+          o.page === f.page &&
+          !o.autoInitials &&
+          RECIPIENT_AUTO_INITIALS_AVOID_TYPES.includes(o.type)
+      )
+      .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
+    const nudgedAuto = nudgeAutoInitialsRectClearOfNormRects(pair.auto, pageObs);
+    const { width: w, height: h, y } = nudgedAuto;
     const gap = RECIPIENT_AUTO_INITIALS_GAP_NORM;
-    let x = pair.auto.x - idx * (w + gap);
+    let x = nudgedAuto.x - idx * (w + gap);
     x = Math.max(0, Math.min(x, 1 - w));
 
     const same =
@@ -468,7 +557,7 @@ export function createPlacedFieldAtClick(
   page: number,
   clickX: number,
   clickY: number,
-  ctx: { typedName: string; initials: string },
+  ctx: SigningPlacementValueContext,
   options?: { autoInitials?: boolean }
 ): PlacedSigningField {
   const { x, y, width, height } = computeRectFromClick(type, clickX, clickY);
@@ -490,9 +579,10 @@ export function createPlacedFieldAtClick(
  */
 export function createAutoInitialsField(
   page: number,
-  ctx: { typedName: string; initials: string }
+  ctx: SigningPlacementValueContext,
+  layout?: { x: number; y: number; width: number; height: number }
 ): PlacedSigningField {
-  const { width, height, x, y } = autoInitialsLayout();
+  const { width, height, x, y } = layout ?? autoInitialsLayout();
   return {
     id: `auto_initials_${page}`,
     type: "initials",
@@ -508,16 +598,27 @@ export function createAutoInitialsField(
 
 /**
  * Build all auto-initials fields for pages 0 .. pageCount-1, skipping pages in skippedPages.
+ * Optional `manualFields` avoids overlapping gray auto slots with placed text/date/email boxes.
  */
 export function buildAutoInitialsFields(
   pageCount: number,
-  ctx: { typedName: string; initials: string },
-  skippedPages: Set<number>
+  ctx: SigningPlacementValueContext,
+  skippedPages: Set<number>,
+  manualFields: PlacedSigningField[] = []
 ): PlacedSigningField[] {
   const out: PlacedSigningField[] = [];
   for (let p = 0; p < pageCount; p++) {
     if (skippedPages.has(p)) continue;
-    out.push(createAutoInitialsField(p, ctx));
+    const obstacles = manualFields
+      .filter(
+        (f) =>
+          f.page === p &&
+          !f.autoInitials &&
+          SENDER_AUTO_INITIALS_AVOID_TYPES.includes(f.type)
+      )
+      .map((f) => ({ x: f.x, y: f.y, width: f.width, height: f.height }));
+    const layout = nudgeAutoInitialsRectClearOfNormRects(autoInitialsLayout(), obstacles);
+    out.push(createAutoInitialsField(p, ctx, layout));
   }
   return out;
 }

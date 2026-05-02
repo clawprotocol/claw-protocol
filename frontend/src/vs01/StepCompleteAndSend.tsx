@@ -81,7 +81,8 @@ function createRecipientFieldAtClick(
   clickX: number,
   clickY: number,
   counterpartyId: string,
-  recipientDisplayName: string
+  recipientDisplayName: string,
+  recipientEmail?: string
 ): Vs01RecipientPlacedField {
   const { x, y, width, height } = computeRecipientRectFromClick(type, clickX, clickY);
   return {
@@ -93,7 +94,7 @@ function createRecipientFieldAtClick(
     y,
     width,
     height,
-    value: defaultRecipientFieldValue(type, recipientDisplayName),
+    value: defaultRecipientFieldValue(type, recipientDisplayName, recipientEmail),
   };
 }
 
@@ -146,6 +147,11 @@ function SenderReferenceFieldContent({
   if (field.type === "text") {
     return (
       <span className="vs01-sign-sender-ref-text">{textVal.trim() ? textVal : "Text"}</span>
+    );
+  }
+  if (field.type === "email") {
+    return (
+      <span className="vs01-sign-sender-ref-text">{textVal.trim() ? textVal : "Email"}</span>
     );
   }
   if (field.type === "date") {
@@ -431,6 +437,20 @@ export function StepCompleteAndSend({
   const placementArmed = armedTool != null && namedCps.length > 0 && Boolean(selectedCounterpartyId);
   const canContinue = recipientFields.length > 0;
 
+  const recipientOverlapKey = useMemo(() => {
+    const id = selectedCounterpartyId.trim();
+    if (!id) return "";
+    return recipientFields
+      .filter(
+        (f) =>
+          f.counterpartyId === id &&
+          !f.autoInitials &&
+          (f.type === "text" || f.type === "date" || f.type === "email")
+      )
+      .map((f) => `${f.page},${roundNorm(f.x)},${roundNorm(f.y)},${roundNorm(f.width)},${roundNorm(f.height)}`)
+      .join(";");
+  }, [recipientFields, selectedCounterpartyId]);
+
   useEffect(() => {
     if (recipientAutoInitialsEveryPage) {
       prevRecipientAutoToggleRef.current = true;
@@ -469,6 +489,7 @@ export function StepCompleteAndSend({
     skippedRecipientAutoByCp,
     counterparties,
     onRecipientFieldsChange,
+    recipientOverlapKey,
   ]);
 
   const onPagePlacementClick = useCallback(
@@ -483,13 +504,15 @@ export function StepCompleteAndSend({
 
       const px = (ev.clientX - rect.left) / rect.width;
       const py = (ev.clientY - rect.top) / rect.height;
+      const cpRow = cpById.get(selectedCounterpartyId);
       const nf = createRecipientFieldAtClick(
         armedTool,
         pageIndex0,
         px,
         py,
         selectedCounterpartyId,
-        counterpartyName(cpById, selectedCounterpartyId)
+        counterpartyName(cpById, selectedCounterpartyId),
+        cpRow?.email?.trim() || undefined
       );
       onRecipientFieldsChange((prev) => [...prev, nf]);
       setSelectedFieldId(nf.id);
@@ -519,7 +542,11 @@ export function StepCompleteAndSend({
       if ((ev.target as HTMLElement).closest(".vs01-sign-placement-resize-handle")) return;
       if ((ev.target as HTMLElement).closest(".vs01-sign-field-inline-input")) return;
       if (
-        (field.type === "date" || field.type === "initials") &&
+        (field.type === "date" ||
+          field.type === "initials" ||
+          field.type === "text" ||
+          field.type === "email" ||
+          field.type === "printed_name") &&
         selectedFieldId !== field.id
       ) {
         setSelectedFieldId(field.id);
@@ -953,6 +980,29 @@ export function StepCompleteAndSend({
                                                       }${textVal.trim() ? " vs01-recipient-field-value-filled" : ""}`}
                                                     >
                                                       {textVal.trim() || "Signer adds text"}
+                                                    </span>
+                                                  )
+                                                ) : null}
+                                                {field.type === "email" ? (
+                                                  isSel && !busy ? (
+                                                    <input
+                                                      type="email"
+                                                      className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                      value={textVal}
+                                                      placeholder="Email"
+                                                      autoComplete="email"
+                                                      aria-label="Email field for signer"
+                                                      onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                      onPointerDown={(ev) => ev.stopPropagation()}
+                                                      onClick={(ev) => ev.stopPropagation()}
+                                                    />
+                                                  ) : (
+                                                    <span
+                                                      className={`vs01-sign-placement-text${
+                                                        !textVal.trim() ? " vs01-sign-placement-ph" : ""
+                                                      }${textVal.trim() ? " vs01-recipient-field-value-filled" : ""}`}
+                                                    >
+                                                      {textVal.trim() || "Signer adds email"}
                                                     </span>
                                                   )
                                                 ) : null}

@@ -31,8 +31,8 @@ export type Vs01Counterparty = {
   phone?: string;
 };
 
-/** Field type for recipient assignment (Step 4). `printed_name` is a fixed label; `text` is freeform (title, email, blanks). */
-export type Vs01RecipientFieldType = "signature" | "initials" | "printed_name" | "text" | "date";
+/** Field type for recipient assignment (Step 4). `printed_name` is a fixed label; `text` / `email` are freeform (email prefills when known). */
+export type Vs01RecipientFieldType = "signature" | "initials" | "printed_name" | "text" | "email" | "date";
 
 /**
  * A field placed for a specific counterparty on the PDF (normalized coords, client-only until backend exists).

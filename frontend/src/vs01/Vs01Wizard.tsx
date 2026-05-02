@@ -682,6 +682,7 @@ export function Vs01Wizard({
             onError={setError}
             onSigned={handleSigned}
             counterparties={counterparties}
+            creatorEmail={creatorEmail.trim() ? creatorEmail.trim() : undefined}
             senderMessage={senderMessage}
             onBack={() => goToStep(paidProAgreementBridgeSkip ? 0 : 1)}
             onContinue={() => {

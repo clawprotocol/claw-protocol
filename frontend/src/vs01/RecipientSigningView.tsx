@@ -105,6 +105,11 @@ function SenderReferenceFieldContent({
       <span className="vs01-sign-sender-ref-text">{textVal.trim() ? textVal : "Text"}</span>
     );
   }
+  if (field.type === "email") {
+    return (
+      <span className="vs01-sign-sender-ref-text">{textVal.trim() ? textVal : "Email"}</span>
+    );
+  }
   if (field.type === "date") {
     return (
       <span className="vs01-sign-sender-ref-text">{formatIsoDateDisplay(textVal)}</span>
@@ -122,6 +127,8 @@ function fieldIsComplete(f: Vs01RecipientPlacedField): boolean {
     case "printed_name":
       return true;
     case "text":
+      return v.length > 0;
+    case "email":
       return v.length > 0;
     case "date":
       return v.length > 0;
@@ -551,6 +558,18 @@ export function RecipientSigningView({
                                                   placeholder="Text (title, email, custom blank…)"
                                                   autoComplete="off"
                                                   aria-label="Text field"
+                                                  onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                  onPointerDown={(ev) => ev.stopPropagation()}
+                                                />
+                                              ) : null}
+                                              {field.type === "email" ? (
+                                                <input
+                                                  type="email"
+                                                  className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                  value={textVal}
+                                                  placeholder="Email"
+                                                  autoComplete="email"
+                                                  aria-label="Email field"
                                                   onChange={(ev) => updateField(field.id, { value: ev.target.value })}
                                                   onPointerDown={(ev) => ev.stopPropagation()}
                                                 />

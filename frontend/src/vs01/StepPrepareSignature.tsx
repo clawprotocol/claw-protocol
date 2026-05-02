@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent,
@@ -50,6 +51,8 @@ export type StepPrepareSignatureProps = {
     senderSignatureRef: Vs01SenderSignatureRef | null;
   }) => void;
   counterparties: Vs01Counterparty[];
+  /** When set, Email placement tool prefills from this address. */
+  creatorEmail?: string;
   senderMessage: string;
   onBack?: () => void;
   onContinue?: () => void;
@@ -68,6 +71,8 @@ function signingPlacementCornerLabel(t: SigningFieldType): string {
       return "Printed name";
     case "text":
       return "Text";
+    case "email":
+      return "Email";
     case "date":
       return "Date";
     default:
@@ -131,6 +136,7 @@ export function StepPrepareSignature({
   onError,
   onSigned,
   counterparties,
+  creatorEmail,
   senderMessage,
   onBack,
   onContinue,
@@ -316,6 +322,15 @@ export function StepPrepareSignature({
   const hasSignatureOnDoc = fields.some((f) => f.type === "signature");
   const flowStep3Ready = signReady && hasSignatureOnDoc;
 
+  const fieldsOverlapKey = useMemo(
+    () =>
+      fields
+        .filter((f) => !f.autoInitials && (f.type === "text" || f.type === "date" || f.type === "email"))
+        .map((f) => `${f.page},${roundNorm(f.x)},${roundNorm(f.y)},${roundNorm(f.width)},${roundNorm(f.height)}`)
+        .join(";"),
+    [fields]
+  );
+
   const signerForApi = defaultSignerRef.trim() || "signer";
 
   const pageIndex0 = currentPage - 1;
@@ -374,10 +389,10 @@ export function StepPrepareSignature({
     const ctx = { typedName: typedNameRef.current, initials: initialsRef.current };
     setFields((prev) => {
       const manual = prev.filter((f) => !f.autoInitials);
-      const auto = buildAutoInitialsFields(numPages, ctx, skippedAutoPages);
+      const auto = buildAutoInitialsFields(numPages, ctx, skippedAutoPages, manual);
       return [...manual, ...auto];
     });
-  }, [autoInitialsEveryPage, numPages, skippedAutoPages]);
+  }, [autoInitialsEveryPage, numPages, skippedAutoPages, fieldsOverlapKey]);
 
   /** Keep auto-initials text in sync when the user edits initials/name, without rebuilding positions. */
   useEffect(() => {
@@ -385,11 +400,18 @@ export function StepPrepareSignature({
     setFields((prev) =>
       prev.map((f) =>
         f.autoInitials && f.type === "initials"
-          ? { ...f, value: defaultValueForType("initials", { typedName, initials }) }
+          ? {
+              ...f,
+              value: defaultValueForType("initials", {
+                typedName,
+                initials,
+                signerEmail: creatorEmail?.trim() || undefined,
+              }),
+            }
           : f
       )
     );
-  }, [autoInitialsEveryPage, typedName, initials]);
+  }, [autoInitialsEveryPage, typedName, initials, creatorEmail]);
 
   const onPagePlacementClick = useCallback(
     (pageIndex0: number, ev: React.MouseEvent<HTMLDivElement>) => {
@@ -403,7 +425,11 @@ export function StepPrepareSignature({
 
       const px = (ev.clientX - rect.left) / rect.width;
       const py = (ev.clientY - rect.top) / rect.height;
-      const ctx = { typedName, initials };
+      const ctx = {
+        typedName,
+        initials,
+        signerEmail: creatorEmail?.trim() || undefined,
+      };
       const nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, ctx);
       setFields((prev) => [...prev, nf]);
       setSelectedFieldId(nf.id);
@@ -418,7 +444,7 @@ export function StepPrepareSignature({
         dragHintTimerRef.current = null;
       }, 2200);
     },
-    [armedTool, busy, typedName, initials]
+    [armedTool, busy, typedName, initials, creatorEmail]
   );
 
   useEffect(() => {
@@ -433,7 +459,10 @@ export function StepPrepareSignature({
       if ((ev.target as HTMLElement).closest(".vs01-sign-placement-resize-handle")) return;
       if ((ev.target as HTMLElement).closest(".vs01-sign-field-inline-input")) return;
       if (
-        (field.type === "text" || field.type === "printed_name" || field.type === "date") &&
+        (field.type === "text" ||
+          field.type === "email" ||
+          field.type === "printed_name" ||
+          field.type === "date") &&
         selectedFieldId !== field.id
       ) {
         setSelectedFieldId(field.id);
@@ -1027,6 +1056,25 @@ export function StepPrepareSignature({
                                             ) : (
                                               <span className="vs01-sign-placement-text">
                                                 {textVal.trim() ? textVal : "Add text"}
+                                              </span>
+                                            )
+                                          ) : null}
+                                          {field.type === "email" ? (
+                                            isSel && !busy ? (
+                                              <input
+                                                type="email"
+                                                className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                value={textVal}
+                                                placeholder="Email"
+                                                autoComplete="email"
+                                                aria-label="Email on document"
+                                                onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                onPointerDown={(ev) => ev.stopPropagation()}
+                                                onClick={(ev) => ev.stopPropagation()}
+                                              />
+                                            ) : (
+                                              <span className="vs01-sign-placement-text">
+                                                {textVal.trim() ? textVal : "Email"}
                                               </span>
                                             )
                                           ) : null}

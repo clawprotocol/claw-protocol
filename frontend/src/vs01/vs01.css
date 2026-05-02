@@ -2675,14 +2675,17 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-box--text .vs01-sign-field-inline-input,
-.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-field-inline-input {
+.vs01-sign-placement-box--email .vs01-sign-field-inline-input,
+.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-field-inline-input,
+.vs01-recipient-assign-step .vs01-sign-placement-box--email .vs01-sign-field-inline-input {
   min-height: 2.35em;
   white-space: normal;
   word-break: break-word;
   line-height: 1.25;
 }
 
-.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-placement-text {
+.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-placement-text,
+.vs01-recipient-assign-step .vs01-sign-placement-box--email .vs01-sign-placement-text {
   white-space: normal;
   word-break: break-word;
   line-height: 1.25;
@@ -2922,12 +2925,14 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-box--text,
+.vs01-sign-placement-box--email,
 .vs01-sign-placement-box--printed_name,
 .vs01-sign-placement-box--date {
   cursor: default;
 }
 
 .vs01-sign-placement-box--text.vs01-sign-placement-box--selected,
+.vs01-sign-placement-box--email.vs01-sign-placement-box--selected,
 .vs01-sign-placement-box--printed_name.vs01-sign-placement-box--selected,
 .vs01-sign-placement-box--date.vs01-sign-placement-box--selected {
   cursor: text;
@@ -3090,6 +3095,19 @@ button.vs01-upload-btn:disabled {
 }
 
 /**
+ * Signing placement pages: extra bottom fade so embedded draft footers / watermarks read as margin,
+ * not as ink on top of signature blocks (complements `.vs01-pdf-footer-watermark-shim`).
+ */
+.vs01-sign-page-surface--footer-safe {
+  isolation: isolate;
+  box-shadow: inset 0 -4.5rem 3rem -1.25rem rgba(255, 255, 255, 0.88);
+}
+
+.vs01-sign-doc-surface .vs01-sign-page-surface--footer-safe {
+  box-shadow: inset 0 -4.5rem 3rem -1.25rem rgba(250, 248, 245, 0.9);
+}
+
+/**
  * Soft band over the bottom of the rendered page to reduce clash with embedded draft footers
  * (e.g. “Created with LawDog — Draft for Review” from agreement HTML → PDF) while keeping
  * placement overlays above (z-index 3+).
@@ -3099,13 +3117,14 @@ button.vs01-upload-btn:disabled {
   left: 0;
   right: 0;
   bottom: 0;
-  height: clamp(1.85rem, 6.2%, 3.1rem);
+  height: clamp(2.35rem, 12%, 4.35rem);
   z-index: 1;
   pointer-events: none;
   background: linear-gradient(
     to top,
-    rgba(255, 255, 255, 0.97) 0%,
-    rgba(255, 255, 255, 0.9) 42%,
+    rgba(255, 255, 255, 0.99) 0%,
+    rgba(255, 255, 255, 0.94) 38%,
+    rgba(255, 255, 255, 0.72) 62%,
     rgba(255, 255, 255, 0) 100%
   );
 }
@@ -3113,8 +3132,9 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-doc-surface .vs01-pdf-footer-watermark-shim {
   background: linear-gradient(
     to top,
-    rgba(250, 248, 245, 0.98) 0%,
-    rgba(250, 248, 245, 0.92) 45%,
+    rgba(250, 248, 245, 0.99) 0%,
+    rgba(250, 248, 245, 0.94) 38%,
+    rgba(250, 248, 245, 0.74) 62%,
     rgba(250, 248, 245, 0) 100%
   );
 }

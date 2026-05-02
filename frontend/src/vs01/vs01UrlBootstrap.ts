@@ -94,7 +94,8 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   if (decoded.ok) {
     recipientHydratedFields = ensureRecipientFieldDefaults(
       rebindRecipientFieldsToCounterparty(decoded.fields, lockedId),
-      recipientName || "Recipient"
+      recipientName || "Recipient",
+      recipientEmail || undefined
     );
   } else {
     recipientManifestDecodeError = decoded.error;

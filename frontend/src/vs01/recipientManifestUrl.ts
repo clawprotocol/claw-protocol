@@ -7,7 +7,14 @@ import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 
 export const VS01_RECIPIENT_MANIFEST_QUERY = "vs01_rmanifest";
 
-const RECIPIENT_TYPES = new Set<Vs01RecipientFieldType>(["signature", "initials", "printed_name", "text", "date"]);
+const RECIPIENT_TYPES = new Set<Vs01RecipientFieldType>([
+  "signature",
+  "initials",
+  "printed_name",
+  "text",
+  "email",
+  "date",
+]);
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -148,14 +155,16 @@ export function rebindRecipientFieldsToCounterparty(
  */
 export function ensureRecipientFieldDefaults(
   fields: Vs01RecipientPlacedField[],
-  recipientDisplayName: string
+  recipientDisplayName: string,
+  recipientEmail?: string
 ): Vs01RecipientPlacedField[] {
   const name = recipientDisplayName.trim() || "Recipient";
+  const email = (recipientEmail ?? "").trim() || undefined;
   return fields.map((f) => {
     if (typeof f.value === "string" && f.value.length > 0) return f;
     if (f.type === "signature" || f.type === "initials") {
       return { ...f, value: "" };
     }
-    return { ...f, value: defaultRecipientFieldValue(f.type, name) };
+    return { ...f, value: defaultRecipientFieldValue(f.type, name, email) };
   });
 }
