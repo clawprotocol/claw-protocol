@@ -366,6 +366,8 @@ type Props = {
   onContinueToReviewerSetup?: () => void;
   /** Simple launch: paid-Pro send routing metadata — parent skips SendConversionModal when `bypass` is true. */
   onPaidProSendBranchMeta?: (meta: PaidProSendBranchMeta) => void;
+  /** Paid Pro VS01 return: signature-first landing — avoid review-first status and negotiation-heavy chrome. */
+  postVs01SignatureFirstLanding?: boolean;
 };
 
 const API_BASE = resolveApiBase();
@@ -663,6 +665,7 @@ const AgreementReview: React.FC<Props> = ({
   simpleFlowPremiumHandoffIntent,
   onContinueToReviewerSetup,
   onPaidProSendBranchMeta,
+  postVs01SignatureFirstLanding = false,
 }) => {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState<string>("");
@@ -1208,6 +1211,22 @@ const AgreementReview: React.FC<Props> = ({
     [draft, signingUrl, agreementFullySigned]
   );
 
+  const workspaceStatusPillText = useMemo(() => {
+    if (
+      postVs01SignatureFirstLanding &&
+      status === "Complete Draft" &&
+      (!vb || !vb.reviewSentAt)
+    ) {
+      const pend = pendingSignerModel.rows.filter((r) => r.status !== "signed");
+      if (pend.length > 0) {
+        const nm = pend[0]!.name.trim();
+        if (nm) return `Awaiting ${nm}`;
+      }
+      return "Awaiting signature";
+    }
+    return workspaceStatusPillLabel(status);
+  }, [postVs01SignatureFirstLanding, status, vb, pendingSignerModel]);
+
   const workspaceStateBannerContent = useMemo(() => {
     if (section === "simpleHomeReview") return null;
     if (!isWorkspace || !draft) return null;
@@ -1222,6 +1241,14 @@ const AgreementReview: React.FC<Props> = ({
       };
     }
     if (lockActive) {
+      if (postVs01SignatureFirstLanding && !reviewSent) {
+        const pend = pendingSignerModel.rows.filter((r) => r.status !== "signed");
+        const nextName = pend[0]?.name?.trim();
+        return {
+          title: nextName ? `Awaiting signature from ${nextName}` : "Awaiting signature",
+          detail: pendingSignerModel.summary,
+        };
+      }
       return {
         title: "Pending signature",
         detail:
@@ -1243,6 +1270,14 @@ const AgreementReview: React.FC<Props> = ({
       };
     }
     if (requiredComplete) {
+      if (postVs01SignatureFirstLanding && !reviewSent) {
+        const pend = pendingSignerModel.rows.filter((r) => r.status !== "signed");
+        const nextName = pend[0]?.name?.trim();
+        return {
+          title: nextName ? `Awaiting signature from ${nextName}` : "Awaiting signature",
+          detail: pendingSignerModel.summary,
+        };
+      }
       return {
         title: "Ready for review",
         detail:
@@ -1254,7 +1289,16 @@ const AgreementReview: React.FC<Props> = ({
       detail:
         "Finish agreement details first. Then you can request changes and share revised drafts with recipients in one shared workflow.",
     };
-  }, [section, isWorkspace, draft, vb, headVersionTail, requiredComplete]);
+  }, [
+    section,
+    isWorkspace,
+    draft,
+    vb,
+    headVersionTail,
+    requiredComplete,
+    postVs01SignatureFirstLanding,
+    pendingSignerModel,
+  ]);
 
   useEffect(() => {
     if (!shouldPollAgreementProof) {
@@ -3523,7 +3567,7 @@ const AgreementReview: React.FC<Props> = ({
         <div className="flex flex-wrap items-center gap-2">
           <ProofBadge state={proofBadgeState} />
           <span className="inline-flex rounded-full border border-slate-600 bg-slate-900/50 px-2.5 py-1 text-[11px] font-medium text-slate-200">
-            {workspaceStatusPillLabel(status)}
+            {workspaceStatusPillText}
           </span>
           <span className="text-xs text-slate-500">Updated {new Date(draft.updated_at).toLocaleString()}</span>
         </div>
@@ -3564,11 +3608,26 @@ const AgreementReview: React.FC<Props> = ({
         </div>
       </div>
       {shareFlash ? <p className="mt-2 text-[10px] text-emerald-400/95">{shareFlash}</p> : null}
-      <p className="mt-2 text-[10px] leading-snug text-slate-500">
-        Owners merge revisions into the draft; recipients review or propose changes; signatures happen after the
-        agreement is stable and locked.
-      </p>
-      <p className="mt-1 text-[10px] leading-snug text-slate-500">Changes are versioned and auditable in LawDog.</p>
+      {postVs01SignatureFirstLanding ? (
+        <details className="mt-2 rounded-md border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
+          <summary className="cursor-pointer text-[10px] font-medium text-slate-500">
+            Workspace and version history (optional)
+          </summary>
+          <p className="mt-2 text-[10px] leading-snug text-slate-500">
+            Owners merge revisions into the draft; recipients review or propose changes; signatures happen after the
+            agreement is stable and locked.
+          </p>
+          <p className="mt-1 text-[10px] leading-snug text-slate-500">Changes are versioned and auditable in LawDog.</p>
+        </details>
+      ) : (
+        <>
+          <p className="mt-2 text-[10px] leading-snug text-slate-500">
+            Owners merge revisions into the draft; recipients review or propose changes; signatures happen after the
+            agreement is stable and locked.
+          </p>
+          <p className="mt-1 text-[10px] leading-snug text-slate-500">Changes are versioned and auditable in LawDog.</p>
+        </>
+      )}
       <p className="mt-2 text-[10px] text-slate-600">
         Agreement ID (for support):{" "}
         <span className="font-mono text-slate-500">{draft.id}</span>

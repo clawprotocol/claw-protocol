@@ -2906,11 +2906,13 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-box--text,
+.vs01-sign-placement-box--printed_name,
 .vs01-sign-placement-box--date {
   cursor: default;
 }
 
 .vs01-sign-placement-box--text.vs01-sign-placement-box--selected,
+.vs01-sign-placement-box--printed_name.vs01-sign-placement-box--selected,
 .vs01-sign-placement-box--date.vs01-sign-placement-box--selected {
   cursor: text;
 }

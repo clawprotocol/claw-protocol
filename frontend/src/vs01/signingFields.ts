@@ -4,7 +4,7 @@
 import type { Vs01Counterparty, Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { FieldManifestEntry } from "./vs01Api";
 
-export type SigningFieldType = "signature" | "initials" | "text" | "date";
+export type SigningFieldType = "signature" | "initials" | "printed_name" | "text" | "date";
 
 export type PlacedSigningField = {
   id: string;
@@ -25,6 +25,7 @@ export type PlacedSigningField = {
 export const SIGNING_FIELD_TOOLS: { type: SigningFieldType; label: string }[] = [
   { type: "signature", label: "Signature" },
   { type: "initials", label: "Initials" },
+  { type: "printed_name", label: "Printed name" },
   { type: "text", label: "Text" },
   { type: "date", label: "Date" },
 ];
@@ -34,6 +35,7 @@ export const RECIPIENT_FIELD_TOOLS: { type: Vs01RecipientFieldType; label: strin
   { type: "signature", label: "Signature" },
   { type: "initials", label: "Initials" },
   { type: "printed_name", label: "Printed name" },
+  { type: "text", label: "Text" },
   { type: "date", label: "Date" },
 ];
 
@@ -49,6 +51,8 @@ export function defaultSizeForRecipientField(t: Vs01RecipientFieldType): { width
     case "initials":
       return defaultSizeForType("initials");
     case "printed_name":
+      return defaultSizeForType("text");
+    case "text":
       return defaultSizeForType("text");
     case "date":
       return defaultSizeForType("date");
@@ -87,6 +91,7 @@ export function defaultSizeForType(t: SigningFieldType): { width: number; height
       return { width: 0.26, height: 0.064 };
     case "initials":
       return { width: 0.11, height: 0.052 };
+    case "printed_name":
     case "text":
       return { width: 0.2, height: 0.052 };
     case "date":
@@ -132,6 +137,8 @@ export function defaultValueForType(t: SigningFieldType, ctx: { typedName: strin
       return ctx.typedName.trim() || "Signature";
     case "initials":
       return ctx.initials.trim() || "AB";
+    case "printed_name":
+      return ctx.typedName.trim();
     case "text":
       return "";
     case "date": {
@@ -151,6 +158,8 @@ export function defaultRecipientFieldValue(t: Vs01RecipientFieldType, recipientD
       return "";
     case "printed_name":
       return recipientDisplayName.trim();
+    case "text":
+      return "";
     case "date": {
       const d = new Date();
       return d.toISOString().slice(0, 10);

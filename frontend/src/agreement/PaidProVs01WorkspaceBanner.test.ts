@@ -14,7 +14,8 @@ describe("PaidProVs01WorkspaceBanner (static)", () => {
     const s = readFileSync(p, "utf8");
     expect(s).toContain("Saved in LawDog");
     expect(s).toContain("Copy signing link");
-    expect(s).toContain("View proof details");
+    expect(s).toContain("View proof");
+    expect(s).toContain("Proof & receipt details");
     expect(s).toContain("readPaidProVs01PostSignHandoff");
   });
 });

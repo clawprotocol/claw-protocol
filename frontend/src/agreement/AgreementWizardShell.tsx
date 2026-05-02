@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLaunchNav } from "../launch/LaunchNavContext";
 import AgreementBuilderIntake, {
   clearAgreementCreatorIntakeStorage,
 } from "../components/agreements/AgreementBuilderIntake";
@@ -31,6 +32,7 @@ import {
 import { UpgradeToProModal } from "../monetization/UpgradeToProModal";
 import { AgreementMemoryAgreementStrip } from "./AgreementMemoryAgreementStrip";
 import { PaidProVs01WorkspaceBanner } from "./PaidProVs01WorkspaceBanner";
+import { readPaidProVs01PostSignHandoff } from "../vs01/vs01PaidProPostSignHandoff";
 
 function adjacentWizardSteps(
   current: number,
@@ -90,6 +92,7 @@ export type AgreementWizardShellProps = {
 /** Wraps intake + review with a VS01-style stepper; uses existing /api/agreements/* only. */
 export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
   const { startFreshWizard = false, openAgreementId = null } = props;
+  const { search } = useLaunchNav();
   const access = useAccess();
   const [workspaceMode, setWorkspaceMode] = useState<"landing" | "wizard">("landing");
   const [step, setStep] = useState(0);
@@ -115,6 +118,18 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
   const launchBootRef = useRef(false);
 
   agreementIdRef.current = agreementId;
+
+  const postVs01SignatureFirstLanding = useMemo(() => {
+    try {
+      const q = new URLSearchParams(search || (typeof window !== "undefined" ? window.location.search : ""));
+      if (q.get("vs01_saved") === "1") return true;
+    } catch {
+      /* ignore */
+    }
+    const aid = agreementId?.trim();
+    if (aid && readPaidProVs01PostSignHandoff(aid)) return true;
+    return false;
+  }, [search, agreementId, wizardBoot]);
 
   const stepCount = STEPS.length;
 
@@ -493,35 +508,72 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
           My agreements
         </button>
       </div>
-      <nav className="vs01-stepper" aria-label={`Agreement Workspace: ${stepCount} steps`}>
-        {STEPS.map(({ id, label }) => {
-          const active = id === step;
-          const blocked = !canOpenStep(id);
-          const stepNum = id + 1;
-          return (
-            <button
-              key={id}
-              type="button"
-              className={`vs01-stepper-step${active ? " vs01-stepper-step--active" : ""}`}
-              disabled={blocked}
-              aria-current={active ? "step" : undefined}
-              aria-label={
-                blocked
-                  ? id === 0
-                    ? `Step ${stepNum} of ${stepCount}: ${label} (use My agreements to start a new agreement)`
-                    : `Step ${stepNum} of ${stepCount}: ${label} (complete preparation first)`
-                  : `Step ${stepNum} of ${stepCount}: ${label}`
-              }
-              onClick={() => {
-                if (!blocked) guardedSetStep(id);
-              }}
-            >
-              <span className="vs01-stepper-num">{stepNum}</span>
-              <span className="vs01-stepper-label">{label}</span>
-            </button>
-          );
-        })}
-      </nav>
+      {postVs01SignatureFirstLanding && step > 0 && wizardDraftReady && wizardBoot === "ready" ? (
+        <details className="vs01-agreement-wizard-advanced mb-3 rounded-lg border border-slate-800/70 bg-slate-950/35 px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium text-slate-400">
+            Full workspace steps (details, versions, recipients)
+          </summary>
+          <nav className="vs01-stepper mt-3" aria-label={`Agreement Workspace: ${stepCount} steps`}>
+            {STEPS.map(({ id, label }) => {
+              const active = id === step;
+              const blocked = !canOpenStep(id);
+              const stepNum = id + 1;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`vs01-stepper-step${active ? " vs01-stepper-step--active" : ""}`}
+                  disabled={blocked}
+                  aria-current={active ? "step" : undefined}
+                  aria-label={
+                    blocked
+                      ? id === 0
+                        ? `Step ${stepNum} of ${stepCount}: ${label} (use My agreements to start a new agreement)`
+                        : `Step ${stepNum} of ${stepCount}: ${label} (complete preparation first)`
+                      : `Step ${stepNum} of ${stepCount}: ${label}`
+                  }
+                  onClick={() => {
+                    if (!blocked) guardedSetStep(id);
+                  }}
+                >
+                  <span className="vs01-stepper-num">{stepNum}</span>
+                  <span className="vs01-stepper-label">{label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </details>
+      ) : (
+        <nav className="vs01-stepper" aria-label={`Agreement Workspace: ${stepCount} steps`}>
+          {STEPS.map(({ id, label }) => {
+            const active = id === step;
+            const blocked = !canOpenStep(id);
+            const stepNum = id + 1;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`vs01-stepper-step${active ? " vs01-stepper-step--active" : ""}`}
+                disabled={blocked}
+                aria-current={active ? "step" : undefined}
+                aria-label={
+                  blocked
+                    ? id === 0
+                      ? `Step ${stepNum} of ${stepCount}: ${label} (use My agreements to start a new agreement)`
+                      : `Step ${stepNum} of ${stepCount}: ${label} (complete preparation first)`
+                    : `Step ${stepNum} of ${stepCount}: ${label}`
+                }
+                onClick={() => {
+                  if (!blocked) guardedSetStep(id);
+                }}
+              >
+                <span className="vs01-stepper-num">{stepNum}</span>
+                <span className="vs01-stepper-label">{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
 
       <div
         className="vs01-card vs01-card--envelope vs01-agreement-wizard-card relative"
@@ -540,9 +592,22 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
           </div>
         ) : null}
 
-        <p className="vs01-agreement-ws-eyebrow">Agreement workspace</p>
-        <h2 className="vs01-card-title vs01-agreement-ws-step-title">{STEP_INTRO[step]?.title ?? ""}</h2>
-        <p className="vs01-card-help vs01-agreement-ws-step-sub">{STEP_INTRO[step]?.subtitle ?? ""}</p>
+        {postVs01SignatureFirstLanding && step > 0 && wizardDraftReady && wizardBoot === "ready" ? (
+          <>
+            <p className="vs01-agreement-ws-eyebrow">Agreement saved</p>
+            <h2 className="vs01-card-title vs01-agreement-ws-step-title">You&apos;re in your workspace</h2>
+            <p className="vs01-card-help vs01-agreement-ws-step-sub">
+              Use the banner above for signing links and proof. Expand &quot;Full workspace steps&quot; when you need
+              versions or recipient details.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="vs01-agreement-ws-eyebrow">Agreement workspace</p>
+            <h2 className="vs01-card-title vs01-agreement-ws-step-title">{STEP_INTRO[step]?.title ?? ""}</h2>
+            <p className="vs01-card-help vs01-agreement-ws-step-sub">{STEP_INTRO[step]?.subtitle ?? ""}</p>
+          </>
+        )}
 
         {step > 0 && agreementId?.trim() ? (
           <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} />
@@ -598,6 +663,7 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
                 section={reviewSection}
                 embeddedInCard
                 workspaceEntryMode={workspaceEntryMode}
+                postVs01SignatureFirstLanding={postVs01SignatureFirstLanding}
                 onBackToNew={goToLanding}
                 initialDraftSnapshot={
                   reviewPrimedDraft && reviewPrimedDraft.id === agreementId ? reviewPrimedDraft : null

@@ -7,7 +7,7 @@ import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 
 export const VS01_RECIPIENT_MANIFEST_QUERY = "vs01_rmanifest";
 
-const RECIPIENT_TYPES = new Set<Vs01RecipientFieldType>(["signature", "initials", "printed_name", "date"]);
+const RECIPIENT_TYPES = new Set<Vs01RecipientFieldType>(["signature", "initials", "printed_name", "text", "date"]);
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

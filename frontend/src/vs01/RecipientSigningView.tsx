@@ -95,6 +95,11 @@ function SenderReferenceFieldContent({
       <span className="vs01-sign-sender-ref-initials">{textVal.trim().slice(0, 8) || "—"}</span>
     );
   }
+  if (field.type === "printed_name") {
+    return (
+      <span className="vs01-sign-sender-ref-text">{textVal.trim() ? textVal : "Printed name"}</span>
+    );
+  }
   if (field.type === "text") {
     return (
       <span className="vs01-sign-sender-ref-text">{textVal.trim() ? textVal : "Text"}</span>
@@ -116,6 +121,8 @@ function fieldIsComplete(f: Vs01RecipientPlacedField): boolean {
       return v.length > 0;
     case "printed_name":
       return true;
+    case "text":
+      return v.length > 0;
     case "date":
       return v.length > 0;
     default:
@@ -535,6 +542,18 @@ export function RecipientSigningView({
                                               ) : null}
                                               {field.type === "printed_name" ? (
                                                 <RecipientPrintedNameFieldBody displayName={forName} />
+                                              ) : null}
+                                              {field.type === "text" ? (
+                                                <input
+                                                  type="text"
+                                                  className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                  value={textVal}
+                                                  placeholder="Text (title, email, custom blank…)"
+                                                  autoComplete="off"
+                                                  aria-label="Text field"
+                                                  onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                  onPointerDown={(ev) => ev.stopPropagation()}
+                                                />
                                               ) : null}
                                               {field.type === "date" ? (
                                                 <input

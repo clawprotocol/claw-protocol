@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ProofStatus, vs01ReceiptToProofStatusData } from "../components/proof/ProofStatus";
 import { LawdogRecordedMark } from "../components/ui/LawdogRecordedMark";
 import { useLaunchNav } from "../launch/LaunchNavContext";
@@ -30,6 +30,7 @@ function truncateMiddle(s: string, max = 22): string {
 export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
   const nav = useLaunchNav();
   const panelId = useId();
+  const proofDetailsRef = useRef<HTMLDetailsElement>(null);
   const [handoff, setHandoff] = useState<PaidProVs01PostSignHandoffV1 | null>(null);
   const [receipt, setReceipt] = useState<unknown>(null);
   const [receiptLoadError, setReceiptLoadError] = useState<string | null>(null);
@@ -93,16 +94,35 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
     setHandoff(null);
   }, []);
 
+  const openProofDetails = useCallback(() => {
+    const el = proofDetailsRef.current;
+    if (!el) return;
+    el.open = true;
+    window.requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, []);
+
   if (!visible || !handoff) return null;
 
   const title = handoff.agreementTitle.trim() || "Agreement";
-  const primary = handoff.signers[0];
-  const awaitingLine =
-    handoff.signers.length === 0
-      ? "Awaiting recipient signature"
-      : handoff.signers.length === 1
-        ? `Awaiting ${primary.displayName}`
-        : `Awaiting ${handoff.signers.length} signers`;
+  const signers = handoff.signers;
+  const primary = signers[0];
+  const firstSigningUrl = primary?.signingUrl?.trim() ?? "";
+
+  const awaitingStatus =
+    signers.length === 0
+      ? "Awaiting signature"
+      : signers.length === 1
+        ? `Awaiting signature · ${primary.displayName}`
+        : `Awaiting signature · ${signers.length} signers`;
+
+  const completionLine =
+    signers.length === 0
+      ? "Your signature is complete. Add recipients from the workspace when you are ready to collect remaining signatures."
+      : signers.length === 1
+        ? `Your signature is complete. ${primary.displayName} still needs to sign.`
+        : `Your signature is complete. ${signers.length} people still need to sign.`;
 
   return (
     <section
@@ -111,47 +131,79 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
     >
       <div className="flex flex-wrap items-start gap-3">
         <LawdogRecordedMark size="sm" />
-        <div className="min-w-0 flex-1 space-y-1">
-          <h3 id={`${panelId}-title`} className="text-sm font-semibold text-emerald-100">
+        <div className="min-w-0 flex-1 space-y-2">
+          <h3 id={`${panelId}-title`} className="text-base font-semibold tracking-tight text-emerald-100">
             Saved in LawDog
           </h3>
-          <p className="text-sm text-slate-200/95">{title}</p>
-          <p className="text-xs text-slate-400">{awaitingLine}</p>
-          <p className="text-xs text-slate-500">Your signature is on file. Share the signing link when you&apos;re ready.</p>
+          <p className="text-sm font-medium text-slate-100">{completionLine}</p>
+          <p className="text-xs font-medium text-slate-400">{awaitingStatus}</p>
+          <p className="text-xs text-slate-500">{title}</p>
+          {firstSigningUrl ? (
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--primary vs01-btn--auto min-h-[2.5rem] px-4 text-sm"
+                onClick={() => void copyText("hero-signing", firstSigningUrl)}
+              >
+                {copiedKey === "hero-signing" ? "Copied" : "Copy signing link"}
+              </button>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--auto min-h-[2.5rem] px-4 text-sm"
+                onClick={() => window.open(firstSigningUrl, "_blank", "noopener,noreferrer")}
+              >
+                Open signing link
+              </button>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--auto min-h-[2.5rem] px-4 text-sm text-slate-200"
+                onClick={openProofDetails}
+              >
+                View proof
+              </button>
+            </div>
+          ) : null}
         </div>
         <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0 text-xs" onClick={dismiss}>
           Dismiss
         </button>
       </div>
 
-      {handoff.signers.length > 0 ? (
-        <ul className="mt-4 space-y-3 border-t border-slate-800/60 pt-4">
-          {handoff.signers.map((s) => (
-            <li key={s.counterpartyId} className="rounded-lg border border-slate-800/80 bg-slate-950/40 p-3">
-              <div className="text-sm font-medium text-slate-100">{s.displayName}</div>
-              {s.email ? <div className="text-xs text-slate-500">{s.email}</div> : null}
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="vs01-btn vs01-btn--primary vs01-btn--auto text-xs"
-                  onClick={() => void copyText(`cp-${s.counterpartyId}`, s.signingUrl)}
-                >
-                  {copiedKey === `cp-${s.counterpartyId}` ? "Copied" : "Copy signing link"}
-                </button>
-                <button
-                  type="button"
-                  className="vs01-btn vs01-btn--secondary vs01-btn--auto text-xs"
-                  onClick={() => window.open(s.signingUrl, "_blank", "noopener,noreferrer")}
-                >
-                  Open signing link
-                </button>
-              </div>
-              <p className="mt-2 font-mono text-[10px] text-slate-600" title={s.signingUrl}>
-                {truncateMiddle(s.signingUrl, 56)}
-              </p>
-            </li>
-          ))}
-        </ul>
+      {signers.length > 1 ? (
+        <details className="mt-4 border-t border-slate-800/60 pt-4">
+          <summary className="cursor-pointer text-xs font-medium text-slate-400">Other signing links</summary>
+          <ul className="mt-3 space-y-3">
+            {signers.map((s) => (
+              <li key={s.counterpartyId} className="rounded-lg border border-slate-800/80 bg-slate-950/40 p-3">
+                <div className="text-sm font-medium text-slate-100">{s.displayName}</div>
+                {s.email ? <div className="text-xs text-slate-500">{s.email}</div> : null}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--secondary vs01-btn--auto text-xs"
+                    onClick={() => void copyText(`cp-${s.counterpartyId}`, s.signingUrl)}
+                  >
+                    {copiedKey === `cp-${s.counterpartyId}` ? "Copied" : "Copy link"}
+                  </button>
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--secondary vs01-btn--auto text-xs"
+                    onClick={() => window.open(s.signingUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    Open
+                  </button>
+                </div>
+                <p className="mt-2 font-mono text-[10px] text-slate-600" title={s.signingUrl}>
+                  {truncateMiddle(s.signingUrl, 56)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : signers.length === 1 ? (
+        <p className="mt-3 border-t border-slate-800/60 pt-3 font-mono text-[10px] text-slate-600" title={firstSigningUrl}>
+          {truncateMiddle(firstSigningUrl, 72)}
+        </p>
       ) : null}
 
       <div className="mt-4 border-t border-slate-800/60 pt-4">
@@ -167,8 +219,8 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
         {receiptLoadError ? (
           <p className="mt-2 text-xs text-amber-200/90">Could not refresh receipt payload: {receiptLoadError}</p>
         ) : null}
-        <details className="mt-3 rounded-lg border border-slate-800/80 bg-slate-950/30 p-3">
-          <summary className="cursor-pointer text-xs font-medium text-slate-300">View proof details</summary>
+        <details ref={proofDetailsRef} className="mt-3 rounded-lg border border-slate-800/80 bg-slate-950/30 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-slate-300">Proof & receipt details</summary>
           <dl className="mt-2 space-y-1 text-xs text-slate-400">
             <div className="flex gap-2">
               <dt className="shrink-0 text-slate-500">Receipt ID</dt>

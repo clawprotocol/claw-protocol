@@ -138,6 +138,11 @@ function SenderReferenceFieldContent({
       <span className="vs01-sign-sender-ref-initials">{textVal.trim().slice(0, 8) || "—"}</span>
     );
   }
+  if (field.type === "printed_name") {
+    return (
+      <span className="vs01-sign-sender-ref-text">{textVal.trim() ? textVal : "Printed name"}</span>
+    );
+  }
   if (field.type === "text") {
     return (
       <span className="vs01-sign-sender-ref-text">{textVal.trim() ? textVal : "Text"}</span>
@@ -927,6 +932,29 @@ export function StepCompleteAndSend({
                                                 ) : null}
                                                 {field.type === "printed_name" ? (
                                                   <RecipientPrintedNameFieldBody displayName={forName} />
+                                                ) : null}
+                                                {field.type === "text" ? (
+                                                  isSel && !busy ? (
+                                                    <input
+                                                      type="text"
+                                                      className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                      value={textVal}
+                                                      placeholder="Text (title, email, custom blank…)"
+                                                      autoComplete="off"
+                                                      aria-label="Text field for signer"
+                                                      onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                      onPointerDown={(ev) => ev.stopPropagation()}
+                                                      onClick={(ev) => ev.stopPropagation()}
+                                                    />
+                                                  ) : (
+                                                    <span
+                                                      className={`vs01-sign-placement-text${
+                                                        !textVal.trim() ? " vs01-sign-placement-ph" : ""
+                                                      }${textVal.trim() ? " vs01-recipient-field-value-filled" : ""}`}
+                                                    >
+                                                      {textVal.trim() || "Signer adds text"}
+                                                    </span>
+                                                  )
                                                 ) : null}
                                                 {field.type === "date" ? (
                                                   isSel && !busy ? (

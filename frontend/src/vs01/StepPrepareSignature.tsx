@@ -57,11 +57,6 @@ export type StepPrepareSignatureProps = {
 
 const STEP_ID = "prepare-sign" as const;
 
-/** Toolbar / “Place …” copy (text tool uses longer label). */
-function signingToolbarLabelForType(t: SigningFieldType): string {
-  return t === "text" ? "Printed name / Text" : labelForFieldType(t);
-}
-
 /** Corner label on placed fields (Step 3, first person). */
 function signingPlacementCornerLabel(t: SigningFieldType): string {
   switch (t) {
@@ -69,8 +64,10 @@ function signingPlacementCornerLabel(t: SigningFieldType): string {
       return "Your signature";
     case "initials":
       return "Your initials";
+    case "printed_name":
+      return "Printed name";
     case "text":
-      return "Type here";
+      return "Text";
     case "date":
       return "Date";
     default:
@@ -436,7 +433,7 @@ export function StepPrepareSignature({
       if ((ev.target as HTMLElement).closest(".vs01-sign-placement-resize-handle")) return;
       if ((ev.target as HTMLElement).closest(".vs01-sign-field-inline-input")) return;
       if (
-        (field.type === "text" || field.type === "date") &&
+        (field.type === "text" || field.type === "printed_name" || field.type === "date") &&
         selectedFieldId !== field.id
       ) {
         setSelectedFieldId(field.id);
@@ -819,7 +816,7 @@ export function StepPrepareSignature({
         <div className="vs01-sign-doc-col">
           {placementArmed && placementSurface && !previewLoading ? (
             <div className="vs01-sign-armed-banner" role="status">
-              Click once on the document to place your {signingToolbarLabelForType(armedTool)}.
+              Click once on the document to place your {labelForFieldType(armedTool)}.
             </div>
           ) : null}
 
@@ -994,22 +991,41 @@ export function StepPrepareSignature({
                                               {textVal.trim().slice(0, 8) || "Your initials"}
                                             </span>
                                           ) : null}
-                                          {field.type === "text" ? (
+                                          {field.type === "printed_name" ? (
                                             isSel && !busy ? (
                                               <input
                                                 type="text"
                                                 className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
                                                 value={textVal}
-                                                placeholder="Type here"
-                                                autoComplete="off"
-                                                aria-label="Printed name or text on document"
+                                                placeholder="Printed name"
+                                                autoComplete="name"
+                                                aria-label="Printed name on document"
                                                 onChange={(ev) => updateField(field.id, { value: ev.target.value })}
                                                 onPointerDown={(ev) => ev.stopPropagation()}
                                                 onClick={(ev) => ev.stopPropagation()}
                                               />
                                             ) : (
                                               <span className="vs01-sign-placement-text">
-                                                {textVal.trim() ? textVal : "Type here"}
+                                                {textVal.trim() ? textVal : "Printed name"}
+                                              </span>
+                                            )
+                                          ) : null}
+                                          {field.type === "text" ? (
+                                            isSel && !busy ? (
+                                              <input
+                                                type="text"
+                                                className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                value={textVal}
+                                                placeholder="Title, email, custom blank…"
+                                                autoComplete="off"
+                                                aria-label="Text on document"
+                                                onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                onPointerDown={(ev) => ev.stopPropagation()}
+                                                onClick={(ev) => ev.stopPropagation()}
+                                              />
+                                            ) : (
+                                              <span className="vs01-sign-placement-text">
+                                                {textVal.trim() ? textVal : "Add text"}
                                               </span>
                                             )
                                           ) : null}
@@ -1124,7 +1140,7 @@ export function StepPrepareSignature({
                     setArmedTool(null);
                   }}
                 >
-                  {signingToolbarLabelForType(type)}
+                  {labelForFieldType(type)}
                 </button>
               ))}
             </div>
@@ -1138,11 +1154,11 @@ export function StepPrepareSignature({
                 disabled={busy || !placementSurface || previewLoading}
                 onClick={() => setArmedTool(activeTool)}
               >
-                Place {signingToolbarLabelForType(activeTool)} on document
+                Place {labelForFieldType(activeTool)} on document
               </button>
               {placementArmed ? (
                 <p className="vs01-sign-placement-mode-hint">
-                  Click once on the document to place your {signingToolbarLabelForType(armedTool)}.
+                  Click once on the document to place your {labelForFieldType(armedTool)}.
                 </p>
               ) : (
                 <p className="vs01-sign-placement-mode-hint vs01-sign-placement-mode-hint--muted">
