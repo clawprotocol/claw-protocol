@@ -152,6 +152,8 @@ def agreement_rendered_html_to_pdf_bytes(
         user_css = (
             "body{font-family:Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.35;"
             "margin:0;padding:0;}"
+            "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
+            "orphans:3;widows:3;margin-top:28pt;padding-top:10pt;}"
         )
 
         mediabox = fitz.paper_rect("letter")

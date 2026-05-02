@@ -1949,6 +1949,104 @@ def test_render_html_watermark_emits_label_once_even_when_body_repeats_it():
     assert out.count(WATERMARK_LABEL) == 1
 
 
+def test_render_html_watermark_uses_flow_footer_not_absolute_overlay():
+    """VS01 seed PDF: watermark must not use a full-page absolute overlay (Story composites it over signatures)."""
+    from backend.routers.agreements_v2_api import AgreementDraft, AgreementParty, _render_html
+    from backend.usage_economics.constants import WATERMARK_LABEL
+
+    long_body = "z" * 2500 + "\n\n" + WATERMARK_LABEL + "\nBody line.\n"
+    d = AgreementDraft(
+        id="wm-flow-footer",
+        created_at="c",
+        updated_at="u",
+        title="Title",
+        jurisdiction="DE",
+        parties=[
+            AgreementParty(name="Alice", role="party_a"),
+            AgreementParty(name="Bob", role="party_b"),
+        ],
+        purpose=long_body,
+        payment_terms="net 30",
+        duration="1 year",
+        due_date=None,
+        effective_date="2026-01-01",
+        versions=[],
+        audit_log=[],
+    )
+    out = _render_html(d, watermark=True)
+    assert "position:absolute;inset:0" not in out
+    assert "ldg-draft-footer" in out
+    assert out.count(WATERMARK_LABEL) == 1
+
+
+def test_render_html_watermark_not_inside_pre_body_near_signature_fixture():
+    """LawDog label must not remain inside <pre> when economics watermark is on (single footer copy)."""
+    from backend.routers.agreements_v2_api import AgreementDraft, AgreementParty, _render_html
+    from backend.usage_economics.constants import WATERMARK_LABEL
+
+    tail = (
+        "\n\nDEVELOPER: _________________________\n"
+        "Title: _____________________________\n"
+        "Date: ______________________________\n"
+    )
+    long_body = "z" * 2500 + "\n\n" + WATERMARK_LABEL + "\n\n" + "Section X.\n" + tail
+    d = AgreementDraft(
+        id="wm-pre-sig",
+        created_at="c",
+        updated_at="u",
+        title="Title",
+        jurisdiction="DE",
+        parties=[
+            AgreementParty(name="Alice", role="party_a"),
+            AgreementParty(name="Bob", role="party_b"),
+        ],
+        purpose=long_body,
+        payment_terms="net 30",
+        duration="1 year",
+        due_date=None,
+        effective_date="2026-01-01",
+        versions=[],
+        audit_log=[],
+    )
+    out = _render_html(d, watermark=True)
+    assert out.count(WATERMARK_LABEL) == 1
+    assert "DEVELOPER:" in out
+    pre_i = out.find("<pre")
+    pre_j = out.find("</pre>")
+    assert pre_i != -1 and pre_j != -1 and pre_j > pre_i
+    assert WATERMARK_LABEL not in out[pre_i:pre_j]
+    assert "ldg-draft-footer" in out
+
+
+def test_render_html_short_template_watermark_flow_footer():
+    from backend.routers.agreements_v2_api import AgreementDraft, AgreementParty, _render_html
+    from backend.usage_economics.constants import WATERMARK_LABEL
+
+    d = AgreementDraft(
+        id="wm-short",
+        created_at="c",
+        updated_at="u",
+        title="Short T",
+        jurisdiction="DE",
+        parties=[
+            AgreementParty(name="Alice", role="party_a"),
+            AgreementParty(name="Bob", role="party_b"),
+        ],
+        purpose="Short purpose for template path.",
+        payment_terms="net 30",
+        duration="1 year",
+        due_date=None,
+        effective_date="2026-01-01",
+        versions=[],
+        audit_log=[],
+    )
+    out = _render_html(d, watermark=True)
+    assert "position:absolute;inset:0" not in out
+    assert "ldg-draft-footer" in out
+    assert WATERMARK_LABEL in out
+    assert out.count(WATERMARK_LABEL) == 1
+
+
 def test_vs01_signing_seed_endpoint_ok_with_s3_backend_uses_legacy_finalize(monkeypatch, tmp_path):
     """S3/Object stub must not 503 VS01 seed — finalize_document falls back to legacy files."""
     from backend.storage.artifact_repository import reset_artifact_repository_singleton

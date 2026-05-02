@@ -2727,6 +2727,34 @@ def _collapse_duplicate_watermark_labels(text: str, label: str) -> str:
     return pattern.sub(label, text)
 
 
+def _strip_watermark_label_from_body(text: str, label: str) -> str:
+    """
+    Remove LawDog draft footer text from the operative body before HTML/PDF render.
+
+    When economics watermark is on, the label is re-emitted once in a dedicated document-flow
+    footer so PyMuPDF Story does not paint an absolute overlay across signature blocks.
+    """
+    if not text or not label:
+        return text
+    t = text.replace(label, "")
+    t = re.sub(r"[ \t]+\n", "\n", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
+def _html_watermark_footer(wm_safe: str) -> str:
+    """
+    Non-absolute footer block: flows after the agreement body so HTML→PDF engines (e.g. Story)
+    cannot composite it over mid-page signature / DEVELOPER content.
+    """
+    return (
+        "<footer class='ldg-draft-footer' "
+        "style='margin-top:36pt;padding-top:12pt;border-top:1px solid #cbd5e1;font-size:10pt;color:#64748b;"
+        "text-align:center;line-height:1.35;break-inside:avoid;page-break-inside:avoid'>"
+        f"{wm_safe}</footer>"
+    )
+
+
 def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
     """When the create-flow document editor persists the full preview into `purpose`, render it as the body (not nested in the short-form template)."""
     t = (purpose or "").strip()
@@ -2748,9 +2776,13 @@ def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
 def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     purpose_raw = (draft.purpose or "").strip()
     if _purpose_looks_like_full_client_agreement_text(purpose_raw):
-        purpose_for_body = (
-            _collapse_duplicate_watermark_labels(purpose_raw, WATERMARK_LABEL) if watermark else purpose_raw
-        )
+        if watermark:
+            purpose_for_body = _strip_watermark_label_from_body(
+                _collapse_duplicate_watermark_labels(purpose_raw, WATERMARK_LABEL),
+                WATERMARK_LABEL,
+            )
+        else:
+            purpose_for_body = purpose_raw
         body = html.escape(purpose_for_body)
         wm = html.escape(WATERMARK_LABEL)
         article = (
@@ -2767,13 +2799,7 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
         )
         if not watermark:
             return article
-        overlay = (
-            "<div style='position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2'>"
-            f"<p style='position:absolute;left:50%;bottom:10px;transform:translateX(-50%);margin:0;"
-            f"padding-top:10px;border-top:1px solid #cbd5e1;font-size:11px;color:#64748b;"
-            f"text-align:center;max-width:calc(100% - 24px)'>{wm}</p></div>"
-        )
-        return f"<div style='position:relative'>{article}{overlay}</div>"
+        return f"{article}{_html_watermark_footer(wm)}"
 
     title = html.escape((draft.title or "").strip() or "Agreement")
     jurisdiction_raw = (draft.jurisdiction or "").strip() or "TBD"
@@ -2830,13 +2856,7 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     )
     if not watermark:
         return article
-    overlay = (
-        "<div style='position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2'>"
-        f"<p style='position:absolute;left:50%;bottom:10px;transform:translateX(-50%);margin:0;"
-        f"padding-top:10px;border-top:1px solid #cbd5e1;font-size:11px;color:#64748b;"
-        f"text-align:center;max-width:calc(100% - 24px)'>{wm}</p></div>"
-    )
-    return f"<div style='position:relative'>{article}{overlay}</div>"
+    return f"{article}{_html_watermark_footer(wm)}"
 
 
 def _norm_revision_comparison_text(s: str) -> str:
