@@ -19,8 +19,6 @@ import {
   RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
 } from "../compliance/disclosureCopy";
 import { completeSignSession, createSignSession, fetchDocumentContent } from "./vs01Api";
-import { firstPlausibleEmailInSignerRef } from "./detailsStepValidation";
-
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 import type { Vs01Counterparty, Vs01LoadingState, Vs01SenderSignatureRef } from "./types";
 import {
@@ -31,6 +29,7 @@ import {
   fieldsToManifest,
   labelForFieldType,
   resizeBoundsForPlacementField,
+  resolveSenderEmailForEmailFieldPlacement,
   type PlacedSigningField,
   type SigningFieldType,
 } from "./signingFields";
@@ -138,7 +137,7 @@ export function StepPrepareSignature({
   onContinue,
 }: StepPrepareSignatureProps) {
   const signerEmailForPlacement =
-    (creatorEmail?.trim() || firstPlausibleEmailInSignerRef(defaultSignerRef)) ?? undefined;
+    resolveSenderEmailForEmailFieldPlacement(creatorEmail, defaultSignerRef) || undefined;
 
   const busySession = loading === "session";
   const busyComplete = loading === "complete";

@@ -14,6 +14,8 @@ import {
   rebuildRecipientAutoInitialsEveryPage,
   RECIPIENT_FIELD_TOOLS,
   resizeBoundsForPlacementField,
+  resolveRecipientEmailForEmailFieldPlacement,
+  resolveSenderEmailForEmailFieldPlacement,
   signingFieldResizeBoundsNorm,
   type PlacedSigningField,
 } from "./signingFields";
@@ -77,8 +79,8 @@ describe("VS01 sender placement: Text field", () => {
   });
 
   it("uses compact line-like default heights for Text and Email", () => {
-    expect(defaultSizeForType("text").height).toBeLessThanOrEqual(0.042);
-    expect(defaultSizeForType("email").height).toBeLessThanOrEqual(0.045);
+    expect(defaultSizeForType("text").height).toBeLessThanOrEqual(0.036);
+    expect(defaultSizeForType("email").height).toBeLessThanOrEqual(0.036);
     expect(defaultSizeForType("email").width).toBeGreaterThanOrEqual(defaultSizeForType("text").width);
   });
 });
@@ -108,10 +110,12 @@ describe("VS01 manual field sizing map and resize bounds", () => {
   });
 
   it("defaults line-like text, email, date, and printed_name (not oversized blocks)", () => {
-    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.text.height).toBeLessThanOrEqual(0.04);
-    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.email.height).toBeLessThanOrEqual(0.042);
-    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.date.height).toBeLessThanOrEqual(0.042);
-    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.printed_name.height).toBeLessThanOrEqual(0.045);
+    const { text, email, date, printed_name } = VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM;
+    expect(text.height).toBeLessThanOrEqual(0.034);
+    expect(email.height).toBe(text.height);
+    expect(date.height).toBe(text.height);
+    expect(printed_name.height).toBe(text.height);
+    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.signature.height).toBeLessThanOrEqual(0.056);
   });
 
   it("orders default widths: email > text > printed_name and email > date", () => {
@@ -168,7 +172,28 @@ describe("VS01 sender placement: Email tool", () => {
     expect(defaultRecipientFieldValue("email", "R", "r@ex.com")).toBe("r@ex.com");
     expect(defaultRecipientFieldValue("email", "R", undefined)).toBe("");
     expect(defaultRecipientFieldValue("email", "R", "   ")).toBe("");
+    expect(defaultRecipientFieldValue("email", "R", "not-an-email")).toBe("");
     expect(defaultRecipientFieldValue("text", "R", "r@ex.com")).toBe("");
+  });
+
+  it("resolveSenderEmail prefers creator over signer-ref segment", () => {
+    expect(
+      resolveSenderEmailForEmailFieldPlacement("owner@firm.com", "Other · other@co.com")
+    ).toBe("owner@firm.com");
+    expect(resolveSenderEmailForEmailFieldPlacement("", "Signer · fallback@co.com")).toBe("fallback@co.com");
+    expect(resolveSenderEmailForEmailFieldPlacement(undefined, "No email here")).toBe("");
+  });
+
+  it("resolveRecipientEmail only accepts plausible counterparty emails", () => {
+    expect(resolveRecipientEmailForEmailFieldPlacement("  signer@deal.com  ")).toBe("signer@deal.com");
+    expect(resolveRecipientEmailForEmailFieldPlacement("bogus")).toBe("");
+    expect(resolveRecipientEmailForEmailFieldPlacement(undefined)).toBe("");
+  });
+
+  it("preserves same email when creator and ref agree", () => {
+    expect(
+      resolveSenderEmailForEmailFieldPlacement("same@x.org", "Name · same@x.org")
+    ).toBe("same@x.org");
   });
 
   it("nudges sender auto-initials away from placed text boxes", () => {

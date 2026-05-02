@@ -1,6 +1,7 @@
 /**
  * VS01 signing step — placed field model (client). Maps to API field_manifest on submit.
  */
+import { firstPlausibleEmailInSignerRef, isPlausibleEmail } from "./detailsStepValidation";
 import type { Vs01Counterparty, Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { FieldManifestEntry } from "./vs01Api";
 
@@ -50,16 +51,39 @@ export const RECIPIENT_FIELD_TOOLS: { type: Vs01RecipientFieldType; label: strin
 ];
 
 /**
+ * Sender Step 3 Email placement: prefer creator email, then a plausible address parsed from the signer ref.
+ * Never fabricates an address; rejects non-plausible strings.
+ */
+export function resolveSenderEmailForEmailFieldPlacement(
+  creatorEmail: string | undefined | null,
+  defaultSignerRef: string | undefined | null
+): string {
+  const fromCreator = (creatorEmail ?? "").trim();
+  if (isPlausibleEmail(fromCreator)) return fromCreator;
+  const fromRef = (firstPlausibleEmailInSignerRef(defaultSignerRef ?? "") ?? "").trim();
+  return isPlausibleEmail(fromRef) ? fromRef : "";
+}
+
+/**
+ * Recipient Step 4 Email placement: only the selected counterparty’s email when it is plausible.
+ * Returns empty string when unknown (callers may pass `undefined` into {@link defaultRecipientFieldValue}).
+ */
+export function resolveRecipientEmailForEmailFieldPlacement(counterpartyEmail: string | undefined | null): string {
+  const raw = (counterpartyEmail ?? "").trim();
+  return isPlausibleEmail(raw) ? raw : "";
+}
+
+/**
  * Single source of truth for **manual** signing-field default footprint (normalized 0..1 on the page).
  * Compact, line-aligned defaults for e-sign UX; gray auto-initials use {@link autoInitialsPlacementDims} only.
  */
 export const VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM: Record<SigningFieldType, { width: number; height: number }> = {
-  signature: { width: 0.22, height: 0.056 },
-  initials: { width: 0.078, height: 0.036 },
-  printed_name: { width: 0.22, height: 0.042 },
-  text: { width: 0.32, height: 0.036 },
-  email: { width: 0.37, height: 0.04 },
-  date: { width: 0.135, height: 0.04 },
+  signature: { width: 0.21, height: 0.052 },
+  initials: { width: 0.074, height: 0.034 },
+  printed_name: { width: 0.21, height: 0.032 },
+  text: { width: 0.3, height: 0.032 },
+  email: { width: 0.34, height: 0.032 },
+  date: { width: 0.12, height: 0.032 },
 };
 
 /** Hard page caps for resize (geometry stays on-page). */
@@ -73,12 +97,12 @@ export type Vs01FieldResizeBoundsNorm = {
 };
 
 const VS01_MANUAL_FIELD_RESIZE_BOUNDS_NORM: Record<SigningFieldType, Vs01FieldResizeBoundsNorm> = {
-  signature: { minW: 0.14, minH: 0.044, maxW: 0.92, maxH: 0.22 },
-  initials: { minW: 0.05, minH: 0.028, maxW: 0.2, maxH: 0.11 },
-  printed_name: { minW: 0.15, minH: 0.034, maxW: 0.55, maxH: 0.09 },
-  text: { minW: 0.15, minH: 0.03, maxW: 0.92, maxH: 0.45 },
-  email: { minW: 0.2, minH: 0.032, maxW: 0.92, maxH: 0.45 },
-  date: { minW: 0.1, minH: 0.032, maxW: 0.34, maxH: 0.12 },
+  signature: { minW: 0.14, minH: 0.042, maxW: 0.92, maxH: 0.22 },
+  initials: { minW: 0.048, minH: 0.026, maxW: 0.2, maxH: 0.11 },
+  printed_name: { minW: 0.14, minH: 0.028, maxW: 0.55, maxH: 0.09 },
+  text: { minW: 0.14, minH: 0.026, maxW: 0.92, maxH: 0.45 },
+  email: { minW: 0.18, minH: 0.026, maxW: 0.92, maxH: 0.45 },
+  date: { minW: 0.09, minH: 0.026, maxW: 0.34, maxH: 0.12 },
 };
 
 /** Sender gray auto-initials only — tight bounds so manual rules do not stretch autos. */
@@ -327,8 +351,10 @@ export function defaultValueForType(t: SigningFieldType, ctx: SigningPlacementVa
       return ctx.typedName.trim();
     case "text":
       return "";
-    case "email":
-      return (ctx.signerEmail ?? "").trim();
+    case "email": {
+      const raw = (ctx.signerEmail ?? "").trim();
+      return isPlausibleEmail(raw) ? raw : "";
+    }
     case "date": {
       const d = new Date();
       return d.toISOString().slice(0, 10);
@@ -352,8 +378,10 @@ export function defaultRecipientFieldValue(
       return recipientDisplayName.trim();
     case "text":
       return "";
-    case "email":
-      return (recipientEmail ?? "").trim();
+    case "email": {
+      const raw = (recipientEmail ?? "").trim();
+      return isPlausibleEmail(raw) ? raw : "";
+    }
     case "date": {
       const d = new Date();
       return d.toISOString().slice(0, 10);

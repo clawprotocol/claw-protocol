@@ -35,6 +35,7 @@ import {
   rebuildRecipientAutoInitialsEveryPage,
   repositionAllRecipientAutoInitialsNonOverlapping,
   resizeBoundsForPlacementField,
+  resolveRecipientEmailForEmailFieldPlacement,
   type PlacedSigningField,
 } from "./signingFields";
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
@@ -522,7 +523,7 @@ export function StepCompleteAndSend({
         py,
         selectedCounterpartyId,
         counterpartyName(cpById, selectedCounterpartyId),
-        cpRow?.email?.trim() || undefined
+        resolveRecipientEmailForEmailFieldPlacement(cpRow?.email) || undefined
       );
       onRecipientFieldsChange((prev) => [...prev, nf]);
       setSelectedFieldId(nf.id);

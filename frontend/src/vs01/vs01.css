@@ -2778,8 +2778,8 @@ button.vs01-upload-btn:disabled {
 .vs01-recipient-assign-step .vs01-sign-placement-box--printed_name {
   justify-content: flex-start;
   align-items: stretch;
-  padding: 0.26rem 0.34rem 0.34rem;
-  gap: 0.12rem;
+  padding: 0.18rem 0.26rem 0.24rem;
+  gap: 0.08rem;
   cursor: default;
 }
 
@@ -2844,16 +2844,16 @@ button.vs01-upload-btn:disabled {
 .vs01-recipient-field-placeholder-text {
   display: block;
   max-width: 100%;
-  padding: 0.08rem 0.2rem;
+  padding: 0.06rem 0.14rem;
   text-align: center;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: max(0.46rem, 8cqi);
-  font-weight: 650;
+  font-size: max(0.4rem, 7.5cqi);
+  font-weight: 600;
   font-style: italic;
-  line-height: 1.25;
-  letter-spacing: 0.03em;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
   color: color-mix(in srgb, var(--vs01-color-text-secondary) 55%, #1a1a1a);
-  opacity: 0.92;
+  opacity: 0.88;
 }
 
 .vs01-recipient-field-body--fill .vs01-sign-placement-script {
@@ -2870,12 +2870,12 @@ button.vs01-upload-btn:disabled {
   min-width: 0;
   width: 100%;
   align-self: center;
-  padding: 0.16rem 0.32rem;
+  padding: 0.1rem 0.22rem;
   text-align: center;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-weight: 650;
-  font-size: max(0.52rem, 10.5cqi);
-  line-height: 1.32;
+  font-size: max(0.44rem, 9cqi);
+  line-height: 1.28;
   letter-spacing: 0.02em;
   color: var(--vs01-color-text-primary);
   background: color-mix(in srgb, var(--vs01-color-bg-card) 88%, #e8e2d8);
@@ -3515,19 +3515,19 @@ button.vs01-upload-btn:disabled {
   height: clamp(15px, 3.6cqi, 22px);
   margin: 0;
   padding: 0;
-  border: 2px solid var(--vs01-color-accent);
+  border: 1px solid color-mix(in srgb, var(--vs01-color-accent) 70%, var(--vs01-color-border-subtle));
   border-radius: 3px;
-  background: var(--vs01-color-bg-card);
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 92%, var(--vs01-color-accent) 8%);
   color: transparent;
   cursor: nwse-resize;
   z-index: 6;
   touch-action: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   overflow: hidden;
 }
 
 .vs01-sign-placement-resize-handle:hover {
-  background: color-mix(in srgb, var(--vs01-color-accent) 22%, var(--vs01-color-bg-card));
+  background: color-mix(in srgb, var(--vs01-color-accent) 14%, var(--vs01-color-bg-card));
   border-color: var(--vs01-color-accent-hover);
 }
 
@@ -3561,14 +3561,14 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-label {
-  font-size: max(0.48rem, 5.5cqi);
-  font-weight: 750;
-  letter-spacing: 0.08em;
+  font-size: max(0.42rem, 5cqi);
+  font-weight: 700;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: #111111;
+  color: color-mix(in srgb, #111111 72%, var(--vs01-color-text-muted));
   user-select: none;
   pointer-events: none;
-  line-height: 1.15;
+  line-height: 1.12;
 }
 
 .vs01-sign-placement-box--text .vs01-sign-placement-label,
