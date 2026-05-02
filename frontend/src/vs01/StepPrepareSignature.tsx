@@ -909,7 +909,7 @@ export function StepPrepareSignature({
                               >
                                 <div
                                   ref={(el) => registerPageSurface(p, el)}
-                                  className="vs01-sign-page-surface"
+                                  className="vs01-sign-page-surface vs01-sign-page-surface--footer-safe"
                                 >
                                   <Page
                                     pageNumber={p + 1}
@@ -917,6 +917,7 @@ export function StepPrepareSignature({
                                     renderTextLayer={false}
                                     renderAnnotationLayer={false}
                                   />
+                                  <div className="vs01-pdf-footer-watermark-shim" aria-hidden />
                                   <div
                                     className={`vs01-sign-placement-click-layer${
                                       placementArmed

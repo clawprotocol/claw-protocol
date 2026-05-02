@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   SIGNING_FIELD_TOOLS,
   createPlacedFieldAtClick,
+  defaultSizeForRecipientField,
+  defaultSizeForType,
   labelForFieldType,
 } from "./signingFields";
 
@@ -37,5 +39,15 @@ describe("VS01 sender placement: Text field", () => {
     const free = createPlacedFieldAtClick("text", 1, 0.6, 0.3, ctx);
     expect(free.type).toBe("text");
     expect(free.value).toBe("");
+  });
+
+  it("uses a wider default box for freeform Text than for Printed name (sender + recipient)", () => {
+    const textS = defaultSizeForType("text");
+    const printedS = defaultSizeForType("printed_name");
+    expect(textS.width).toBeGreaterThan(printedS.width);
+    expect(textS.height).toBeGreaterThanOrEqual(printedS.height);
+    const textR = defaultSizeForRecipientField("text");
+    const printedR = defaultSizeForRecipientField("printed_name");
+    expect(textR.width).toBeGreaterThan(printedR.width);
   });
 });

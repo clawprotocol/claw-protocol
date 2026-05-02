@@ -15,7 +15,7 @@ describe("PaidProVs01WorkspaceBanner (static)", () => {
     expect(s).toContain("Saved in LawDog");
     expect(s).toContain("Copy signing link");
     expect(s).toContain("View proof");
-    expect(s).toContain("Proof & receipt details");
+    expect(s).toContain("Proof status and receipt details");
     expect(s).toContain("readPaidProVs01PostSignHandoff");
   });
 });

@@ -501,6 +501,8 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
 
   const showWizardLoadingOverlay = wizardBoot === "loading_saved";
   const showIntakeErrorPanel = wizardBoot === "error" && step === 0;
+  const showPostVs01SimpleFirst =
+    postVs01SignatureFirstLanding && step > 0 && wizardDraftReady && wizardBoot === "ready";
 
   return (
     <>
@@ -514,42 +516,7 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
           My agreements
         </button>
       </div>
-      {postVs01SignatureFirstLanding && step > 0 && wizardDraftReady && wizardBoot === "ready" ? (
-        <details className="vs01-agreement-wizard-advanced mb-3 rounded-lg border border-slate-800/70 bg-slate-950/35 px-3 py-2">
-          <summary className="cursor-pointer text-xs font-medium text-slate-400">
-            Full workspace steps (details, versions, recipients)
-          </summary>
-          <nav className="vs01-stepper mt-3" aria-label={`Agreement Workspace: ${stepCount} steps`}>
-            {STEPS.map(({ id, label }) => {
-              const active = id === step;
-              const blocked = !canOpenStep(id);
-              const stepNum = id + 1;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className={`vs01-stepper-step${active ? " vs01-stepper-step--active" : ""}`}
-                  disabled={blocked}
-                  aria-current={active ? "step" : undefined}
-                  aria-label={
-                    blocked
-                      ? id === 0
-                        ? `Step ${stepNum} of ${stepCount}: ${label} (use My agreements to start a new agreement)`
-                        : `Step ${stepNum} of ${stepCount}: ${label} (complete preparation first)`
-                      : `Step ${stepNum} of ${stepCount}: ${label}`
-                  }
-                  onClick={() => {
-                    if (!blocked) guardedSetStep(id);
-                  }}
-                >
-                  <span className="vs01-stepper-num">{stepNum}</span>
-                  <span className="vs01-stepper-label">{label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </details>
-      ) : (
+      {!showPostVs01SimpleFirst ? (
         <nav className="vs01-stepper" aria-label={`Agreement Workspace: ${stepCount} steps`}>
           {STEPS.map(({ id, label }) => {
             const active = id === step;
@@ -579,7 +546,7 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
             );
           })}
         </nav>
-      )}
+      ) : null}
 
       <div
         className="vs01-card vs01-card--envelope vs01-agreement-wizard-card relative"
@@ -599,28 +566,19 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
           </div>
         ) : null}
 
-        {postVs01SignatureFirstLanding && step > 0 && wizardDraftReady && wizardBoot === "ready" ? (
-          <>
-            <p className="vs01-agreement-ws-eyebrow">Agreement saved</p>
-            <h2 className="vs01-card-title vs01-agreement-ws-step-title">You&apos;re in your workspace</h2>
-            <p className="vs01-card-help vs01-agreement-ws-step-sub">
-              Use the banner above for signing links and proof. Expand &quot;Full workspace steps&quot; when you need
-              versions or recipient details.
-            </p>
-          </>
-        ) : (
+        {!showPostVs01SimpleFirst ? (
           <>
             <p className="vs01-agreement-ws-eyebrow">Agreement workspace</p>
             <h2 className="vs01-card-title vs01-agreement-ws-step-title">{STEP_INTRO[step]?.title ?? ""}</h2>
             <p className="vs01-card-help vs01-agreement-ws-step-sub">{STEP_INTRO[step]?.subtitle ?? ""}</p>
           </>
-        )}
+        ) : null}
 
         {step > 0 && agreementId?.trim() && wizardDraftReady && wizardBoot === "ready" && postVs01SignatureFirstLanding ? (
           <PaidProVs01WorkspaceBanner agreementId={agreementId.trim()} visible />
         ) : null}
 
-        {step > 0 && agreementId?.trim() ? (
+        {step > 0 && agreementId?.trim() && !showPostVs01SimpleFirst ? (
           <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} />
         ) : null}
 
@@ -667,47 +625,132 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
         ) : null}
 
         {step > 0 && agreementId?.trim() && reviewSection && wizardDraftReady && wizardBoot === "ready" ? (
-          <>
-            <AgreementReviewErrorBoundary onBack={goToLanding}>
-              <AgreementReview
-                agreementId={agreementId}
-                section={reviewSection}
-                embeddedInCard
-                workspaceEntryMode={workspaceEntryMode}
-                postVs01SignatureFirstLanding={postVs01SignatureFirstLanding}
-                onBackToNew={goToLanding}
-                initialDraftSnapshot={
-                  reviewPrimedDraft && reviewPrimedDraft.id === agreementId ? reviewPrimedDraft : null
-                }
-                onCanonicalDraftLoaded={clearReviewPrimedDraft}
-                onWorkspaceDetailsNotReady={handleWorkspaceDetailsNotReady}
-              />
-            </AgreementReviewErrorBoundary>
-            <div className="vs01-agreement-step-actions">
-              <button
-                type="button"
-                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                disabled={prevNavStep === step}
-                onClick={() => guardedSetStep(prevNavStep)}
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                className="vs01-btn vs01-btn--primary"
-                disabled={nextNavStep === step}
-                onClick={() => guardedSetStep(nextNavStep)}
-              >
-                {step === 1
-                  ? "Continue"
-                  : step === 2
+          showPostVs01SimpleFirst ? (
+            <details className="vs01-agreement-advanced-workspace mb-4 rounded-lg border border-slate-800/70 bg-slate-950/35 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-medium text-slate-400">
+                Advanced workspace details (steps, Agreement Memory, draft editor, version tools)
+              </summary>
+              <p className="mt-2 text-[11px] leading-snug text-slate-500">
+                Signing links and proof stay in the banner above. Open this section when you need the full LawDog
+                workspace.
+              </p>
+              <nav className="vs01-stepper mt-3" aria-label={`Agreement Workspace: ${stepCount} steps`}>
+                {STEPS.map(({ id, label }) => {
+                  const active = id === step;
+                  const blocked = !canOpenStep(id);
+                  const stepNum = id + 1;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`vs01-stepper-step${active ? " vs01-stepper-step--active" : ""}`}
+                      disabled={blocked}
+                      aria-current={active ? "step" : undefined}
+                      aria-label={
+                        blocked
+                          ? id === 0
+                            ? `Step ${stepNum} of ${stepCount}: ${label} (use My agreements to start a new agreement)`
+                            : `Step ${stepNum} of ${stepCount}: ${label} (complete preparation first)`
+                          : `Step ${stepNum} of ${stepCount}: ${label}`
+                      }
+                      onClick={() => {
+                        if (!blocked) guardedSetStep(id);
+                      }}
+                    >
+                      <span className="vs01-stepper-num">{stepNum}</span>
+                      <span className="vs01-stepper-label">{label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+              <div className="mt-3 border-t border-slate-800/60 pt-3">
+                <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} />
+              </div>
+              <div className="mt-3 border-t border-slate-800/60 pt-3">
+                <AgreementReviewErrorBoundary onBack={goToLanding}>
+                  <AgreementReview
+                    agreementId={agreementId}
+                    section={reviewSection}
+                    embeddedInCard
+                    workspaceEntryMode={workspaceEntryMode}
+                    postVs01SignatureFirstLanding={postVs01SignatureFirstLanding}
+                    onBackToNew={goToLanding}
+                    initialDraftSnapshot={
+                      reviewPrimedDraft && reviewPrimedDraft.id === agreementId ? reviewPrimedDraft : null
+                    }
+                    onCanonicalDraftLoaded={clearReviewPrimedDraft}
+                    onWorkspaceDetailsNotReady={handleWorkspaceDetailsNotReady}
+                  />
+                </AgreementReviewErrorBoundary>
+              </div>
+              <div className="vs01-agreement-step-actions mt-4 border-t border-slate-800/60 pt-3">
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                  disabled={prevNavStep === step}
+                  onClick={() => guardedSetStep(prevNavStep)}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--primary"
+                  disabled={nextNavStep === step}
+                  onClick={() => guardedSetStep(nextNavStep)}
+                >
+                  {step === 1
                     ? "Continue"
-                    : step === 3
-                      ? "Continue to send"
-                      : "Continue"}
-              </button>
-            </div>
-          </>
+                    : step === 2
+                      ? "Continue"
+                      : step === 3
+                        ? "Continue to send"
+                        : "Continue"}
+                </button>
+              </div>
+            </details>
+          ) : (
+            <>
+              <AgreementReviewErrorBoundary onBack={goToLanding}>
+                <AgreementReview
+                  agreementId={agreementId}
+                  section={reviewSection}
+                  embeddedInCard
+                  workspaceEntryMode={workspaceEntryMode}
+                  postVs01SignatureFirstLanding={postVs01SignatureFirstLanding}
+                  onBackToNew={goToLanding}
+                  initialDraftSnapshot={
+                    reviewPrimedDraft && reviewPrimedDraft.id === agreementId ? reviewPrimedDraft : null
+                  }
+                  onCanonicalDraftLoaded={clearReviewPrimedDraft}
+                  onWorkspaceDetailsNotReady={handleWorkspaceDetailsNotReady}
+                />
+              </AgreementReviewErrorBoundary>
+              <div className="vs01-agreement-step-actions">
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                  disabled={prevNavStep === step}
+                  onClick={() => guardedSetStep(prevNavStep)}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--primary"
+                  disabled={nextNavStep === step}
+                  onClick={() => guardedSetStep(nextNavStep)}
+                >
+                  {step === 1
+                    ? "Continue"
+                    : step === 2
+                      ? "Continue"
+                      : step === 3
+                        ? "Continue to send"
+                        : "Continue"}
+                </button>
+              </div>
+            </>
+          )
         ) : null}
       </div>
     </>

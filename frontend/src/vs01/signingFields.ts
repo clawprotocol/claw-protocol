@@ -51,9 +51,9 @@ export function defaultSizeForRecipientField(t: Vs01RecipientFieldType): { width
     case "initials":
       return defaultSizeForType("initials");
     case "printed_name":
-      return defaultSizeForType("text");
+      return { width: 0.2, height: 0.052 };
     case "text":
-      return defaultSizeForType("text");
+      return { width: 0.34, height: 0.07 };
     case "date":
       return defaultSizeForType("date");
     default:
@@ -90,10 +90,11 @@ export function defaultSizeForType(t: SigningFieldType): { width: number; height
     case "signature":
       return { width: 0.26, height: 0.064 };
     case "initials":
-      return { width: 0.11, height: 0.052 };
+      return { width: 0.092, height: 0.044 };
     case "printed_name":
-    case "text":
       return { width: 0.2, height: 0.052 };
+    case "text":
+      return { width: 0.34, height: 0.07 };
     case "date":
       return { width: 0.17, height: 0.052 };
     default:
@@ -119,8 +120,9 @@ export function computeRectFromClick(
 }
 
 /** Bottom-right auto initials: normalized margins from page edges (x = 1 - marginX - width). */
-const AUTO_INITIALS_MARGIN_X = 0.038;
-const AUTO_INITIALS_MARGIN_Y = 0.044;
+const AUTO_INITIALS_MARGIN_X = 0.04;
+/** Slightly higher bottom anchor so auto initials sit in margin above draft footer / watermark band. */
+const AUTO_INITIALS_MARGIN_Y = 0.056;
 
 export function autoInitialsLayout(): { x: number; y: number; width: number; height: number } {
   const { width, height } = defaultSizeForType("initials");

@@ -2666,12 +2666,28 @@ button.vs01-upload-btn:disabled {
   align-items: center;
   justify-content: center;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: max(0.52rem, 11cqi);
-  font-weight: 700;
+  font-size: max(0.48rem, 10cqi);
+  font-weight: 650;
   line-height: 1.2;
   letter-spacing: 0.04em;
   color: #111111;
   text-align: center;
+}
+
+.vs01-sign-placement-box--text .vs01-sign-field-inline-input,
+.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-field-inline-input {
+  min-height: 2.35em;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.25;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-placement-text {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.25;
+  max-height: 4.5em;
+  overflow-y: auto;
 }
 
 .vs01-sign-placement-ph {
@@ -3074,6 +3090,36 @@ button.vs01-upload-btn:disabled {
 }
 
 /**
+ * Soft band over the bottom of the rendered page to reduce clash with embedded draft footers
+ * (e.g. “Created with LawDog — Draft for Review” from agreement HTML → PDF) while keeping
+ * placement overlays above (z-index 3+).
+ */
+.vs01-pdf-footer-watermark-shim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: clamp(1.85rem, 6.2%, 3.1rem);
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    rgba(255, 255, 255, 0.97) 0%,
+    rgba(255, 255, 255, 0.9) 42%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+.vs01-sign-doc-surface .vs01-pdf-footer-watermark-shim {
+  background: linear-gradient(
+    to top,
+    rgba(250, 248, 245, 0.98) 0%,
+    rgba(250, 248, 245, 0.92) 45%,
+    rgba(250, 248, 245, 0) 100%
+  );
+}
+
+/**
  * Rendered as children of react-pdf <Page /> after the canvas so overlays stack above the PDF
  * (sibling canvases can composite above later siblings in some engines).
  */
@@ -3101,11 +3147,11 @@ button.vs01-upload-btn:disabled {
   align-items: stretch;
   justify-content: flex-start;
   gap: 0.08rem;
-  padding: 0.16rem 0.22rem 0.2rem;
-  border: 2px dashed color-mix(in srgb, var(--vs01-color-text-muted) 55%, var(--vs01-color-border-subtle));
+  padding: 0.14rem 0.18rem 0.16rem;
+  border: 1px dashed color-mix(in srgb, var(--vs01-color-text-muted) 50%, var(--vs01-color-border-subtle));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--vs01-color-bg-card) 55%, transparent);
-  opacity: 0.72;
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 48%, transparent);
+  opacity: 0.58;
   box-shadow: none;
   pointer-events: none;
   user-select: none;
@@ -3169,8 +3215,8 @@ button.vs01-upload-btn:disabled {
 
 .vs01-sign-sender-ref-initials {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: max(0.78rem, 14cqi);
-  font-weight: 700;
+  font-size: max(0.68rem, 12cqi);
+  font-weight: 650;
   letter-spacing: 0.04em;
   color: color-mix(in srgb, var(--vs01-color-text-secondary) 85%, #111);
   text-align: center;

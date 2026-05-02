@@ -15,10 +15,12 @@ describe("starter Pro VS01 full flow (canonical dashboard path)", () => {
     expect(create).toContain("shouldSuppressReviewPipelineTelemetry");
   });
 
-  it("workspace shell prioritizes post-sign banner above memory strip and logs dashboard landing", () => {
+  it("workspace shell prioritizes post-sign banner and tucks memory + editor under advanced details", () => {
     const shell = readFileSync(join(__dirname, "../../agreement/AgreementWizardShell.tsx"), "utf8");
     expect(shell).toContain("[flow] dashboard_landing_post_sign");
     expect(shell).toContain("data-vs01-post-sign-landing=");
+    expect(shell).toContain("vs01-agreement-advanced-workspace");
+    expect(shell).toContain("Advanced workspace details");
     const idxPostSignBanner = shell.indexOf('wizardBoot === "ready" && postVs01SignatureFirstLanding');
     const idxMemory = shell.indexOf("<AgreementMemoryAgreementStrip");
     expect(idxPostSignBanner).toBeGreaterThanOrEqual(0);

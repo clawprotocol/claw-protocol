@@ -811,7 +811,7 @@ export function StepCompleteAndSend({
                                   className="vs01-sign-page-stack"
                                   data-vs01-sign-page={p}
                                 >
-                                  <div className="vs01-sign-page-surface">
+                                  <div className="vs01-sign-page-surface vs01-sign-page-surface--footer-safe">
                                     <Page
                                       pageNumber={p + 1}
                                       width={pageRenderWidth}
@@ -992,6 +992,7 @@ export function StepCompleteAndSend({
                                         </div>
                                       </div>
                                     </Page>
+                                    <div className="vs01-pdf-footer-watermark-shim" aria-hidden />
                                   </div>
                                 </div>
                               );

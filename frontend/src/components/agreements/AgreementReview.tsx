@@ -3616,11 +3616,11 @@ const AgreementReview: React.FC<Props> = ({
               </button>
             </div>
           </details>
-          {onBackToNew && (
+          {onBackToNew && !postVs01SignatureFirstLanding ? (
             <button type="button" className="btn text-xs font-medium text-slate-200" onClick={onBackToNew}>
               Reset draft
             </button>
-          )}
+          ) : null}
         </div>
       </div>
       {shareFlash ? <p className="mt-2 text-[10px] text-emerald-400/95">{shareFlash}</p> : null}

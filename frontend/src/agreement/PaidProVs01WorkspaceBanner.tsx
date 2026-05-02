@@ -112,13 +112,6 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
 
   const namedPending = signers.filter((s) => s.displayName?.trim().length);
   const firstNamed = namedPending[0];
-  const awaitingStatus =
-    namedPending.length === 0
-      ? "Awaiting signature"
-      : namedPending.length === 1
-        ? `Awaiting ${firstNamed!.displayName.trim()}`
-        : "Awaiting signatures";
-
   const completionLine =
     signers.length === 0
       ? "Your signature is complete. Add recipients from the workspace when you are ready to collect remaining signatures."
@@ -140,7 +133,6 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
             Saved in LawDog
           </h3>
           <p className="text-sm font-medium text-slate-100">{completionLine}</p>
-          <p className="text-xs font-medium text-slate-400">{awaitingStatus}</p>
           <p className="text-xs text-slate-500">{title}</p>
           {firstSigningUrl ? (
             <div className="flex flex-wrap gap-2 pt-1">
@@ -210,22 +202,22 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
         </p>
       ) : null}
 
-      <div className="mt-4 border-t border-slate-800/60 pt-4">
-        <ProofStatus
-          {...vs01ReceiptToProofStatusData({
-            receipt,
-            receiptId: handoff.receiptId,
-            receiptHashSha256: handoff.receiptHashSha256,
-          })}
-          exportReceiptId={handoff.receiptId.trim()}
-          className="mt-0"
-        />
-        {receiptLoadError ? (
-          <p className="mt-2 text-xs text-amber-200/90">Could not refresh receipt payload: {receiptLoadError}</p>
-        ) : null}
-        <details ref={proofDetailsRef} className="mt-3 rounded-lg border border-slate-800/80 bg-slate-950/30 p-3">
-          <summary className="cursor-pointer text-xs font-medium text-slate-300">Proof & receipt details</summary>
-          <dl className="mt-2 space-y-1 text-xs text-slate-400">
+      <details ref={proofDetailsRef} className="mt-4 border-t border-slate-800/60 pt-4">
+        <summary className="cursor-pointer text-xs font-medium text-slate-400">Proof status and receipt details</summary>
+        <div className="mt-3">
+          <ProofStatus
+            {...vs01ReceiptToProofStatusData({
+              receipt,
+              receiptId: handoff.receiptId,
+              receiptHashSha256: handoff.receiptHashSha256,
+            })}
+            exportReceiptId={handoff.receiptId.trim()}
+            className="mt-0"
+          />
+          {receiptLoadError ? (
+            <p className="mt-2 text-xs text-amber-200/90">Could not refresh receipt payload: {receiptLoadError}</p>
+          ) : null}
+          <dl className="mt-3 space-y-1 text-xs text-slate-400">
             <div className="flex gap-2">
               <dt className="shrink-0 text-slate-500">Receipt ID</dt>
               <dd className="min-w-0 break-all font-mono text-slate-300">{handoff.receiptId}</dd>
@@ -250,8 +242,8 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
           >
             {copiedKey === "proof-hash" ? "Copied" : "Copy proof receipt"}
           </button>
-        </details>
-      </div>
+        </div>
+      </details>
     </section>
   );
 }
