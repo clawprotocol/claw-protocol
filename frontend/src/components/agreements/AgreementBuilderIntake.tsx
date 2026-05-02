@@ -304,13 +304,18 @@ import {
 } from "./agreementIntakeStorage";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 import {
+  armPaidProStarterSignatureSendFromCreateFlow,
+  clearPaidProStarterSignatureSendFromCreateFlow,
   clearPremiumSendIntent,
   clearPremiumSenderSignFirst,
+  peekPaidProStarterSignatureSendFromCreateFlow,
   peekPremiumSendIntent,
   peekPremiumSenderSignFirst,
   writePremiumSendIntent,
   writePremiumSenderSignFirst,
 } from "../../launch/simpleProduct/premiumSendIntent";
+import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
+import { buildSimpleSendHandoff } from "../../launch/simpleProduct/simpleSendHandoff";
 import {
   clearPremiumCollaborateFirstDefaultPrimed,
   clearPremiumForkUserSendMode,
@@ -1811,6 +1816,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     draftSnapshotRef.current = draft;
   }, [draft]);
+  const paidProAuthoritativeRef = useRef(false);
   useLayoutEffect(() => {
     recipient1NameRef.current = recipient1Name;
   }, [recipient1Name]);
@@ -1842,13 +1848,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     prevCreateUiStageForPremiumForkRef.current = createUiStage;
     if (prev === CreateUiStage.RECIPIENTS && createUiStage !== CreateUiStage.RECIPIENTS) {
       setPremiumSendConfirmOpen(false);
-      setPremiumSendModeUserChoice(null);
-      setPremiumSendModeTouched(false);
-      paidProPremiumSendIntentRef.current = null;
-      clearPremiumForkUserSendMode();
-      clearPremiumSendIntent();
-      clearPremiumSenderSignFirst();
-      setPremiumSignatureSenderFirst(false);
+      if (!paidProAuthoritativeRef.current) {
+        setPremiumSendModeUserChoice(null);
+        setPremiumSendModeTouched(false);
+        paidProPremiumSendIntentRef.current = null;
+        clearPremiumForkUserSendMode();
+        clearPremiumSendIntent();
+        clearPremiumSenderSignFirst();
+        setPremiumSignatureSenderFirst(false);
+      }
       setCreateFlowSendRecipientEditorOpen(false);
       createFlowSendEditorPrimedRef.current = false;
     }
@@ -3316,6 +3324,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
     primePremiumCollaborateFirstDefault();
     setPremiumForkPrimedNonce((n) => n + 1);
+    if (peekPaidProStarterSignatureSendFromCreateFlow()) {
+      clearPremiumCollaborateFirstDefaultPrimed();
+      persistPremiumForkUserSendMode("signature");
+      writePremiumSendIntent("signature");
+      writePremiumSenderSignFirst(true);
+      paidProPremiumSendIntentRef.current = "signature";
+      setPremiumSendModeUserChoice("signature");
+      setPremiumSendModeTouched(true);
+      setPremiumSignatureSenderFirst(true);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[paid-pro-signature-intent-armed]", {
+          source: "post_premium_completion_starter_send",
+        });
+      }
+    }
     markPremiumCompletionDoneInLocalStorage();
     writePremiumRecipientHandoffExact(
       {
@@ -4431,6 +4455,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         primePremiumCollaborateFirstDefault();
         setPremiumForkPrimedNonce((n) => n + 1);
+        if (peekPaidProStarterSignatureSendFromCreateFlow()) {
+          clearPremiumCollaborateFirstDefaultPrimed();
+          persistPremiumForkUserSendMode("signature");
+          writePremiumSendIntent("signature");
+          writePremiumSenderSignFirst(true);
+          paidProPremiumSendIntentRef.current = "signature";
+          setPremiumSendModeUserChoice("signature");
+          setPremiumSendModeTouched(true);
+          setPremiumSignatureSenderFirst(true);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[paid-pro-signature-intent-armed]", {
+              source: "post_premium_completion_starter_send",
+            });
+          }
+        }
         markPremiumCompletionDoneInLocalStorage();
         clearPaidPremiumCompletionSession();
         bumpPremiumSurfaceGateTick();
@@ -5476,6 +5516,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       awaitingProCheckout: true,
       resume_kind: "optional_full_upgrade",
     });
+    armPaidProStarterSignatureSendFromCreateFlow();
+    persistPremiumForkUserSendMode("signature");
+    paidProPremiumSendIntentRef.current = "signature";
+    setPremiumSendModeUserChoice("signature");
+    setPremiumSendModeTouched(true);
+    setPremiumSignatureSenderFirst(true);
+    clearPremiumCollaborateFirstDefaultPrimed();
     stashUpgradeCheckoutContext(upgradeContextReasons, {
       completionLabel: buildUpgradeCheckoutCompletionLabel(gateDraft),
       intentSignals: detectUpgradeIntentSignals(`${raw}\n${agreementDocumentText}`),
@@ -6766,6 +6813,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }),
     [draft, tier, reviewAgreementId, premiumSendPathUnlocked, premiumPersistedFlowActive, reviewDocRefreshTick],
   );
+  useLayoutEffect(() => {
+    paidProAuthoritativeRef.current = paidProAuthoritative;
+  }, [paidProAuthoritative]);
 
   const paidProReviewReady = computeSimpleCreatePaidProReviewReady({
     simpleProductFlow,
@@ -8518,6 +8568,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPremiumSendModeUserChoice(mode);
     setPremiumSendModeTouched(true);
     if (mode === "review") {
+      clearPaidProStarterSignatureSendFromCreateFlow();
       setPremiumSignatureSenderFirst(false);
       writePremiumSenderSignFirst(false);
     }
@@ -10630,6 +10681,77 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createFlowPhase === "ready_to_send" &&
       productionSendBarPhase !== "sent",
   );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !createProductionTwoPane) return;
+    if (!paidProRecipientSetupOnDraft) return;
+    if (effectivePremiumSendMode !== "signature") return;
+    if (!premiumSignersSurfaceReady) return;
+    // eslint-disable-next-line no-console
+    console.info("[paid-pro-vs01-send-surface]", {
+      createUiStage,
+      createFlowPhase,
+    });
+  }, [
+    createProductionTwoPane,
+    paidProRecipientSetupOnDraft,
+    effectivePremiumSendMode,
+    premiumSignersSurfaceReady,
+    createUiStage,
+    createFlowPhase,
+  ]);
+
+  const openPaidProPostInlineSendDestination = React.useCallback(async () => {
+    const id = productionSendBarAgreementId?.trim();
+    if (!id || !draft) return;
+    const sig =
+      effectivePremiumSendMode === "signature" &&
+      peekPremiumSenderSignFirst() &&
+      isPaidProAgreementAuthoritative({
+        draft,
+        tier,
+        agreementId: id,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      });
+    if (sig) {
+      const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
+        navigate: (to) => void navigate(to),
+        agreementId: id,
+        draft: draft as unknown as AgreementDraft,
+        logReason: "intake_inline_send_success_cta",
+      });
+      if (ok) {
+        clearPaidProStarterSignatureSendFromCreateFlow();
+        return;
+      }
+      if (import.meta.env.DEV) {
+        console.warn("[paid-pro-obsolete-review-link-bypass]", {
+          reason: "vs01_seed_failed_open_link_setup_fallback",
+          agreementId: id,
+        });
+      }
+    }
+    navigate(`/app/send/${encodeURIComponent(id)}`, {
+      simpleSendHandoff: buildSimpleSendHandoff({
+        agreementId: id,
+        primedDraft: draft as unknown as AgreementDraft,
+        streamlinedSimpleFlow: freshSimpleCreateUx,
+        premiumSendIntent: effectivePremiumSendMode,
+        openFlowPhase: "send",
+      }),
+    });
+  }, [
+    productionSendBarAgreementId,
+    draft,
+    effectivePremiumSendMode,
+    navigate,
+    freshSimpleCreateUx,
+    tier,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
+  ]);
 
   const effectivePrimaryCtaDisabled = simpleCreateUnifiedBottomCta
     ? unifiedPrimaryCta.disabled
@@ -14547,10 +14669,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       <button
                         type="button"
                         className="mt-3 text-sm font-medium text-emerald-100/95 underline decoration-emerald-300/55 underline-offset-[3px] hover:text-white"
-                        onClick={() => {
-                          if (!productionSendBarAgreementId) return;
-                          navigate(`/app/send/${encodeURIComponent(productionSendBarAgreementId)}`);
-                        }}
+                        onClick={() => void openPaidProPostInlineSendDestination()}
                       >
                         Open link setup
                       </button>
@@ -14657,10 +14776,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     <button
                       type="button"
                       className="mt-3 text-sm font-medium text-emerald-100/95 underline decoration-emerald-300/55 underline-offset-[3px] hover:text-white"
-                      onClick={() => {
-                        if (!productionSendBarAgreementId) return;
-                        navigate(`/app/send/${encodeURIComponent(productionSendBarAgreementId)}`);
-                      }}
+                      onClick={() => void openPaidProPostInlineSendDestination()}
                     >
                       Open link setup
                     </button>
@@ -15390,10 +15506,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     });
                   }
                   setPremiumSendConfirmOpen(false);
+                  const starterOrderedSig = peekPaidProStarterSignatureSendFromCreateFlow();
                   const signFirst =
-                    effectivePremiumSendMode === "signature" && premiumSendConfirmSignFirst;
+                    starterOrderedSig ||
+                    (effectivePremiumSendMode === "signature" && premiumSendConfirmSignFirst);
                   setPremiumSignatureSenderFirst(Boolean(signFirst));
                   writePremiumSenderSignFirst(Boolean(signFirst));
+                  if (starterOrderedSig) clearPaidProStarterSignatureSendFromCreateFlow();
                   void onGenerate();
                 }}
               >

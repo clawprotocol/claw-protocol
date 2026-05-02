@@ -245,3 +245,36 @@ export async function fetchAgreementVs01SigningSeed(agreementId: string): Promis
     return { ok: false, reason: "network", httpStatus: 0, detail: "network" };
   }
 }
+
+/**
+ * Paid Pro create-flow: seed VS01 and navigate to `/app/esign/:documentId?agreement_bridge=1`.
+ * Does not change server seed behavior — same POST as SimpleSend sender-first.
+ */
+export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
+  navigate: (to: string) => void | Promise<void>;
+  agreementId: string;
+  draft: AgreementDraft | null;
+  logReason: string;
+}): Promise<boolean> {
+  const id = String(options.agreementId || "").trim();
+  if (!id) return false;
+  const vs01Seed = await fetchAgreementVs01SigningSeed(id);
+  if (!vs01Seed.ok) return false;
+  const bridge = buildAgreementVs01BridgeSession({
+    agreementId: id,
+    vs01DocumentId: vs01Seed.documentId,
+    draft: options.draft,
+    senderFirstLawdogHandoff: true,
+  });
+  writeAgreementVs01BridgeSession(bridge);
+  setPaidProAgreementBridgeSkipMarker(vs01Seed.documentId);
+  const route = `/app/esign/${encodeURIComponent(vs01Seed.documentId)}?agreement_bridge=1`;
+  logAgreementToVs01EsignRoute({
+    agreementId: id,
+    seedDocumentId: vs01Seed.documentId,
+    route,
+    reason: options.logReason,
+  });
+  void options.navigate(route);
+  return true;
+}

@@ -43,7 +43,13 @@ import { clearLawdogEntryContext, consumeLawdogFocusCreateIntake } from "../lawd
 import { isFirstLawdogSession, markLawdogDraftCreated } from "../lawdogFirstDraftSession";
 import { isFreshSimpleCreateStart as computeFreshSimpleCreateStart } from "./freshSimpleCreateStart";
 import { buildSimpleSendHandoff } from "./simpleSendHandoff";
-import type { PremiumSendIntent } from "./premiumSendIntent";
+import {
+  clearPaidProStarterSignatureSendFromCreateFlow,
+  peekPremiumSenderSignFirst,
+  type PremiumSendIntent,
+} from "./premiumSendIntent";
+import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
+import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
 import { getOrgId } from "../orgContext";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
@@ -484,17 +490,44 @@ export function SimpleCreatePage() {
               if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
                 console.debug("[SimpleCreate] navigate to review with agreement id", agreementId);
               }
-              navigate(`/app/send/${encodeURIComponent(agreementId)}`, {
-                simpleSendHandoff: buildSimpleSendHandoff({
-                  agreementId,
-                  primedDraft: primed,
-                  streamlinedSimpleFlow: isFreshSimpleCreateStart,
-                  premiumSendIntent: handoff?.premiumSendIntent ?? null,
-                  ...(handoff?.openFlowPhase === "send" || handoff?.openFlowPhase === "review"
-                    ? { openFlowPhase: handoff.openFlowPhase }
-                    : {}),
-                }),
-              });
+              void (async () => {
+                const sig =
+                  handoff?.premiumSendIntent === "signature" &&
+                  peekPremiumSenderSignFirst() &&
+                  isPaidProAgreementAuthoritative({
+                    draft: primed,
+                    agreementId,
+                  });
+                if (sig) {
+                  const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
+                    navigate: (to) => void navigate(to),
+                    agreementId,
+                    draft: primed,
+                    logReason: "create_flow_paid_pro_signature",
+                  });
+                  if (ok) {
+                    clearPaidProStarterSignatureSendFromCreateFlow();
+                    return;
+                  }
+                  if (import.meta.env.DEV) {
+                    console.warn("[paid-pro-obsolete-review-link-bypass]", {
+                      reason: "vs01_seed_failed_fallback_send_shell",
+                      agreementId,
+                    });
+                  }
+                }
+                navigate(`/app/send/${encodeURIComponent(agreementId)}`, {
+                  simpleSendHandoff: buildSimpleSendHandoff({
+                    agreementId,
+                    primedDraft: primed,
+                    streamlinedSimpleFlow: isFreshSimpleCreateStart,
+                    premiumSendIntent: handoff?.premiumSendIntent ?? null,
+                    ...(handoff?.openFlowPhase === "send" || handoff?.openFlowPhase === "review"
+                      ? { openFlowPhase: handoff.openFlowPhase }
+                      : {}),
+                  }),
+                });
+              })();
             }}
           />
         </div>

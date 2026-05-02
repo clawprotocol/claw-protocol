@@ -55,3 +55,35 @@ export function clearPremiumSenderSignFirst(): void {
     /* ignore */
   }
 }
+
+/**
+ * User chose “Send with LawDog Pro” from starter draft → checkout. After Pro completes, bias create-flow
+ * send toward signature + sender-first VS01 (not review-link / `/app/send` review shell).
+ */
+const PAID_PRO_STARTER_SIGNATURE_SEND_SS_KEY = "claw_paid_pro_starter_signature_send_v1";
+
+export function armPaidProStarterSignatureSendFromCreateFlow(): void {
+  try {
+    sessionStorage.setItem(PAID_PRO_STARTER_SIGNATURE_SEND_SS_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+  writePremiumSendIntent("signature");
+  writePremiumSenderSignFirst(true);
+}
+
+export function peekPaidProStarterSignatureSendFromCreateFlow(): boolean {
+  try {
+    return sessionStorage.getItem(PAID_PRO_STARTER_SIGNATURE_SEND_SS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function clearPaidProStarterSignatureSendFromCreateFlow(): void {
+  try {
+    sessionStorage.removeItem(PAID_PRO_STARTER_SIGNATURE_SEND_SS_KEY);
+  } catch {
+    /* ignore */
+  }
+}

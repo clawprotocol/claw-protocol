@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
+  armPaidProStarterSignatureSendFromCreateFlow,
+  clearPaidProStarterSignatureSendFromCreateFlow,
+} from "../../launch/simpleProduct/premiumSendIntent";
+import {
   agreementTextSuggestsNegotiation,
   clearPremiumForkUserSendMode,
   inferPremiumDefaultSendMode,
@@ -44,6 +48,31 @@ describe("inferPremiumDefaultSendMode", () => {
     suggestCollaboratePrimed: false,
     getDraftFirstReviewBlocker,
   };
+  const sessionMem: Record<string, string> = {};
+  beforeEach(() => {
+    Object.keys(sessionMem).forEach((k) => delete sessionMem[k]);
+    vi.stubGlobal("sessionStorage", {
+      getItem: (k: string) => (Object.prototype.hasOwnProperty.call(sessionMem, k) ? sessionMem[k] : null),
+      setItem: (k: string, v: string) => {
+        sessionMem[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete sessionMem[k];
+      },
+      clear: () => {
+        Object.keys(sessionMem).forEach((k) => delete sessionMem[k]);
+      },
+      key: () => null,
+      get length() {
+        return Object.keys(sessionMem).length;
+      },
+    } as Storage);
+  });
+
+  afterEach(() => {
+    clearPaidProStarterSignatureSendFromCreateFlow();
+    vi.unstubAllGlobals();
+  });
 
   it("defaults to review when draft has review blocker", () => {
     const draft = baseDraft({
@@ -105,6 +134,19 @@ describe("inferPremiumDefaultSendMode", () => {
         hasRecipientsReady: true,
       }),
     ).toBe("review");
+  });
+
+  it("returns signature when starter LawDog Pro send path is armed (overrides collaborate-first / review default)", () => {
+    const draft = baseDraft({ title: "Agreement" });
+    armPaidProStarterSignatureSendFromCreateFlow();
+    expect(
+      inferPremiumDefaultSendMode({
+        ...common,
+        draft,
+        hasRecipientsReady: true,
+        suggestCollaboratePrimed: true,
+      }),
+    ).toBe("signature");
   });
 });
 

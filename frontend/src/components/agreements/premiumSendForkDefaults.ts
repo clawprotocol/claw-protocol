@@ -1,4 +1,7 @@
-import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
+import {
+  peekPaidProStarterSignatureSendFromCreateFlow,
+  type PremiumSendIntent,
+} from "../../launch/simpleProduct/premiumSendIntent";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const COLLAB_FIRST_SESSION_KEY = "claw_premium_fork_default_collaborate_v1";
@@ -84,6 +87,7 @@ export function inferPremiumDefaultSendMode(input: InferPremiumDefaultSendModeIn
     suggestCollaboratePrimed,
     getDraftFirstReviewBlocker,
   } = input;
+  if (peekPaidProStarterSignatureSendFromCreateFlow()) return "signature";
   if (!draft) return "signature";
   if (getDraftFirstReviewBlocker(draft)) return "review";
   if (agreementDocDirty) return "review";
