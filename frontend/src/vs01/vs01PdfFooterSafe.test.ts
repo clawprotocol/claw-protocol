@@ -10,6 +10,7 @@ describe("VS01 PDF footer-safe overlay", () => {
     expect(css).toContain("z-index: 1");
     expect(css).toContain(".vs01-sign-page-surface--footer-safe");
     expect(css).toContain("box-shadow:");
+    expect(css).toContain("inset 0 -5.5rem");
     for (const f of ["StepPrepareSignature.tsx", "StepCompleteAndSend.tsx", "RecipientSigningView.tsx"]) {
       const s = readFileSync(join(__dirname, f), "utf8");
       expect(s).toContain("vs01-sign-page-surface--footer-safe");

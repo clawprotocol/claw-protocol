@@ -441,12 +441,7 @@ export function StepCompleteAndSend({
     const id = selectedCounterpartyId.trim();
     if (!id) return "";
     return recipientFields
-      .filter(
-        (f) =>
-          f.counterpartyId === id &&
-          !f.autoInitials &&
-          (f.type === "text" || f.type === "date" || f.type === "email")
-      )
+      .filter((f) => f.counterpartyId === id && !f.autoInitials)
       .map((f) => `${f.page},${roundNorm(f.x)},${roundNorm(f.y)},${roundNorm(f.width)},${roundNorm(f.height)}`)
       .join(";");
   }, [recipientFields, selectedCounterpartyId]);
@@ -910,7 +905,10 @@ export function StepCompleteAndSend({
                                                 key={field.id}
                                                 data-field-id={field.id}
                                                 className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
-                                                  field.type === "signature" || field.type === "initials"
+                                                  field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
+                                                }${
+                                                  field.type === "signature" ||
+                                                  (field.type === "initials" && !field.autoInitials)
                                                     ? " vs01-recipient-pending-slot"
                                                     : ""
                                                 }${isSel ? " vs01-sign-placement-box--selected" : ""}${

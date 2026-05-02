@@ -4,6 +4,7 @@ import {
   counterpartyNameErrorKey,
   detailsStepIsValid,
   firstDetailsErrorFieldSelector,
+  firstPlausibleEmailInSignerRef,
 } from "./detailsStepValidation";
 
 const row = (id: string, name: string) => ({ id, name, email: "", phone: "" });
@@ -87,5 +88,13 @@ describe("firstDetailsErrorFieldSelector", () => {
         [counterpartyNameErrorKey("x")]: "x",
       })
     ).toContain(`data-counterparty-id=`);
+  });
+});
+
+describe("firstPlausibleEmailInSignerRef", () => {
+  it("extracts email from defaultSignerRef style strings", () => {
+    expect(firstPlausibleEmailInSignerRef("Acme LLC · billing@acme.com")).toBe("billing@acme.com");
+    expect(firstPlausibleEmailInSignerRef("solo@signer.dev")).toBe("solo@signer.dev");
+    expect(firstPlausibleEmailInSignerRef("Name only")).toBeUndefined();
   });
 });

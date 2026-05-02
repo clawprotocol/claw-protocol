@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   SIGNING_FIELD_TOOLS,
+  autoInitialsPlacementDims,
   buildAutoInitialsFields,
   createPlacedFieldAtClick,
   defaultRecipientFieldValue,
   defaultSizeForRecipientField,
   defaultSizeForType,
   labelForFieldType,
+  rebuildRecipientAutoInitialsEveryPage,
   RECIPIENT_FIELD_TOOLS,
   type PlacedSigningField,
 } from "./signingFields";
@@ -50,10 +52,16 @@ describe("VS01 sender placement: Text field", () => {
     const textS = defaultSizeForType("text");
     const printedS = defaultSizeForType("printed_name");
     expect(textS.width).toBeGreaterThan(printedS.width);
-    expect(textS.height).toBeGreaterThanOrEqual(printedS.height);
+    expect(textS.height).toBeGreaterThan(0.04);
     const textR = defaultSizeForRecipientField("text");
     const printedR = defaultSizeForRecipientField("printed_name");
     expect(textR.width).toBeGreaterThan(printedR.width);
+  });
+
+  it("uses compact line-like default heights for Text and Email", () => {
+    expect(defaultSizeForType("text").height).toBeLessThanOrEqual(0.052);
+    expect(defaultSizeForType("email").height).toBeLessThanOrEqual(0.054);
+    expect(defaultSizeForType("email").width).toBeGreaterThanOrEqual(defaultSizeForType("text").width);
   });
 });
 
@@ -96,7 +104,7 @@ describe("VS01 sender placement: Email tool", () => {
     expect(defaultRecipientFieldValue("text", "R", "r@ex.com")).toBe("");
   });
 
-  it("nudges sender auto-initials away from placed text/date/email boxes", () => {
+  it("nudges sender auto-initials away from placed text boxes", () => {
     const obstacle: PlacedSigningField = {
       id: "blk",
       type: "text",
@@ -119,6 +127,68 @@ describe("VS01 sender placement: Email tool", () => {
       a.x + a.width > obstacle.x &&
       a.y < obstacle.y + obstacle.height &&
       a.y + a.height > obstacle.y;
+    expect(overlaps).toBe(false);
+  });
+
+  it("nudges sender auto-initials away from placed signature fields", () => {
+    const obstacle: PlacedSigningField = {
+      id: "sig",
+      type: "signature",
+      page: 0,
+      x: 0.65,
+      y: 0.78,
+      width: 0.3,
+      height: 0.14,
+      value: "Signer",
+    };
+    const autos = buildAutoInitialsFields(
+      1,
+      { typedName: "Sender", initials: "SX" },
+      new Set(),
+      [obstacle]
+    );
+    expect(autos).toHaveLength(1);
+    const a = autos[0];
+    const overlaps =
+      a.x < obstacle.x + obstacle.width &&
+      a.x + a.width > obstacle.x &&
+      a.y < obstacle.y + obstacle.height &&
+      a.y + a.height > obstacle.y;
+    expect(overlaps).toBe(false);
+  });
+});
+
+describe("VS01 auto initials placement", () => {
+  it("uses a smaller box for gray auto initials than for tool-placed initials", () => {
+    const auto = autoInitialsPlacementDims();
+    const manual = defaultSizeForRecipientField("initials");
+    expect(auto.width).toBeLessThan(manual.width);
+    expect(auto.height).toBeLessThan(manual.height);
+  });
+
+  it("keeps recipient gray auto initials clear of sender signature on the same page", () => {
+    const senderPlacedFields: PlacedSigningField[] = [
+      {
+        id: "sig",
+        type: "signature",
+        page: 0,
+        x: 0.64,
+        y: 0.78,
+        width: 0.32,
+        height: 0.14,
+        value: "X",
+      },
+    ];
+    const out = rebuildRecipientAutoInitialsEveryPage([], "cp1", 1, new Set(), senderPlacedFields);
+    const auto = out.find((f) => f.autoInitials);
+    expect(auto).toBeDefined();
+    const sig = senderPlacedFields[0];
+    const a = auto!;
+    const overlaps =
+      a.x < sig.x + sig.width &&
+      a.x + a.width > sig.x &&
+      a.y < sig.y + sig.height &&
+      a.y + a.height > sig.y;
     expect(overlaps).toBe(false);
   });
 });

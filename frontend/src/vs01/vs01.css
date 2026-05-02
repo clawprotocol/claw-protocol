@@ -2678,10 +2678,11 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-placement-box--email .vs01-sign-field-inline-input,
 .vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-field-inline-input,
 .vs01-recipient-assign-step .vs01-sign-placement-box--email .vs01-sign-field-inline-input {
-  min-height: 2.35em;
+  min-height: 1.28em;
   white-space: normal;
   word-break: break-word;
-  line-height: 1.25;
+  line-height: 1.22;
+  font-size: max(0.42rem, 9cqi);
 }
 
 .vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-placement-text,
@@ -3100,11 +3101,15 @@ button.vs01-upload-btn:disabled {
  */
 .vs01-sign-page-surface--footer-safe {
   isolation: isolate;
-  box-shadow: inset 0 -4.5rem 3rem -1.25rem rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 -5.5rem 3.5rem -1rem rgba(255, 255, 255, 0.92),
+    inset 0 -1.25rem 1.5rem rgba(255, 255, 255, 0.55);
 }
 
 .vs01-sign-doc-surface .vs01-sign-page-surface--footer-safe {
-  box-shadow: inset 0 -4.5rem 3rem -1.25rem rgba(250, 248, 245, 0.9);
+  box-shadow:
+    inset 0 -5.5rem 3.5rem -1rem rgba(250, 248, 245, 0.93),
+    inset 0 -1.25rem 1.5rem rgba(250, 248, 245, 0.58);
 }
 
 /**
@@ -3117,14 +3122,15 @@ button.vs01-upload-btn:disabled {
   left: 0;
   right: 0;
   bottom: 0;
-  height: clamp(2.35rem, 12%, 4.35rem);
+  height: clamp(2.65rem, 15%, 5.25rem);
   z-index: 1;
   pointer-events: none;
   background: linear-gradient(
     to top,
-    rgba(255, 255, 255, 0.99) 0%,
-    rgba(255, 255, 255, 0.94) 38%,
-    rgba(255, 255, 255, 0.72) 62%,
+    rgba(255, 255, 255, 0.995) 0%,
+    rgba(255, 255, 255, 0.96) 32%,
+    rgba(255, 255, 255, 0.82) 55%,
+    rgba(255, 255, 255, 0.45) 78%,
     rgba(255, 255, 255, 0) 100%
   );
 }
@@ -3132,9 +3138,10 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-doc-surface .vs01-pdf-footer-watermark-shim {
   background: linear-gradient(
     to top,
-    rgba(250, 248, 245, 0.99) 0%,
-    rgba(250, 248, 245, 0.94) 38%,
-    rgba(250, 248, 245, 0.74) 62%,
+    rgba(250, 248, 245, 0.995) 0%,
+    rgba(250, 248, 245, 0.96) 32%,
+    rgba(250, 248, 245, 0.84) 55%,
+    rgba(250, 248, 245, 0.48) 78%,
     rgba(250, 248, 245, 0) 100%
   );
 }
@@ -3527,6 +3534,30 @@ button.vs01-upload-btn:disabled {
   user-select: none;
   pointer-events: none;
   line-height: 1.15;
+}
+
+.vs01-sign-placement-box--text .vs01-sign-placement-label,
+.vs01-sign-placement-box--email .vs01-sign-placement-label {
+  font-size: max(0.36rem, 4.6cqi);
+  letter-spacing: 0.065em;
+  font-weight: 700;
+}
+
+.vs01-sign-placement-box--auto-initials {
+  opacity: 0.72;
+  border-style: dotted;
+  border-width: 1px;
+}
+
+.vs01-sign-placement-box--auto-initials .vs01-sign-placement-initials {
+  font-size: max(0.34rem, 7.5cqi);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--auto-initials {
+  opacity: 0.7;
+  box-shadow: none;
 }
 
 .vs01-sign-placement-script {

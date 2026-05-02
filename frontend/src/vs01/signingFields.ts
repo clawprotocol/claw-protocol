@@ -63,9 +63,9 @@ export function defaultSizeForRecipientField(t: Vs01RecipientFieldType): { width
     case "printed_name":
       return { width: 0.2, height: 0.052 };
     case "text":
-      return { width: 0.42, height: 0.088 };
+      return { width: 0.4, height: 0.05 };
     case "email":
-      return { width: 0.44, height: 0.088 };
+      return { width: 0.44, height: 0.052 };
     case "date":
       return defaultSizeForType("date");
     default:
@@ -106,9 +106,9 @@ export function defaultSizeForType(t: SigningFieldType): { width: number; height
     case "printed_name":
       return { width: 0.2, height: 0.052 };
     case "text":
-      return { width: 0.42, height: 0.088 };
+      return { width: 0.4, height: 0.05 };
     case "email":
-      return { width: 0.44, height: 0.088 };
+      return { width: 0.44, height: 0.052 };
     case "date":
       return { width: 0.17, height: 0.052 };
     default:
@@ -134,13 +134,9 @@ export function computeRectFromClick(
 }
 
 /** Bottom-right auto initials: normalized margins from page edges (x = 1 - marginX - width). */
-const AUTO_INITIALS_MARGIN_X = 0.052;
-/** Higher bottom anchor so auto initials sit above draft footer / watermark band and typical body fields. */
-const AUTO_INITIALS_MARGIN_Y = 0.09;
-
-const SENDER_AUTO_INITIALS_AVOID_TYPES: SigningFieldType[] = ["text", "date", "email"];
-
-const RECIPIENT_AUTO_INITIALS_AVOID_TYPES: Vs01RecipientFieldType[] = ["text", "date", "email"];
+const AUTO_INITIALS_MARGIN_X = 0.056;
+/** Bottom anchor: gray auto slots sit above draft footer band and clear typical signature rows. */
+const AUTO_INITIALS_MARGIN_Y = 0.1;
 
 function normRectsOverlap(
   a: { x: number; y: number; width: number; height: number },
@@ -161,17 +157,17 @@ function normRectsOverlap(
 export function nudgeAutoInitialsRectClearOfNormRects(
   rect: { x: number; y: number; width: number; height: number },
   obstacles: Array<{ x: number; y: number; width: number; height: number }>,
-  pad = 0.014
+  pad = 0.018
 ): { x: number; y: number; width: number; height: number } {
   const { width: rw, height: rh } = rect;
   let { x, y } = rect;
   const overlaps = () => obstacles.some((b) => normRectsOverlap({ x, y, width: rw, height: rh }, b, pad));
   if (!overlaps()) return { x, y, width: rw, height: rh };
 
-  const step = 0.016;
+  const step = 0.014;
   const startX = x;
   const startY = y;
-  for (let leg = 0; leg < 96; leg++) {
+  for (let leg = 0; leg < 140; leg++) {
     if (!overlaps()) return { x, y, width: rw, height: rh };
     if (y - step >= 0) {
       y -= step;
@@ -187,8 +183,13 @@ export function nudgeAutoInitialsRectClearOfNormRects(
   return { x: startX, y: startY, width: rw, height: rh };
 }
 
+/** Normalized rect for gray “initials on every page” slots only — smaller than tool-placed initials. */
+export function autoInitialsPlacementDims(): { width: number; height: number } {
+  return { width: 0.064, height: 0.03 };
+}
+
 export function autoInitialsLayout(): { x: number; y: number; width: number; height: number } {
-  const { width, height } = defaultSizeForType("initials");
+  const { width, height } = autoInitialsPlacementDims();
   let x = 1 - AUTO_INITIALS_MARGIN_X - width;
   let y = 1 - AUTO_INITIALS_MARGIN_Y - height;
   x = Math.max(0, Math.min(x, 1 - width));
@@ -255,25 +256,28 @@ export function layoutRecipientInitialsBottomRightPair(): {
   auto: { x: number; y: number; width: number; height: number };
   manual: { x: number; y: number; width: number; height: number };
 } {
-  const { width: w, height: h } = defaultSizeForRecipientField("initials");
+  const { width: wM, height: hM } = defaultSizeForRecipientField("initials");
+  const { width: wA, height: hA } = autoInitialsPlacementDims();
   const gap = RECIPIENT_AUTO_INITIALS_GAP_NORM;
-  const y = Math.max(0, Math.min(1 - AUTO_INITIALS_MARGIN_Y - h, 1 - h));
+  const bottom = 1 - AUTO_INITIALS_MARGIN_Y;
+  const yM = Math.max(0, bottom - hM);
+  const yA = Math.max(0, bottom - hA);
 
-  let xAuto = Math.max(0, Math.min(1 - AUTO_INITIALS_MARGIN_X - w, 1 - w));
-  let xManual = xAuto - gap - w;
+  let xAuto = Math.max(0, Math.min(1 - AUTO_INITIALS_MARGIN_X - wA, 1 - wA));
+  let xManual = xAuto - gap - wM;
   if (xManual < 0) {
     xManual = 0;
-    xAuto = Math.min(1 - w, xManual + gap + w);
+    xAuto = Math.min(1 - wA, xManual + gap + wM);
   }
-  xManual = Math.max(0, Math.min(xManual, 1 - w));
-  xAuto = Math.max(0, Math.min(xAuto, 1 - w));
-  if (xManual + w + gap > xAuto + 1e-9) {
-    xAuto = Math.min(1 - w, xManual + gap + w);
+  xManual = Math.max(0, Math.min(xManual, 1 - wM));
+  xAuto = Math.max(0, Math.min(xAuto, 1 - wA));
+  if (xManual + wM + gap > xAuto + 1e-9) {
+    xAuto = Math.min(1 - wA, xManual + gap + wM);
   }
 
   return {
-    auto: { x: xAuto, y, width: w, height: h },
-    manual: { x: xManual, y, width: w, height: h },
+    auto: { x: xAuto, y: yA, width: wA, height: hA },
+    manual: { x: xManual, y: yM, width: wM, height: hM },
   };
 }
 
@@ -297,40 +301,43 @@ export function layoutRecipientInitialsPairLeftOfSender(
   manual: { x: number; y: number; width: number; height: number };
 } {
   const gap = RECIPIENT_AUTO_INITIALS_GAP_NORM;
-  const { width: w, height: h } = defaultSizeForRecipientField("initials");
-  const y = Math.max(0, Math.min(sender.y, 1 - h));
+  const { width: wM, height: hM } = defaultSizeForRecipientField("initials");
+  const { width: wA, height: hA } = autoInitialsPlacementDims();
+  const bottom = Math.min(1, sender.y + sender.height);
+  const yM = Math.max(0, bottom - hM);
+  const yA = Math.max(0, bottom - hA);
 
-  let xAuto = sender.x - gap - w;
-  let xManual = xAuto - gap - w;
+  let xAuto = sender.x - gap - wA;
+  let xManual = xAuto - gap - wM;
 
   if (xManual < 0) {
     xManual = 0;
-    xAuto = Math.min(sender.x - gap - w, xManual + gap + w);
+    xAuto = Math.min(sender.x - gap - wA, xManual + gap + wM);
   }
-  xManual = Math.max(0, Math.min(xManual, 1 - w));
-  xAuto = Math.max(0, Math.min(xAuto, 1 - w));
+  xManual = Math.max(0, Math.min(xManual, 1 - wM));
+  xAuto = Math.max(0, Math.min(xAuto, 1 - wA));
 
-  if (xManual + gap + w > xAuto + 1e-9) {
-    xAuto = Math.min(1 - w, sender.x - gap - w, xManual + gap + w);
+  if (xManual + gap + wM > xAuto + 1e-9) {
+    xAuto = Math.min(1 - wA, sender.x - gap - wA, xManual + gap + wM);
     xAuto = Math.max(0, xAuto);
   }
 
-  if (xAuto + w + gap > sender.x + 1e-9) {
-    xAuto = Math.max(0, sender.x - gap - w);
-    xManual = Math.max(0, xAuto - gap - w);
+  if (xAuto + wA + gap > sender.x + 1e-9) {
+    xAuto = Math.max(0, sender.x - gap - wA);
+    xManual = Math.max(0, xAuto - gap - wM);
     if (xManual < 0) {
       xManual = 0;
-      xAuto = Math.min(sender.x - gap - w, xManual + gap + w);
+      xAuto = Math.min(sender.x - gap - wA, xManual + gap + wM);
       xAuto = Math.max(0, xAuto);
     }
   }
 
-  xManual = Math.max(0, Math.min(xManual, 1 - w));
-  xAuto = Math.max(0, Math.min(xAuto, 1 - w));
+  xManual = Math.max(0, Math.min(xManual, 1 - wM));
+  xAuto = Math.max(0, Math.min(xAuto, 1 - wA));
 
   return {
-    auto: { x: xAuto, y, width: w, height: h },
-    manual: { x: xManual, y, width: w, height: h },
+    auto: { x: xAuto, y: yA, width: wA, height: hA },
+    manual: { x: xManual, y: yM, width: wM, height: hM },
   };
 }
 
@@ -417,14 +424,13 @@ export function rebuildRecipientAutoInitialsEveryPage(
   for (let p = 0; p < numPages; p++) {
     if (skippedPages.has(p)) continue;
     const pair = layoutRecipientInitialsPairForPage(p, senderPlacedFields);
-    const obstacles = rest
-      .filter(
-        (o) =>
-          o.page === p &&
-          !o.autoInitials &&
-          RECIPIENT_AUTO_INITIALS_AVOID_TYPES.includes(o.type)
-      )
+    const rObs = rest
+      .filter((o) => o.page === p && !o.autoInitials)
       .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
+    const sObs = senderPlacedFields
+      .filter((s) => s.page === p)
+      .map((s) => ({ x: s.x, y: s.y, width: s.width, height: s.height }));
+    const obstacles = [...rObs, ...sObs];
     const autoLayout = nudgeAutoInitialsRectClearOfNormRects(pair.auto, obstacles);
     autos.push(createRecipientAutoInitialsField(counterpartyId, p, autoLayout));
   }
@@ -472,14 +478,14 @@ export function repositionAllRecipientAutoInitialsNonOverlapping(
     if (idx < 0) return f;
 
     const pair = layoutRecipientInitialsPairForPage(f.page, senderPlacedFields);
-    const pageObs = fields
-      .filter(
-        (o) =>
-          o.page === f.page &&
-          !o.autoInitials &&
-          RECIPIENT_AUTO_INITIALS_AVOID_TYPES.includes(o.type)
-      )
-      .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
+    const pageObs = [
+      ...fields
+        .filter((o) => o.page === f.page && !o.autoInitials)
+        .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height })),
+      ...senderPlacedFields
+        .filter((s) => s.page === f.page)
+        .map((s) => ({ x: s.x, y: s.y, width: s.width, height: s.height })),
+    ];
     const nudgedAuto = nudgeAutoInitialsRectClearOfNormRects(pair.auto, pageObs);
     const { width: w, height: h, y } = nudgedAuto;
     const gap = RECIPIENT_AUTO_INITIALS_GAP_NORM;
@@ -610,12 +616,7 @@ export function buildAutoInitialsFields(
   for (let p = 0; p < pageCount; p++) {
     if (skippedPages.has(p)) continue;
     const obstacles = manualFields
-      .filter(
-        (f) =>
-          f.page === p &&
-          !f.autoInitials &&
-          SENDER_AUTO_INITIALS_AVOID_TYPES.includes(f.type)
-      )
+      .filter((f) => f.page === p && !f.autoInitials)
       .map((f) => ({ x: f.x, y: f.y, width: f.width, height: f.height }));
     const layout = nudgeAutoInitialsRectClearOfNormRects(autoInitialsLayout(), obstacles);
     out.push(createAutoInitialsField(p, ctx, layout));

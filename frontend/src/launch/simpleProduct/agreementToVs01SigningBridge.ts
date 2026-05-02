@@ -105,13 +105,10 @@ export function buildAgreementVs01BridgeSession(params: {
   const others = owner ? parties.filter((p) => p !== owner) : parties.slice(1);
   const creatorName = (owner?.name || "").trim() || "Sender";
   const creatorEmail = (owner?.email || "").trim();
-  const creatorEmailNorm = creatorEmail.toLowerCase();
   const counterparties: Vs01Counterparty[] =
     others.length > 0
       ? others.map((p) => {
-          const rawEmail = (p.email || "").trim();
-          const email =
-            creatorEmailNorm && rawEmail.toLowerCase() === creatorEmailNorm ? "" : rawEmail;
+          const email = (p.email || "").trim();
           return {
             id: (p.id && String(p.id).trim()) || newCpId(),
             name: (p.name || "").trim(),

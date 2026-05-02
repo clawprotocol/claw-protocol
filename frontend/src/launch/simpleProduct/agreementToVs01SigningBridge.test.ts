@@ -35,7 +35,7 @@ describe("buildAgreementVs01BridgeSession", () => {
     expect(b.targetStep).toBe(2);
   });
 
-  it("clears counterparty email when it matches creator email (case-insensitive)", () => {
+  it("preserves counterparty email when it matches creator (VS01 Email placement prefills from draft)", () => {
     const draft = {
       title: "MSA",
       parties: [
@@ -49,7 +49,7 @@ describe("buildAgreementVs01BridgeSession", () => {
       draft,
     });
     expect(b.creatorEmail).toBe("Same@Example.com");
-    expect(b.counterparties[0].email).toBe("");
+    expect(b.counterparties[0].email).toBe("same@example.com");
     expect(b.counterparties[0].name).toBe("Signer LLC");
   });
 

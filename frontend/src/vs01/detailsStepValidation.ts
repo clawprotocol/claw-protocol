@@ -12,6 +12,15 @@ export function isPlausibleEmail(raw: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
+/** Parse `defaultSignerRef` segments (e.g. "Name · you@co.com") for a plausible email. */
+export function firstPlausibleEmailInSignerRef(ref: string): string | undefined {
+  for (const seg of ref.split("·")) {
+    const t = seg.trim();
+    if (isPlausibleEmail(t)) return t;
+  }
+  return undefined;
+}
+
 /**
  * Single source of truth for “Who needs to sign?” required fields:
  * agreement title, your name, your email, at least one other signer name.

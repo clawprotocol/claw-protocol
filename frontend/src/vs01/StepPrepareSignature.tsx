@@ -19,6 +19,7 @@ import {
   RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
 } from "../compliance/disclosureCopy";
 import { completeSignSession, createSignSession, fetchDocumentContent } from "./vs01Api";
+import { firstPlausibleEmailInSignerRef } from "./detailsStepValidation";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 import type { Vs01Counterparty, Vs01LoadingState, Vs01SenderSignatureRef } from "./types";
@@ -141,6 +142,9 @@ export function StepPrepareSignature({
   onBack,
   onContinue,
 }: StepPrepareSignatureProps) {
+  const signerEmailForPlacement =
+    (creatorEmail?.trim() || firstPlausibleEmailInSignerRef(defaultSignerRef)) ?? undefined;
+
   const busySession = loading === "session";
   const busyComplete = loading === "complete";
   const busy = busySession || busyComplete;
@@ -325,7 +329,7 @@ export function StepPrepareSignature({
   const fieldsOverlapKey = useMemo(
     () =>
       fields
-        .filter((f) => !f.autoInitials && (f.type === "text" || f.type === "date" || f.type === "email"))
+        .filter((f) => !f.autoInitials)
         .map((f) => `${f.page},${roundNorm(f.x)},${roundNorm(f.y)},${roundNorm(f.width)},${roundNorm(f.height)}`)
         .join(";"),
     [fields]
@@ -405,13 +409,13 @@ export function StepPrepareSignature({
               value: defaultValueForType("initials", {
                 typedName,
                 initials,
-                signerEmail: creatorEmail?.trim() || undefined,
+                signerEmail: signerEmailForPlacement,
               }),
             }
           : f
       )
     );
-  }, [autoInitialsEveryPage, typedName, initials, creatorEmail]);
+  }, [autoInitialsEveryPage, typedName, initials, signerEmailForPlacement]);
 
   const onPagePlacementClick = useCallback(
     (pageIndex0: number, ev: React.MouseEvent<HTMLDivElement>) => {
@@ -428,7 +432,7 @@ export function StepPrepareSignature({
       const ctx = {
         typedName,
         initials,
-        signerEmail: creatorEmail?.trim() || undefined,
+        signerEmail: signerEmailForPlacement,
       };
       const nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, ctx);
       setFields((prev) => [...prev, nf]);
@@ -444,7 +448,7 @@ export function StepPrepareSignature({
         dragHintTimerRef.current = null;
       }, 2200);
     },
-    [armedTool, busy, typedName, initials, creatorEmail]
+    [armedTool, busy, typedName, initials, signerEmailForPlacement]
   );
 
   useEffect(() => {
@@ -976,8 +980,10 @@ export function StepPrepareSignature({
                                           key={field.id}
                                           data-field-id={field.id}
                                           className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
-                                            isSel ? " vs01-sign-placement-box--selected" : ""
-                                          }${pop ? " vs01-sign-placement-box--pop" : ""}`}
+                                            field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
+                                          }${isSel ? " vs01-sign-placement-box--selected" : ""}${
+                                            pop ? " vs01-sign-placement-box--pop" : ""
+                                          }`}
                                           style={{
                                             left: `${xFit * 100}%`,
                                             top: `${yFit * 100}%`,
