@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Vs01RecipientPlacedField } from "./types";
 import {
   SIGNING_FIELD_TOOLS,
   autoInitialsPlacementDims,
@@ -12,6 +13,19 @@ import {
   RECIPIENT_FIELD_TOOLS,
   type PlacedSigningField,
 } from "./signingFields";
+
+function normRectsOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+  pad: number
+): boolean {
+  return (
+    a.x - pad < b.x + b.width + pad &&
+    a.x + a.width + pad > b.x - pad &&
+    a.y - pad < b.y + b.height + pad &&
+    a.y + a.height + pad > b.y - pad
+  );
+}
 
 describe("VS01 sender placement: Text field", () => {
   it("lists Text as its own tool after Printed name (not merged with Printed name)", () => {
@@ -179,7 +193,9 @@ describe("VS01 auto initials placement", () => {
         value: "X",
       },
     ];
-    const out = rebuildRecipientAutoInitialsEveryPage([], "cp1", 1, new Set(), senderPlacedFields);
+    const out = rebuildRecipientAutoInitialsEveryPage([], "cp1", 1, new Set(), senderPlacedFields, [
+      { id: "cp1", name: "Party A" },
+    ]);
     const auto = out.find((f) => f.autoInitials);
     expect(auto).toBeDefined();
     const sig = senderPlacedFields[0];
@@ -190,5 +206,65 @@ describe("VS01 auto initials placement", () => {
       a.y < sig.y + sig.height &&
       a.y + a.height > sig.y;
     expect(overlaps).toBe(false);
+  });
+
+  it("skips gray auto initials when the right margin lane has no collision-free slot", () => {
+    const senderPlacedFields: PlacedSigningField[] = [
+      {
+        id: "lane_wall",
+        type: "text",
+        page: 0,
+        x: 0.86,
+        y: 0,
+        width: 0.14,
+        height: 1,
+        value: "",
+      },
+    ];
+    const out = rebuildRecipientAutoInitialsEveryPage([], "cp1", 1, new Set(), senderPlacedFields, [
+      { id: "cp1", name: "Party A" },
+    ]);
+    expect(out.some((f) => f.autoInitials)).toBe(false);
+  });
+
+  it("keeps gray auto initials clear of recipient email and date obstacles", () => {
+    const obstacles: Vs01RecipientPlacedField[] = [
+      {
+        id: "em1",
+        counterpartyId: "cp1",
+        type: "email",
+        page: 0,
+        x: 0.88,
+        y: 0.72,
+        width: 0.1,
+        height: 0.052,
+        value: "x@y.z",
+      },
+      {
+        id: "dt1",
+        counterpartyId: "cp1",
+        type: "date",
+        page: 0,
+        x: 0.88,
+        y: 0.5,
+        width: 0.12,
+        height: 0.052,
+        value: "2026-04-30",
+      },
+    ];
+    const out = rebuildRecipientAutoInitialsEveryPage(obstacles, "cp1", 1, new Set(), [], [
+      { id: "cp1", name: "Party A" },
+    ]);
+    const auto = out.find((f) => f.autoInitials);
+    expect(auto).toBeDefined();
+    const pad = 0.024;
+    for (const o of obstacles) {
+      const overlaps = normRectsOverlap(
+        { x: auto!.x, y: auto!.y, width: auto!.width, height: auto!.height },
+        { x: o.x, y: o.y, width: o.width, height: o.height },
+        pad
+      );
+      expect(overlaps).toBe(false);
+    }
   });
 });

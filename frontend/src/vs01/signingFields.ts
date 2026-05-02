@@ -138,6 +138,15 @@ const AUTO_INITIALS_MARGIN_X = 0.056;
 /** Bottom anchor: gray auto slots sit above draft footer band and clear typical signature rows. */
 const AUTO_INITIALS_MARGIN_Y = 0.1;
 
+/** Gray auto initials must sit entirely in this right margin strip (document-flow safe lane). */
+const AUTO_INITIALS_MARGIN_LANE_X_MIN = 0.88;
+const AUTO_INITIALS_MARGIN_RIGHT = 0.02;
+const AUTO_INITIALS_MARGIN_TOP_SCAN = 0.065;
+const AUTO_INITIALS_MARGIN_BOTTOM = 0.11;
+const AUTO_INITIALS_Y_SCAN_STEP = 0.017;
+const AUTO_INITIALS_OBSTACLE_PAD = 0.024;
+const AUTO_INITIALS_COLUMN_GAP = 0.006;
+
 function normRectsOverlap(
   a: { x: number; y: number; width: number; height: number },
   b: { x: number; y: number; width: number; height: number },
@@ -185,15 +194,66 @@ export function nudgeAutoInitialsRectClearOfNormRects(
 
 /** Normalized rect for gray “initials on every page” slots only — smaller than tool-placed initials. */
 export function autoInitialsPlacementDims(): { width: number; height: number } {
-  return { width: 0.064, height: 0.03 };
+  return { width: 0.048, height: 0.024 };
+}
+
+/**
+ * Margin-only placement for gray auto-initials: scan bottom→top along the right lane.
+ * Returns null if no collision-free slot exists (caller should skip that page).
+ */
+export function findAutoInitialsMarginSlotOrNull(
+  dims: { width: number; height: number },
+  obstacles: Array<{ x: number; y: number; width: number; height: number }>,
+  options?: { columnOffset?: number }
+): { x: number; y: number; width: number; height: number } | null {
+  const { width: w, height: h } = dims;
+  const col = Math.max(0, Math.floor(options?.columnOffset ?? 0));
+  let x = 1 - AUTO_INITIALS_MARGIN_RIGHT - w - col * (w + AUTO_INITIALS_COLUMN_GAP);
+  if (x < AUTO_INITIALS_MARGIN_LANE_X_MIN - 1e-9) return null;
+  x = Math.max(AUTO_INITIALS_MARGIN_LANE_X_MIN, Math.min(x, 1 - w));
+
+  const yBottom = 1 - AUTO_INITIALS_MARGIN_BOTTOM - h;
+  const yTop = AUTO_INITIALS_MARGIN_TOP_SCAN;
+  for (let y = yBottom; y >= yTop - 1e-9; y -= AUTO_INITIALS_Y_SCAN_STEP) {
+    const yy = Math.max(yTop, Math.min(y, 1 - h));
+    const rect = { x, y: yy, width: w, height: h };
+    const hit = obstacles.some((b) => normRectsOverlap(rect, b, AUTO_INITIALS_OBSTACLE_PAD));
+    if (!hit) return rect;
+  }
+  return null;
+}
+
+/** Column index for a recipient’s gray auto among all gray autos on the same page (left = higher rank). */
+export function autoInitialsColumnIndexOnPage(
+  fields: Vs01RecipientPlacedField[],
+  counterparties: Pick<Vs01Counterparty, "id" | "name">[],
+  counterpartyId: string,
+  page: number
+): number {
+  const namedOrder = counterparties.filter((c) => c.name.trim()).map((c) => c.id);
+  const cpRank = new Map(namedOrder.map((id, i) => [id, i]));
+  const rankOf = (id: string) => (cpRank.has(id) ? (cpRank.get(id) as number) : 9999);
+  const group = fields
+    .filter((f) => f.autoInitials && f.type === "initials" && f.page === page)
+    .slice()
+    .sort((a, b) => {
+      const da = rankOf(a.counterpartyId);
+      const db = rankOf(b.counterpartyId);
+      if (da !== db) return da - db;
+      return a.counterpartyId.localeCompare(b.counterpartyId);
+    });
+  const idx = group.findIndex((x) => x.counterpartyId === counterpartyId);
+  return idx < 0 ? 0 : idx;
 }
 
 export function autoInitialsLayout(): { x: number; y: number; width: number; height: number } {
-  const { width, height } = autoInitialsPlacementDims();
-  let x = 1 - AUTO_INITIALS_MARGIN_X - width;
-  let y = 1 - AUTO_INITIALS_MARGIN_Y - height;
-  x = Math.max(0, Math.min(x, 1 - width));
-  y = Math.max(0, Math.min(y, 1 - height));
+  const dims = autoInitialsPlacementDims();
+  const slot = findAutoInitialsMarginSlotOrNull(dims, []);
+  if (slot) return slot;
+  const { width, height } = dims;
+  let x = Math.max(AUTO_INITIALS_MARGIN_LANE_X_MIN, 1 - AUTO_INITIALS_MARGIN_RIGHT - width);
+  x = Math.min(x, 1 - width);
+  const y = Math.max(0, Math.min(1 - AUTO_INITIALS_MARGIN_BOTTOM - height, 1 - height));
   return { width, height, x, y };
 }
 
@@ -388,7 +448,8 @@ export function rebuildRecipientAutoInitialsEveryPage(
   counterpartyId: string,
   numPages: number,
   skippedPages: Set<number>,
-  senderPlacedFields: PlacedSigningField[]
+  senderPlacedFields: PlacedSigningField[],
+  counterparties: Pick<Vs01Counterparty, "id" | "name">[],
 ): Vs01RecipientPlacedField[] {
   let rest = prev.filter((f) => {
     if (f.autoInitials && f.type === "initials" && f.counterpartyId === counterpartyId) {
@@ -423,7 +484,6 @@ export function rebuildRecipientAutoInitialsEveryPage(
   const autos: Vs01RecipientPlacedField[] = [];
   for (let p = 0; p < numPages; p++) {
     if (skippedPages.has(p)) continue;
-    const pair = layoutRecipientInitialsPairForPage(p, senderPlacedFields);
     const rObs = rest
       .filter((o) => o.page === p && !o.autoInitials)
       .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
@@ -431,8 +491,15 @@ export function rebuildRecipientAutoInitialsEveryPage(
       .filter((s) => s.page === p)
       .map((s) => ({ x: s.x, y: s.y, width: s.width, height: s.height }));
     const obstacles = [...rObs, ...sObs];
-    const autoLayout = nudgeAutoInitialsRectClearOfNormRects(pair.auto, obstacles);
-    autos.push(createRecipientAutoInitialsField(counterpartyId, p, autoLayout));
+    const dims = autoInitialsPlacementDims();
+    const col = autoInitialsColumnIndexOnPage(
+      [...rest, ...autos],
+      counterparties,
+      counterpartyId,
+      p
+    );
+    const slot = findAutoInitialsMarginSlotOrNull(dims, obstacles, { columnOffset: col });
+    if (slot) autos.push(createRecipientAutoInitialsField(counterpartyId, p, slot));
   }
 
   return dedupeRecipientAutoInitialsByRecipientPage([...rest, ...autos]);
@@ -461,7 +528,9 @@ export function repositionAllRecipientAutoInitialsNonOverlapping(
 
   const rankOf = (cpId: string) => (cpRank.has(cpId) ? (cpRank.get(cpId) as number) : 9999);
 
+  const omit = new Set<string>();
   let changed = false;
+  const dims = autoInitialsPlacementDims();
   const next = fields.map((f) => {
     if (!(f.autoInitials && f.type === "initials")) return f;
 
@@ -477,7 +546,6 @@ export function repositionAllRecipientAutoInitialsNonOverlapping(
     const idx = group.findIndex((x) => x.id === f.id);
     if (idx < 0) return f;
 
-    const pair = layoutRecipientInitialsPairForPage(f.page, senderPlacedFields);
     const pageObs = [
       ...fields
         .filter((o) => o.page === f.page && !o.autoInitials)
@@ -486,22 +554,24 @@ export function repositionAllRecipientAutoInitialsNonOverlapping(
         .filter((s) => s.page === f.page)
         .map((s) => ({ x: s.x, y: s.y, width: s.width, height: s.height })),
     ];
-    const nudgedAuto = nudgeAutoInitialsRectClearOfNormRects(pair.auto, pageObs);
-    const { width: w, height: h, y } = nudgedAuto;
-    const gap = RECIPIENT_AUTO_INITIALS_GAP_NORM;
-    let x = nudgedAuto.x - idx * (w + gap);
-    x = Math.max(0, Math.min(x, 1 - w));
-
+    const slot = findAutoInitialsMarginSlotOrNull(dims, pageObs, { columnOffset: idx });
+    if (!slot) {
+      omit.add(f.id);
+      changed = true;
+      return f;
+    }
     const same =
-      Math.abs(f.x - x) < 1e-6 &&
-      Math.abs(f.y - y) < 1e-6 &&
-      Math.abs(f.width - w) < 1e-6 &&
-      Math.abs(f.height - h) < 1e-6;
+      Math.abs(f.x - slot.x) < 1e-6 &&
+      Math.abs(f.y - slot.y) < 1e-6 &&
+      Math.abs(f.width - slot.width) < 1e-6 &&
+      Math.abs(f.height - slot.height) < 1e-6;
     if (!same) changed = true;
-    return same ? f : { ...f, x, y, width: w, height: h };
+    return same ? f : { ...f, ...slot };
   });
 
-  return changed ? next : fields;
+  const filtered = omit.size > 0 ? next.filter((f) => !omit.has(f.id)) : next;
+  if (omit.size > 0) return filtered;
+  return changed ? filtered : fields;
 }
 
 export function recipientAutoInitialsFieldId(counterpartyId: string, page: number): string {
@@ -618,8 +688,9 @@ export function buildAutoInitialsFields(
     const obstacles = manualFields
       .filter((f) => f.page === p && !f.autoInitials)
       .map((f) => ({ x: f.x, y: f.y, width: f.width, height: f.height }));
-    const layout = nudgeAutoInitialsRectClearOfNormRects(autoInitialsLayout(), obstacles);
-    out.push(createAutoInitialsField(p, ctx, layout));
+    const dims = autoInitialsPlacementDims();
+    const slot = findAutoInitialsMarginSlotOrNull(dims, obstacles);
+    if (slot) out.push(createAutoInitialsField(p, ctx, slot));
   }
   return out;
 }

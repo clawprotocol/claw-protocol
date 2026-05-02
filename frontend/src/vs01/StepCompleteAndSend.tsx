@@ -23,8 +23,11 @@ import type {
 } from "./types";
 import {
   RECIPIENT_FIELD_TOOLS,
+  autoInitialsColumnIndexOnPage,
+  autoInitialsPlacementDims,
   computeRecipientRectFromClick,
   defaultRecipientFieldValue,
+  findAutoInitialsMarginSlotOrNull,
   labelForFieldType,
   labelForRecipientFieldType,
   layoutRecipientInitialsPairForPage,
@@ -246,18 +249,32 @@ export function StepCompleteAndSend({
         target.type === "initials"
       ) {
         const pair = layoutRecipientInitialsPairForPage(target.page, senderPlacedFields);
-        return prev.map((f) => {
-          if (f.id === fieldId) return { ...f, ...pair.manual };
-          if (
-            f.autoInitials &&
-            f.type === "initials" &&
-            f.counterpartyId === target.counterpartyId &&
-            f.page === target.page
-          ) {
-            return { ...f, ...pair.auto };
-          }
-          return f;
-        });
+        const page = target.page;
+        const cpId = target.counterpartyId;
+        const base = prev.map((f) => (f.id === fieldId ? { ...f, ...pair.manual } : f));
+        const rObs = base
+          .filter((o) => o.page === page && !o.autoInitials)
+          .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
+        const sObs = senderPlacedFields
+          .filter((s) => s.page === page)
+          .map((s) => ({ x: s.x, y: s.y, width: s.width, height: s.height }));
+        const obstacles = [...rObs, ...sObs];
+        const dims = autoInitialsPlacementDims();
+        const col = autoInitialsColumnIndexOnPage(base, counterparties, cpId, page);
+        const slot = findAutoInitialsMarginSlotOrNull(dims, obstacles, { columnOffset: col });
+        return base
+          .filter((f) => {
+            if (f.autoInitials && f.type === "initials" && f.counterpartyId === cpId && f.page === page) {
+              return Boolean(slot);
+            }
+            return true;
+          })
+          .map((f) => {
+            if (f.autoInitials && f.type === "initials" && f.counterpartyId === cpId && f.page === page && slot) {
+              return { ...f, ...slot };
+            }
+            return f;
+          });
       }
 
       if (
@@ -296,7 +313,7 @@ export function StepCompleteAndSend({
 
       return prev.map((f) => (f.id === fieldId ? { ...f, ...patch } : f));
     },
-    [recipientAutoInitialsEveryPage, senderPlacedFields]
+    [recipientAutoInitialsEveryPage, senderPlacedFields, counterparties]
   );
 
   const namedCps = counterparties.filter((c) => c.name.trim());
@@ -473,7 +490,8 @@ export function StepCompleteAndSend({
         cp,
         numPages,
         skipped,
-        senderPlacedFieldsRef.current
+        senderPlacedFieldsRef.current,
+        counterparties
       );
       return repositionAllRecipientAutoInitialsNonOverlapping(rebuilt, counterparties, senderPlacedFieldsRef.current);
     });
