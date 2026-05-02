@@ -181,7 +181,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const j = s.indexOf('case "update_agreement_from_buffer"', i);
     expect(j).toBeGreaterThan(i);
     const block = s.slice(i, j);
-    expect(block).toContain("paidProAuthoritative");
+    expect(block).toMatch(/\(paidProAuthoritative && premiumSignersSurfaceReady\)/);
     expect(block).toContain("premiumPersistedFlowActive");
     expect(block).toContain("hasPaidPremiumCompletionSession()");
     expect(block).toContain("launchUpgradeCheckoutFromStarterDraft");
@@ -233,6 +233,19 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(block).not.toContain("finalizeIntakeCapture");
     expect(block).toContain("setAdvancedFullDraftPaywallOpen(true)");
     expect(block).toContain("stashCreateComplexityResume");
+  });
+
+  it("free draft primary CTA uses Pro checkout labels (not Continue to send) when showUpgradeToFullDraftOnReview", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    const i = s.indexOf("if (showUpgradeToFullDraftOnReview)");
+    expect(i).toBeGreaterThanOrEqual(0);
+    const j = s.indexOf("const firstBlocker = draft", i);
+    expect(j).toBeGreaterThan(i);
+    const block = s.slice(i, j);
+    expect(block).toContain('label: streamlineFirstRunReviewUi ? "Send with LawDog Pro" : "Upgrade to send"');
+    expect(block).toContain('action: "continue_basic_draft"');
+    expect(block).not.toContain("label: streamlineContinueLabelEarly");
   });
 
   it("continue_basic_draft paid or premium-session path still calls handOffProductionDraftToRecipients after clearUpgradeLockAndResume", () => {

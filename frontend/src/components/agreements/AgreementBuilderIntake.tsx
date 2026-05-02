@@ -1739,6 +1739,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [draft, buildPreviewForCurrentTier],
   );
 
+  const [starterDraftCopyAck, setStarterDraftCopyAck] = useState(false);
+  const copyStarterDraftPreview = React.useCallback(() => {
+    if (!draft) return;
+    const text = buildPreviewForCurrentTier(draft);
+    if (!text.trim()) return;
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setStarterDraftCopyAck(true);
+        window.setTimeout(() => setStarterDraftCopyAck(false), 2000);
+      })
+      .catch(() => {});
+  }, [draft, buildPreviewForCurrentTier]);
+
   const [premiumPipelineUserMessage, setPremiumPipelineUserMessage] = useState<string | null>(() => {
     return readInitialPremiumReturnFromWindow().pipelineMessage;
   });
@@ -10337,17 +10351,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             };
           }
         }
-        const premiumForkSurfaceEarly =
-          premiumSendPathUnlocked || premiumPersistedFlowActive || premiumRecipientUxActive;
-        const streamlineContinueLabelEarly =
-          streamlineFirstRunReviewUi && premiumForkSurfaceEarly
-            ? "Continue to send"
-            : streamlineFirstRunReviewUi
-              ? "Continue to send"
-              : "Continue";
         if (showUpgradeToFullDraftOnReview) {
           return {
-            label: streamlineContinueLabelEarly,
+            label: streamlineFirstRunReviewUi ? "Send with LawDog Pro" : "Upgrade to send",
             action: "continue_basic_draft",
             disabled: !draft,
             reason: !draft ? "no_draft" : undefined,
@@ -11341,7 +11347,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           case "continue_basic_draft": {
             const eligibleForRecipientSetupAfterStarterPreview =
-              paidProAuthoritative ||
+              (paidProAuthoritative && premiumSignersSurfaceReady) ||
               premiumPersistedFlowActive ||
               hasPaidPremiumCompletionSession();
             if (!eligibleForRecipientSetupAfterStarterPreview) {
@@ -13040,12 +13046,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   {PREVIEW_BLOCK_TITLE}
                                 </h2>
                                 <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
-                                  Review details, then continue. Nothing is sent automatically.
+                                  Review your starter draft below.
                                 </p>
                                 <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
-                                  You can keep going with this version or compare an upgrade below for fuller
-                                  protections — upgrading is optional, not required to continue.
+                                  Copy it now, or upgrade to send, collect signatures, and keep a proof record.
+                                  Nothing is sent automatically until you choose Pro and complete checkout.
                                 </p>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    className="rounded-md border border-slate-600/80 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-slate-500 hover:bg-slate-800/90 sm:text-sm"
+                                    onClick={() => void copyStarterDraftPreview()}
+                                  >
+                                    {starterDraftCopyAck ? "Copied" : "Copy draft"}
+                                  </button>
+                                </div>
                               </>
                             ) : premiumPostCheckoutSummaryVisible ? (
                               premiumProTruthGate?.successBannerAllowed ? null : (
@@ -14475,19 +14490,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   (unifiedPrimaryCta.action === "continue_to_recipients" ||
                     unifiedPrimaryCta.action === "continue_basic_draft") ? (
                     <div className="mb-3 space-y-1 text-center">
-                      <p className="text-xs leading-relaxed text-slate-300 sm:text-sm">
-                        Nothing is sent automatically.
-                        <br />
-                        You&apos;ll review recipients and send when ready.
-                      </p>
-                      <p className="text-[11px] text-slate-400 sm:text-xs">
-                        You&apos;ll add emails and send for signature next
-                      </p>
                       {unifiedPrimaryCta.action === "continue_basic_draft" ? (
-                        <p className="text-[10px] leading-snug text-slate-500 sm:text-[11px]">
-                          {STARTER_CONTINUE_TO_SEND_UPGRADE_NUDGE}
-                        </p>
-                      ) : null}
+                        <>
+                          <p className="text-xs leading-relaxed text-slate-300 sm:text-sm">
+                            Nothing is sent automatically. The primary button opens LawDog Pro checkout — send,
+                            signatures, and proof record unlock after upgrade.
+                          </p>
+                          <p className="text-[11px] text-slate-400 sm:text-xs">
+                            Use &quot;Copy draft&quot; above if you only need the starter text for now.
+                          </p>
+                          <p className="text-[10px] leading-snug text-slate-500 sm:text-[11px]">
+                            {STARTER_CONTINUE_TO_SEND_UPGRADE_NUDGE}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-xs leading-relaxed text-slate-300 sm:text-sm">
+                            Nothing is sent automatically.
+                            <br />
+                            You&apos;ll review recipients and send when ready.
+                          </p>
+                          <p className="text-[11px] text-slate-400 sm:text-xs">
+                            You&apos;ll add emails and send for signature next
+                          </p>
+                        </>
+                      )}
                     </div>
                   ) : null}
                   {showPartyNamesPlaceholderHint ? (
