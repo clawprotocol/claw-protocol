@@ -6763,13 +6763,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!paidProAuthoritative || createUiStage !== CreateUiStage.RECIPIENTS) return;
+    const inPersistedRecipientShell =
+      createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send";
+    /**
+     * Free/basic handoff uses RECIPIENTS + CreateFlowSendRecipientsPanel. `paidProAuthoritative` can be a
+     * false positive (long corpus / tier) while `premiumSignersSurfaceReady` is still false — do not snap back to DRAFT.
+     * True paid inline recipient UI stays on DRAFT (`advancePaidProToRecipientSetup`); only coerce when signers surface is ready.
+     */
+    if (inPersistedRecipientShell && !premiumSignersSurfaceReady) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[recipient-stage-draft-restore-blocked]", {
+          createFlowPhase,
+          createUiStage,
+          paidProAuthoritative,
+          premiumSignersSurfaceReady,
+        });
+      }
+      return;
+    }
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.warn("[invariant-violation] paid Pro should not enter RECIPIENTS — coercing to DRAFT + review");
     }
     setCreateUiStage(CreateUiStage.DRAFT);
     setDisplayPhase("review");
-  }, [paidProAuthoritative, createUiStage]);
+  }, [paidProAuthoritative, createUiStage, createFlowPhase, premiumSignersSurfaceReady]);
 
   /** Paid authoritative Pro: recipient setup stays on the Pro review surface (DRAFT) — never legacy RECIPIENTS shell. */
   const advancePaidProToRecipientSetup = useCallback(() => {

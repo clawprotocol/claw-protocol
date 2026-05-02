@@ -363,6 +363,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
     expect(intake).toMatch(/if \(paidProAuthoritative\) \{[\s\S]*?setCreateUiStage\(CreateUiStage\.DRAFT\)/);
     expect(intake).toContain("[invariant-violation] paid Pro should not enter RECIPIENTS");
+    expect(intake).toContain("[recipient-stage-draft-restore-blocked]");
+    expect(intake).toContain("inPersistedRecipientShell");
   });
 
   it("paid Pro send confirmation modal includes I will sign first for signature mode only", () => {
