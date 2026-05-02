@@ -138,14 +138,21 @@ const AUTO_INITIALS_MARGIN_X = 0.056;
 /** Bottom anchor: gray auto slots sit above draft footer band and clear typical signature rows. */
 const AUTO_INITIALS_MARGIN_Y = 0.1;
 
-/** Gray auto initials must sit entirely in this right margin strip (document-flow safe lane). */
-const AUTO_INITIALS_MARGIN_LANE_X_MIN = 0.88;
 const AUTO_INITIALS_MARGIN_RIGHT = 0.02;
-const AUTO_INITIALS_MARGIN_TOP_SCAN = 0.065;
-const AUTO_INITIALS_MARGIN_BOTTOM = 0.11;
+/**
+ * Normalized clearance from physical page bottom to the bottom edge of the gray auto box.
+ * Tuned with VS01 signing PDF seed bottom inset (~72pt / 792pt) so initials sit in reserved blank,
+ * not over agreement body.
+ */
+const AUTO_INITIALS_MARGIN_BOTTOM = 0.058;
 const AUTO_INITIALS_Y_SCAN_STEP = 0.017;
 const AUTO_INITIALS_OBSTACLE_PAD = 0.024;
 const AUTO_INITIALS_COLUMN_GAP = 0.006;
+/** Vertical span (upward from yBottom) scanned inside the reserved bottom band only (no mid-page fallback). */
+const AUTO_INITIALS_BOTTOM_BAND_HEIGHT = 0.038;
+/** Left extent for bottom-band sweep (~Story left inset on Letter, keeps initials out of left body column). */
+const AUTO_INITIALS_BOTTOM_SWEEP_X_MIN = 0.055;
+const AUTO_INITIALS_X_SCAN_STEP = 0.01;
 
 function normRectsOverlap(
   a: { x: number; y: number; width: number; height: number },
@@ -198,8 +205,9 @@ export function autoInitialsPlacementDims(): { width: number; height: number } {
 }
 
 /**
- * Margin-only placement for gray auto-initials: scan bottom→top along the right lane.
- * Returns null if no collision-free slot exists (caller should skip that page).
+ * Gray auto-initials only: reserved bottom safe band (matches VS01 signing PDF seed bottom inset).
+ * Order: bottom-right anchor, then move left along the same bottom band (small vertical wiggle).
+ * No mid-page or right-margin vertical fallback — returns null if no clean slot (caller skips page).
  */
 export function findAutoInitialsMarginSlotOrNull(
   dims: { width: number; height: number },
@@ -208,17 +216,27 @@ export function findAutoInitialsMarginSlotOrNull(
 ): { x: number; y: number; width: number; height: number } | null {
   const { width: w, height: h } = dims;
   const col = Math.max(0, Math.floor(options?.columnOffset ?? 0));
-  let x = 1 - AUTO_INITIALS_MARGIN_RIGHT - w - col * (w + AUTO_INITIALS_COLUMN_GAP);
-  if (x < AUTO_INITIALS_MARGIN_LANE_X_MIN - 1e-9) return null;
-  x = Math.max(AUTO_INITIALS_MARGIN_LANE_X_MIN, Math.min(x, 1 - w));
+  const xRightAnchor =
+    1 - AUTO_INITIALS_MARGIN_RIGHT - w - col * (w + AUTO_INITIALS_COLUMN_GAP);
+  if (xRightAnchor + 1e-9 < AUTO_INITIALS_BOTTOM_SWEEP_X_MIN) return null;
 
   const yBottom = 1 - AUTO_INITIALS_MARGIN_BOTTOM - h;
-  const yTop = AUTO_INITIALS_MARGIN_TOP_SCAN;
-  for (let y = yBottom; y >= yTop - 1e-9; y -= AUTO_INITIALS_Y_SCAN_STEP) {
-    const yy = Math.max(yTop, Math.min(y, 1 - h));
-    const rect = { x, y: yy, width: w, height: h };
-    const hit = obstacles.some((b) => normRectsOverlap(rect, b, AUTO_INITIALS_OBSTACLE_PAD));
-    if (!hit) return rect;
+  const yLow = yBottom - AUTO_INITIALS_BOTTOM_BAND_HEIGHT;
+  const pad = AUTO_INITIALS_OBSTACLE_PAD;
+  const overlapsObstacle = (rect: { x: number; y: number; width: number; height: number }) =>
+    obstacles.some((b) => normRectsOverlap(rect, b, pad));
+
+  for (let yRow = yBottom; yRow >= yLow - 1e-9; yRow -= AUTO_INITIALS_Y_SCAN_STEP) {
+    const y = Math.max(0, Math.min(yRow, 1 - h));
+    for (
+      let x = Math.min(xRightAnchor, 1 - w);
+      x >= AUTO_INITIALS_BOTTOM_SWEEP_X_MIN - 1e-9;
+      x -= AUTO_INITIALS_X_SCAN_STEP
+    ) {
+      const xx = Math.max(0, Math.min(x, 1 - w));
+      const rect = { x: xx, y, width: w, height: h };
+      if (!overlapsObstacle(rect)) return rect;
+    }
   }
   return null;
 }
@@ -251,8 +269,10 @@ export function autoInitialsLayout(): { x: number; y: number; width: number; hei
   const slot = findAutoInitialsMarginSlotOrNull(dims, []);
   if (slot) return slot;
   const { width, height } = dims;
-  let x = Math.max(AUTO_INITIALS_MARGIN_LANE_X_MIN, 1 - AUTO_INITIALS_MARGIN_RIGHT - width);
-  x = Math.min(x, 1 - width);
+  const x = Math.max(
+    AUTO_INITIALS_BOTTOM_SWEEP_X_MIN,
+    Math.min(1 - AUTO_INITIALS_MARGIN_RIGHT - width, 1 - width)
+  );
   const y = Math.max(0, Math.min(1 - AUTO_INITIALS_MARGIN_BOTTOM - height, 1 - height));
   return { width, height, x, y };
 }

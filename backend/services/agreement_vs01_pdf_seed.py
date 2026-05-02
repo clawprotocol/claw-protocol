@@ -14,6 +14,13 @@ log = logging.getLogger(__name__)
 _MAX_HTML_CHARS: Final[int] = 1_200_000
 _MAX_STORY_PAGES: Final[int] = 400
 
+# US Letter Story layout: asymmetric bottom inset reserves space for rendered footer + VS01 gray
+# auto-initials (never overlap agreement body). Sides/top stay ~0.56in; bottom ~1in per product spec.
+VS01_SIGNING_STORY_MARGIN_LEFT_PT: Final[int] = 40
+VS01_SIGNING_STORY_MARGIN_TOP_PT: Final[int] = 40
+VS01_SIGNING_STORY_MARGIN_RIGHT_PT: Final[int] = 40
+VS01_SIGNING_STORY_MARGIN_BOTTOM_PT: Final[int] = 72
+
 
 def _import_fitz_module() -> Optional[Any]:
     """Return PyMuPDF module or None (patchable for tests)."""
@@ -99,6 +106,20 @@ def _strip_scripts_and_styles(html: str) -> str:
     return s[:_MAX_HTML_CHARS]
 
 
+def _vs01_signing_story_user_css() -> str:
+    """
+    CSS for PyMuPDF Story: Letter @page with ~1in bottom reserve (footer + VS01 gray auto-initials),
+    plus body typography and draft footer stability.
+    """
+    return (
+        "@page{size:letter;margin:40pt 40pt 72pt 40pt;}"
+        "body{font-family:Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.35;"
+        "margin:0;padding:0;}"
+        "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
+        "orphans:3;widows:3;margin-top:28pt;padding-top:10pt;}"
+    )
+
+
 def _plaintext_pdf_bytes(fitz: object, body_inner: str) -> bytes:
     plain = re.sub(r"(?s)<[^>]+>", " ", body_inner)
     plain = " ".join(plain.split())
@@ -109,7 +130,12 @@ def _plaintext_pdf_bytes(fitz: object, body_inner: str) -> bytes:
     page = doc.new_page(width=612, height=792)
     try:
         page.insert_textbox(
-            fitz.Rect(36, 36, 576, 756),
+            fitz.Rect(
+                VS01_SIGNING_STORY_MARGIN_LEFT_PT,
+                VS01_SIGNING_STORY_MARGIN_TOP_PT,
+                612 - VS01_SIGNING_STORY_MARGIN_RIGHT_PT,
+                792 - VS01_SIGNING_STORY_MARGIN_BOTTOM_PT,
+            ),
             plain,
             fontsize=10,
             fontname="helv",
@@ -149,15 +175,15 @@ def agreement_rendered_html_to_pdf_bytes(
             f"{body_inner}"
             "</body></html>"
         )
-        user_css = (
-            "body{font-family:Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.35;"
-            "margin:0;padding:0;}"
-            "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
-            "orphans:3;widows:3;margin-top:28pt;padding-top:10pt;}"
-        )
+        user_css = _vs01_signing_story_user_css()
 
         mediabox = fitz.paper_rect("letter")
-        where = mediabox + (36, 36, -36, -36)
+        where = mediabox + (
+            VS01_SIGNING_STORY_MARGIN_LEFT_PT,
+            VS01_SIGNING_STORY_MARGIN_TOP_PT,
+            -VS01_SIGNING_STORY_MARGIN_RIGHT_PT,
+            -VS01_SIGNING_STORY_MARGIN_BOTTOM_PT,
+        )
 
         try:
             buf = io.BytesIO()

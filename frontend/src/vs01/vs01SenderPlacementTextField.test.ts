@@ -8,6 +8,7 @@ import {
   defaultRecipientFieldValue,
   defaultSizeForRecipientField,
   defaultSizeForType,
+  findAutoInitialsMarginSlotOrNull,
   labelForFieldType,
   rebuildRecipientAutoInitialsEveryPage,
   RECIPIENT_FIELD_TOOLS,
@@ -173,6 +174,9 @@ describe("VS01 sender placement: Email tool", () => {
 });
 
 describe("VS01 auto initials placement", () => {
+  /** Matches `AUTO_INITIALS_MARGIN_BOTTOM` in signingFields (reserved page-bottom band). */
+  const marginBottom = 0.058;
+
   it("uses a smaller box for gray auto initials than for tool-placed initials", () => {
     const auto = autoInitialsPlacementDims();
     const manual = defaultSizeForRecipientField("initials");
@@ -187,9 +191,9 @@ describe("VS01 auto initials placement", () => {
         type: "signature",
         page: 0,
         x: 0.64,
-        y: 0.78,
+        y: 0.58,
         width: 0.32,
-        height: 0.14,
+        height: 0.12,
         value: "X",
       },
     ];
@@ -208,8 +212,18 @@ describe("VS01 auto initials placement", () => {
     expect(overlaps).toBe(false);
   });
 
-  it("skips gray auto initials when the right margin lane has no collision-free slot", () => {
+  it("skips gray auto initials when the reserved bottom band has no collision-free slot", () => {
     const senderPlacedFields: PlacedSigningField[] = [
+      {
+        id: "bottom_fill",
+        type: "text",
+        page: 0,
+        x: 0,
+        y: 0.75,
+        width: 1,
+        height: 0.25,
+        value: "",
+      },
       {
         id: "lane_wall",
         type: "text",
@@ -225,6 +239,66 @@ describe("VS01 auto initials placement", () => {
       { id: "cp1", name: "Party A" },
     ]);
     expect(out.some((f) => f.autoInitials)).toBe(false);
+  });
+
+  it("when bottom-right is clear, places auto initials in the bottom-right footer-safe band", () => {
+    const dims = autoInitialsPlacementDims();
+    const slot = findAutoInitialsMarginSlotOrNull(dims, []);
+    expect(slot).not.toBeNull();
+    const yBottom = 1 - marginBottom - dims.height;
+    expect(slot!.y).toBeCloseTo(yBottom, 2);
+    expect(slot!.x + slot!.width).toBeGreaterThan(0.94);
+  });
+
+  it("when bottom-right is blocked, steps left along the reserved bottom band (no mid-page placement)", () => {
+    const dims = autoInitialsPlacementDims();
+    const yBottom = 1 - marginBottom - dims.height;
+    const obstacles = [
+      {
+        x: 0.72,
+        y: Math.max(0, yBottom - 0.02),
+        width: 0.28,
+        height: 0.08,
+      },
+      {
+        x: 0.88,
+        y: 0.12,
+        width: 0.12,
+        height: 0.58,
+      },
+    ];
+    const slot = findAutoInitialsMarginSlotOrNull(dims, obstacles);
+    expect(slot).not.toBeNull();
+    expect(slot!.y).toBeGreaterThanOrEqual(yBottom - 0.045);
+    expect(slot!.y).toBeLessThanOrEqual(yBottom + 0.01);
+    expect(slot!.x + dims.width).toBeLessThanOrEqual(0.72 + 1e-6);
+  });
+
+  it("returns null when the bottom band is fully blocked (no mid-page or right-margin fallback)", () => {
+    const dims = autoInitialsPlacementDims();
+    const yBottom = 1 - marginBottom - dims.height;
+    const obstacles = [{ x: 0.05, y: yBottom - 0.04, width: 0.92, height: 0.07 }];
+    expect(findAutoInitialsMarginSlotOrNull(dims, obstacles)).toBeNull();
+  });
+
+  it("does not place gray auto initials mid-page when only a mid-page right lane is clear", () => {
+    const dims = autoInitialsPlacementDims();
+    const yBottom = 1 - marginBottom - dims.height;
+    const obstacles = [
+      { x: 0.05, y: yBottom - 0.04, width: 0.92, height: 0.07 },
+      { x: 0.88, y: 0.1, width: 0.12, height: 0.55 },
+    ];
+    expect(findAutoInitialsMarginSlotOrNull(dims, obstacles)).toBeNull();
+  });
+
+  it("when bottom-right is clear, ignores a mid-page right obstacle (no right-lane fallback)", () => {
+    const dims = autoInitialsPlacementDims();
+    const yBottom = 1 - marginBottom - dims.height;
+    const obstacles = [{ x: 0.88, y: 0.12, width: 0.12, height: 0.5 }];
+    const slot = findAutoInitialsMarginSlotOrNull(dims, obstacles);
+    expect(slot).not.toBeNull();
+    expect(slot!.y).toBeGreaterThanOrEqual(yBottom - 0.04);
+    expect(slot!.x + dims.width).toBeGreaterThan(0.9);
   });
 
   it("keeps gray auto initials clear of recipient email and date obstacles", () => {
