@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Vs01RecipientPlacedField } from "./types";
 import {
   SIGNING_FIELD_TOOLS,
+  VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM,
   autoInitialsPlacementDims,
   buildAutoInitialsFields,
   createPlacedFieldAtClick,
@@ -12,6 +13,8 @@ import {
   labelForFieldType,
   rebuildRecipientAutoInitialsEveryPage,
   RECIPIENT_FIELD_TOOLS,
+  resizeBoundsForPlacementField,
+  signingFieldResizeBoundsNorm,
   type PlacedSigningField,
 } from "./signingFields";
 
@@ -67,16 +70,65 @@ describe("VS01 sender placement: Text field", () => {
     const textS = defaultSizeForType("text");
     const printedS = defaultSizeForType("printed_name");
     expect(textS.width).toBeGreaterThan(printedS.width);
-    expect(textS.height).toBeGreaterThan(0.04);
+    expect(textS.height).toBeGreaterThan(0.028);
     const textR = defaultSizeForRecipientField("text");
     const printedR = defaultSizeForRecipientField("printed_name");
     expect(textR.width).toBeGreaterThan(printedR.width);
   });
 
   it("uses compact line-like default heights for Text and Email", () => {
-    expect(defaultSizeForType("text").height).toBeLessThanOrEqual(0.052);
-    expect(defaultSizeForType("email").height).toBeLessThanOrEqual(0.054);
+    expect(defaultSizeForType("text").height).toBeLessThanOrEqual(0.042);
+    expect(defaultSizeForType("email").height).toBeLessThanOrEqual(0.045);
     expect(defaultSizeForType("email").width).toBeGreaterThanOrEqual(defaultSizeForType("text").width);
+  });
+});
+
+describe("VS01 manual field sizing map and resize bounds", () => {
+  it("exposes one manual default map aligned for sender and recipient tools", () => {
+    for (const t of [
+      "signature",
+      "initials",
+      "printed_name",
+      "text",
+      "email",
+      "date",
+    ] as const) {
+      expect(defaultSizeForType(t)).toEqual(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM[t]);
+      expect(defaultSizeForRecipientField(t)).toEqual(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM[t]);
+    }
+  });
+
+  it("keeps gray auto-initials dims separate and smaller than manual initials", () => {
+    const auto = autoInitialsPlacementDims();
+    const manual = VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.initials;
+    expect(auto.width).toBe(0.048);
+    expect(auto.height).toBe(0.024);
+    expect(auto.width).toBeLessThan(manual.width);
+    expect(auto.height).toBeLessThan(manual.height);
+  });
+
+  it("defaults line-like text, email, date, and printed_name (not oversized blocks)", () => {
+    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.text.height).toBeLessThanOrEqual(0.04);
+    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.email.height).toBeLessThanOrEqual(0.042);
+    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.date.height).toBeLessThanOrEqual(0.042);
+    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.printed_name.height).toBeLessThanOrEqual(0.045);
+  });
+
+  it("orders default widths: email > text > printed_name and email > date", () => {
+    const { text, email, printed_name, date } = VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM;
+    expect(email.width).toBeGreaterThan(text.width);
+    expect(text.width).toBeGreaterThan(printed_name.width);
+    expect(email.width).toBeGreaterThan(date.width);
+  });
+
+  it("allows Text/Email to grow on resize up to generous max while enforcing mins", () => {
+    const tb = signingFieldResizeBoundsNorm("text");
+    const eb = signingFieldResizeBoundsNorm("email");
+    expect(tb.maxW).toBeGreaterThan(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.text.width);
+    expect(tb.maxH).toBeGreaterThan(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.text.height);
+    expect(eb.maxH).toBeGreaterThan(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.email.height);
+    expect(tb.minW).toBeLessThanOrEqual(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.text.width);
+    expect(resizeBoundsForPlacementField({ type: "initials", autoInitials: true }).maxW).toBeLessThanOrEqual(0.09);
   });
 });
 

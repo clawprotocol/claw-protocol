@@ -2675,14 +2675,32 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-box--text .vs01-sign-field-inline-input,
-.vs01-sign-placement-box--email .vs01-sign-field-inline-input,
-.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-field-inline-input,
-.vs01-recipient-assign-step .vs01-sign-placement-box--email .vs01-sign-field-inline-input {
-  min-height: 1.28em;
+.vs01-sign-placement-box--email .vs01-sign-field-inline-input {
+  min-height: 1.2em;
   white-space: normal;
   word-break: break-word;
   line-height: 1.22;
   font-size: max(0.42rem, 9cqi);
+}
+
+/* Step 4: default single-line e-sign look; allow wrap when the box is resized taller (container). */
+.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-field-inline-input,
+.vs01-recipient-assign-step .vs01-sign-placement-box--email .vs01-sign-field-inline-input {
+  min-height: 1.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+  font-size: max(0.4rem, 8.5cqi);
+}
+
+@container vs01-placed-field (min-height: 3.35rem) {
+  .vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-field-inline-input,
+  .vs01-recipient-assign-step .vs01-sign-placement-box--email .vs01-sign-field-inline-input {
+    white-space: normal;
+    overflow-y: auto;
+    word-break: break-word;
+  }
 }
 
 .vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-placement-text,
@@ -2751,6 +2769,8 @@ button.vs01-upload-btn:disabled {
 .vs01-recipient-assign-step .vs01-sign-placement-box--date .vs01-sign-field-inline-input {
   background: color-mix(in srgb, var(--vs01-color-bg-card) 94%, #ebe4d8);
   border-color: color-mix(in srgb, var(--vs01-color-text-muted) 32%, var(--vs01-color-border-subtle));
+  font-size: max(0.4rem, 8.5cqi);
+  line-height: 1.2;
 }
 
 /* Step 4: signature / printed name — mirror sender ref hierarchy (label + subline + centered body). */
@@ -2930,6 +2950,21 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-placement-box--printed_name,
 .vs01-sign-placement-box--date {
   cursor: default;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--text,
+.vs01-recipient-assign-step .vs01-sign-placement-box--email,
+.vs01-recipient-assign-step .vs01-sign-placement-box--date {
+  gap: 0.06rem;
+  padding: 0.12rem 0.22rem 0.18rem;
+}
+
+.vs01-recipient-assign-step .vs01-sign-placement-box--text .vs01-sign-placement-label,
+.vs01-recipient-assign-step .vs01-sign-placement-box--email .vs01-sign-placement-label,
+.vs01-recipient-assign-step .vs01-sign-placement-box--date .vs01-sign-placement-label {
+  font-size: max(0.36rem, 4.6cqi);
+  letter-spacing: 0.07em;
+  line-height: 1.1;
 }
 
 .vs01-sign-placement-box--text.vs01-sign-placement-box--selected,
@@ -3476,8 +3511,8 @@ button.vs01-upload-btn:disabled {
   position: absolute;
   right: -3px;
   bottom: -3px;
-  width: 15px;
-  height: 15px;
+  width: clamp(15px, 3.6cqi, 22px);
+  height: clamp(15px, 3.6cqi, 22px);
   margin: 0;
   padding: 0;
   border: 2px solid var(--vs01-color-accent);

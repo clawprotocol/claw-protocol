@@ -49,28 +49,83 @@ export const RECIPIENT_FIELD_TOOLS: { type: Vs01RecipientFieldType; label: strin
   { type: "date", label: "Date" },
 ];
 
+/**
+ * Single source of truth for **manual** signing-field default footprint (normalized 0..1 on the page).
+ * Compact, line-aligned defaults for e-sign UX; gray auto-initials use {@link autoInitialsPlacementDims} only.
+ */
+export const VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM: Record<SigningFieldType, { width: number; height: number }> = {
+  signature: { width: 0.22, height: 0.056 },
+  initials: { width: 0.078, height: 0.036 },
+  printed_name: { width: 0.22, height: 0.042 },
+  text: { width: 0.32, height: 0.036 },
+  email: { width: 0.37, height: 0.04 },
+  date: { width: 0.135, height: 0.04 },
+};
+
+/** Hard page caps for resize (geometry stays on-page). */
+const VS01_FIELD_RESIZE_PAGE_CAP_NORM = { maxW: 0.92, maxH: 0.5 } as const;
+
+export type Vs01FieldResizeBoundsNorm = {
+  minW: number;
+  minH: number;
+  maxW: number;
+  maxH: number;
+};
+
+const VS01_MANUAL_FIELD_RESIZE_BOUNDS_NORM: Record<SigningFieldType, Vs01FieldResizeBoundsNorm> = {
+  signature: { minW: 0.14, minH: 0.044, maxW: 0.92, maxH: 0.22 },
+  initials: { minW: 0.05, minH: 0.028, maxW: 0.2, maxH: 0.11 },
+  printed_name: { minW: 0.15, minH: 0.034, maxW: 0.55, maxH: 0.09 },
+  text: { minW: 0.15, minH: 0.03, maxW: 0.92, maxH: 0.45 },
+  email: { minW: 0.2, minH: 0.032, maxW: 0.92, maxH: 0.45 },
+  date: { minW: 0.1, minH: 0.032, maxW: 0.34, maxH: 0.12 },
+};
+
+/** Sender gray auto-initials only — tight bounds so manual rules do not stretch autos. */
+const VS01_AUTO_INITIALS_RESIZE_BOUNDS_NORM: Vs01FieldResizeBoundsNorm = {
+  minW: 0.036,
+  minH: 0.018,
+  maxW: 0.08,
+  maxH: 0.042,
+};
+
 export function labelForRecipientFieldType(t: Vs01RecipientFieldType): string {
   const m = RECIPIENT_FIELD_TOOLS.find((x) => x.type === t);
   return m?.label ?? t;
 }
 
 export function defaultSizeForRecipientField(t: Vs01RecipientFieldType): { width: number; height: number } {
-  switch (t) {
-    case "signature":
-      return defaultSizeForType("signature");
-    case "initials":
-      return defaultSizeForType("initials");
-    case "printed_name":
-      return { width: 0.2, height: 0.052 };
-    case "text":
-      return { width: 0.4, height: 0.05 };
-    case "email":
-      return { width: 0.44, height: 0.052 };
-    case "date":
-      return defaultSizeForType("date");
-    default:
-      return defaultSizeForType("text");
+  return VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM[t];
+}
+
+export function signingFieldResizeBoundsNorm(t: SigningFieldType): Vs01FieldResizeBoundsNorm {
+  const b = VS01_MANUAL_FIELD_RESIZE_BOUNDS_NORM[t];
+  return {
+    minW: b.minW,
+    minH: b.minH,
+    maxW: Math.min(b.maxW, VS01_FIELD_RESIZE_PAGE_CAP_NORM.maxW),
+    maxH: Math.min(b.maxH, VS01_FIELD_RESIZE_PAGE_CAP_NORM.maxH),
+  };
+}
+
+export function recipientFieldResizeBoundsNorm(t: Vs01RecipientFieldType): Vs01FieldResizeBoundsNorm {
+  return signingFieldResizeBoundsNorm(t);
+}
+
+/** Step 3 sender fields + Step 4 recipient fields (auto initials use tight caps). */
+export function resizeBoundsForPlacementField(f: {
+  type: SigningFieldType | Vs01RecipientFieldType;
+  autoInitials?: boolean;
+}): Vs01FieldResizeBoundsNorm {
+  if (f.autoInitials && f.type === "initials") {
+    return {
+      minW: VS01_AUTO_INITIALS_RESIZE_BOUNDS_NORM.minW,
+      minH: VS01_AUTO_INITIALS_RESIZE_BOUNDS_NORM.minH,
+      maxW: Math.min(VS01_AUTO_INITIALS_RESIZE_BOUNDS_NORM.maxW, VS01_FIELD_RESIZE_PAGE_CAP_NORM.maxW),
+      maxH: Math.min(VS01_AUTO_INITIALS_RESIZE_BOUNDS_NORM.maxH, VS01_FIELD_RESIZE_PAGE_CAP_NORM.maxH),
+    };
   }
+  return signingFieldResizeBoundsNorm(f.type as SigningFieldType);
 }
 
 /**
@@ -96,24 +151,9 @@ export function newSigningFieldId(): string {
   return `fld_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** Normalized sizes tuned for legibility in the preview overlay. */
+/** Normalized defaults for sender manual tools (same map as recipient manual fields). */
 export function defaultSizeForType(t: SigningFieldType): { width: number; height: number } {
-  switch (t) {
-    case "signature":
-      return { width: 0.26, height: 0.064 };
-    case "initials":
-      return { width: 0.092, height: 0.044 };
-    case "printed_name":
-      return { width: 0.2, height: 0.052 };
-    case "text":
-      return { width: 0.4, height: 0.05 };
-    case "email":
-      return { width: 0.44, height: 0.052 };
-    case "date":
-      return { width: 0.17, height: 0.052 };
-    default:
-      return { width: 0.2, height: 0.055 };
-  }
+  return VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM[t];
 }
 
 /**

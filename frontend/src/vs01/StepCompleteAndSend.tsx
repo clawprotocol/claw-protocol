@@ -34,6 +34,7 @@ import {
   newSigningFieldId,
   rebuildRecipientAutoInitialsEveryPage,
   repositionAllRecipientAutoInitialsNonOverlapping,
+  resizeBoundsForPlacementField,
   type PlacedSigningField,
 } from "./signingFields";
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
@@ -59,10 +60,6 @@ function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
 }
 
-const FIELD_MIN_W = 0.06;
-const FIELD_MIN_H = 0.036;
-const FIELD_MAX_W = 0.92;
-const FIELD_MAX_H = 0.5;
 
 function roundNorm(n: number): string {
   const r = Math.round(n * 10000) / 10000;
@@ -642,12 +639,13 @@ export function StepCompleteAndSend({
       if (rect.width <= 0 || rect.height <= 0) return;
       const dx = (e.clientX - start.pointerX) / rect.width;
       const dy = (e.clientY - start.pointerY) / rect.height;
-      const maxW = Math.min(FIELD_MAX_W, 1 - start.x);
-      const maxH = Math.min(FIELD_MAX_H, 1 - start.y);
+      const b = resizeBoundsForPlacementField(field);
+      const maxW = Math.min(b.maxW, 1 - start.x);
+      const maxH = Math.min(b.maxH, 1 - start.y);
       let nw = start.startW + dx;
       let nh = start.startH + dy;
-      nw = Math.min(Math.max(FIELD_MIN_W, nw), maxW);
-      nh = Math.min(Math.max(FIELD_MIN_H, nh), maxH);
+      nw = Math.min(Math.max(b.minW, nw), maxW);
+      nh = Math.min(Math.max(b.minH, nh), maxH);
       onRecipientFieldsChange((prev) =>
         applyRecipientGeometryPatch(prev, field.id, {
           width: parseFloat(roundNorm(nw)),
