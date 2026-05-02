@@ -20,6 +20,7 @@ import {
 } from "../compliance/disclosureCopy";
 import { completeSignSession, createSignSession, fetchDocumentContent } from "./vs01Api";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+import { firstPlausibleEmailInSignerRef, isPlausibleEmail } from "./detailsStepValidation";
 import type { Vs01Counterparty, Vs01LoadingState, Vs01SenderSignatureRef } from "./types";
 import {
   SIGNING_FIELD_TOOLS,
@@ -157,6 +158,10 @@ export function StepPrepareSignature({
   const [activeTool, setActiveTool] = useState<SigningFieldType>("signature");
   /** When set, the next click on the document places this field type once, then clears. */
   const [armedTool, setArmedTool] = useState<SigningFieldType | null>(null);
+  const activeToolForEmailLogRef = useRef(activeTool);
+  const armedToolForEmailLogRef = useRef(armedTool);
+  activeToolForEmailLogRef.current = activeTool;
+  armedToolForEmailLogRef.current = armedTool;
 
   const [autoInitialsEveryPage, setAutoInitialsEveryPage] = useState(false);
   const [skippedAutoPages, setSkippedAutoPages] = useState<Set<number>>(() => new Set());
@@ -208,6 +213,54 @@ export function StepPrepareSignature({
     y: number;
     page: number;
   } | null>(null);
+
+  const emailDefaultLogKeyRef = useRef("");
+  useEffect(() => {
+    const se = resolveSenderEmailForEmailFieldPlacement(creatorEmail, defaultSignerRef);
+    const ce = (creatorEmail ?? "").trim();
+    const refParsed = (firstPlausibleEmailInSignerRef(defaultSignerRef) ?? "").trim();
+    const domainHint = (addr: string) => {
+      const at = addr.indexOf("@");
+      if (at < 1 || at >= addr.length - 1) return null;
+      return addr.slice(at + 1).toLowerCase();
+    };
+    const resolvedSource =
+      isPlausibleEmail(ce) && se === ce
+        ? "creator_prop"
+        : isPlausibleEmail(refParsed) && se === refParsed
+          ? "signer_ref"
+          : se
+            ? "resolved_other"
+            : "none";
+    const key = `${ce}|${defaultSignerRef}|${resolvedSource}`;
+    if (emailDefaultLogKeyRef.current === key) return;
+    emailDefaultLogKeyRef.current = key;
+    // eslint-disable-next-line no-console
+    console.info("[vs01-email-default-source]", {
+      hasCreatorEmail: isPlausibleEmail(ce),
+      hasSignerRefEmail: isPlausibleEmail(refParsed),
+      resolvedSource,
+      creatorEmailDomain: domainHint(ce) ?? null,
+      signerRefEmailDomain: domainHint(refParsed) ?? null,
+      selectedType: armedToolForEmailLogRef.current ?? activeToolForEmailLogRef.current,
+      resolvedHasValue: Boolean(se),
+    });
+  }, [creatorEmail, defaultSignerRef]);
+
+  useEffect(() => {
+    const se = resolveSenderEmailForEmailFieldPlacement(creatorEmail, defaultSignerRef);
+    if (!isPlausibleEmail(se)) return;
+    setFields((prev) => {
+      let changed = false;
+      const next = prev.map((f) => {
+        if (f.type !== "email") return f;
+        if ((f.value ?? "").trim() !== "") return f;
+        changed = true;
+        return { ...f, value: se };
+      });
+      return changed ? next : prev;
+    });
+  }, [creatorEmail, defaultSignerRef]);
 
   useEffect(() => {
     const base = nameFromSignerRef(defaultSignerRef);

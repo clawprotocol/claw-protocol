@@ -71,6 +71,50 @@ describe("buildAgreementVs01BridgeSession", () => {
     expect(b.source).toBe("paid_pro_sender_first");
     expect(b.signerFirst).toBe(true);
   });
+
+  it("infers creatorEmail from a party row matching owner display name when owner row email is empty", () => {
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "o1", name: "Anthem Blanchard", role: "owner", email: "" },
+        { id: "s1", name: "Counterparty LLC", role: "signer", email: "cp@example.com" },
+        { id: "p2", name: "Anthem Blanchard", role: "signer", email: "anthem@firm.com" },
+      ],
+    } as AgreementDraft;
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "a-infer",
+      vs01DocumentId: "doc_infer",
+      draft,
+      senderFirstLawdogHandoff: true,
+    });
+    expect(b.creatorEmail).toBe("anthem@firm.com");
+    expect(
+      lawdogSenderFirstBridgeMetadataReady(
+        {
+          senderFirstLawdogHandoff: true,
+          creatorName: b.creatorName,
+          creatorEmail: b.creatorEmail,
+        },
+        b.counterparties,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not infer creatorEmail from a different party name when owner email is empty", () => {
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "o1", name: "Owner Only", role: "owner", email: "" },
+        { id: "s1", name: "Someone Else", role: "signer", email: "else@example.com" },
+      ],
+    } as AgreementDraft;
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "a-no-infer",
+      vs01DocumentId: "doc_n",
+      draft,
+    });
+    expect(b.creatorEmail).toBe("");
+  });
 });
 
 describe("computePaidProAgreementBridgeSkip", () => {

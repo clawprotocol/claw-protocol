@@ -6,6 +6,7 @@ import {
   autoInitialsPlacementDims,
   buildAutoInitialsFields,
   createPlacedFieldAtClick,
+  defaultValueForType,
   defaultRecipientFieldValue,
   defaultSizeForRecipientField,
   defaultSizeForType,
@@ -166,6 +167,23 @@ describe("VS01 sender placement: Email tool", () => {
     const text = createPlacedFieldAtClick("text", 0, 0.5, 0.5, ctx);
     expect(email.value).toBe("");
     expect(text.value).toBe("");
+  });
+
+  it("defaultValueForType email uses signerEmail when plausible", () => {
+    const ctx = { typedName: "A B", initials: "AB", signerEmail: "a@example.com" };
+    expect(defaultValueForType("email", ctx)).toBe("a@example.com");
+  });
+
+  it("defaultValueForType email stays empty for invalid signerEmail", () => {
+    const ctx = { typedName: "A B", initials: "AB", signerEmail: "not-valid" };
+    expect(defaultValueForType("email", ctx)).toBe("");
+  });
+
+  it("createPlacedFieldAtClick email uses resolved sender email from ref when creator prop absent", () => {
+    const resolved = resolveSenderEmailForEmailFieldPlacement(undefined, "You · me@deal.com");
+    const ctx = { typedName: "You", initials: "YO", signerEmail: resolved || undefined };
+    const f = createPlacedFieldAtClick("email", 0, 0.2, 0.2, ctx);
+    expect(f.value).toBe("me@deal.com");
   });
 
   it("defaultRecipientFieldValue prefills email from recipient row when known", () => {
