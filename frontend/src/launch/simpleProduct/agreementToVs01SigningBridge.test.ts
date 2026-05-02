@@ -3,12 +3,19 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
+  defaultRecipientFieldValue,
+  resolveRecipientEmailForEmailFieldPlacement,
+  resolveSenderEmailForEmailFieldPlacement,
+} from "../../vs01/signingFields";
+import {
   buildAgreementVs01BridgeSession,
   clearPaidProAgreementBridgeSkipMarker,
   computePaidProAgreementBridgeSkip,
   fetchAgreementVs01SigningSeed,
   lawdogSenderFirstBridgeMetadataReady,
+  logAgreementVs01BridgePreflight,
   logAgreementVs01SeedBlocked,
+  mergePaidProRecipientSetupEmailsIntoDraft,
   readPaidProAgreementBridgeSkipMarker,
   setPaidProAgreementBridgeSkipMarker,
 } from "./agreementToVs01SigningBridge";
@@ -114,6 +121,87 @@ describe("buildAgreementVs01BridgeSession", () => {
       draft,
     });
     expect(b.creatorEmail).toBe("");
+  });
+});
+
+describe("mergePaidProRecipientSetupEmailsIntoDraft + paid Pro sender-first bridge", () => {
+  it("merges recipient-setup slot emails into parties then bridge carries Anthem creator + Sarah counterparty", () => {
+    const draft = {
+      title: "Deal",
+      parties: [
+        { id: "p0", name: "Anthem Blanchard", role: "owner", email: "" },
+        { id: "p1", name: "Sarah", role: "signer", email: "" },
+      ],
+    } as AgreementDraft;
+    const merged = mergePaidProRecipientSetupEmailsIntoDraft(draft, [
+      "anthem@example.com",
+      "sarah@countersign.co",
+    ]);
+    expect(merged).not.toBe(draft);
+    expect((merged?.parties?.[0] as { email?: string })?.email).toBe("anthem@example.com");
+    expect((merged?.parties?.[1] as { email?: string })?.email).toBe("sarah@countersign.co");
+
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "ag-handoff",
+      vs01DocumentId: "doc-handoff",
+      draft: merged,
+      senderFirstLawdogHandoff: true,
+    });
+    expect(b.creatorEmail).toBe("anthem@example.com");
+    expect(b.counterparties).toHaveLength(1);
+    expect(b.counterparties[0].name).toBe("Sarah");
+    expect(b.counterparties[0].email).toBe("sarah@countersign.co");
+
+    expect(
+      resolveSenderEmailForEmailFieldPlacement(b.creatorEmail, `${b.creatorName} · ${b.creatorEmail}`),
+    ).toBe("anthem@example.com");
+
+    const sarahCp = b.counterparties[0];
+    const cpEmail = resolveRecipientEmailForEmailFieldPlacement(sarahCp.email);
+    expect(defaultRecipientFieldValue("email", "Sarah", cpEmail)).toBe("sarah@countersign.co");
+  });
+
+  it("logAgreementVs01BridgePreflight emits domains and counts without local-part in payload", () => {
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "a", name: "A", role: "owner", email: "owner99@secret.org" },
+        { id: "b", name: "B", role: "signer", email: "c99@other.net" },
+      ],
+    } as AgreementDraft;
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "id",
+      vs01DocumentId: "doc",
+      draft,
+    });
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+    logAgreementVs01BridgePreflight(b);
+    const row = spy.mock.calls.find((c) => c[0] === "[agreement-vs01-bridge-preflight]")?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(row).toEqual(
+      expect.objectContaining({
+        hasCreatorEmail: true,
+        creatorEmailDomain: "secret.org",
+        counterpartyCount: 1,
+        counterpartiesWithEmailCount: 1,
+      }),
+    );
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/owner99/);
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/c99@/);
+    spy.mockRestore();
+  });
+
+  it("merge leaves draft unchanged when slot emails are empty or invalid", () => {
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "a", name: "A", role: "owner", email: "" },
+        { id: "b", name: "B", role: "signer", email: "" },
+      ],
+    } as AgreementDraft;
+    expect(mergePaidProRecipientSetupEmailsIntoDraft(draft, ["", "not-an-email"])).toBe(draft);
   });
 });
 

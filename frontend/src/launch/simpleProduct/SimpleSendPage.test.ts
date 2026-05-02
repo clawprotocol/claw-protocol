@@ -52,6 +52,9 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("Continue without VS01 e-sign");
     expect(s).toContain("const route = `/app/esign/${encodeURIComponent(vs01Seed.documentId)}?agreement_bridge=1`");
     expect(s).toContain("[agreement-vs01-bridge-session-written]");
+    expect(s).toContain("logAgreementVs01BridgePreflight");
+    expect(s).toContain("bridgeHandoffDraftRef");
+    expect(s).toContain("onBridgeHandoffDraftSnapshot");
     expect(s).toContain("setPaidProAgreementBridgeSkipMarker");
   });
 
@@ -60,6 +63,13 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     const s = readFileSync(p, "utf8");
     expect(s).toMatch(/simpleFlowPremiumHandoffIntent\s*!==\s*["']signature["']/);
     expect(s).toContain("peekPremiumSenderSignFirst()");
+  });
+
+  it("AgreementReview publishes live draft for VS01 bridge handoff", () => {
+    const p = join(__dirname, "..", "..", "components", "agreements", "AgreementReview.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("onBridgeHandoffDraftSnapshot");
+    expect(s).toContain("onBridgeHandoffDraftSnapshot(draft ?? initialDraftSnapshot ?? null)");
   });
 
   it("Send path still gates on recipient readiness (no silent bypass)", () => {

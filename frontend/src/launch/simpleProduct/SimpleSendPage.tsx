@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { AgreementReviewErrorBoundary } from "../../agreement/AgreementReviewErrorBoundary";
 import AgreementReview from "../../components/agreements/AgreementReview";
 import { JoyFlashBanner } from "../../joy/JoyFlashBanner";
@@ -28,12 +29,12 @@ import {
   peekPremiumSenderSignFirst,
   writePremiumSendIntent,
 } from "./premiumSendIntent";
-import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
 import {
   buildAgreementVs01BridgeSession,
   fetchAgreementVs01SigningSeed,
   logAgreementToVs01EsignRoute,
+  logAgreementVs01BridgePreflight,
   logAgreementVs01SeedBlocked,
   setPaidProAgreementBridgeSkipMarker,
   writeAgreementVs01BridgeSession,
@@ -127,6 +128,11 @@ export function SimpleSendPage(props: { agreementId: string }) {
     resolveSimpleFlowPhase(sendLanding.premiumIntent ?? peekPremiumSendIntent()),
   );
   const initialDraftSnapshot = sendLanding.primed;
+  /** Live draft from {@link AgreementReview} (recipient emails); falls back to handoff primed snapshot. */
+  const bridgeHandoffDraftRef = useRef<AgreementDraft | null>((initialDraftSnapshot as AgreementDraft | null) ?? null);
+  useEffect(() => {
+    bridgeHandoffDraftRef.current = (initialDraftSnapshot as AgreementDraft | null) ?? null;
+  }, [initialDraftSnapshot]);
   const streamlinedSimpleFlow = sendLanding.streamlined;
   const sendAuthoritative = useMemo(
     () => isPaidProAgreementAuthoritative({ draft: initialDraftSnapshot ?? null, agreementId }),
@@ -336,12 +342,14 @@ export function SimpleSendPage(props: { agreementId: string }) {
       const vs01Seed = await fetchAgreementVs01SigningSeed(id);
       if (!cancelled && vs01Seed.ok) {
         setSenderFirstVs01SeedFailure(null);
+        const draftForBridge = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
         const bridge = buildAgreementVs01BridgeSession({
           agreementId: id,
           vs01DocumentId: vs01Seed.documentId,
-          draft: (initialDraftSnapshot as AgreementDraft | null) ?? null,
+          draft: draftForBridge,
           senderFirstLawdogHandoff: true,
         });
+        logAgreementVs01BridgePreflight(bridge);
         writeAgreementVs01BridgeSession(bridge);
         setPaidProAgreementBridgeSkipMarker(vs01Seed.documentId);
         // eslint-disable-next-line no-console
@@ -544,6 +552,9 @@ export function SimpleSendPage(props: { agreementId: string }) {
           section="simpleHomeReview"
           embeddedInCard
           initialDraftSnapshot={initialDraftSnapshot}
+          onBridgeHandoffDraftSnapshot={(d) => {
+            bridgeHandoffDraftRef.current = d;
+          }}
           simpleFlowPhase={simpleFlowPhase}
           simpleSendActionsUnlocked={premiumSendUnlocked}
           streamlinedSimpleFlow={streamlinedSimpleFlow}

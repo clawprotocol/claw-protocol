@@ -91,6 +91,78 @@ function newCpId(): string {
   return `cp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function emailDomainForBridgeLog(addr: string): string | null {
+  const t = addr.trim();
+  const at = t.indexOf("@");
+  if (at < 1 || at >= t.length - 1) return null;
+  return t.slice(at + 1).toLowerCase();
+}
+
+/**
+ * Privacy-safe diagnostics before writing the VS01 bridge session (no full addresses).
+ */
+export function logAgreementVs01BridgePreflight(bridge: AgreementVs01BridgeSession): void {
+  const ce = (bridge.creatorEmail || "").trim();
+  const cps = bridge.counterparties ?? [];
+  const counterpartiesWithEmailCount = cps.filter((c) => isPlausibleEmail((c.email || "").trim())).length;
+  // eslint-disable-next-line no-console
+  console.info("[agreement-vs01-bridge-preflight]", {
+    hasCreatorEmail: isPlausibleEmail(ce),
+    creatorEmailDomain: emailDomainForBridgeLog(ce),
+    counterpartyCount: cps.length,
+    counterpartiesWithEmailCount,
+  });
+}
+
+/**
+ * Merges recipient-setup / inline UI emails into `draft.parties[i].email` by index before VS01 bridge build.
+ * Only sets plausible addresses; leaves parties unchanged when nothing to apply.
+ */
+export function mergePaidProRecipientSetupEmailsIntoDraft(
+  draft: AgreementDraft | null,
+  slotEmails: readonly (string | null | undefined)[],
+): AgreementDraft | null {
+  if (!draft) return null;
+  if (!slotEmails.length) return draft;
+  const parties = [...(draft.parties ?? [])] as AgreementParty[];
+  let changed = false;
+  for (let i = 0; i < slotEmails.length && i < parties.length; i++) {
+    const raw = (slotEmails[i] ?? "").trim();
+    if (!raw || !isPlausibleEmail(raw)) continue;
+    const prev = (parties[i].email ?? "").trim();
+    if (prev === raw) continue;
+    parties[i] = { ...parties[i], email: raw };
+    changed = true;
+  }
+  return changed ? { ...draft, parties } : draft;
+}
+
+/**
+ * LawDog drafts sometimes omit `email` on the owner row even when another party row carries the same
+ * display name with a plausible address. Never pull another party’s email unless it matches the creator name.
+ */
+function inferBridgeCreatorEmail(
+  draft: AgreementDraft | null,
+  owner: AgreementParty | null,
+  creatorName: string
+): string {
+  const direct = (owner?.email || "").trim();
+  if (isPlausibleEmail(direct)) return direct;
+
+  const key = creatorName.trim().toLowerCase();
+  if (!key) return "";
+
+  const parties = (draft?.parties ?? []) as AgreementParty[];
+  for (const p of parties) {
+    const pn = (p.name || "").trim().toLowerCase();
+    if (pn !== key) continue;
+    const em = (p.email || "").trim();
+    if (isPlausibleEmail(em)) return em;
+  }
+
+  return "";
+}
+
 /** Map agreement parties → VS01 creator + counterparties (non-owner signers/recipients). */
 export function buildAgreementVs01BridgeSession(params: {
   agreementId: string;
@@ -104,7 +176,7 @@ export function buildAgreementVs01BridgeSession(params: {
     parties.find((p) => (p.role || "").toLowerCase() === "owner") ?? parties[0] ?? null;
   const others = owner ? parties.filter((p) => p !== owner) : parties.slice(1);
   const creatorName = (owner?.name || "").trim() || "Sender";
-  const creatorEmail = (owner?.email || "").trim();
+  const creatorEmail = inferBridgeCreatorEmail(params.draft, owner, creatorName);
   const counterparties: Vs01Counterparty[] =
     others.length > 0
       ? others.map((p) => {
@@ -263,6 +335,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     draft: options.draft,
     senderFirstLawdogHandoff: true,
   });
+  logAgreementVs01BridgePreflight(bridge);
   writeAgreementVs01BridgeSession(bridge);
   setPaidProAgreementBridgeSkipMarker(vs01Seed.documentId);
   const route = `/app/esign/${encodeURIComponent(vs01Seed.documentId)}?agreement_bridge=1`;

@@ -314,7 +314,10 @@ import {
   writePremiumSendIntent,
   writePremiumSenderSignFirst,
 } from "../../launch/simpleProduct/premiumSendIntent";
-import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
+import {
+  mergePaidProRecipientSetupEmailsIntoDraft,
+  tryNavigatePaidProAgreementSenderFirstVs01Esign,
+} from "../../launch/simpleProduct/agreementToVs01SigningBridge";
 import {
   shouldBlockIntakeReviewDisplayPhaseForVs01,
   shouldSuppressReviewPipelineTelemetry,
@@ -10734,10 +10737,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
       });
     if (sig) {
+      const draftForBridge =
+        mergePaidProRecipientSetupEmailsIntoDraft(draft as unknown as AgreementDraft, [
+          looksLikeEmail(recipient1Email) ? stripRecipientEmailNoise(recipient1Email) : undefined,
+          looksLikeEmail(recipient2Email) ? stripRecipientEmailNoise(recipient2Email) : undefined,
+        ]) ?? (draft as unknown as AgreementDraft);
       const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
         navigate: (to) => void navigate(to),
         agreementId: id,
-        draft: draft as unknown as AgreementDraft,
+        draft: draftForBridge,
         logReason: "intake_inline_send_success_cta",
       });
       if (ok) {
@@ -10763,6 +10771,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     productionSendBarAgreementId,
     draft,
+    recipient1Email,
+    recipient2Email,
     effectivePremiumSendMode,
     navigate,
     freshSimpleCreateUx,

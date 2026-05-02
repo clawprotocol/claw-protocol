@@ -368,6 +368,11 @@ type Props = {
   onPaidProSendBranchMeta?: (meta: PaidProSendBranchMeta) => void;
   /** Paid Pro VS01 return: signature-first landing — avoid review-first status and negotiation-heavy chrome. */
   postVs01SignatureFirstLanding?: boolean;
+  /**
+   * Simple-home send: latest draft snapshot (including recipient emails from UI) for Paid Pro sender-first
+   * VS01 bridge — parent reads synchronously when seed completes.
+   */
+  onBridgeHandoffDraftSnapshot?: (draft: AgreementDraft | null) => void;
 };
 
 const API_BASE = resolveApiBase();
@@ -666,6 +671,7 @@ const AgreementReview: React.FC<Props> = ({
   onContinueToReviewerSetup,
   onPaidProSendBranchMeta,
   postVs01SignatureFirstLanding = false,
+  onBridgeHandoffDraftSnapshot,
 }) => {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState<string>("");
@@ -761,6 +767,11 @@ const AgreementReview: React.FC<Props> = ({
   const fullTimelineUnlocked = canAccessFullTimeline(monetizationState);
 
   const isSimpleHomeReview = section === "simpleHomeReview";
+
+  useEffect(() => {
+    if (!onBridgeHandoffDraftSnapshot || !isSimpleHomeReview) return;
+    onBridgeHandoffDraftSnapshot(draft ?? initialDraftSnapshot ?? null);
+  }, [draft, initialDraftSnapshot, isSimpleHomeReview, onBridgeHandoffDraftSnapshot]);
 
   useEffect(() => {
     if (!onPaidProSendBranchMeta || !isSimpleHomeReview) return;
