@@ -180,8 +180,38 @@ import {
 } from "../../agreement/agreementProFunnelGate";
 import { LEGAL_GOVERNING_LAW_STATE } from "../../launch/legal/legalConstants";
 import { US_STATE_NAMES_ENGLISH } from "./partyFormat";
+import { humanizeRevisionValidationIssues } from "./revisionValidationLabels";
 
 /** Plain-English mapping for policy / LLM blocks — avoid raw server codes in UI. */
+function agreementPartiesWithEmailCount(parties: AgreementDraft["parties"] | undefined): number {
+  return (parties ?? []).filter((p) => String(p?.email ?? "").trim().length > 0).length;
+}
+
+/** Lightweight bullets from common revision phrases (instruction text only; no LLM). */
+function heuristicRevisionSummaryBullets(instruction: string): string[] {
+  const ins = instruction.toLowerCase();
+  const bullets: string[] = [];
+  if (/\bcure\s+period\b|\bcure-period\b/.test(ins) || (/\bcure\b/.test(ins) && /\bperiod\b/.test(ins))) {
+    bullets.push("Added cure period");
+  }
+  if (/non-disparagement|non\s+disparagement|nondisparagement/.test(ins)) {
+    bullets.push("Added non-disparagement clause");
+  }
+  if (/\b45\s*days?\b|\bforty[-\s]?five\s+days?\b/.test(ins)) {
+    bullets.push("Updated timeline");
+  }
+  if (/\bweekly\b/.test(ins) && /\b(progress|updates?)\b/.test(ins)) {
+    bullets.push("Added reporting requirement");
+  }
+  if (/out-of-scope|out of scope/.test(ins) || /\b125\b/.test(ins)) {
+    bullets.push("Added out-of-scope billing terms");
+  }
+  if (/payment\s+terms?\s+unchanged|keep\s+all\s+existing\s+payment/.test(ins)) {
+    bullets.push("Preserved payment terms (per your note)");
+  }
+  return bullets;
+}
+
 function mapDraftAssistBlockedMessage(serverMsg: string): string {
   const l = serverMsg.toLowerCase();
   if (
@@ -681,6 +711,14 @@ const AgreementReview: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   /** Simple-home review: brief confirmation after revision preview succeeds (compare panel mounts below). */
   const [revisionPreviewFlash, setRevisionPreviewFlash] = useState(false);
+  /** After owner applies a previewed revision: short field-level summary (no raw instruction text). */
+  const [appliedRevisionBanner, setAppliedRevisionBanner] = useState<string | null>(null);
+  /** Post-commit heuristic lines for “Changes applied” (from instruction phrases). */
+  const [appliedRevisionHeuristicBullets, setAppliedRevisionHeuristicBullets] = useState<string[]>([]);
+  /** Latest server revision_validation when ok === false (preview or last commit). */
+  const [revisionValidation, setRevisionValidation] = useState<{ ok: boolean; issues: string[] } | null>(
+    null
+  );
   const [auditOpen, setAuditOpen] = useState(false);
   const [status, setStatus] = useState<"Draft" | "Complete Draft" | "Signed">("Draft");
   const [editInstruction, setEditInstruction] = useState("");
@@ -2591,9 +2629,20 @@ const AgreementReview: React.FC<Props> = ({
     setSavingField("conversation");
     setError(null);
     setRevisionPreviewFlash(false);
+    setAppliedRevisionBanner(null);
+    setAppliedRevisionHeuristicBullets([]);
+    setRevisionValidation(null);
     try {
       const baselineDraft = JSON.parse(JSON.stringify(draft)) as AgreementDraft;
       const baselineRenderedHtml = renderedHtml;
+      if (typeof console !== "undefined" && console.info) {
+        console.info("[review-revision-request-start]", {
+          instructionLen: ins.length,
+          revisionSource: source,
+          hasAgreementId: Boolean(agreementId?.trim()),
+          baselinePartiesWithEmailCount: agreementPartiesWithEmailCount(draft.parties),
+        });
+      }
       const res = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/revise`, {
         method: "POST",
         headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
@@ -2618,6 +2667,28 @@ const AgreementReview: React.FC<Props> = ({
       const nextDraft = payload?.draft as AgreementDraft | null;
       const html = String(payload?.rendered_html || "");
       if (!nextDraft) throw new Error("We couldn't load the proposed revision. Please try again.");
+      if (typeof console !== "undefined" && console.info) {
+        console.info("[review-revision-success]", {
+          instructionLen: ins.length,
+          revisionSource: source,
+          proposedPurposeLen: String(nextDraft.purpose ?? "").length,
+          proposedPaymentTermsLen: String(nextDraft.payment_terms ?? "").length,
+          proposedPartiesWithEmailCount: agreementPartiesWithEmailCount(nextDraft.parties),
+          hasRenderedHtml: html.length > 0,
+        });
+      }
+      const rvRaw = payload?.revision_validation as { ok?: unknown; issues?: unknown } | undefined;
+      if (rvRaw && rvRaw.ok === false) {
+        const issues = Array.isArray(rvRaw.issues)
+          ? rvRaw.issues.filter((x): x is string => typeof x === "string")
+          : [];
+        if (typeof console !== "undefined" && console.info) {
+          console.info("[review-revision-warning]", { issues, count: issues.length });
+        }
+        setRevisionValidation({ ok: false, issues });
+      } else {
+        setRevisionValidation(null);
+      }
       setPendingRevision({
         instruction: ins,
         baselineDraft,
@@ -2693,6 +2764,39 @@ const AgreementReview: React.FC<Props> = ({
       const html = String(payload?.rendered_html || "");
       if (!nextDraft) throw new Error("We couldn't load the updated draft. Please try again.");
       const ins = p.instruction;
+      const appliedCmp = compareAgreementSnapshots(
+        draftToSnapshot(p.baselineDraft),
+        draftToSnapshot(nextDraft)
+      );
+      if (typeof console !== "undefined" && console.info) {
+        console.info("[review-revision-applied-to-send]", {
+          instructionLen: ins.length,
+          revisionSource: p.source,
+          changedFieldCount: appliedCmp.changedFieldKeys.length,
+          changedFieldKeys: appliedCmp.changedFieldKeys,
+          baselinePartiesWithEmailCount: agreementPartiesWithEmailCount(p.baselineDraft.parties),
+          nextPartiesWithEmailCount: agreementPartiesWithEmailCount(nextDraft.parties),
+        });
+      }
+      const labels = appliedCmp.changedFieldKeys.map((k) => agreementFieldLabel(k));
+      setAppliedRevisionBanner(
+        labels.length > 0
+          ? `Changes applied: ${labels.join(", ")}.`
+          : "Revision applied to your draft."
+      );
+      setAppliedRevisionHeuristicBullets(heuristicRevisionSummaryBullets(ins));
+      const rvCommit = payload?.revision_validation as { ok?: unknown; issues?: unknown } | undefined;
+      if (rvCommit && rvCommit.ok === false) {
+        const issues = Array.isArray(rvCommit.issues)
+          ? rvCommit.issues.filter((x): x is string => typeof x === "string")
+          : [];
+        if (typeof console !== "undefined" && console.info) {
+          console.info("[review-revision-warning]", { issues, count: issues.length });
+        }
+        setRevisionValidation({ ok: false, issues });
+      } else {
+        setRevisionValidation(null);
+      }
       setDraft(nextDraft);
       setRenderedHtml(html);
       setEditInstruction("");
@@ -2745,6 +2849,7 @@ const AgreementReview: React.FC<Props> = ({
   function discardPendingRevision() {
     setPendingRevision(null);
     setRevisionPreviewFlash(false);
+    setRevisionValidation(null);
   }
 
   async function reviseAgreement() {
@@ -3797,6 +3902,35 @@ const AgreementReview: React.FC<Props> = ({
       {!isSimpleHomeReview ? (
         <div className="mb-3 text-sm font-semibold tracking-tight text-slate-100">Type or speak a change</div>
       ) : null}
+      {appliedRevisionBanner ? (
+        <p className="mb-3 text-xs font-medium text-emerald-400/95" role="status">
+          {appliedRevisionBanner}
+        </p>
+      ) : null}
+      {appliedRevisionHeuristicBullets.length > 0 ? (
+        <div className="mb-3 text-xs text-slate-300" role="status">
+          <div className="font-semibold text-slate-200">Changes applied</div>
+          <ul className="mt-1 list-disc pl-5">
+            {appliedRevisionHeuristicBullets.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {revisionValidation && revisionValidation.ok === false ? (
+        <div className="mb-3 text-xs text-amber-300/95" role="alert">
+          <p className="font-medium">
+            Some requested changes may not have been fully applied. Please review before sending.
+          </p>
+          {revisionValidation.issues.length > 0 ? (
+            <ul className="mt-1.5 list-disc pl-5 text-amber-200/90">
+              {humanizeRevisionValidationIssues(revisionValidation.issues).map((label, idx) => (
+                <li key={revisionValidation.issues[idx] ?? idx}>{label}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       {workspaceDraftStatusLine ? (
         <p className="mb-3 text-[10px] font-medium leading-snug text-slate-400">{workspaceDraftStatusLine}</p>
       ) : null}
@@ -3850,6 +3984,35 @@ const AgreementReview: React.FC<Props> = ({
   ) : (
     <div className="rounded border border-slate-800 bg-slate-900/40 p-3">
       <div className="text-sm font-semibold tracking-tight text-slate-200">Type or speak a change</div>
+      {appliedRevisionBanner ? (
+        <p className="mt-2 text-xs font-medium text-emerald-400/95" role="status">
+          {appliedRevisionBanner}
+        </p>
+      ) : null}
+      {appliedRevisionHeuristicBullets.length > 0 ? (
+        <div className="mt-2 text-xs text-slate-300" role="status">
+          <div className="font-semibold text-slate-200">Changes applied</div>
+          <ul className="mt-1 list-disc pl-5">
+            {appliedRevisionHeuristicBullets.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {revisionValidation && revisionValidation.ok === false ? (
+        <div className="mt-2 text-xs text-amber-300/95" role="alert">
+          <p className="font-medium">
+            Some requested changes may not have been fully applied. Please review before sending.
+          </p>
+          {revisionValidation.issues.length > 0 ? (
+            <ul className="mt-1.5 list-disc pl-5 text-amber-200/90">
+              {humanizeRevisionValidationIssues(revisionValidation.issues).map((label, idx) => (
+                <li key={revisionValidation.issues[idx] ?? idx}>{label}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       {!simpleHomeProEntitlementBypass ? <UpgradeLimitNotice gate={revisionPlanGate} className="mt-2" /> : null}
       <p className="mt-2 text-xs leading-relaxed text-slate-400">
         Describe the change you want. We&apos;ll preview it before anything is applied.

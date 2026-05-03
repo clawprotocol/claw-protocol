@@ -390,7 +390,9 @@ def _sanitize_agreement_parties_in_order(parties: List[AgreementParty]) -> List[
         role_in = str(p.role or "party").strip() or "party"
         role_out = _fallback_role_for_party_index(len(out)) if _is_placeholder_party_role(role_in) else role_in
         pid = (p.id or "").strip() or None
-        out.append(AgreementParty(name=name, role=role_out, id=pid))
+        email = str(getattr(p, "email", None) or "").strip() or None
+        phone = str(getattr(p, "phone", None) or "").strip() or None
+        out.append(AgreementParty(name=name, role=role_out, id=pid, email=email, phone=phone))
     return out
 
 
@@ -439,6 +441,8 @@ class AgreementParty(BaseModel):
     name: str
     role: str
     id: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class VersionSnapshot(BaseModel):
@@ -2583,7 +2587,9 @@ def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
         name = str(p.get("name") or "").strip()
         role = str(p.get("role") or "party").strip() or "party"
         pid = str(p.get("id") or "").strip()
-        tmp.append(AgreementParty(name=name, role=role, id=pid or None))
+        email = str(p.get("email") or "").strip() or None
+        phone = str(p.get("phone") or "").strip() or None
+        tmp.append(AgreementParty(name=name, role=role, id=pid or None, email=email, phone=phone))
     parties = _ensure_agreement_parties_have_ids(tmp)
     due_date = str(raw.get("due_date") or "").strip() or None
     duration = str(raw.get("duration") or "").strip() or None
@@ -2887,6 +2893,138 @@ def _revision_comparison_blob(d: AgreementDraft | AgreementDraftCreate) -> str:
     return json.dumps(bucket, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def _revision_validation_corpus_text(revised: AgreementDraft | AgreementDraftCreate) -> str:
+    """Lowercased prose used for lightweight post-revision checks (no full HTML render)."""
+    parts = [
+        revised.title or "",
+        revised.jurisdiction or "",
+        revised.purpose or "",
+        revised.payment_terms or "",
+    ]
+    if getattr(revised, "duration", None):
+        parts.append(str(revised.duration))
+    if getattr(revised, "due_date", None):
+        parts.append(str(revised.due_date))
+    if getattr(revised, "effective_date", None):
+        parts.append(str(revised.effective_date))
+    return " ".join(parts).lower()
+
+
+def _has_any(text: str, phrases: List[str]) -> bool:
+    return any(phrase in text for phrase in phrases)
+
+
+def _validate_revision_expectations(
+    base: AgreementDraft,
+    revised: AgreementDraftCreate,
+    instruction: str,
+) -> Dict[str, Any]:
+    """
+    Best-effort checks that explicit user asks appear in the coalesced draft prose.
+    Non-blocking. Result is returned as JSON key ``revision_validation`` on revise/commit
+    (equivalent to tagging the coalesced draft for the client; not stored on AgreementDraft).
+    """
+    issues: List[str] = []
+    text = _revision_validation_corpus_text(revised)
+    instr = (instruction or "").lower()
+
+    # Cure / remedy — only when instruction clearly asks for it.
+    instr_wants_cure = _has_any(
+        instr,
+        [
+            "cure period",
+            "cure within",
+            "days to cure",
+            "day to cure",
+            "opportunity to cure",
+            "time to cure",
+            "right to cure",
+            "days to remedy",
+            "day to remedy",
+            "remedy breach",
+            "cure for breach",
+            "cure a breach",
+            "add cure",
+            "include a cure",
+            "cure before",
+            "cure prior",
+        ],
+    ) or ("breach" in instr and "cure" in instr)
+    if instr_wants_cure:
+        cure_ok = _has_any(
+            text,
+            [
+                "cure period",
+                "cure within",
+                "days to cure",
+                "days to remedy",
+                "opportunity to cure",
+                "remedy breach within",
+                "five business day",
+                "5 business day",
+                "five (5) business day",
+                "5-day cure",
+            ],
+        )
+        if not cure_ok:
+            issues.append("missing_cure_period")
+
+    # Non-disparagement — instruction mentions disparagement / non-disparagement.
+    instr_wants_nd = _has_any(
+        instr,
+        [
+            "non-disparagement",
+            "non disparagement",
+            "nondisparagement",
+            "disparagement",
+        ],
+    )
+    if instr_wants_nd:
+        nd_ok = _has_any(
+            text,
+            [
+                "non-disparagement",
+                "non disparagement",
+                "not disparage",
+                "shall not disparage",
+                "disparag",
+            ],
+        )
+        if not nd_ok:
+            issues.append("missing_non_disparagement")
+
+    # ~45-day timeline — instruction asks for 45 / forty-five day delivery.
+    instr_wants_45 = bool(re.search(r"\b45\s*days?\b", instr)) or _has_any(
+        instr, ["forty-five days", "forty five days", "forty-five day", "forty five day"]
+    )
+    if instr_wants_45:
+        timeline_ok = _has_any(
+            text,
+            [
+                "45 days",
+                "forty-five days",
+                "forty five days",
+                "within 45",
+                "within forty-five",
+                "within forty five",
+            ],
+        ) or bool(re.search(r"\b45\s*days?\b", text))
+        if not timeline_ok:
+            issues.append("timeline_not_updated")
+
+    base_j = (base.jurisdiction or "").strip()
+    rev_j = (revised.jurisdiction or "").strip()
+    if base_j and not rev_j:
+        issues.append("jurisdiction_dropped")
+
+    base_pt = (base.payment_terms or "").strip()
+    rev_pt = (revised.payment_terms or "").strip()
+    if base_pt and not rev_pt:
+        issues.append("payment_terms_dropped")
+
+    return {"ok": len(issues) == 0, "issues": issues}
+
+
 def agreement_revision_similarity(
     before: AgreementDraft | AgreementDraftCreate,
     after: AgreementDraft | AgreementDraftCreate,
@@ -2899,12 +3037,98 @@ def agreement_revision_similarity(
     return SequenceMatcher(None, sa, sb).ratio()
 
 
+def _coalesce_revision_draft_with_base(
+    base: AgreementDraft,
+    revised: AgreementDraftCreate,
+) -> AgreementDraftCreate:
+    """
+    After LLM revise, restore identity the model often drops: party emails/phones, empty scalar fields.
+    Index-aligned party merge; extra parties from either side are kept when the other side lacks that slot.
+    """
+    b_parties = list(base.parties or [])
+    r_parties = list(revised.parties or [])
+    n = max(len(b_parties), len(r_parties))
+    merged_parties: List[AgreementParty] = []
+    for i in range(n):
+        bp = b_parties[i] if i < len(b_parties) else None
+        rp = r_parties[i] if i < len(r_parties) else None
+        if bp is None and rp is None:
+            continue
+        if bp is None and rp is not None:
+            merged_parties.append(rp)
+            continue
+        if rp is None and bp is not None:
+            merged_parties.append(bp)
+            continue
+        assert bp is not None and rp is not None
+        name = (rp.name or "").strip() or (bp.name or "").strip() or ("Party A" if i == 0 else "Party B")
+        role = (rp.role or "").strip() or (bp.role or "").strip() or "party"
+        pid = (rp.id or "").strip() or (bp.id or "").strip() or None
+        em_r = (rp.email or "").strip()
+        em_b = (bp.email or "").strip()
+        email = em_r or em_b or None
+        ph_r = (rp.phone or "").strip()
+        ph_b = (bp.phone or "").strip()
+        phone = ph_r or ph_b or None
+        merged_parties.append(AgreementParty(name=name, role=role, id=pid, email=email, phone=phone))
+
+    def _pick_text(rev: str, cur: str) -> str:
+        r = (rev or "").strip()
+        if r:
+            return rev
+        c = (cur or "").strip()
+        return cur if c else rev
+
+    def _pick_opt(rev: Optional[str], cur: Optional[str]) -> Optional[str]:
+        if rev is not None and str(rev).strip():
+            return rev
+        return cur
+
+    jurisdiction = _pick_text(revised.jurisdiction or "", base.jurisdiction or "")
+    if not jurisdiction.strip():
+        jurisdiction = "TBD"
+    title = _pick_text(revised.title or "", base.title or "")
+    purpose = _pick_text(revised.purpose or "", base.purpose or "")
+    payment_terms = _pick_text(revised.payment_terms or "", base.payment_terms or "")
+    duration = _pick_opt(revised.duration, base.duration)
+    due_date = _pick_opt(revised.due_date, base.due_date)
+    effective_date = _pick_opt(revised.effective_date, base.effective_date)
+
+    # Preview/commit bodies often omit feed + payment_request; do not reset stored agreement state.
+    payment_request = (
+        revised.payment_request if revised.payment_request is not None else base.payment_request
+    )
+    payment_required = (
+        revised.payment_required
+        if revised.payment_request is not None
+        else getattr(base, "payment_required", False)
+    )
+
+    return AgreementDraftCreate(
+        title=title,
+        jurisdiction=jurisdiction,
+        parties=_ensure_agreement_parties_have_ids(merged_parties),
+        purpose=purpose,
+        payment_terms=payment_terms,
+        duration=duration,
+        due_date=due_date,
+        effective_date=effective_date,
+        feed_visibility=base.feed_visibility,
+        feed_party_anonymize=base.feed_party_anonymize,
+        feed_show_financial_summary=base.feed_show_financial_summary,
+        feed_anchor_network=base.feed_anchor_network,
+        payment_request=payment_request,
+        payment_required=payment_required,
+    )
+
+
 def _revise_system_prompt_starter_preview() -> str:
     return (
         "You are a structured agreement editor for CLAW (STARTER_PREVIEW mode).\n"
         "Update the agreement state based on the user's edit instruction.\n"
         "Return ONLY strict JSON matching:\n"
-        '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":""}], "purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
+        '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":"","email":null,"phone":null}], '
+        '"purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
         "Rules:\n"
         "- Preserve existing values unless user explicitly changes them.\n"
         "- Keep response concise and valid JSON.\n"
@@ -2917,7 +3141,8 @@ def _revise_system_prompt_premium_rewrite() -> str:
         "You are CLAW's premium agreement rewriter (PREMIUM_REWRITE mode — distinct from starter preview).\n"
         "Paid users expect a visibly upgraded, send-ready draft, not a near-copy of the prior wording.\n"
         "Return ONLY strict JSON matching:\n"
-        '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":""}], "purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
+        '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":"","email":null,"phone":null}], '
+        '"purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
         "User intent is sacred; exact prior wording is optional.\n"
         "Treat the revision instruction as authorization to materially upgrade the draft (not a minimal line patch).\n"
         "Preserve material facts: party names and roles, jurisdiction, pricing amounts and cadence, dates, durations, "
@@ -2929,6 +3154,9 @@ def _revise_system_prompt_premium_rewrite() -> str:
         "sections (short headings or bullets inside the JSON string where helpful), tighter obligations, less filler.\n"
         "title: specific and scannable; avoid lazy one-word titles when the deal supports more.\n"
         "Do not invent new parties, dollar amounts, dates, or jurisdictions absent from the current draft or instruction.\n"
+        "Numbered / multi-part instructions: implement each clear item; do not drop unrelated commercial terms unless the user asked to remove them.\n"
+        "In the output JSON `parties` array, echo each party's `email` and `phone` from `current_draft.parties` when those "
+        "fields exist (same order). Omitting them wipes client-visible contact data.\n"
         "Do not add commentary outside JSON."
     )
 
@@ -3085,7 +3313,8 @@ def _parse_intake_system_prompt_basic() -> str:
         "You are a structured agreement intake assistant for CLAW.\n"
         "Extract agreement details from the user's intake.\n"
         "Return ONLY strict JSON matching this schema:\n"
-        '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":""}], "purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
+        '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":""}], '
+        '"purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
         "Rules:\n"
         "- If due_date exists and duration missing, set duration = \"until <due_date>\".\n"
         "- If effective_date missing, set null.\n"
@@ -3711,7 +3940,9 @@ def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[Ag
     out: List[AgreementParty] = []
     for p in sanitized:
         pid = (p.id or "").strip() or str(uuid.uuid4())
-        out.append(AgreementParty(name=p.name, role=p.role, id=pid))
+        email = str(getattr(p, "email", None) or "").strip() or None
+        phone = str(getattr(p, "phone", None) or "").strip() or None
+        out.append(AgreementParty(name=p.name, role=p.role, id=pid, email=email, phone=phone))
     return out
 
 
@@ -5290,6 +5521,8 @@ def revise_agreement(
         trace_context=trace,
         ai_model_class=body.ai_model_class,
     )
+    revised = _coalesce_revision_draft_with_base(draft, revised)
+    revision_validation = _validate_revision_expectations(draft, revised, instruction)
     now = _utc_now_iso()
     persist = bool(getattr(body, "persist", True))
     next_draft = _merge_agreement_draft(
@@ -5329,6 +5562,7 @@ def revise_agreement(
         "draft": next_draft.model_dump(),
         "rendered_html": _render_html(next_draft, watermark=wm),
         "canonical_json": canonicalize_agreement(next_draft.model_dump()),
+        "revision_validation": revision_validation,
     }
 
 
@@ -5361,6 +5595,8 @@ def commit_agreement_revision(agreement_id: str, body: AgreementCommitRevisionRe
     _assert_draft_mutable_after_signatures(current)
     now = _utc_now_iso()
     instruction = (body.instruction or "").strip()
+    coalesced = _coalesce_revision_draft_with_base(current, body.draft)
+    revision_validation = _validate_revision_expectations(current, coalesced, instruction)
     next_draft = _merge_agreement_draft(
         current,
         updated_at=now,
@@ -5373,18 +5609,18 @@ def commit_agreement_revision(agreement_id: str, body: AgreementCommitRevisionRe
                 value=instruction or "revision_committed",
             ),
         ],
-        title=body.draft.title,
-        jurisdiction=body.draft.jurisdiction,
-        parties=_ensure_agreement_parties_have_ids(list(body.draft.parties or [])),
-        purpose=body.draft.purpose,
-        payment_terms=body.draft.payment_terms,
-        duration=body.draft.duration,
-        due_date=body.draft.due_date,
-        effective_date=body.draft.effective_date,
-        feed_visibility=body.draft.feed_visibility,
-        feed_party_anonymize=body.draft.feed_party_anonymize,
-        feed_show_financial_summary=body.draft.feed_show_financial_summary,
-        feed_anchor_network=body.draft.feed_anchor_network,
+        title=coalesced.title,
+        jurisdiction=coalesced.jurisdiction,
+        parties=_ensure_agreement_parties_have_ids(list(coalesced.parties or [])),
+        purpose=coalesced.purpose,
+        payment_terms=coalesced.payment_terms,
+        duration=coalesced.duration,
+        due_date=coalesced.due_date,
+        effective_date=coalesced.effective_date,
+        feed_visibility=coalesced.feed_visibility,
+        feed_party_anonymize=coalesced.feed_party_anonymize,
+        feed_show_financial_summary=coalesced.feed_show_financial_summary,
+        feed_anchor_network=coalesced.feed_anchor_network,
     )
     nd = next_draft.model_dump()
     save_draft(nd)
@@ -5395,6 +5631,7 @@ def commit_agreement_revision(agreement_id: str, body: AgreementCommitRevisionRe
         "draft": nd,
         "rendered_html": _render_html(next_draft, watermark=wm),
         "canonical_json": canonicalize_agreement(nd),
+        "revision_validation": revision_validation,
     }
 
 
