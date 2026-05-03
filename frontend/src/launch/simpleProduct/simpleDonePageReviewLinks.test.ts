@@ -10,7 +10,8 @@ describe("SimpleDonePage review-link receipt", () => {
     expect(s).toContain("readSimpleDoneReviewRecipientLinks");
     expect(s).toContain("Copy public verify link");
     expect(s).toContain("Copy ${row.displayName} review link");
-    expect(s).toContain("Review links were created, but this page could not load them");
+    expect(s).toContain("Review links are not ready yet");
+    expect(s).toContain("Retry review links");
     expect(s).toContain("/app/send/");
   });
 });

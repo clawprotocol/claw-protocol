@@ -302,18 +302,19 @@ export function SimpleDonePage(props: { agreementId: string }) {
         reviewRecipientHandoff.intent === "review" &&
         reviewRecipientHandoff.recipients.length === 0 ? (
           <div
-            className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-left text-sm text-amber-100/95"
+            className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-4 text-left text-sm text-amber-100/95"
             role="status"
           >
-            Review links were created, but this page could not load them. Go back to the{" "}
+            <p className="leading-relaxed">
+              Review links are not ready yet. You can go back to the send page to retry or copy them.
+            </p>
             <button
               type="button"
-              className="font-medium text-amber-50 underline decoration-amber-400/40 underline-offset-2 hover:text-white"
+              className="vs01-btn vs01-btn--secondary mt-3 w-full min-h-[2.5rem] text-sm sm:w-auto"
               onClick={() => navigate(`/app/send/${encodeURIComponent(agreementId)}`)}
             >
-              send page
-            </button>{" "}
-            to recreate or copy links.
+              Retry review links
+            </button>
           </div>
         ) : null}
         <div className="rounded-xl border border-sky-900/35 bg-sky-950/20 px-5 py-4">

@@ -42,6 +42,17 @@ describe("simpleDoneReviewRecipientLinks session handoff", () => {
     const read = readSimpleDoneReviewRecipientLinks("ag_x");
     expect(read?.recipients.length).toBe(0);
   });
+
+  it("round-trips reviewLinksPending flag", () => {
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId: "ag_pending",
+      recipients: [],
+      reviewLinksPending: true,
+    });
+    const read = readSimpleDoneReviewRecipientLinks("ag_pending");
+    expect(read?.recipients.length).toBe(0);
+    expect(read?.reviewLinksPending).toBe(true);
+  });
 });
 
 describe("mintSimpleDoneReviewRecipientLinkRows", () => {
@@ -64,8 +75,13 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
         { id: "p_rev", name: "Sarah Collins", role: "reviewer", email: "sarah@example.com" },
       ],
     } as AgreementDraft;
-    const rows = await mintSimpleDoneReviewRecipientLinkRows({ agreementId: "ag_mint", draft });
+    const { rows, attemptedMintCount, firstErrorStatus } = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: "ag_mint",
+      draft,
+    });
     expect(rows.length).toBe(1);
+    expect(attemptedMintCount).toBe(1);
+    expect(firstErrorStatus).toBeUndefined();
     expect(rows[0]!.displayName).toBe("Sarah Collins");
     expect(rows[0]!.reviewHref).toContain("/agreements/ag_mint/review?t=tok_mint_test");
     expect(rows[0]!.reviewHref).not.toContain("/verify/");
@@ -76,5 +92,30 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
     expect(body.mode).toBe("review");
     expect(body.recipient_party_id).toBe("p_rev");
+  });
+
+  it("returns empty rows on 503 with attempted count and error status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        json: async () => ({ detail: "unavailable" }),
+      })) as unknown as typeof fetch,
+    );
+    const draft = {
+      id: "ag_503",
+      parties: [
+        { id: "p_owner", name: "Owner", role: "owner", email: "o@example.com" },
+        { id: "p_rev", name: "Sarah Collins", role: "reviewer", email: "sarah@example.com" },
+      ],
+    } as AgreementDraft;
+    const { rows, attemptedMintCount, firstErrorStatus } = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: "ag_503",
+      draft,
+    });
+    expect(rows.length).toBe(0);
+    expect(attemptedMintCount).toBe(1);
+    expect(firstErrorStatus).toBe(503);
   });
 });

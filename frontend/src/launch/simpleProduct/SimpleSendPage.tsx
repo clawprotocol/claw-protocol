@@ -35,6 +35,7 @@ import {
   clearSimpleDoneReviewRecipientLinks,
   mintSimpleDoneReviewRecipientLinkRows,
   writeSimpleDoneReviewRecipientLinks,
+  type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
 import {
@@ -657,9 +658,41 @@ export function SimpleSendPage(props: { agreementId: string }) {
               const id = agreementId.trim();
               const draft =
                 bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+              const shortAgIdForMintLog = (aid: string) => {
+                const t = aid.trim();
+                return t.length <= 12 ? t : `${t.slice(0, 8)}…`;
+              };
               if (simpleFlowPremiumHandoffIntent === "review" && id) {
-                const rows = draft ? await mintSimpleDoneReviewRecipientLinkRows({ agreementId: id, draft }) : [];
-                writeSimpleDoneReviewRecipientLinks({ agreementId: id, recipients: rows });
+                let linkRows: SimpleDoneReviewRecipientLinkRow[] = [];
+                let attemptedMintCount = 0;
+                let firstErrorStatus: number | undefined;
+                let mintThrew = false;
+                try {
+                  if (draft) {
+                    const minted = await mintSimpleDoneReviewRecipientLinkRows({ agreementId: id, draft });
+                    linkRows = minted.rows;
+                    attemptedMintCount = minted.attemptedMintCount;
+                    firstErrorStatus = minted.firstErrorStatus;
+                  }
+                } catch {
+                  mintThrew = true;
+                  linkRows = [];
+                }
+                const reviewLinksPending =
+                  linkRows.length === 0 && (attemptedMintCount > 0 || mintThrew || !draft);
+                if (linkRows.length === 0 && (attemptedMintCount > 0 || mintThrew)) {
+                  // eslint-disable-next-line no-console
+                  console.warn("[simple-done-review-links-mint-failed]", {
+                    agreementIdShort: shortAgIdForMintLog(id),
+                    attemptedCount: attemptedMintCount,
+                    errorStatus: firstErrorStatus,
+                  });
+                }
+                writeSimpleDoneReviewRecipientLinks({
+                  agreementId: id,
+                  recipients: linkRows,
+                  ...(reviewLinksPending ? { reviewLinksPending: true } : {}),
+                });
               } else if (id) {
                 clearSimpleDoneReviewRecipientLinks(id);
               }

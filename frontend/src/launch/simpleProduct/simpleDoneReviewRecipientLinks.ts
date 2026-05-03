@@ -1,6 +1,6 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { agreementMagicLinkPath } from "../../agreement/AgreementRecipientReview";
-import { mintRecipientAccessToken } from "../../agreement/recipientAccessApi";
+import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
 import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } from "./reviewLinkRecipientEmailMerge";
 
 /**
@@ -20,6 +20,8 @@ export type SimpleDoneReviewLinksPayload = {
   intent: "review";
   recipients: SimpleDoneReviewRecipientLinkRow[];
   savedAt: number;
+  /** True when mint was attempted but no usable URLs were stored (e.g. 503). */
+  reviewLinksPending?: boolean;
 };
 
 function shortAgreementId(id: string): string {
@@ -31,6 +33,7 @@ function shortAgreementId(id: string): string {
 export function writeSimpleDoneReviewRecipientLinks(payload: {
   agreementId: string;
   recipients: SimpleDoneReviewRecipientLinkRow[];
+  reviewLinksPending?: boolean;
 }): void {
   const id = payload.agreementId.trim();
   if (!id) return;
@@ -39,6 +42,7 @@ export function writeSimpleDoneReviewRecipientLinks(payload: {
     intent: "review",
     recipients: payload.recipients,
     savedAt: Date.now(),
+    ...(payload.reviewLinksPending === true ? { reviewLinksPending: true } : {}),
   };
   try {
     sessionStorage.setItem(simpleDoneReviewRecipientLinksStorageKey(id), JSON.stringify(full));
@@ -62,14 +66,17 @@ export function readSimpleDoneReviewRecipientLinks(agreementId: string): SimpleD
     if (!raw) return null;
     const o = JSON.parse(raw) as SimpleDoneReviewLinksPayload;
     if (o?.v !== 1 || o.intent !== "review" || !Array.isArray(o.recipients)) return null;
-    return {
+    const recipients = o.recipients.filter(
+      (r) => r && typeof r.displayName === "string" && typeof r.reviewHref === "string" && r.reviewHref.trim(),
+    );
+    const out: SimpleDoneReviewLinksPayload = {
       v: 1,
       intent: "review",
-      recipients: o.recipients.filter(
-        (r) => r && typeof r.displayName === "string" && typeof r.reviewHref === "string" && r.reviewHref.trim(),
-      ),
+      recipients,
       savedAt: typeof o.savedAt === "number" ? o.savedAt : Date.now(),
     };
+    if (o.reviewLinksPending === true) out.reviewLinksPending = true;
+    return out;
   } catch {
     return null;
   }
@@ -87,7 +94,11 @@ export function clearSimpleDoneReviewRecipientLinks(agreementId: string): void {
 export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   agreementId: string;
   draft: AgreementDraft;
-}): Promise<SimpleDoneReviewRecipientLinkRow[]> {
+}): Promise<{
+  rows: SimpleDoneReviewRecipientLinkRow[];
+  attemptedMintCount: number;
+  firstErrorStatus?: number;
+}> {
   const mintKey =
     (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env?.VITE_RECIPIENT_LINK_MINT_KEY ||
     "";
@@ -97,6 +108,8 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   const inviter = String(list[ownerIdx]?.name ?? "").trim();
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const out: SimpleDoneReviewRecipientLinkRow[] = [];
+  let attemptedMintCount = 0;
+  let firstErrorStatus: number | undefined;
   for (let i = 0; i < list.length; i++) {
     if (i === ownerIdx) continue;
     const p = list[i]!;
@@ -105,7 +118,8 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
     const role: "signer" | "reviewer" | "recipient" =
       wf === "signer" ? "signer" : wf === "reviewer" ? "reviewer" : "recipient";
     const partyId = p.id && !String(p.id).startsWith("legacy_") ? String(p.id).trim() : undefined;
-    const minted = await mintRecipientAccessToken(
+    attemptedMintCount += 1;
+    const res = await mintRecipientAccessTokenResult(
       args.agreementId,
       {
         mode: "review",
@@ -115,10 +129,14 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
       },
       mintKey,
     );
-    if (!minted?.token) continue;
-    const reviewHref = `${origin}${agreementMagicLinkPath(args.agreementId, minted.token)}`;
+    if (!res.ok) {
+      if (firstErrorStatus === undefined) firstErrorStatus = res.status;
+      continue;
+    }
+    const token = res.data.token;
+    const reviewHref = `${origin}${agreementMagicLinkPath(args.agreementId, token)}`;
     const displayName = String(p.name || "").trim() || "Recipient";
     out.push({ displayName, reviewHref });
   }
-  return out;
+  return { rows: out, attemptedMintCount, firstErrorStatus };
 }
