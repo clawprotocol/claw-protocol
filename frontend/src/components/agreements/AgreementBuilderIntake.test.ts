@@ -30,6 +30,13 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(readCreateReviewAgreementResumeId()).toBe("agr-xyz");
   });
 
+  it("production GET resume merges authoritative Pro fields after coerceDraftFromApiPayload", () => {
+    const p = join(__dirname, "AgreementBuilderIntake.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("mergePaidProAuthoritativeDraftFieldsFromApi");
+    expect(s).toMatch(/coerceDraftFromApiPayload\([\s\S]{0,220}mergePaidProAuthoritativeDraftFieldsFromApi/m);
+  });
+
   it("hydrate shape: server_full_document_text length + render source keeps review (not intake)", () => {
     const d = {
       premium_render_source: "server_full_document_text",

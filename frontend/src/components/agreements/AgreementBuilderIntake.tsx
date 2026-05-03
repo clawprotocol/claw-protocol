@@ -304,6 +304,13 @@ import {
 } from "./agreementIntakeStorage";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 import {
+  clearPaidProEditReturnHandoff,
+  logPaidProEditReturnHydrated,
+  logPaidProEditReturnRead,
+  readPaidProEditReturnHandoff,
+} from "../../launch/simpleProduct/paidProEditReturnHandoff";
+import { mergePaidProAuthoritativeDraftFieldsFromApi } from "../../launch/simpleProduct/paidProResumeDraftMerge";
+import {
   armPaidProStarterSignatureSendFromCreateFlow,
   clearPaidProStarterSignatureSendFromCreateFlow,
   clearPremiumSendIntent,
@@ -8280,10 +8287,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           productionResumeHydratedRef.current = false;
           return;
         }
+        const editReturn = readPaidProEditReturnHandoff();
+        const editReturnMatch = Boolean(editReturn && editReturn.agreementId === hid);
+        if (editReturnMatch && editReturn) {
+          const docLenPre = materialPremiumPipelineCorpusMaxLen(ad);
+          const partyCountPre = Array.isArray(ad.parties) ? ad.parties.length : 0;
+          let recipientEmailCountPre = 0;
+          for (const p of ad.parties || []) {
+            const em = stripRecipientEmailNoise(String((p as { email?: string }).email ?? ""));
+            if (looksLikeEmail(em)) recipientEmailCountPre += 1;
+          }
+          logPaidProEditReturnRead({
+            agreementIdShort: hid.length <= 12 ? hid : `${hid.slice(0, 8)}…`,
+            hasPremiumDoc: docLenPre >= 500,
+            docLen: docLenPre,
+            partyCount: partyCountPre,
+            recipientEmailCount: recipientEmailCountPre,
+            intent: editReturn.premiumSendIntent,
+          });
+          writePremiumSendIntent(editReturn.premiumSendIntent);
+        }
         const rawIntake =
           [ad.title, ad.purpose, ad.payment_terms].filter(Boolean).join("\n\n").trim() || ad.purpose || "";
         const payment = extractIntakePayment(rawIntake);
         let next = coerceDraftFromApiPayload(ad as unknown, rawIntake, payment);
+        next = mergePaidProAuthoritativeDraftFieldsFromApi(next, ad);
         next = runIntakeDefaultsAndRoles(next, rawIntake, simpleProductFlow, intakePartyRoleLabels);
         next = alignParsedWithCanonicalType(next, rawIntake);
         next = normalizeParsedDraftLegalConcepts(next, rawIntake);
@@ -8314,6 +8342,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
         setDisplayPhase(nextDisplay);
+        if (editReturnMatch) {
+          clearPaidProEditReturnHandoff();
+          const docLenH = materialPremiumPipelineCorpusMaxLen(next);
+          logPaidProEditReturnHydrated({
+            agreementIdShort: hid.length <= 12 ? hid : `${hid.slice(0, 8)}…`,
+            createUiStage: String(CreateUiStage.DRAFT),
+            createFlowPhase: "draft_ready_for_review",
+            displayPhase: nextDisplay,
+            hasPremiumDoc: docLenH >= 500,
+            docLen: docLenH,
+          });
+        }
         setHardError(null);
         if (rawIntake.trim()) {
           setIntakeBaselineCommitted(rawIntake);

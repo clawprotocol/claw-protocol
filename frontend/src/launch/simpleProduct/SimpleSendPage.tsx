@@ -28,7 +28,9 @@ import {
   peekPremiumSendIntent,
   peekPremiumSenderSignFirst,
   writePremiumSendIntent,
+  type PremiumSendIntent,
 } from "./premiumSendIntent";
+import { writePaidProEditReturnHandoff } from "./paidProEditReturnHandoff";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
 import {
   buildAgreementVs01BridgeSession,
@@ -92,11 +94,6 @@ function formatVs01SeedFailureDetail(detail: unknown): string {
 export function SimpleSendPage(props: { agreementId: string }) {
   const { agreementId } = props;
   const { navigate, pathname } = useLaunchNav();
-  const navigateBackToCreateForEdit = useCallback(() => {
-    const id = agreementId.trim();
-    if (id) writeCreateReviewAgreementResumeId(id);
-    void navigate("/app/create");
-  }, [agreementId, navigate]);
   const [flash, setFlash] = useState<"draft_ready" | null>(null);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallCopy, setPaywallCopy] = useState<{ headline: string; sub: string } | null>(null);
@@ -141,6 +138,31 @@ export function SimpleSendPage(props: { agreementId: string }) {
     () => isPaidProAgreementAuthoritative({ draft: initialDraftSnapshot ?? null, agreementId }),
     [initialDraftSnapshot, agreementId],
   );
+  const navigateBackToCreateForEdit = useCallback(() => {
+    const id = agreementId.trim();
+    if (id) {
+      writeCreateReviewAgreementResumeId(id);
+      const live = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null);
+      const authoritativeForEdit = isPaidProAgreementAuthoritative({ draft: live, agreementId });
+      if (authoritativeForEdit) {
+        const rawIntent =
+          simpleFlowPremiumHandoffIntent ?? sendLanding.premiumIntent ?? peekPremiumSendIntent();
+        const premiumSendIntent: PremiumSendIntent = rawIntent === "signature" ? "signature" : "review";
+        writePaidProEditReturnHandoff({
+          agreementId: id,
+          liveDraft: live,
+          premiumSendIntent,
+        });
+      }
+    }
+    void navigate("/app/create");
+  }, [
+    agreementId,
+    navigate,
+    initialDraftSnapshot,
+    sendLanding.premiumIntent,
+    simpleFlowPremiumHandoffIntent,
+  ]);
   const [paidProSendBranch, setPaidProSendBranch] = useState<PaidProSendBranchMeta>(() =>
     describePaidProSendModalBranch(initialDraftSnapshot, { agreementId }),
   );
