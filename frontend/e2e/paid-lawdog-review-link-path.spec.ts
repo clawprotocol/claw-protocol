@@ -332,5 +332,9 @@ test.describe("paid LawDog review-link path (hydrate + mint + proposal)", () => 
 
     await page.getByRole("button", { name: /Create review links/ }).first().click();
     await expect(page).toHaveURL(new RegExp(`/app/done/${AG_ID}`));
+    await expect(page.getByText("Review links to share")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /Copy Sarah Collins review link/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy public verify link" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open" }).first()).toHaveAttribute("href", /\/review\?t=/);
   });
 });

@@ -31,6 +31,11 @@ import {
   type PremiumSendIntent,
 } from "./premiumSendIntent";
 import { writePaidProEditReturnHandoff } from "./paidProEditReturnHandoff";
+import {
+  clearSimpleDoneReviewRecipientLinks,
+  mintSimpleDoneReviewRecipientLinkRows,
+  writeSimpleDoneReviewRecipientLinks,
+} from "./simpleDoneReviewRecipientLinks";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
 import {
   buildAgreementVs01BridgeSession,
@@ -648,9 +653,20 @@ export function SimpleSendPage(props: { agreementId: string }) {
               return;
             }
             clearPersistedSendPhase(agreementId);
-            markSimpleFlowSent(agreementId);
-            emitActionCompleted("send", { agreementId });
-            navigate(`/app/done/${encodeURIComponent(agreementId)}`);
+            void (async () => {
+              const id = agreementId.trim();
+              const draft =
+                bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+              if (simpleFlowPremiumHandoffIntent === "review" && id) {
+                const rows = draft ? await mintSimpleDoneReviewRecipientLinkRows({ agreementId: id, draft }) : [];
+                writeSimpleDoneReviewRecipientLinks({ agreementId: id, recipients: rows });
+              } else if (id) {
+                clearSimpleDoneReviewRecipientLinks(id);
+              }
+              markSimpleFlowSent(agreementId);
+              emitActionCompleted("send", { agreementId });
+              navigate(`/app/done/${encodeURIComponent(id || agreementId)}`);
+            })();
           }}
           onSimpleFlowBack={() => {
             if (simpleFlowPhase === "send") {

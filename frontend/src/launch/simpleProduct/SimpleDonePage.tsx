@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { agreementPublicVerifyPath, fetchPublicAgreementVerify } from "../../agreement/agreementPublicVerify";
 import {
   CANONICAL_PROOF_SENTENCE,
@@ -25,6 +25,7 @@ import { PROOF_LADDER_SUBTITLE } from "../../components/proof/proofTrustLadder";
 import { LawdogOnRecordStamp } from "../../components/ui/LawdogOnRecordStamp";
 import { LawdogRecordedMark } from "../../components/ui/LawdogRecordedMark";
 import { PRODUCT_NOT_LAW_FIRM, RECORDS_DOWNLOAD_KEEP_COPY_SHORT } from "../../compliance/disclosureCopy";
+import { readSimpleDoneReviewRecipientLinks } from "./simpleDoneReviewRecipientLinks";
 
 export function SimpleDonePage(props: { agreementId: string }) {
   const { agreementId } = props;
@@ -39,6 +40,8 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   const verifyPath = agreementPublicVerifyPath(agreementId);
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${verifyPath}` : verifyPath;
+  const reviewRecipientHandoff = useMemo(() => readSimpleDoneReviewRecipientLinks(agreementId), [agreementId]);
+  const [reviewCopyIdx, setReviewCopyIdx] = useState<number | null>(null);
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
   const csn = isLawdogCsnTraffic();
   const showClaimBlock = Boolean(confirmedSend || signed);
@@ -257,6 +260,62 @@ export function SimpleDonePage(props: { agreementId: string }) {
         {confirmedSend ? (
           <ProofOpportunityBridgeCard agreementId={agreementId} mode={signed ? "proof_ready" : "sent_pending"} />
         ) : null}
+        {confirmedSend && reviewRecipientHandoff && reviewRecipientHandoff.recipients.length > 0 ? (
+          <div className="rounded-xl border border-emerald-900/40 bg-emerald-950/20 px-5 py-4 text-left">
+            <h2 className="text-sm font-semibold tracking-tight text-emerald-100">Review links to share</h2>
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">
+              Personal links for each reviewer — not the same as the public verify page below.
+            </p>
+            <ul className="mt-4 space-y-4">
+              {reviewRecipientHandoff.recipients.map((row, idx) => (
+                <li key={`${row.displayName}-${idx}`} className="rounded-lg border border-slate-800/80 bg-slate-950/40 px-4 py-3">
+                  <p className="text-xs font-medium text-slate-200">{row.displayName}</p>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--primary vs01-btn--compact w-full text-[11px] sm:w-auto"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(row.reviewHref).then(() => {
+                          setReviewCopyIdx(idx);
+                          window.setTimeout(() => setReviewCopyIdx((cur) => (cur === idx ? null : cur)), 2000);
+                        });
+                      }}
+                    >
+                      {reviewCopyIdx === idx ? "Copied" : `Copy ${row.displayName} review link`}
+                    </button>
+                    <a
+                      href={row.reviewHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="vs01-btn vs01-btn--secondary vs01-btn--compact inline-flex w-full items-center justify-center text-center text-[11px] no-underline sm:w-auto"
+                    >
+                      Open
+                    </a>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {confirmedSend &&
+        reviewRecipientHandoff &&
+        reviewRecipientHandoff.intent === "review" &&
+        reviewRecipientHandoff.recipients.length === 0 ? (
+          <div
+            className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-left text-sm text-amber-100/95"
+            role="status"
+          >
+            Review links were created, but this page could not load them. Go back to the{" "}
+            <button
+              type="button"
+              className="font-medium text-amber-50 underline decoration-amber-400/40 underline-offset-2 hover:text-white"
+              onClick={() => navigate(`/app/send/${encodeURIComponent(agreementId)}`)}
+            >
+              send page
+            </button>{" "}
+            to recreate or copy links.
+          </div>
+        ) : null}
         <div className="rounded-xl border border-sky-900/35 bg-sky-950/20 px-5 py-4">
           <p className="text-sm font-medium text-sky-100">{JOY_COPY.proofSecured}</p>
           <p className="mt-1 text-xs text-slate-400">
@@ -319,7 +378,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                 });
               }}
             >
-              {copyFlash ? "Copied" : "Copy link"}
+              {copyFlash ? "Copied" : "Copy public verify link"}
             </button>
             <button type="button" className="vs01-btn vs01-btn--secondary w-full sm:w-auto" onClick={onInviteOthers}>
               Invite others

@@ -80,4 +80,13 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("[create-review-links-click]");
     expect(s).toContain("paidProAuthoritativeSendHappyPath");
   });
+
+  it("review intent persists minted recipient review links for SimpleDonePage before navigating to /app/done", () => {
+    const p = join(__dirname, "SimpleSendPage.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("mintSimpleDoneReviewRecipientLinkRows");
+    expect(s).toContain("writeSimpleDoneReviewRecipientLinks");
+    expect(s).toContain("clearSimpleDoneReviewRecipientLinks");
+    expect(s).toContain('simpleFlowPremiumHandoffIntent === "review"');
+  });
 });
