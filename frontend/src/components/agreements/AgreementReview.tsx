@@ -136,6 +136,11 @@ import {
 import { SimplePaymentAttachCard } from "../../launch/simpleProduct/SimplePaymentAttachCard";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 import { writePremiumSenderSignFirst } from "../../launch/simpleProduct/premiumSendIntent";
+import {
+  countReadyReviewLinkInviteParties,
+  logReviewLinkRecipientEmailPreflight,
+  mergeReviewLinkRecipientEmailsOntoHydratedDraft,
+} from "../../launch/simpleProduct/reviewLinkRecipientEmailMerge";
 import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import { normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
 import { mintRecipientAccessToken, putSigningLock } from "../../agreement/recipientAccessApi";
@@ -277,21 +282,21 @@ function mergeSimpleHomeHydrationDraft(
 ): AgreementDraft {
   const id = String(agreementId || "").trim();
   const primed = primedDraft && String(primedDraft.id || "").trim() === id ? primedDraft : null;
-  if (!primed) return fetchedDraft;
+  const emailMerged = mergeReviewLinkRecipientEmailsOntoHydratedDraft(fetchedDraft, primed);
+  if (!primed) {
+    return emailMerged;
+  }
   const keepPrimed = (v: string | null | undefined): boolean => String(v ?? "").trim().length > 0;
-  const primedParties = Array.isArray(primed.parties) ? primed.parties : [];
-  const fetchedParties = Array.isArray(fetchedDraft.parties) ? fetchedDraft.parties : [];
   const nz = (s: string) => (s.trim() ? s : null);
   return {
-    ...fetchedDraft,
-    title: keepPrimed(primed.title) ? primed.title : fetchedDraft.title,
-    purpose: nz(preferLongerPlainCorpus(primed.purpose, fetchedDraft.purpose)) ?? fetchedDraft.purpose,
-    payment_terms: keepPrimed(primed.payment_terms) ? primed.payment_terms : fetchedDraft.payment_terms,
-    jurisdiction: keepPrimed(primed.jurisdiction) ? primed.jurisdiction : fetchedDraft.jurisdiction,
-    duration: keepPrimed(primed.duration) ? primed.duration : fetchedDraft.duration,
-    due_date: keepPrimed(primed.due_date) ? primed.due_date : fetchedDraft.due_date,
-    effective_date: keepPrimed(primed.effective_date) ? primed.effective_date : fetchedDraft.effective_date,
-    parties: primedParties.length > 0 ? primedParties : fetchedParties,
+    ...emailMerged,
+    title: keepPrimed(primed.title) ? primed.title : emailMerged.title,
+    purpose: nz(preferLongerPlainCorpus(primed.purpose, fetchedDraft.purpose)) ?? emailMerged.purpose,
+    payment_terms: keepPrimed(primed.payment_terms) ? primed.payment_terms : emailMerged.payment_terms,
+    jurisdiction: keepPrimed(primed.jurisdiction) ? primed.jurisdiction : emailMerged.jurisdiction,
+    duration: keepPrimed(primed.duration) ? primed.duration : emailMerged.duration,
+    due_date: keepPrimed(primed.due_date) ? primed.due_date : emailMerged.due_date,
+    effective_date: keepPrimed(primed.effective_date) ? primed.effective_date : emailMerged.effective_date,
     premium_full_document_text: nz(
       preferLongerPlainCorpus(primed.premium_full_document_text, fetchedDraft.premium_full_document_text),
     ),
@@ -491,23 +496,35 @@ function countReadyInviteParties(parties: Party[] | undefined): number {
  * Lets owners send when at least one signer/reviewer row is complete; optional second signer can stay empty.
  * Rows that are partially filled still surface field errors.
  */
-function validateRecipientContactForFlexibleSend(parties: Party[] | undefined): Record<string, string> {
+function validateRecipientContactForFlexibleSend(
+  parties: Party[] | undefined,
+  opts?: { reviewLinkEmailOnly?: boolean },
+): Record<string, string> {
+  const reviewOnly = opts?.reviewLinkEmailOnly === true;
   const err: Record<string, string> = {};
   const list = parties || [];
-  const ready = countReadyInviteParties(list);
+  const ready = reviewOnly ? countReadyReviewLinkInviteParties(list) : countReadyInviteParties(list);
   list.forEach((p, idx) => {
     if (!recipientRoleNeedsContactInfo(p.role)) return;
     const name = (p.name || "").trim();
     const email = (p.email || "").trim();
     const phoneDigits = (p.phone || "").replace(/\D/g, "");
-    const started = Boolean(name || email || phoneDigits);
     if (email && !SIMPLE_SEND_EMAIL_RE.test(email)) {
       err[`${idx}-email`] = "Check that this email looks correct";
     }
-    if (started) {
-      if (!name) err[`${idx}-name`] = "Name is required";
-      if (!email) err[`${idx}-email`] = err[`${idx}-email`] || "Email is required to send for signature";
-      if (phoneDigits.length < 10) err[`${idx}-phone`] = "Add a mobile number or email";
+    if (reviewOnly) {
+      const started = Boolean(name || email);
+      if (started) {
+        if (!name) err[`${idx}-name`] = "Name is required";
+        if (!email) err[`${idx}-email`] = err[`${idx}-email`] || "Email is required";
+      }
+    } else {
+      const started = Boolean(name || email || phoneDigits);
+      if (started) {
+        if (!name) err[`${idx}-name`] = "Name is required";
+        if (!email) err[`${idx}-email`] = err[`${idx}-email`] || "Email is required to send for signature";
+        if (phoneDigits.length < 10) err[`${idx}-phone`] = "Add a mobile number or email";
+      }
     }
   });
   if (ready < 1) {
@@ -518,9 +535,14 @@ function validateRecipientContactForFlexibleSend(parties: Party[] | undefined): 
       const email = (p.email || "").trim();
       const phoneDigits = (p.phone || "").replace(/\D/g, "");
       if (!name) err[`${firstIdx}-name`] = err[`${firstIdx}-name`] || "Name is required";
-      if (!email) err[`${firstIdx}-email`] = err[`${firstIdx}-email`] || "Add at least one signer email to send";
-      if (phoneDigits.length < 10)
+      if (!email) {
+        err[`${firstIdx}-email`] =
+          err[`${firstIdx}-email`] ||
+          (reviewOnly ? "Add at least one recipient email to create review links." : "Add at least one signer email to send");
+      }
+      if (!reviewOnly && phoneDigits.length < 10) {
         err[`${firstIdx}-phone`] = err[`${firstIdx}-phone`] || "Add a mobile number or email";
+      }
     }
   }
   return err;
@@ -1627,6 +1649,9 @@ const AgreementReview: React.FC<Props> = ({
               : null;
           const mergedForSimple = simpleHome ? mergeSimpleHomeHydrationDraft(id, primedCurrent, normalized) : normalized;
           setDraft(mergedForSimple);
+          if (simpleHome && mergedForSimple) {
+            logReviewLinkRecipientEmailPreflight(mergedForSimple);
+          }
           if (import.meta.env.DEV && simpleHome && mergedForSimple) {
             const hp = pickAuthoritativePlainForSendHandoff(mergedForSimple);
             // eslint-disable-next-line no-console
@@ -2076,7 +2101,15 @@ const AgreementReview: React.FC<Props> = ({
 
   const signingApproverMissingList = useMemo(() => missingSignerApprovals(draft), [draft]);
   const participantRows = useMemo(() => deriveParticipantRows(draft), [draft]);
-  const sendInviteReadyCount = useMemo(() => countReadyInviteParties(draft?.parties), [draft?.parties]);
+  const sendInviteReadyCount = useMemo(() => {
+    const parties = draft?.parties;
+    const reviewIntent =
+      isSimpleHomeReview && (streamlinedPremiumIntentForCopy ?? simpleFlowPremiumHandoffIntent) === "review";
+    if (reviewIntent) {
+      return countReadyReviewLinkInviteParties(parties);
+    }
+    return countReadyInviteParties(parties);
+  }, [draft?.parties, isSimpleHomeReview, streamlinedPremiumIntentForCopy, simpleFlowPremiumHandoffIntent]);
   const sendInviteTotalSlots = useMemo(() => countContactRequiredParties(draft?.parties), [draft?.parties]);
   /** Paid authoritative `/app/send` v1: flat recipient editor, no accordion / delivery matrix chrome. */
   const simplePaidProAuthoritativeSendSurface = useMemo(
@@ -2264,7 +2297,9 @@ const AgreementReview: React.FC<Props> = ({
     if (simpleFlowAdvanceBusy) return;
     if (isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send") {
       setSimpleSendValidateAttempted(true);
-      const contactErrs = validateRecipientContactForFlexibleSend(draft.parties);
+      const contactErrs = validateRecipientContactForFlexibleSend(draft.parties, {
+        reviewLinkEmailOnly: (streamlinedPremiumIntentForCopy ?? simpleFlowPremiumHandoffIntent) === "review",
+      });
       setSimpleSendFieldErrors(contactErrs);
       if (Object.keys(contactErrs).length > 0) {
         setSimpleSendRecipientEditorOpen(true);
@@ -2323,7 +2358,9 @@ const AgreementReview: React.FC<Props> = ({
     if (simpleFlowAdvanceBusy) return;
     if (isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send") {
       setSimpleSendValidateAttempted(true);
-      const contactErrs = validateRecipientContactForFlexibleSend(draft.parties);
+      const contactErrs = validateRecipientContactForFlexibleSend(draft.parties, {
+        reviewLinkEmailOnly: (streamlinedPremiumIntentForCopy ?? simpleFlowPremiumHandoffIntent) === "review",
+      });
       setSimpleSendFieldErrors(contactErrs);
       if (Object.keys(contactErrs).length > 0) {
         logReviewLinkAction("blocked_recipient_validation");
@@ -2892,9 +2929,18 @@ const AgreementReview: React.FC<Props> = ({
 
   useEffect(() => {
     if (!(isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send") || !draft?.parties?.length) return;
-    const err = validateRecipientContactForFlexibleSend(draft.parties);
+    const err = validateRecipientContactForFlexibleSend(draft.parties, {
+      reviewLinkEmailOnly: (streamlinedPremiumIntentForCopy ?? simpleFlowPremiumHandoffIntent) === "review",
+    });
     if (Object.keys(err).length > 0) setSimpleSendRecipientEditorOpen(true);
-  }, [isWorkspace, isSimpleHomeReview, simpleFlowPhase, draft?.parties]);
+  }, [
+    isWorkspace,
+    isSimpleHomeReview,
+    simpleFlowPhase,
+    draft?.parties,
+    streamlinedPremiumIntentForCopy,
+    simpleFlowPremiumHandoffIntent,
+  ]);
 
   if (!agreementId?.trim()) {
     if (import.meta.env.DEV) {

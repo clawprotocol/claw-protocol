@@ -112,6 +112,16 @@ export function persistPremiumRecipientHandoff(patch: {
     const payload: PremiumRecipientHandoffV2 = { v: 2, party1, party2, savedAt: Date.now() };
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
+    const p1e = Boolean(String(party1.email || "").trim());
+    const p2e = Boolean(String(party2.email || "").trim());
+    if (p1e || p2e) {
+      // eslint-disable-next-line no-console
+      console.info("[review-link-recipient-email-handoff-write]", {
+        partySlotsWithEmail: (p1e ? 1 : 0) + (p2e ? 1 : 0),
+        party1HasEmail: p1e,
+        party2HasEmail: p2e,
+      });
+    }
   } catch {
     /* ignore */
   }
@@ -161,6 +171,16 @@ export function writePremiumRecipientHandoffExact(party1: PremiumRecipientHandof
     if (!payload.party1.name && !payload.party2.name && !payload.party1.email && !payload.party2.email) return;
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
+    const p1e = Boolean(String(payload.party1.email || "").trim());
+    const p2e = Boolean(String(payload.party2.email || "").trim());
+    if (p1e || p2e) {
+      // eslint-disable-next-line no-console
+      console.info("[review-link-recipient-email-handoff-write]", {
+        partySlotsWithEmail: (p1e ? 1 : 0) + (p2e ? 1 : 0),
+        party1HasEmail: p1e,
+        party2HasEmail: p2e,
+      });
+    }
   } catch {
     /* ignore */
   }

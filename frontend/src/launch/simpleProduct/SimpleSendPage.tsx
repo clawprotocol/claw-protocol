@@ -91,7 +91,7 @@ function formatVs01SeedFailureDetail(detail: unknown): string {
 
 export function SimpleSendPage(props: { agreementId: string }) {
   const { agreementId } = props;
-  const { navigate } = useLaunchNav();
+  const { navigate, pathname } = useLaunchNav();
   const navigateBackToCreateForEdit = useCallback(() => {
     const id = agreementId.trim();
     if (id) writeCreateReviewAgreementResumeId(id);
@@ -101,7 +101,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallCopy, setPaywallCopy] = useState<{ headline: string; sub: string } | null>(null);
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
-  const sendLanding = useMemo(() => readSimpleSendHandoffFromHistory(agreementId), [agreementId]);
+  const sendLanding = useMemo(() => readSimpleSendHandoffFromHistory(agreementId), [agreementId, pathname]);
   const [simpleFlowPremiumHandoffIntent, setSimpleFlowPremiumHandoffIntent] = useState(
     () => sendLanding.premiumIntent ?? peekPremiumSendIntent(),
   );

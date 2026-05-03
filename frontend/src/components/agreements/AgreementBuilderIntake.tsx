@@ -6538,8 +6538,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (import.meta.env.DEV && paidProAuthoritative) {
           devTracePremiumSendIntent("onGenerate_handoff", paidProResolvedHandoffIntent, peekPremiumSenderSignFirst());
         }
-        const simpleSendOpenPhaseHandoff =
-          inlineContextualSend || paidProAuthoritative ? ("send" as const) : undefined;
+        const simpleSendOpenPhaseHandoff: "send" | "review" | undefined =
+          inlineContextualSend || paidProAuthoritative
+            ? paidProResolvedHandoffIntent === "review"
+              ? ("review" as const)
+              : ("send" as const)
+            : undefined;
         const ok = await runPersistAndOpen(
           draftWithRecipientUi,
           partyCtx,
