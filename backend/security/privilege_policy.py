@@ -65,8 +65,17 @@ PRIVILEGE_CANDIDATE_SINGLE_TERMS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Legal-doctrine signals only. Plain "work product" appears in routine commercial/IP clauses
+# (deliverables, commissioned designs, software dev) and must not trip protected-mode by itself.
 WORK_PRODUCT_PHRASES: Final[tuple[str, ...]] = (
-    "work product",
+    "attorney work product",
+    "attorneys work product",
+    "legal work product",
+    "privileged work product",
+    "work product doctrine",
+    "work-product doctrine",
+    "work product privilege",
+    "work product protection",
 )
 
 

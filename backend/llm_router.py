@@ -24,8 +24,14 @@ class ExternalAIBlockedError(RuntimeError):
     ``args[0]`` is metadata-safe and must not echo user content.
     """
 
-    def __init__(self, block_reason: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        block_reason: Optional[str] = None,
+        *,
+        policy_reason_codes: tuple[str, ...] = (),
+    ) -> None:
         self.block_reason = block_reason
+        self.policy_reason_codes = policy_reason_codes
         code = block_reason or "AIRLOCK_BLOCKED"
         super().__init__(f"external_ai_blocked:{code}")
 
@@ -135,7 +141,17 @@ def _messages_after_user_airlock(messages: List[Dict[str, Any]]) -> List[Dict[st
         raw = _user_content_text_for_airlock(msg.get("content"))
         airlock_result = run_ai_airlock(raw)
         if airlock_result.blocked:
-            raise ExternalAIBlockedError(airlock_result.block_reason)
+            codes = tuple(airlock_result.policy_decision.reason_codes)
+            log.warning(
+                "[claw-ai-airlock] user_message_blocked block_reason=%s policy_reason_codes=%s user_content_chars=%s",
+                airlock_result.block_reason,
+                ",".join(codes) if codes else "",
+                len(raw),
+            )
+            raise ExternalAIBlockedError(
+                airlock_result.block_reason,
+                policy_reason_codes=codes,
+            )
         new_content = _user_content_with_minimized(msg.get("content"), airlock_result.minimized_text)
         out.append({**msg, "content": new_content})
     return out
@@ -218,7 +234,17 @@ def embed_texts(
     for t in texts:
         airlock_result = run_ai_airlock(t)
         if airlock_result.blocked:
-            raise ExternalAIBlockedError(airlock_result.block_reason)
+            codes = tuple(airlock_result.policy_decision.reason_codes)
+            log.warning(
+                "[claw-ai-airlock] embed_input_blocked block_reason=%s policy_reason_codes=%s user_content_chars=%s",
+                airlock_result.block_reason,
+                ",".join(codes) if codes else "",
+                len(t),
+            )
+            raise ExternalAIBlockedError(
+                airlock_result.block_reason,
+                policy_reason_codes=codes,
+            )
         minimized_inputs.append(airlock_result.minimized_text)
     client = _get_client()
     m = model or os.getenv("CLAW_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small").strip()

@@ -70,7 +70,7 @@ def test_empty_and_whitespace() -> None:
 
 
 def test_casing_variation() -> None:
-    d = evaluate_privilege_policy("ATTORNEY-CLIENT WORK PRODUCT draft")
+    d = evaluate_privilege_policy("ATTORNEY-CLIENT WORK PRODUCT DOCTRINE draft")
     assert d.is_legal_sensitive is True
     assert REASON_LEGAL_SENSITIVE_TERM in d.reason_codes
     assert REASON_WORK_PRODUCT_SIGNAL in d.reason_codes
@@ -79,7 +79,7 @@ def test_casing_variation() -> None:
 
 def test_multiple_categories_sorted_reason_codes() -> None:
     text = (
-        "Privileged notes on work product; coordinate litigation "
+        "Privileged notes on work product doctrine; coordinate litigation "
         "with outside counsel per the legal memo."
     )
     d = evaluate_privilege_policy(text)

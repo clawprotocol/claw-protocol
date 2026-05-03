@@ -10,6 +10,10 @@ from backend.security.ai_airlock import (
     minimize_for_airlock,
     run_ai_airlock,
 )
+from backend.security.privilege_policy import (
+    REASON_WORK_PRODUCT_SIGNAL,
+    evaluate_privilege_policy,
+)
 
 
 def test_legal_sensitive_content_not_blocked_with_local_bypass(
@@ -100,6 +104,53 @@ def test_transformation_metadata_coherent_when_blocked() -> None:
     assert r.policy_decision.requires_protected_mode is True
     assert r.minimized_length <= r.redacted_length
     assert tuple(r.transformation_summary) == r.transformation_summary
+
+
+def test_commercial_ip_work_product_phrase_not_blocked() -> None:
+    """Ordinary services agreements reference 'work product' as IP/deliverables, not privilege doctrine."""
+    raw = (
+        "Duties, comp, term/termination, IP for work product, and classification-appropriate terms. "
+        "Deliverables include source files and assigned copyrights."
+    )
+    r = run_ai_airlock(raw)
+    assert r.blocked is False
+    assert REASON_WORK_PRODUCT_SIGNAL not in r.policy_decision.reason_codes
+
+
+def test_work_product_doctrine_still_blocks() -> None:
+    r = run_ai_airlock("Memo on the work product doctrine and trial preparation materials.")
+    assert r.blocked is True
+    assert REASON_WORK_PRODUCT_SIGNAL in r.policy_decision.reason_codes
+
+
+def test_premium_full_draft_style_json_with_employment_intent_contract_passes_airlock() -> None:
+    """Mirrors POST /premium-full-draft user JSON: employment intent contract used to embed 'IP for work product'."""
+    import json
+
+    intake = (
+        "I need a freelance software development agreement. Anthem Blanchard is the client. "
+        "Sarah Collins is the developer. Sarah will redesign and optimize the CryptoSpaces.net website. "
+        "Fee is $7,500. $3,000 upfront and $4,500 on final delivery. Start May 1, 2026. Final delivery May 31, 2026."
+    )
+    payload = {
+        "intake": intake,
+        "scenario_category": "freelancer_service",
+        "scenario_category_signals": ["freelancer"],
+        "intent_contract": {
+            "intent_id": "employment_contractor",
+            "expected_title_terms": ["Services", "Agreement"],
+            "minimum_section_expectations": (
+                "Duties, comp, term/termination, IP for work product, and classification-appropriate terms."
+            ),
+            "ambiguity_policy": "require_user_details",
+            "pro_strict": True,
+        },
+    }
+    blob = json.dumps(payload, ensure_ascii=False)
+    r = run_ai_airlock(blob)
+    assert r.blocked is False
+    d = evaluate_privilege_policy(blob)
+    assert d.requires_protected_mode is False
 
 
 def test_transformation_metadata_coherent_when_allowed() -> None:

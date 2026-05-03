@@ -593,7 +593,10 @@ def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
         return "missing_openai_key", "missing_openai_key:RuntimeError"
     if isinstance(exc, ExternalAIBlockedError):
         br = getattr(exc, "block_reason", None) or "airlock"
-        return "airlock_blocked", f"airlock:{br}"
+        codes = getattr(exc, "policy_reason_codes", ()) or ()
+        codes_s = ",".join(str(c) for c in codes) if codes else ""
+        detail = f"airlock:{br}" + (f" policy_codes={codes_s}" if codes_s else "")
+        return "airlock_blocked", detail
     try:
         from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError, RateLimitError
 
