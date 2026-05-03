@@ -12,6 +12,9 @@ export type PublicVerifySignatureEvent = {
 
 export type PublicVerifyPayload = {
   agreement_id: string;
+  /** Backend may return this when proof/hash assembly is incomplete (still HTTP 200). */
+  record_status?: string;
+  record_status_reason?: string;
   summary: {
     title?: string;
     jurisdiction?: string;
@@ -39,6 +42,7 @@ export type PublicVerifyPayload = {
     agreement_hash: string;
     signing_commitment_hash?: string | null;
     schema?: string;
+    record_note?: string;
   };
   claw_feed?: {
     event_type?: string;

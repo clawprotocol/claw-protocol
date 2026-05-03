@@ -90,7 +90,7 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain('simpleFlowPremiumHandoffIntent === "review"');
     expect(s).toContain("try {");
     expect(s).toContain("mintThrew");
-    expect(s).toContain("[simple-done-review-links-mint-failed]");
+    expect(s).toContain("[review-link-mint]");
     expect(s).toContain("markSimpleFlowSent(agreementId)");
     expect(s).toContain("navigate(`/app/done/${encodeURIComponent(id || agreementId)}`)");
   });

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
@@ -14,7 +15,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from backend.config.anchor_network_config import (
     ALLOWED_AGREEMENT_ANCHOR_NETWORKS,
@@ -77,6 +78,10 @@ from backend.llm_usage_guard import (
     validate_instruction_size,
     validate_negotiate_payload_size,
     validate_negotiate_text,
+)
+from backend.config.agreement_signing_token import (
+    SigningTokenSecretMissingInProductionError,
+    resolve_signing_token_secret_raw,
 )
 from backend.config.feed_anchor_policy import settlement_anchor_network_hint
 from backend.proof_status.store import ProofLayerStore
@@ -197,13 +202,16 @@ def _recipient_link_mint_key_ok(request: Request) -> bool:
 
 
 def _signing_token_secret_bytes() -> bytes:
-    s = os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()
-    if not s:
+    try:
+        return resolve_signing_token_secret_raw().encode("utf-8")
+    except SigningTokenSecretMissingInProductionError as e:
         raise HTTPException(
-            status_code=503,
-            detail="CLAW_AGREEMENT_SIGNING_TOKEN_SECRET is not configured",
-        )
-    return s.encode("utf-8")
+            status_code=422,
+            detail={
+                "code": "signing_token_secret_not_configured",
+                "message": str(e),
+            },
+        ) from e
 
 
 def _utc_now_iso() -> str:
@@ -4198,9 +4206,16 @@ def _recipient_party_id_on_draft(draft: Dict[str, Any], party_id: str) -> bool:
 
 @router.get("/access/validate")
 def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[str, Any]:
-    secret_raw = os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()
-    if not secret_raw:
-        raise HTTPException(status_code=503, detail="signing_token_secret_not_configured")
+    try:
+        secret_raw = resolve_signing_token_secret_raw()
+    except SigningTokenSecretMissingInProductionError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "signing_token_secret_not_configured",
+                "message": str(e),
+            },
+        ) from e
     log_ok = os.getenv("CLAW_RECIPIENT_TOKEN_LOG_VALIDATIONS", "1").strip().lower() not in (
         "0",
         "false",
@@ -4500,18 +4515,40 @@ def post_recipient_access_token(
     else:
         lv = str((lock or {}).get("locked_version_id") or "")
 
-    token = mint_recipient_access_token(
-        secret=_signing_token_secret_bytes(),
-        agreement_id=agreement_id,
-        locked_version_id=lv,
-        mode=body.mode,
-        role=body.role,
-        ttl_seconds=ttl,
-        recipient_subject=body.recipient_subject,
-        recipient_party_id=body.recipient_party_id,
-        inviter_display_name=body.inviter_display_name,
-        single_use=body.single_use,
-    )
+    secret = _signing_token_secret_bytes()
+    token: Optional[str] = None
+    last_mint_error: Optional[BaseException] = None
+    for attempt in range(3):  # initial + 2 retries (short backoff)
+        try:
+            token = mint_recipient_access_token(
+                secret=secret,
+                agreement_id=agreement_id,
+                locked_version_id=lv,
+                mode=body.mode,
+                role=body.role,
+                ttl_seconds=ttl,
+                recipient_subject=body.recipient_subject,
+                recipient_party_id=body.recipient_party_id,
+                inviter_display_name=body.inviter_display_name,
+                single_use=body.single_use,
+            )
+            break
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — bounded retries; never log token material
+            last_mint_error = exc
+            if attempt < 2:
+                time.sleep(0.06 * (2**attempt))
+                continue
+            break
+    if not token:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "recipient_token_mint_unavailable",
+                "message": "Unable to mint recipient access token after retries. Try again shortly.",
+            },
+        ) from last_mint_error
     u_ev = "signature_request_sent" if body.mode == "sign" else "recipient_invite_sent"
     record_usage_ledger_event(
         subject_ref=resolve_subject_from_request(request),
@@ -4620,15 +4657,8 @@ def patch_agreement_workspace_tags(
     return {"ok": True, "draft": next_draft.model_dump()}
 
 
-@router.get("/public/{agreement_id}/verify")
-def get_public_agreement_verify(agreement_id: str) -> Dict[str, Any]:
-    """Public read-only verification bundle (no agreement body text, purpose, or payment terms)."""
-    if not public_agreement_verify_enabled():
-        raise HTTPException(status_code=404, detail="not_found")
-    aid = (agreement_id or "").strip()
-    if not aid:
-        raise HTTPException(status_code=404, detail="not_found")
-    draft = _load_or_404(aid)
+def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[str, Any]:
+    """Full public verify JSON; callers wrap in try/except for graceful degradation."""
     overview_hash = _public_agreement_overview_hash(aid, draft)
     sig_status = _public_signature_status(aid, draft)
     claw_feed: Optional[Dict[str, Any]] = None
@@ -4674,6 +4704,103 @@ def get_public_agreement_verify(agreement_id: str) -> Dict[str, Any]:
             ),
         },
     }
+
+
+def _public_agreement_verify_pending_payload(aid: str, draft: AgreementDraft) -> Dict[str, Any]:
+    """Minimal safe bundle when hashes, feed, or anchors cannot be assembled (never 500)."""
+    try:
+        settlement_net = settlement_anchor_network_hint()
+    except Exception:
+        settlement_net = ""
+    try:
+        lifecycle = _public_lifecycle_label(draft, aid)
+    except Exception:
+        lifecycle = "in_negotiation"
+    signer_party_count = 0
+    try:
+        signer_party_count = len(
+            [p for p in draft.parties or [] if _normalize_workflow_role(p.role) == "signer"]
+        )
+    except Exception:
+        signer_party_count = 0
+    return {
+        "agreement_id": aid,
+        "record_status": "pending",
+        "record_status_reason": "verification_bundle_incomplete",
+        "summary": {
+            "title": draft.title,
+            "jurisdiction": draft.jurisdiction,
+            "created_at": draft.created_at,
+            "updated_at": draft.updated_at,
+            "status": lifecycle,
+            "review_sent_at": draft.review_sent_at,
+        },
+        "participants": [{"name": p.name, "role": p.role} for p in draft.parties or []],
+        "version_history": [],
+        "signature_status": {
+            "fully_executed": False,
+            "signatures_recorded": 0,
+            "signer_party_count": signer_party_count,
+            "locked_version_id": None,
+            "signing_commitment_hash": None,
+        },
+        "signature_events": [],
+        "verification": {
+            "agreement_hash": "",
+            "signing_commitment_hash": None,
+            "schema": "claw.agreement.public_verify/v1",
+            "record_note": (
+                "Public verification details are not available yet. The agreement exists, but proof "
+                "or anchor metadata may still be pending."
+            ),
+        },
+        "claw_feed": None,
+        "settlement_anchor": {
+            "network_hint": settlement_net or "unknown",
+            "note": (
+                "Settlement anchor details may be unavailable until the record is finalized."
+            ),
+        },
+    }
+
+
+@router.get("/public/{agreement_id}/verify")
+def get_public_agreement_verify(agreement_id: str) -> Dict[str, Any]:
+    """Public read-only verification bundle (no agreement body text, purpose, or payment terms)."""
+    if not public_agreement_verify_enabled():
+        raise HTTPException(status_code=404, detail="not_found")
+    aid = (agreement_id or "").strip()
+    if not aid:
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        raw = load_draft(aid)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "agreement_not_found", "message": "No agreement exists for this id."},
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "agreement_not_found",
+                "message": "Agreement record is missing or not readable.",
+            },
+        )
+    try:
+        draft = AgreementDraft.model_validate(raw)
+    except ValidationError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "agreement_not_found",
+                "message": "Agreement record is missing or not readable.",
+            },
+        )
+    try:
+        return _public_agreement_verify_payload(aid, draft)
+    except Exception:
+        return _public_agreement_verify_pending_payload(aid, draft)
 
 
 @router.get("/{agreement_id}")

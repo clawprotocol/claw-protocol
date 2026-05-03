@@ -680,14 +680,23 @@ export function SimpleSendPage(props: { agreementId: string }) {
                 }
                 const reviewLinksPending =
                   linkRows.length === 0 && (attemptedMintCount > 0 || mintThrew || !draft);
-                if (linkRows.length === 0 && (attemptedMintCount > 0 || mintThrew)) {
-                  // eslint-disable-next-line no-console
-                  console.warn("[simple-done-review-links-mint-failed]", {
-                    agreementIdShort: shortAgIdForMintLog(id),
-                    attemptedCount: attemptedMintCount,
-                    errorStatus: firstErrorStatus,
-                  });
-                }
+                const successCount = linkRows.length;
+                const mintStatus =
+                  !draft || mintThrew
+                    ? "exception_or_no_draft"
+                    : successCount > 0
+                      ? "ok"
+                      : attemptedMintCount > 0
+                        ? "partial_failure"
+                        : "skipped_no_counterparties";
+                // eslint-disable-next-line no-console
+                console.info("[review-link-mint]", {
+                  attemptedCount: attemptedMintCount,
+                  successCount,
+                  status: mintStatus,
+                  ...(typeof firstErrorStatus === "number" ? { httpStatus: firstErrorStatus } : {}),
+                  agreementIdShort: shortAgIdForMintLog(id),
+                });
                 writeSimpleDoneReviewRecipientLinks({
                   agreementId: id,
                   recipients: linkRows,

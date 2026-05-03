@@ -17,7 +17,6 @@ import { markFirstWorkflowReinforcementDone, shouldShowFirstWorkflowReinforcemen
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { useLaunchNav } from "../LaunchNavContext";
 import { usePowerGatedNavigation } from "../../monetization/usePowerGatedNavigation";
-import { ProofOpportunityBridgeCard } from "../affiliate/ProofOpportunityBridgeCard";
 import { ClaimRecordCard } from "../../conversion/ClaimRecordCard";
 import { JoinLeaderboardOptInCard } from "../../leaderboard/JoinLeaderboardOptInCard";
 import { trackProofFinalizeMilestone, trackProofSendMilestone } from "../../leaderboard/trackProofLifecycle";
@@ -35,13 +34,14 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const [title, setTitle] = useState<string | null>(null);
   const [confirmedSend, setConfirmedSend] = useState(() => hasMarkedSimpleFlowSent(agreementId));
   const [copyFlash, setCopyFlash] = useState(false);
+  const [publicVerifyCopyFlash, setPublicVerifyCopyFlash] = useState(false);
   const [showFirstWorkflowReinforcement, setShowFirstWorkflowReinforcement] = useState(false);
   const finalizeLoggedRef = useRef(false);
 
   const verifyPath = agreementPublicVerifyPath(agreementId);
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${verifyPath}` : verifyPath;
   const reviewRecipientHandoff = useMemo(() => readSimpleDoneReviewRecipientLinks(agreementId), [agreementId]);
-  const [reviewCopyIdx, setReviewCopyIdx] = useState<number | null>(null);
+  const [reviewBundleCopyFlash, setReviewBundleCopyFlash] = useState(false);
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
   const csn = isLawdogCsnTraffic();
   const showClaimBlock = Boolean(confirmedSend || signed);
@@ -94,13 +94,32 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const headline = signed
     ? JOY_COPY.signSealedProof
     : confirmedSend
-      ? "Agreement saved"
+      ? "Agreement ready"
       : JOY_COPY.readyToSendHeadline;
   const subline = signed
     ? "Everyone who needed to sign has signed."
     : confirmedSend
-      ? "It’s in your Agreement Memory — share links from there when you are ready."
+      ? "Share your review link so others can suggest edits. Use the public verify link only for status checks."
       : JOY_COPY.readyToSendSubline;
+
+  const reviewHandoffRows = reviewRecipientHandoff?.recipients ?? [];
+  const reviewLinksReady = confirmedSend && reviewHandoffRows.length > 0;
+  const reviewLinksPending =
+    confirmedSend &&
+    reviewRecipientHandoff?.intent === "review" &&
+    (reviewRecipientHandoff.reviewLinksPending === true || reviewHandoffRows.length === 0);
+
+  function copyAllReviewLinks(): void {
+    if (reviewHandoffRows.length === 0) return;
+    const text =
+      reviewHandoffRows.length === 1
+        ? reviewHandoffRows[0]!.reviewHref
+        : reviewHandoffRows.map((r) => `${r.displayName}: ${r.reviewHref}`).join("\n");
+    void navigator.clipboard.writeText(text).then(() => {
+      setReviewBundleCopyFlash(true);
+      window.setTimeout(() => setReviewBundleCopyFlash(false), 2000);
+    });
+  }
 
   function onInviteOthers(): void {
     const subject = title ? `Agreement: ${title}` : "Agreement to review";
@@ -225,95 +244,43 @@ export function SimpleDonePage(props: { agreementId: string }) {
             className="text-left"
           />
         ) : null}
-        {confirmedSend ? (
-          <div className="rounded-xl border border-slate-800/70 bg-slate-950/35 px-4 py-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Where things stand</p>
-            <p className="mt-1 text-[10px] leading-snug text-slate-600">
-              Live statuses ship next — here&apos;s the path recipients follow.
-            </p>
-            <ol className="mt-4 flex list-none flex-wrap justify-center gap-2 sm:justify-start" aria-label="Agreement progress">
-              <li className="rounded-lg border border-emerald-800/45 bg-emerald-950/25 px-3 py-2 text-xs font-medium text-emerald-100">
-                <span aria-hidden>✓</span> Sent
-              </li>
-              <li
-                className={`rounded-lg border px-3 py-2 text-xs font-medium ${
-                  signed ? "border-slate-600 text-slate-400" : "border-amber-800/35 bg-amber-950/15 text-amber-100/90"
-                }`}
-              >
-                <span aria-hidden>⏳</span> Viewed
-              </li>
-              <li
-                className={`rounded-lg border px-3 py-2 text-xs font-medium ${
-                  signed
-                    ? "border-emerald-800/45 bg-emerald-950/20 text-emerald-100"
-                    : "border-slate-700 text-slate-400"
-                }`}
-              >
-                <span aria-hidden>✍️</span> Signed
-              </li>
-              <li className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-medium text-slate-400">
-                <span aria-hidden>💰</span> Paid
-              </li>
-            </ol>
-          </div>
-        ) : null}
-        {confirmedSend ? (
-          <ProofOpportunityBridgeCard agreementId={agreementId} mode={signed ? "proof_ready" : "sent_pending"} />
-        ) : null}
-        {confirmedSend && reviewRecipientHandoff && reviewRecipientHandoff.recipients.length > 0 ? (
+        {confirmedSend && reviewLinksReady ? (
           <div className="rounded-xl border border-emerald-900/40 bg-emerald-950/20 px-5 py-4 text-left">
-            <h2 className="text-sm font-semibold tracking-tight text-emerald-100">Review links to share</h2>
-            <p className="mt-1 text-xs leading-relaxed text-slate-400">
-              Personal links for each reviewer — not the same as the public verify page below.
+            <p className="text-xs leading-relaxed text-slate-400">
+              Personal review links (not the same as the public verify link below).
             </p>
-            <ul className="mt-4 space-y-4">
-              {reviewRecipientHandoff.recipients.map((row, idx) => (
-                <li key={`${row.displayName}-${idx}`} className="rounded-lg border border-slate-800/80 bg-slate-950/40 px-4 py-3">
-                  <p className="text-xs font-medium text-slate-200">{row.displayName}</p>
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--primary vs01-btn--compact w-full text-[11px] sm:w-auto"
-                      onClick={() => {
-                        void navigator.clipboard.writeText(row.reviewHref).then(() => {
-                          setReviewCopyIdx(idx);
-                          window.setTimeout(() => setReviewCopyIdx((cur) => (cur === idx ? null : cur)), 2000);
-                        });
-                      }}
-                    >
-                      {reviewCopyIdx === idx ? "Copied" : `Copy ${row.displayName} review link`}
-                    </button>
-                    <a
-                      href={row.reviewHref}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="vs01-btn vs01-btn--secondary vs01-btn--compact inline-flex w-full items-center justify-center text-center text-[11px] no-underline sm:w-auto"
-                    >
-                      Open
-                    </a>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                onClick={() => copyAllReviewLinks()}
+              >
+                {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
+              </button>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(shareUrl).then(() => {
+                    setPublicVerifyCopyFlash(true);
+                    window.setTimeout(() => setPublicVerifyCopyFlash(false), 2000);
+                  });
+                }}
+              >
+                {publicVerifyCopyFlash ? "Copied" : "Copy public verify link"}
+              </button>
+            </div>
           </div>
         ) : null}
-        {confirmedSend &&
-        reviewRecipientHandoff &&
-        reviewRecipientHandoff.intent === "review" &&
-        reviewRecipientHandoff.recipients.length === 0 ? (
-          <div
-            className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-4 text-left text-sm text-amber-100/95"
-            role="status"
-          >
-            <p className="leading-relaxed">
-              Review links are not ready yet. You can go back to the send page to retry or copy them.
-            </p>
+        {confirmedSend && reviewLinksPending ? (
+          <div className="rounded-lg border border-slate-800/70 bg-slate-950/30 px-4 py-3 text-left text-sm text-slate-300">
+            <p className="leading-snug">Review link is still preparing. Refresh or return to send.</p>
             <button
               type="button"
-              className="vs01-btn vs01-btn--secondary mt-3 w-full min-h-[2.5rem] text-sm sm:w-auto"
+              className="vs01-btn vs01-btn--secondary mt-3 min-h-[2.25rem] px-3 text-xs"
               onClick={() => navigate(`/app/send/${encodeURIComponent(agreementId)}`)}
             >
-              Retry review links
+              Back to send
             </button>
           </div>
         ) : null}
@@ -369,6 +336,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
               {RECORDS_DOWNLOAD_KEEP_COPY_SHORT} {PRODUCT_NOT_LAW_FIRM}
             </p>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
+            {!reviewLinksReady ? (
             <button
               type="button"
               className="vs01-btn vs01-btn--secondary w-full sm:w-auto"
@@ -381,6 +349,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
             >
               {copyFlash ? "Copied" : "Copy public verify link"}
             </button>
+            ) : null}
             <button type="button" className="vs01-btn vs01-btn--secondary w-full sm:w-auto" onClick={onInviteOthers}>
               Invite others
             </button>

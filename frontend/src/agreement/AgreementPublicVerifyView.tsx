@@ -37,6 +37,7 @@ function formatTs(iso: string | undefined): string {
 }
 
 function proofStateFromPayload(data: PublicVerifyPayload): ProofBadgeState {
+  if (String(data.record_status || "").trim().toLowerCase() === "pending") return "pending";
   if (data.signature_status?.fully_executed) return "verified";
   const s = String(data.summary?.status || "").trim();
   if (s === "partially_signed" || s === "locked_for_signing") return "pending";
@@ -98,6 +99,9 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
   const vfy = data.verification;
   const sig = data.signature_status;
   const proofState = proofStateFromPayload(data);
+  const recordPending = String(data.record_status || "").trim().toLowerCase() === "pending";
+  const versionHistory = data.version_history ?? [];
+  const signatureEvents = data.signature_events ?? [];
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
@@ -116,6 +120,12 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
           {(data.summary.title || "").trim() || "Agreement"}
         </h1>
         <p className="text-[11px] leading-snug text-slate-500">{PROOF_LADDER_SUBTITLE}</p>
+        {recordPending ? (
+          <p className="rounded-md border border-amber-800/40 bg-amber-950/25 px-3 py-2 text-xs leading-snug text-amber-100/95">
+            {vfy.record_note?.trim() ||
+              "Public verification details are still preparing. This page shows agreement metadata only — not full agreement text."}
+          </p>
+        ) : null}
         <p className="text-sm text-slate-400">
           {data.summary.jurisdiction ? `${data.summary.jurisdiction} · ` : null}
           <span className="text-slate-300">{statusLabel(data.summary.status)}</span>
@@ -191,11 +201,11 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
         <h2 id="verify-versions-heading" className="text-sm font-semibold text-slate-200">
           Version history
         </h2>
-        {data.version_history.length === 0 ? (
+        {versionHistory.length === 0 ? (
           <p className="text-xs text-slate-500">No version rows on record.</p>
         ) : (
           <ul className="space-y-2">
-            {data.version_history.map((v) => (
+            {versionHistory.map((v) => (
               <li
                 key={`${v.version}_${v.created_at}`}
                 className="rounded-lg border border-slate-800/80 bg-slate-900/35 px-4 py-3 text-xs"
@@ -247,7 +257,13 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
           <div className="mt-4 space-y-4 border-t border-violet-900/30 pt-4 text-xs">
             <div>
               <p className="font-semibold text-slate-400">Agreement hash (public overview)</p>
-              <p className="mt-1 break-all font-mono text-[11px] text-violet-100/90">{vfy.agreement_hash}</p>
+              {vfy.agreement_hash?.trim() ? (
+                <p className="mt-1 break-all font-mono text-[11px] text-violet-100/90">{vfy.agreement_hash}</p>
+              ) : (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {vfy.record_note?.trim() || "Not available yet for this record."}
+                </p>
+              )}
               <p className="mt-1 text-[10px] text-slate-500">
                 SHA-256 of canonical metadata and version index — excludes document body, purpose, and payment terms (
                 {vfy.schema}).
@@ -292,11 +308,11 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
             ) : null}
             <div>
               <p className="font-semibold text-slate-400">Signature events</p>
-              {data.signature_events.length === 0 ? (
+              {signatureEvents.length === 0 ? (
                 <p className="mt-1 text-slate-500">None recorded.</p>
               ) : (
                 <ul className="mt-2 space-y-3">
-                  {data.signature_events.map((ev, idx) => (
+                  {signatureEvents.map((ev, idx) => (
                     <li
                       key={`${ev.event_type}_${ev.at}_${idx}`}
                       className="rounded border border-slate-800/80 bg-slate-900/50 px-3 py-2"
