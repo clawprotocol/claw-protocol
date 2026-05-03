@@ -9,6 +9,17 @@ function normalizeRole(role: string | undefined): string {
   return String(role ?? "").trim().toLowerCase();
 }
 
+/**
+ * Row treated as agreement owner/sender for review-link counterparty math.
+ * Prefer the first explicit `owner` role; if none, assume index 0 (create-flow convention).
+ */
+export function resolveReviewLinkAssumedOwnerPartyIndex(parties: readonly AgreementParty[] | undefined): number {
+  const list = parties ?? [];
+  const idx = list.findIndex((p) => normalizeRole(p.role) === "owner");
+  if (idx >= 0) return idx;
+  return 0;
+}
+
 function plausibleSlotEmail(raw: string | null | undefined): string {
   const s = stripRecipientEmailNoise(String(raw ?? ""));
   return isPlausibleEmail(s) ? s : "";
@@ -23,42 +34,46 @@ export function logReviewLinkRecipientEmailHandoffRead(payload: {
 }
 
 /**
- * Paid simple-home review path: name + plausible email only (no phone gate).
+ * Paid simple-home review path: name + email only (no phone). Counterparty = not the assumed
+ * owner row; non–signer/reviewer roles (e.g. `party`) still qualify on index ≥ 1 or when another row is owner.
  */
-export function rowReadyForReviewLinkInvite(p: AgreementParty): boolean {
-  const w = normalizeRole(p.role);
-  if (w !== "signer" && w !== "reviewer") return false;
+export function rowReadyForReviewLinkInvite(
+  p: AgreementParty,
+  partyIndex: number,
+  parties: readonly AgreementParty[],
+): boolean {
+  const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(parties);
+  if (partyIndex === ownerIdx) return false;
   const name = (p.name || "").trim();
   const email = (p.email || "").trim();
   return Boolean(name && email && SIMPLE_SEND_EMAIL_RE.test(email));
 }
 
 export function countReadyReviewLinkInviteParties(parties: AgreementParty[] | undefined): number {
-  return (parties || []).filter((p) => rowReadyForReviewLinkInvite(p)).length;
+  const list = parties ?? [];
+  return list.filter((p, i) => rowReadyForReviewLinkInvite(p, i, list)).length;
 }
 
 export function logReviewLinkRecipientEmailPreflight(draft: AgreementDraft | null): void {
   if (!draft) return;
   const parties = (draft.parties ?? []) as AgreementParty[];
+  const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(parties);
   let recipientEmailCount = 0;
   let counterpartyEmailCount = 0;
-  for (const p of parties) {
+  parties.forEach((p, i) => {
     const em = stripRecipientEmailNoise(String((p as { email?: string }).email ?? ""));
-    if (!isPlausibleEmail(em)) continue;
+    if (!isPlausibleEmail(em)) return;
     recipientEmailCount += 1;
-    const w = normalizeRole(p.role);
-    if (w === "reviewer" || w === "signer") counterpartyEmailCount += 1;
-  }
-  const contactRequiredSlots = parties.filter((p) => {
-    const w = normalizeRole(p.role);
-    return w === "signer" || w === "reviewer";
-  }).length;
+    if (i !== ownerIdx) counterpartyEmailCount += 1;
+  });
+  const contactRequiredSlots = Math.max(0, parties.length - (parties.length > 0 ? 1 : 0));
   // eslint-disable-next-line no-console
   console.info("[review-link-recipient-email-preflight]", {
     recipientEmailCount,
     counterpartyEmailCount,
     contactRequiredSlots,
     partyRows: parties.length,
+    assumedOwnerPartyIndex: ownerIdx,
   });
 }
 

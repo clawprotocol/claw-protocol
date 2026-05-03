@@ -13,7 +13,7 @@ import {
   findSignedAuditTimestamp,
   isAgreementMarkedSignedInAudit,
 } from "../../agreement/pendingSignatureDerive";
-import type { AgreementDraft } from "../../agreement/agreementTypes";
+import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import {
   isAgreementDetailsStepReady,
   normalizeAgreementDraftFromApi,
@@ -140,6 +140,8 @@ import {
   countReadyReviewLinkInviteParties,
   logReviewLinkRecipientEmailPreflight,
   mergeReviewLinkRecipientEmailsOntoHydratedDraft,
+  resolveReviewLinkAssumedOwnerPartyIndex,
+  rowReadyForReviewLinkInvite,
 } from "../../launch/simpleProduct/reviewLinkRecipientEmailMerge";
 import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import { normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
@@ -503,7 +505,45 @@ function validateRecipientContactForFlexibleSend(
   const reviewOnly = opts?.reviewLinkEmailOnly === true;
   const err: Record<string, string> = {};
   const list = parties || [];
-  const ready = reviewOnly ? countReadyReviewLinkInviteParties(list) : countReadyInviteParties(list);
+  const asParties = list as AgreementParty[];
+  const ready = reviewOnly ? countReadyReviewLinkInviteParties(asParties) : countReadyInviteParties(list);
+
+  if (reviewOnly) {
+    const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(asParties);
+    list.forEach((p, idx) => {
+      if (idx === ownerIdx) return;
+      const name = (p.name || "").trim();
+      const email = (p.email || "").trim();
+      if (email && !SIMPLE_SEND_EMAIL_RE.test(email)) {
+        err[`${idx}-email`] = "Check that this email looks correct";
+      }
+      const started = Boolean(name || email);
+      if (started) {
+        if (!name) err[`${idx}-name`] = "Name is required";
+        if (!email) err[`${idx}-email`] = err[`${idx}-email`] || "Email is required";
+      }
+    });
+    if (ready < 1) {
+      let firstIdx = list.findIndex(
+        (p, i) => i !== ownerIdx && !rowReadyForReviewLinkInvite(p as AgreementParty, i, asParties),
+      );
+      if (firstIdx < 0) {
+        firstIdx = list.findIndex((_, i) => i !== ownerIdx);
+      }
+      if (firstIdx >= 0) {
+        const p = list[firstIdx];
+        const name = (p.name || "").trim();
+        const email = (p.email || "").trim();
+        if (!name) err[`${firstIdx}-name`] = err[`${firstIdx}-name`] || "Name is required";
+        if (!email) {
+          err[`${firstIdx}-email`] =
+            err[`${firstIdx}-email`] || "Add at least one recipient email to create review links.";
+        }
+      }
+    }
+    return err;
+  }
+
   list.forEach((p, idx) => {
     if (!recipientRoleNeedsContactInfo(p.role)) return;
     const name = (p.name || "").trim();
@@ -512,19 +552,11 @@ function validateRecipientContactForFlexibleSend(
     if (email && !SIMPLE_SEND_EMAIL_RE.test(email)) {
       err[`${idx}-email`] = "Check that this email looks correct";
     }
-    if (reviewOnly) {
-      const started = Boolean(name || email);
-      if (started) {
-        if (!name) err[`${idx}-name`] = "Name is required";
-        if (!email) err[`${idx}-email`] = err[`${idx}-email`] || "Email is required";
-      }
-    } else {
-      const started = Boolean(name || email || phoneDigits);
-      if (started) {
-        if (!name) err[`${idx}-name`] = "Name is required";
-        if (!email) err[`${idx}-email`] = err[`${idx}-email`] || "Email is required to send for signature";
-        if (phoneDigits.length < 10) err[`${idx}-phone`] = "Add a mobile number or email";
-      }
+    const started = Boolean(name || email || phoneDigits);
+    if (started) {
+      if (!name) err[`${idx}-name`] = "Name is required";
+      if (!email) err[`${idx}-email`] = err[`${idx}-email`] || "Email is required to send for signature";
+      if (phoneDigits.length < 10) err[`${idx}-phone`] = "Add a mobile number or email";
     }
   });
   if (ready < 1) {
@@ -536,11 +568,9 @@ function validateRecipientContactForFlexibleSend(
       const phoneDigits = (p.phone || "").replace(/\D/g, "");
       if (!name) err[`${firstIdx}-name`] = err[`${firstIdx}-name`] || "Name is required";
       if (!email) {
-        err[`${firstIdx}-email`] =
-          err[`${firstIdx}-email`] ||
-          (reviewOnly ? "Add at least one recipient email to create review links." : "Add at least one signer email to send");
+        err[`${firstIdx}-email`] = err[`${firstIdx}-email`] || "Add at least one signer email to send";
       }
-      if (!reviewOnly && phoneDigits.length < 10) {
+      if (phoneDigits.length < 10) {
         err[`${firstIdx}-phone`] = err[`${firstIdx}-phone`] || "Add a mobile number or email";
       }
     }
