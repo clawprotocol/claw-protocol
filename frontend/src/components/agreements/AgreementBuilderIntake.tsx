@@ -307,6 +307,9 @@ import {
   clearPaidProEditReturnHandoff,
   logPaidProEditReturnHydrated,
   logPaidProEditReturnRead,
+  logPaidProEditReturnSkipBasicGenerate,
+  mergePaidProEditReturnSnapshotIntoApiDraft,
+  paidProEditReturnHasRecoverableBody,
   readPaidProEditReturnHandoff,
 } from "../../launch/simpleProduct/paidProEditReturnHandoff";
 import { mergePaidProAuthoritativeDraftFieldsFromApi } from "../../launch/simpleProduct/paidProResumeDraftMerge";
@@ -1445,6 +1448,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const dictationControlRef = useRef<VoiceDictationControl | null>(null);
   const followUpDictationControlRef = useRef<VoiceDictationControl | null>(null);
   const productionResumeHydratedRef = useRef(false);
+  /** Paid Pro “Edit Draft” → /app/create: suppress auto-generate / Retry Pro until user edits inline. */
+  const [paidProEditReturnResumeActive, setPaidProEditReturnResumeActive] = useState(false);
   const [followUpEnterReady, setFollowUpEnterReady] = useState(false);
   const [intakeAckLine, setIntakeAckLine] = useState<string | null>(null);
   const [scopeGuessConfirmed, setScopeGuessConfirmed] = useState(false);
@@ -5557,6 +5562,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const runProductionLocalDraftParse = React.useCallback(
     async (opts?: { rawOverride?: string; handoffSource?: string }): Promise<boolean> => {
+    const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
+    if (paidProEditReturnResumeActive && handoffSource !== "inline_wording_submit") {
+      const hid = (reviewAgreementIdRef.current || "").trim();
+      logPaidProEditReturnSkipBasicGenerate(
+        `skip_local_parse:${handoffSource}`,
+        hid.length <= 12 ? hid : `${hid.slice(0, 8)}…`,
+      );
+      return false;
+    }
     const rawIntake = (opts?.rawOverride ?? intakeCombined).trim();
     if (!rawIntake) return false;
     if (
@@ -5673,6 +5687,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     createProductionTwoPane,
     emitPaidFunnelEvent,
+    paidProEditReturnResumeActive,
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(async (instructionOverride?: string | null): Promise<boolean> => {
@@ -8253,6 +8268,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [reviewAgreementId]);
 
   useEffect(() => {
+    if (!(reviewAgreementId || "").trim()) {
+      setPaidProEditReturnResumeActive(false);
+    }
+  }, [reviewAgreementId]);
+
+  useEffect(() => {
     if (!createProductionTwoPane) return;
     const id = reviewAgreementId?.trim();
     if (id) writeCreateReviewAgreementResumeId(id);
@@ -8289,29 +8310,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         const editReturn = readPaidProEditReturnHandoff();
         const editReturnMatch = Boolean(editReturn && editReturn.agreementId === hid);
+        let adForHydrate = ad as AgreementDraft;
+        if (editReturnMatch && editReturn?.draftSnapshot) {
+          adForHydrate = mergePaidProEditReturnSnapshotIntoApiDraft(ad as AgreementDraft, editReturn.draftSnapshot);
+        }
         if (editReturnMatch && editReturn) {
-          const docLenPre = materialPremiumPipelineCorpusMaxLen(ad);
-          const partyCountPre = Array.isArray(ad.parties) ? ad.parties.length : 0;
+          const docLenPre = materialPremiumPipelineCorpusMaxLen(adForHydrate);
+          const hasRec = paidProEditReturnHasRecoverableBody(adForHydrate);
+          const partyCountPre = Array.isArray(adForHydrate.parties) ? adForHydrate.parties.length : 0;
           let recipientEmailCountPre = 0;
-          for (const p of ad.parties || []) {
+          for (const p of adForHydrate.parties || []) {
             const em = stripRecipientEmailNoise(String((p as { email?: string }).email ?? ""));
             if (looksLikeEmail(em)) recipientEmailCountPre += 1;
           }
           logPaidProEditReturnRead({
             agreementIdShort: hid.length <= 12 ? hid : `${hid.slice(0, 8)}…`,
-            hasPremiumDoc: docLenPre >= 500,
+            hasPremiumDoc: hasRec,
             docLen: docLenPre,
             partyCount: partyCountPre,
             recipientEmailCount: recipientEmailCountPre,
             intent: editReturn.premiumSendIntent,
           });
           writePremiumSendIntent(editReturn.premiumSendIntent);
+          if (hasRec) {
+            setPaidProEditReturnResumeActive(true);
+            setPremiumPersistedFlowActive(true);
+            setProFullDraftQualityRetry(false);
+            logPaidProEditReturnSkipBasicGenerate(
+              "session_edit_return_hydrate",
+              hid.length <= 12 ? hid : `${hid.slice(0, 8)}…`,
+            );
+          }
         }
         const rawIntake =
-          [ad.title, ad.purpose, ad.payment_terms].filter(Boolean).join("\n\n").trim() || ad.purpose || "";
+          [adForHydrate.title, adForHydrate.purpose, adForHydrate.payment_terms]
+            .filter(Boolean)
+            .join("\n\n")
+            .trim() ||
+          adForHydrate.purpose ||
+          "";
         const payment = extractIntakePayment(rawIntake);
-        let next = coerceDraftFromApiPayload(ad as unknown, rawIntake, payment);
-        next = mergePaidProAuthoritativeDraftFieldsFromApi(next, ad);
+        let next = coerceDraftFromApiPayload(adForHydrate as unknown, rawIntake, payment);
+        next = mergePaidProAuthoritativeDraftFieldsFromApi(next, adForHydrate);
         next = runIntakeDefaultsAndRoles(next, rawIntake, simpleProductFlow, intakePartyRoleLabels);
         next = alignParsedWithCanonicalType(next, rawIntake);
         next = normalizeParsedDraftLegalConcepts(next, rawIntake);
@@ -8325,15 +8365,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setCreateUiStage(CreateUiStage.DRAFT);
         setCreateFlowPhase("draft_ready_for_review");
         setDraftNowCommitted(true);
-        const nextDisplay = shouldKeepReviewDisplayAfterProHydrate(ad) ? "review" : "intake";
+        const nextDisplay = shouldKeepReviewDisplayAfterProHydrate(adForHydrate) ? "review" : "intake";
         if (import.meta.env.DEV) {
-          const rs = String(ad.premium_render_source ?? "").trim();
-          const corpusLen = materialPremiumPipelineCorpusMaxLen(ad);
+          const rs = String(adForHydrate.premium_render_source ?? "").trim();
+          const corpusLen = materialPremiumPipelineCorpusMaxLen(adForHydrate);
           console.info("[paid-pro-hydrate-preserve]", {
             agreement_id: hid,
             premium_render_source: rs || null,
             corpusLen,
-            hasMaterialPremiumPipelineCorpus: hasMaterialPremiumPipelineCorpus(ad),
+            hasMaterialPremiumPipelineCorpus: hasMaterialPremiumPipelineCorpus(adForHydrate),
             displayPhase_before: displayPhaseRef.current,
             displayPhase_after: nextDisplay,
             createUiStage_before: String(createUiStageRef.current),
@@ -8345,12 +8385,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (editReturnMatch) {
           clearPaidProEditReturnHandoff();
           const docLenH = materialPremiumPipelineCorpusMaxLen(next);
+          const hasDocH = paidProEditReturnHasRecoverableBody(next as unknown as AgreementDraft);
           logPaidProEditReturnHydrated({
             agreementIdShort: hid.length <= 12 ? hid : `${hid.slice(0, 8)}…`,
             createUiStage: String(CreateUiStage.DRAFT),
             createFlowPhase: "draft_ready_for_review",
             displayPhase: nextDisplay,
-            hasPremiumDoc: docLenH >= 500,
+            hasPremiumDoc: hasDocH,
             docLen: docLenH,
           });
         }
@@ -8957,7 +8998,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ),
     [hasFullDraftAccess, premiumPersistedFlowActive, premiumPaidReadonlyPick.plainText, reviewDocRefreshTick],
   );
-  const shouldShowPaidRetry = Boolean(proFullDraftQualityRetry && !hasUsablePaidBody);
+  const shouldShowPaidRetry = Boolean(
+    proFullDraftQualityRetry && !hasUsablePaidBody && !paidProEditReturnResumeActive,
+  );
 
   const premiumProTruthSnapshot = useMemo(() => {
     if (!hasFullDraftAccess || !premiumPersistedFlowActive) return null;

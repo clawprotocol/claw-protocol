@@ -30,7 +30,11 @@ import {
   writePremiumSendIntent,
   type PremiumSendIntent,
 } from "./premiumSendIntent";
-import { writePaidProEditReturnHandoff } from "./paidProEditReturnHandoff";
+import {
+  resolvePaidProEditReturnSourceDraft,
+  paidProEditReturnHasRecoverableBody,
+  writePaidProEditReturnHandoff,
+} from "./paidProEditReturnHandoff";
 import {
   clearSimpleDoneReviewRecipientLinks,
   mintSimpleDoneReviewRecipientLinkRows,
@@ -144,31 +148,6 @@ export function SimpleSendPage(props: { agreementId: string }) {
     () => isPaidProAgreementAuthoritative({ draft: initialDraftSnapshot ?? null, agreementId }),
     [initialDraftSnapshot, agreementId],
   );
-  const navigateBackToCreateForEdit = useCallback(() => {
-    const id = agreementId.trim();
-    if (id) {
-      writeCreateReviewAgreementResumeId(id);
-      const live = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null);
-      const authoritativeForEdit = isPaidProAgreementAuthoritative({ draft: live, agreementId });
-      if (authoritativeForEdit) {
-        const rawIntent =
-          simpleFlowPremiumHandoffIntent ?? sendLanding.premiumIntent ?? peekPremiumSendIntent();
-        const premiumSendIntent: PremiumSendIntent = rawIntent === "signature" ? "signature" : "review";
-        writePaidProEditReturnHandoff({
-          agreementId: id,
-          liveDraft: live,
-          premiumSendIntent,
-        });
-      }
-    }
-    void navigate("/app/create");
-  }, [
-    agreementId,
-    navigate,
-    initialDraftSnapshot,
-    sendLanding.premiumIntent,
-    simpleFlowPremiumHandoffIntent,
-  ]);
   const [paidProSendBranch, setPaidProSendBranch] = useState<PaidProSendBranchMeta>(() =>
     describePaidProSendModalBranch(initialDraftSnapshot, { agreementId }),
   );
@@ -185,6 +164,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
     detail?: unknown;
   } | null>(null);
   const [senderFirstRouteRetryTick, setSenderFirstRouteRetryTick] = useState(0);
+  const [editReturnNavigateBlocked, setEditReturnNavigateBlocked] = useState<string | null>(null);
   const authoritativeProBypassRef = useRef(paidProSendBranch.paidProSendAllowed);
   authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
   const premiumSendUnlocked = useMemo(() => {
@@ -201,6 +181,53 @@ export function SimpleSendPage(props: { agreementId: string }) {
     sendAuthoritative,
     paidProSendBranch.paidProSendAllowed,
     sendUnlockTick,
+  ]);
+
+  const navigateBackToCreateForEdit = useCallback(() => {
+    const id = agreementId.trim();
+    setEditReturnNavigateBlocked(null);
+    if (!id) {
+      void navigate("/app/create");
+      return;
+    }
+    writeCreateReviewAgreementResumeId(id);
+    const paidSurface =
+      premiumSendUnlocked ||
+      sendAuthoritative ||
+      paidProSendBranch.paidProSendAllowed ||
+      workspaceProEntitled;
+    const resolved = resolvePaidProEditReturnSourceDraft({
+      live: bridgeHandoffDraftRef.current,
+      initial: (initialDraftSnapshot as AgreementDraft | null) ?? null,
+      primed: sendLanding.primed,
+      agreementId: id,
+    });
+    if (paidSurface && !paidProEditReturnHasRecoverableBody(resolved)) {
+      setEditReturnNavigateBlocked("We're still loading the Pro document. Try again in a moment.");
+      return;
+    }
+    if (paidSurface && resolved) {
+      const rawIntent =
+        simpleFlowPremiumHandoffIntent ?? sendLanding.premiumIntent ?? peekPremiumSendIntent();
+      const premiumSendIntent: PremiumSendIntent = rawIntent === "signature" ? "signature" : "review";
+      writePaidProEditReturnHandoff({
+        agreementId: id,
+        liveDraft: resolved,
+        premiumSendIntent,
+      });
+    }
+    void navigate("/app/create");
+  }, [
+    agreementId,
+    navigate,
+    initialDraftSnapshot,
+    sendLanding.premiumIntent,
+    sendLanding.primed,
+    simpleFlowPremiumHandoffIntent,
+    premiumSendUnlocked,
+    sendAuthoritative,
+    paidProSendBranch.paidProSendAllowed,
+    workspaceProEntitled,
   ]);
 
   useEffect(() => {
@@ -468,6 +495,15 @@ export function SimpleSendPage(props: { agreementId: string }) {
     <SimpleFlowShell step={shellStep as 1 | 2 | 3 | 4} progressLabels={FLOW_PROGRESS} title={title} subtitle={subtitle}>
       {flash === "draft_ready" && !streamlinedSimpleFlow ? (
         <JoyFlashBanner kind="draft_ready" onDismiss={() => setFlash(null)} />
+      ) : null}
+
+      {editReturnNavigateBlocked ? (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-amber-600/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-50/95"
+        >
+          {editReturnNavigateBlocked}
+        </div>
       ) : null}
 
       {simpleFlowPhase === "review" && !streamlinedSimpleFlow ? (

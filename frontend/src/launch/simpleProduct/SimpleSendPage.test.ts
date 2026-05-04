@@ -81,6 +81,15 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("paidProAuthoritativeSendHappyPath");
   });
 
+  it("Edit Draft uses paid Pro edit-return resolution + paid-surface guard before navigating to /app/create", () => {
+    const p = join(__dirname, "SimpleSendPage.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("resolvePaidProEditReturnSourceDraft");
+    expect(s).toContain("paidProEditReturnHasRecoverableBody");
+    expect(s).toContain("editReturnNavigateBlocked");
+    expect(s).toContain("We're still loading the Pro document");
+  });
+
   it("review intent persists minted recipient review links for SimpleDonePage before navigating to /app/done", () => {
     const p = join(__dirname, "SimpleSendPage.tsx");
     const s = readFileSync(p, "utf8");

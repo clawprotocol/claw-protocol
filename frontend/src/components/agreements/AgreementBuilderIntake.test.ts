@@ -457,4 +457,13 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       /workspaceUi\s*&&\s*\n\s*\!simpleProductFlow[\s\S]*persistedRowMatchesDraft/,
     );
   });
+
+  it("paid Pro edit-return resume merges session snapshot and blocks auto local parse (not inline wording)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("mergePaidProEditReturnSnapshotIntoApiDraft");
+    expect(intake).toContain("paidProEditReturnHasRecoverableBody");
+    expect(intake).toContain("paidProEditReturnResumeActive");
+    expect(intake).toContain("skip_local_parse:");
+    expect(intake).toContain("logPaidProEditReturnSkipBasicGenerate");
+  });
 });
