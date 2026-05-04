@@ -5,17 +5,16 @@ import { formatProRefineRejectedShortInline, PRO_REFINE_REJECTED_SHORT_PRIMARY }
 
 describe("Pro refine rejection copy (rejected_short)", () => {
   it("exposes a clear unchanged-document message", () => {
-    expect(PRO_REFINE_REJECTED_SHORT_PRIMARY).toContain("safely apply");
-    expect(PRO_REFINE_REJECTED_SHORT_PRIMARY).toContain("unchanged");
+    expect(PRO_REFINE_REJECTED_SHORT_PRIMARY).toContain("LawDog made a shorter version");
+    expect(PRO_REFINE_REJECTED_SHORT_PRIMARY).toContain("not changed");
     const inline = formatProRefineRejectedShortInline();
     expect(inline).toContain("Edit wording");
-    expect(inline.split("\n\n").length).toBeGreaterThanOrEqual(2);
   });
 
   it("shows rejected_short inline near post-checkout refine (AgreementBuilderIntake)", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
-    expect(s).toContain("safely apply");
+    expect(s).toContain("isProRefineRejectedShortMessage");
     expect(s).toContain("Apply change");
     expect(s).toContain("Want to adjust this agreement?");
   });

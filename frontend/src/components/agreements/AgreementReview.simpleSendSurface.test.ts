@@ -73,7 +73,7 @@ describe("FinalizeYourAgreementPanel Pro copy", () => {
     expect(s).not.toContain("Create an agreement in minutes");
   });
 
-  it("Update agreement is gated on non-empty refine prompt", () => {
+  it("Apply with LawDog Pro is gated on non-empty refine prompt", () => {
     const p = join(__dirname, "FinalizeYourAgreementPanel.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("disabled={disabled || busy || !prompt.trim()}");

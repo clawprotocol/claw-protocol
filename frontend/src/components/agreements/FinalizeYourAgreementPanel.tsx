@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { VoiceAugmentedTextArea, type VoiceDictationControl } from "../../launch/VoiceAugmentedControl";
-import { formatProRefineRejectedShortInline, pickAuthoritativeProCorpusForRefine, PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE } from "./premiumRefineAcceptance";
+import {
+  formatProRefineRejectedShortInline,
+  pickAuthoritativeProCorpusForRefine,
+  PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
+} from "./premiumRefineAcceptance";
+import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
 import {
   augmentPremiumRefineUserPrompt,
   PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE,
@@ -20,7 +25,6 @@ import {
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 
-const PLACEHOLDER = "Describe the change you want (optional)";
 /** Pro finalize panel — shown above review/signature row; also used for empty refine submit hint. */
 export const FINALIZE_REFINE_ROUTE_HINT =
   "Need changes? Describe them below, then update the agreement. When you’re ready, use Send for review or Send for signature above.";
@@ -258,6 +262,7 @@ export function FinalizeYourAgreementPanel({
           refinedCandidateLen: acc.refinedLen,
           ratio: Number(acc.ratio.toFixed(4)),
           applyDecision: acc.decision,
+          requiredSectionsPresent: acc.requiredSectionsPresent,
           preservedExistingDoc: acc.decision !== "accepted",
           chosenSource: baseline.chosenSource,
           endpoint: "premium-refine",
@@ -571,12 +576,12 @@ export function FinalizeYourAgreementPanel({
           disabled={disabled || busy}
           dictationControlRef={dictationRef}
           voiceSubtleIdle={true}
-          placeholder={PLACEHOLDER}
+          placeholder={PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER}
           rows={3}
           className="w-full rounded-xl border border-slate-600/50 bg-slate-900/90 px-3.5 py-2.5 pr-14 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 sm:px-4"
           autoComplete="off"
           name="finalize-refinement"
-          aria-label={PLACEHOLDER}
+          aria-label={PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER}
         />
         {err ? (
           <p className="whitespace-pre-wrap text-sm text-amber-200/95" role="alert">
@@ -617,7 +622,7 @@ export function FinalizeYourAgreementPanel({
             className="rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400 disabled:opacity-50"
             disabled={disabled || busy || !prompt.trim()}
           >
-            {busy ? "Working…" : prompt.trim() ? "Update agreement" : "Describe a change first"}
+            {busy ? "Working…" : prompt.trim() ? "Apply with LawDog Pro" : "Describe a change first"}
           </button>
         </div>
       </form>

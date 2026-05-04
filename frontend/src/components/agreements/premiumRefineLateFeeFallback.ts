@@ -107,7 +107,7 @@ export function resolvePremiumRefineApplyOutcome(args: {
   const { apiOut, baselineText, baselineLen, summaryChanges, userInstruction } = args;
   const inst = userInstruction.trim();
   const out0 = (apiOut || "").trim();
-  let acc = evaluatePremiumRefineCandidate(out0, baselineText, baselineLen, summaryChanges);
+  let acc = evaluatePremiumRefineCandidate(out0, baselineText, baselineLen, summaryChanges, inst);
 
   if (acc.decision === "accepted") {
     return {
@@ -130,7 +130,7 @@ export function resolvePremiumRefineApplyOutcome(args: {
     });
     if (fb) {
       const out1 = fb.text.trim();
-      const acc1 = evaluatePremiumRefineCandidate(out1, baselineText, baselineLen, summaryChanges);
+      const acc1 = evaluatePremiumRefineCandidate(out1, baselineText, baselineLen, summaryChanges, inst);
       if (acc1.decision === "accepted") {
         return {
           finalText: out1,

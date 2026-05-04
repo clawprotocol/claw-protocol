@@ -94,6 +94,7 @@ import {
   PRO_REPLACED_STARTER_PREVIEW,
 } from "./draftPreviewLabels";
 import {
+  PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER,
   refineFieldHeading,
   REFINE_PERSISTED_UPDATE_FAIL_INLINE,
   REFINE_THIS_DRAFT_PLACEHOLDER,
@@ -400,6 +401,7 @@ import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import {
   pickAuthoritativeProCorpusForRefine,
   formatProRefineRejectedShortInline,
+  isProRefineRejectedShortMessage,
   PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
 } from "./premiumRefineAcceptance";
@@ -1399,7 +1401,6 @@ function readInitialPremiumReturnFromWindow(): {
   return { phase: null, pipelineMessage: null };
 }
 
-const PAID_PRO_CARD_AI_BOX_PLACEHOLDER = "Tell LawDog what to change…";
 const PAID_PRO_CARD_AI_DISABLED_EXPLAIN = "Manual edit is ready. AI edit coming next.";
 
 const AgreementBuilderIntake: React.FC<Props> = ({
@@ -5807,6 +5808,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           refinedCandidateLen: acceptance.refinedLen,
           ratio: Number(acceptance.ratio.toFixed(4)),
           applyDecision: acceptance.decision,
+          requiredSectionsPresent: acceptance.requiredSectionsPresent,
           preservedExistingDoc: acceptance.decision !== "accepted",
           chosenSource: chosenSourceForLog,
           endpoint: "premium-refine",
@@ -10478,7 +10480,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           (intakeStepBuffer || "").trim() &&
           premiumPaidDocumentSurface &&
           !isFreeStarterReviewSurface
-        ? "Update agreement"
+        ? "Apply with LawDog Pro"
         : guidedMainCtaLabel;
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
@@ -10624,7 +10626,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const hasRefinementBuffer = (intakeStepBuffer || "").trim().length > 0;
           if (hasRefinementBuffer && draft && premiumPaidDocumentSurface && !isFreeStarterReviewSurface) {
             return {
-              label: "Update agreement",
+              label: "Apply with LawDog Pro",
               action: "update_agreement_from_buffer",
               disabled: !draft,
               reason: !draft ? "no_draft" : undefined,
@@ -13317,7 +13319,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               {reviewRefineUserMessage ? (
                                 <p
                                   className={`mt-3 rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-                                    reviewRefineUserMessage.includes("safely apply")
+                                    isProRefineRejectedShortMessage(reviewRefineUserMessage)
                                       ? "border-amber-500/40 bg-amber-950/25 text-amber-100/95"
                                       : "border-sky-500/35 bg-slate-900/50 text-slate-200"
                                   }`}
@@ -14014,7 +14016,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               onDictationPhaseChange={handleDictationPhaseChange}
                                               onVoiceError={(m) => setVoiceError(humanizeVoiceErrorMessage(m))}
                                               className="min-h-[6.5rem] w-full rounded-lg border border-stone-300/90 bg-white px-3 py-3 pb-11 pr-11 text-sm leading-relaxed text-stone-900 placeholder:text-stone-500"
-                                              placeholder={PAID_PRO_CARD_AI_BOX_PLACEHOLDER}
+                                              placeholder={PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER}
                                               aria-label="LawDog Pro instruction for this agreement"
                                             />
                                           </div>
@@ -14121,11 +14123,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 {reviewRefineUserMessage ? (
                                   <p
                                     className={`mt-2 rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
-                                      reviewRefineUserMessage.includes("safely apply")
+                                      isProRefineRejectedShortMessage(reviewRefineUserMessage)
                                         ? "border-amber-500/40 bg-amber-950/25 text-amber-100/95"
                                         : "border-sky-500/35 bg-slate-900/50 text-slate-200"
                                     }`}
-                                    role={reviewRefineUserMessage.includes("safely apply") ? "alert" : "status"}
+                                    role={isProRefineRejectedShortMessage(reviewRefineUserMessage) ? "alert" : "status"}
                                     aria-live="polite"
                                   >
                                     {reviewRefineUserMessage}
@@ -14202,11 +14204,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             {showProLawdogRefineAndFinalize && reviewRefineUserMessage ? (
                               <p
                                 className={`mb-2 rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap sm:mb-3 ${
-                                  reviewRefineUserMessage.includes("safely apply")
+                                  isProRefineRejectedShortMessage(reviewRefineUserMessage)
                                     ? "border-amber-500/40 bg-amber-950/25 text-amber-100/95"
                                     : "border-sky-500/35 bg-slate-900/50 text-slate-200"
                                 }`}
-                                role={reviewRefineUserMessage.includes("safely apply") ? "alert" : "status"}
+                                role={isProRefineRejectedShortMessage(reviewRefineUserMessage) ? "alert" : "status"}
                                 aria-live="polite"
                               >
                                 {reviewRefineUserMessage}

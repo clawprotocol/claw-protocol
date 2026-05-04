@@ -12,7 +12,10 @@ export const REFINE_THIS_DRAFT_SUBCOPY =
   "Add changes here. LawDog updates this agreement — nothing new is created and nothing is sent.";
 
 export const REFINE_THIS_DRAFT_PLACEHOLDER =
-  "Example: change the title to Web Development Agreement, add Oklahoma venue, add acceptance language, and keep payment terms unchanged.";
+  "Tell LawDog what to add or change, e.g. 'Add a change request approval clause and clarify ownership after final payment.'";
+
+/** Placeholder for paid Pro refine instruction (draft card + finalize panel). */
+export const PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER = REFINE_THIS_DRAFT_PLACEHOLDER;
 
 /** @deprecated Use {@link STARTER_PRO_REFINE_IMPROVEMENT_HEADING} in create-flow card. */
 export const STARTER_PRO_REFINE_UPSELL_HEADING = "Want LawDog to improve this draft?";
