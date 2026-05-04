@@ -42,7 +42,6 @@ import {
 import {
   PAYWALL_PAID_READY_CTA,
   PAYWALL_PAID_READY_HEADLINE,
-  PAYWALL_PAID_READY_SUB_REVIEW,
   PAYWALL_PAID_READY_SUB_SIGNATURE,
 } from "../../launch/paywallMessaging";
 import { LiveAgreementPreview, type IntakeFormationPhase } from "./LiveAgreementPreview";
@@ -1170,16 +1169,31 @@ function CreateFlowSendRecipientsPanel({
         {minimalProSendRecipientChrome ? "Recipient setup" : "Recipient invite"}
       </p>
       <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">
-        {paidProInlineRecipientShell ? "Add recipient emails" : "Share this agreement"}
+        {paidProInlineRecipientShell && effectivePremiumSendMode === "review"
+          ? "Send for review"
+          : paidProInlineRecipientShell
+            ? "Add recipient emails"
+            : "Share this agreement"}
       </h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="rounded-full border border-emerald-700/45 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/95">
-          {modeLinkLabel}
-        </span>
+        {paidProInlineRecipientShell && effectivePremiumSendMode === "review" ? null : (
+          <span className="rounded-full border border-emerald-700/45 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/95">
+            {modeLinkLabel}
+          </span>
+        )}
       </div>
       <p className="mt-3 text-sm leading-relaxed text-slate-300">
-        {modeExplain}
-        {nextStepExplain ? <> {nextStepExplain}</> : null}
+        {paidProInlineRecipientShell && effectivePremiumSendMode === "review" ? (
+          <>
+            Add the other party&apos;s email. They&apos;ll get a private review link where they can suggest changes.
+            Nothing is signed yet.
+          </>
+        ) : (
+          <>
+            {modeExplain}
+            {nextStepExplain ? <> {nextStepExplain}</> : null}
+          </>
+        )}
       </p>
       {!minimalProSendRecipientChrome ? senderInviteTrustStrip : null}
       <div className="mt-5 rounded-xl border border-slate-700/45 bg-slate-900/35 px-4 py-4 sm:px-5">
@@ -1220,9 +1234,11 @@ function CreateFlowSendRecipientsPanel({
         ) : null}
       </div>
       <p className="mt-3 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
-        {minimalProSendRecipientChrome
-          ? "Nothing is emailed from LawDog until you create links and share them yourself."
-          : <>Nothing is sent to recipients until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""} and share a link yourself.</>}
+        {paidProInlineRecipientShell && effectivePremiumSendMode === "review"
+          ? "You copy the link yourself — LawDog does not email it automatically."
+          : minimalProSendRecipientChrome
+            ? "Nothing is emailed from LawDog until you create links and share them yourself."
+            : <>Nothing is sent to recipients until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""} and share a link yourself.</>}
       </p>
       {!recipientBlockForceExpanded ? (
         <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
@@ -10446,13 +10462,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   ? paidProAuthoritative
                     ? effectivePremiumSendMode === "signature"
                       ? "Confirm and send for signature"
-                      : "Confirm and create review links"
+                      : "Create review link"
                     : "Continue to confirmation"
                   : effectivePremiumSendMode === "review"
                     ? paidProAuthoritative
-                      ? "Create review links"
+                      ? "Create review link"
                       : premiumOutbox
-                        ? "Continue to review links"
+                        ? "Continue to review link"
                         : "Create review link"
                     : paidProAuthoritative
                       ? "Create signing links"
@@ -13157,11 +13173,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   <p className="mt-2 text-xs leading-relaxed text-slate-500">{line}</p>
                                 ) : null)(formatPremiumRevealDeltaRow(premiumFinalizeAudit))}
                               <p className="mt-4 text-sm leading-relaxed text-slate-300">
-                                Next: use the LawDog Pro panel below to choose{" "}
-                                <span className="font-medium text-slate-100">Send for review</span> (recipients suggest
-                                edits; you approve what applies before signing) or{" "}
-                                <span className="font-medium text-slate-100">Send for signature</span>. For signature, you
-                                can opt to sign first there before adding recipient emails.
+                                Next: use <span className="font-medium text-slate-100">Send for review</span> on your
+                                draft when you want a private link — the other party can suggest edits; you choose what
+                                to accept. Nothing is signed yet.
                               </p>
                             </div>
                           ) : null}
@@ -13809,15 +13823,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             the text.
                                           </p>
                                         ) : null}
-                                        <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900">
-                                          Agreement
-                                        </p>
-                                        {import.meta.env.DEV ? (
-                                          <p className="mt-1 text-[10px] font-medium tracking-wide text-stone-600">
-                                            Render source: {premiumPaidReadonlyPick.sourceUsed} | hash{" "}
-                                            {liveTraceHash(premiumPaidReadonlyPick.plainText)}
-                                          </p>
-                                        ) : null}
+                                        {effectivePremiumSendMode === "review" ? (
+                                          <>
+                                            <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900 sm:text-lg">
+                                              Review your draft
+                                            </p>
+                                            <p className="mt-2 text-sm leading-relaxed text-stone-700">
+                                              Edit anything now. When ready, send a review link so the other party can
+                                              suggest changes.
+                                            </p>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900">
+                                              Agreement
+                                            </p>
+                                            {import.meta.env.DEV ? (
+                                              <p className="mt-1 text-[10px] font-medium tracking-wide text-stone-600">
+                                                Render source: {premiumPaidReadonlyPick.sourceUsed} | hash{" "}
+                                                {liveTraceHash(premiumPaidReadonlyPick.plainText)}
+                                              </p>
+                                            ) : null}
+                                          </>
+                                        )}
                                       </div>
                                       <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2.5">
                                         <button
@@ -13882,6 +13910,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         >
                                           {premiumReviewDocEditorOpen ? "View document" : "Edit wording"}
                                         </button>
+                                        {effectivePremiumSendMode === "review" ? (
+                                          <button
+                                            type="button"
+                                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
+                                            onClick={() => handleFinalizeRoutePrimaryAction("review")}
+                                          >
+                                            Send for review
+                                          </button>
+                                        ) : null}
                                       </div>
                                     </div>
                                     {premiumReviewDocEditorOpen ? (
@@ -14624,7 +14661,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             : "text-sm font-semibold text-emerald-50/95 sm:text-[0.9375rem]"
                         }
                       >
-                        {minimalProSendRecipientChrome ? "Ready to create links" : "Ready for final send"}
+                        {minimalProSendRecipientChrome && effectivePremiumSendMode === "review"
+                          ? "Add their email"
+                          : minimalProSendRecipientChrome
+                            ? "Ready to create links"
+                            : "Ready for final send"}
                       </p>
                       <p
                         className={
@@ -14633,9 +14674,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             : "mt-0.5 text-[11px] leading-snug text-emerald-100/75 sm:text-xs"
                         }
                       >
-                        {minimalProSendRecipientChrome
-                          ? "Add recipients, then create a secure link. Nothing is emailed automatically."
-                          : "Add recipients next, then confirm before anything is sent."}
+                        {minimalProSendRecipientChrome && effectivePremiumSendMode === "review"
+                          ? "Then tap Create review link. Nothing is signed yet."
+                          : minimalProSendRecipientChrome
+                            ? "Add recipients, then create a secure link. Nothing is emailed automatically."
+                            : "Add recipients next, then confirm before anything is sent."}
                       </p>
                     </div>
                   ) : null}
@@ -15499,12 +15542,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="premium-send-confirm-title" className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-              {minimalProSendRecipientChrome ? PAYWALL_PAID_READY_HEADLINE : "Confirm before saving"}
+              {effectivePremiumSendMode === "review"
+                ? "Create review link?"
+                : minimalProSendRecipientChrome
+                  ? PAYWALL_PAID_READY_HEADLINE
+                  : "Confirm before saving"}
             </h2>
             {minimalProSendRecipientChrome ? (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
                 {effectivePremiumSendMode === "review"
-                  ? PAYWALL_PAID_READY_SUB_REVIEW
+                  ? "This creates a private link for the reviewer to suggest changes. Nothing is signed."
                   : PAYWALL_PAID_READY_SUB_SIGNATURE}
               </p>
             ) : effectivePremiumSendMode === "signature" ? (
@@ -15515,9 +15562,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               </p>
             ) : (
               <p className="mt-2 text-sm font-medium leading-relaxed text-slate-200 sm:text-[0.9375rem]">
-                You are about to save the agreement and open the review-link screen. Recipients can suggest edits; you
-                accept changes before the draft updates. Copy the link there — LawDog does not auto-email recipients from
-                this step.
+                This creates a private link for the reviewer to suggest changes. Nothing is signed.
               </p>
             )}
             <p className="mt-2 text-sm leading-relaxed text-slate-300 sm:text-[0.9375rem]">
@@ -15640,7 +15685,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   void onGenerate();
                 }}
               >
-                {minimalProSendRecipientChrome ? PAYWALL_PAID_READY_CTA : "Confirm and continue"}
+                {effectivePremiumSendMode === "review"
+                  ? "Create review link"
+                  : minimalProSendRecipientChrome
+                    ? PAYWALL_PAID_READY_CTA
+                    : "Confirm and continue"}
               </button>
             </div>
           </div>

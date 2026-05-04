@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agreementPublicVerifyPath, fetchPublicAgreementVerify } from "../../agreement/agreementPublicVerify";
+import { fetchAgreementDraft } from "../../agreement/agreementWorkspaceApi";
+import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import {
   CANONICAL_PROOF_SENTENCE,
   JOY_COPY,
@@ -24,7 +26,16 @@ import { PROOF_LADDER_SUBTITLE } from "../../components/proof/proofTrustLadder";
 import { LawdogOnRecordStamp } from "../../components/ui/LawdogOnRecordStamp";
 import { LawdogRecordedMark } from "../../components/ui/LawdogRecordedMark";
 import { PRODUCT_NOT_LAW_FIRM, RECORDS_DOWNLOAD_KEEP_COPY_SHORT } from "../../compliance/disclosureCopy";
-import { readSimpleDoneReviewRecipientLinks } from "./simpleDoneReviewRecipientLinks";
+import {
+  mintSimpleDoneReviewRecipientLinkRows,
+  readSimpleDoneReviewRecipientLinks,
+  writeSimpleDoneReviewRecipientLinks,
+  type SimpleDoneReviewRecipientLinkRow,
+} from "./simpleDoneReviewRecipientLinks";
+import {
+  paidProEditReturnHasRecoverableBody,
+  writePaidProEditReturnHandoff,
+} from "./paidProEditReturnHandoff";
 
 export function SimpleDonePage(props: { agreementId: string }) {
   const { agreementId } = props;
@@ -40,7 +51,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   const verifyPath = agreementPublicVerifyPath(agreementId);
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${verifyPath}` : verifyPath;
-  const reviewRecipientHandoff = useMemo(() => readSimpleDoneReviewRecipientLinks(agreementId), [agreementId]);
+  const [reviewLinksTick, setReviewLinksTick] = useState(0);
+  const [remintBusy, setRemintBusy] = useState(false);
+  const reviewRecipientHandoff = useMemo(
+    () => readSimpleDoneReviewRecipientLinks(agreementId),
+    [agreementId, reviewLinksTick],
+  );
   const [reviewBundleCopyFlash, setReviewBundleCopyFlash] = useState(false);
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
   const csn = isLawdogCsnTraffic();
@@ -108,6 +124,59 @@ export function SimpleDonePage(props: { agreementId: string }) {
     confirmedSend &&
     reviewRecipientHandoff?.intent === "review" &&
     (reviewRecipientHandoff.reviewLinksPending === true || reviewHandoffRows.length === 0);
+  const isPaidProReviewDonePath =
+    Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
+
+  const retryRemintReviewLink = useCallback(async () => {
+    const id = agreementId.trim();
+    if (!id || remintBusy) return;
+    setRemintBusy(true);
+    let mintThrew = false;
+    try {
+      const { ok, draft } = await fetchAgreementDraft(id);
+      if (!ok || !draft) {
+        writeSimpleDoneReviewRecipientLinks({ agreementId: id, recipients: [], reviewLinksPending: true });
+        setReviewLinksTick((t) => t + 1);
+        return;
+      }
+      let linkRows: SimpleDoneReviewRecipientLinkRow[] = [];
+      let attemptedMintCount = 0;
+      try {
+        const minted = await mintSimpleDoneReviewRecipientLinkRows({ agreementId: id, draft });
+        linkRows = minted.rows;
+        attemptedMintCount = minted.attemptedMintCount;
+      } catch {
+        mintThrew = true;
+        linkRows = [];
+      }
+      const reviewLinksPendingLocal =
+        linkRows.length === 0 && (attemptedMintCount > 0 || mintThrew || !draft);
+      writeSimpleDoneReviewRecipientLinks({
+        agreementId: id,
+        recipients: linkRows,
+        ...(reviewLinksPendingLocal ? { reviewLinksPending: true } : {}),
+      });
+      setReviewLinksTick((t) => t + 1);
+    } finally {
+      setRemintBusy(false);
+    }
+  }, [agreementId, remintBusy]);
+
+  const backToDraft = useCallback(async () => {
+    const id = agreementId.trim();
+    writeCreateReviewAgreementResumeId(id);
+    if (id) {
+      const { ok, draft } = await fetchAgreementDraft(id);
+      if (ok && draft && paidProEditReturnHasRecoverableBody(draft)) {
+        writePaidProEditReturnHandoff({
+          agreementId: id,
+          liveDraft: draft,
+          premiumSendIntent: "review",
+        });
+      }
+    }
+    void navigate("/app/create");
+  }, [agreementId, navigate]);
 
   function copyAllReviewLinks(): void {
     if (reviewHandoffRows.length === 0) return;
@@ -125,6 +194,64 @@ export function SimpleDonePage(props: { agreementId: string }) {
     const subject = title ? `Agreement: ${title}` : "Agreement to review";
     const body = `Hi — here is our agreement to review and sign:\n${shareUrl}\n`;
     window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+
+  if (isPaidProReviewDonePath) {
+    return (
+      <SimpleFlowShell
+        title="Review link ready"
+        subtitle={title ? `“${title}”` : undefined}
+      >
+        <div className="vs01-card vs01-card--envelope space-y-5 text-center sm:text-left">
+          <div className="rounded-xl border border-emerald-900/35 bg-emerald-950/25 px-5 py-6">
+            {reviewLinksReady ? (
+              <>
+                <p className="text-sm leading-relaxed text-slate-300">
+                  Send this link to the other party. They can suggest edits; you decide what to accept.
+                </p>
+                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                    onClick={() => copyAllReviewLinks()}
+                  >
+                    {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
+                  </button>
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                    onClick={() => void backToDraft()}
+                  >
+                    Back to draft
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm leading-relaxed text-slate-300">Review link is still preparing.</p>
+                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm disabled:opacity-50"
+                    disabled={remintBusy}
+                    onClick={() => void retryRemintReviewLink()}
+                  >
+                    {remintBusy ? "Working…" : "Try again"}
+                  </button>
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                    onClick={() => void backToDraft()}
+                  >
+                    Back to draft
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </SimpleFlowShell>
+    );
   }
 
   return (

@@ -57,7 +57,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("paidProAuthoritative");
-    expect(s).toContain('"Confirm and create review links"');
+    expect(s).toContain('"Create review link"');
     expect(s).toContain('"Confirm and send for signature"');
     expect(s).toContain("Add at least one recipient email to create review links.");
     expect(s).toContain("Add at least one signer email to continue.");
@@ -287,7 +287,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("showSignatureRecipientContinue");
     expect(intake).toContain("onContinueToRecipientSetup");
     expect(intake).toContain("Share for review");
-    expect(intake).toContain("Create review links");
+    expect(intake).toContain("Create review link");
     expect(intake).toContain("Nothing changes unless you accept it");
   });
 
@@ -307,7 +307,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(advBlock).not.toContain("CreateUiStage.RECIPIENTS");
     expect(intake).toContain("paidProRecipientSetupOnDraft");
     expect(intake).toContain("paidProInlineRecipientShell");
-    expect(intake).toContain("Confirm and create review links");
+    expect(intake).toContain("Create review link");
   });
 
   it("paid Pro recipient fields mount below finalize with inline shell (not legacy Share headline constant)", () => {
@@ -316,7 +316,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       /\{paidProRecipientSetupOnDraft \? \([\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
     );
     expect(intake).toMatch(
-      /\{paidProInlineRecipientShell \? "Add recipient emails" : "Share this agreement"\}/,
+      /paidProInlineRecipientShell && effectivePremiumSendMode === "review"\s*\n\s*\? "Send for review"/,
+    );
+    expect(intake).toMatch(
+      /paidProInlineRecipientShell\s*\n\s*\? "Add recipient emails"\s*\n\s*: "Share this agreement"/,
     );
   });
 
@@ -353,7 +356,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const sendBlock = unifiedRegion.slice(sendSurface, draftAfterSendSurface);
     expect(sendBlock).toMatch(/action:\s*"send_agreement"/);
     expect(sendBlock).not.toMatch(/action:\s*"continue_to_recipients"/);
-    expect(sendBlock).toContain('"Confirm and create review links"');
+    expect(sendBlock).toContain('"Create review link"');
     expect(sendBlock).toContain('"Confirm and send for signature"');
   });
 

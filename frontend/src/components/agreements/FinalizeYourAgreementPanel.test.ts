@@ -25,13 +25,14 @@ describe("FinalizeYourAgreementPanel send-for-review framing (copy only)", () =>
   it("surfaces delivery choice heading, conversion framing, and paid Pro signature continue + sender-first hooks", () => {
     const p = join(__dirname, "FinalizeYourAgreementPanel.tsx");
     const s = readFileSync(p, "utf8");
+    expect(s).toContain("Optional refinements");
     expect(s).toContain("Choose how to deliver");
     expect(s).toContain("Recommended next step");
     expect(s).toContain(
       "Send this agreement for review so both sides can confirm details before signing.",
     );
     expect(s).toContain("Most agreements are reviewed by all parties before signing.");
-    expect(s).toContain("Send for review →");
+    expect(s).toContain("Send for review");
     expect(s).toContain("Send for signature");
     expect(s).not.toContain("Send for signature instead");
     expect(s).not.toMatch(/>\s*Review first\s*</);

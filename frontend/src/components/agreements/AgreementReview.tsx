@@ -167,7 +167,6 @@ import {
   PAYWALL_DEFAULT_SUB,
   PAYWALL_PAID_READY_CTA,
   PAYWALL_PAID_READY_HEADLINE,
-  PAYWALL_PAID_READY_SUB_REVIEW,
   PAYWALL_PAID_READY_SUB_SIGNATURE,
 } from "../../launch/paywallMessaging";
 import { useAccess } from "../../access/AccessContext";
@@ -537,7 +536,7 @@ function validateRecipientContactForFlexibleSend(
         if (!name) err[`${firstIdx}-name`] = err[`${firstIdx}-name`] || "Name is required";
         if (!email) {
           err[`${firstIdx}-email`] =
-            err[`${firstIdx}-email`] || "Add at least one recipient email to create review links.";
+            err[`${firstIdx}-email`] || "Add at least one recipient email to create a review link.";
         }
       }
     }
@@ -2398,9 +2397,9 @@ const AgreementReview: React.FC<Props> = ({
           draft && isPaidProAgreementAuthoritative({ draft, agreementId })
             ? streamlinedPremiumIntentForCopy === "signature"
               ? "Add at least one signer email to continue."
-              : "Add at least one recipient email to create review links."
+              : "Add at least one recipient email to create a review link."
             : streamlinedPremiumIntentForCopy === "review"
-              ? "Add at least one recipient email below, then try Create review links again."
+              ? "Add at least one recipient email below, then try Create review link again."
               : "Add at least one recipient email below, then try again.",
         );
         setSimpleSendRecipientEditorOpen(true);
@@ -6194,7 +6193,7 @@ const AgreementReview: React.FC<Props> = ({
                                   {draft && isPaidProAgreementAuthoritative({ draft, agreementId })
                                     ? streamlinedPremiumIntentForCopy === "signature"
                                       ? "Add at least one signer email to continue."
-                                      : "Add at least one recipient email to create review links."
+                                      : "Add at least one recipient email to create a review link."
                                     : streamlinedPremiumIntentForCopy === "review"
                                       ? "Add at least one recipient email in Recipients below — we need it to label review links and continue."
                                       : "Add at least one recipient email in Recipients below before continuing."}
@@ -6215,9 +6214,9 @@ const AgreementReview: React.FC<Props> = ({
                                   {streamlinedPremiumIntentForCopy === "review"
                                     ? sendInviteReadyCount >= 1
                                       ? sendInviteReadyCount === 1
-                                        ? "Create review links"
-                                        : `Create review links (${sendInviteReadyCount})`
-                                      : "Create review links"
+                                        ? "Create review link"
+                                        : `Create review link (${sendInviteReadyCount})`
+                                      : "Create review link"
                                     : "Review and send"}
                                 </button>
                                 {onSimpleFlowBack ? (
@@ -6250,11 +6249,11 @@ const AgreementReview: React.FC<Props> = ({
                           ) : streamlinedPremiumIntentForCopy === "review" ? (
                             <>
                               <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                                Create review links
+                                Create review link
                               </h3>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                                Generate secure review links for each recipient — you copy and share them. Nothing
-                                reaches anyone until you do.
+                                Create a private review link — you copy and share it. Nothing reaches anyone until you
+                                do.
                               </p>
                               {recipientGateBlocksSend ? (
                                 <p
@@ -6279,9 +6278,9 @@ const AgreementReview: React.FC<Props> = ({
                                 >
                                   {sendInviteReadyCount >= 1
                                     ? sendInviteReadyCount === 1
-                                      ? "Create review links"
-                                      : `Create review links (${sendInviteReadyCount})`
-                                    : "Create review links"}
+                                      ? "Create review link"
+                                      : `Create review link (${sendInviteReadyCount})`
+                                    : "Create review link"}
                                 </button>
                                 {onSimpleFlowBack ? (
                                   <button
@@ -7013,11 +7012,11 @@ const AgreementReview: React.FC<Props> = ({
               {draft && bypassSimpleHomeWatermarkSendGate(draft, economicsOverlay) ? (
                 <>
                   <h2 id="wm-send-title" className="text-lg font-semibold leading-snug text-slate-100">
-                    {PAYWALL_PAID_READY_HEADLINE}
+                    {simpleFlowPremiumHandoffIntent === "review" ? "Create review link?" : PAYWALL_PAID_READY_HEADLINE}
                   </h2>
                   <p className="mt-2 text-sm leading-relaxed text-slate-400">
                     {simpleFlowPremiumHandoffIntent === "review"
-                      ? PAYWALL_PAID_READY_SUB_REVIEW
+                      ? "This creates a private link for the reviewer to suggest changes. Nothing is signed."
                       : PAYWALL_PAID_READY_SUB_SIGNATURE}
                   </p>
                   {simpleFlowPremiumHandoffIntent === "signature" ? (
@@ -7048,7 +7047,7 @@ const AgreementReview: React.FC<Props> = ({
                         onSimpleFlowContinue?.();
                       }}
                     >
-                      {PAYWALL_PAID_READY_CTA}
+                      {simpleFlowPremiumHandoffIntent === "review" ? "Create review link" : PAYWALL_PAID_READY_CTA}
                     </button>
                     <button
                       type="button"

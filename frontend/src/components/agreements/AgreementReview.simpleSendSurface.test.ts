@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FINALIZE_REFINE_ROUTE_HINT } from "./FinalizeYourAgreementPanel";
+import { FINALIZE_REFINE_ROUTE_HINT, FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY } from "./FinalizeYourAgreementPanel";
 
 describe("AgreementReview simple paid Pro /app/send surface", () => {
   const agreementReviewPath = join(__dirname, "AgreementReview.tsx");
@@ -21,7 +21,7 @@ describe("AgreementReview simple paid Pro /app/send surface", () => {
     expect(s).toContain("autoPaidAuthoritativeSendConfirmPrimedKeyRef");
     expect(s).toContain("setWatermarkSendModalOpen(true)");
     expect(s).toContain("Review and send");
-    expect(s).toContain("Add at least one recipient email to create review links.");
+    expect(s).toContain("Add at least one recipient email to create a review link.");
     expect(s).toContain("Add at least one signer email to continue.");
   });
 
@@ -31,7 +31,7 @@ describe("AgreementReview simple paid Pro /app/send surface", () => {
     expect(s).toContain("I&apos;ll sign first");
     expect(s).toContain("writePremiumSenderSignFirst");
     expect(s).toContain("PAYWALL_PAID_READY_SUB_SIGNATURE");
-    expect(s).toContain("PAYWALL_PAID_READY_SUB_REVIEW");
+    expect(s).toContain("This creates a private link for the reviewer to suggest changes");
   });
 
   it("streamlined premium signature panel copy uses signature links (not review-link heading)", () => {
@@ -60,6 +60,7 @@ describe("FinalizeYourAgreementPanel Pro copy", () => {
     expect(FINALIZE_REFINE_ROUTE_HINT).toContain("Need changes?");
     expect(FINALIZE_REFINE_ROUTE_HINT).toContain("Send for review or Send for signature above");
     expect(FINALIZE_REFINE_ROUTE_HINT).not.toContain("Add a short note");
+    expect(FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY).toContain("Send for review in the section above");
   });
 
   it("AgreementReview does not embed generic simple-create marketing headline", () => {

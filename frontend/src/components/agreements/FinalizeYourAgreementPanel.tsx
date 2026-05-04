@@ -24,6 +24,9 @@ const PLACEHOLDER = "Describe the change you want (optional)";
 /** Pro finalize panel — shown above review/signature row; also used for empty refine submit hint. */
 export const FINALIZE_REFINE_ROUTE_HINT =
   "Need changes? Describe them below, then update the agreement. When you’re ready, use Send for review or Send for signature above.";
+/** Review-first v1: send CTAs live on the draft card above; this panel is refine-only. */
+export const FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY =
+  "Need changes? Describe them below, then update the agreement. When you’re ready, use Send for review in the section above.";
 
 type SendMode = "review" | "signature";
 
@@ -72,7 +75,7 @@ function readinessPillClass(r: FinalizeReadiness): string {
 
 /** Display-only: forward momentum on the primary review CTA (wiring unchanged). */
 function formatRecommendedCtaLabel(cta: PremiumReviewRoute["recommended_cta"]): string {
-  if (cta === "Send for review") return "Send for review →";
+  if (cta === "Send for review") return "Send for review";
   return cta;
 }
 
@@ -439,7 +442,9 @@ export function FinalizeYourAgreementPanel({
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">Choose how to deliver</h3>
+          <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">
+            {sendMode === "review" ? "Optional refinements" : "Choose how to deliver"}
+          </h3>
           <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">{tagline}</p>
         </div>
         <p
@@ -458,7 +463,7 @@ export function FinalizeYourAgreementPanel({
       ) : (
         <p className="mt-3 text-sm text-slate-500 sm:mt-4">Looking good on the quick scan — add tweaks below if needed.</p>
       )}
-      {reviewRoute ? (
+      {reviewRoute && sendMode !== "review" ? (
         <div className="mt-4 rounded-xl border border-cyan-500/25 bg-cyan-950/15 p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-cyan-100">{routeBadge}</p>
@@ -494,24 +499,26 @@ export function FinalizeYourAgreementPanel({
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-stretch">
-        <button
-          type="button"
-          className="inline-flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-md shadow-emerald-950/20 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/90 disabled:opacity-50 sm:min-h-[2.85rem] sm:flex-1 sm:px-5 sm:py-3 sm:text-[0.9375rem]"
-          disabled={disabled || busy}
-          onClick={() => onReadyForReview()}
-        >
-          Send for review →
-        </button>
-        <button
-          type="button"
-          className="inline-flex min-h-[2.75rem] items-center justify-center rounded-lg border border-slate-500/55 bg-slate-950/50 px-3.5 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:bg-slate-900/60 disabled:opacity-50 sm:min-h-[2.85rem] sm:flex-1 sm:py-2.5"
-          disabled={disabled || busy}
-          onClick={() => onSendForSignature()}
-        >
-          Send for signature
-        </button>
-      </div>
+      {sendMode === "signature" ? (
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-stretch">
+          <button
+            type="button"
+            className="inline-flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-md shadow-emerald-950/20 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/90 disabled:opacity-50 sm:min-h-[2.85rem] sm:flex-1 sm:px-5 sm:py-3 sm:text-[0.9375rem]"
+            disabled={disabled || busy}
+            onClick={() => onReadyForReview()}
+          >
+            Send for review
+          </button>
+          <button
+            type="button"
+            className="inline-flex min-h-[2.75rem] items-center justify-center rounded-lg border border-slate-500/55 bg-slate-950/50 px-3.5 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:bg-slate-900/60 disabled:opacity-50 sm:min-h-[2.85rem] sm:flex-1 sm:py-2.5"
+            disabled={disabled || busy}
+            onClick={() => onSendForSignature()}
+          >
+            Send for signature
+          </button>
+        </div>
+      ) : null}
 
       {showSignatureRecipientContinue && sendMode === "signature" ? (
         <div className="mt-4 rounded-xl border border-slate-600/60 bg-slate-950/50 p-3.5 sm:p-4">
@@ -591,7 +598,9 @@ export function FinalizeYourAgreementPanel({
             </ul>
           </div>
         ) : null}
-        <p className="text-xs leading-relaxed text-slate-500 sm:text-sm">{FINALIZE_REFINE_ROUTE_HINT}</p>
+        <p className="text-xs leading-relaxed text-slate-500 sm:text-sm">
+          {sendMode === "review" ? FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY : FINALIZE_REFINE_ROUTE_HINT}
+        </p>
         <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <button
             type="submit"
