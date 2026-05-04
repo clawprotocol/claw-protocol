@@ -310,7 +310,7 @@ test.describe("recipient + link flow QA", () => {
     });
     await expect(page.getByRole("heading", { name: "Share this agreement" })).toBeVisible();
     await expectNoMisleadingSentCopy(page);
-    const openReviewer = page.getByRole("button", { name: "Open reviewer setup" });
+    const openReviewer = page.getByRole("button", { name: "Continue to confirmation" }).first();
     if (await openReviewer.isVisible().catch(() => false)) {
       await openReviewer.click();
     }
@@ -501,7 +501,9 @@ test.describe("recipient + link flow QA", () => {
       await route.continue();
     });
     await page.goto(`/app/send/${encodeURIComponent(id)}`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByText(/Your agreement|Your Agreement|LawDog Pro active/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByText(/Prepare review link|Owner workspace|Your agreement|Your Agreement|LawDog Pro active/i).first(),
+    ).toBeVisible({ timeout: 20_000 });
     const signPath = page.getByRole("button", { name: "Signing link path" });
     if (await signPath.isVisible().catch(() => false)) {
       await signPath.click();

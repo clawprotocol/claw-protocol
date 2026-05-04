@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { agreementPublicVerifyPath, fetchPublicAgreementVerify } from "../../agreement/agreementPublicVerify";
 import { fetchAgreementDraft } from "../../agreement/agreementWorkspaceApi";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
@@ -37,6 +38,16 @@ import {
   writePaidProEditReturnHandoff,
 } from "./paidProEditReturnHandoff";
 
+function formatPartiesLineForDone(parties: AgreementDraft["parties"] | undefined, maxNames = 6): string {
+  const names = (parties || [])
+    .map((p) => String((p as { name?: string }).name ?? "").trim())
+    .filter(Boolean);
+  if (names.length === 0) return "—";
+  const shown = names.slice(0, maxNames);
+  const extra = names.length > maxNames ? ` +${names.length - maxNames}` : "";
+  return `${shown.join(", ")}${extra}`;
+}
+
 export function SimpleDonePage(props: { agreementId: string }) {
   const { agreementId } = props;
   const { navigate } = useLaunchNav();
@@ -58,6 +69,8 @@ export function SimpleDonePage(props: { agreementId: string }) {
     [agreementId, reviewLinksTick],
   );
   const [reviewBundleCopyFlash, setReviewBundleCopyFlash] = useState(false);
+  const [ownerHandoffDraft, setOwnerHandoffDraft] = useState<AgreementDraft | null>(null);
+  const ownerSuccessLoggedRef = useRef<string | null>(null);
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
   const csn = isLawdogCsnTraffic();
   const showClaimBlock = Boolean(confirmedSend || signed);
@@ -126,6 +139,31 @@ export function SimpleDonePage(props: { agreementId: string }) {
     (reviewRecipientHandoff.reviewLinksPending === true || reviewHandoffRows.length === 0);
   const isPaidProReviewDonePath =
     Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
+
+  useEffect(() => {
+    if (!isPaidProReviewDonePath) return;
+    let cancel = false;
+    void (async () => {
+      const { ok, draft } = await fetchAgreementDraft(agreementId);
+      if (cancel || !ok || !draft) return;
+      setOwnerHandoffDraft(draft);
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [agreementId, isPaidProReviewDonePath]);
+
+  useEffect(() => {
+    ownerSuccessLoggedRef.current = null;
+  }, [agreementId]);
+
+  useEffect(() => {
+    if (!isPaidProReviewDonePath || !reviewLinksReady) return;
+    if (ownerSuccessLoggedRef.current === agreementId) return;
+    ownerSuccessLoggedRef.current = agreementId;
+    // eslint-disable-next-line no-console
+    console.info("[review-link-owner-success-visible]", { agreementId });
+  }, [agreementId, isPaidProReviewDonePath, reviewLinksReady]);
 
   const retryRemintReviewLink = useCallback(async () => {
     const id = agreementId.trim();
@@ -197,25 +235,86 @@ export function SimpleDonePage(props: { agreementId: string }) {
   }
 
   if (isPaidProReviewDonePath) {
+    const agreementTitle =
+      (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement";
+    const partiesLine = formatPartiesLineForDone(ownerHandoffDraft?.parties);
+    const primaryReviewHref = (reviewHandoffRows[0]?.reviewHref || "").trim();
+    const copyPrimaryReviewLink = () => {
+      const text =
+        reviewHandoffRows.length <= 1
+          ? primaryReviewHref
+          : reviewHandoffRows.map((r) => `${r.displayName}: ${r.reviewHref}`).join("\n");
+      if (!text.trim()) return;
+      void navigator.clipboard.writeText(text).then(() => {
+        setReviewBundleCopyFlash(true);
+        window.setTimeout(() => setReviewBundleCopyFlash(false), 2000);
+      });
+    };
+
     return (
       <SimpleFlowShell
-        title="Review link ready"
-        subtitle={title ? `“${title}”` : undefined}
+        title={reviewLinksReady && primaryReviewHref ? "Review link created" : "Review link could not be created"}
       >
         <div className="vs01-card vs01-card--envelope space-y-5 text-center sm:text-left">
           <div className="rounded-xl border border-emerald-900/35 bg-emerald-950/25 px-5 py-6">
-            {reviewLinksReady ? (
+            {reviewLinksReady && primaryReviewHref ? (
               <>
                 <p className="text-sm leading-relaxed text-slate-300">
-                  Send this link to the other party. They can suggest edits; you decide what to accept.
+                  Nothing has been signed. Copy this private link and send it to the reviewer.
                 </p>
+                <dl className="mt-5 space-y-3 text-left text-sm text-slate-300">
+                  <div>
+                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</dt>
+                    <dd className="mt-0.5 font-medium text-slate-100">{agreementTitle}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Parties</dt>
+                    <dd className="mt-0.5">{partiesLine}</dd>
+                  </div>
+                  {reviewHandoffRows.length > 0 ? (
+                    <div>
+                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Reviewer{reviewHandoffRows.length > 1 ? "s" : ""}
+                      </dt>
+                      <dd className="mt-0.5 space-y-1">
+                        {reviewHandoffRows.map((r) => (
+                          <div key={`${r.displayName}-${r.reviewHref}`}>
+                            <span className="font-medium text-slate-100">{r.displayName}</span>
+                            {r.recipientEmail ? (
+                              <span className="text-slate-400"> · {r.recipientEmail}</span>
+                            ) : null}
+                          </div>
+                        ))}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+                <label className="mt-5 block text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Review link
+                  <input
+                    type="text"
+                    readOnly
+                    className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2.5 font-mono text-[11px] text-slate-200"
+                    value={primaryReviewHref}
+                    aria-label="Review link URL"
+                  />
+                </label>
                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <button
                     type="button"
                     className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
-                    onClick={() => copyAllReviewLinks()}
+                    onClick={() => copyPrimaryReviewLink()}
                   >
                     {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
+                  </button>
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                    onClick={() => {
+                      if (primaryReviewHref) window.open(primaryReviewHref, "_blank", "noopener,noreferrer");
+                    }}
+                  >
+                    Open reviewer view
                   </button>
                   <button
                     type="button"
@@ -225,10 +324,15 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     Back to draft
                   </button>
                 </div>
+                <p className="mt-4 text-left text-[11px] leading-relaxed text-slate-500">
+                  To test the reviewer experience, open the reviewer link in incognito or another browser.
+                </p>
               </>
             ) : (
               <>
-                <p className="text-sm leading-relaxed text-slate-300">Review link is still preparing.</p>
+                <p className="text-sm leading-relaxed text-slate-300">
+                  Review link could not be created. Please try again.
+                </p>
                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <button
                     type="button"

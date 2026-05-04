@@ -42,7 +42,7 @@ export function PremiumSendNextStepFork({ selected, onPick, compact }: PremiumSe
             className="mt-3.5 min-h-[2.45rem] w-full rounded-lg border border-slate-600/80 bg-slate-900/85 px-3 py-2 text-center text-sm font-semibold text-slate-100 transition hover:border-emerald-500/50 hover:bg-slate-900 sm:mt-4"
             onClick={() => onPick("review")}
           >
-            Open reviewer setup
+            Continue to confirmation
           </button>
         </div>
         <div

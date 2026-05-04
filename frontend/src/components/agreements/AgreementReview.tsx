@@ -811,6 +811,8 @@ const AgreementReview: React.FC<Props> = ({
   const [governingLawSaveBusy, setGoverningLawSaveBusy] = useState(false);
   const [watermarkSendModalOpen, setWatermarkSendModalOpen] = useState(false);
   const [watermarkModalSignFirst, setWatermarkModalSignFirst] = useState(false);
+  /** Paid Pro review (non-authoritative happy path): confirm before mint — avoids duplicate “Create review link” chrome. */
+  const [simpleReviewLinkConfirmModalOpen, setSimpleReviewLinkConfirmModalOpen] = useState(false);
   /** Paid authoritative send: auto-open paid-ready modal once per send-phase visit; reset when leaving send. */
   const autoPaidAuthoritativeSendConfirmPrimedKeyRef = useRef<string | null>(null);
   const [simpleSendValidateAttempted, setSimpleSendValidateAttempted] = useState(false);
@@ -2189,6 +2191,16 @@ const AgreementReview: React.FC<Props> = ({
     setWatermarkModalSignFirst(false);
   }, [watermarkSendModalOpen]);
 
+  useEffect(() => {
+    if (simpleFlowPhase === "send") return;
+    setSimpleReviewLinkConfirmModalOpen(false);
+  }, [simpleFlowPhase]);
+
+  useEffect(() => {
+    if (!watermarkSendModalOpen) return;
+    setSimpleReviewLinkConfirmModalOpen(false);
+  }, [watermarkSendModalOpen]);
+
   const logCreateReviewLinksClick = useCallback(
     (actionTaken: string, extra?: Record<string, unknown>) => {
       if (!import.meta.env.DEV) return;
@@ -2432,6 +2444,66 @@ const AgreementReview: React.FC<Props> = ({
     } finally {
       setSimpleFlowAdvanceBusy(false);
     }
+  }
+
+  function requestReviewLinkCreateConfirmation() {
+    const logReviewLinkAction = (actionTaken: string, extra?: Record<string, unknown>) => {
+      if (!import.meta.env.DEV) return;
+      if (postVs01SignatureFirstLanding) return;
+      // eslint-disable-next-line no-console
+      console.info("[review-link-action]", {
+        agreementId,
+        createFlowPhase: simpleFlowPhase,
+        createUiStage: section,
+        hasRecipients: sendInviteReadyCount >= 1,
+        actionTaken,
+        ...extra,
+      });
+    };
+    if (!onSimpleFlowContinue || !draft || !simpleSendActionsUnlocked) {
+      logReviewLinkAction("aborted_missing_prereq", {
+        hasOnContinue: Boolean(onSimpleFlowContinue),
+        hasDraft: Boolean(draft),
+        unlocked: simpleSendActionsUnlocked,
+      });
+      return;
+    }
+    if (simpleFlowAdvanceBusy) return;
+    if (isWorkspace && isSimpleHomeReview && simpleFlowPhase === "send") {
+      setSimpleSendValidateAttempted(true);
+      const contactErrs = validateRecipientContactForFlexibleSend(draft.parties, {
+        reviewLinkEmailOnly: (streamlinedPremiumIntentForCopy ?? simpleFlowPremiumHandoffIntent) === "review",
+      });
+      setSimpleSendFieldErrors(contactErrs);
+      if (Object.keys(contactErrs).length > 0) {
+        logReviewLinkAction("blocked_recipient_validation");
+        setError(
+          draft && isPaidProAgreementAuthoritative({ draft, agreementId })
+            ? streamlinedPremiumIntentForCopy === "signature"
+              ? "Add at least one signer email to continue."
+              : "Add at least one recipient email to create a review link."
+            : streamlinedPremiumIntentForCopy === "review"
+              ? "Add at least one recipient email below, then try Create review link again."
+              : "Add at least one recipient email below, then try again.",
+        );
+        setSimpleSendRecipientEditorOpen(true);
+        setContactValidationSeq((n) => n + 1);
+        const firstKey = scrollToFirstContactError(contactErrs);
+        if (firstKey) {
+          setShakeContactFieldKey(firstKey);
+          window.setTimeout(() => setShakeContactFieldKey(null), 220);
+        }
+        window.requestAnimationFrame(() => {
+          document.getElementById("simple-send-recipients-v1-anchor")?.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+        });
+        return;
+      }
+    }
+    setError(null);
+    setSimpleReviewLinkConfirmModalOpen(true);
   }
 
   function EditableField(props: {
@@ -5923,7 +5995,8 @@ const AgreementReview: React.FC<Props> = ({
 
           {economicsBannerEl}
 
-          {simpleFlowUpsellSuppressed ? (
+          {simpleFlowUpsellSuppressed &&
+          !(simpleFlowPhase === "send" && (streamlinedPremiumIntentForCopy ?? simpleFlowPremiumHandoffIntent) === "review") ? (
             <div
               className="mb-4 rounded-lg border border-emerald-800/40 bg-emerald-950/[0.12] px-4 py-3"
               role="status"
@@ -6058,6 +6131,24 @@ const AgreementReview: React.FC<Props> = ({
                         : "Check the agreement below. Nothing is sent until you confirm."}
                   </p>
                 </div>
+              ) : premiumLawdogSimpleHome && simpleFlowPhase === "send" && streamlinedPremiumIntentForCopy === "review" ? (
+                <div className="space-y-2">
+                  <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-[1.625rem]">
+                    Prepare review link
+                  </h1>
+                  <p className="max-w-none text-sm leading-relaxed text-slate-400 lg:max-w-[44rem]">
+                    Confirm recipient details on the right, then continue to confirmation to create a private review link.
+                  </p>
+                </div>
+              ) : premiumLawdogSimpleHome && simpleFlowPhase === "send" && streamlinedPremiumIntentForCopy === "signature" ? (
+                <div className="space-y-2">
+                  <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-[1.625rem]">
+                    Owner workspace
+                  </h1>
+                  <p className="max-w-none text-sm leading-relaxed text-slate-400 lg:max-w-[44rem]">
+                    Confirm signers on the right, then create and share signing links when you are ready.
+                  </p>
+                </div>
               ) : (
                 <div>
                   <h2 className="text-base font-semibold tracking-tight text-slate-100">Agreement preview</h2>
@@ -6160,8 +6251,12 @@ const AgreementReview: React.FC<Props> = ({
                                   <p className="text-sm leading-relaxed text-slate-400">
                                     Final confirmation opens automatically for paid Pro agreements when recipients are
                                     ready. Use{" "}
-                                    <span className="font-medium text-slate-200">Review and send</span> below if you
-                                    closed the dialog — nothing is sent until you confirm.
+                                    <span className="font-medium text-slate-200">
+                                      {simpleFlowPremiumHandoffIntent === "review"
+                                        ? "Continue to confirmation"
+                                        : "Review and send"}
+                                    </span>{" "}
+                                    below if you closed the dialog — nothing is sent until you confirm.
                                   </p>
                                 ) : null}
                                 <div className="flex flex-col gap-3">
@@ -6173,7 +6268,9 @@ const AgreementReview: React.FC<Props> = ({
                                     disabled={Boolean(savingField) || simpleFlowAdvanceBusy}
                                     onClick={() => setWatermarkSendModalOpen(true)}
                                   >
-                                    Review and send
+                                    {simpleFlowPremiumHandoffIntent === "review"
+                                      ? "Continue to confirmation"
+                                      : "Review and send"}
                                   </button>
                                   {onSimpleFlowBack ? (
                                     <button
@@ -6225,15 +6322,15 @@ const AgreementReview: React.FC<Props> = ({
                                     logCreateReviewLinksClick("primary_cta_click", {
                                       intent: streamlinedPremiumIntentForCopy ?? null,
                                     });
-                                    void handleSimpleSendWithoutPayment();
+                                    if (streamlinedPremiumIntentForCopy === "review") {
+                                      requestReviewLinkCreateConfirmation();
+                                    } else {
+                                      void handleSimpleSendWithoutPayment();
+                                    }
                                   }}
                                 >
                                   {streamlinedPremiumIntentForCopy === "review"
-                                    ? sendInviteReadyCount >= 1
-                                      ? sendInviteReadyCount === 1
-                                        ? "Create review link"
-                                        : `Create review link (${sendInviteReadyCount})`
-                                      : "Create review link"
+                                    ? "Continue to confirmation"
                                     : "Review and send"}
                                 </button>
                                 {onSimpleFlowBack ? (
@@ -6266,7 +6363,7 @@ const AgreementReview: React.FC<Props> = ({
                           ) : streamlinedPremiumIntentForCopy === "review" ? (
                             <>
                               <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                                Create review link
+                                Review link
                               </h3>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
                                 Create a private review link — you copy and share it. Nothing reaches anyone until you
@@ -6290,14 +6387,10 @@ const AgreementReview: React.FC<Props> = ({
                                     logCreateReviewLinksClick("primary_cta_click", {
                                       intent: streamlinedPremiumIntentForCopy ?? null,
                                     });
-                                    void handleSimpleSendWithoutPayment();
+                                    requestReviewLinkCreateConfirmation();
                                   }}
                                 >
-                                  {sendInviteReadyCount >= 1
-                                    ? sendInviteReadyCount === 1
-                                      ? "Create review link"
-                                      : `Create review link (${sendInviteReadyCount})`
-                                    : "Create review link"}
+                                  Continue to confirmation
                                 </button>
                                 {onSimpleFlowBack ? (
                                   <button
@@ -7113,6 +7206,42 @@ const AgreementReview: React.FC<Props> = ({
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        ) : null}
+        {simpleReviewLinkConfirmModalOpen ? (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="simple-review-link-confirm-title"
+          >
+            <div className="max-w-md rounded-xl border border-slate-700 bg-slate-950 p-6 shadow-xl">
+              <h2 id="simple-review-link-confirm-title" className="text-lg font-semibold leading-snug text-slate-100">
+                Create review link?
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                This creates a private link for the reviewer to suggest changes. Nothing is signed.
+              </p>
+              <div className="mt-6 flex flex-col gap-3">
+                <button
+                  type="button"
+                  className="w-full min-h-[2.65rem] rounded-xl border-2 border-emerald-500/55 bg-gradient-to-b from-emerald-950/40 to-slate-950/70 px-6 text-sm font-semibold text-emerald-100 shadow-[0_4px_18px_rgba(16,185,129,0.12)] transition hover:border-emerald-400/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                  onClick={() => {
+                    setSimpleReviewLinkConfirmModalOpen(false);
+                    void handleSimpleSendWithoutPayment();
+                  }}
+                >
+                  Create review link
+                </button>
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary w-full"
+                  onClick={() => setSimpleReviewLinkConfirmModalOpen(false)}
+                >
+                  Back
+                </button>
+              </div>
             </div>
           </div>
         ) : null}

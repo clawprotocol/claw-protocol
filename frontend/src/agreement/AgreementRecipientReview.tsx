@@ -264,7 +264,21 @@ export function AgreementRecipientReview({
   const ceremonyStartedRef = useRef(false);
   const joySignEmittedRef = useRef(false);
   const recipientFunnelOpenRef = useRef(false);
+  const reviewerViewLoggedRef = useRef(false);
   const access = useAccess();
+
+  useEffect(() => {
+    reviewerViewLoggedRef.current = false;
+  }, [agreementId]);
+
+  useEffect(() => {
+    if (entry.kind !== "review" || recipientLinkRole !== "reviewer") return;
+    if (!recipientAccessToken.trim()) return;
+    if (reviewerViewLoggedRef.current) return;
+    reviewerViewLoggedRef.current = true;
+    // eslint-disable-next-line no-console
+    console.info("[reviewer-view-visible]", { agreementId, mode: "reviewer" as const });
+  }, [agreementId, entry.kind, recipientAccessToken, recipientLinkRole]);
 
   const frictionPatterns = useMemo(
     () => computeNegotiationPatterns(bundle?.versions ?? []),
@@ -1428,16 +1442,22 @@ export function AgreementRecipientReview({
             ? "Review the terms — signing opens when the sender finishes setup."
             : "Review the terms — you can request changes before anything is finalized.";
     const primaryCtaLabel = canSignFromHub ? "Review and sign" : "Review agreement";
+    const isPaidReviewerSurface =
+      entry.kind === "review" && recipientLinkRole === "reviewer" && !viewerLike;
     return (
       <div className="vs01-agreement-review-inner space-y-5 p-6 pb-28 sm:pb-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement review</p>
             <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">
-              You&apos;ve been invited to review an agreement
+              {isPaidReviewerSurface
+                ? "You're reviewing this agreement"
+                : "You've been invited to review an agreement"}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300">
-              Read the terms, request changes, or sign securely on your phone. Nothing is final until you confirm.
+              {isPaidReviewerSurface
+                ? "Suggest changes before anyone signs."
+                : "Read the terms, request changes, or sign securely on your phone. Nothing is final until you confirm."}
             </p>
             {recipientTrustCueStrip()}
             {recipientAgreementSummaryCard({
@@ -1700,12 +1720,25 @@ export function AgreementRecipientReview({
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-4">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Review Agreement</p>
-          <p className="text-sm text-slate-300">
-            {workspaceTab === "read"
-              ? "Read the agreement first — editing tools are under Suggest edits."
-              : "Describe what you’d like different, preview, then send your revised draft to the owner."}
-          </p>
+          {entry.kind === "review" && recipientLinkRole === "reviewer" && !viewerLike ? (
+            <>
+              <h1 className="text-lg font-semibold tracking-tight text-slate-100 sm:text-xl">
+                You&apos;re reviewing this agreement
+              </h1>
+              <p className="mt-1.5 text-sm leading-relaxed text-slate-300">
+                Suggest changes before anyone signs.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Review Agreement</p>
+              <p className="text-sm text-slate-300">
+                {workspaceTab === "read"
+                  ? "Read the agreement first — editing tools are under Suggest edits."
+                  : "Describe what you’d like different, preview, then send your revised draft to the owner."}
+              </p>
+            </>
+          )}
           <p className="mt-1 text-[10px] text-slate-500">You are a recipient (not the owner).</p>
           <p className="mt-1.5 text-[10px] text-slate-600">
             Support reference — agreement ID:{" "}

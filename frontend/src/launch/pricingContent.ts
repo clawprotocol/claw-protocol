@@ -93,7 +93,7 @@ export const SIMPLE_HOME_AGREEMENT_READY_LINES = [
 export const FUNNEL_PRO_ACTIVE_TITLE = "LawDog Pro active";
 export const FUNNEL_PRO_ACTIVE_BODY =
   "Your agreement is ready for review links, signatures, and proof.";
-export const FUNNEL_PRO_PHASE_REVIEWER_SETUP = "Continue to reviewer setup";
+export const FUNNEL_PRO_PHASE_REVIEWER_SETUP = "Continue to confirmation";
 export const FUNNEL_PRO_PHASE_READY_SIGNATURES = "Ready for signatures";
 
 /** Paywall / pricing — one concrete product workflow claim. */

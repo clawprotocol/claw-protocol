@@ -13,6 +13,8 @@ export const simpleDoneReviewRecipientLinksStorageKey = (agreementId: string) =>
 export type SimpleDoneReviewRecipientLinkRow = {
   displayName: string;
   reviewHref: string;
+  /** Counterparty email when present on the minted party row. */
+  recipientEmail?: string;
 };
 
 export type SimpleDoneReviewLinksPayload = {
@@ -136,7 +138,8 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
     const token = res.data.token;
     const reviewHref = `${origin}${agreementMagicLinkPath(args.agreementId, token)}`;
     const displayName = String(p.name || "").trim() || "Recipient";
-    out.push({ displayName, reviewHref });
+    const recipientEmail = String((p as { email?: string }).email ?? "").trim() || undefined;
+    out.push({ displayName, reviewHref, ...(recipientEmail ? { recipientEmail } : {}) });
   }
   return { rows: out, attemptedMintCount, firstErrorStatus };
 }

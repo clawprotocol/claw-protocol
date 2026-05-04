@@ -344,7 +344,12 @@ export function SimpleSendPage(props: { agreementId: string }) {
   }, [premiumSendUnlocked, simpleFlowPremiumHandoffIntent, simpleFlowPhase]);
 
   const shellStep = simpleFlowPhase === "review" ? 2 : 3;
-  const title = "Your Agreement";
+  const shellTitle = useMemo(() => {
+    if (!premiumSendUnlocked) return "Your Agreement";
+    if (simpleFlowPremiumHandoffIntent === "review") return "Prepare review link";
+    if (simpleFlowPremiumHandoffIntent === "signature") return "Owner workspace";
+    return "Your Agreement";
+  }, [premiumSendUnlocked, simpleFlowPremiumHandoffIntent]);
   const showPremiumFork = premiumSendUnlocked && simpleFlowPhase === "review" && simpleFlowPremiumHandoffIntent === null;
 
   const subtitle =
@@ -492,7 +497,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
   ]);
 
   return (
-    <SimpleFlowShell step={shellStep as 1 | 2 | 3 | 4} progressLabels={FLOW_PROGRESS} title={title} subtitle={subtitle}>
+    <SimpleFlowShell step={shellStep as 1 | 2 | 3 | 4} progressLabels={FLOW_PROGRESS} title={shellTitle} subtitle={subtitle}>
       {flash === "draft_ready" && !streamlinedSimpleFlow ? (
         <JoyFlashBanner kind="draft_ready" onDismiss={() => setFlash(null)} />
       ) : null}
@@ -737,6 +742,12 @@ export function SimpleSendPage(props: { agreementId: string }) {
                   agreementId: id,
                   recipients: linkRows,
                   ...(reviewLinksPending ? { reviewLinksPending: true } : {}),
+                });
+                // eslint-disable-next-line no-console
+                console.info("[review-link-created]", {
+                  agreementId: id,
+                  hasReviewUrl: linkRows.length > 0,
+                  recipientCount: linkRows.length,
                 });
               } else if (id) {
                 clearSimpleDoneReviewRecipientLinks(id);
