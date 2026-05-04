@@ -4,8 +4,24 @@ import { describe, expect, it } from "vitest";
 import {
   formatProRefineRejectedShortInline,
   PRO_REFINE_REJECTED_SHORT_PRIMARY,
+  PRO_REFINE_REVISE_HELPER,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
 } from "./premiumRefineAcceptance";
+import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
+
+describe("Paid Pro refine textarea helper + placeholder", () => {
+  it("matches unified edits + reviewer-notes copy across constants and surfaces", () => {
+    expect(PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER).toContain("Edit the agreement OR add notes for the reviewer");
+    expect(PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER).toContain("Add late fee");
+    expect(PRO_REFINE_REVISE_HELPER).toBe(PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER);
+    const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(finalize).toContain("PRO_REFINE_REVISE_HELPER");
+    expect(finalize).toContain("PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER");
+    expect(intake).toContain("PRO_REFINE_REVISE_HELPER");
+    expect(intake).toContain("PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER");
+  });
+});
 
 describe("Pro refine rejection copy (rejected_short)", () => {
   it("exposes a clear unchanged-document message", () => {

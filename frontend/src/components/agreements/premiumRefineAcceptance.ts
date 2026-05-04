@@ -1,4 +1,5 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
 import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 
 /** Post-checkout pipeline / resolver pin for a committed full Pro body (see premiumCompletionStorage). */
@@ -104,9 +105,8 @@ export type PremiumRefineRequiredSectionsPresence = {
 /** Paid Pro refine panel heading (Finalize + draft card). */
 export const PRO_REFINE_REVISE_SECTION_HEADING = "Ask LawDog to revise.";
 
-/** Short helper under the revise heading. */
-export const PRO_REFINE_REVISE_HELPER =
-  "LawDog preserves the document and only applies the change you request.";
+/** Short helper under the revise heading (matches paid Pro textarea placeholder). */
+export const PRO_REFINE_REVISE_HELPER = PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER;
 
 /** Primary CTA label for applying a premium refine instruction. */
 export const PRO_REFINE_APPLY_REVISION_BUTTON_LABEL = "Apply revision.";

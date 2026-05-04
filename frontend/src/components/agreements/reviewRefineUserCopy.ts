@@ -15,7 +15,8 @@ export const REFINE_THIS_DRAFT_PLACEHOLDER =
   "Tell LawDog what to add or change, e.g. 'Add a change request approval clause and clarify ownership after final payment.'";
 
 /** Placeholder for paid Pro refine instruction (draft card + finalize panel). */
-export const PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER = REFINE_THIS_DRAFT_PLACEHOLDER;
+export const PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER =
+  'Edit the agreement OR add notes for the reviewer (e.g., "Add late fee..." or "List items the other party should review")';
 
 /** @deprecated Use {@link STARTER_PRO_REFINE_IMPROVEMENT_HEADING} in create-flow card. */
 export const STARTER_PRO_REFINE_UPSELL_HEADING = "Want LawDog to improve this draft?";
