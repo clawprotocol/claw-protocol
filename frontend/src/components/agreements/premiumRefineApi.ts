@@ -62,6 +62,8 @@ export async function postPremiumRefine(
     intake_text: string;
     user_refinement_prompt: string;
     action: PremiumRefineAction;
+    /** Server second pass: stronger preserve-full-document prompt + heading context. */
+    surgical_preserve_retry?: boolean;
   },
   signal?: AbortSignal,
 ): Promise<PremiumRefineResponse> {
@@ -75,15 +77,19 @@ export async function postPremiumRefine(
   }
   const base = resolveApiBase().replace(/\/$/, "");
   const fetchSignal = resolvePremiumRefineFetchSignal(signal);
+  const payload: Record<string, unknown> = {
+    current_document_text: body.current_document_text,
+    intake_text: body.intake_text,
+    user_refinement_prompt: body.user_refinement_prompt,
+    action: body.action,
+  };
+  if (body.surgical_preserve_retry) {
+    payload.surgical_preserve_retry = true;
+  }
   const res = await fetch(`${base}/api/agreements/premium-refine`, {
     method: "POST",
     headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      current_document_text: body.current_document_text,
-      intake_text: body.intake_text,
-      user_refinement_prompt: body.user_refinement_prompt,
-      action: body.action,
-    }),
+    body: JSON.stringify(payload),
     signal: fetchSignal,
   });
   if (!res.ok) {

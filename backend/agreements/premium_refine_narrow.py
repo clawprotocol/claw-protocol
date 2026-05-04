@@ -57,17 +57,29 @@ def _safe_json_dict(text: str) -> Optional[Dict[str, Any]]:
     return d
 
 
+CLIENT_DELIVERABLES_FINAL_PAYMENT_CLAUSE = (
+    "Final payment is due after final delivery and Client approval of the deliverables, "
+    "or deemed acceptance under Section 3.4. Client may not unreasonably withhold approval "
+    "for deliverables that materially conform to the agreed scope."
+)
+
+
 def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
     """
     Map a user refinement prompt to a narrow amendment kind, or None for generic refine.
 
-    Kinds: late_fee, governing_law, delivery_acceptance, support_period, termination.
+    Kinds: late_fee, governing_law, delivery_acceptance, support_period, termination,
+    client_deliverables_final_payment.
     """
     p = (prompt or "").strip().lower()
     if not p or len(p) < 8:
         return None
     if re.search(r"\b(no|not|without|remove|delete|drop|avoid)\b.*\b(late\s+fee|late\s+payment)\b", p):
         return None
+    if re.search(r"\b(final\s+payment|before\s+final\s+payment|payment\s+is\s+due)\b", p) and re.search(
+        r"\b(deliverable|deliverables)\b", p
+    ) and re.search(r"\b(approve|approval|accept|acceptance)\b", p):
+        return "client_deliverables_final_payment"
     # Late fee: match "5% after 10 days", "five percent after ten days overdue", "Preserve all other terms", etc.
     if re.search(r"\b(late\s+fees?|late\s+payment|overdue|past\s+due)\b", p) and (
         re.search(
@@ -90,6 +102,40 @@ def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
     ):
         return "termination"
     return None
+
+
+def document_has_client_deliverables_final_payment_language(doc: str) -> bool:
+    low = (doc or "").lower()
+    return "deliverables" in low and "final payment" in low and ("approval" in low or "approve" in low or "acceptance" in low)
+
+
+def _insert_client_deliverables_final_payment_clause(doc: str) -> Optional[str]:
+    """Insert deliverables / final payment approval clause; preserve full document and signature block."""
+    if document_has_client_deliverables_final_payment_language(doc):
+        return None
+    block = "\n\n### Client approval of deliverables before final payment\n\n" + CLIENT_DELIVERABLES_FINAL_PAYMENT_CLAUSE + "\n\n"
+    witness = re.search(r"\n\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b", doc, re.I)
+    if witness:
+        return doc[: witness.start()].rstrip() + block + doc[witness.start() :]
+    pay_m = re.search(
+        r"(?m)^(?:#{1,3}\s*|\d+\.)?\s*(?:4[\.\s][^\n]*Final[^\n]*Payment|Final\s+Payment)[^\n]*\s*$",
+        doc,
+        re.I,
+    )
+    if pay_m:
+        pos = pay_m.end()
+        tail = doc[pos:]
+        dbl = tail.find("\n\n")
+        insert_at = pos + (dbl + 2 if dbl >= 0 else 0)
+        return doc[:insert_at].rstrip() + block + doc[insert_at:]
+    acc_m = re.search(r"(?m)^(?:#{1,3}\s*|\d+\.)?\s*3\.4[^\n]*Acceptance[^\n]*\s*$", doc, re.I)
+    if acc_m:
+        pos = acc_m.end()
+        tail = doc[pos:]
+        dbl = tail.find("\n\n")
+        insert_at = pos + (dbl + 2 if dbl >= 0 else min(len(tail), 400))
+        return doc[:insert_at].rstrip() + block + doc[insert_at:]
+    return (doc or "").rstrip() + block
 
 
 def document_has_late_fee_language(doc: str) -> bool:
@@ -159,6 +205,12 @@ def validate_narrow_refined_document(*, original: str, updated: str, kind: str) 
             return False
     elif kind == "termination":
         if not re.search(r"(?i)\b(terminat|notice)\b", updated):
+            return False
+    elif kind == "client_deliverables_final_payment":
+        low = updated.lower()
+        if "deliverables" not in low or "final payment" not in low:
+            return False
+        if not re.search(r"(?i)\b(approval|approve|acceptance)\b", updated):
             return False
     return True
 
@@ -335,6 +387,9 @@ _SUMMARY_FOR_KIND: Dict[str, List[str]] = {
     "delivery_acceptance": ["Added delivery and acceptance language as requested."],
     "support_period": ["Added support or warranty period language as requested."],
     "termination": ["Added termination / notice language as requested."],
+    "client_deliverables_final_payment": [
+        "Added client approval of deliverables before final payment, preserving the full agreement."
+    ],
 }
 
 
@@ -362,6 +417,14 @@ def try_apply_narrow_amendment(
             "readiness_score": 82,
             "suggested_next_step": "review",
         }
+
+    if kind == "client_deliverables_final_payment":
+        patched = _insert_client_deliverables_final_payment_clause(doc)
+        if patched and validate_narrow_refined_document(
+            original=doc, updated=patched, kind="client_deliverables_final_payment"
+        ):
+            return ok_response(patched, _SUMMARY_FOR_KIND["client_deliverables_final_payment"])
+        return None
 
     if kind == "late_fee":
         if document_has_late_fee_language(doc):

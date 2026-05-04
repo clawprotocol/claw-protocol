@@ -7,14 +7,16 @@ import {
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REVISE_HELPER,
   PRO_REFINE_REVISE_SECTION_HEADING,
+  PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
+  PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE,
 } from "./premiumRefineAcceptance";
 import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
 import {
-  augmentPremiumRefineUserPrompt,
+  buildPremiumRefineChecklistBullets,
+  executePremiumRefineUpdate,
   PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE,
-  resolvePremiumRefineApplyOutcome,
 } from "./premiumRefineLateFeeFallback";
-import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE, type PremiumRefineResponse } from "./premiumRefineApi";
+import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE, type PremiumRefineResponse } from "./premiumRefineApi";
 import { computePremiumReviewCompleteness } from "./premiumReviewCompleteness";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
@@ -68,7 +70,7 @@ type Props = {
   disabled?: boolean;
   /** When true, hide Send for review / Send for signature row (host shows them on the paid Pro draft card). */
   deliveryCtasOnDraftCard?: boolean;
-  /** Dev-only: logged when `postPremiumRefine` fails; parent supplies flags and ids. */
+  /** Dev-only: logged when premium refine fails; parent supplies flags and ids. */
   devProRefineContext?: {
     handlerLabel: string;
     premiumPersistedFlowActive: boolean;
@@ -241,30 +243,33 @@ export function FinalizeYourAgreementPanel({
           draft,
           agreementDocumentText: currentDocumentText || "",
         });
-        const r = await postPremiumRefine(
-          {
-            current_document_text: baseline.text,
-            intake_text: effectiveIntakeText,
-            user_refinement_prompt: augmentPremiumRefineUserPrompt(prompt.trim()),
-            action: "update",
-          },
-          ac.signal,
-        );
-        const resolved = resolvePremiumRefineApplyOutcome({
-          apiOut: r.updated_document_text,
+        const resolved = await executePremiumRefineUpdate({
           baselineText: baseline.text,
           baselineLen: baseline.len,
-          summaryChanges: r.summary_changes,
+          intakeText: effectiveIntakeText,
           userInstruction: prompt.trim(),
+          signal: ac.signal,
+          refineChecklistBullets: buildPremiumRefineChecklistBullets(review, reviewRoute),
         });
-        const { acceptance: acc, finalText: out, usedLocalLateFeeFallback, whatChangedLine, unchangedDuplicateLateFee } =
-          resolved;
+        const r = resolved.lastRefineResponse;
+        const {
+          acceptance: acc,
+          finalText: out,
+          usedLocalLateFeeFallback,
+          whatChangedLine,
+          unchangedDuplicateLateFee,
+          usedClientDeliverablesFinalPaymentFallback,
+          usedSurgicalPreserveRetry,
+          surgicalRejectedShortExhausted,
+          usedAppendReviewerNotePreserve,
+          refineApplyDecision,
+        } = resolved;
         // eslint-disable-next-line no-console
         console.info("[premium-refine-apply]", {
           currentProLen: baseline.len,
           refinedCandidateLen: acc.refinedLen,
           ratio: Number(acc.ratio.toFixed(4)),
-          applyDecision: acc.decision,
+          applyDecision: refineApplyDecision ?? acc.decision,
           revisionIntent: acc.revisionIntent,
           headingPreservationRatio: Number(acc.headingPreservationRatio.toFixed(4)),
           requiredSectionsPresent: acc.requiredSectionsPresent,
@@ -273,6 +278,10 @@ export function FinalizeYourAgreementPanel({
           endpoint: "premium-refine",
           surface: "FinalizeYourAgreementPanel.runUpdate",
           usedLocalLateFeeFallback,
+          usedClientDeliverablesFinalPaymentFallback,
+          usedSurgicalPreserveRetry,
+          surgicalRejectedShortExhausted,
+          usedAppendReviewerNotePreserve,
         });
         if (acc.decision === "rejected_unchanged") {
           setLastRefine(null);
@@ -283,7 +292,11 @@ export function FinalizeYourAgreementPanel({
         if (acc.decision === "rejected_short") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
-          setErr(formatProRefineRejectedShortInline());
+          setErr(
+            surgicalRejectedShortExhausted
+              ? PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED
+              : formatProRefineRejectedShortInline(),
+          );
           return;
         }
         if (acc.decision === "rejected_empty") {
@@ -292,7 +305,7 @@ export function FinalizeYourAgreementPanel({
           setErr("We couldn't apply that update. Try again.");
           return;
         }
-        if (out) {
+        if (out && r) {
           setLastRefine(r);
           markDocumentDirty?.();
           onApplyDocumentText(out);
@@ -300,7 +313,11 @@ export function FinalizeYourAgreementPanel({
           onProRefineWhatChanged?.(wc);
           setRefineWhatChangedCaption(wc);
           setPrompt("");
-          setRefineSuccessMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
+          setRefineSuccessMessage(
+            usedAppendReviewerNotePreserve
+              ? PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE
+              : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
+          );
         } else if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[agreement-refine] FinalizeYourAgreementPanel#runUpdate empty model output", { r });
@@ -342,6 +359,8 @@ export function FinalizeYourAgreementPanel({
       onApplyDocumentText,
       onProRefineWhatChanged,
       prompt,
+      review,
+      reviewRoute,
     ],
   );
 
@@ -369,23 +388,22 @@ export function FinalizeYourAgreementPanel({
           draft,
           agreementDocumentText: currentDocumentText || "",
         });
-        const r = await postPremiumRefine(
-          {
-            current_document_text: baseline.text,
-            intake_text: effectiveIntakeText,
-            user_refinement_prompt: augmentPremiumRefineUserPrompt(seed),
-            action: "update",
-          },
-          undefined,
-        );
-        const resolved = resolvePremiumRefineApplyOutcome({
-          apiOut: r.updated_document_text,
+        const resolved = await executePremiumRefineUpdate({
           baselineText: baseline.text,
           baselineLen: baseline.len,
-          summaryChanges: r.summary_changes,
+          intakeText: effectiveIntakeText,
           userInstruction: seed,
+          refineChecklistBullets: buildPremiumRefineChecklistBullets(review, reviewRoute),
         });
-        const { acceptance: acc, finalText: out, whatChangedLine, unchangedDuplicateLateFee } = resolved;
+        const r = resolved.lastRefineResponse;
+        const {
+          acceptance: acc,
+          finalText: out,
+          whatChangedLine,
+          unchangedDuplicateLateFee,
+          surgicalRejectedShortExhausted,
+          usedAppendReviewerNotePreserve,
+        } = resolved;
         if (acc.decision === "rejected_unchanged") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
@@ -395,7 +413,11 @@ export function FinalizeYourAgreementPanel({
         if (acc.decision === "rejected_short") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
-          setErr(formatProRefineRejectedShortInline());
+          setErr(
+            surgicalRejectedShortExhausted
+              ? PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED
+              : formatProRefineRejectedShortInline(),
+          );
           return;
         }
         if (acc.decision === "rejected_empty") {
@@ -404,14 +426,18 @@ export function FinalizeYourAgreementPanel({
           setErr("We couldn't apply that update. Try again.");
           return;
         }
-        if (out) {
+        if (out && r) {
           setLastRefine(r);
           markDocumentDirty?.();
           onApplyDocumentText(out);
           const wc = whatChangedLine?.trim() ? whatChangedLine.trim() : null;
           onProRefineWhatChanged?.(wc);
           setRefineWhatChangedCaption(wc);
-          setRefineSuccessMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
+          setRefineSuccessMessage(
+            usedAppendReviewerNotePreserve
+              ? PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE
+              : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
+          );
         }
       } catch (e2) {
         setRefineSuccessMessage(null);
@@ -438,6 +464,7 @@ export function FinalizeYourAgreementPanel({
   }, [
     routePrimaryActionNonce,
     reviewRoute,
+    review,
     currentDocumentText,
     draft,
     intakeText,
@@ -584,6 +611,9 @@ export function FinalizeYourAgreementPanel({
           disabled={disabled || busy}
           dictationControlRef={dictationRef}
           voiceSubtleIdle={true}
+          autosize
+          autosizeMaxPx={260}
+          onVoiceError={() => {}}
           placeholder={PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER}
           rows={3}
           className="w-full rounded-xl border border-slate-600/50 bg-slate-900/90 px-3.5 py-2.5 pr-14 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 sm:px-4"

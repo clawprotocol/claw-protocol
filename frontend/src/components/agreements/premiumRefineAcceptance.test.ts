@@ -7,6 +7,8 @@ import {
   extractMajorHeadingFingerprints,
   formatProRefineRejectedShortInline,
   instructionAllowsExtremeShrink,
+  isProRefineRejectedShortMessage,
+  isProRefineSurgicalExhaustedMessage,
   normalizePremiumRefineTextForCompare,
   pickAuthoritativeProCorpusForRefine,
   premiumRefineSummaryIsUnchangedFailOpen,
@@ -16,6 +18,7 @@ import {
   PREMIUM_REFINE_TRANSFORMATIONAL_HARD_REJECT_RATIO,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REJECTED_SHORT_PRIMARY,
+  PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
 } from "./premiumRefineAcceptance";
 import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 
@@ -274,6 +277,15 @@ describe("formatProRefineRejectedShortInline", () => {
     expect(t).toContain(PRO_REFINE_REJECTED_SHORT_PRIMARY);
     expect(t).toContain("Edit wording");
     expect(t).toContain("LawDog tried to change too much");
+  });
+});
+
+describe("surgical exhausted vs generic rejected_short copy", () => {
+  it("treats surgical exhausted message as refine alert class alongside generic short reject", () => {
+    expect(isProRefineSurgicalExhaustedMessage(PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED)).toBe(true);
+    expect(isProRefineRejectedShortMessage(PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED)).toBe(true);
+    expect(isProRefineRejectedShortMessage(PRO_REFINE_REJECTED_SHORT_PRIMARY)).toBe(true);
+    expect(isProRefineSurgicalExhaustedMessage(PRO_REFINE_REJECTED_SHORT_PRIMARY)).toBe(false);
   });
 });
 

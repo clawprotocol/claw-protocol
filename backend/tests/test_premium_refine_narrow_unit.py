@@ -272,3 +272,44 @@ def test_try_apply_late_fee_llm_anchor_patch_fallback():
     assert out is not None
     assert "five percent (5%)" in out["updated_document_text"].lower()
     assert len(out["updated_document_text"]) >= int(len(doc) * 0.9)
+
+
+def test_classify_narrow_amendment_prompt_client_deliverables_final_payment():
+    assert (
+        classify_narrow_amendment_prompt(
+            "add in the client will need to approve deliverables before final payment is due"
+        )
+        == "client_deliverables_final_payment"
+    )
+
+
+def _doc_client_deliverables_narrow_base() -> str:
+    return (
+        "# Agreement\n\n## Scope\n\nMonthly deliverables per the statement of work.\n\n"
+        "## Payment\n\n"
+        + ("Net 30 invoicing detail line.\n" * 120)
+        + "\n## 4 Final Payment\n\nDue on completion of milestones.\n\nIN WITNESS WHEREOF\n\n__ /s/ __\n"
+    )
+
+
+def test_try_apply_client_deliverables_final_payment_deterministic_without_llm():
+    doc = _doc_client_deliverables_narrow_base()
+
+    def no_llm(*_a, **_k):
+        raise AssertionError("LLM must not run for deterministic client-deliverables insert")
+
+    out = try_apply_narrow_amendment(
+        kind="client_deliverables_final_payment",
+        current_document_text=doc,
+        user_refinement_prompt="add in the client will need to approve deliverables before final payment is due",
+        call_legal_llm_fn=no_llm,
+        llm_model=None,
+    )
+    assert out is not None
+    text = out["updated_document_text"]
+    low = text.lower()
+    assert "deliverables" in low
+    assert "final payment" in low
+    assert "approval" in low
+    assert "in witness whereof" in low
+    assert len(text) >= int(len(doc) * 0.9)

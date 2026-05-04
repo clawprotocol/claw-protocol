@@ -407,13 +407,15 @@ import {
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REVISE_HELPER,
   PRO_REFINE_REVISE_SECTION_HEADING,
+  PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
+  PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE,
 } from "./premiumRefineAcceptance";
 import {
-  augmentPremiumRefineUserPrompt,
+  buildPremiumRefineChecklistBullets,
+  executePremiumRefineUpdate,
   PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE,
-  resolvePremiumRefineApplyOutcome,
 } from "./premiumRefineLateFeeFallback";
-import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
+import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import {
@@ -813,7 +815,7 @@ function humanizeVoiceErrorMessage(raw: string): string {
     norm.includes("denied") ||
     norm.includes("notallowed")
   ) {
-    return "Microphone access is needed to dictate. Check your browser settings and try again.";
+    return "Microphone wasn’t available. You can keep typing your instruction — mic is optional. Check browser settings if you want to try dictation again.";
   }
   if (l === "audio-capture" || norm === "audio-capture" || l.includes("audio-capture")) {
     return "We couldn’t access the microphone. Check that it’s connected, then try again.";
@@ -5790,27 +5792,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
           return false;
         }
-        const r = await postPremiumRefine({
-          current_document_text: currentDoc,
-          intake_text: rawIntake,
-          user_refinement_prompt: augmentPremiumRefineUserPrompt(instruction),
-          action: "update",
-        });
-        const resolved = resolvePremiumRefineApplyOutcome({
-          apiOut: r.updated_document_text,
+        const resolved = await executePremiumRefineUpdate({
           baselineText: currentDoc,
           baselineLen: currentProLen,
-          summaryChanges: r.summary_changes,
+          intakeText: rawIntake,
           userInstruction: instruction,
+          refineChecklistBullets: buildPremiumRefineChecklistBullets(premiumRefineReview, premiumReviewRoute),
         });
-        const { acceptance, finalText: out, usedLocalLateFeeFallback, whatChangedLine, unchangedDuplicateLateFee } =
-          resolved;
+        const r = resolved.lastRefineResponse;
+        const {
+          acceptance,
+          finalText: out,
+          usedLocalLateFeeFallback,
+          whatChangedLine,
+          unchangedDuplicateLateFee,
+          usedClientDeliverablesFinalPaymentFallback,
+          usedSurgicalPreserveRetry,
+          surgicalRejectedShortExhausted,
+          usedAppendReviewerNotePreserve,
+          refineApplyDecision,
+        } = resolved;
         // eslint-disable-next-line no-console
         console.info("[premium-refine-apply]", {
           currentProLen,
           refinedCandidateLen: acceptance.refinedLen,
           ratio: Number(acceptance.ratio.toFixed(4)),
-          applyDecision: acceptance.decision,
+          applyDecision: refineApplyDecision ?? acceptance.decision,
           revisionIntent: acceptance.revisionIntent,
           headingPreservationRatio: Number(acceptance.headingPreservationRatio.toFixed(4)),
           requiredSectionsPresent: acceptance.requiredSectionsPresent,
@@ -5818,6 +5825,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           chosenSource: chosenSourceForLog,
           endpoint: "premium-refine",
           usedLocalLateFeeFallback,
+          usedClientDeliverablesFinalPaymentFallback,
+          usedSurgicalPreserveRetry,
+          surgicalRejectedShortExhausted,
+          usedAppendReviewerNotePreserve,
         });
         if (acceptance.decision === "rejected_unchanged") {
           setHardError(null);
@@ -5838,17 +5849,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         if (acceptance.decision === "rejected_short") {
           setHardError(null);
-          setReviewRefineUserMessage(formatProRefineRejectedShortInline());
+          setReviewRefineUserMessage(
+            surgicalRejectedShortExhausted
+              ? PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED
+              : formatProRefineRejectedShortInline(),
+          );
           return false;
         }
         // eslint-disable-next-line no-console
         console.info("[agreement-refine] paid_premium success", {
           outLen: out.length,
-          suggested_next_step: r.suggested_next_step,
-          summary_changes: r.summary_changes,
+          suggested_next_step: r?.suggested_next_step,
+          summary_changes: r?.summary_changes,
           usedLocalLateFeeFallback,
         });
-        setReviewRefineUserMessage(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE);
+        setReviewRefineUserMessage(
+          usedAppendReviewerNotePreserve
+            ? PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE
+            : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
+        );
         setProRefineWhatChangedSummary(whatChangedLine?.trim() ? whatChangedLine.trim() : null);
         applyProRefineOutputToProSurfaceRef.current?.(out, { clearStepBuffer: true, scrollToReview: true });
         return true;
@@ -5963,6 +5982,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleInstantProductionSurface,
     applyHandoffAgreementPreviewOrAuthoritative,
     premiumPersistedFlowActive,
+    premiumRefineReview,
+    premiumReviewRoute,
     resolveRawIntakeForPremiumCheckout,
   ]);
 
@@ -14021,6 +14042,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               dictationControlRef={paidProCardDictationRef}
                                               onDictationPhaseChange={handleDictationPhaseChange}
                                               onVoiceError={(m) => setVoiceError(humanizeVoiceErrorMessage(m))}
+                                              autosize
+                                              autosizeMaxPx={260}
                                               className="min-h-[6.5rem] w-full rounded-lg border border-stone-300/90 bg-white px-3 py-3 pb-11 pr-11 text-sm leading-relaxed text-stone-900 placeholder:text-stone-500"
                                               placeholder={PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER}
                                               aria-label="LawDog Pro instruction for this agreement"

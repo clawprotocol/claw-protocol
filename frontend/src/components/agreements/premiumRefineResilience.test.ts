@@ -69,11 +69,11 @@ describe("PRO_REFINE_UNAVAILABLE_USER_MESSAGE export", () => {
 });
 
 describe("Premium refine no-op apply guard", () => {
-  it("paid path resolves refine via resolvePremiumRefineApplyOutcome and distinguishes duplicate late fee", () => {
+  it("paid path uses executePremiumRefineUpdate and distinguishes duplicate late fee", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
-    expect(s).toContain("resolvePremiumRefineApplyOutcome");
-    expect(s).toContain("augmentPremiumRefineUserPrompt(instruction)");
+    expect(s).toContain("executePremiumRefineUpdate");
+    expect(s).toContain("userInstruction: instruction");
     expect(s).toContain('acceptance.decision === "rejected_unchanged"');
     expect(s).toContain("PRO_REFINE_UNAVAILABLE_USER_MESSAGE");
     expect(s).toContain("PRO_REFINE_LATE_FEE_ALREADY_PRESENT_MESSAGE");

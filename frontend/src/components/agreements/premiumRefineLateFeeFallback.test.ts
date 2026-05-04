@@ -3,7 +3,9 @@ import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import {
   augmentPremiumRefineUserPrompt,
   documentAlreadyHasLateFeeClause,
+  looksLikeClientDeliverablesFinalPaymentInstruction,
   resolvePremiumRefineApplyOutcome,
+  tryPremiumRefineClientDeliverablesFinalPaymentLocalFallback,
   tryPremiumRefineLateFeeLocalFallback,
 } from "./premiumRefineLateFeeFallback";
 
@@ -83,5 +85,29 @@ describe("augmentPremiumRefineUserPrompt", () => {
     expect(out.startsWith(u)).toBe(true);
     expect(out).toMatch(/complete updated document/i);
     expect(out).toMatch(/preserve-first editing/i);
+    expect(out).toMatch(/COMPLETE agreement/i);
+    expect(out).toMatch(/Do not summarize/i);
+  });
+});
+
+describe("client deliverables / final payment deterministic fallback", () => {
+  const QA_INSTR = "add in the client will need to approve deliverables before final payment is due";
+
+  it("classifies QA-style instruction", () => {
+    expect(looksLikeClientDeliverablesFinalPaymentInstruction(QA_INSTR)).toBe(true);
+  });
+
+  it("inserts before IN WITNESS WHEREOF and preserves witness block", () => {
+    const base =
+      "# Agreement\n\n## Scope\n\nDeliverables monthly.\n\n## 4 Final Payment\n\nNet 30.\n\n" +
+      "IN WITNESS WHEREOF\n\nsig\n";
+    const r = tryPremiumRefineClientDeliverablesFinalPaymentLocalFallback({
+      currentDocumentText: base,
+      userInstruction: QA_INSTR,
+    });
+    expect(r).not.toBeNull();
+    expect(r!.text).toContain("IN WITNESS WHEREOF");
+    expect(r!.text.indexOf("Client approval of deliverables")).toBeLessThan(r!.text.indexOf("IN WITNESS WHEREOF"));
+    expect(r!.text.toLowerCase()).toContain("final payment");
   });
 });

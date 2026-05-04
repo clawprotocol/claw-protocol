@@ -1,4 +1,10 @@
-import { evaluatePremiumRefineCandidate, premiumRefineSummaryIsUnchangedFailOpen } from "./premiumRefineAcceptance";
+import {
+  classifyPremiumRefineRevisionIntent,
+  evaluatePremiumRefineCandidate,
+  looksLikeReviewerNoteOrCommentIntent,
+  premiumRefineSummaryIsUnchangedFailOpen,
+} from "./premiumRefineAcceptance";
+import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
 
 type PremiumRefineAcceptanceResult = ReturnType<typeof evaluatePremiumRefineCandidate>;
 
@@ -74,10 +80,197 @@ export function tryPremiumRefineLateFeeLocalFallback(args: {
   };
 }
 
+/** Mirrors backend `CLIENT_DELIVERABLES_FINAL_PAYMENT_CLAUSE` for deterministic insert. */
+export const CLIENT_DELIVERABLES_FINAL_PAYMENT_CLAUSE =
+  "Final payment is due after final delivery and Client approval of the deliverables, " +
+  "or deemed acceptance under Section 3.4. Client may not unreasonably withhold approval " +
+  "for deliverables that materially conform to the agreed scope.";
+
+const CLIENT_DELIVERABLES_INSTR_RE =
+  /\b(?:final\s+payment|before\s+final\s+payment|payment\s+is\s+due)\b/i;
+const CLIENT_DELIVERABLES_DELIV_RE = /\b(?:deliverable|deliverables)\b/i;
+const CLIENT_DELIVERABLES_APPROVAL_RE = /\b(?:approve|approval|accept|acceptance)\b/i;
+
+/** Instruction class that maps to deterministic client-approval-before-final-payment insert. */
+export function looksLikeClientDeliverablesFinalPaymentInstruction(instr: string): boolean {
+  const t = instr.trim();
+  if (t.length < 12) return false;
+  return (
+    CLIENT_DELIVERABLES_INSTR_RE.test(t) &&
+    CLIENT_DELIVERABLES_DELIV_RE.test(t) &&
+    CLIENT_DELIVERABLES_APPROVAL_RE.test(t)
+  );
+}
+
+export function documentHasClientDeliverablesFinalPaymentLanguage(doc: string): boolean {
+  const low = (doc || "").toLowerCase();
+  return (
+    low.includes("deliverables") &&
+    low.includes("final payment") &&
+    (low.includes("approval") || low.includes("approve") || low.includes("acceptance"))
+  );
+}
+
+/**
+ * Deterministic insert (mirrors server `premium_refine_narrow._insert_client_deliverables_final_payment_clause`).
+ * Preserves full document and signature block when possible.
+ */
+export function tryPremiumRefineClientDeliverablesFinalPaymentLocalFallback(args: {
+  currentDocumentText: string;
+  userInstruction: string;
+}): { text: string; summaryLine: string } | null {
+  const doc = args.currentDocumentText;
+  const instr = args.userInstruction.trim();
+  if (!doc.trim() || !instr) return null;
+  if (!looksLikeClientDeliverablesFinalPaymentInstruction(instr)) return null;
+  if (documentHasClientDeliverablesFinalPaymentLanguage(doc)) return null;
+
+  const block =
+    "\n\n### Client approval of deliverables before final payment\n\n" +
+    CLIENT_DELIVERABLES_FINAL_PAYMENT_CLAUSE +
+    "\n\n";
+
+  const witness = doc.search(/\n\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b/i);
+  if (witness >= 0) {
+    const head = doc.slice(0, witness).trimEnd();
+    const tail = doc.slice(witness);
+    return {
+      text: `${head}${block}${tail}`,
+      summaryLine:
+        "Added client approval of deliverables before final payment, preserving the full agreement.",
+    };
+  }
+  const payM = doc.match(
+    /^(?:#{1,3}\s*|\d+\.)?\s*(?:4[\.\s][^\n]*Final[^\n]*Payment|Final\s+Payment)[^\n]*\s*$/im,
+  );
+  if (payM && payM.index !== undefined) {
+    const pos = payM.index + payM[0].length;
+    const tail = doc.slice(pos);
+    const dbl = tail.indexOf("\n\n");
+    const insertAt = pos + (dbl >= 0 ? dbl + 2 : 0);
+    return {
+      text: `${doc.slice(0, insertAt).trimEnd()}${block}${doc.slice(insertAt)}`,
+      summaryLine:
+        "Added client approval of deliverables before final payment, preserving the full agreement.",
+    };
+  }
+  const accM = doc.match(/^(?:#{1,3}\s*|\d+\.)?\s*3\.4[^\n]*Acceptance[^\n]*\s*$/im);
+  if (accM && accM.index !== undefined) {
+    const pos = accM.index + accM[0].length;
+    const tail = doc.slice(pos);
+    const dbl = tail.indexOf("\n\n");
+    const insertAt = pos + (dbl >= 0 ? dbl + 2 : Math.min(tail.length, 400));
+    return {
+      text: `${doc.slice(0, insertAt).trimEnd()}${block}${doc.slice(insertAt)}`,
+      summaryLine:
+        "Added client approval of deliverables before final payment, preserving the full agreement.",
+    };
+  }
+  return {
+    text: `${doc.trimEnd()}${block}`,
+    summaryLine:
+      "Added client approval of deliverables before final payment, preserving the full agreement.",
+  };
+}
+
 export function augmentPremiumRefineUserPrompt(instruction: string): string {
   const t = instruction.trim();
   if (!t) return t;
-  return `${t}\n\n[Preserve-first editing: apply this to the full document. Keep the document type; preserve existing sections, headings, numbering, and order; preserve parties, names, dates, amounts, signature blocks, governing law, confidentiality, liability, termination, payment, IP, and other material clauses unless the user explicitly asked to shorten, simplify, summarize, rewrite from scratch, convert format, or replace the document. Only add, revise, or clarify what is needed for this request — do not compress, summarize, remove, or re-outline unless they asked for that. Return the complete updated document text only.]`;
+  return `${t}\n\n[Preserve-first editing: Return the COMPLETE agreement. Do not summarize, replace the agreement, or omit sections. Make only the requested change. If adding a clause, insert it into the most relevant existing section and preserve all other text. Apply this to the full document; preserve existing sections, headings, numbering, parties, signature blocks, and material clauses unless the user explicitly asked to shorten, simplify, summarize, rewrite from scratch, convert format, or replace the document. Return the complete updated document text only.]`;
+}
+
+const REVIEWER_NOTE_HEADING = "## REVIEWER NOTE / REQUESTED REVIEW ITEMS";
+
+/** Merge LawDog premium-review / route bullets into the refine prompt when available. */
+export function buildPremiumRefineChecklistBullets(
+  review:
+    | {
+        missing_or_weak_terms?: string[];
+        questions_for_user?: string[];
+        suggested_clause_upgrades?: string[];
+      }
+    | null
+    | undefined,
+  reviewRoute: { unresolved_items?: string[] } | null | undefined,
+): string[] {
+  const out: string[] = [];
+  if (review) {
+    for (const x of review.missing_or_weak_terms ?? []) {
+      const s = String(x ?? "").trim();
+      if (s) out.push(s);
+    }
+    for (const x of review.questions_for_user ?? []) {
+      const s = String(x ?? "").trim();
+      if (s) out.push(s);
+    }
+    for (const x of review.suggested_clause_upgrades ?? []) {
+      const s = String(x ?? "").trim();
+      if (s) out.push(s);
+    }
+  }
+  for (const x of reviewRoute?.unresolved_items ?? []) {
+    const s = String(x ?? "").trim();
+    if (s) out.push(s);
+  }
+  return [...new Set(out)].slice(0, 24);
+}
+
+export function augmentPremiumRefineUserPromptWithChecklist(
+  instruction: string,
+  checklistLines: string[] | undefined,
+): string {
+  const core = augmentPremiumRefineUserPrompt(instruction);
+  const lines = (checklistLines || []).map((x) => String(x ?? "").trim()).filter(Boolean).slice(0, 20);
+  if (!lines.length) return core;
+  return `${core}\n\n[LawDog / readiness context — use only where relevant to the user's request; do not invent economics or parties. If the user asked for reviewer notes, comments, or to capture best-practice / flagged issues, append a clearly labeled reviewer-note section at the end instead of replacing the agreement:]\n${lines.map((l) => `- ${l}`).join("\n")}`;
+}
+
+/**
+ * When the model returns a too-short body but the user asked for reviewer notes, preserve the
+ * full agreement bytes and append an administrative section.
+ */
+export function tryAppendReviewerNotePreserveDocument(args: {
+  currentDocumentText: string;
+  userInstruction: string;
+  shortCandidate: string;
+  checklistLines?: string[] | undefined;
+}): { text: string; summaryLine: string } | null {
+  if (!looksLikeReviewerNoteOrCommentIntent(args.userInstruction)) return null;
+  const base = args.currentDocumentText;
+  if (!base || base.length < 500) return null;
+  const short = (args.shortCandidate || "").trim();
+  if (short.length < 40) return null;
+  if (short.length >= base.length * 0.92) return null;
+
+  const checklist = (args.checklistLines || []).filter(Boolean).slice(0, 20);
+  const checklistBlock =
+    checklist.length > 0
+      ? `\n**Flagged / readiness items (from LawDog review):**\n${checklist.map((c) => `- ${c}`).join("\n")}\n`
+      : "";
+
+  const shortBlock =
+    short.length > 800
+      ? `\n**LawDog short output (preserved as reference — agreement text above is unchanged):**\n\n${short}\n`
+      : `\n**Captured points:**\n\n${short}\n`;
+
+  const footer =
+    `\n*This section is administrative / reviewer-facing. It does not amend the operative agreement text above unless the parties separately agree in writing.*\n`;
+
+  if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
+    const addendum =
+      `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${args.userInstruction.trim()}\n${checklistBlock}${shortBlock}${footer}`;
+    return {
+      text: base + addendum,
+      summaryLine: "Appended an additional reviewer note; full agreement preserved.",
+    };
+  }
+
+  const tail =
+    `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${args.userInstruction.trim()}\n${checklistBlock}${shortBlock}${footer}`;
+  return {
+    text: base + tail,
+    summaryLine: "Added a reviewer note / requested review items section; full agreement preserved.",
+  };
 }
 
 function joinSummaryChanges(summary: string[] | undefined): string | null {
@@ -92,6 +285,16 @@ export type PremiumRefineResolveOutcome = {
   usedLocalLateFeeFallback: boolean;
   whatChangedLine: string | null;
   unchangedDuplicateLateFee: boolean;
+};
+
+export type PremiumRefineExecuteOutcome = PremiumRefineResolveOutcome & {
+  usedClientDeliverablesFinalPaymentFallback: boolean;
+  usedSurgicalPreserveRetry: boolean;
+  surgicalRejectedShortExhausted: boolean;
+  lastRefineResponse: PremiumRefineResponse | null;
+  usedAppendReviewerNotePreserve: boolean;
+  /** Prefer for QA logs when a fallback path applied (e.g. append reviewer note). */
+  refineApplyDecision: string | null;
 };
 
 /**
@@ -158,4 +361,172 @@ export function resolvePremiumRefineApplyOutcome(args: {
     whatChangedLine: null,
     unchangedDuplicateLateFee: false,
   };
+}
+
+function toExecuteExtras(
+  base: PremiumRefineResolveOutcome,
+  extras: {
+    usedClientDeliverablesFinalPaymentFallback: boolean;
+    usedSurgicalPreserveRetry: boolean;
+    surgicalRejectedShortExhausted: boolean;
+    lastRefineResponse: PremiumRefineResponse | null;
+    usedAppendReviewerNotePreserve: boolean;
+    refineApplyDecision: string | null;
+  },
+): PremiumRefineExecuteOutcome {
+  return { ...base, ...extras };
+}
+
+/**
+ * Paid Pro refine: POST → accept gate → optional surgical preserve retry → deterministic deliverables clause.
+ */
+export async function executePremiumRefineUpdate(args: {
+  baselineText: string;
+  baselineLen: number;
+  intakeText: string;
+  userInstruction: string;
+  signal?: AbortSignal;
+  /** LawDog premium-review + route bullets, appended to refine prompt and reviewer-note section. */
+  refineChecklistBullets?: string[] | undefined;
+}): Promise<PremiumRefineExecuteOutcome> {
+  const { baselineText, baselineLen, intakeText, userInstruction, signal, refineChecklistBullets } = args;
+  const inst = userInstruction.trim();
+  const userPrompt = augmentPremiumRefineUserPromptWithChecklist(inst, refineChecklistBullets);
+
+  const runResolve = (r: PremiumRefineResponse): PremiumRefineResolveOutcome =>
+    resolvePremiumRefineApplyOutcome({
+      apiOut: r.updated_document_text,
+      baselineText,
+      baselineLen,
+      summaryChanges: r.summary_changes,
+      userInstruction: inst,
+    });
+
+  let lastR: PremiumRefineResponse | null = null;
+  let usedSurgicalPreserveRetry = false;
+
+  const r0 = await postPremiumRefine(
+    {
+      current_document_text: baselineText,
+      intake_text: intakeText,
+      user_refinement_prompt: userPrompt,
+      action: "update",
+    },
+    signal,
+  );
+  lastR = r0;
+  let resolved = runResolve(r0);
+
+  if (resolved.acceptance.decision === "accepted") {
+    return toExecuteExtras(resolved, {
+      usedClientDeliverablesFinalPaymentFallback: false,
+      usedSurgicalPreserveRetry,
+      surgicalRejectedShortExhausted: false,
+      lastRefineResponse: lastR,
+      usedAppendReviewerNotePreserve: false,
+      refineApplyDecision: null,
+    });
+  }
+
+  if (resolved.acceptance.decision === "rejected_short" && classifyPremiumRefineRevisionIntent(inst) === "surgical_revision") {
+    usedSurgicalPreserveRetry = true;
+    const r1 = await postPremiumRefine(
+      {
+        current_document_text: baselineText,
+        intake_text: intakeText,
+        user_refinement_prompt: userPrompt,
+        action: "update",
+        surgical_preserve_retry: true,
+      },
+      signal,
+    );
+    lastR = r1;
+    resolved = runResolve(r1);
+    if (resolved.acceptance.decision === "accepted") {
+      return toExecuteExtras(resolved, {
+        usedClientDeliverablesFinalPaymentFallback: false,
+        usedSurgicalPreserveRetry,
+        surgicalRejectedShortExhausted: false,
+        lastRefineResponse: lastR,
+        usedAppendReviewerNotePreserve: false,
+        refineApplyDecision: null,
+      });
+    }
+  }
+
+  if (resolved.acceptance.decision === "rejected_short" && looksLikeClientDeliverablesFinalPaymentInstruction(inst)) {
+    const cdf = tryPremiumRefineClientDeliverablesFinalPaymentLocalFallback({
+      currentDocumentText: baselineText,
+      userInstruction: inst,
+    });
+    if (cdf) {
+      const out2 = cdf.text.trim();
+      const acc2 = evaluatePremiumRefineCandidate(out2, baselineText, baselineLen, lastR?.summary_changes, inst);
+      if (acc2.decision === "accepted") {
+        return toExecuteExtras(
+          {
+            finalText: out2,
+            acceptance: acc2,
+            usedLocalLateFeeFallback: false,
+            whatChangedLine: cdf.summaryLine,
+            unchangedDuplicateLateFee: false,
+          },
+          {
+            usedClientDeliverablesFinalPaymentFallback: true,
+            usedSurgicalPreserveRetry,
+            surgicalRejectedShortExhausted: false,
+            lastRefineResponse: lastR,
+            usedAppendReviewerNotePreserve: false,
+            refineApplyDecision: null,
+          },
+        );
+      }
+    }
+  }
+
+  if (resolved.acceptance.decision === "rejected_short" && looksLikeReviewerNoteOrCommentIntent(inst)) {
+    const note = tryAppendReviewerNotePreserveDocument({
+      currentDocumentText: baselineText,
+      userInstruction: inst,
+      shortCandidate: (lastR?.updated_document_text || "").trim(),
+      checklistLines: refineChecklistBullets,
+    });
+    if (note) {
+      const out3 = note.text;
+      const acc3 = evaluatePremiumRefineCandidate(out3, baselineText, baselineLen, lastR?.summary_changes, inst);
+      if (acc3.decision === "accepted") {
+        return toExecuteExtras(
+          {
+            finalText: out3,
+            acceptance: acc3,
+            usedLocalLateFeeFallback: false,
+            whatChangedLine: note.summaryLine,
+            unchangedDuplicateLateFee: false,
+          },
+          {
+            usedClientDeliverablesFinalPaymentFallback: false,
+            usedSurgicalPreserveRetry,
+            surgicalRejectedShortExhausted: false,
+            lastRefineResponse: lastR,
+            usedAppendReviewerNotePreserve: true,
+            refineApplyDecision: "append_reviewer_note_preserve_document",
+          },
+        );
+      }
+    }
+  }
+
+  const surgicalExhausted =
+    resolved.acceptance.decision === "rejected_short" &&
+    classifyPremiumRefineRevisionIntent(inst) === "surgical_revision" &&
+    usedSurgicalPreserveRetry;
+
+  return toExecuteExtras(resolved, {
+    usedClientDeliverablesFinalPaymentFallback: false,
+    usedSurgicalPreserveRetry,
+    surgicalRejectedShortExhausted: surgicalExhausted,
+    lastRefineResponse: lastR,
+    usedAppendReviewerNotePreserve: false,
+    refineApplyDecision: null,
+  });
 }

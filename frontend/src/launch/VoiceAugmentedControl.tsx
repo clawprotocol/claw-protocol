@@ -1,10 +1,14 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
+  type ForwardedRef,
   type InputHTMLAttributes,
+  type MutableRefObject,
   type RefObject,
   type TextareaHTMLAttributes,
 } from "react";
@@ -40,7 +44,17 @@ type VoiceChrome = {
   micIdleAttract?: boolean;
   /** Increment to request starting dictation (e.g. top-level “Speak your agreement” chip). */
   dictationStartNonce?: number;
+  /** Grow textarea height with content; cap then scroll (refine / long prompts). */
+  autosize?: boolean;
+  /** Max height in px when {@link autosize} is true. Default 280. */
+  autosizeMaxPx?: number;
 };
+
+function assignTextAreaRef(r: ForwardedRef<HTMLTextAreaElement>, node: HTMLTextAreaElement | null) {
+  if (!r) return;
+  if (typeof r === "function") r(node);
+  else (r as MutableRefObject<HTMLTextAreaElement | null>).current = node;
+}
 
 function useMicGate(voiceUiEnabled: boolean | undefined) {
   return useMemo(
@@ -71,6 +85,8 @@ export const VoiceAugmentedTextArea = forwardRef<
     voiceSubtleIdle = true,
     micIdleAttract = false,
     dictationStartNonce = 0,
+    autosize = false,
+    autosizeMaxPx = 280,
     className = "",
     ...rest
   } = props;
@@ -82,6 +98,27 @@ export const VoiceAugmentedTextArea = forwardRef<
   const lastDictationNonceRef = useRef(0);
   const fallbackDictationRef = useRef<VoiceDictationControl | null>(null);
   const dControlRef = dictationControlRef ?? fallbackDictationRef;
+  const textareaInnerRef = useRef<HTMLTextAreaElement | null>(null);
+  const setTextareaRef = useCallback(
+    (node: HTMLTextAreaElement | null) => {
+      textareaInnerRef.current = node;
+      assignTextAreaRef(ref, node);
+    },
+    [ref],
+  );
+
+  useLayoutEffect(() => {
+    if (!autosize) return;
+    const el = textareaInnerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const max = Math.max(120, autosizeMaxPx);
+    const minPx = 72;
+    const next = Math.min(Math.max(el.scrollHeight, minPx), max);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+    el.style.maxHeight = `${max}px`;
+  }, [autosize, autosizeMaxPx, value, className, disabled]);
 
   useImperativeHandle(
     dControlRef,
@@ -112,7 +149,7 @@ export const VoiceAugmentedTextArea = forwardRef<
     <div className={`relative ${wrapperClassName ?? ""}`.trim()}>
       <textarea
         {...rest}
-        ref={ref}
+        ref={setTextareaRef}
         disabled={disabled}
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
@@ -151,6 +188,8 @@ export function VoiceAugmentedInput(
     voiceSubtleIdle = true,
     micIdleAttract = false,
     dictationStartNonce = 0,
+    autosize: _autosize = false,
+    autosizeMaxPx: _autosizeMaxPx = 280,
     className = "",
     ...rest
   } = props;

@@ -140,6 +140,33 @@ export function classifyPremiumRefineRevisionIntent(userInstruction: string | un
   return "surgical_revision";
 }
 
+/**
+ * Reviewer-note / comment / best-practice capture — not a full agreement rewrite.
+ * Used when the model returns a short body; we append instead of rejecting silently.
+ */
+export function looksLikeReviewerNoteOrCommentIntent(userInstruction: string | undefined): boolean {
+  const raw = (userInstruction || "").trim();
+  if (raw.length < 10) return false;
+  const t = raw.toLowerCase();
+  const noteVerb =
+    /\b(make\s+(?:a\s+)?notes?|noted?|note\s+(?:of|that|to)|add\s+(?:a\s+)?note|capture\s+(?:a\s+)?note|jot\s+down)\b/i.test(
+      raw,
+    );
+  const reviewLens = /\b(reviewer|reviewer's|for\s+the\s+reviewer|review\s+notes?|peer\s+review|comments?\s+for|requested\s+review)\b/i.test(
+    raw,
+  );
+  const practiceOrItems =
+    /\b(best\s+practices?|best\s+for|flagged|needs\s+details|unresolved|these|those|issues?|comments?|checklist)\b/i.test(
+      t,
+    );
+  if (noteVerb && (reviewLens || practiceOrItems)) return true;
+  if (reviewLens && /\b(note|notes|summarize|capture|record)\b/i.test(t)) return true;
+  if (/\bbest\s+practices?\b/i.test(t) && /\b(note|notes|reviewer|comment)\b/i.test(t)) return true;
+  if (/\bapply\b/i.test(t) && /\b(issues?|comments?|flags?|best)\b/i.test(t) && (noteVerb || /\breviewer\b/i.test(t)))
+    return true;
+  return false;
+}
+
 function normalizedDocForSections(doc: string): string {
   return doc.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -443,6 +470,12 @@ export function evaluatePremiumRefineCandidate(
 export const PRO_REFINE_REJECTED_SHORT_PRIMARY =
   "LawDog tried to change too much, so your document was not changed. Try a narrower instruction or use Edit wording.";
 
+/**
+ * After surgical preserve retry + deterministic fallbacks, shrink/unsafe output — document unchanged.
+ */
+export const PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED =
+  "LawDog could not safely apply that change automatically. Use Edit wording for a precise manual change.";
+
 /** Secondary hint — optional line shown below the primary. */
 export const PRO_REFINE_REJECTED_SHORT_HINT = "";
 
@@ -457,8 +490,19 @@ export const PRO_REFINE_REJECTED_SHORT_USER_MESSAGE = PRO_REFINE_REJECTED_SHORT_
 
 /** Stable substring for alert role / UI branching when showing rejected_short copy. */
 export function isProRefineRejectedShortMessage(message: string | undefined): boolean {
-  return Boolean((message || "").includes("LawDog tried to change too much"));
+  const m = (message || "").trim();
+  if (!m) return false;
+  return m.includes("LawDog tried to change too much") || m.includes("could not safely apply that change automatically");
+}
+
+/** Surgical path exhausted (retry + fallbacks); document unchanged. */
+export function isProRefineSurgicalExhaustedMessage(message: string | undefined): boolean {
+  return Boolean((message || "").includes("could not safely apply that change automatically"));
 }
 
 /** Shown inline after a premium refine is accepted and applied. */
 export const PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE = "Revision applied. Review before sending.";
+
+/** After append-only reviewer note path (full agreement preserved). */
+export const PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE =
+  "Reviewer note added. Full agreement is unchanged above the note — review before sending.";

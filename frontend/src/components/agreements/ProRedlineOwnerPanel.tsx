@@ -11,9 +11,8 @@ import {
   postProRedlineSuggestionMarkApplied,
   postProRedlineSuggestionReject,
 } from "../../agreement/proRedlineReviewApi";
-import { augmentPremiumRefineUserPrompt, resolvePremiumRefineApplyOutcome } from "./premiumRefineLateFeeFallback";
-import { pickAuthoritativeProCorpusForRefine } from "./premiumRefineAcceptance";
-import { postPremiumRefine } from "./premiumRefineApi";
+import { executePremiumRefineUpdate } from "./premiumRefineLateFeeFallback";
+import { pickAuthoritativeProCorpusForRefine, PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED } from "./premiumRefineAcceptance";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 export type ProRedlineSuggestionRow = {
@@ -393,21 +392,18 @@ export function ProRedlineOwnerPanel(props: {
                           agreementDocumentText: "",
                         });
                         const instr = (s.suggestion_text || "").trim();
-                        const r = await postPremiumRefine({
-                          current_document_text: corpus.text,
-                          intake_text: intakeTextFallback,
-                          user_refinement_prompt: augmentPremiumRefineUserPrompt(instr),
-                          action: "update",
-                        });
-                        const resolved = resolvePremiumRefineApplyOutcome({
-                          apiOut: r.updated_document_text,
+                        const resolved = await executePremiumRefineUpdate({
                           baselineText: corpus.text,
                           baselineLen: corpus.len,
-                          summaryChanges: r.summary_changes,
+                          intakeText: intakeTextFallback,
                           userInstruction: instr,
                         });
                         if (resolved.acceptance.decision !== "accepted" || !resolved.finalText.trim()) {
-                          setMsg("LawDog Pro could not apply that suggestion safely. Try a narrower edit or Edit wording.");
+                          setMsg(
+                            resolved.surgicalRejectedShortExhausted
+                              ? PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED
+                              : "LawDog Pro could not apply that suggestion safely. Try a narrower edit or Edit wording.",
+                          );
                           return;
                         }
                         const applied = await postProRedlineSuggestionMarkApplied(agreementId, s.id, {

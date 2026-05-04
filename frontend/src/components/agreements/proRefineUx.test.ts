@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { formatProRefineRejectedShortInline, PRO_REFINE_REJECTED_SHORT_PRIMARY } from "./premiumRefineAcceptance";
+import {
+  formatProRefineRejectedShortInline,
+  PRO_REFINE_REJECTED_SHORT_PRIMARY,
+  PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
+} from "./premiumRefineAcceptance";
 
 describe("Pro refine rejection copy (rejected_short)", () => {
   it("exposes a clear unchanged-document message", () => {
@@ -10,6 +14,11 @@ describe("Pro refine rejection copy (rejected_short)", () => {
     const inline = formatProRefineRejectedShortInline();
     expect(inline).toContain("Edit wording");
     expect(inline).toContain("LawDog tried to change too much");
+  });
+
+  it("exposes surgical exhausted copy after retry + fallbacks", () => {
+    expect(PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED).toContain("could not safely apply");
+    expect(PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED).toContain("Edit wording");
   });
 
   it("shows rejected_short inline near post-checkout refine (AgreementBuilderIntake)", () => {

@@ -11,11 +11,11 @@ describe("FinalizeYourAgreementPanel Pro refine → host summary", () => {
     expect(s).toContain("summary_changes");
   });
 
-  it("uses resolvePremiumRefineApplyOutcome + augment prompt and shows inline What changed caption", () => {
+  it("uses executePremiumRefineUpdate and shows inline What changed caption", () => {
     const p = join(__dirname, "FinalizeYourAgreementPanel.tsx");
     const s = readFileSync(p, "utf8");
-    expect(s).toContain("resolvePremiumRefineApplyOutcome");
-    expect(s).toContain("augmentPremiumRefineUserPrompt");
+    expect(s).toContain("executePremiumRefineUpdate");
+    expect(s).toContain("userInstruction:");
     expect(s).toContain("refineWhatChangedCaption");
     expect(s).toContain("What changed: </span>");
   });
