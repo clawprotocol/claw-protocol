@@ -289,6 +289,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("Share for review");
     expect(intake).toContain("Create review link");
     expect(intake).toContain("Nothing changes unless you accept it");
+    expect(intake).toContain("deliveryCtasOnDraftCard={canProceedWithPaidProDocument}");
+    expect(intake).toContain("Send a private review link so the other party can suggest changes.");
+    expect(intake).toContain("Ready to sign now? Start the signature flow.");
   });
 
   it("sign-first control is gated to paid signature recipients (not review mode)", () => {

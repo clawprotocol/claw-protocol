@@ -13812,7 +13812,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     </div>
                                   ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
-                                    <div className="flex flex-col gap-3 border-b border-stone-200/95 bg-gradient-to-b from-[#f4f0e6] to-[#ebe6dc] px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                                    <div className="flex flex-col gap-3 border-b border-stone-200/95 bg-gradient-to-b from-[#f4f0e6] to-[#ebe6dc] px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5">
                                       <div className="min-w-0">
                                         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">
                                           LawDog Pro
@@ -13823,30 +13823,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             the text.
                                           </p>
                                         ) : null}
-                                        {effectivePremiumSendMode === "review" ? (
-                                          <>
-                                            <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900 sm:text-lg">
-                                              Review your draft
-                                            </p>
-                                            <p className="mt-2 text-sm leading-relaxed text-stone-700">
-                                              Edit anything now. When ready, send a review link so the other party can
-                                              suggest changes.
-                                            </p>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900">
-                                              Agreement
-                                            </p>
-                                            {import.meta.env.DEV ? (
-                                              <p className="mt-1 text-[10px] font-medium tracking-wide text-stone-600">
-                                                Render source: {premiumPaidReadonlyPick.sourceUsed} | hash{" "}
-                                                {liveTraceHash(premiumPaidReadonlyPick.plainText)}
-                                              </p>
-                                            ) : null}
-                                          </>
-                                        )}
+                                        <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900 sm:text-lg">
+                                          Review your draft
+                                        </p>
+                                        {import.meta.env.DEV ? (
+                                          <p className="mt-1 text-[10px] font-medium tracking-wide text-stone-600">
+                                            Render source: {premiumPaidReadonlyPick.sourceUsed} | hash{" "}
+                                            {liveTraceHash(premiumPaidReadonlyPick.plainText)}
+                                          </p>
+                                        ) : null}
                                       </div>
+                                      <p className="text-xs leading-relaxed text-stone-600 sm:text-sm">
+                                        Send a private review link so the other party can suggest changes.
+                                      </p>
+                                      <p className="text-xs leading-relaxed text-stone-600 sm:text-sm">
+                                        Ready to sign now? Start the signature flow.
+                                      </p>
                                       <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2.5">
                                         <button
                                           type="button"
@@ -13910,15 +13902,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         >
                                           {premiumReviewDocEditorOpen ? "View document" : "Edit wording"}
                                         </button>
-                                        {effectivePremiumSendMode === "review" ? (
-                                          <button
-                                            type="button"
-                                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
-                                            onClick={() => handleFinalizeRoutePrimaryAction("review")}
-                                          >
-                                            Send for review
-                                          </button>
-                                        ) : null}
+                                        <button
+                                          type="button"
+                                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
+                                          onClick={() => handleFinalizeRoutePrimaryAction("review")}
+                                        >
+                                          Send for review
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
+                                          onClick={() => handleFinalizeRoutePrimaryAction("signature")}
+                                        >
+                                          Send for signature
+                                        </button>
                                       </div>
                                     </div>
                                     {premiumReviewDocEditorOpen ? (
@@ -14162,6 +14159,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   }}
                                   sendMode={effectivePremiumSendMode}
                                   sendModeTouched={premiumSendModeTouched}
+                                  deliveryCtasOnDraftCard={canProceedWithPaidProDocument}
                                   disabled={(isGenerating && !draft) || upgradeLockActive}
                                   devProRefineContext={
                                     import.meta.env.DEV

@@ -27,6 +27,9 @@ export const FINALIZE_REFINE_ROUTE_HINT =
 /** Review-first v1: send CTAs live on the draft card above; this panel is refine-only. */
 export const FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY =
   "Need changes? Describe them below, then update the agreement. When you’re ready, use Send for review in the section above.";
+/** Paid Pro draft card owns review + signature CTAs; refinements panel points there (no duplicate delivery row). */
+export const FINALIZE_REFINE_ROUTE_HINT_DRAFT_CARD_DELIVERY =
+  "Need changes? Describe them below, then update the agreement. Edit wording, Send for review, and Send for signature are on your draft card above.";
 
 type SendMode = "review" | "signature";
 
@@ -56,6 +59,8 @@ type Props = {
   sendMode: SendMode;
   sendModeTouched: boolean;
   disabled?: boolean;
+  /** When true, hide Send for review / Send for signature row (host shows them on the paid Pro draft card). */
+  deliveryCtasOnDraftCard?: boolean;
   /** Dev-only: logged when `postPremiumRefine` fails; parent supplies flags and ids. */
   devProRefineContext?: {
     handlerLabel: string;
@@ -109,6 +114,7 @@ export function FinalizeYourAgreementPanel({
   sendMode,
   sendModeTouched,
   disabled = false,
+  deliveryCtasOnDraftCard = false,
   devProRefineContext,
 }: Props) {
   const [prompt, setPrompt] = useState("");
@@ -438,12 +444,12 @@ export function FinalizeYourAgreementPanel({
     <div
       className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5"
       role="region"
-      aria-label="Choose how to deliver your agreement"
+      aria-label={deliveryCtasOnDraftCard ? "Optional refinements" : "Choose how to deliver your agreement"}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">
-            {sendMode === "review" ? "Optional refinements" : "Choose how to deliver"}
+            {deliveryCtasOnDraftCard || sendMode === "review" ? "Optional refinements" : "Choose how to deliver"}
           </h3>
           <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">{tagline}</p>
         </div>
@@ -499,7 +505,7 @@ export function FinalizeYourAgreementPanel({
         </div>
       ) : null}
 
-      {sendMode === "signature" ? (
+      {!deliveryCtasOnDraftCard && sendMode === "signature" ? (
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-stretch">
           <button
             type="button"
@@ -599,7 +605,11 @@ export function FinalizeYourAgreementPanel({
           </div>
         ) : null}
         <p className="text-xs leading-relaxed text-slate-500 sm:text-sm">
-          {sendMode === "review" ? FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY : FINALIZE_REFINE_ROUTE_HINT}
+          {deliveryCtasOnDraftCard
+            ? FINALIZE_REFINE_ROUTE_HINT_DRAFT_CARD_DELIVERY
+            : sendMode === "review"
+              ? FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY
+              : FINALIZE_REFINE_ROUTE_HINT}
         </p>
         <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <button

@@ -41,5 +41,7 @@ describe("FinalizeYourAgreementPanel send-for-review framing (copy only)", () =>
     expect(s).toContain("I&apos;ll sign first");
     expect(s).toContain("formatRouteConfidenceLabel");
     expect(s).toContain('return "solid for review"');
+    expect(s).toContain("deliveryCtasOnDraftCard");
+    expect(s).toContain("FINALIZE_REFINE_ROUTE_HINT_DRAFT_CARD_DELIVERY");
   });
 });

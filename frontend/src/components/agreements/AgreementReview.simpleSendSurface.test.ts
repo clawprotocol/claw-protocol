@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FINALIZE_REFINE_ROUTE_HINT, FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY } from "./FinalizeYourAgreementPanel";
+import {
+  FINALIZE_REFINE_ROUTE_HINT,
+  FINALIZE_REFINE_ROUTE_HINT_DRAFT_CARD_DELIVERY,
+  FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY,
+} from "./FinalizeYourAgreementPanel";
 
 describe("AgreementReview simple paid Pro /app/send surface", () => {
   const agreementReviewPath = join(__dirname, "AgreementReview.tsx");
@@ -61,6 +65,7 @@ describe("FinalizeYourAgreementPanel Pro copy", () => {
     expect(FINALIZE_REFINE_ROUTE_HINT).toContain("Send for review or Send for signature above");
     expect(FINALIZE_REFINE_ROUTE_HINT).not.toContain("Add a short note");
     expect(FINALIZE_REFINE_ROUTE_HINT_REVIEW_ONLY).toContain("Send for review in the section above");
+    expect(FINALIZE_REFINE_ROUTE_HINT_DRAFT_CARD_DELIVERY).toContain("on your draft card above");
   });
 
   it("AgreementReview does not embed generic simple-create marketing headline", () => {
