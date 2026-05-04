@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import html
+import io
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 from pydantic import BaseModel, Field, ValidationError
@@ -51,6 +52,7 @@ from backend.agreements.premium_full_draft_quality_gate import (
     evaluate_premium_full_draft_quality,
     premium_full_draft_repair_system_prompt,
 )
+from backend.agreements.pro_redline_diff import compute_pro_redline_block_diff
 from backend.agreements.premium_refine_narrow import (
     classify_narrow_amendment_prompt,
     try_apply_narrow_amendment,
@@ -495,6 +497,15 @@ class AgreementDraft(AgreementDraftCreate):
     workspace_archived_at: Optional[str] = None
     workspace_folder_id: Optional[str] = None
     workspace_tags: List[str] = Field(default_factory=list)
+    # Premium / full-document plain text (optional; persisted for Pro surfaces + redline import).
+    server_full_document_text: Optional[str] = None
+    premium_server_full_document_text: Optional[str] = None
+    premium_full_document_text: Optional[str] = None
+    document_text: Optional[str] = None
+    rendered_document_text: Optional[str] = None
+    premium_render_source: Optional[str] = None
+    """Pro review redline v1: pending import diff, reviewer suggestions, version ledger (JSON-only)."""
+    pro_redline_v1: Optional[Dict[str, Any]] = None
 
 
 def _merge_agreement_draft(base: AgreementDraft, **updates: Any) -> AgreementDraft:
@@ -5203,6 +5214,461 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
                 exc=exc,
             ),
         ) from exc
+
+
+PRO_REDLINE_SNAPSHOT_MAX = 256_000
+
+
+def _agreement_id_short(aid: str) -> str:
+    s = (aid or "").strip()
+    return s[:12] if len(s) >= 12 else s
+
+
+def _canonical_agreement_plain_from_raw(raw: Dict[str, Any]) -> str:
+    best = ""
+    for k in (
+        "server_full_document_text",
+        "premium_server_full_document_text",
+        "premium_full_document_text",
+        "document_text",
+        "rendered_document_text",
+    ):
+        seg = raw.get(k)
+        if not isinstance(seg, str):
+            continue
+        t = seg.strip()
+        if len(t) > len(best):
+            best = t
+    if not best:
+        p = str(raw.get("purpose") or "").strip()
+        pay = str(raw.get("payment_terms") or "").strip()
+        best = (p + "\n\n" + pay).strip()
+    return best
+
+
+def _truncate_redline_snapshot(s: str) -> Tuple[str, bool]:
+    if len(s) <= PRO_REDLINE_SNAPSHOT_MAX:
+        return s, False
+    return s[:PRO_REDLINE_SNAPSHOT_MAX], True
+
+
+def _default_pro_redline() -> Dict[str, Any]:
+    return {"version_counter": 0, "version_events": [], "pending_import": None, "suggestions": []}
+
+
+def _pro_redline_get(raw: Dict[str, Any]) -> Dict[str, Any]:
+    pr = raw.get("pro_redline_v1")
+    if isinstance(pr, dict):
+        out = _default_pro_redline()
+        out.update(pr)
+        if not isinstance(out.get("version_events"), list):
+            out["version_events"] = []
+        if not isinstance(out.get("suggestions"), list):
+            out["suggestions"] = []
+        try:
+            out["version_counter"] = int(out.get("version_counter") or 0)
+        except Exception:
+            out["version_counter"] = 0
+        return out
+    return _default_pro_redline()
+
+
+def _pro_redline_set(raw: Dict[str, Any], pr: Dict[str, Any]) -> None:
+    raw["pro_redline_v1"] = pr
+
+
+def _build_docx_bytes_from_plain(text: str) -> bytes:
+    import docx
+
+    doc = docx.Document()
+    for line in (text or "").replace("\r\n", "\n").split("\n"):
+        doc.add_paragraph(line or " ")
+    bio = io.BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
+
+
+class ProRedlineImportTextBody(BaseModel):
+    imported_text: str = Field(..., min_length=1, max_length=920_000)
+
+
+class ProRedlineReviewerSuggestionBody(BaseModel):
+    participant_id: str = Field(..., min_length=1)
+    suggestion_text: str = Field(..., min_length=1, max_length=48_000)
+    reviewer_display_name: str = ""
+    reviewer_email: str = ""
+
+
+@router.get("/{agreement_id}/export-draft.txt")
+def export_draft_txt(agreement_id: str, request: Request) -> Response:
+    assert_agreement_full_draft_read_allowed(request, agreement_id)
+    raw = load_draft(agreement_id)
+    text = _canonical_agreement_plain_from_raw(raw)
+    if not (text or "").strip():
+        raise HTTPException(status_code=400, detail="empty_document_export")
+    body = text.encode("utf-8")
+    short = _agreement_id_short(agreement_id)
+    return Response(
+        content=body,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="lawdog-agreement-{short}.txt"'},
+    )
+
+
+@router.get("/{agreement_id}/export-draft.docx")
+def export_draft_docx(agreement_id: str, request: Request) -> Response:
+    assert_agreement_full_draft_read_allowed(request, agreement_id)
+    raw = load_draft(agreement_id)
+    text = _canonical_agreement_plain_from_raw(raw)
+    if not (text or "").strip():
+        raise HTTPException(status_code=400, detail="empty_document_export")
+    blob = _build_docx_bytes_from_plain(text)
+    short = _agreement_id_short(agreement_id)
+    return Response(
+        content=blob,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="lawdog-agreement-{short}.docx"'},
+    )
+
+
+@router.post("/{agreement_id}/pro-redline/import-text")
+def pro_redline_import_text(agreement_id: str, body: ProRedlineImportTextBody, request: Request) -> Dict[str, Any]:
+    _owner_mutation_guards(request, agreement_id, surface="pro_redline_import_text")
+    raw = load_draft(agreement_id)
+    base = _canonical_agreement_plain_from_raw(raw)
+    imported = (body.imported_text or "").strip()
+    if not imported:
+        raise HTTPException(status_code=400, detail="imported_text_required")
+    blocks, changed = compute_pro_redline_block_diff(base, imported)
+    diff_summary = {"blocks": blocks, "changed_block_count": changed}
+    pending_id = str(uuid.uuid4())
+    now = _utc_now_iso()
+    base_snap, base_trunc = _truncate_redline_snapshot(base)
+    imp_snap, imp_trunc = _truncate_redline_snapshot(imported)
+    pr = _pro_redline_get(raw)
+    pr["pending_import"] = {
+        "id": pending_id,
+        "created_at": now,
+        "base_len": len(base),
+        "imported_len": len(imported),
+        "imported_text": imported,
+        "diff_summary_json": diff_summary,
+        "base_snapshot_truncated": base_trunc,
+        "imported_snapshot_truncated": imp_trunc,
+        "base_document_text": base_snap,
+        "imported_document_text": imp_snap,
+    }
+    pr.setdefault("version_events", []).append(
+        {
+            "version_number": int(pr.get("version_counter") or 0),
+            "source": "imported_revision",
+            "actor_label": "Owner",
+            "created_at": now,
+            "pending_revision_id": pending_id,
+            "diff_summary_json": diff_summary,
+        }
+    )
+    _pro_redline_set(raw, pr)
+    raw["updated_at"] = now
+    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    log.info(
+        "[pro-redline-import] agreementIdShort=%s baseLen=%s importedLen=%s changedBlockCount=%s",
+        _agreement_id_short(agreement_id),
+        len(base),
+        len(imported),
+        changed,
+    )
+    return {
+        "ok": True,
+        "pending_id": pending_id,
+        "changed_block_count": changed,
+        "no_changes": changed == 0,
+        "diff_summary": diff_summary,
+    }
+
+
+@router.post("/{agreement_id}/pro-redline/import-file")
+async def pro_redline_import_file(agreement_id: str, request: Request, file: UploadFile = File(...)) -> Dict[str, Any]:
+    _owner_mutation_guards(request, agreement_id, surface="pro_redline_import_file")
+    raw_bytes = await file.read()
+    fname = (file.filename or "").strip().lower() or "upload.txt"
+    if not fname.endswith(".txt"):
+        raise HTTPException(status_code=400, detail="pro_redline_import_txt_only_v1")
+    try:
+        extracted = (raw_bytes or b"").decode("utf-8").strip()
+    except UnicodeDecodeError:
+        extracted = (raw_bytes or b"").decode("utf-8", errors="replace").strip()
+    if not extracted:
+        raise HTTPException(status_code=400, detail="imported_text_empty")
+    body = ProRedlineImportTextBody(imported_text=extracted)
+    return pro_redline_import_text(agreement_id, body, request)
+
+
+@router.post("/{agreement_id}/pro-redline/accept-import")
+def pro_redline_accept_import(agreement_id: str, request: Request) -> Dict[str, Any]:
+    _owner_mutation_guards(request, agreement_id, surface="pro_redline_accept_import")
+    _assert_negotiation_not_locked(agreement_id)
+    raw = load_draft(agreement_id)
+    pr = _pro_redline_get(raw)
+    pending = pr.get("pending_import")
+    if not isinstance(pending, dict):
+        raise HTTPException(status_code=400, detail="no_pending_import")
+    pid = str(pending.get("id") or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="no_pending_import")
+    imported = str(pending.get("imported_text") or "").strip()
+    if not imported:
+        raise HTTPException(status_code=400, detail="invalid_pending_import")
+    base_before = _canonical_agreement_plain_from_raw(raw)
+    now = _utc_now_iso()
+    from_v = int(pr.get("version_counter") or 0)
+    pr["version_counter"] = from_v + 1
+    base_snap, base_trunc = _truncate_redline_snapshot(base_before)
+    imp_snap, imp_trunc = _truncate_redline_snapshot(imported)
+    acc_snap, acc_trunc = _truncate_redline_snapshot(imported)
+    ev: Dict[str, Any] = {
+        "version_number": pr["version_counter"],
+        "source": "owner_accepted_revision",
+        "actor_label": "Owner",
+        "actor_email": None,
+        "created_at": now,
+        "base_document_text": base_snap,
+        "imported_document_text": imp_snap,
+        "accepted_document_text": acc_snap,
+        "base_snapshot_truncated": base_trunc,
+        "imported_snapshot_truncated": imp_trunc,
+        "accepted_snapshot_truncated": acc_trunc,
+        "diff_summary_json": pending.get("diff_summary_json"),
+        "pending_revision_id": pid,
+    }
+    pr.setdefault("version_events", []).append(ev)
+    pr["pending_import"] = None
+    _pro_redline_set(raw, pr)
+    raw["server_full_document_text"] = imported
+    raw["premium_server_full_document_text"] = imported
+    raw["premium_full_document_text"] = imported
+    raw["document_text"] = imported
+    # Drop stale rendered/plain cache so export + canonical pick the accepted corpus (longest-field merge).
+    raw["rendered_document_text"] = None
+    raw["updated_at"] = now
+    audit = list(raw.get("audit_log") or [])
+    audit.append(
+        AuditEvent(
+            event_type="pro_redline_import_accepted",
+            at=now,
+            field="pro_redline_v1",
+            value={"pending_id": pid, "version_number": pr["version_counter"]},
+        ).model_dump()
+    )
+    raw["audit_log"] = audit
+    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    log.info(
+        "[pro-redline-accept] agreementIdShort=%s fromVersion=%s toVersion=%s",
+        _agreement_id_short(agreement_id),
+        from_v,
+        pr["version_counter"],
+    )
+    return {"ok": True, "version_number": pr["version_counter"], "draft": AgreementDraft.model_validate(raw).model_dump()}
+
+
+@router.post("/{agreement_id}/pro-redline/reject-import")
+def pro_redline_reject_import(agreement_id: str, request: Request) -> Dict[str, Any]:
+    _owner_mutation_guards(request, agreement_id, surface="pro_redline_reject_import")
+    raw = load_draft(agreement_id)
+    pr = _pro_redline_get(raw)
+    pending = pr.get("pending_import")
+    pid = str((pending or {}).get("id") or "").strip() if isinstance(pending, dict) else ""
+    now = _utc_now_iso()
+    pr["pending_import"] = None
+    pr.setdefault("version_events", []).append(
+        {
+            "version_number": int(pr.get("version_counter") or 0),
+            "source": "owner_rejected_revision",
+            "actor_label": "Owner",
+            "created_at": now,
+            "pending_revision_id": pid or None,
+            "rejection_kind": "import",
+        }
+    )
+    _pro_redline_set(raw, pr)
+    raw["updated_at"] = now
+    audit = list(raw.get("audit_log") or [])
+    audit.append(
+        AuditEvent(
+            event_type="pro_redline_import_rejected",
+            at=now,
+            field="pro_redline_v1",
+            value={"pending_revision_id": pid or None},
+        ).model_dump()
+    )
+    raw["audit_log"] = audit
+    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    log.info(
+        "[pro-redline-reject] agreementIdShort=%s pendingRevisionId=%s",
+        _agreement_id_short(agreement_id),
+        pid or "-",
+    )
+    return {"ok": True, "draft": AgreementDraft.model_validate(raw).model_dump()}
+
+
+@router.post("/{agreement_id}/pro-redline/reviewer-suggestion")
+def pro_redline_reviewer_suggestion(
+    agreement_id: str, body: ProRedlineReviewerSuggestionBody, request: Request
+) -> Dict[str, Any]:
+    assert_free_incomplete_draft_not_expired(agreement_id, surface="pro_redline_reviewer_suggestion")
+    draft = _load_or_404(agreement_id)
+    assert_agreement_recipient_write_allowed(
+        request,
+        agreement_id,
+        allowed_modes=("review",),
+        bind_participant_id=body.participant_id,
+    )
+    lock = read_signing_lock(agreement_id)
+    if lock and bool((lock or {}).get("locked_version_id")):
+        raise HTTPException(status_code=400, detail="negotiation_locked")
+    draft = _persist_party_id_backfill(draft)
+    _validate_nonowner_proposer(draft, body.participant_id)
+    raw = load_draft(agreement_id)
+    pr = _pro_redline_get(raw)
+    sid = str(uuid.uuid4())
+    now = _utc_now_iso()
+    row = {
+        "id": sid,
+        "created_at": now,
+        "participant_id": (body.participant_id or "").strip(),
+        "reviewer_label": (body.reviewer_display_name or "").strip(),
+        "reviewer_email": (body.reviewer_email or "").strip(),
+        "suggestion_text": (body.suggestion_text or "").strip(),
+        "status": "pending",
+    }
+    pr.setdefault("suggestions", []).append(row)
+    sug_preview = row["suggestion_text"][:4000] if len(row["suggestion_text"]) > 4000 else row["suggestion_text"]
+    pr.setdefault("version_events", []).append(
+        {
+            "version_number": int(pr.get("version_counter") or 0),
+            "source": "reviewer_suggestion",
+            "actor_label": row["reviewer_label"] or "Reviewer",
+            "actor_email": row["reviewer_email"] or None,
+            "created_at": now,
+            "suggestion_id": sid,
+            "suggestion_text": sug_preview,
+        }
+    )
+    _pro_redline_set(raw, pr)
+    raw["updated_at"] = now
+    audit = list(raw.get("audit_log") or [])
+    audit.append(
+        AuditEvent(
+            event_type="pro_redline_reviewer_suggestion",
+            at=now,
+            field="pro_redline_v1",
+            value={"suggestion_id": sid, "participant_id": row["participant_id"]},
+        ).model_dump()
+    )
+    raw["audit_log"] = audit
+    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    log.info(
+        "[pro-redline-suggestion-submit] agreementIdShort=%s actorType=%s suggestionLen=%s",
+        _agreement_id_short(agreement_id),
+        "reviewer",
+        len(row["suggestion_text"]),
+    )
+    return {"ok": True, "suggestion_id": sid}
+
+
+@router.post("/{agreement_id}/pro-redline/suggestions/{suggestion_id}/reject")
+def pro_redline_suggestion_reject(agreement_id: str, suggestion_id: str, request: Request) -> Dict[str, Any]:
+    _owner_mutation_guards(request, agreement_id, surface="pro_redline_suggestion_reject")
+    raw = load_draft(agreement_id)
+    pr = _pro_redline_get(raw)
+    found = False
+    hit_sug: Optional[str] = None
+    hit_label: Optional[str] = None
+    for s in pr.get("suggestions") or []:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("id") or "").strip() != (suggestion_id or "").strip():
+            continue
+        if str(s.get("status") or "") != "pending":
+            raise HTTPException(status_code=400, detail="suggestion_not_pending")
+        hit_sug = str(s.get("suggestion_text") or "")
+        hit_label = (str(s.get("reviewer_label") or "").strip() or None)
+        s["status"] = "rejected"
+        found = True
+        break
+    if not found:
+        raise HTTPException(status_code=404, detail="suggestion_not_found")
+    now = _utc_now_iso()
+    sug_snap, _sug_trunc = _truncate_redline_snapshot(hit_sug or "")
+    pr.setdefault("version_events", []).append(
+        {
+            "version_number": int(pr.get("version_counter") or 0),
+            "source": "owner_rejected_revision",
+            "actor_label": "Owner",
+            "created_at": now,
+            "suggestion_text": sug_snap or None,
+            "suggestion_id": suggestion_id,
+            "rejection_kind": "suggestion",
+            "reviewer_label": hit_label,
+        }
+    )
+    _pro_redline_set(raw, pr)
+    raw["updated_at"] = now
+    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    return {"ok": True, "draft": AgreementDraft.model_validate(raw).model_dump()}
+
+
+class ProRedlineMarkAppliedBody(BaseModel):
+    """When `applied_document_text` is non-empty, persist as the new authoritative Pro corpus (post refine)."""
+
+    applied_document_text: str = Field(default="", max_length=920_000)
+
+
+@router.post("/{agreement_id}/pro-redline/suggestions/{suggestion_id}/mark-applied")
+def pro_redline_suggestion_mark_applied(
+    agreement_id: str,
+    suggestion_id: str,
+    request: Request,
+    body: ProRedlineMarkAppliedBody = ProRedlineMarkAppliedBody(),
+) -> Dict[str, Any]:
+    """Owner-only: mark a reviewer suggestion row applied after they merged it (e.g. via LawDog Pro refine)."""
+    _owner_mutation_guards(request, agreement_id, surface="pro_redline_suggestion_mark_applied")
+    raw = load_draft(agreement_id)
+    pr = _pro_redline_get(raw)
+    hit: Optional[Dict[str, Any]] = None
+    for s in pr.get("suggestions") or []:
+        if isinstance(s, dict) and str(s.get("id") or "").strip() == (suggestion_id or "").strip():
+            hit = s
+            break
+    if not hit:
+        raise HTTPException(status_code=404, detail="suggestion_not_found")
+    if str(hit.get("status") or "") != "pending":
+        raise HTTPException(status_code=400, detail="suggestion_not_pending")
+    now = _utc_now_iso()
+    hit["status"] = "applied"
+    pr["version_counter"] = int(pr.get("version_counter") or 0) + 1
+    applied_doc = (body.applied_document_text or "").strip()
+    if applied_doc:
+        raw["server_full_document_text"] = applied_doc
+        raw["premium_server_full_document_text"] = applied_doc
+        raw["premium_full_document_text"] = applied_doc
+        raw["document_text"] = applied_doc
+        raw["rendered_document_text"] = None
+    pr.setdefault("version_events", []).append(
+        {
+            "version_number": pr["version_counter"],
+            "source": "owner_accepted_revision",
+            "actor_label": "Owner",
+            "created_at": now,
+            "suggestion_text": str(hit.get("suggestion_text") or "")[:PRO_REDLINE_SNAPSHOT_MAX],
+            "suggestion_id": suggestion_id,
+            "note": "reviewer_suggestion_marked_applied",
+        }
+    )
+    _pro_redline_set(raw, pr)
+    raw["updated_at"] = now
+    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    return {"ok": True, "draft": AgreementDraft.model_validate(raw).model_dump()}
 
 
 @router.post("/{agreement_id}/export-docx")

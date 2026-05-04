@@ -403,7 +403,10 @@ import {
   formatProRefineRejectedShortInline,
   isProRefineRejectedShortMessage,
   PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
+  PRO_REFINE_APPLY_REVISION_BUTTON_LABEL,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
+  PRO_REFINE_REVISE_HELPER,
+  PRO_REFINE_REVISE_SECTION_HEADING,
 } from "./premiumRefineAcceptance";
 import {
   augmentPremiumRefineUserPrompt,
@@ -1823,7 +1826,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumReviewDocEditorOpen, setPremiumReviewDocEditorOpen] = useState(false);
   /** Paid Pro draft card: buffered plain text while inline editor open (Save commits to agreement document). */
   const [paidProCardEditDraft, setPaidProCardEditDraft] = useState<string | null>(null);
-  /** Paid Pro draft card: instruction text for premium-refine when user taps Apply with LawDog Pro. */
+  /** Paid Pro draft card: instruction text for premium-refine when user taps Apply revision. */
   const [paidProCardAiInstruction, setPaidProCardAiInstruction] = useState("");
   const paidProCardDictationRef = useRef<VoiceDictationControl | null>(null);
   const [premiumSendModeUserChoice, setPremiumSendModeUserChoice] = useState<PremiumSendIntent | null>(() =>
@@ -5808,6 +5811,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           refinedCandidateLen: acceptance.refinedLen,
           ratio: Number(acceptance.ratio.toFixed(4)),
           applyDecision: acceptance.decision,
+          revisionIntent: acceptance.revisionIntent,
+          headingPreservationRatio: Number(acceptance.headingPreservationRatio.toFixed(4)),
           requiredSectionsPresent: acceptance.requiredSectionsPresent,
           preservedExistingDoc: acceptance.decision !== "accepted",
           chosenSource: chosenSourceForLog,
@@ -10480,7 +10485,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           (intakeStepBuffer || "").trim() &&
           premiumPaidDocumentSurface &&
           !isFreeStarterReviewSurface
-        ? "Apply with LawDog Pro"
+        ? PRO_REFINE_APPLY_REVISION_BUTTON_LABEL
         : guidedMainCtaLabel;
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
@@ -10626,7 +10631,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const hasRefinementBuffer = (intakeStepBuffer || "").trim().length > 0;
           if (hasRefinementBuffer && draft && premiumPaidDocumentSurface && !isFreeStarterReviewSurface) {
             return {
-              label: "Apply with LawDog Pro",
+              label: PRO_REFINE_APPLY_REVISION_BUTTON_LABEL,
               action: "update_agreement_from_buffer",
               disabled: !draft,
               reason: !draft ? "no_draft" : undefined,
@@ -14001,7 +14006,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           aria-label="Agreement document"
                                         />
                                         <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
-                                          <p className="text-xs font-medium text-stone-700">Pro AI assist (optional)</p>
+                                          <p className="text-xs font-medium text-stone-700">{PRO_REFINE_REVISE_SECTION_HEADING}</p>
+                                          <p className="mt-1 text-xs leading-relaxed text-stone-600">{PRO_REFINE_REVISE_HELPER}</p>
                                           <div className="relative mt-2">
                                             <VoiceAugmentedTextArea
                                               value={paidProCardAiInstruction}
@@ -14032,7 +14038,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               }
                                               onClick={() => void applyPaidProCardAiWithLawDog()}
                                             >
-                                              Apply with LawDog Pro
+                                              {PRO_REFINE_APPLY_REVISION_BUTTON_LABEL}
                                             </button>
                                           </div>
                                           {!showPersistedRefineBelowDocument ? (

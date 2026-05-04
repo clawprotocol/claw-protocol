@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
+  classifyPremiumRefineRevisionIntent,
+  computeMajorHeadingPreservationRatio,
   evaluatePremiumRefineCandidate,
+  extractMajorHeadingFingerprints,
   formatProRefineRejectedShortInline,
   instructionAllowsExtremeShrink,
   normalizePremiumRefineTextForCompare,
   pickAuthoritativeProCorpusForRefine,
   premiumRefineSummaryIsUnchangedFailOpen,
   PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
-  PREMIUM_REFINE_FULL_ACCEPT_RATIO,
-  PREMIUM_REFINE_HARD_SHRINK_FLOOR,
-  PREMIUM_REFINE_MIN_LENGTH_RATIO,
+  PREMIUM_REFINE_SURGICAL_HEADING_CHECK_MAX_RATIO,
+  PREMIUM_REFINE_SURGICAL_MIN_LENGTH_RATIO,
+  PREMIUM_REFINE_TRANSFORMATIONAL_HARD_REJECT_RATIO,
+  PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REJECTED_SHORT_PRIMARY,
 } from "./premiumRefineAcceptance";
 import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
@@ -53,29 +57,71 @@ function padDocToLength(body: string, totalLen: number, fill: string): string {
   return b + fill.repeat(totalLen - b.length);
 }
 
+function docWithMarkdownHeadings(targetLen: number): string {
+  const parts = [
+    "## General Terms\n\n",
+    "a".repeat(300),
+    "\n\n## Payment Schedule\n\n",
+    "b".repeat(300),
+    "\n\n## Confidentiality\n\n",
+    "c".repeat(300),
+    "\n\n## Termination Rights\n\n",
+    "d".repeat(300),
+    "\n\n",
+  ];
+  let s = parts.join("");
+  while (s.length < targetLen) s += "fill ";
+  return s.slice(0, targetLen);
+}
+
 describe("evaluatePremiumRefineCandidate", () => {
-  it("rejects ~15k → ~3.9k truncation regression", () => {
+  it("rejects ~15k → ~3.9k truncation (surgical)", () => {
     const cur = 15_000;
     const cand = "x".repeat(3900);
-    const r = evaluatePremiumRefineCandidate(cand, undefined, cur);
+    const r = evaluatePremiumRefineCandidate(cand, undefined, cur, undefined, "Add a governing-law footnote.");
     expect(r.decision).toBe("rejected_short");
-    expect(r.ratio).toBeLessThan(PREMIUM_REFINE_HARD_SHRINK_FLOOR);
-    expect(r.requiredSectionsPresent).toBe(false);
+    expect(r.revisionIntent).toBe("surgical_revision");
+    expect(r.ratio).toBeLessThan(PREMIUM_REFINE_SURGICAL_MIN_LENGTH_RATIO);
   });
 
-  it("accepts ~15k → ~10.1k when ratio ~0.64 and required agreement sections are present", () => {
-    const cur = 15_759;
-    const target = 10_143;
+  it("rejects surgical add-clause instruction when ratio ~0.54 even with agreement spine present", () => {
+    const cur = 15_900;
+    const target = Math.floor(cur * 0.54);
     const cand = padDocToLength(SECTION_SPINE, target, "z");
-    expect(cand.length).toBe(target);
-    const r = evaluatePremiumRefineCandidate(cand, undefined, cur);
-    expect(r.ratio).toBeGreaterThan(0.63);
-    expect(r.ratio).toBeLessThan(PREMIUM_REFINE_FULL_ACCEPT_RATIO);
+    const r = evaluatePremiumRefineCandidate(
+      cand,
+      undefined,
+      cur,
+      undefined,
+      "Add a change order approval clause and clarify acceptance.",
+    );
+    expect(r.revisionIntent).toBe("surgical_revision");
+    expect(r.ratio).toBeLessThan(PREMIUM_REFINE_SURGICAL_MIN_LENGTH_RATIO);
+    expect(r.decision).toBe("rejected_short");
+  });
+
+  it("accepts transformational summarize at ~0.54 when agreement spine is still present", () => {
+    const cur = 15_900;
+    const target = Math.floor(cur * 0.54);
+    const cand = padDocToLength(SECTION_SPINE, target, "z");
+    const r = evaluatePremiumRefineCandidate(cand, undefined, cur, undefined, "Summarize this agreement.");
+    expect(r.revisionIntent).toBe("transformational_revision");
+    expect(r.ratio).toBeLessThan(PREMIUM_REFINE_SURGICAL_MIN_LENGTH_RATIO);
     expect(r.requiredSectionsPresent).toBe(true);
     expect(r.decision).toBe("accepted");
   });
 
-  it("rejects ~15.7k → ~10.1k when ratio ~0.64 but parties/scope sections are missing", () => {
+  it("rejects ~15.7k → ~10.1k surgical shrink (preserve-first) even when spine heuristics pass", () => {
+    const cur = 15_759;
+    const target = 10_143;
+    const cand = padDocToLength(SECTION_SPINE, target, "z");
+    const r = evaluatePremiumRefineCandidate(cand, undefined, cur);
+    expect(r.revisionIntent).toBe("surgical_revision");
+    expect(r.ratio).toBeLessThan(PREMIUM_REFINE_SURGICAL_MIN_LENGTH_RATIO);
+    expect(r.decision).toBe("rejected_short");
+  });
+
+  it("rejects ~15.7k → ~10.1k when spine heuristics fail", () => {
     const cur = 15_759;
     const filler = `
 Payment invoice amount due $500 within thirty days term duration twelve months termination upon notice.
@@ -83,10 +129,42 @@ Fees compensation for term of 90 calendar days.
 `.trim();
     const target = 10_143;
     const cand = padDocToLength(filler, target, "n");
-    expect(cand.length).toBe(target);
     const r = evaluatePremiumRefineCandidate(cand, undefined, cur);
     expect(r.decision).toBe("rejected_short");
     expect(r.requiredSectionsPresent).toBe(false);
+  });
+
+  it("accepts surgical revision with ratio ~0.92 and major headings preserved vs baseline", () => {
+    const baseline = docWithMarkdownHeadings(20_000);
+    const cur = baseline.length;
+    const target = Math.floor(cur * 0.92);
+    let cand = baseline.slice(0, target);
+    if (cand.length < target) cand += "y".repeat(target - cand.length);
+    expect(cand.length / cur).toBeLessThan(PREMIUM_REFINE_SURGICAL_HEADING_CHECK_MAX_RATIO);
+    expect(cand.length / cur).toBeGreaterThanOrEqual(PREMIUM_REFINE_SURGICAL_MIN_LENGTH_RATIO);
+    const hp = computeMajorHeadingPreservationRatio(baseline, cand);
+    expect(hp).toBeGreaterThanOrEqual(0.85);
+    const r = evaluatePremiumRefineCandidate(cand, baseline, cur, undefined, "Add a Delaware choice-of-law sentence.");
+    expect(r.revisionIntent).toBe("surgical_revision");
+    expect(r.decision).toBe("accepted");
+    expect(r.headingPreservationRatio).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it("rejects surgical revision in 0.80–0.95 band when major heading preservation falls below 85%", () => {
+    const baseline = docWithMarkdownHeadings(20_000);
+    const cur = baseline.length;
+    const mangled = baseline.replace(
+      /## Payment Schedule\n\nb{300}/,
+      "## Fee Arrangements\n\n" + "b".repeat(300),
+    );
+    const target = Math.floor(cur * 0.9);
+    let cand = mangled.slice(0, target);
+    if (cand.length < target) cand += "q".repeat(target - cand.length);
+    expect(cand.length / cur).toBeLessThan(PREMIUM_REFINE_SURGICAL_HEADING_CHECK_MAX_RATIO);
+    expect(cand.length / cur).toBeGreaterThanOrEqual(PREMIUM_REFINE_SURGICAL_MIN_LENGTH_RATIO);
+    expect(computeMajorHeadingPreservationRatio(baseline, cand)).toBeLessThan(0.85);
+    const r = evaluatePremiumRefineCandidate(cand, baseline, cur, undefined, "Tighten wording only.");
+    expect(r.decision).toBe("rejected_short");
   });
 
   it("accepts ~15k → ~15.2k marginal expansion", () => {
@@ -94,8 +172,7 @@ Fees compensation for term of 90 calendar days.
     const cand = "y".repeat(15_200);
     const r = evaluatePremiumRefineCandidate(cand, undefined, cur);
     expect(r.decision).toBe("accepted");
-    expect(r.ratio).toBeGreaterThanOrEqual(PREMIUM_REFINE_FULL_ACCEPT_RATIO);
-    expect(r.ratio).toBeGreaterThanOrEqual(PREMIUM_REFINE_MIN_LENGTH_RATIO);
+    expect(r.ratio).toBeGreaterThanOrEqual(PREMIUM_REFINE_SURGICAL_HEADING_CHECK_MAX_RATIO);
   });
 
   it("rejects empty candidate", () => {
@@ -109,17 +186,27 @@ Fees compensation for term of 90 calendar days.
       "\n\nLate Payment. Any undisputed amount not paid within ten (10) days after it becomes due may accrue a late fee equal to five percent (5%) of the overdue amount.\n\n";
     const r = evaluatePremiumRefineCandidate(base + block, undefined, cur);
     expect(r.decision).toBe("accepted");
-    expect(r.ratio).toBeGreaterThanOrEqual(PREMIUM_REFINE_FULL_ACCEPT_RATIO);
+    expect(r.ratio).toBeGreaterThan(1);
   });
 
-  it("accepts extreme shrink below 0.50 when user asks to summarize and spine is still present", () => {
+  it("accepts extreme shrink for transformational summarize below 0.50 when spine is present", () => {
     const cur = 12_000;
     const pad = "q".repeat(5000);
     const cand = `${SECTION_SPINE}\n\n${pad}`;
-    expect(cand.length / cur).toBeLessThan(PREMIUM_REFINE_HARD_SHRINK_FLOOR);
+    expect(cand.length / cur).toBeLessThan(0.5);
     const r = evaluatePremiumRefineCandidate(cand, undefined, cur, undefined, "Please summarize this agreement.");
-    expect(r.decision).toBe("accepted");
+    expect(r.revisionIntent).toBe("transformational_revision");
     expect(r.requiredSectionsPresent).toBe(true);
+    expect(r.decision).toBe("accepted");
+  });
+
+  it("rejects transformational shrink below hard ratio even with spine", () => {
+    const cur = 12_000;
+    const pad = "q".repeat(1000);
+    const cand = `${SECTION_SPINE}\n\n${pad}`;
+    expect(cand.length / cur).toBeLessThan(PREMIUM_REFINE_TRANSFORMATIONAL_HARD_REJECT_RATIO);
+    const r = evaluatePremiumRefineCandidate(cand, undefined, cur, undefined, "Summarize this agreement.");
+    expect(r.decision).toBe("rejected_short");
   });
 
   it("rejects identical refined text vs current Pro (no false-positive apply)", () => {
@@ -149,6 +236,20 @@ Fees compensation for term of 90 calendar days.
   });
 });
 
+describe("classifyPremiumRefineRevisionIntent", () => {
+  it("defaults to surgical_revision for normal edit instructions", () => {
+    expect(classifyPremiumRefineRevisionIntent("Add an indemnity cap.")).toBe("surgical_revision");
+    expect(classifyPremiumRefineRevisionIntent("")).toBe("surgical_revision");
+  });
+
+  it("detects transformational_revision for shorten / rewrite / replace / convert phrasing", () => {
+    expect(classifyPremiumRefineRevisionIntent("Please shorten the whole agreement")).toBe("transformational_revision");
+    expect(classifyPremiumRefineRevisionIntent("Rewrite from scratch as an NDA")).toBe("transformational_revision");
+    expect(classifyPremiumRefineRevisionIntent("Replace the entire document with a memo")).toBe("transformational_revision");
+    expect(classifyPremiumRefineRevisionIntent("Convert this to bullet points")).toBe("transformational_revision");
+  });
+});
+
 describe("instructionAllowsExtremeShrink", () => {
   it("detects shorten / summarize intent", () => {
     expect(instructionAllowsExtremeShrink("Please shorten the agreement")).toBe(true);
@@ -157,12 +258,29 @@ describe("instructionAllowsExtremeShrink", () => {
   });
 });
 
+describe("extractMajorHeadingFingerprints", () => {
+  it("captures markdown headings from a long baseline", () => {
+    const d = docWithMarkdownHeadings(5000);
+    const fp = extractMajorHeadingFingerprints(d);
+    expect(fp).toContain("general terms");
+    expect(fp).toContain("payment schedule");
+    expect(fp.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
 describe("formatProRefineRejectedShortInline", () => {
   it("includes primary copy for UI", () => {
     const t = formatProRefineRejectedShortInline();
     expect(t).toContain(PRO_REFINE_REJECTED_SHORT_PRIMARY);
     expect(t).toContain("Edit wording");
-    expect(t).toContain("LawDog made a shorter version");
+    expect(t).toContain("LawDog tried to change too much");
+  });
+});
+
+describe("PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE", () => {
+  it("tells the user to review before sending", () => {
+    expect(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE).toContain("Revision applied");
+    expect(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE).toContain("Review before sending");
   });
 });
 

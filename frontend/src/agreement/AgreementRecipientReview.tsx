@@ -65,6 +65,8 @@ import { emitActionCompleted } from "../joy/joyTelemetry";
 import { errorMessageFromResponse, resolveApiBase } from "../lib/clawApi";
 import { trackAgreementFunnelEvent } from "../tracking/agreementFunnelAnalytics";
 import { recipientAgreementReadHeaders } from "./recipientAccessApi";
+import { postProRedlineReviewerSuggestion } from "./proRedlineReviewApi";
+import { isPaidProAgreementAuthoritative } from "../components/agreements/paidProAgreementAuthority";
 import { DirectComparePanel } from "./DirectComparePanel";
 import { cloneDraftForRecipientPreview } from "./recipientPreviewBaseline";
 import {
@@ -208,6 +210,10 @@ type RecipientPreview = {
   suggestionUsedAtPreview: boolean;
 };
 
+/** Stable copy for tests and recipient Pro redline submit success. */
+export const PRO_REDLINE_REVIEWER_SUGGEST_SUCCESS_COPY =
+  "Suggestion sent. The agreement owner chooses what to accept.";
+
 /**
  * Recipient-facing review: read-first hub, preview (persist=false) + pending proposal on send (owner applies).
  */
@@ -243,6 +249,10 @@ export function AgreementRecipientReview({
   const [suggestionUsed, setSuggestionUsed] = useState(false);
   const [reviseTextMode, setReviseTextMode] = useState<"assisted" | "direct">("assisted");
   const [universalIntakeMode, setUniversalIntakeMode] = useState<"plain" | "paste">("plain");
+  const [proRedlineSuggestText, setProRedlineSuggestText] = useState("");
+  const [proRedlineSuggestBusy, setProRedlineSuggestBusy] = useState(false);
+  const [proRedlineSuggestErr, setProRedlineSuggestErr] = useState<string | null>(null);
+  const [proRedlineSuggestSuccess, setProRedlineSuggestSuccess] = useState(false);
   type CeremonyPhase = "idle" | "start_error" | "ready" | "signing" | "done";
   const [ceremonyPhase, setCeremonyPhase] = useState<CeremonyPhase>("idle");
   const [ceremonyError, setCeremonyError] = useState<string | null>(null);
@@ -1732,6 +1742,101 @@ export function AgreementRecipientReview({
           dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
         />
       </div>
+
+      {entry.kind === "review" &&
+      draft &&
+      isPaidProAgreementAuthoritative({ draft, agreementId, includeLocalCompletionMarker: false }) &&
+      !viewerLike ? (
+        <div className="rounded-lg border border-violet-800/45 bg-slate-950/50 px-4 py-4 text-slate-100">
+          <div className="text-xs font-semibold uppercase tracking-wide text-violet-200/90">Suggest changes</div>
+          <p className="mt-1 text-[11px] leading-snug text-slate-400">
+            Plain-language notes for the owner. Nothing is signed on this screen.
+          </p>
+          <label className="mt-3 block text-[11px] font-medium text-slate-500" htmlFor="pro-redline-recipient-suggest">
+            Your suggestions
+          </label>
+          <textarea
+            id="pro-redline-recipient-suggest"
+            className="mt-1 w-full min-h-[7rem] rounded-md border border-slate-700 bg-slate-900/90 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600"
+            value={proRedlineSuggestText}
+            onChange={(e) => {
+              setProRedlineSuggestText(e.target.value);
+              setProRedlineSuggestErr(null);
+              setProRedlineSuggestSuccess(false);
+            }}
+            disabled={proRedlineSuggestBusy || needsPersonalizedLink}
+            placeholder="Describe what you’d like different…"
+          />
+          {needsPersonalizedLink ? (
+            <p className="mt-2 text-[11px] text-amber-200/90">
+              Open the personal link the owner sent you (it includes <code className="text-amber-100/90">?p=…</code>) so
+              your suggestion is attributed correctly.
+            </p>
+          ) : null}
+          <button
+            type="button"
+            className="mt-3 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+            disabled={
+              proRedlineSuggestBusy ||
+              needsPersonalizedLink ||
+              !proRedlineSuggestText.trim() ||
+              Boolean(bundle && isSigningLockActive(bundle))
+            }
+            onClick={async () => {
+              if (needsPersonalizedLink) {
+                setProRedlineSuggestErr("Use the personal review link from the sender (it includes your participant id).");
+                return;
+              }
+              const pid = participantPid.trim();
+              if (!pid) {
+                setProRedlineSuggestErr("We could not determine your participant id. Use the link the owner sent you.");
+                return;
+              }
+              if (bundle && isSigningLockActive(bundle)) {
+                setProRedlineSuggestErr("Review is closed on this agreement.");
+                return;
+              }
+              setProRedlineSuggestBusy(true);
+              setProRedlineSuggestErr(null);
+              setProRedlineSuggestSuccess(false);
+              try {
+                const r = await postProRedlineReviewerSuggestion({
+                  agreementId,
+                  participantId: pid,
+                  suggestionText: proRedlineSuggestText.trim(),
+                  reviewerDisplayName: recipientLabel,
+                  reviewerEmail: "",
+                  recipientAccessToken: recipientAccessToken || null,
+                });
+                if (!r.ok) {
+                  setProRedlineSuggestErr(
+                    humanizeRecipientActionError(r.error, "Could not send your suggestion. Please try again."),
+                  );
+                  return;
+                }
+                setProRedlineSuggestSuccess(true);
+                setProRedlineSuggestText("");
+              } catch (e: unknown) {
+                setProRedlineSuggestErr(e instanceof Error ? e.message : String(e));
+              } finally {
+                setProRedlineSuggestBusy(false);
+              }
+            }}
+          >
+            {proRedlineSuggestBusy ? "Sending…" : "Submit suggested changes"}
+          </button>
+          {proRedlineSuggestSuccess ? (
+            <p className="mt-2 text-xs text-emerald-300/95" role="status">
+              {PRO_REDLINE_REVIEWER_SUGGEST_SUCCESS_COPY}
+            </p>
+          ) : null}
+          {proRedlineSuggestErr ? (
+            <p className="mt-2 text-xs text-rose-300" role="alert">
+              {proRedlineSuggestErr}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {featureFlags.negotiationTimelineUi && bundle && bundle.versions.length > 0 ? (
         <NegotiationTimelineView

@@ -25,7 +25,7 @@ describe("FinalizeYourAgreementPanel send-for-review framing (copy only)", () =>
   it("surfaces delivery choice heading, conversion framing, and paid Pro signature continue + sender-first hooks", () => {
     const p = join(__dirname, "FinalizeYourAgreementPanel.tsx");
     const s = readFileSync(p, "utf8");
-    expect(s).toContain("Optional refinements");
+    expect(s).toContain("PRO_REFINE_REVISE_SECTION_HEADING");
     expect(s).toContain("Choose how to deliver");
     expect(s).toContain("Recommended next step");
     expect(s).toContain(

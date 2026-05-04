@@ -55,6 +55,34 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     expect(pick?.text.length).toBe(15_000);
   });
 
+  it("send handoff uses aligned premium/server corpus when rendered_document_text is cleared after redline accept", () => {
+    const accepted = "Post-import body\n\n" + "p".repeat(600);
+    const d: AgreementDraft = {
+      id: "r1",
+      title: "T",
+      jurisdiction: "DE",
+      parties: [{ name: "A", role: "party" }],
+      purpose: "short",
+      payment_terms: "pay",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      created_at: "",
+      updated_at: "",
+      versions: [],
+      audit_log: [],
+      premium_render_source: "server_full_document_text",
+      premium_full_document_text: accepted,
+      premium_server_full_document_text: accepted,
+      server_full_document_text: accepted,
+      document_text: accepted,
+      rendered_document_text: null,
+    };
+    const pick = pickAuthoritativePlainForSendHandoff(d);
+    expect(pick?.text).toBe(accepted);
+    expect(pick?.field).toBe("premium_full_document_text");
+  });
+
   it("longestPlainForAgreementPersist chooses longest premium / editor / purpose", () => {
     const longPremium = "z".repeat(800);
     const parsed = minimalParsed({

@@ -35,4 +35,6 @@ export type AgreementDraft = {
   server_full_document_text?: string | null;
   document_text?: string | null;
   rendered_document_text?: string | null;
+  /** Pro review redline v1 (server JSON); optional. */
+  pro_redline_v1?: Record<string, unknown> | null;
 };

@@ -77,7 +77,7 @@ export function tryPremiumRefineLateFeeLocalFallback(args: {
 export function augmentPremiumRefineUserPrompt(instruction: string): string {
   const t = instruction.trim();
   if (!t) return t;
-  return `${t}\n\n[Apply this edit to the full agreement. Return the complete updated agreement text only. Preserve all other provisions; make only the minimal edits needed to integrate the new terms.]`;
+  return `${t}\n\n[Preserve-first editing: apply this to the full document. Keep the document type; preserve existing sections, headings, numbering, and order; preserve parties, names, dates, amounts, signature blocks, governing law, confidentiality, liability, termination, payment, IP, and other material clauses unless the user explicitly asked to shorten, simplify, summarize, rewrite from scratch, convert format, or replace the document. Only add, revise, or clarify what is needed for this request — do not compress, summarize, remove, or re-outline unless they asked for that. Return the complete updated document text only.]`;
 }
 
 function joinSummaryChanges(summary: string[] | undefined): string | null {

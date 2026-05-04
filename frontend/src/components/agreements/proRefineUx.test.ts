@@ -5,10 +5,11 @@ import { formatProRefineRejectedShortInline, PRO_REFINE_REJECTED_SHORT_PRIMARY }
 
 describe("Pro refine rejection copy (rejected_short)", () => {
   it("exposes a clear unchanged-document message", () => {
-    expect(PRO_REFINE_REJECTED_SHORT_PRIMARY).toContain("LawDog made a shorter version");
+    expect(PRO_REFINE_REJECTED_SHORT_PRIMARY).toContain("LawDog tried to change too much");
     expect(PRO_REFINE_REJECTED_SHORT_PRIMARY).toContain("not changed");
     const inline = formatProRefineRejectedShortInline();
     expect(inline).toContain("Edit wording");
+    expect(inline).toContain("LawDog tried to change too much");
   });
 
   it("shows rejected_short inline near post-checkout refine (AgreementBuilderIntake)", () => {

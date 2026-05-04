@@ -81,6 +81,7 @@ describe("augmentPremiumRefineUserPrompt", () => {
     const u = "Add a governing-law footnote.";
     const out = augmentPremiumRefineUserPrompt(u);
     expect(out.startsWith(u)).toBe(true);
-    expect(out).toMatch(/complete updated agreement/i);
+    expect(out).toMatch(/complete updated document/i);
+    expect(out).toMatch(/preserve-first editing/i);
   });
 });

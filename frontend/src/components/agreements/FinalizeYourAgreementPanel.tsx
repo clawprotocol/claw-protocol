@@ -3,7 +3,10 @@ import { VoiceAugmentedTextArea, type VoiceDictationControl } from "../../launch
 import {
   formatProRefineRejectedShortInline,
   pickAuthoritativeProCorpusForRefine,
+  PRO_REFINE_APPLY_REVISION_BUTTON_LABEL,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
+  PRO_REFINE_REVISE_HELPER,
+  PRO_REFINE_REVISE_SECTION_HEADING,
 } from "./premiumRefineAcceptance";
 import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
 import {
@@ -262,6 +265,8 @@ export function FinalizeYourAgreementPanel({
           refinedCandidateLen: acc.refinedLen,
           ratio: Number(acc.ratio.toFixed(4)),
           applyDecision: acc.decision,
+          revisionIntent: acc.revisionIntent,
+          headingPreservationRatio: Number(acc.headingPreservationRatio.toFixed(4)),
           requiredSectionsPresent: acc.requiredSectionsPresent,
           preservedExistingDoc: acc.decision !== "accepted",
           chosenSource: baseline.chosenSource,
@@ -449,12 +454,12 @@ export function FinalizeYourAgreementPanel({
     <div
       className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5"
       role="region"
-      aria-label={deliveryCtasOnDraftCard ? "Optional refinements" : "Choose how to deliver your agreement"}
+      aria-label={deliveryCtasOnDraftCard ? PRO_REFINE_REVISE_SECTION_HEADING : "Choose how to deliver your agreement"}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">
-            {deliveryCtasOnDraftCard || sendMode === "review" ? "Optional refinements" : "Choose how to deliver"}
+            {deliveryCtasOnDraftCard || sendMode === "review" ? PRO_REFINE_REVISE_SECTION_HEADING : "Choose how to deliver"}
           </h3>
           <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">{tagline}</p>
         </div>
@@ -567,6 +572,9 @@ export function FinalizeYourAgreementPanel({
         </div>
       ) : null}
 
+      {deliveryCtasOnDraftCard || sendMode === "review" ? (
+        <p className="mt-3 text-xs leading-relaxed text-slate-400 sm:mt-4 sm:text-sm">{PRO_REFINE_REVISE_HELPER}</p>
+      ) : null}
       <form onSubmit={runUpdate} className="mt-4 space-y-3 border-t border-slate-700/50 pt-4">
         <VoiceAugmentedTextArea
           ref={refineTextareaRef}
@@ -622,7 +630,7 @@ export function FinalizeYourAgreementPanel({
             className="rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400 disabled:opacity-50"
             disabled={disabled || busy || !prompt.trim()}
           >
-            {busy ? "Working…" : prompt.trim() ? "Apply with LawDog Pro" : "Describe a change first"}
+            {busy ? "Working…" : prompt.trim() ? PRO_REFINE_APPLY_REVISION_BUTTON_LABEL : "Describe a change first"}
           </button>
         </div>
       </form>

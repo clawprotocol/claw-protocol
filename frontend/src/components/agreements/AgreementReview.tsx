@@ -144,6 +144,7 @@ import {
   rowReadyForReviewLinkInvite,
 } from "../../launch/simpleProduct/reviewLinkRecipientEmailMerge";
 import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
+import { ProRedlineOwnerPanel } from "./ProRedlineOwnerPanel";
 import { normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
 import { mintRecipientAccessToken, putSigningLock } from "../../agreement/recipientAccessApi";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
@@ -6077,6 +6078,22 @@ const AgreementReview: React.FC<Props> = ({
                 </div>
               ) : null}
               {simplePreviewBlock}
+              {draft && isPaidProAgreementAuthoritative({ draft, agreementId }) ? (
+                <div className="mt-6">
+                  <ProRedlineOwnerPanel
+                    agreementId={agreementId}
+                    draft={draft}
+                    intakeTextFallback={[draft.title, draft.jurisdiction, draft.purpose, draft.payment_terms]
+                      .map((x) => String(x || "").trim())
+                      .filter(Boolean)
+                      .join("\n\n")}
+                    onDraftReplaced={(next) => {
+                      const norm = normalizeAgreementDraftFromApi(next, { fallbackAgreementId: agreementId });
+                      if (norm) setDraft(norm);
+                    }}
+                  />
+                </div>
+              ) : null}
               {isSimpleHomeReview && savingField === "conversation" && !pendingRevision ? (
                 <div
                   className="mt-4 flex items-center gap-2.5 rounded-lg border border-slate-700/70 bg-slate-950/50 px-4 py-3 text-sm text-slate-200"

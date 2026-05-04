@@ -140,18 +140,18 @@ test("1–6: free starter review + type in body + continue to invite recipients"
   ).toHaveCount(0);
   await expect(page.getByText(/Tool-assisted drafting only/)).toHaveCount(0);
 
-  const updateAgreement = page.getByRole("button", { name: "Update agreement" });
-  await expect(updateAgreement).toHaveCount(0);
+  const applyRevision = page.getByRole("button", { name: "Apply revision." });
+  await expect(applyRevision).toHaveCount(0);
 
   await expect(page.getByRole("heading", { name: "Want LawDog to improve this draft?" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Upgrade to improve draft" })).toBeVisible();
   await expect(page.locator("#claw-refine-starter-pro-upsell")).toBeVisible();
 
   await agreementDocument.fill("E2E edit in agreement body — not persisted refine field.");
-  await expect(updateAgreement).toHaveCount(0);
+  await expect(applyWithLawDogPro).toHaveCount(0);
   const continueOrSend = page.getByRole("button", { name: /Continue to send|Continue to Send|Continue/i });
   const continueText = (await continueOrSend.first().textContent()) || "";
-  expect(continueText).not.toMatch(/Update agreement/i);
+  expect(continueText).not.toMatch(/Apply revision/i);
 
   await page.getByRole("button", { name: /Continue to send|Continue to Send|Continue/i }).first().click();
   await expect(page.getByRole("region", { name: "Invite recipients" })).toBeVisible({ timeout: 20_000 });

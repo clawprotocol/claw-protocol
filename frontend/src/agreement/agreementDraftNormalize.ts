@@ -172,6 +172,10 @@ export function normalizeAgreementDraftFromApi(
       r.rendered_document_text == null || r.rendered_document_text === ""
         ? null
         : String(r.rendered_document_text),
+    pro_redline_v1:
+      r.pro_redline_v1 != null && typeof r.pro_redline_v1 === "object"
+        ? (r.pro_redline_v1 as Record<string, unknown>)
+        : null,
   };
 }
 

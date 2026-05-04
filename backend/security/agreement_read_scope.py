@@ -17,6 +17,10 @@ from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
 
+from backend.config.agreement_signing_token import (
+    SigningTokenSecretMissingInProductionError,
+    resolve_signing_token_secret_raw,
+)
 from backend.config.runtime_environment import recipient_access_token_required
 from backend.security.recipient_access_token import RECIPIENT_LINK_INVALID_OR_EXPIRED, verify_recipient_access_token
 from backend.services.agreement_draft_store import load_draft
@@ -211,9 +215,16 @@ def assert_agreement_recipient_write_allowed(
             },
         )
 
-    secret_raw = os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()
-    if not secret_raw:
-        raise HTTPException(status_code=503, detail="signing_token_secret_not_configured")
+    try:
+        secret_raw = resolve_signing_token_secret_raw()
+    except SigningTokenSecretMissingInProductionError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "signing_token_secret_not_configured",
+                "message": str(e),
+            },
+        ) from e
 
     out = validate_recipient_access_token_for_agreement(
         token=tok,
@@ -263,9 +274,16 @@ def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str
 
     tok = recipient_access_token_from_request(request)
     if tok:
-        secret_raw = os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()
-        if not secret_raw:
-            raise HTTPException(status_code=503, detail="signing_token_secret_not_configured")
+        try:
+            secret_raw = resolve_signing_token_secret_raw()
+        except SigningTokenSecretMissingInProductionError as e:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "signing_token_secret_not_configured",
+                    "message": str(e),
+                },
+            ) from e
         validate_recipient_access_token_for_agreement(
             token=tok,
             path_agreement_id=aid,
