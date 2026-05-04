@@ -1399,6 +1399,9 @@ function readInitialPremiumReturnFromWindow(): {
   return { phase: null, pipelineMessage: null };
 }
 
+const PAID_PRO_CARD_AI_BOX_PLACEHOLDER = "Tell LawDog what to change…";
+const PAID_PRO_CARD_AI_DISABLED_EXPLAIN = "Manual edit is ready. AI edit coming next.";
+
 const AgreementBuilderIntake: React.FC<Props> = ({
   onCreated,
   onCreateHydrateFailed,
@@ -1817,6 +1820,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumSignatureSenderFirst, setPremiumSignatureSenderFirst] = useState(false);
   /** Premium paid review: default read-only HTML document; toggle opens legacy textarea editor. */
   const [premiumReviewDocEditorOpen, setPremiumReviewDocEditorOpen] = useState(false);
+  /** Paid Pro draft card: buffered plain text while inline editor open (Save commits to agreement document). */
+  const [paidProCardEditDraft, setPaidProCardEditDraft] = useState<string | null>(null);
+  /** Paid Pro draft card: instruction text for premium-refine when user taps Apply with LawDog Pro. */
+  const [paidProCardAiInstruction, setPaidProCardAiInstruction] = useState("");
+  const paidProCardDictationRef = useRef<VoiceDictationControl | null>(null);
   const [premiumSendModeUserChoice, setPremiumSendModeUserChoice] = useState<PremiumSendIntent | null>(() =>
     peekPremiumForkUserSendMode() ?? peekPremiumSendIntent(),
   );
@@ -5706,7 +5714,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProEditReturnResumeActive,
   ]);
 
-  const runPersistedRefineFromStepBuffer = React.useCallback(async (instructionOverride?: string | null): Promise<boolean> => {
+  const runPersistedRefineFromStepBuffer = React.useCallback(
+    async (
+      instructionOverride?: string | null,
+      opts?: { premiumRefineDocumentOverride?: string | null },
+    ): Promise<boolean> => {
     if (isFreeStarterReviewSurfaceRef.current) return false;
     if (!premiumPaidDocumentSurfaceRef.current) return false;
     const instruction = (
@@ -5734,14 +5746,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     try {
       if (premiumPersistedFlowActive) {
         const snapForCorpus = readPremiumCompletionSnapshot();
+        const docOv = (opts?.premiumRefineDocumentOverride ?? "").trim();
         const corpusPick = pickAuthoritativeProCorpusForRefine({
           draft: prior,
           agreementDocumentText: (agreementDocumentTextRef.current || "").trim(),
           premiumReadonlyPlain: (snapForCorpus?.premiumReadonlyPlainText || "").trim(),
           premiumSnapshotWinnerPlain: (snapForCorpus?.premiumWinningBodyText || "").trim(),
         });
-        const currentDoc = corpusPick.text;
-        const currentProLen = corpusPick.len;
+        const currentDoc = docOv || corpusPick.text;
+        const currentProLen = docOv ? docOv.length : corpusPick.len;
+        const chosenSourceForLog = docOv ? "paid_pro_card_editor" : corpusPick.chosenSource;
         const rawIntake =
           (proRefineIntakeTextForProPanelsRef.current || "").trim() ||
           intakeCombined.trim() ||
@@ -5756,7 +5770,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPersistedFlowActive: true,
           hasReviewWorkspaceId: Boolean((reviewAgreementIdRef.current || "").trim()),
           currentProLen,
-          chosenSource: corpusPick.chosenSource,
+          chosenSource: chosenSourceForLog,
           instructionLen: instruction.length,
           endpoint: "/api/agreements/premium-refine",
           intakeTextLen: rawIntake.length,
@@ -5794,7 +5808,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ratio: Number(acceptance.ratio.toFixed(4)),
           applyDecision: acceptance.decision,
           preservedExistingDoc: acceptance.decision !== "accepted",
-          chosenSource: corpusPick.chosenSource,
+          chosenSource: chosenSourceForLog,
           endpoint: "premium-refine",
           usedLocalLateFeeFallback,
         });
@@ -7949,6 +7963,92 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidDocumentSurface,
     ],
   );
+
+  const openPaidProDraftCardEditor = React.useCallback(() => {
+    if (!draft) return;
+    setPaidProCardAiInstruction("");
+    const snapObj = readPremiumCompletionSnapshot();
+    const snap = snapObj?.premiumReadonlyPlainText?.trim() ?? "";
+    const winner = snapObj?.premiumWinningBodyText?.trim() ?? "";
+    const pipelineBody = premiumPipelineOutputBodyRef.current.trim();
+    const hydratedBody = hydratedPremiumBodyRef.current.trim();
+    const adt = agreementDocumentText.trim();
+    const adtHasPremiumMarkers =
+      /\b(lawdog pro|commercial safeguards|raw-intent premium protections|execution\s+—\s+signatures|signatures)\b/i.test(
+        adt,
+      );
+    const pipelineSrcForAuth =
+      snapObj?.premiumPipelineRenderSource || lastPremiumPipelineRenderSourceRef.current || null;
+    let paidReadonlyAuthBodyInline: string | null = null;
+    if (isAuthoritativePremiumPipelineRenderSource(pipelineSrcForAuth)) {
+      const explicitAuthoritative =
+        (lastPremiumWinningCorpusRef.current || "").trim() || winner || snap || pipelineBody || hydratedBody;
+      if (explicitAuthoritative.length >= 500) paidReadonlyAuthBodyInline = explicitAuthoritative;
+    }
+    const pick = pickPremiumPaidReadonlyPlainText({
+      premiumWinningBodyText: winner,
+      premiumReadonlySnapshotText: snap,
+      premiumPipelineOutputBodyText: pipelineBody,
+      hydratedPremiumSnapshotText: hydratedBody,
+      draft,
+      agreementDocumentText,
+      agreementDocumentTextHasPremiumMarkers: adtHasPremiumMarkers,
+      premiumCheckoutCompleted: Boolean(snapObj),
+      intakeText: intakeCombined,
+      paidAuthoritativeProBody: paidReadonlyAuthBodyInline,
+      authoritativeHydratedPlainText: hydratedPremiumBodyRef.current,
+      lastPremiumPipelineRenderSource: lastPremiumPipelineRenderSourceRef.current,
+    });
+    let seed = agreementDocumentText.trim();
+    if (
+      pick.plainText.trim() &&
+      scorePremiumReadonlyCorpusCandidate(pick.plainText) > scorePremiumReadonlyCorpusCandidate(agreementDocumentText)
+    ) {
+      seed = pick.plainText;
+    }
+    setPaidProCardEditDraft(seed);
+    setPremiumReviewDocEditorOpen(true);
+  }, [draft, agreementDocumentText, intakeCombined]);
+
+  const cancelPaidProDraftCardEditor = React.useCallback(async () => {
+    await paidProCardDictationRef.current?.finalizeDictation();
+    setPaidProCardEditDraft(null);
+    setPaidProCardAiInstruction("");
+    setPremiumReviewDocEditorOpen(false);
+  }, []);
+
+  const savePaidProDraftCardEditor = React.useCallback(async () => {
+    await paidProCardDictationRef.current?.finalizeDictation();
+    const raw = (paidProCardEditDraft ?? "").trim();
+    if (!raw) {
+      setPaidProCardEditDraft(null);
+      setPaidProCardAiInstruction("");
+      setPremiumReviewDocEditorOpen(false);
+      return;
+    }
+    const stripped = stripPremiumInstructionNoiseForDocument(raw);
+    const finalText = stripped !== raw ? stripped : raw;
+    agreementDocumentDirtyRef.current = true;
+    setAgreementDocumentText(finalText);
+    scheduleAgreementDocSync(finalText);
+    setPaidProCardEditDraft(null);
+    setPaidProCardAiInstruction("");
+    setPremiumReviewDocEditorOpen(false);
+  }, [paidProCardEditDraft, scheduleAgreementDocSync]);
+
+  const applyPaidProCardAiWithLawDog = React.useCallback(async () => {
+    const ins = paidProCardAiInstruction.trim();
+    if (!ins) return;
+    await paidProCardDictationRef.current?.finalizeDictation();
+    const docBuffer = (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim();
+    const ok = await runPersistedRefineFromStepBuffer(ins, {
+      premiumRefineDocumentOverride: docBuffer || null,
+    });
+    if (ok) {
+      setPaidProCardEditDraft((agreementDocumentTextRef.current || "").trim());
+      setPaidProCardAiInstruction("");
+    }
+  }, [paidProCardAiInstruction, paidProCardEditDraft, runPersistedRefineFromStepBuffer]);
 
   const showStarterProRefineUpsell = useMemo(() => {
     if (hasPaidPremiumCompletionSession()) return false;
@@ -13840,68 +13940,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         Ready to sign now? Start the signature flow.
                                       </p>
                                       <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2.5">
-                                        <button
-                                          type="button"
-                                          className={`rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition sm:text-[13px] ${
-                                            premiumReviewDocEditorOpen
-                                              ? "border-amber-600/55 bg-amber-50 text-amber-950 hover:bg-amber-100/90"
-                                              : "border-stone-300/90 bg-white/80 text-stone-800 hover:bg-white"
-                                          }`}
-                                          onClick={() => {
-                                            if (!premiumReviewDocEditorOpen && !agreementDocumentDirtyRef.current) {
-                                              const snapObj = readPremiumCompletionSnapshot();
-                                              const snap = snapObj?.premiumReadonlyPlainText?.trim() ?? "";
-                                              const winner = snapObj?.premiumWinningBodyText?.trim() ?? "";
-                                              const pipelineBody = premiumPipelineOutputBodyRef.current.trim();
-                                              const hydratedBody = hydratedPremiumBodyRef.current.trim();
-                                              const adt = agreementDocumentText.trim();
-                                              const adtHasPremiumMarkers =
-                                                /\b(lawdog pro|commercial safeguards|raw-intent premium protections|execution\s+—\s+signatures|signatures)\b/i.test(
-                                                  adt,
-                                                );
-                                              const pipelineSrcForAuth =
-                                                snapObj?.premiumPipelineRenderSource ||
-                                                lastPremiumPipelineRenderSourceRef.current ||
-                                                null;
-                                              let paidReadonlyAuthBodyInline: string | null = null;
-                                              if (isAuthoritativePremiumPipelineRenderSource(pipelineSrcForAuth)) {
-                                                const explicitAuthoritative =
-                                                  (lastPremiumWinningCorpusRef.current || "").trim() ||
-                                                  winner ||
-                                                  snap ||
-                                                  pipelineBody ||
-                                                  hydratedBody;
-                                                if (explicitAuthoritative.length >= 500)
-                                                  paidReadonlyAuthBodyInline = explicitAuthoritative;
-                                              }
-                                              const pick = pickPremiumPaidReadonlyPlainText({
-                                                premiumWinningBodyText: winner,
-                                                premiumReadonlySnapshotText: snap,
-                                                premiumPipelineOutputBodyText: pipelineBody,
-                                                hydratedPremiumSnapshotText: hydratedBody,
-                                                draft,
-                                                agreementDocumentText,
-                                                agreementDocumentTextHasPremiumMarkers: adtHasPremiumMarkers,
-                                                premiumCheckoutCompleted: Boolean(snapObj),
-                                                intakeText: intakeCombined,
-                                                paidAuthoritativeProBody: paidReadonlyAuthBodyInline,
-                                                authoritativeHydratedPlainText: hydratedPremiumBodyRef.current,
-                                                lastPremiumPipelineRenderSource:
-                                                  lastPremiumPipelineRenderSourceRef.current,
-                                              });
-                                              if (
-                                                pick.plainText.trim() &&
-                                                scorePremiumReadonlyCorpusCandidate(pick.plainText) >
-                                                  scorePremiumReadonlyCorpusCandidate(agreementDocumentText)
-                                              ) {
-                                                setAgreementDocumentText(pick.plainText);
-                                              }
-                                            }
-                                            setPremiumReviewDocEditorOpen((o) => !o);
-                                          }}
-                                        >
-                                          {premiumReviewDocEditorOpen ? "View document" : "Edit wording"}
-                                        </button>
+                                        {!premiumReviewDocEditorOpen ? (
+                                          <button
+                                            type="button"
+                                            className="rounded-lg border border-stone-300/90 bg-white/80 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
+                                            disabled={(isGenerating && !draft) || upgradeLockActive || loading}
+                                            onClick={() => void openPaidProDraftCardEditor()}
+                                          >
+                                            Edit wording
+                                          </button>
+                                        ) : (
+                                          <>
+                                            <button
+                                              type="button"
+                                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-50 sm:text-[13px]"
+                                              disabled={(isGenerating && !draft) || upgradeLockActive || loading}
+                                              onClick={() => void savePaidProDraftCardEditor()}
+                                            >
+                                              Save changes
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white disabled:opacity-50 sm:text-[13px]"
+                                              disabled={loading}
+                                              onClick={() => void cancelPaidProDraftCardEditor()}
+                                            >
+                                              Cancel
+                                            </button>
+                                          </>
+                                        )}
                                         <button
                                           type="button"
                                           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
@@ -13919,30 +13986,60 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       </div>
                                     </div>
                                     {premiumReviewDocEditorOpen ? (
-                                      <textarea
-                                        ref={agreementPreviewEditorRef}
-                                        id="claw-agreement-preview-editor"
-                                        className="min-h-[min(68vh,44rem)] max-h-[min(78vh,54rem)] w-full resize-y border-0 bg-transparent px-[clamp(1.35rem,4.5vw,2.65rem)] pb-14 pt-9 font-serif text-[15px] leading-[1.88] tracking-[0.012em] text-stone-900 antialiased outline-none [text-wrap:pretty] selection:bg-amber-200/80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/90 sm:text-[15.5px] sm:leading-[1.9]"
-                                        style={{ fontFeatureSettings: '"kern" 1, "liga" 1, "onum" 1' }}
-                                        value={agreementDocumentText}
-                                        onChange={(e) => {
-                                          agreementDocumentDirtyRef.current = true;
-                                          setAgreementDocumentText(e.target.value);
-                                          scheduleAgreementDocSync(e.target.value);
-                                        }}
-                                        onBlur={(e) => {
-                                          const raw = e.target.value;
-                                          const next = stripPremiumInstructionNoiseForDocument(raw);
-                                          if (next !== raw) {
-                                            agreementDocumentDirtyRef.current = true;
-                                            setAgreementDocumentText(next);
-                                            scheduleAgreementDocSync(next);
-                                          }
-                                        }}
-                                        spellCheck
-                                        disabled={(isGenerating && !draft) || upgradeLockActive}
-                                        aria-label="Agreement document"
-                                      />
+                                      <>
+                                        <textarea
+                                          ref={agreementPreviewEditorRef}
+                                          id="claw-agreement-preview-editor"
+                                          className="min-h-[min(68vh,44rem)] max-h-[min(78vh,54rem)] w-full resize-y border-0 bg-transparent px-[clamp(1.35rem,4.5vw,2.65rem)] pb-8 pt-9 font-serif text-[15px] leading-[1.88] tracking-[0.012em] text-stone-900 antialiased outline-none [text-wrap:pretty] selection:bg-amber-200/80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/90 sm:text-[15.5px] sm:leading-[1.9]"
+                                          style={{ fontFeatureSettings: '"kern" 1, "liga" 1, "onum" 1' }}
+                                          value={paidProCardEditDraft ?? ""}
+                                          onChange={(e) => setPaidProCardEditDraft(e.target.value)}
+                                          spellCheck
+                                          disabled={(isGenerating && !draft) || upgradeLockActive || loading}
+                                          aria-label="Agreement document"
+                                        />
+                                        <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
+                                          <p className="text-xs font-medium text-stone-700">Pro AI assist (optional)</p>
+                                          <div className="relative mt-2">
+                                            <VoiceAugmentedTextArea
+                                              value={paidProCardAiInstruction}
+                                              onValueChange={setPaidProCardAiInstruction}
+                                              surface="light"
+                                              disabled={isGenerating || draftPreCommitFreeze || loading}
+                                              readOnly={draftPreCommitFreeze}
+                                              voiceUiEnabled={!draftPreCommitFreeze}
+                                              micIdleAttract={micIdleAttract}
+                                              dictationStartNonce={freshSimpleCreateUx ? dictationStartNonce : 0}
+                                              dictationControlRef={paidProCardDictationRef}
+                                              onDictationPhaseChange={handleDictationPhaseChange}
+                                              onVoiceError={(m) => setVoiceError(humanizeVoiceErrorMessage(m))}
+                                              className="min-h-[6.5rem] w-full rounded-lg border border-stone-300/90 bg-white px-3 py-3 pb-11 pr-11 text-sm leading-relaxed text-stone-900 placeholder:text-stone-500"
+                                              placeholder={PAID_PRO_CARD_AI_BOX_PLACEHOLDER}
+                                              aria-label="LawDog Pro instruction for this agreement"
+                                            />
+                                          </div>
+                                          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                                            <button
+                                              type="button"
+                                              className="rounded-lg bg-stone-800 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm"
+                                              disabled={
+                                                !showPersistedRefineBelowDocument ||
+                                                !paidProCardAiInstruction.trim() ||
+                                                loading ||
+                                                draftPreCommitFreeze
+                                              }
+                                              onClick={() => void applyPaidProCardAiWithLawDog()}
+                                            >
+                                              Apply with LawDog Pro
+                                            </button>
+                                          </div>
+                                          {!showPersistedRefineBelowDocument ? (
+                                            <p className="mt-2 text-xs leading-relaxed text-stone-600">
+                                              {PAID_PRO_CARD_AI_DISABLED_EXPLAIN}
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                      </>
                                     ) : (
                                       <PremiumAgreementReadonlyView html={premiumReadonlyAgreementHtml} />
                                     )}

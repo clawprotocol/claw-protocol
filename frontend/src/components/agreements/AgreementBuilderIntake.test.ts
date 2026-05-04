@@ -292,6 +292,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("deliveryCtasOnDraftCard={canProceedWithPaidProDocument}");
     expect(intake).toContain("Send a private review link so the other party can suggest changes.");
     expect(intake).toContain("Ready to sign now? Start the signature flow.");
+    expect(intake).toContain("Save changes");
+    expect(intake).toContain("Apply with LawDog Pro");
+    expect(intake).toContain("Tell LawDog what to change");
+    expect(intake).toContain("Manual edit is ready. AI edit coming next.");
   });
 
   it("sign-first control is gated to paid signature recipients (not review mode)", () => {
