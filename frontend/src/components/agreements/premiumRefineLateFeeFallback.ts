@@ -1,8 +1,13 @@
 import {
   classifyPremiumRefineRevisionIntent,
   evaluatePremiumRefineCandidate,
+  isAdvisoryNoteOrCommentIntent,
   looksLikeReviewerNoteOrCommentIntent,
+  normalizePremiumRefineTextForCompare,
   premiumRefineSummaryIsUnchangedFailOpen,
+  premiumRefineTextContainsPlaceholderCorruption,
+  PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+  scanPremiumRefinePlaceholderCorruption,
 } from "./premiumRefineAcceptance";
 import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
 
@@ -181,6 +186,52 @@ export function augmentPremiumRefineUserPrompt(instruction: string): string {
 
 const REVIEWER_NOTE_HEADING = "## REVIEWER NOTE / REQUESTED REVIEW ITEMS";
 
+/**
+ * Always prefix-preserves the authoritative agreement and appends a reviewer/advisory section.
+ * Model output is included only when non-corrupt and not a truncated replacement of the whole doc.
+ */
+export function buildAdvisoryAppendPreserveDocument(args: {
+  currentDocumentText: string;
+  userInstruction: string;
+  modelOut: string;
+  checklistLines?: string[] | undefined;
+}): string {
+  const base = args.currentDocumentText;
+  const inst = args.userInstruction.trim();
+  let snippet = (args.modelOut || "").trim();
+  if (snippet && premiumRefineTextContainsPlaceholderCorruption(snippet)) {
+    snippet = "";
+  }
+  if (
+    snippet &&
+    normalizePremiumRefineTextForCompare(snippet) === normalizePremiumRefineTextForCompare(base)
+  ) {
+    snippet = "";
+  }
+  if (snippet && snippet.length < base.length * 0.92 && !snippet.startsWith(base.slice(0, Math.min(2000, base.length)))) {
+    snippet = "";
+  }
+  const checklist = (args.checklistLines || []).filter(Boolean).slice(0, 20);
+  const checklistBlock =
+    checklist.length > 0
+      ? `\n**Flagged / readiness items (from LawDog review):**\n${checklist.map((c) => `- ${c}`).join("\n")}\n`
+      : "";
+  const modelBlock = snippet
+    ? snippet.length > 4000
+      ? `\n**Captured review points (excerpt from model output):**\n\n${snippet.slice(0, 4000)}\n`
+      : `\n**Captured review points (from model output):**\n\n${snippet}\n`
+    : "";
+  const footer =
+    `\n*This section is administrative / reviewer-facing. It does not amend the operative agreement text above unless the parties separately agree in writing.*\n`;
+
+  if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
+    const addendum = `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${inst}\n${checklistBlock}${modelBlock}${footer}`;
+    return base + addendum;
+  }
+  const tail = `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${inst}\n${checklistBlock}${modelBlock}${footer}`;
+  return base + tail;
+}
+
 /** Merge LawDog premium-review / route bullets into the refine prompt when available. */
 export function buildPremiumRefineChecklistBullets(
   review:
@@ -235,7 +286,7 @@ export function tryAppendReviewerNotePreserveDocument(args: {
   shortCandidate: string;
   checklistLines?: string[] | undefined;
 }): { text: string; summaryLine: string } | null {
-  if (!looksLikeReviewerNoteOrCommentIntent(args.userInstruction)) return null;
+  if (!isAdvisoryNoteOrCommentIntent(args.userInstruction)) return null;
   const base = args.currentDocumentText;
   if (!base || base.length < 500) return null;
   const short = (args.shortCandidate || "").trim();
@@ -311,6 +362,9 @@ export function resolvePremiumRefineApplyOutcome(args: {
   const inst = userInstruction.trim();
   const out0 = (apiOut || "").trim();
   let acc = evaluatePremiumRefineCandidate(out0, baselineText, baselineLen, summaryChanges, inst);
+  if (classifyPremiumRefineRevisionIntent(inst) === "advisory_note_or_comment" && acc.decision === "accepted") {
+    acc = { ...acc, decision: "rejected_short" };
+  }
 
   if (acc.decision === "accepted") {
     return {
@@ -392,6 +446,7 @@ export async function executePremiumRefineUpdate(args: {
   const { baselineText, baselineLen, intakeText, userInstruction, signal, refineChecklistBullets } = args;
   const inst = userInstruction.trim();
   const userPrompt = augmentPremiumRefineUserPromptWithChecklist(inst, refineChecklistBullets);
+  const promptIntent = classifyPremiumRefineRevisionIntent(inst);
 
   const runResolve = (r: PremiumRefineResponse): PremiumRefineResolveOutcome =>
     resolvePremiumRefineApplyOutcome({
@@ -415,9 +470,121 @@ export async function executePremiumRefineUpdate(args: {
     signal,
   );
   lastR = r0;
+
+  if (promptIntent === "advisory_note_or_comment") {
+    const raw = (r0.updated_document_text || "").trim();
+    const ph = scanPremiumRefinePlaceholderCorruption(raw);
+    if (ph.count > 0) {
+      // eslint-disable-next-line no-console
+      console.info("[premium_candidate_rejected_placeholder_tokens]", {
+        tokenCount: ph.count,
+        samples: ph.samples,
+      });
+    }
+    let modelExcerpt = ph.count > 0 ? "" : raw;
+    if (
+      modelExcerpt &&
+      normalizePremiumRefineTextForCompare(modelExcerpt) === normalizePremiumRefineTextForCompare(baselineText)
+    ) {
+      modelExcerpt = "";
+    }
+    if (
+      modelExcerpt &&
+      modelExcerpt.length < baselineLen * 0.92 &&
+      !modelExcerpt.startsWith(baselineText.slice(0, Math.min(2000, baselineText.length)))
+    ) {
+      modelExcerpt = "";
+    }
+    const built = buildAdvisoryAppendPreserveDocument({
+      currentDocumentText: baselineText,
+      userInstruction: inst,
+      modelOut: modelExcerpt,
+      checklistLines: refineChecklistBullets,
+    });
+    const accBuilt = evaluatePremiumRefineCandidate(
+      built,
+      baselineText,
+      baselineLen,
+      r0.summary_changes,
+      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+    );
+    // eslint-disable-next-line no-console
+    console.info("[premium-refine-apply]", {
+      intent: promptIntent,
+      authoritativeLen: baselineLen,
+      candidateLen: raw.length,
+      outputLen: built.length,
+      applyDecision:
+        accBuilt.decision === "accepted" ? "append_reviewer_note_preserve_document" : accBuilt.decision,
+      preservationFallbackUsed: true,
+      placeholderTokenCount: ph.count,
+    });
+    if (accBuilt.decision === "accepted") {
+      return toExecuteExtras(
+        {
+          finalText: built,
+          acceptance: accBuilt,
+          usedLocalLateFeeFallback: false,
+          whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
+          unchangedDuplicateLateFee: false,
+        },
+        {
+          usedClientDeliverablesFinalPaymentFallback: false,
+          usedSurgicalPreserveRetry,
+          surgicalRejectedShortExhausted: false,
+          lastRefineResponse: lastR,
+          usedAppendReviewerNotePreserve: true,
+          refineApplyDecision: "append_reviewer_note_preserve_document",
+        },
+      );
+    }
+    const builtMinimal = buildAdvisoryAppendPreserveDocument({
+      currentDocumentText: baselineText,
+      userInstruction: inst,
+      modelOut: "",
+      checklistLines: refineChecklistBullets,
+    });
+    const accMin = evaluatePremiumRefineCandidate(
+      builtMinimal,
+      baselineText,
+      baselineLen,
+      r0.summary_changes,
+      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+    );
+    if (accMin.decision === "accepted") {
+      return toExecuteExtras(
+        {
+          finalText: builtMinimal,
+          acceptance: accMin,
+          usedLocalLateFeeFallback: false,
+          whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
+          unchangedDuplicateLateFee: false,
+        },
+        {
+          usedClientDeliverablesFinalPaymentFallback: false,
+          usedSurgicalPreserveRetry,
+          surgicalRejectedShortExhausted: false,
+          lastRefineResponse: lastR,
+          usedAppendReviewerNotePreserve: true,
+          refineApplyDecision: "append_reviewer_note_preserve_document",
+        },
+      );
+    }
+  }
+
   let resolved = runResolve(r0);
 
   if (resolved.acceptance.decision === "accepted") {
+    // eslint-disable-next-line no-console
+    console.info("[premium-refine-apply]", {
+      intent: promptIntent,
+      authoritativeLen: baselineLen,
+      candidateLen: (r0.updated_document_text || "").trim().length,
+      outputLen: resolved.finalText.length,
+      applyDecision: "accepted_replacement",
+      preservationFallbackUsed: false,
+      placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(resolved.finalText).count,
+    });
     return toExecuteExtras(resolved, {
       usedClientDeliverablesFinalPaymentFallback: false,
       usedSurgicalPreserveRetry,
@@ -428,7 +595,10 @@ export async function executePremiumRefineUpdate(args: {
     });
   }
 
-  if (resolved.acceptance.decision === "rejected_short" && classifyPremiumRefineRevisionIntent(inst) === "surgical_revision") {
+  if (
+    resolved.acceptance.decision === "rejected_short" &&
+    classifyPremiumRefineRevisionIntent(inst) !== "transformational_revision"
+  ) {
     usedSurgicalPreserveRetry = true;
     const r1 = await postPremiumRefine(
       {
@@ -443,6 +613,16 @@ export async function executePremiumRefineUpdate(args: {
     lastR = r1;
     resolved = runResolve(r1);
     if (resolved.acceptance.decision === "accepted") {
+      // eslint-disable-next-line no-console
+      console.info("[premium-refine-apply]", {
+        intent: promptIntent,
+        authoritativeLen: baselineLen,
+        candidateLen: (r1.updated_document_text || "").trim().length,
+        outputLen: resolved.finalText.length,
+        applyDecision: "accepted_replacement_after_surgical_retry",
+        preservationFallbackUsed: false,
+        placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(resolved.finalText).count,
+      });
       return toExecuteExtras(resolved, {
         usedClientDeliverablesFinalPaymentFallback: false,
         usedSurgicalPreserveRetry,
@@ -463,6 +643,16 @@ export async function executePremiumRefineUpdate(args: {
       const out2 = cdf.text.trim();
       const acc2 = evaluatePremiumRefineCandidate(out2, baselineText, baselineLen, lastR?.summary_changes, inst);
       if (acc2.decision === "accepted") {
+        // eslint-disable-next-line no-console
+        console.info("[premium-refine-apply]", {
+          intent: promptIntent,
+          authoritativeLen: baselineLen,
+          candidateLen: out2.length,
+          outputLen: out2.length,
+          applyDecision: "client_deliverables_fallback",
+          preservationFallbackUsed: true,
+          placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(out2).count,
+        });
         return toExecuteExtras(
           {
             finalText: out2,
@@ -495,6 +685,16 @@ export async function executePremiumRefineUpdate(args: {
       const out3 = note.text;
       const acc3 = evaluatePremiumRefineCandidate(out3, baselineText, baselineLen, lastR?.summary_changes, inst);
       if (acc3.decision === "accepted") {
+        // eslint-disable-next-line no-console
+        console.info("[premium-refine-apply]", {
+          intent: promptIntent,
+          authoritativeLen: baselineLen,
+          candidateLen: (lastR?.updated_document_text || "").trim().length,
+          outputLen: out3.length,
+          applyDecision: "append_reviewer_note_preserve_document",
+          preservationFallbackUsed: true,
+          placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(out3).count,
+        });
         return toExecuteExtras(
           {
             finalText: out3,
@@ -518,8 +718,19 @@ export async function executePremiumRefineUpdate(args: {
 
   const surgicalExhausted =
     resolved.acceptance.decision === "rejected_short" &&
-    classifyPremiumRefineRevisionIntent(inst) === "surgical_revision" &&
+    classifyPremiumRefineRevisionIntent(inst) !== "transformational_revision" &&
     usedSurgicalPreserveRetry;
+
+  // eslint-disable-next-line no-console
+  console.info("[premium-refine-apply]", {
+    intent: promptIntent,
+    authoritativeLen: baselineLen,
+    candidateLen: (lastR?.updated_document_text || "").trim().length,
+    outputLen: resolved.finalText.length,
+    applyDecision: resolved.acceptance.decision,
+    preservationFallbackUsed: false,
+    placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(resolved.finalText).count,
+  });
 
   return toExecuteExtras(resolved, {
     usedClientDeliverablesFinalPaymentFallback: false,

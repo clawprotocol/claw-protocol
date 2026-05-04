@@ -86,7 +86,11 @@ export function pickAuthoritativeProCorpusForRefine(args: {
 
 export type PremiumRefineApplyDecision = "accepted" | "rejected_short" | "rejected_empty" | "rejected_unchanged";
 
-export type PremiumRefineRevisionIntent = "surgical_revision" | "transformational_revision";
+export type PremiumRefineRevisionIntent =
+  | "surgical_revision"
+  | "transformational_revision"
+  /** Add notes / review guidance — never replace the agreement body with a model rewrite. */
+  | "advisory_note_or_comment";
 
 export type PremiumRefineRequiredSectionsPresence = {
   title: boolean;
@@ -126,30 +130,53 @@ export function instructionAllowsExtremeShrink(userInstruction: string | undefin
   );
 }
 
-export function classifyPremiumRefineRevisionIntent(userInstruction: string | undefined): PremiumRefineRevisionIntent {
+/** True when the user explicitly asked to remove, extract, or replace the whole agreement. */
+export function instructionAllowsMaterialDocumentChange(userInstruction: string | undefined): boolean {
+  if (instructionAllowsExtremeShrink(userInstruction)) return true;
   const t = (userInstruction || "").trim();
-  if (!t) return "surgical_revision";
-  if (instructionAllowsExtremeShrink(userInstruction)) return "transformational_revision";
-  if (
-    /\b(simplify|rewrite\s+(?:completely|entirely|from\s+scratch)|start\s+over|replace\s+(?:the\s+)?(?:entire\s+|whole\s+)?document|convert\s+(?:this\s+)?(?:to|into)|re-?outline|format\s+only|turn\s+into|new\s+version\s+of)\b/i.test(
-      t,
-    )
-  ) {
-    return "transformational_revision";
+  if (!t) return false;
+  return /\b(delete|extract\s+only|omit\s+sections?|remove\s+(?:the\s+)?(?:entire|whole)|replace\s+(?:the\s+)?(?:entire|whole)\s+document)\b/i.test(
+    t,
+  );
+}
+
+/** Bracket placeholders like [ADDRESS_1], [PARTY_2], [DATE_3]. */
+const PREMIUM_REFINE_BRACKET_PLACEHOLDER_RE = /\[[A-Z][A-Z0-9_]*_\d+\]/g;
+/** e.g. `1.[ADDRESS_1]` */
+const PREMIUM_REFINE_SECTION_DOT_PLACEHOLDER_RE = /\b\d+\.\[[A-Z]/;
+/** e.g. `US $4,[ADDRESS_6]` */
+const PREMIUM_REFINE_MONEY_COMMA_BRACKET_RE = /\$\s*\d+\s*,\s*\[/i;
+
+export function scanPremiumRefinePlaceholderCorruption(text: string): { count: number; samples: string[] } {
+  const t = text || "";
+  const matches = t.match(PREMIUM_REFINE_BRACKET_PLACEHOLDER_RE) || [];
+  const samples = [...new Set(matches.map((x) => x.slice(0, 48)))].slice(0, 8);
+  let count = matches.length;
+  if (PREMIUM_REFINE_SECTION_DOT_PLACEHOLDER_RE.test(t)) {
+    count += 1;
+    if (samples.length < 8) samples.push("[pattern:section_dot_placeholder]");
   }
-  return "surgical_revision";
+  if (PREMIUM_REFINE_MONEY_COMMA_BRACKET_RE.test(t)) {
+    count += 1;
+    if (samples.length < 8) samples.push("[pattern:money_comma_bracket]");
+  }
+  return { count, samples };
+}
+
+export function premiumRefineTextContainsPlaceholderCorruption(text: string): boolean {
+  return scanPremiumRefinePlaceholderCorruption(text).count > 0;
 }
 
 /**
- * Reviewer-note / comment / best-practice capture — not a full agreement rewrite.
- * Used when the model returns a short body; we append instead of rejecting silently.
+ * Advisory / comment / reviewer guidance — preserve agreement bytes and append notes, never treat as surgical rewrite.
  */
-export function looksLikeReviewerNoteOrCommentIntent(userInstruction: string | undefined): boolean {
+export function isAdvisoryNoteOrCommentIntent(userInstruction: string | undefined): boolean {
   const raw = (userInstruction || "").trim();
-  if (raw.length < 10) return false;
+  if (raw.length < 8) return false;
   const t = raw.toLowerCase();
+
   const noteVerb =
-    /\b(make\s+(?:a\s+)?notes?|noted?|note\s+(?:of|that|to)|add\s+(?:a\s+)?note|capture\s+(?:a\s+)?note|jot\s+down)\b/i.test(
+    /\b(make\s+(?:a\s+)?notes?|noted?|note\s+(?:of|that|to)|add\s+(?:a\s+)?note|capture\s+(?:a\s+)?note|jot\s+down|leave\s+(?:a\s+)?note|note\s+this)\b/i.test(
       raw,
     );
   const reviewLens = /\b(reviewer|reviewer's|for\s+the\s+reviewer|review\s+notes?|peer\s+review|comments?\s+for|requested\s+review)\b/i.test(
@@ -164,7 +191,49 @@ export function looksLikeReviewerNoteOrCommentIntent(userInstruction: string | u
   if (/\bbest\s+practices?\b/i.test(t) && /\b(note|notes|reviewer|comment)\b/i.test(t)) return true;
   if (/\bapply\b/i.test(t) && /\b(issues?|comments?|flags?|best)\b/i.test(t) && (noteVerb || /\breviewer\b/i.test(t)))
     return true;
+
+  // QA + universal review / improvement phrasing (not clause edits like "Add late fee…")
+  if (/\bmake\s+note\b/i.test(raw) && /\b(review|improv|agreement|contract|anything)\b/i.test(t)) return true;
+  if (/\b(anything|everything)\s+that\s+should\s+be\s+(reviewed|improved)\b/i.test(t)) return true;
+  if (/\banything\s+to\s+review\b/i.test(t)) return true;
+  if (/\bfor\s+review\b/i.test(t) && /\b(note|list|items?|checklist|comments?|instruction)\b/i.test(t)) return true;
+  if (/\b(add|leave)\s+(?:a\s+)?comments?\b/i.test(t) && /\b(review|reviewer|agreement|counterparty)\b/i.test(t))
+    return true;
+  if (/\bflag\s+(?:the\s+)?(risks?|issues?|gaps?|concerns?|open\s+items?)\b/i.test(t)) return true;
+  if (/\bred\s+flags?\b/i.test(t) && /\b(list|note|add|capture|flag)\b/i.test(t)) return true;
+  if (/\bbest\s+practic(es?|e)\b/i.test(t) && /\b(suggest|recommended|review|change)\b/i.test(t)) return true;
+  if (/\bfor\s+(?:the\s+)?(?:reviewer|other\s+party|counterparty|signer)\b/i.test(t) && /\b(note|comment|list|checklist)\b/i.test(t))
+    return true;
+  if (/\b(review\s+checklist|negotiation\s+checklist|add\s+(?:a\s+)?checklist)\b/i.test(t)) return true;
+  if (/\b(summarize|list)\s+what\s+to\s+review\b/i.test(t)) return true;
+  if (/\b(flag\s+what\s+matters)\b/i.test(t)) return true;
+  if (/\b(recommended\s+changes|improvement\s+suggestions|negotiation\s+flags)\b/i.test(t)) return true;
+  if (/\bopen\s+issues?\b/i.test(t) && /\b(note|add|list|capture|flag)\b/i.test(t)) return true;
+
   return false;
+}
+
+export function classifyPremiumRefineRevisionIntent(userInstruction: string | undefined): PremiumRefineRevisionIntent {
+  const t = (userInstruction || "").trim();
+  if (!t) return "surgical_revision";
+  if (instructionAllowsExtremeShrink(userInstruction)) return "transformational_revision";
+  if (
+    /\b(simplify|rewrite\s+(?:completely|entirely|from\s+scratch)|start\s+over|replace\s+(?:the\s+)?(?:entire\s+|whole\s+)?document|convert\s+(?:this\s+)?(?:to|into)|re-?outline|format\s+only|turn\s+into|new\s+version\s+of)\b/i.test(
+      t,
+    )
+  ) {
+    return "transformational_revision";
+  }
+  if (isAdvisoryNoteOrCommentIntent(userInstruction)) return "advisory_note_or_comment";
+  return "surgical_revision";
+}
+
+/**
+ * @deprecated Prefer {@link isAdvisoryNoteOrCommentIntent} (same behavior, expanded patterns).
+ * Reviewer-note / comment / best-practice capture — not a full agreement rewrite.
+ */
+export function looksLikeReviewerNoteOrCommentIntent(userInstruction: string | undefined): boolean {
+  return isAdvisoryNoteOrCommentIntent(userInstruction);
 }
 
 function normalizedDocForSections(doc: string): string {
@@ -272,6 +341,10 @@ type LengthDecision = {
   headingPreservationRatio: number;
 };
 
+/** Synthetic instruction so length gate treats append-only output as surgical preserve expansion. */
+export const PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR =
+  "Precise surgical wording tweak in section 2 only; preserve all other agreement text.";
+
 function decideTransformational(
   _refinedLen: number,
   currentProLen: number,
@@ -376,6 +449,18 @@ function decideLengthAgainstBaseline(
       headingPreservationRatio,
     );
   }
+  if (revisionIntent === "advisory_note_or_comment") {
+    return decideSurgicalRefine(
+      refined,
+      refinedLen,
+      baselineText,
+      currentProLen,
+      ratio,
+      requiredSectionsPresent,
+      revisionIntent,
+      headingPreservationRatio,
+    );
+  }
   return decideSurgicalRefine(
     refined,
     refinedLen,
@@ -454,8 +539,43 @@ export function evaluatePremiumRefineCandidate(
     };
   }
 
-  const { decision, ratio, requiredSectionsPresent, revisionIntent: ri, headingPreservationRatio: hpr } =
-    decideLengthAgainstBaseline(refined, refinedLen, baselineText, currentProLen, userInstruction);
+  const {
+    decision: lengthDecision,
+    ratio,
+    requiredSectionsPresent,
+    revisionIntent: ri,
+    headingPreservationRatio: hpr,
+  } = decideLengthAgainstBaseline(refined, refinedLen, baselineText, currentProLen, userInstruction);
+  let decision = lengthDecision;
+  if (decision === "accepted") {
+    if (premiumRefineTextContainsPlaceholderCorruption(refined)) {
+      const st = scanPremiumRefinePlaceholderCorruption(refined);
+      if (typeof console !== "undefined" && typeof console.info === "function") {
+        // eslint-disable-next-line no-console
+        console.info("[premium_candidate_rejected_placeholder_tokens]", {
+          tokenCount: st.count,
+          samples: st.samples,
+        });
+      }
+      decision = "rejected_short";
+    } else if (
+      ri === "surgical_revision" &&
+      currentProLen >= 8000 &&
+      ratio < 0.55 &&
+      !instructionAllowsMaterialDocumentChange(userInstruction)
+    ) {
+      if (typeof console !== "undefined" && typeof console.info === "function") {
+        // eslint-disable-next-line no-console
+        console.info("[premium_refine_rejected_material_collapse]", {
+          authoritativeLen: currentProLen,
+          candidateLen: refinedLen,
+          ratio,
+          revisionIntent: ri,
+        });
+      }
+      decision = "rejected_short";
+    }
+  }
   return {
     decision,
     refinedLen,

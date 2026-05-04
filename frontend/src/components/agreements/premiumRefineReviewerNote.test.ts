@@ -102,7 +102,7 @@ describe("executePremiumRefineUpdate reviewer-note append path", () => {
     expect(out.acceptance.decision).toBe("accepted");
     expect(out.finalText.startsWith(baseline)).toBe(true);
     expect(out.finalText).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
-    expect(postPremiumRefine).toHaveBeenCalledTimes(2);
+    expect(postPremiumRefine).toHaveBeenCalledTimes(1);
   });
 
   it("still rejects unsafe short replacement for non-reviewer instructions", async () => {
