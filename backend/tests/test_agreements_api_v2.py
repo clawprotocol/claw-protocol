@@ -1111,6 +1111,26 @@ def _premium_refine_long_fixture_doc() -> str:
     return "".join(parts)
 
 
+def _premium_refine_15k_doc_client_deliverables_fixture() -> str:
+    """Long Pro-style body for surgical QA (narrow insert must not trip idempotent language guard)."""
+    parts = ["# Agreement\n\n", "## Parties\n\nClient and Vendor LLC.\n\n", "## Scope\n\n"]
+    parts.append(
+        "".join(
+            f"Scope operational paragraph {i} with deliverables milestones and invoicing context filler line.\n"
+            for i in range(240)
+        )
+    )
+    parts.append(
+        "\n## 3.4 Client sign-off\n\nVendor submits work; Client signs off using the checklist in Exhibit A.\n\n"
+        "## 4 Final Payment\n\nClient pays the final invoice within thirty days following Client sign-off.\n\n"
+        "## Intellectual Property\n\nEach party retains its pre-existing IP.\n\n"
+        "## Confidentiality\n\nMutual confidentiality obligations.\n\n"
+        "## Termination\n\nEither party may terminate on thirty days notice.\n\n"
+        "IN WITNESS WHEREOF\n\n__ /s/ Vendor __\n"
+    )
+    return "".join(parts)
+
+
 def _premium_refine_doc_fees_and_payment_schedule() -> str:
     parts = ["# Agreement\n\n", "## Parties\n\nA and B.\n\n", "## Scope\n\n"]
     parts.append("".join(f"Scope detail line {i} with mutual obligations.\n" for i in range(160)))
@@ -1364,6 +1384,75 @@ def test_premium_refine_update_llm_failure_fail_open_unchanged(monkeypatch, tmp_
     b = res.json()
     assert b["updated_document_text"] == doc
     assert av2.PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE in (b.get("summary_changes") or [])
+
+
+def test_premium_refine_fail_open_preserves_exact_request_bytes_including_trailing_whitespace(
+    monkeypatch, tmp_path,
+):
+    """LLM failure fail-open must echo request current_document_text byte-for-byte (no strip)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def boom_llm(*_a, **_k):
+        raise RuntimeError("no_model")
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom_llm)
+    client = TestClient(app)
+    core = "STARTER AGREEMENT BODY\n" + ("Section line.\n" * 80)
+    raw = core + "\n\n  \t\n"
+    assert raw != raw.strip()
+    assert len(raw) >= 200
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": raw,
+            "intake_text": "Referral deal between A and B.",
+            "user_refinement_prompt": "Rename Party A to Acme LLC throughout.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    b = res.json()
+    assert b["updated_document_text"] == raw
+    assert av2.PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE in (b.get("summary_changes") or [])
+
+
+def test_premium_refine_client_deliverables_narrow_deterministic_skips_llm(monkeypatch, tmp_path):
+    """Narrow path: client approval before final payment + deliverables — full document, no shrink."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("call_legal_llm_should_not_run_for_deterministic_client_deliverables")
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom)
+    client = TestClient(app)
+    doc = _premium_refine_15k_doc_client_deliverables_fixture()
+    assert len(doc) >= 15000
+    instr = "add in the client will need to approve deliverables before final payment is due"
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc,
+            "intake_text": "B2B professional services, US.",
+            "user_refinement_prompt": instr,
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["updated_document_text"]
+    low = text.lower()
+    assert "deliverables" in low
+    assert "final payment" in low
+    assert "approval" in low or "approve" in low
+    assert "deemed acceptance under section 3.4" in low
+    assert "## 3.4" in text
+    assert "IN WITNESS WHEREOF" in text
+    assert len(text) >= int(len(doc) * 0.95)
 
 
 def test_premium_refine_late_fee_narrow_llm_anchor_when_no_payment_header(monkeypatch, tmp_path):

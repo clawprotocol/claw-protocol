@@ -1192,6 +1192,10 @@ class PremiumRefineRequest(BaseModel):
     intake_text: str = Field(..., min_length=1)
     user_refinement_prompt: str = ""
     action: PremiumRefineAction = "update"
+    surgical_preserve_retry: bool = Field(
+        default=False,
+        description="Second-pass: stronger preserve-full-document prompt + heading context (surgical QA).",
+    )
 
 
 class PremiumRefineResponse(BaseModel):
@@ -1236,7 +1240,7 @@ def _normalize_premium_refine_result(
     changes = _str_list_capped(raw.get("summary_changes"), 12)
     new_doc = str(raw.get("updated_document_text") or "").strip()
     if not new_doc:
-        new_doc = (current_doc or "").strip()
+        new_doc = current_doc or ""
     return PremiumRefineResponse(
         updated_document_text=new_doc,
         summary_changes=changes,
@@ -1275,22 +1279,22 @@ def _premium_refine_update_reject_unchanged_candidate(
     new = _premium_refine_ws_normalize_for_compare(out.updated_document_text)
     if cur != new:
         return out
-    base = (current_doc or "").strip()
+    preserved = current_doc or ""
     _log_premium_refine_structured(
         "update_unchanged_candidate_rejected",
         {
             "source": source,
-            "current_document_len": len(base),
+            "current_document_len": len(preserved),
             "out_len": len((out.updated_document_text or "").strip()),
             "instruction_len": len((user_prompt or "").strip()),
         },
     )
-    return _premium_refine_update_fail_open_response(base)
+    return _premium_refine_update_fail_open_response(preserved)
 
 
 def _premium_refine_update_fail_open_response(current_doc: str) -> PremiumRefineResponse:
     """Paid Pro action=update: never leave the client with 503 for LLM/parse outages — preserve document."""
-    d = (current_doc or "").strip()
+    d = current_doc or ""
     return PremiumRefineResponse(
         updated_document_text=d,
         summary_changes=[PREMIUM_REFINE_UPDATE_FAIL_OPEN_USER_MESSAGE],
@@ -1311,7 +1315,46 @@ def _log_premium_refine_structured(event: str, fields: Dict[str, Any]) -> None:
     log.info("claw_premium_refine_trace %s", blob)
 
 
-def _premium_refine_update_system_prompt() -> str:
+def _premium_refine_sample_major_headings(doc: str, cap: int = 40) -> List[str]:
+    """Short list of likely section headings for surgical-retry context (best-effort, not exhaustive)."""
+    out: List[str] = []
+    for raw in (doc or "").splitlines():
+        s = raw.strip()
+        if not s:
+            continue
+        if s.startswith("#"):
+            out.append(s[:200])
+        elif re.match(r"^\d+(?:\.\d+)*\.\s+\S", s):
+            out.append(s[:200])
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _premium_refine_update_system_prompt(
+    *, surgical_retry: bool = False, original_document_char_len: Optional[int] = None
+) -> str:
+    surgical_block = (
+        "\n**Surgical / preserve-first update (required for action=update):**\n"
+        "- Return the **COMPLETE** agreement in `updated_document_text`.\n"
+        "- Do **not** summarize, abridge, or replace the whole agreement.\n"
+        "- Do **not** omit sections, headings, numbering, parties, signature blocks, or schedules.\n"
+        "- Make **only** the change implied by `user_refinement_prompt`.\n"
+        "- If adding a clause, insert it into the most relevant existing section and preserve all other text unchanged.\n"
+    )
+    retry_block = ""
+    if surgical_retry:
+        len_hint = ""
+        if isinstance(original_document_char_len, int) and original_document_char_len > 0:
+            len_hint = f" The original agreement is approximately {original_document_char_len} characters — your output must be similar in length (full document). "
+        retry_block = (
+            "\n**Second attempt (prior output was too short):** Return the **full** agreement text. "
+            "Your prior response was too short. Return the complete agreement with **only** the requested revision applied. "
+            "Do not summarize, replace, or omit sections. Copy through the entire `current_document_text`, then edit in place. "
+            "Do not shorten the document."
+            + len_hint
+            + "\n"
+        )
     return (
         "You are a precise commercial contract editor in CLAW (a product, not a law firm). The user is refining "
         "their **full agreement text** after generation.\n"
@@ -1319,7 +1362,9 @@ def _premium_refine_update_system_prompt() -> str:
         "or tighten language they asked for. Keep party names, key numbers, and business intent aligned with the intake.\n"
         "Rules: Do not invent new economics or parties. Do not strip entire sections unless the user asked. "
         "When in doubt, make a minimal, targeted edit. Plain text only (no HTML).\n"
-        "Output ONLY valid JSON, no markdown fences, with **exact** keys: "
+        + surgical_block
+        + retry_block
+        + "Output ONLY valid JSON, no markdown fences, with **exact** keys: "
         '{ "updated_document_text": string, "summary_changes": string array (1–6 short imperatives, what changed), '
         '"readiness_score": number 0–100 (higher = closer to send-ready after this pass), '
         '"suggested_next_step": "edit" | "review" | "send" }.\n'
@@ -1365,6 +1410,12 @@ def _user_payload_premium_refine(
     }
     if (body.user_refinement_prompt or "").strip():
         p["user_refinement_prompt"] = (body.user_refinement_prompt or "").strip()[:12_000]
+    if body.action == "update" and bool(getattr(body, "surgical_preserve_retry", False)):
+        p["refine_context"] = {
+            "mode": "surgical_preserve_retry",
+            "original_document_char_len": len(doc),
+            "major_headings_sample": _premium_refine_sample_major_headings(doc),
+        }
     return p
 
 
@@ -1395,7 +1446,10 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
         raise HTTPException(status_code=400, detail="Input too large for premium refine")
 
     if body.action == "update":
-        system = _premium_refine_update_system_prompt()
+        system = _premium_refine_update_system_prompt(
+            surgical_retry=bool(body.surgical_preserve_retry),
+            original_document_char_len=len(doc) if body.surgical_preserve_retry else None,
+        )
         max_out = max(2000, int(os.environ.get("CLAW_PREMIUM_REFINE_UPDATE_MAX_TOKENS", "12000")))
     elif body.action == "ask_missing":
         system = _premium_refine_ask_missing_system_prompt()
@@ -1503,7 +1557,7 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
                         _safe_record_ai_call(request, request_ip)
                         return _premium_refine_update_reject_unchanged_candidate(
                             out_narrow,
-                            current_doc=doc,
+                            current_doc=current_for_norm,
                             user_prompt=u_narrow,
                             source="narrow_amendment",
                         )
@@ -1556,7 +1610,7 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
                 )
                 return _premium_refine_update_reject_unchanged_candidate(
                     out_update,
-                    current_doc=doc,
+                    current_doc=current_for_norm,
                     user_prompt=u_narrow,
                     source="full_llm_refine",
                 )
