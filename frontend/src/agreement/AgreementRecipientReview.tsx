@@ -605,6 +605,8 @@ export function AgreementRecipientReview({
       recipientPreview.baselineHtml,
       recipientPreview.proposedHtml,
       previewDiff.hasSnapshotDiff,
+      recipientPreview.revisionText ?? "",
+      previewDiff.snapshotCompare.changedFields,
     );
     return buildLegalRedlineDocumentViewModel(currentPlain, proposedPlain);
   }, [recipientPreview, previewDiff]);
@@ -711,6 +713,8 @@ export function AgreementRecipientReview({
       baseHtml,
       propHtml,
       previewDiff.hasSnapshotDiff,
+      recipientPreview.revisionText ?? "",
+      previewDiff.snapshotCompare.changedFields,
     );
     const equalRawPlain =
       rawCur.replace(/\s+/g, " ").trim() === rawProp.replace(/\s+/g, " ").trim();
@@ -726,7 +730,8 @@ export function AgreementRecipientReview({
       proposedFingerprint: fingerprintPlainText(paired.proposedPlain),
       equalTexts: equalRawPlain,
       equalHtmlLengths: baseHtml.length === propHtml.length,
-      usedStructuredDraftTrailer: paired.currentPlain !== rawCur || paired.proposedPlain !== rawProp,
+      redlineSourceMode: paired.sourceMode,
+      usedFieldPatchBaseline: paired.sourceMode === "baseline_vs_field_patch",
       baselineSnippet: snippetAroundPaymentTerms(paired.currentPlain),
       proposedSnippet: snippetAroundPaymentTerms(paired.proposedPlain),
       changedClauseCount,
