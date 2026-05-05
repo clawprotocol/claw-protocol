@@ -485,17 +485,19 @@ test.describe("recipient + link flow QA", () => {
     await expect(legalDoc).toBeVisible();
     await expect(legalDoc).toHaveText(/\S{8,}/);
     await expect(page.getByTestId("recipient-redline-chip-insertions")).toBeVisible();
-    await expect(page.getByTestId("recipient-redline-chip-not-reflected")).toBeVisible();
+    await expect(page.getByTestId("recipient-redline-chip-not-reflected")).toHaveCount(0);
     const callout = page.getByTestId("recipient-redline-not-reflected-callout");
     await expect(callout).toBeVisible();
-    await expect(callout).toContainText(/Not reflected:/i);
-    await expect(callout).toContainText(/pause work after 15 days late/i);
+    await expect(page.getByTestId("recipient-intent-coverage-list")).toBeVisible();
+    await expect(callout).toContainText(/Added:/i);
+    await expect(callout).not.toContainText(/Could not add:/i);
     await expect(legalDoc.locator("section[data-block-kind]")).toHaveCount(4);
     await expect(legalDoc.getByTestId("recipient-redline-changed-block").first()).toBeVisible();
     const docSurface = page.getByTestId("recipient-suggested-changes-document");
     await expect(docSurface.locator('[data-redline="insert"]').first()).toBeVisible({ timeout: 12_000 });
     await expect(docSurface.locator('[data-redline="insert"]').first()).toContainText(/Net\s*30/i);
     await expect(docSurface).toContainText(/Net\s*30/i);
+    await expect(docSurface).toContainText(/pause work until all overdue/i);
 
     await expect(page.getByTestId("recipient-tab-redline")).toHaveCount(0);
     await expect(page.getByTestId("recipient-side-by-side-block-grid")).toHaveCount(0);

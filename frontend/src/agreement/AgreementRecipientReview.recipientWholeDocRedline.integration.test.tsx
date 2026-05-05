@@ -150,7 +150,7 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     vi.restoreAllMocks();
   });
 
-  it("keeps baseline structure, shows only payment insert, hides Agreement fields trailer, flags pause gap", async () => {
+  it("keeps baseline structure, applies Net 30 and pause remedy in payment block, hides Agreement fields trailer, two intents applied", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -206,23 +206,35 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     expect(legalRoot.textContent).not.toMatch(/Agreement fields \(tracked for redline\)/i);
     expect(legalRoot.textContent).not.toMatch(/Excepteur sint occaecat/i);
 
-    const insertEl = legalRoot.querySelector('[data-redline="insert"]');
-    expect(insertEl).toBeTruthy();
-    expect(insertEl?.textContent).toMatch(/Net\s*30/i);
+    const insertEls = legalRoot.querySelectorAll('[data-redline="insert"]');
+    expect(insertEls.length).toBeGreaterThan(0);
+    const insertJoined = Array.from(insertEls)
+      .map((el) => el.textContent ?? "")
+      .join(" ");
+    expect(insertJoined).toMatch(/Net\s*30/i);
+    expect(insertJoined).toMatch(/pause work until all overdue undisputed amounts are paid/i);
+    expect(insertJoined).toMatch(/fifteen \(15\)/i);
 
-    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/^1\s+insertion$/i);
+    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/^[12]\s+insertions?$/i);
     expect(screen.getByTestId("recipient-redline-chip-deletions").textContent).toMatch(/^0\s+deletion|^1\s+deletion$/i);
     expect(screen.getByTestId("recipient-redline-chip-sections").textContent).toMatch(/^1\s+changed section$/i);
+
+    expect(screen.queryByTestId("recipient-redline-chip-not-reflected")).toBeNull();
 
     for (const el of legalRoot.querySelectorAll('[data-redline="insert"], [data-redline="delete"]')) {
       const t = (el.textContent ?? "").toLowerCase();
       expect(t).not.toContain("lawdog");
       expect(t).not.toContain("in witness whereof");
+      expect(t).not.toContain("alice");
+      expect(t).not.toContain("bob");
     }
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
-    expect(callout.textContent).toMatch(/Not reflected:/i);
-    expect(callout.textContent).toMatch(/pause work after 15 days late/i);
+    expect(screen.getByTestId("recipient-intent-coverage-list")).toBeTruthy();
+    expect(callout.textContent).toMatch(/Added:/i);
+    expect(callout.textContent).not.toMatch(/Could not add:/i);
+    const list = screen.getByTestId("recipient-intent-coverage-list");
+    expect(within(list).getAllByText(/Added:/i)).toHaveLength(2);
 
     expect(screen.queryByTestId("recipient-side-by-side-block-grid")).toBeNull();
     expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();
@@ -437,6 +449,8 @@ describe("AgreementRecipientReview narrow payment redline QA (party/signature/fo
     expect(parseInt(secChip, 10)).toBeLessThanOrEqual(1);
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
-    expect(callout.textContent).toMatch(/pause work after 15 days late/i);
+    expect(callout.textContent).toMatch(/Added:/i);
+    expect(callout.textContent).not.toMatch(/Could not add:/i);
+    expect(insText).toMatch(/pause work until all overdue/i);
   });
 });

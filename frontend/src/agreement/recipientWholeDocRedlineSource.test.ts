@@ -5,6 +5,8 @@ import {
 } from "./legalRedlineBlocks";
 import {
   buildRecipientLegalRedlinePlainTexts,
+  buildRecipientPauseRemedyClause,
+  extractLatePaymentGraceDaysFromInstruction,
   extractPaymentPlacementCalloutSnippet,
   splitPlainTextAtRecipientPaymentNoiseBoundary,
 } from "./recipientWholeDocRedlineSource";
@@ -52,6 +54,22 @@ describe("extractPaymentPlacementCalloutSnippet", () => {
   });
 });
 
+describe("buildRecipientPauseRemedyClause", () => {
+  it("defaults to fifteen (15) days when instruction omits a number", () => {
+    expect(buildRecipientPauseRemedyClause("pause work after days late")).toContain("fifteen (15)");
+  });
+  it("uses explicit day count from instruction", () => {
+    expect(buildRecipientPauseRemedyClause("pause work after 21 days late")).toMatch(/twenty-one \(21\)/i);
+  });
+});
+
+describe("extractLatePaymentGraceDaysFromInstruction", () => {
+  it("parses common phrasings", () => {
+    expect(extractLatePaymentGraceDaysFromInstruction("after 15 days late")).toBe(15);
+    expect(extractLatePaymentGraceDaysFromInstruction("after 7 days late")).toBe(7);
+  });
+});
+
 describe("buildRecipientLegalRedlinePlainTexts", () => {
   it("does not append payment text when no safe payment block; placement fails closed", () => {
     const sameHtml = "<p>Standard agreement body without payment detail.</p>";
@@ -94,6 +112,11 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
     expect(r.narrowRecipientTargetedRedline).toBe(true);
     expect(r.paymentTermsInlinePlacementFailed).not.toBe(true);
     expect(r.proposedPlain.toLowerCase()).toMatch(/net\s*30/);
+    expect(r.proposedPlain).toMatch(/pause work until all overdue undisputed amounts are paid/i);
+    expect(r.proposedPlain).toMatch(/fifteen \(15\)/i);
+    const outcomes = r.instructionIntentOutcomes ?? [];
+    expect(outcomes.filter((i) => i.status === "applied")).toHaveLength(2);
+    expect(outcomes.filter((i) => i.status === "failed" || i.status === "unclear")).toHaveLength(0);
     const lawdog = r.proposedPlain.toLowerCase().indexOf("created with lawdog");
     const net = r.proposedPlain.toLowerCase().indexOf("net 30");
     expect(lawdog).toBeGreaterThan(-1);
@@ -146,6 +169,7 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
       sourceMode,
       usedNoisyReviseGuard,
       narrowRecipientTargetedRedline,
+      instructionIntentOutcomes,
     } = buildRecipientLegalRedlinePlainTexts(
       current,
       proposed,
@@ -179,5 +203,29 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
     expect(vmFiltered.stats.changedBlockCount).toBe(1);
     expect(vmFiltered.stats.insertCount).toBeGreaterThanOrEqual(1);
     expect(vmFiltered.stats.deleteCount).toBeLessThanOrEqual(1);
+    expect(proposedPlain).toMatch(/pause work until all overdue undisputed amounts are paid/i);
+    expect(instructionIntentOutcomes?.filter((i) => i.status === "applied")).toHaveLength(2);
+  });
+
+  it("when HTML has no payment anchor, narrow Net+pause instruction marks both payment-related intents failed", () => {
+    const listingOnly = "<p>Master services agreement (listing only).</p>";
+    const current = minimalDraft({ payment_terms: "Invoices are payable upon receipt." });
+    const proposed = minimalDraft({ payment_terms: "Invoices are payable Net 30." });
+    const fields = changedFieldsBetween(current, proposed);
+    const r = buildRecipientLegalRedlinePlainTexts(
+      current,
+      proposed,
+      listingOnly,
+      listingOnly,
+      true,
+      "Net 30 and pause work after 15 days late",
+      fields,
+    );
+    expect(r.paymentTermsInlinePlacementFailed).toBe(true);
+    expect(r.proposedPlain).not.toMatch(/net\s*30/i);
+    const failed = (r.instructionIntentOutcomes ?? []).filter((i) => i.status === "failed");
+    expect(failed).toHaveLength(2);
+    expect(failed.map((i) => i.category).sort()).toEqual(["payment_timing", "suspend_pause_work"].sort());
+    expect(failed.every((i) => i.reason?.includes("payment") || i.reason?.includes("safely"))).toBe(true);
   });
 });

@@ -390,6 +390,7 @@ function collapseBlockToSameOnly(b: LegalRedlineBlock): LegalRedlineBlock {
 
 function blockLooksStrongPayment(t: string): boolean {
   const s = t.toLowerCase();
+  if (/\bif\s+payment\s+is\s+more\s+than\b.*\bpause\s+work\s+until\b/i.test(s)) return true;
   return /\b(invoice|invoicing|payable|net\s*\d|payment schedule|fee schedule|compensation|past due|late payment|payment terms)\b/.test(
     s,
   );
@@ -409,7 +410,12 @@ function narrowPaymentSpuriousInsertDeleteLeak(b: LegalRedlineBlock): boolean {
     .join(" ")
     .toLowerCase();
   if (!insDel.replace(/\s+/g, "").length) return false;
-  if (/\bnet\s*\d+\b/.test(insDel) || /\b(invoice|invoices|payable|receipt|payment)\b/.test(insDel)) return false;
+  if (
+    /\bnet\s*\d+\b/.test(insDel) ||
+    /\b(invoice|invoices|payable|receipt|payment)\b/.test(insDel) ||
+    /\bpause\s+work\s+until\b/.test(insDel)
+  )
+    return false;
   return (
     /\b(in witness whereof|created with lawdog|draft for review|email for notices|execution and signature|sarah collins|anthem blanchard)\b/i.test(
       insDel,

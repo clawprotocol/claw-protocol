@@ -7,6 +7,11 @@
 import type { AgreementDraft } from "./agreementTypes";
 import type { AgreementFieldChange } from "../vs01/agreementCompare";
 import { htmlToPlainTextForLegalRedline } from "./externalAiHandoff";
+import { instructionRequestsPauseWork, pauseWorkInProposed } from "./recipientPreviewDiffModel";
+import {
+  finalizeRecipientInstructionIntents,
+  type RecipientInstructionIntent,
+} from "./recipientInstructionIntents";
 import {
   buildLegalRedlineDocumentViewModel,
   filterNarrowRecipientPaymentRedlineNoise,
@@ -94,6 +99,8 @@ export type BuildRecipientLegalRedlinePlainTextsResult = {
   narrowRecipientTargetedRedline?: boolean;
   /** Populated for narrow payment + field-patch path (diagnostics / QA). */
   recipientRedlineTargetedPatchDiag?: RecipientRedlineTargetedPatchDiag;
+  /** Per-request coverage when snapshot diff exists (applied / failed / unclear). */
+  instructionIntentOutcomes?: RecipientInstructionIntent[];
 };
 
 function replaceFirst(haystack: string, needle: string, repl: string): string {
@@ -280,6 +287,92 @@ function applyMicroNet30InLine(line: string, before: string, after: string): str
   return line;
 }
 
+/** Late-payment grace days from phrases like “after 15 days late” (default 15). */
+export function extractLatePaymentGraceDaysFromInstruction(instr: string): number {
+  const t = String(instr ?? "").toLowerCase();
+  const patterns = [
+    /after\s+(\d+)\s*days?\s*late/,
+    /(\d+)\s*days?\s*late/,
+    /more\s+than\s+(\d+)\s*days?\s*late/,
+    /pause\s+work\s+after\s+(\d+)/,
+    /(\d+)\s*days?\s*(?:past\s*due|past\s+due)/,
+  ];
+  for (const re of patterns) {
+    const m = t.match(re);
+    if (m?.[1]) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n > 0 && n < 366) return n;
+    }
+  }
+  return 15;
+}
+
+const PAUSE_REMEDY_NUMBER_WORDS: Record<number, string> = {
+  1: "one",
+  2: "two",
+  3: "three",
+  4: "four",
+  5: "five",
+  6: "six",
+  7: "seven",
+  8: "eight",
+  9: "nine",
+  10: "ten",
+  11: "eleven",
+  12: "twelve",
+  13: "thirteen",
+  14: "fourteen",
+  15: "fifteen",
+  16: "sixteen",
+  17: "seventeen",
+  18: "eighteen",
+  19: "nineteen",
+  20: "twenty",
+  21: "twenty-one",
+  22: "twenty-two",
+  23: "twenty-three",
+  24: "twenty-four",
+  25: "twenty-five",
+  26: "twenty-six",
+  27: "twenty-seven",
+  28: "twenty-eight",
+  29: "twenty-nine",
+  30: "thirty",
+};
+
+/**
+ * Plain-language nonpayment pause remedy for the payment clause (recipient preview composer).
+ */
+export function buildRecipientPauseRemedyClause(instructionPlain: string): string {
+  const n = extractLatePaymentGraceDaysFromInstruction(instructionPlain);
+  const word = PAUSE_REMEDY_NUMBER_WORDS[n] ?? String(n);
+  const digit = String(n);
+  return `If payment is more than ${word} (${digit}) days late, Developer may pause work until all overdue undisputed amounts are paid.`;
+}
+
+function appendPauseRemedyToPaymentHead(head: string, remedy: string): string {
+  const r = remedy.trim();
+  if (!r) return head;
+  const low = head.toLowerCase();
+  if (/\bpause\s+work\s+until\b/i.test(low) && /\boverdue\b/i.test(low)) return head;
+  const lines = head.split("\n");
+  const line0 = (lines[0] ?? "").trim();
+  const hasHeading =
+    /^\d+(?:\.\d+)*\.?\s+\S/.test(line0) ||
+    /^(article|section)\s+/i.test(line0) ||
+    (lines.length > 1 && line0.length < 120);
+  if (hasHeading && lines.length > 1) {
+    const body = lines.slice(1);
+    let j = body.length - 1;
+    while (j >= 0 && !body[j]!.trim()) j--;
+    if (j < 0) body.push(r);
+    else body[j] = `${body[j]!.trimEnd()} ${r}`;
+    return `${lines[0]}\n${body.join("\n")}`;
+  }
+  const base = head.trim();
+  return base ? `${base} ${r}` : r;
+}
+
 /**
  * Mutates only `head` (prefix before signature/footer noise); `tail` is preserved verbatim.
  */
@@ -340,7 +433,7 @@ function applyPaymentTermsInlinePatch(
   plain: string,
   before: string,
   after: string,
-  options?: { narrowPaymentInstruction?: boolean },
+  options?: { narrowPaymentInstruction?: boolean; instructionPlain?: string },
 ): { ok: boolean; plain: string; diag: RecipientRedlineInlinePlacementDiag; meta: ApplyPaymentTermsInlinePatchMeta } {
   const narrowMicro = Boolean(options?.narrowPaymentInstruction);
   const afterT = after.trim();
@@ -429,8 +522,20 @@ function applyPaymentTermsInlinePatch(
   const b = blocks[best]!;
   const fullRaw = b.rawText;
   const { head, tail } = splitPlainTextAtRecipientPaymentNoiseBoundary(fullRaw);
-  const patchedHead = patchPaymentTermsHeadChunk(head, before, after, narrowMicro);
-  const newRaw = patchedHead + tail;
+  let composedHead = patchPaymentTermsHeadChunk(head, before, after, narrowMicro);
+  if (
+    narrowMicro &&
+    options?.instructionPlain &&
+    instructionRequestsPauseWork(options.instructionPlain)
+  ) {
+    if (!pauseWorkInProposed(afterT, composedHead) && !pauseWorkInProposed("", composedHead)) {
+      const remedy = buildRecipientPauseRemedyClause(options.instructionPlain);
+      if (!paymentTargetHeadPoisoned(`${composedHead}\n${remedy}`)) {
+        composedHead = appendPauseRemedyToPaymentHead(composedHead, remedy);
+      }
+    }
+  }
+  const newRaw = composedHead + tail;
 
   blocks[best] = { ...b, rawText: newRaw };
   const out = rebuildPlainFromBlocks(blocks);
@@ -478,9 +583,10 @@ type FieldPatchPairResult = {
 function buildFieldPatchPair(
   baselinePlain: string,
   changedPatchableRows: AgreementFieldChange[],
-  options?: { narrowPaymentInstruction?: boolean },
+  options?: { narrowPaymentInstruction?: boolean; instructionPlain?: string },
 ): FieldPatchPairResult {
   const narrowPayment = Boolean(options?.narrowPaymentInstruction);
+  const instructionPlainOpt = typeof options?.instructionPlain === "string" ? options.instructionPlain : "";
   const inlinePlacementDiags: RecipientRedlineInlinePlacementDiag[] = [];
   let paymentTermsInlinePlacementFailed = false;
   let targetedPatchMeta: ApplyPaymentTermsInlinePatchMeta | null = null;
@@ -500,6 +606,7 @@ function buildFieldPatchPair(
       if (narrowPayment) {
         const res = applyPaymentTermsInlinePatch(proposedPlain, before, after, {
           narrowPaymentInstruction: true,
+          instructionPlain: instructionPlainOpt,
         });
         inlinePlacementDiags.push(res.diag);
         targetedPatchMeta = res.meta;
@@ -570,9 +677,34 @@ function buildFieldPatchPair(
  * @param instructionPlain — recipient free-text (guards noisy full revise HTML)
  * @param changedFields — snapshot compare rows (drives targeted patch)
  */
+function buildInstructionIntentOutcomes(
+  instructionPlain: string,
+  currentPlain: string,
+  proposedPlain: string,
+  baselineDraft: AgreementDraft,
+  proposedDraft: AgreementDraft,
+  changedFields: readonly AgreementFieldChange[],
+  paymentTermsInlinePlacementFailed: boolean | undefined,
+  narrowRecipientTargetedRedline: boolean | undefined,
+  sourceMode: RecipientWholeDocRedlineSourceMode,
+): RecipientInstructionIntent[] | undefined {
+  if (!instructionPlain.trim()) return undefined;
+  return finalizeRecipientInstructionIntents({
+    instructionPlain,
+    currentPlain,
+    proposedPlain,
+    baselineDraft,
+    proposedDraft,
+    changedFields,
+    paymentTermsInlinePlacementFailed: Boolean(paymentTermsInlinePlacementFailed),
+    narrowRecipientTargetedRedline: Boolean(narrowRecipientTargetedRedline),
+    fieldPatchDisplay: sourceMode === "baseline_vs_field_patch",
+  });
+}
+
 export function buildRecipientLegalRedlinePlainTexts(
-  _baselineDraft: AgreementDraft,
-  _proposedDraft: AgreementDraft,
+  baselineDraft: AgreementDraft,
+  proposedDraft: AgreementDraft,
   baselineHtml: string,
   proposedHtml: string,
   hasSnapshotDiff: boolean,
@@ -602,7 +734,10 @@ export function buildRecipientLegalRedlinePlainTexts(
 
   let patchPair: FieldPatchPairResult | null = null;
   if (hasPatchableDiff) {
-    patchPair = buildFieldPatchPair(cur, patchableChangedRows, { narrowPaymentInstruction: narrow });
+    patchPair = buildFieldPatchPair(cur, patchableChangedRows, {
+      narrowPaymentInstruction: narrow,
+      instructionPlain,
+    });
   }
 
   const vmPatch =
@@ -663,6 +798,18 @@ export function buildRecipientLegalRedlinePlainTexts(
       logRecipientRedlineTargetedPatch(recipientRedlineTargetedPatchDiag);
     }
 
+    const instructionIntentOutcomes = buildInstructionIntentOutcomes(
+      instructionPlain,
+      patchPair.currentPlain,
+      patchPair.proposedPlain,
+      baselineDraft,
+      proposedDraft,
+      changedFields,
+      patchPair.paymentTermsInlinePlacementFailed,
+      Boolean(narrow && usePatch),
+      "baseline_vs_field_patch",
+    );
+
     return {
       currentPlain: patchPair.currentPlain,
       proposedPlain: patchPair.proposedPlain,
@@ -672,13 +819,27 @@ export function buildRecipientLegalRedlinePlainTexts(
       inlinePlacementDiags: patchPair.inlinePlacementDiags,
       narrowRecipientTargetedRedline: Boolean(narrow && usePatch),
       recipientRedlineTargetedPatchDiag,
+      instructionIntentOutcomes,
     };
   }
+
+  const instructionIntentOutcomes = buildInstructionIntentOutcomes(
+    instructionPlain,
+    cur,
+    prop,
+    baselineDraft,
+    proposedDraft,
+    changedFields,
+    false,
+    false,
+    "baseline_vs_revise_html",
+  );
 
   return {
     currentPlain: cur,
     proposedPlain: prop,
     sourceMode: "baseline_vs_revise_html",
     narrowRecipientTargetedRedline: false,
+    instructionIntentOutcomes,
   };
 }

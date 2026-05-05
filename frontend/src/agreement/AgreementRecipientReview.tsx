@@ -28,6 +28,10 @@ import {
   filterNarrowRecipientPaymentRedlineNoise,
 } from "./legalRedlineBlocks";
 import {
+  countRecipientIntentGaps,
+  formatRecipientIntentAppliedLabel,
+} from "./recipientInstructionIntents";
+import {
   buildRecipientLegalRedlinePlainTexts,
   extractPaymentPlacementCalloutSnippet,
   fingerprintPlainText,
@@ -596,6 +600,12 @@ export function AgreementRecipientReview({
     );
   }, [recipientPreview, previewDiff]);
 
+  const recipientIntentGapCount = useMemo(() => {
+    const o = recipientRedlinePlainTexts?.instructionIntentOutcomes;
+    if (o && o.length > 0) return countRecipientIntentGaps(o);
+    return previewDiff?.instructionCaptureWarning ? 1 : 0;
+  }, [recipientRedlinePlainTexts?.instructionIntentOutcomes, previewDiff?.instructionCaptureWarning]);
+
   const legalRedlineDocumentBaseVm = useMemo(() => {
     if (!recipientRedlinePlainTexts) return null;
     let vm = buildLegalRedlineDocumentViewModel(
@@ -612,9 +622,9 @@ export function AgreementRecipientReview({
     if (!legalRedlineDocumentBaseVm || !previewDiff) return legalRedlineDocumentBaseVm;
     return {
       ...legalRedlineDocumentBaseVm,
-      requestedNotReflectedCount: previewDiff.instructionCaptureWarning ? 1 : 0,
+      requestedNotReflectedCount: recipientIntentGapCount,
     };
-  }, [legalRedlineDocumentBaseVm, previewDiff]);
+  }, [legalRedlineDocumentBaseVm, previewDiff, recipientIntentGapCount]);
 
   useEffect(() => {
     if (!recipientPreview || !previewDiff || !legalRedlineDocumentVm) return;
@@ -1162,17 +1172,55 @@ export function AgreementRecipientReview({
                 {legalRedlineDocumentVm.stats.changedBlockCount} changed section
                 {legalRedlineDocumentVm.stats.changedBlockCount === 1 ? "" : "s"}
               </span>
-              {previewDiff.instructionCaptureWarning ? (
+              {recipientIntentGapCount > 0 ? (
                 <span
                   data-testid="recipient-redline-chip-not-reflected"
                   className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-100"
                 >
-                  {(legalRedlineDocumentVm.requestedNotReflectedCount ?? 0) || 1} request not reflected
+                  {recipientIntentGapCount} request{recipientIntentGapCount === 1 ? "" : "s"} to review
                 </span>
               ) : null}
             </div>
 
-            {previewDiff.instructionCaptureWarning ? (
+            {recipientRedlinePlainTexts?.instructionIntentOutcomes &&
+            recipientRedlinePlainTexts.instructionIntentOutcomes.length > 0 ? (
+              <div
+                className="mt-3 rounded-md border border-amber-600/55 bg-amber-950/35 px-3 py-2.5 text-sm leading-snug text-amber-50"
+                data-testid="recipient-redline-not-reflected-callout"
+                role="status"
+              >
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-100/90">Request status</p>
+                <ul className="space-y-2.5" data-testid="recipient-intent-coverage-list">
+                  {recipientRedlinePlainTexts.instructionIntentOutcomes.map((it) => (
+                    <li key={it.id} className="rounded-md border border-amber-700/35 bg-amber-950/25 px-2.5 py-2">
+                      {it.status === "applied" ? (
+                        <p className="text-[13px] leading-snug text-emerald-100/95">
+                          ✓ Added: {formatRecipientIntentAppliedLabel(it)}
+                        </p>
+                      ) : it.status === "unclear" ? (
+                        <>
+                          <p className="text-[13px] leading-snug text-amber-50">
+                            ? Clarification needed: &quot;{it.normalizedIntent}&quot;
+                          </p>
+                          {it.reason ? (
+                            <p className="mt-1 text-[11px] leading-snug text-amber-100/85">{it.reason}</p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-[13px] leading-snug text-amber-50">
+                            ⚠ Could not add: {it.normalizedIntent}
+                          </p>
+                          {it.reason ? (
+                            <p className="mt-1 text-[11px] leading-snug text-amber-100/85">Reason: {it.reason}</p>
+                          ) : null}
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : previewDiff.instructionCaptureWarning ? (
               <p
                 className="mt-3 rounded-md border border-amber-600/55 bg-amber-950/35 px-3 py-2.5 text-sm leading-snug text-amber-50"
                 data-testid="recipient-redline-not-reflected-callout"

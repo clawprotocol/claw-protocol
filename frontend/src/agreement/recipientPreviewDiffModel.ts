@@ -418,7 +418,9 @@ function extractPauseWorkBullet(text: string): string | null {
   const hasPauseWork =
     /\bpause\s+work\b|\bmay\s+pause\b|\bpause\s+work\s+after\b|\bpause\s+work\s+if\b|\bsuspend\s+work\b|\bsuspend\b.*\bwork\b|\bpause\b.*\bwork\b.*\blate\b/i.test(
       t,
-    );
+    ) ||
+    /\bif\s+payment\s+is\s+more\s+than\b.*\bdays?\s+late\b/i.test(t) ||
+    /\bpause\s+work\s+until\s+all\s+overdue\b/i.test(t);
   if (!hasPauseWork) return null;
   const dm = t.match(
     /more\s+than\s+(\d+)\s*days?\s+late|(\d+)\s*days?\s*(?:past\s*due|late)|after\s+(\d+)\s*days?\s*late/i,
@@ -446,7 +448,7 @@ export function extractPauseRequestPhrase(instr: string): string | null {
   return m ? m[0].trim().replace(/\s+/g, " ") : null;
 }
 
-function pauseWorkInProposed(afterField: string, proposedRenderedPlain?: string): boolean {
+export function pauseWorkInProposed(afterField: string, proposedRenderedPlain?: string): boolean {
   return !!(
     extractPauseWorkBullet(afterField) ||
     (proposedRenderedPlain && extractPauseWorkBullet(proposedRenderedPlain))
