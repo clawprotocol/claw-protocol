@@ -12,18 +12,22 @@ export const BANNED_HOSTILE_REVIEW_TOKENS = [
   "fight",
 ] as const;
 
-export const BRING_BACK_SUGGESTED_EDITS_TITLE = "Bring back suggested edits";
+/** Section heading in recipient “suggest changes” flow (replaces legacy “Bring back suggested edits”). */
+export const BRING_BACK_SUGGESTED_EDITS_TITLE = "Suggest changes";
 export const UNIVERSAL_REVIEW_INTRO =
-  "Use LawDog Assist, your lawyer, your own AI tool, or Word. Paste suggested edits here and LawDog will organize the differences.";
+  "Write comments, paste revised wording, or upload an edited draft. LawDog will help organize the differences.";
 
-export const MODE_SUGGEST_PLAIN_ENGLISH = "Suggest in plain English";
+export const MODE_SUGGEST_PLAIN_ENGLISH = "Write suggestions";
 export const MODE_PASTE_REVISED_DRAFT = "Paste revised draft";
 export const MODE_UPLOAD_FILE = "Upload file";
-export const UPLOAD_FILE_COMPARISON_COMING_SOON = "Upload file comparison coming soon.";
+export const UPLOAD_FILE_COMPARISON_COMING_SOON = "Upload comparison coming soon.";
 
-/** Shown under the universal intro in recipient review. */
+/** Shown under the universal intro in recipient review (legacy scan set / tests). */
 export const NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE =
-  "Nothing changes for the agreement until both sides confirm.";
+  "Nothing changes the owner's draft until they accept it.";
+
+export const REVIEWER_OWNER_ACCEPTS_LINE = "The owner reviews and accepts changes.";
+export const REVIEWER_NOT_AUTOMATIC_LINE = "Nothing here changes the agreement automatically.";
 
 export const MATERIAL_CHANGE_SUMMARY_LABEL = "Material change summary";
 
@@ -55,6 +59,8 @@ export function allReviewIntakeQaStringScanSet(): string[] {
     MODE_UPLOAD_FILE,
     UPLOAD_FILE_COMPARISON_COMING_SOON,
     NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE,
+    REVIEWER_OWNER_ACCEPTS_LINE,
+    REVIEWER_NOT_AUTOMATIC_LINE,
     MATERIAL_CHANGE_SUMMARY_LABEL,
     OWNER_INCOMING_SUGGESTED_EDITS_HEADING,
     PLAIN_ENGLISH_FIELD_LABEL,
