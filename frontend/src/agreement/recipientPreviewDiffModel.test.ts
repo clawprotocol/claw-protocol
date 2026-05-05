@@ -80,15 +80,15 @@ describe("recipientPreviewDiffModel", () => {
     ]);
   });
 
-  it("Net 30 + pause-if-late builds two clause cards with plain-English reasons", () => {
+  it("Net 30 + pause-if-late in payment_terms alone yields two semantic units on one card", () => {
     const base = baseDraft({
       purpose: "Custom software development.",
-      payment_terms: "Net 15.",
+      payment_terms: "Net 15. Invoices due on receipt.",
     });
     const proposed = baseDraft({
-      payment_terms: "Net 30. Net 15.",
-      purpose:
-        "Custom software development. The developer may pause work if payment is more than 15 days late until amounts are brought current.",
+      purpose: "Custom software development.",
+      payment_terms:
+        "Net 30. Invoices due within 30 days. The developer may pause work if payment is more than 15 days late until amounts are brought current.",
     });
     const a = assessRecipientPreviewDiff(
       base,
@@ -100,13 +100,18 @@ describe("recipientPreviewDiffModel", () => {
     expect(a.isCompleteNoOp).toBe(false);
     expect(a.canSubmit).toBe(true);
     const cards = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff);
-    expect(cards.length).toBeGreaterThanOrEqual(2);
     const pay = cards.find((c) => c.id === "payment_terms");
-    const pur = cards.find((c) => c.id === "purpose");
+    expect(cards.filter((c) => c.id === "purpose")).toEqual([]);
     expect(pay?.proposedText).toMatch(/Net 30/i);
-    expect(pur?.reason.toLowerCase()).toMatch(/pause/);
+    expect(pay?.whatChangedBullets.some((b) => /Payment timing changed to Net 30/i.test(b))).toBe(true);
+    expect(
+      pay?.whatChangedBullets.some((b) => /pause work.*more than 15 days late/i.test(b)),
+    ).toBe(true);
+    expect(pay?.fieldRedline?.hasChanges).toBe(true);
+    expect(pay?.reason.toLowerCase()).toMatch(/pause|net/);
     const bullets = getRecipientPreviewSummaryBullets(a);
     expect(bullets[0]).toMatch(/2 suggested changes detected/);
+    expect(bullets.some((b) => /Pause-work right added for late payment/i.test(b))).toBe(true);
     expect(recipientSendConfirmationLine(a)).toMatch(/2 suggested changes/);
   });
 

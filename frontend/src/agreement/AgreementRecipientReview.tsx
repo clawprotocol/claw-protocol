@@ -23,6 +23,7 @@ import {
   recipientPreviewNoOpMessage,
   recipientSendConfirmationLine,
 } from "./recipientPreviewDiffModel";
+import { RecipientChangedClauseCard } from "./RecipientChangedClauseCard";
 import { RecipientRedlineInline } from "./RecipientRedlineInline";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
@@ -570,6 +571,33 @@ export function AgreementRecipientReview({
 
   const redlineNoisy = Boolean(previewDiff && isRecipientRedlineConsideredNoisy(previewDiff));
 
+  const recipientClauseDiagKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (!recipientPreview) {
+      recipientClauseDiagKeyRef.current = "";
+      return;
+    }
+    if (!previewDiff) return;
+    const diag =
+      import.meta.env.DEV ||
+      (typeof window !== "undefined" && window.localStorage?.getItem("lawdogRecipientReviseDiag") === "1");
+    if (!diag) return;
+    const key = `${agreementId}:${recipientPreview.revisionText ?? ""}:${recipientPreview.proposedDraft.updated_at ?? ""}`;
+    if (key === recipientClauseDiagKeyRef.current) return;
+    recipientClauseDiagKeyRef.current = key;
+    const cards = buildRecipientClauseCards(previewDiff.snapshotCompare, previewDiff.hasMaterialTextDiff);
+    for (const c of cards) {
+      // eslint-disable-next-line no-console
+      console.info("[recipient-changed-clause-card]", {
+        id: c.id,
+        fieldsChanged: [c.id],
+        bullets: c.whatChangedBullets,
+        excerptLength: Math.max(c.currentText.length, c.proposedText.length),
+        hasInlineRedline: Boolean(c.fieldRedline?.hasChanges),
+      });
+    }
+  }, [agreementId, previewDiff, recipientPreview]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -1032,21 +1060,7 @@ export function AgreementRecipientReview({
               fields.
             </p>
             {clauseCards.map((card) => (
-              <div
-                key={card.id}
-                className="rounded-md border border-slate-700/80 bg-slate-950/40 px-3 py-2.5 text-[11px] leading-snug text-slate-100"
-              >
-                <div className="font-semibold text-slate-100">{card.sectionLabel}</div>
-                <div className="mt-2 text-slate-400">
-                  <span className="font-medium text-slate-500">Current: </span>
-                  <span className="text-slate-300">{card.currentText}</span>
-                </div>
-                <div className="mt-1 text-slate-200">
-                  <span className="font-medium text-emerald-200/90">Proposed: </span>
-                  <span>{card.proposedText}</span>
-                </div>
-                <p className="mt-2 border-t border-slate-800/80 pt-2 text-[10px] italic text-slate-400">{card.reason}</p>
-              </div>
+              <RecipientChangedClauseCard key={card.id} card={card} />
             ))}
             {redlineNoisy ? (
               <p className="text-[10px] text-slate-500">
