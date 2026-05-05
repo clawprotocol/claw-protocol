@@ -1,5 +1,6 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { agreementMagicLinkPath } from "../../agreement/AgreementRecipientReview";
+import type { MintRecipientAccessTokenSuccess } from "../../agreement/recipientAccessApi";
 import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
 import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } from "./reviewLinkRecipientEmailMerge";
 
@@ -92,6 +93,29 @@ export function clearSimpleDoneReviewRecipientLinks(agreementId: string): void {
   }
 }
 
+export const REVIEW_LINK_MINT_FAILURE_USER_COPY =
+  "Review link could not be created. Please check the recipient email and try again.";
+
+/** True when at least one row has a non-empty review href (caller’s success gate for navigation). */
+export function reviewLinkMintHasUsableUrls(rows: Pick<SimpleDoneReviewRecipientLinkRow, "reviewHref">[]): boolean {
+  return rows.some((r) => typeof r.reviewHref === "string" && r.reviewHref.trim().length > 0);
+}
+
+function resolveReviewHrefFromMint(
+  agreementId: string,
+  origin: string,
+  data: MintRecipientAccessTokenSuccess,
+): string {
+  const url = (data.review_url || "").trim();
+  if (url) {
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    return `${origin}${url.startsWith("/") ? url : `/${url}`}`;
+  }
+  const tok = (data.token || "").trim();
+  if (!tok) return "";
+  return `${origin}${agreementMagicLinkPath(agreementId, tok)}`;
+}
+
 /** Mint personal review magic links for each counterparty row that passes review-link readiness (non-owner). */
 export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   agreementId: string;
@@ -100,6 +124,8 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   rows: SimpleDoneReviewRecipientLinkRow[];
   attemptedMintCount: number;
   firstErrorStatus?: number;
+  lastMintErrorDetail?: string;
+  lastMintErrorCode?: string;
 }> {
   const mintKey =
     (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env?.VITE_RECIPIENT_LINK_MINT_KEY ||
@@ -112,6 +138,8 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   const out: SimpleDoneReviewRecipientLinkRow[] = [];
   let attemptedMintCount = 0;
   let firstErrorStatus: number | undefined;
+  let lastMintErrorDetail: string | undefined;
+  let lastMintErrorCode: string | undefined;
   for (let i = 0; i < list.length; i++) {
     if (i === ownerIdx) continue;
     const p = list[i]!;
@@ -133,13 +161,20 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
     );
     if (!res.ok) {
       if (firstErrorStatus === undefined) firstErrorStatus = res.status;
+      lastMintErrorDetail = res.detail ?? res.message;
+      lastMintErrorCode = res.code;
       continue;
     }
-    const token = res.data.token;
-    const reviewHref = `${origin}${agreementMagicLinkPath(args.agreementId, token)}`;
+    const reviewHref = resolveReviewHrefFromMint(args.agreementId, origin, res.data).trim();
+    if (!reviewHref) {
+      if (firstErrorStatus === undefined) firstErrorStatus = 200;
+      lastMintErrorDetail = "empty_review_href";
+      lastMintErrorCode = "empty_review_href";
+      continue;
+    }
     const displayName = String(p.name || "").trim() || "Recipient";
     const recipientEmail = String((p as { email?: string }).email ?? "").trim() || undefined;
     out.push({ displayName, reviewHref, ...(recipientEmail ? { recipientEmail } : {}) });
   }
-  return { rows: out, attemptedMintCount, firstErrorStatus };
+  return { rows: out, attemptedMintCount, firstErrorStatus, lastMintErrorDetail, lastMintErrorCode };
 }

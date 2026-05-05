@@ -38,6 +38,8 @@ import {
 import {
   clearSimpleDoneReviewRecipientLinks,
   mintSimpleDoneReviewRecipientLinkRows,
+  reviewLinkMintHasUsableUrls,
+  REVIEW_LINK_MINT_FAILURE_USER_COPY,
   writeSimpleDoneReviewRecipientLinks,
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
@@ -105,6 +107,8 @@ export function SimpleSendPage(props: { agreementId: string }) {
   const { agreementId } = props;
   const { navigate, pathname } = useLaunchNav();
   const [flash, setFlash] = useState<"draft_ready" | null>(null);
+  /** Inline error when review-link mint yields no usable URLs (stay on /app/send). */
+  const [reviewLinkMintFailure, setReviewLinkMintFailure] = useState<string | null>(null);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallCopy, setPaywallCopy] = useState<{ headline: string; sub: string } | null>(null);
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
@@ -662,7 +666,8 @@ export function SimpleSendPage(props: { agreementId: string }) {
           }}
           onBackToNew={navigateBackToCreateForEdit}
           onPaidProSendBranchMeta={setPaidProSendBranch}
-          onSimpleFlowContinue={() => {
+          reviewLinkMintFailureMessage={reviewLinkMintFailure}
+          onSimpleFlowContinue={async () => {
             if (simpleFlowPhase === "review") {
               logProductEvent("send_clicked", { agreementId, phase: "review" });
               const blockPaywall =
@@ -692,68 +697,90 @@ export function SimpleSendPage(props: { agreementId: string }) {
               }
               return;
             }
-            clearPersistedSendPhase(agreementId);
-            void (async () => {
-              const id = agreementId.trim();
-              const draft =
-                bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
-              const shortAgIdForMintLog = (aid: string) => {
-                const t = aid.trim();
-                return t.length <= 12 ? t : `${t.slice(0, 8)}…`;
-              };
-              if (simpleFlowPremiumHandoffIntent === "review" && id) {
-                let linkRows: SimpleDoneReviewRecipientLinkRow[] = [];
-                let attemptedMintCount = 0;
-                let firstErrorStatus: number | undefined;
-                let mintThrew = false;
-                try {
-                  if (draft) {
-                    const minted = await mintSimpleDoneReviewRecipientLinkRows({ agreementId: id, draft });
-                    linkRows = minted.rows;
-                    attemptedMintCount = minted.attemptedMintCount;
-                    firstErrorStatus = minted.firstErrorStatus;
-                  }
-                } catch {
-                  mintThrew = true;
-                  linkRows = [];
+            const id = agreementId.trim();
+            const draft =
+              bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+            const shortAgIdForMintLog = (aid: string) => {
+              const t = aid.trim();
+              return t.length <= 12 ? t : `${t.slice(0, 8)}…`;
+            };
+
+            if (simpleFlowPremiumHandoffIntent === "review" && id) {
+              setReviewLinkMintFailure(null);
+              let linkRows: SimpleDoneReviewRecipientLinkRow[] = [];
+              let attemptedMintCount = 0;
+              let firstErrorStatus: number | undefined;
+              let lastMintErrorDetail: string | undefined;
+              let lastMintErrorCode: string | undefined;
+              let mintThrew = false;
+              try {
+                if (draft) {
+                  const minted = await mintSimpleDoneReviewRecipientLinkRows({ agreementId: id, draft });
+                  linkRows = minted.rows;
+                  attemptedMintCount = minted.attemptedMintCount;
+                  firstErrorStatus = minted.firstErrorStatus;
+                  lastMintErrorDetail = minted.lastMintErrorDetail;
+                  lastMintErrorCode = minted.lastMintErrorCode;
                 }
-                const reviewLinksPending =
-                  linkRows.length === 0 && (attemptedMintCount > 0 || mintThrew || !draft);
-                const successCount = linkRows.length;
-                const mintStatus =
-                  !draft || mintThrew
-                    ? "exception_or_no_draft"
-                    : successCount > 0
-                      ? "ok"
-                      : attemptedMintCount > 0
-                        ? "partial_failure"
-                        : "skipped_no_counterparties";
+              } catch {
+                mintThrew = true;
+                linkRows = [];
+              }
+              const successCount = linkRows.filter((r) => r.reviewHref?.trim()).length;
+              const mintStatus =
+                !draft || mintThrew
+                  ? "exception_or_no_draft"
+                  : successCount > 0
+                    ? "ok"
+                    : attemptedMintCount > 0
+                      ? "partial_failure"
+                      : "skipped_no_counterparties";
+              // eslint-disable-next-line no-console
+              console.info("[review-link-mint]", {
+                attemptedCount: attemptedMintCount,
+                successCount,
+                status: mintStatus,
+                ...(typeof firstErrorStatus === "number" ? { httpStatus: firstErrorStatus } : {}),
+                agreementIdShort: shortAgIdForMintLog(id),
+              });
+
+              const mintSucceeded = reviewLinkMintHasUsableUrls(linkRows);
+              if (!mintSucceeded) {
+                clearSimpleDoneReviewRecipientLinks(id);
+                persistSendPhase(agreementId);
                 // eslint-disable-next-line no-console
-                console.info("[review-link-mint]", {
+                console.info("[review-link-create-failed]", {
+                  agreementIdShort: shortAgIdForMintLog(id),
                   attemptedCount: attemptedMintCount,
                   successCount,
-                  status: mintStatus,
                   ...(typeof firstErrorStatus === "number" ? { httpStatus: firstErrorStatus } : {}),
-                  agreementIdShort: shortAgIdForMintLog(id),
+                  ...(lastMintErrorCode ? { errorCode: lastMintErrorCode } : {}),
+                  ...(lastMintErrorDetail ? { errorMessage: lastMintErrorDetail } : {}),
                 });
-                writeSimpleDoneReviewRecipientLinks({
-                  agreementId: id,
-                  recipients: linkRows,
-                  ...(reviewLinksPending ? { reviewLinksPending: true } : {}),
-                });
-                // eslint-disable-next-line no-console
-                console.info("[review-link-created]", {
-                  agreementId: id,
-                  hasReviewUrl: linkRows.length > 0,
-                  recipientCount: linkRows.length,
-                });
-              } else if (id) {
-                clearSimpleDoneReviewRecipientLinks(id);
+                setReviewLinkMintFailure(REVIEW_LINK_MINT_FAILURE_USER_COPY);
+                return;
               }
+
+              // eslint-disable-next-line no-console
+              console.info("[review-link-create-success]", {
+                agreementIdShort: shortAgIdForMintLog(id),
+                recipientCount: linkRows.length,
+              });
+              clearPersistedSendPhase(agreementId);
+              writeSimpleDoneReviewRecipientLinks({ agreementId: id, recipients: linkRows });
               markSimpleFlowSent(agreementId);
               emitActionCompleted("send", { agreementId });
               navigate(`/app/done/${encodeURIComponent(id || agreementId)}`);
-            })();
+              return;
+            }
+
+            clearPersistedSendPhase(agreementId);
+            if (id) {
+              clearSimpleDoneReviewRecipientLinks(id);
+            }
+            markSimpleFlowSent(agreementId);
+            emitActionCompleted("send", { agreementId });
+            navigate(`/app/done/${encodeURIComponent(id || agreementId)}`);
           }}
           onSimpleFlowBack={() => {
             if (simpleFlowPhase === "send") {

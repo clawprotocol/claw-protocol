@@ -2,8 +2,15 @@ import { clawAgreementHeaders } from "./agreementOrgHeaders";
 import { loadRecipientMagicLinkSession } from "./recipientMagicLinkSession";
 
 import { resolveApiBase } from "../lib/clawApi";
+import {
+  normalizeMintRecipientAccessTokenBody,
+  type MintRecipientAccessTokenSuccess,
+} from "./recipientAccessMintNormalize";
 
 const API_BASE = resolveApiBase();
+
+export type { MintRecipientAccessTokenSuccess };
+export { normalizeMintRecipientAccessTokenBody };
 
 export type RecipientAccessPolicy = {
   recipient_link_token_required: boolean;
@@ -87,15 +94,9 @@ export async function validateRecipientAccessToken(
   return { ok: true, data: raw as ValidatedRecipientAccess };
 }
 
-export type MintRecipientAccessTokenSuccess = {
-  token: string;
-  expires_in_seconds: number;
-  locked_version_id: string;
-};
-
 export type MintRecipientAccessTokenResult =
   | { ok: true; data: MintRecipientAccessTokenSuccess }
-  | { ok: false; status: number; detail?: string };
+  | { ok: false; status: number; detail?: string; code?: string; message?: string };
 
 /** Same as POST mint but surfaces HTTP status (e.g. 409) for recoverable routing without guessing from null. */
 export async function mintRecipientAccessTokenResult(
@@ -125,13 +126,26 @@ export async function mintRecipientAccessTokenResult(
       raw && typeof raw === "object" && "detail" in raw
         ? String((raw as { detail?: unknown }).detail ?? "")
         : "";
-    return { ok: false, status: res.status, detail: detail || undefined };
+    let code: string | undefined;
+    let message: string | undefined;
+    const d = raw && typeof raw === "object" ? (raw as { detail?: unknown }).detail : undefined;
+    if (d && typeof d === "object") {
+      const o = d as Record<string, unknown>;
+      if (typeof o.code === "string") code = o.code;
+      if (typeof o.message === "string") message = o.message;
+    }
+    return { ok: false, status: res.status, detail: detail || undefined, code, message };
   }
-  const data = raw as MintRecipientAccessTokenSuccess;
-  if (!data?.token?.trim() || !data?.locked_version_id?.trim()) {
-    return { ok: false, status: res.status || 500, detail: "invalid_mint_payload" };
+  const normalized = normalizeMintRecipientAccessTokenBody(raw, body.recipient_party_id);
+  if (!normalized) {
+    return { ok: false, status: res.status, detail: "invalid_mint_payload", code: "invalid_mint_payload" };
   }
-  return { ok: true, data };
+  const hasToken = Boolean(normalized.token?.trim());
+  const hasReviewUrl = Boolean(normalized.review_url?.trim());
+  if (!hasToken && !hasReviewUrl) {
+    return { ok: false, status: res.status, detail: "invalid_mint_payload", code: "invalid_mint_payload" };
+  }
+  return { ok: true, data: normalized };
 }
 
 export async function mintRecipientAccessToken(
@@ -149,7 +163,13 @@ export async function mintRecipientAccessToken(
 ): Promise<{ token: string; expires_in_seconds: number; locked_version_id: string } | null> {
   const r = await mintRecipientAccessTokenResult(agreementId, body, mintKey);
   if (!r.ok) return null;
-  return r.data;
+  const tok = r.data.token?.trim();
+  if (!tok) return null;
+  return {
+    token: tok,
+    expires_in_seconds: r.data.expires_in_seconds,
+    locked_version_id: r.data.locked_version_id.trim() || "unknown",
+  };
 }
 
 export async function putSigningLock(

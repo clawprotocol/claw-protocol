@@ -145,7 +145,9 @@ export async function resolvePremiumSenderFirstSigningPath(params: {
   );
   if (firstMint.ok) {
     const d = firstMint.data;
-    const path = agreementSigningPath(id, d.locked_version_id.trim(), d.token.trim(), ownerPid);
+    const tok = (d.token || "").trim();
+    if (!tok) return null;
+    const path = agreementSigningPath(id, d.locked_version_id.trim(), tok, ownerPid);
     devSenderFirstProfessionalRoute({
       agreementId: id,
       ownerPartyId: ownerPid ?? null,
@@ -247,7 +249,9 @@ export async function resolvePremiumSenderFirstSigningPath(params: {
       return null;
     }
     const d = last.data;
-    const path = agreementSigningPath(id, d.locked_version_id.trim(), d.token.trim(), ownerPid);
+    const tokRemint = (d.token || "").trim();
+    if (!tokRemint) return null;
+    const path = agreementSigningPath(id, d.locked_version_id.trim(), tokRemint, ownerPid);
     devSenderFirstProfessionalRoute({
       agreementId: id,
       ownerPartyId: ownerPid ?? null,

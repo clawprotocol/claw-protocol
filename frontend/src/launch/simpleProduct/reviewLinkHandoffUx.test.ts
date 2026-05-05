@@ -16,11 +16,13 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toMatch(/Your Agreement/);
   });
 
-  it("SimpleSendPage uses owner prep title and review-link-created log", () => {
+  it("SimpleSendPage uses owner prep title and success/fail mint logs", () => {
     const p = join(__dirname, "SimpleSendPage.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("Prepare review link");
-    expect(s).toContain("[review-link-created]");
+    expect(s).toContain("[review-link-create-success]");
+    expect(s).toContain("[review-link-create-failed]");
+    expect(s).not.toContain("[review-link-created]");
   });
 
   it("AgreementReview exposes confirmation-step CTAs for review path", () => {

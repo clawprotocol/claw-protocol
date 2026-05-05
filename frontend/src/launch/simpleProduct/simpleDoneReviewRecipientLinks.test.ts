@@ -3,6 +3,8 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
   readSimpleDoneReviewRecipientLinks,
+  reviewLinkMintHasUsableUrls,
+  REVIEW_LINK_MINT_FAILURE_USER_COPY,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
 
@@ -52,6 +54,23 @@ describe("simpleDoneReviewRecipientLinks session handoff", () => {
     const read = readSimpleDoneReviewRecipientLinks("ag_pending");
     expect(read?.recipients.length).toBe(0);
     expect(read?.reviewLinksPending).toBe(true);
+  });
+});
+
+describe("reviewLinkMintHasUsableUrls", () => {
+  it("is false for empty hrefs", () => {
+    expect(reviewLinkMintHasUsableUrls([{ reviewHref: "" }, { reviewHref: "  " }])).toBe(false);
+  });
+
+  it("is true when any href is non-empty", () => {
+    expect(reviewLinkMintHasUsableUrls([{ reviewHref: "https://x/r" }])).toBe(true);
+  });
+});
+
+describe("REVIEW_LINK_MINT_FAILURE_USER_COPY", () => {
+  it("matches SimpleSendPage inline error contract", () => {
+    expect(REVIEW_LINK_MINT_FAILURE_USER_COPY).toContain("Review link could not be created");
+    expect(REVIEW_LINK_MINT_FAILURE_USER_COPY).toContain("recipient email");
   });
 });
 
@@ -117,5 +136,61 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     expect(rows.length).toBe(0);
     expect(attemptedMintCount).toBe(1);
     expect(firstErrorStatus).toBe(503);
+  });
+
+  it("HTTP 200 + review_url only (no token) still produces a row", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          review_url: "/agreements/ag_mint/review?t=tok_from_url",
+          locked_version_id: "lv_url",
+          expires_in_seconds: 3600,
+        }),
+      })) as unknown as typeof fetch,
+    );
+    const draft = {
+      id: "ag_mint",
+      parties: [
+        { id: "p_owner", name: "Owner", role: "owner", email: "o@example.com" },
+        { id: "p_rev", name: "Sarah Collins", role: "reviewer", email: "sarah@example.com" },
+      ],
+    } as AgreementDraft;
+    const { rows, attemptedMintCount } = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: "ag_mint",
+      draft,
+    });
+    expect(attemptedMintCount).toBe(1);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.reviewHref).toContain("/agreements/ag_mint/review?t=tok_from_url");
+  });
+
+  it("HTTP 200 with empty payload yields no rows and no firstErrorStatus from HTTP", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      })) as unknown as typeof fetch,
+    );
+    const draft = {
+      id: "ag_empty",
+      parties: [
+        { id: "p_owner", name: "Owner", role: "owner", email: "o@example.com" },
+        { id: "p_rev", name: "R", role: "reviewer", email: "r@example.com" },
+      ],
+    } as AgreementDraft;
+    const { rows, attemptedMintCount, firstErrorStatus, lastMintErrorCode } =
+      await mintSimpleDoneReviewRecipientLinkRows({
+        agreementId: "ag_empty",
+        draft,
+      });
+    expect(attemptedMintCount).toBe(1);
+    expect(rows.length).toBe(0);
+    expect(firstErrorStatus).toBe(200);
+    expect(lastMintErrorCode).toBe("invalid_mint_payload");
   });
 });

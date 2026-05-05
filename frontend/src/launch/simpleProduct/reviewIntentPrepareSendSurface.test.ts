@@ -11,6 +11,11 @@ describe("Review intent /app/send prepare surface (paid Pro handoff)", () => {
     expect(s).toContain("Choose who can review this agreement. Nothing is signed.");
   });
 
+  it("AgreementReview accepts parent review-link mint failure banner prop", () => {
+    const s = readFileSync(agreementReview, "utf8");
+    expect(s).toContain("reviewLinkMintFailureMessage");
+  });
+
   it("AgreementReview gates LawDog Pro active strip behind review-link handoff flag", () => {
     const s = readFileSync(agreementReview, "utf8");
     expect(s).toContain("simpleHomePaidReviewLinkHandoff");

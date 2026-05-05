@@ -100,6 +100,10 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("try {");
     expect(s).toContain("mintThrew");
     expect(s).toContain("[review-link-mint]");
+    expect(s).toContain("[review-link-create-success]");
+    expect(s).toContain("[review-link-create-failed]");
+    expect(s).toContain("reviewLinkMintHasUsableUrls");
+    expect(s).not.toContain("[review-link-created]");
     expect(s).toContain("markSimpleFlowSent(agreementId)");
     expect(s).toContain("navigate(`/app/done/${encodeURIComponent(id || agreementId)}`)");
   });

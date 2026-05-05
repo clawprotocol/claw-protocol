@@ -382,7 +382,9 @@ type Props = {
   /** Workspace details step only: server payload could not be normalized to a safe shape — recover from Step 1. */
   onWorkspaceDetailsNotReady?: () => void;
   /** Simple launch flow: dominant footer action after review (e.g. continue to proof / done). */
-  onSimpleFlowContinue?: () => void;
+  onSimpleFlowContinue?: () => void | Promise<void>;
+  /** Parent-owned banner after review-link mint produced no usable URLs (stay on send). */
+  reviewLinkMintFailureMessage?: string | null;
   /** Simple launch flow: quiet secondary back (e.g. to create). */
   onSimpleFlowBack?: () => void;
   /** Simple launch: REVIEW vs SEND column — controls footer labels and when sharing UI is shown. */
@@ -754,6 +756,7 @@ const AgreementReview: React.FC<Props> = ({
   onPaidProSendBranchMeta,
   postVs01SignatureFirstLanding = false,
   onBridgeHandoffDraftSnapshot,
+  reviewLinkMintFailureMessage = null,
 }) => {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState<string>("");
@@ -2377,7 +2380,7 @@ const AgreementReview: React.FC<Props> = ({
     try {
       await saveField("payment_request", simplePayForm);
       await saveField("payment_required", simplePaymentRequired);
-      onSimpleFlowContinue();
+      await Promise.resolve(onSimpleFlowContinue?.());
     } catch {
       /* saveField sets error */
     } finally {
@@ -2447,7 +2450,7 @@ const AgreementReview: React.FC<Props> = ({
     try {
       await saveField("payment_required", false);
       await saveField("payment_request", null);
-      onSimpleFlowContinue();
+      await Promise.resolve(onSimpleFlowContinue?.());
       logReviewLinkAction("advance_confirm_flow");
     } catch {
       /* saveField sets error */
@@ -6273,6 +6276,14 @@ const AgreementReview: React.FC<Props> = ({
 
               {premiumLawdogSimpleHome ? (
                 <>
+                  {reviewLinkMintFailureMessage && isSimpleHomeReview && simpleFlowPhase === "send" ? (
+                    <div
+                      className="rounded-lg border border-rose-800/45 bg-rose-950/25 px-4 py-3 text-sm leading-snug text-rose-50/95"
+                      role="alert"
+                    >
+                      {reviewLinkMintFailureMessage}
+                    </div>
+                  ) : null}
                   {!simpleHomeReviewLinkSendStep ? (
                     <p className="text-sm leading-snug text-slate-300">
                       <span className="font-medium text-slate-500">Parties: </span>
@@ -7024,7 +7035,7 @@ const AgreementReview: React.FC<Props> = ({
                                     route: simpleFlowPhase,
                                   });
                                 }
-                                onSimpleFlowContinue?.();
+                                void Promise.resolve(onSimpleFlowContinue?.());
                               }}
                             >
                               {simpleFlowReviewPrimaryCtaLabel ?? "Send"}
@@ -7061,7 +7072,7 @@ const AgreementReview: React.FC<Props> = ({
                                     route: simpleFlowPhase,
                                   });
                                 }
-                                onSimpleFlowContinue?.();
+                                void Promise.resolve(onSimpleFlowContinue?.());
                               }}
                             >
                               {!requiredComplete
@@ -7309,11 +7320,13 @@ const AgreementReview: React.FC<Props> = ({
                       type="button"
                       className="w-full min-h-[2.65rem] rounded-xl border-2 border-emerald-500/55 bg-gradient-to-b from-emerald-950/40 to-slate-950/70 px-6 text-sm font-semibold text-emerald-100 shadow-[0_4px_18px_rgba(16,185,129,0.12)] transition hover:border-emerald-400/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                       onClick={() => {
-                        writePremiumSenderSignFirst(
-                          simpleFlowPremiumHandoffIntent === "signature" && watermarkModalSignFirst,
-                        );
-                        setWatermarkSendModalOpen(false);
-                        onSimpleFlowContinue?.();
+                        void (async () => {
+                          writePremiumSenderSignFirst(
+                            simpleFlowPremiumHandoffIntent === "signature" && watermarkModalSignFirst,
+                          );
+                          setWatermarkSendModalOpen(false);
+                          await Promise.resolve(onSimpleFlowContinue?.());
+                        })();
                       }}
                     >
                       {simpleFlowPremiumHandoffIntent === "review" ? "Create review link" : PAYWALL_PAID_READY_CTA}
@@ -7348,8 +7361,10 @@ const AgreementReview: React.FC<Props> = ({
                       type="button"
                       className="w-full min-h-[2.75rem] rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-6 text-sm font-semibold text-slate-950 shadow-[0_4px_22px_rgba(245,158,11,0.3)] transition hover:from-amber-300 hover:to-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/90 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                       onClick={() => {
-                        setWatermarkSendModalOpen(false);
-                        onSimpleFlowContinue?.();
+                        void (async () => {
+                          setWatermarkSendModalOpen(false);
+                          await Promise.resolve(onSimpleFlowContinue?.());
+                        })();
                       }}
                     >
                       Continue with draft version
