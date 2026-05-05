@@ -407,9 +407,22 @@ test.describe("recipient + link flow QA", () => {
     state.drafts.set(id, draft);
     await installIsolatedAgreementsApi(page, state);
 
+    const baselineLegalHtml =
+      "<p>Services Agreement</p><p>3.2 Payment Schedule<br/>Invoices are due on receipt.</p><p>IN WITNESS WHEREOF</p><p>Parties agree.</p>";
+    const proposedLegalHtml =
+      "<p>Services Agreement</p><p>3.2 Payment Schedule<br/>Invoices are due <strong>Net 30</strong>.</p><p>IN WITNESS WHEREOF</p><p>Parties agree.</p>";
+
     await page.route("**/api/agreements/**", async (route) => {
       const url = route.request().url();
       const method = route.request().method();
+      if (url.includes("/render") && method === "POST" && url.includes(id)) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ rendered_html: baselineLegalHtml }),
+        });
+        return;
+      }
       if (url.includes("/revise") && method === "POST") {
         const body = route.request().postDataJSON() as { instruction?: string } | null;
         const inst = body?.instruction || "";
@@ -438,7 +451,7 @@ test.describe("recipient + link flow QA", () => {
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
               },
-              rendered_html: `<p>Invoices are due <strong>Net 30</strong>.</p>${noisySuffix}`,
+              rendered_html: `${proposedLegalHtml}${noisySuffix}`,
             }),
           });
           return;
@@ -472,7 +485,9 @@ test.describe("recipient + link flow QA", () => {
     const legalDoc = page.getByTestId("recipient-legal-redline-document");
     await expect(legalDoc).toBeVisible();
     await expect(legalDoc).toHaveText(/\S{8,}/);
+    await expect(legalDoc.getByTestId("recipient-legal-redline-block")).toHaveCount(4);
     await expect(wholeDoc.locator('[data-redline="insert"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(wholeDoc.locator('[data-redline="insert"]').first()).toContainText(/Net\s*30/i);
     await expect(wholeDoc).toContainText(/Net\s*30/i);
 
     await page.getByTestId("recipient-tab-changed-clauses").click();

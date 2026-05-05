@@ -63,11 +63,15 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
       if (method === "POST" && url.includes("/revise")) {
         return jsonResponse({
           draft: revisedDraft,
-          rendered_html: "<p>Net thirty proposed rendering differs.</p>",
+          rendered_html:
+            "<p>Services Agreement</p><p>3.2 Payment terms<br/>Net 30.</p><p>IN WITNESS WHEREOF</p><p>Sign.</p>",
         });
       }
       if (method === "POST" && url.includes("/render")) {
-        return jsonResponse({ rendered_html: "<p>Baseline rendering unchanged.</p>" });
+        return jsonResponse({
+          rendered_html:
+            "<p>Services Agreement</p><p>3.2 Payment terms<br/>Pay upon receipt.</p><p>IN WITNESS WHEREOF</p><p>Sign.</p>",
+        });
       }
       if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
         return jsonResponse({ draft: initialDraft });
@@ -100,9 +104,13 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
 
     expect(screen.getByTestId("recipient-tab-redline")).toBeTruthy();
     const wholeDocPanel = screen.getByTestId("recipient-whole-doc-redline");
-    expect(screen.getByTestId("recipient-legal-redline-document")).toBeTruthy();
-    expect(wholeDocPanel.querySelector('[data-redline="insert"]')).toBeTruthy();
-    expect(screen.getByTestId("recipient-legal-redline-document").textContent).toMatch(/Net|thirty/i);
+    const legalDocRoot = screen.getByTestId("recipient-legal-redline-document");
+    expect(legalDocRoot).toBeTruthy();
+    expect(legalDocRoot.querySelectorAll('[data-testid="recipient-legal-redline-block"]').length).toBeGreaterThan(1);
+    const insertEl = wholeDocPanel.querySelector('[data-redline="insert"]');
+    expect(insertEl).toBeTruthy();
+    expect(insertEl?.textContent).toMatch(/Net\s*30/i);
+    expect(legalDocRoot.textContent).toMatch(/Net|thirty/i);
 
     await userEvent.click(screen.getByTestId("recipient-tab-changed-clauses"));
     const clauseCard = await screen.findByTestId("recipient-clause-card-payment_terms");
@@ -123,10 +131,13 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /Side-by-side/i }));
     const proposedCol = screen.getByTestId("recipient-side-by-side-proposed-column");
+    expect(proposedCol.querySelector('[data-testid="recipient-legal-redline-document"]')).toBeTruthy();
+    expect(proposedCol.querySelectorAll('[data-testid="recipient-legal-redline-block"]').length).toBeGreaterThan(1);
     expect(proposedCol.querySelector("[data-redline]")).toBeTruthy();
 
     await userEvent.click(hideBtn);
     expect(proposedCol.querySelector("[data-redline]")).toBeNull();
+    expect(proposedCol.textContent).toMatch(/Net\s*30/i);
   });
 
   it(
@@ -145,11 +156,15 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
       if (method === "POST" && url.includes("/revise")) {
         return jsonResponse({
           draft: revisedDraft,
-          rendered_html: "<p>Net thirty proposed rendering differs.</p>",
+          rendered_html:
+            "<p>Services Agreement</p><p>3.2 Payment terms<br/>Net 30.</p><p>IN WITNESS WHEREOF</p><p>Sign.</p>",
         });
       }
       if (method === "POST" && url.includes("/render")) {
-        return jsonResponse({ rendered_html: "<p>Baseline rendering unchanged.</p>" });
+        return jsonResponse({
+          rendered_html:
+            "<p>Services Agreement</p><p>3.2 Payment terms<br/>Pay upon receipt.</p><p>IN WITNESS WHEREOF</p><p>Sign.</p>",
+        });
       }
       if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
         return jsonResponse({ draft: initialDraft });

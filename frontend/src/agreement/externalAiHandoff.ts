@@ -20,6 +20,26 @@ export function htmlToPlainText(html: string): string {
     .trim();
 }
 
+/**
+ * Plain text for legal redline / block parsing: keeps paragraph breaks from block-level HTML.
+ * {@link htmlToPlainText} collapses all whitespace and is unsuitable for clause blocking.
+ */
+export function htmlToPlainTextForLegalRedline(html: string): string {
+  let raw = String(html ?? "").replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ");
+  raw = raw
+    .replace(/<\/(p|div|section|article|h[1-6]|blockquote|li|tr|thead|tbody|table)\b[^>]*>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n");
+  raw = raw.replace(/<[^>]+>/g, " ");
+  return raw
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\t\u00a0]+/g, " ")
+    .replace(/ +/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function draftExcerptForClause(draft: AgreementDraft, clause: ClauseFrictionId): string {
   switch (clause) {
     case "payment_terms":

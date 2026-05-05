@@ -1,12 +1,15 @@
+import type { ReactNode } from "react";
 import type { RedlineSegmentVM } from "./recipientPreviewDiffModel";
+import type { LegalRedlineDocumentViewModel, LegalRedlineSegment } from "./legalRedlineBlocks";
 
 type Props = {
-  segments: RedlineSegmentVM[];
-  /**
-   * "page" = full reader (Redline tab). "column" = side-by-side pane (same typography, slightly tighter padding).
-   */
+  /** @deprecated Prefer {@link document} for block-aware redline. */
+  segments?: RedlineSegmentVM[];
+  document?: LegalRedlineDocumentViewModel;
   variant?: "page" | "column";
 };
+
+type AnySeg = LegalRedlineSegment | RedlineSegmentVM;
 
 /** Exported for tests: split segment body into paragraphs, then lines. */
 export function splitSegmentTextToParagraphLines(text: string): string[][] {
@@ -19,7 +22,6 @@ export function splitSegmentTextToParagraphLines(text: string): string[][] {
 export function lineLooksLikeSectionHeading(line: string): boolean {
   const t = line.trim();
   if (t.length < 4 || t.length > 160) return false;
-  // "3. Compensation", "3.1 Payment Schedule", etc.
   return /^\d+(?:\.\d+)*\.?\s+\S/.test(t);
 }
 
@@ -48,10 +50,45 @@ function segmentLineClass(type: "same" | "insert" | "delete"): string {
   ].join(" ");
 }
 
-/**
- * Whole-document legal redline: white page, paragraph spacing, strong insert/delete (no HTML in segments).
- */
-export function RecipientLegalRedlineDocument({ segments, variant = "page" }: Props) {
+function renderSegmentStream(segments: AnySeg[], keyPrefix: string): ReactNode[] {
+  return segments.flatMap((seg, segIdx) => {
+    const blocks = splitSegmentTextToParagraphLines(seg.text);
+    if (blocks.length === 0) {
+      return [
+        <div key={`${keyPrefix}_e_${segIdx}`} className="mb-3">
+          <span data-redline={seg.type} className={`block ${segmentLineClass(seg.type)}`}>
+            {"\u00a0"}
+          </span>
+        </div>,
+      ];
+    }
+    return blocks.map((lines, blockIdx) => {
+      const key = `${keyPrefix}_s${segIdx}_b${blockIdx}`;
+      const firstLine = lines[0] ?? "";
+      const heading = lineLooksLikeSectionHeading(firstLine);
+      return (
+        <div key={key} className={heading ? "mb-4 mt-5 border-b border-slate-200 pb-3 first:mt-0" : "mb-3 last:mb-0"}>
+          {lines.map((line, li) => {
+            const isFirstHeadingLine = heading && li === 0 && seg.type === "same";
+            return (
+              <span
+                key={li}
+                data-redline={seg.type}
+                className={`block ${segmentLineClass(seg.type)} ${
+                  isFirstHeadingLine ? "text-[16px] font-semibold tracking-tight text-slate-900" : ""
+                }`.trim()}
+              >
+                {line.length > 0 ? line : "\u00a0"}
+              </span>
+            );
+          })}
+        </div>
+      );
+    });
+  });
+}
+
+export function RecipientLegalRedlineDocument({ segments, document, variant = "page" }: Props) {
   const shell =
     variant === "page"
       ? "mx-auto w-full max-w-[42rem] rounded-lg border border-slate-300/90 bg-white px-6 py-8 shadow-md sm:px-10 sm:py-10"
@@ -62,43 +99,22 @@ export function RecipientLegalRedlineDocument({ segments, variant = "page" }: Pr
       className={`recipient-legal-redline-document ${shell}`}
       data-testid="recipient-legal-redline-document"
     >
-      <div className="space-y-0">
-        {segments.flatMap((seg, segIdx) => {
-          const blocks = splitSegmentTextToParagraphLines(seg.text);
-          if (blocks.length === 0) {
-            return [
-              <div key={`empty_${segIdx}`} className="mb-3">
-                <span data-redline={seg.type} className={`block ${segmentLineClass(seg.type)}`}>
-                  {"\u00a0"}
-                </span>
-              </div>,
-            ];
-          }
-          return blocks.map((lines, blockIdx) => {
-            const key = `s${segIdx}_b${blockIdx}`;
-            const firstLine = lines[0] ?? "";
-            const heading = lineLooksLikeSectionHeading(firstLine);
-            return (
-              <div key={key} className={heading ? "mb-4 mt-5 border-b border-slate-200 pb-3 first:mt-0" : "mb-3 last:mb-0"}>
-                {lines.map((line, li) => {
-                  const isFirstHeadingLine = heading && li === 0 && seg.type === "same";
-                  return (
-                    <span
-                      key={li}
-                      data-redline={seg.type}
-                      className={`block ${segmentLineClass(seg.type)} ${
-                        isFirstHeadingLine ? "text-[16px] font-semibold tracking-tight text-slate-900" : ""
-                      }`.trim()}
-                    >
-                      {line.length > 0 ? line : "\u00a0"}
-                    </span>
-                  );
-                })}
-              </div>
-            );
-          });
-        })}
-      </div>
+      {document ? (
+        <div className="space-y-0">
+          {document.blocks.map((block) => (
+            <section
+              key={block.id}
+              data-testid="recipient-legal-redline-block"
+              data-block-kind={block.kind}
+              className="recipient-legal-redline-block mb-8 border-b border-slate-100 pb-8 last:mb-0 last:border-b-0 last:pb-0"
+            >
+              <div className="space-y-0">{renderSegmentStream(block.segments, block.id)}</div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-0">{renderSegmentStream(segments ?? [], "legacy")}</div>
+      )}
     </article>
   );
 }

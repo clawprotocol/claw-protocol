@@ -10,7 +10,7 @@ import {
   type AgreementVersionBundle,
 } from "./agreementVersionStore";
 import { computeNegotiationPatterns } from "../vs01/negotiationPatterns";
-import { draftExcerptForClause, htmlToPlainText } from "./externalAiHandoff";
+import { draftExcerptForClause, htmlToPlainText, htmlToPlainTextForLegalRedline } from "./externalAiHandoff";
 import {
   agreementFieldLabel,
   compareAgreementSnapshots,
@@ -25,7 +25,7 @@ import {
 import { RecipientChangedClauseCard } from "./RecipientChangedClauseCard";
 import { RecipientLegalRedlineDocument } from "./RecipientLegalRedlineDocument";
 import { RecipientTrackedChangesToggle } from "./RecipientTrackedChangesToggle";
-import { buildWholeDocumentRedlineViewModel } from "./wholeDocumentRedlineModel";
+import { buildLegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
@@ -588,21 +588,21 @@ export function AgreementRecipientReview({
     );
   }, [recipientPreview]);
 
-  const wholeDocumentRedlineVm = useMemo(() => {
+  const legalRedlineDocumentVm = useMemo(() => {
     if (!recipientPreview) return null;
-    return buildWholeDocumentRedlineViewModel(
-      htmlToPlainText(recipientPreview.baselineHtml || ""),
-      htmlToPlainText(recipientPreview.proposedHtml || ""),
+    return buildLegalRedlineDocumentViewModel(
+      htmlToPlainTextForLegalRedline(recipientPreview.baselineHtml || ""),
+      htmlToPlainTextForLegalRedline(recipientPreview.proposedHtml || ""),
     );
   }, [recipientPreview]);
 
   useEffect(() => {
-    if (!recipientPreview || !previewDiff || !wholeDocumentRedlineVm) return;
+    if (!recipientPreview || !previewDiff || !legalRedlineDocumentVm) return;
     const diag =
       import.meta.env.DEV ||
       (typeof window !== "undefined" && window.localStorage?.getItem("lawdogRecipientReviseDiag") === "1");
     if (!diag) return;
-    const k = `${agreementId}:${recipientPreview.revisionText}:${recipientPreview.proposedDraft.updated_at}:${showTrackedChanges}:${wholeDocumentRedlineVm.stats.segmentCount}`;
+    const k = `${agreementId}:${recipientPreview.revisionText}:${recipientPreview.proposedDraft.updated_at}:${showTrackedChanges}:${legalRedlineDocumentVm.stats.segmentCount}:${legalRedlineDocumentVm.stats.blockCount}`;
     if (k === recipientRedlineViewModelLogKeyRef.current) return;
     recipientRedlineViewModelLogKeyRef.current = k;
     const cards = buildRecipientClauseCards(
@@ -625,21 +625,34 @@ export function AgreementRecipientReview({
         addedLines: c.redlineView.addedLines,
         fallbackReason: c.redlineView.fallbackReason ?? null,
       })),
-      wholeDocFallbackReason: wholeDocumentRedlineVm.fallbackReason ?? null,
+      wholeDocFallbackReason: legalRedlineDocumentVm.fallbackReason ?? null,
+    });
+    // eslint-disable-next-line no-console
+    console.info("[recipient-legal-block-redline]", {
+      agreementId,
+      blockCount: legalRedlineDocumentVm.stats.blockCount,
+      changedBlockCount: legalRedlineDocumentVm.stats.changedBlockCount,
+      blocks: legalRedlineDocumentVm.blocks.map((b) => ({
+        clauseNumber: b.clauseNumber ?? null,
+        kind: b.kind,
+        insertSeg: b.segments.filter((s) => s.type === "insert").length,
+        deleteSeg: b.segments.filter((s) => s.type === "delete").length,
+        sameSeg: b.segments.filter((s) => s.type === "same").length,
+      })),
     });
     // eslint-disable-next-line no-console
     console.info("[recipient-whole-doc-redline]", {
       agreementId,
-      currentLen: wholeDocumentRedlineVm.stats.currentLen,
-      proposedLen: wholeDocumentRedlineVm.stats.proposedLen,
-      hasChanges: wholeDocumentRedlineVm.hasChanges,
-      insertCount: wholeDocumentRedlineVm.stats.insertCount,
-      deleteCount: wholeDocumentRedlineVm.stats.deleteCount,
-      sameCount: wholeDocumentRedlineVm.stats.sameCount,
-      segmentCount: wholeDocumentRedlineVm.stats.segmentCount,
-      fallbackReason: wholeDocumentRedlineVm.fallbackReason ?? null,
+      currentLen: legalRedlineDocumentVm.stats.currentLen,
+      proposedLen: legalRedlineDocumentVm.stats.proposedLen,
+      hasChanges: legalRedlineDocumentVm.hasChanges,
+      insertCount: legalRedlineDocumentVm.stats.insertCount,
+      deleteCount: legalRedlineDocumentVm.stats.deleteCount,
+      sameCount: legalRedlineDocumentVm.stats.sameCount,
+      segmentCount: legalRedlineDocumentVm.stats.segmentCount,
+      fallbackReason: legalRedlineDocumentVm.fallbackReason ?? null,
     });
-  }, [agreementId, previewDiff, recipientPreview, showTrackedChanges, wholeDocumentRedlineVm]);
+  }, [agreementId, previewDiff, recipientPreview, showTrackedChanges, legalRedlineDocumentVm]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -1097,15 +1110,15 @@ export function AgreementRecipientReview({
           </button>
         </div>
 
-        {compareViewMode === "redline" && wholeDocumentRedlineVm ? (
+        {compareViewMode === "redline" && legalRedlineDocumentVm ? (
           <div className="mt-4" data-testid="recipient-whole-doc-redline">
             <p className="mb-3 text-sm font-medium text-slate-200">Agreement text with tracked changes</p>
-            {wholeDocumentRedlineVm.fallbackReason ? (
-              <p className="mb-2 text-sm leading-snug text-amber-100/95">{wholeDocumentRedlineVm.fallbackReason}</p>
+            {legalRedlineDocumentVm.fallbackReason ? (
+              <p className="mb-2 text-sm leading-snug text-amber-100/95">{legalRedlineDocumentVm.fallbackReason}</p>
             ) : null}
             <div className="min-h-[60vh] rounded-lg border border-slate-700/45 bg-slate-200/10 p-3 sm:p-5">
               {showTrackedChanges ? (
-                <RecipientLegalRedlineDocument segments={wholeDocumentRedlineVm.segments} variant="page" />
+                <RecipientLegalRedlineDocument document={legalRedlineDocumentVm} variant="page" />
               ) : (
                 <article
                   className="mx-auto min-h-[60vh] w-full max-w-[42rem] rounded-lg border border-slate-300/90 bg-white px-6 py-8 shadow-md sm:px-10 sm:py-10"
@@ -1147,7 +1160,7 @@ export function AgreementRecipientReview({
           </div>
         ) : null}
 
-        {compareViewMode === "side" && wholeDocumentRedlineVm ? (
+        {compareViewMode === "side" && legalRedlineDocumentVm ? (
           <div className="mt-4 space-y-2" data-testid="recipient-side-by-side">
             <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
               <div className="flex min-h-[55vh] flex-col rounded-lg border border-slate-800/90 bg-white shadow-sm">
@@ -1172,7 +1185,7 @@ export function AgreementRecipientReview({
                 </div>
                 <div className="flex-1 px-3 py-4 sm:px-4 sm:py-5">
                   {showTrackedChanges ? (
-                    <RecipientLegalRedlineDocument segments={wholeDocumentRedlineVm.segments} variant="column" />
+                    <RecipientLegalRedlineDocument document={legalRedlineDocumentVm} variant="column" />
                   ) : (
                     <div
                       className="prose prose-sm prose-slate max-w-none text-[15px] leading-[1.65] text-slate-900"

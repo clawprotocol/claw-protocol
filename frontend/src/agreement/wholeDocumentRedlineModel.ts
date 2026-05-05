@@ -1,9 +1,9 @@
 /**
- * Canonical whole-document plain-text redline for recipient preview (primary UX surface).
- * Never hides diff behind “noisy” gates — uses deterministic {@link buildAgreementRedline}.
+ * Whole-document redline VM: delegates to block-aware {@link buildLegalRedlineDocumentViewModel}
+ * and flattens segments for legacy callers that expect a single segment list.
  */
 
-import { buildAgreementRedline } from "../vs01/agreementRedline";
+import { buildLegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import type { RedlineSegmentVM } from "./recipientPreviewDiffModel";
 
 export type WholeDocumentRedlineStats = {
@@ -16,13 +16,8 @@ export type WholeDocumentRedlineStats = {
 };
 
 export type WholeDocumentRedlineViewModel = {
-  /** True when plain-text diff has non-same segments. */
   hasChanges: boolean;
   segments: RedlineSegmentVM[];
-  /**
-   * Optional note when the engine fell back to a very coarse block diff
-   * (user still sees red/green; we never return clean-only as “redline”).
-   */
   fallbackReason?: string;
   stats: WholeDocumentRedlineStats;
 };
@@ -53,8 +48,7 @@ function countStats(segments: RedlineSegmentVM[]): Omit<WholeDocumentRedlineStat
 }
 
 /**
- * Deterministic full-document redline from normalized plain text (e.g. htmlToPlainText outputs).
- * Insert-only diffs render green inserts; replacement yields delete + insert segments.
+ * Deterministic full-document redline: block-aware engine, flattened segment stream.
  */
 export function buildWholeDocumentRedlineViewModel(
   currentPlainText: string,
@@ -62,35 +56,22 @@ export function buildWholeDocumentRedlineViewModel(
 ): WholeDocumentRedlineViewModel {
   const cur = normalizeWholeDocumentPlainText(currentPlainText);
   const prop = normalizeWholeDocumentPlainText(proposedPlainText);
-  const rl = buildAgreementRedline(cur, prop);
-  const segments: RedlineSegmentVM[] = rl.segments.map((s) => ({
-    type: s.type,
-    text: s.text,
-  }));
-
-  let fallbackReason: string | undefined;
-  if (
-    segments.length === 2 &&
-    segments[0]?.type === "delete" &&
-    segments[1]?.type === "insert"
-  ) {
-    const delLen = segments[0].text.length;
-    const insLen = segments[1].text.length;
-    if (delLen > 6000 || insLen > 6000) {
-      fallbackReason =
-        "Very large single replacement — shown as one removal and one addition. Scroll both sections.";
+  const doc = buildLegalRedlineDocumentViewModel(cur, prop);
+  const segments: RedlineSegmentVM[] = [];
+  for (const b of doc.blocks) {
+    for (const s of b.segments) {
+      segments.push({ type: s.type, text: s.text });
     }
   }
-
   const baseStats = countStats(segments);
   return {
-    hasChanges: rl.hasChanges,
+    hasChanges: doc.hasChanges,
     segments,
-    fallbackReason,
+    fallbackReason: doc.fallbackReason,
     stats: {
       ...baseStats,
-      currentLen: cur.length,
-      proposedLen: prop.length,
+      currentLen: doc.stats.currentLen,
+      proposedLen: doc.stats.proposedLen,
     },
   };
 }

@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import {
   RecipientLegalRedlineDocument,
   splitSegmentTextToParagraphLines,
@@ -63,5 +64,39 @@ describe("RecipientLegalRedlineDocument", () => {
     const root = screen.getByTestId("recipient-legal-redline-document");
     const blocks = root.querySelectorAll(".recipient-legal-redline-same");
     expect(blocks.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders block document model as multiple sections with insert markers", () => {
+    const document: LegalRedlineDocumentViewModel = {
+      blocks: [
+        { id: "t0", kind: "title", segments: [{ type: "same", text: "Services Agreement" }] },
+        {
+          id: "c32",
+          kind: "clause",
+          clauseNumber: "3.2",
+          segments: [
+            { type: "same", text: "Due " },
+            { type: "insert", text: "Net 30" },
+            { type: "same", text: "." },
+          ],
+        },
+      ],
+      stats: {
+        blockCount: 2,
+        changedBlockCount: 1,
+        insertCount: 1,
+        deleteCount: 0,
+        sameCount: 2,
+        segmentCount: 3,
+        currentLen: 10,
+        proposedLen: 12,
+      },
+      hasChanges: true,
+    };
+    render(<RecipientLegalRedlineDocument document={document} />);
+    const root = screen.getByTestId("recipient-legal-redline-document");
+    expect(root.querySelectorAll('[data-testid="recipient-legal-redline-block"]').length).toBe(2);
+    const ins = root.querySelector('[data-redline="insert"]');
+    expect(ins?.textContent).toContain("Net 30");
   });
 });
