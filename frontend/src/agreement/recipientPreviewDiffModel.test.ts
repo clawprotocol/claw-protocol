@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { RedlineResult } from "../vs01/agreementRedline";
 import {
   assessRecipientPreviewDiff,
+  buildPaymentTermsSuggestedSnippetLines,
   buildRecipientClauseCards,
+  extractPaymentTermsCurrentSnippet,
   getRecipientPreviewSummaryBullets,
   isRecipientRedlineNoisyRaw,
   numberedSectionChangeLines,
@@ -59,9 +61,9 @@ describe("recipientPreviewDiffModel", () => {
     expect(a.hasSnapshotDiff).toBe(true);
     expect(a.canSubmit).toBe(true);
     const bullets = getRecipientPreviewSummaryBullets(a);
-    expect(bullets[0]).toMatch(/2 suggested changes detected/);
+    expect(bullets[0]).toMatch(/^2 suggested changes$/);
     expect(bullets.join(" ")).not.toMatch(/29844|characters of wording|diff segments/i);
-    expect(bullets.some((b) => /Owner's draft will not change/i.test(b))).toBe(true);
+    expect(bullets.some((b) => /Nothing changes unless the owner accepts/i.test(b))).toBe(true);
   });
 
   it("allows submit when only rendered text differs (text-only redline)", () => {
@@ -110,9 +112,19 @@ describe("recipientPreviewDiffModel", () => {
     expect(pay?.fieldRedline?.hasChanges).toBe(true);
     expect(pay?.reason.toLowerCase()).toMatch(/pause|net/);
     const bullets = getRecipientPreviewSummaryBullets(a);
-    expect(bullets[0]).toMatch(/2 suggested changes detected/);
+    expect(bullets[0]).toMatch(/^2 suggested changes$/);
     expect(bullets.some((b) => /Pause-work right added for late payment/i.test(b))).toBe(true);
     expect(recipientSendConfirmationLine(a)).toMatch(/2 suggested changes/);
+  });
+
+  it("extracts concise payment snippets for Net 30 and pause-work", () => {
+    const before = "Invoices are due upon receipt. Late fees may apply.";
+    const after =
+      "Invoices are due Net 30. The developer may pause work if payment is more than 15 days late until current.";
+    expect(extractPaymentTermsCurrentSnippet(before)).toMatch(/due\s+upon\s+receipt|on\s+receipt/i);
+    const lines = buildPaymentTermsSuggestedSnippetLines(after, before);
+    expect(lines.some((l) => /Net\s*30/i.test(l))).toBe(true);
+    expect(lines.some((l) => /pause work.*15 days late/i.test(l))).toBe(true);
   });
 
   it("marks redline as noisy when segment count is huge (defaults away from full redline in UI)", () => {

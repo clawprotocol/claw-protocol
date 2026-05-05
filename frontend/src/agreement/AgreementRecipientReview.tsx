@@ -970,42 +970,30 @@ export function AgreementRecipientReview({
 
   const comparePanel =
     recipientPreview && previewDiff && !previewDiff.isCompleteNoOp ? (
-      <div className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-4 shadow-sm">
+      <div className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-3 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
               {MATERIAL_CHANGE_SUMMARY_LABEL}
             </div>
-            <ul className="mt-1.5 list-none space-y-0.5 p-0 text-[10px] leading-snug text-slate-200/95">
+            <ul className="mt-1 list-none space-y-0.5 p-0 text-[10px] leading-snug text-slate-200/95">
               {getRecipientPreviewSummaryBullets(previewDiff).map((line, i) => (
                 <li key={`sum_${i}`} className="flex gap-1.5">
-                  <span className="mt-0.5 text-slate-500" aria-hidden>
+                  <span className="mt-0.5 shrink-0 text-slate-500" aria-hidden>
                     •
                   </span>
                   <span>{line}</span>
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-[10px] font-medium text-slate-200/95">
-              {bundle && isSigningLockActive(bundle)
-                ? "Final: Final version ready for signature"
-                : "Editable: Draft in progress — you can still make edits"}
-            </p>
             {participantPid ? (
-              <span className="mt-1 block text-[10px] font-normal normal-case text-slate-400">
-                Proposed by{" "}
-                <span className="text-slate-200">{proposerDisplayNameForApi}</span>
+              <span className="mt-1 block text-[9px] font-normal normal-case text-slate-500">
+                Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
               </span>
             ) : null}
           </div>
-          <span className="rounded-md border border-slate-600/80 bg-slate-950/60 px-2 py-0.5 text-[10px] font-medium text-slate-400">
-            Suggested edits
-          </span>
         </div>
-        <p className="mt-1 text-[10px] leading-snug text-slate-500">
-          LawDog highlights what you asked to change. The owner&apos;s saved draft stays as-is until they accept.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-0.5 rounded-lg border border-slate-700/90 bg-slate-950/40 p-0.5">
+        <div className="mt-2 flex flex-wrap gap-0.5 rounded-lg border border-slate-700/90 bg-slate-950/40 p-0.5">
           <button
             type="button"
             className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px] ${
@@ -1049,16 +1037,12 @@ export function AgreementRecipientReview({
             onClick={() => setCompareViewMode("fullRedline")}
             data-testid="recipient-tab-full-redline"
           >
-            Full document redline
+            Full document redline (advanced)
           </button>
         </div>
 
         {compareViewMode === "clauses" ? (
-          <div className="mt-4 space-y-3" data-testid="recipient-changed-clauses">
-            <p className="text-[10px] leading-snug text-slate-400">
-              Only the agreement parts your suggestion affects — similar to Word &quot;tracked changes&quot; for key
-              fields.
-            </p>
+          <div className="mt-3 space-y-2" data-testid="recipient-changed-clauses">
             {clauseCards.map((card) => (
               <RecipientChangedClauseCard key={card.id} card={card} />
             ))}
@@ -1127,28 +1111,23 @@ export function AgreementRecipientReview({
           </div>
         ) : null}
 
-        <div className="mt-4 space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-              disabled={saving || !previewDiff.canSubmit}
-              onClick={() => void commitSubmit()}
-            >
-              {saving ? "Sending…" : "Send suggested edits"}
-            </button>
-            <button
-              type="button"
-              className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
-              disabled={saving || previewing}
-              onClick={() => discardPreview()}
-            >
-              Dismiss preview
-            </button>
-          </div>
-          <p className="max-w-xl text-[10px] leading-snug text-slate-500">
-            This sends your proposed changes to the owner. It does not change the agreement automatically.
-          </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+            disabled={saving || !previewDiff.canSubmit}
+            onClick={() => void commitSubmit()}
+          >
+            {saving ? "Sending…" : "Send suggested edits"}
+          </button>
+          <button
+            type="button"
+            className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
+            disabled={saving || previewing}
+            onClick={() => discardPreview()}
+          >
+            Dismiss preview
+          </button>
         </div>
       </div>
     ) : null;
@@ -1827,14 +1806,11 @@ export function AgreementRecipientReview({
         <div>
           {entry.kind === "review" && recipientLinkRole === "reviewer" && !viewerLike ? (
             <>
-              <h1 className="text-lg font-semibold tracking-tight text-slate-100 sm:text-xl">
+              <h1 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">
                 Review this agreement
               </h1>
-              <p className="mt-1.5 text-sm leading-relaxed text-slate-300">
-                Suggest changes before anyone signs.
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                Your suggestions do not change the original until the owner accepts them.
+              <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                Suggest changes before signing. Nothing changes unless the owner accepts.
               </p>
             </>
           ) : (
@@ -1847,10 +1823,8 @@ export function AgreementRecipientReview({
               </p>
             </>
           )}
-          <p className="mt-1 text-[10px] text-slate-500">You are a recipient (not the owner).</p>
           <p className="mt-1.5 text-[10px] text-slate-600">
-            Support reference — agreement ID:{" "}
-            <span className="font-mono text-slate-500 break-all">{agreementId}</span>
+            Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
           </p>
         </div>
         {onClose ? (
@@ -1871,8 +1845,7 @@ export function AgreementRecipientReview({
 
       {workspaceTab === "read" ? (
         <p className="text-xs leading-relaxed text-slate-400">
-          You can suggest changes or say this looks good. The owner reviews and accepts changes — nothing here changes
-          the agreement automatically.
+          Read the document, then use Suggest changes when you are ready.
         </p>
       ) : null}
 
@@ -2368,10 +2341,8 @@ export function AgreementRecipientReview({
                 </button>
               </div>
               <p className="text-[10px] leading-snug text-slate-500">
-                After <span className="text-slate-400">Preview changes</span>, check{" "}
-                <span className="text-slate-400">Changed clauses</span>, then{" "}
-                <span className="text-slate-400">Send suggested edits</span> — the owner&apos;s draft stays as-is until
-                they accept.
+                Use <span className="text-slate-400">Preview changes</span>, review <span className="text-slate-400">Changed clauses</span>, then{" "}
+                <span className="text-slate-400">Send suggested edits</span>.
               </p>
 
               {comparePanel}

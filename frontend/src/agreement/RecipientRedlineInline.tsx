@@ -6,12 +6,20 @@ type Props = {
   paragraphBreaks?: boolean;
   /** Omit outer panel chrome (clause cards provide their own scroll/border). */
   embedded?: boolean;
+  /** Higher-contrast insert/delete for compact clause cards. */
+  trackingStrong?: boolean;
 };
 
-function segmentClass(segType: "same" | "insert" | "delete"): string {
-  if (segType === "same") return "text-slate-800";
+function segmentClass(segType: "same" | "insert" | "delete", trackingStrong?: boolean): string {
+  if (segType === "same") return trackingStrong ? "text-slate-700" : "text-slate-800";
   if (segType === "insert") {
+    if (trackingStrong) {
+      return "rounded-sm bg-emerald-400 px-0.5 py-px font-semibold text-emerald-950 shadow-sm ring-1 ring-emerald-700/25";
+    }
     return "bg-emerald-100/95 text-emerald-950 underline decoration-emerald-700/35 decoration-1 underline-offset-2";
+  }
+  if (trackingStrong) {
+    return "rounded-sm bg-rose-300 px-0.5 py-px font-semibold text-rose-950 line-through decoration-rose-800 decoration-2";
   }
   return "bg-rose-100/90 text-rose-950 line-through decoration-rose-700/40 decoration-1";
 }
@@ -19,7 +27,7 @@ function segmentClass(segType: "same" | "insert" | "delete"): string {
 /**
  * Inline insert/delete/same segments for recipient preview (track-changes style).
  */
-export function RecipientRedlineInline({ redline, paragraphBreaks, embedded }: Props) {
+export function RecipientRedlineInline({ redline, paragraphBreaks, embedded, trackingStrong }: Props) {
   const wrap = paragraphBreaks ? "mb-1 block whitespace-pre-wrap break-words" : "";
   const inner = redline.segments.map((seg, idx) => {
     if (seg.type === "same") {
@@ -34,7 +42,7 @@ export function RecipientRedlineInline({ redline, paragraphBreaks, embedded }: P
         <span
           key={`rl_${idx}`}
           data-redline="insert"
-          className={`${segmentClass("insert")} ${wrap}`.trim()}
+          className={`${segmentClass("insert", trackingStrong)} ${wrap}`.trim()}
         >
           {seg.text}
         </span>
@@ -44,7 +52,7 @@ export function RecipientRedlineInline({ redline, paragraphBreaks, embedded }: P
       <span
         key={`rl_${idx}`}
         data-redline="delete"
-        className={`${segmentClass("delete")} ${wrap}`.trim()}
+        className={`${segmentClass("delete", trackingStrong)} ${wrap}`.trim()}
       >
         {seg.text}
       </span>

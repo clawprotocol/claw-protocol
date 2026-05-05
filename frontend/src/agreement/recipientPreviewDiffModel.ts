@@ -114,6 +114,152 @@ function clauseChangeReason(row: AgreementFieldChange): string {
   }
 }
 
+/** Max “What changed” bullets on a clause card. */
+export const MAX_WHAT_CHANGED_BULLETS = 3;
+
+function normalizeClauseOneLine(s: string): string {
+  return (s || "")
+    .replace(/\r/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function trimCap(s: string, max: number): string {
+  const u = s.trim();
+  if (u.length <= max) return u;
+  const cut = u.slice(0, max - 1).replace(/\s+\S*$/, "");
+  return `${cut}…`;
+}
+
+function firstSentenceOrText(t: string, maxLen: number): string {
+  if (!t) return "—";
+  const m = t.match(/^[^.!?]+[.!?]?/);
+  const unit = (m?.[0] || t).trim();
+  return trimCap(unit, maxLen);
+}
+
+/**
+ * Short “current payment terms” line for cards (prefers receipt/due phrasing, then Net timing).
+ */
+export function extractPaymentTermsCurrentSnippet(before: string): string {
+  const t = normalizeClauseOneLine(before);
+  if (!t) return "—";
+  const chunks = t
+    .split(/\.\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  for (const chunk of chunks) {
+    const seg = chunk.endsWith(".") ? chunk : `${chunk}.`;
+    if (/\b(due\s+(?:on|upon)\s+receipt|upon\s+receipt)\b/i.test(seg)) {
+      return trimCap(seg, 180);
+    }
+  }
+  for (const chunk of chunks) {
+    const seg = chunk.endsWith(".") ? chunk : `${chunk}.`;
+    if (/\bnet\s*\d+\b/i.test(seg)) return trimCap(seg, 180);
+  }
+  return trimCap(chunks[0] || t, 180);
+}
+
+/**
+ * Short suggested payment lines (Net timing + pause-work), for compact cards — not the full field paragraph.
+ */
+export function buildPaymentTermsSuggestedSnippetLines(afterRaw: string, beforeRaw: string): string[] {
+  const after = normalizeClauseOneLine(afterRaw);
+  const before = normalizeClauseOneLine(beforeRaw);
+  const lines: string[] = [];
+  const netA = after.match(/\bnet\s*(\d+)\b/i);
+  const netB = before.match(/\bnet\s*(\d+)\b/i);
+  if (netA && (!netB || netA[1] !== netB[1])) {
+    lines.push(`Invoices are due Net ${netA[1]}.`);
+  }
+  const pauseA = extractPauseWorkBullet(afterRaw);
+  const pauseB = extractPauseWorkBullet(beforeRaw);
+  if (pauseA && !pauseB) {
+    lines.push(pauseA.endsWith(".") ? pauseA : `${pauseA}.`);
+  }
+  if (lines.length === 0 && after) {
+    lines.push(firstSentenceOrText(after, 160));
+  }
+  return lines;
+}
+
+function buildClauseSnippetsForRow(row: AgreementFieldChange): {
+  currentSnippet: string;
+  suggestedSnippetLines: string[];
+} {
+  if (row.field === "payment_terms") {
+    return {
+      currentSnippet: extractPaymentTermsCurrentSnippet(row.before || ""),
+      suggestedSnippetLines: buildPaymentTermsSuggestedSnippetLines(row.after || "", row.before || ""),
+    };
+  }
+  const b = normalizeClauseOneLine(row.before || "");
+  const a = normalizeClauseOneLine(row.after || "");
+  return {
+    currentSnippet: b ? firstSentenceOrText(b, 160) : "—",
+    suggestedSnippetLines: a ? [firstSentenceOrText(a, 160)] : ["—"],
+  };
+}
+
+/** Collapse long “same” runs so the tracked row shows mostly inserts/deletes. */
+/** Keep clause-card tracked row readable — long single-segment inserts are capped. */
+export const CLAUSE_TRACKED_SEGMENT_CHAR_CAP = 100;
+
+export function capRedlineChangeSegmentsForClauseUi(
+  redline: RedlineResult,
+  maxLen = CLAUSE_TRACKED_SEGMENT_CHAR_CAP,
+): RedlineResult {
+  return {
+    hasChanges: redline.hasChanges,
+    segments: redline.segments.map((s) => {
+      if (s.type === "same") return s;
+      const t = s.text.replace(/\s+/g, " ").trim();
+      if (t.length <= maxLen) return s;
+      const cut = t.slice(0, maxLen - 1).replace(/\s+\S*$/, "");
+      return { type: s.type, text: `${cut}…` } as (typeof redline.segments)[number];
+    }),
+  };
+}
+
+export function buildClauseCardDisplayRedline(redline: RedlineResult): RedlineResult {
+  if (!redline.hasChanges) return redline;
+  const out: RedlineResult["segments"] = [];
+  let skippedSame = false;
+  for (const s of redline.segments) {
+    if (s.type === "same") {
+      if (s.text.replace(/\s+/g, " ").trim().length > 0) skippedSame = true;
+      continue;
+    }
+    if (skippedSame && out.length > 0) {
+      out.push({ type: "same", text: " … " });
+    }
+    skippedSame = false;
+    out.push(s);
+  }
+  if (out.length === 0) return redline;
+  return {
+    hasChanges: out.some((s) => s.type === "insert" || s.type === "delete"),
+    segments: out,
+  };
+}
+
+export function redlineHasSignificantRemovals(redline: RedlineResult): boolean {
+  return redline.segments.some((s) => s.type === "delete" && s.text.replace(/\s+/g, " ").trim().length >= 2);
+}
+
+export function insertTextsForAddedPills(redline: RedlineResult, maxPills = 6, capChars = 100): string[] {
+  const out: string[] = [];
+  for (const s of redline.segments) {
+    if (s.type !== "insert") continue;
+    const t = s.text.replace(/\s+/g, " ").trim();
+    if (t.length < 2) continue;
+    out.push(trimCap(t, capChars));
+    if (out.length >= maxPills) break;
+  }
+  return out;
+}
+
 function extractNetTimingLine(after: string, before: string): string | null {
   const ma = (after || "").match(/\bnet\s*(\d+)\b/i);
   const mb = (before || "").match(/\bnet\s*(\d+)\b/i);
@@ -166,7 +312,7 @@ export function deriveClauseWhatChangedBullets(row: AgreementFieldChange): strin
   } else if (a !== b) {
     bullets.push(`${agreementFieldLabel(row.field)} updated.`);
   }
-  return bullets;
+  return bullets.slice(0, MAX_WHAT_CHANGED_BULLETS);
 }
 
 export function buildFieldLevelRedline(before: string, after: string): RedlineResult | null {
@@ -235,13 +381,22 @@ function countChangeUnitsForRow(row: AgreementFieldChange): number {
 
 export type RecipientClauseCard = {
   id: string;
+  /** Short heading, e.g. “Payment terms”. */
+  cardTitle: string;
+  /** @deprecated Same as {@link cardTitle}; kept for tests. */
   sectionLabel: string;
   /** Word-style “what changed” bullets for this field. */
   whatChangedBullets: string[];
   /** Inline diff for this field only (never full-document HTML). */
   fieldRedline: RedlineResult | null;
+  /** Full field text (disclosure only). */
   currentText: string;
+  /** Full field text (disclosure only). */
   proposedText: string;
+  /** Compact current value for the card body. */
+  currentSnippet: string;
+  /** Compact suggested value lines for the card body. */
+  suggestedSnippetLines: string[];
   reason: string;
 };
 
@@ -253,27 +408,35 @@ export function buildRecipientClauseCards(
   hasMaterialTextDiff: boolean,
 ): RecipientClauseCard[] {
   const rows = sortChangedFields(snapshotCompare.changedFields);
-  const cards: RecipientClauseCard[] = rows.map((row, i) => {
+  const cards: RecipientClauseCard[] = rows.map((row) => {
     const currentText = row.before?.trim() ? row.before : "—";
     const proposedText = row.after?.trim() ? row.after : "—";
+    const title = agreementFieldLabel(row.field);
+    const { currentSnippet, suggestedSnippetLines } = buildClauseSnippetsForRow(row);
     return {
       id: row.field,
-      sectionLabel: `Section ${i + 1} — ${agreementFieldLabel(row.field)}`,
+      cardTitle: title,
+      sectionLabel: title,
       whatChangedBullets: deriveClauseWhatChangedBullets(row),
       fieldRedline: buildFieldLevelRedlineCapped(row.before || "", row.after || ""),
       currentText,
       proposedText,
+      currentSnippet,
+      suggestedSnippetLines,
       reason: clauseChangeReason(row),
     };
   });
   if (cards.length === 0 && hasMaterialTextDiff) {
     cards.push({
       id: "rendered_text",
+      cardTitle: "Document wording",
       sectionLabel: "Document wording",
       whatChangedBullets: ["Rendered document text differs from the current version."],
       fieldRedline: null,
       currentText: "See Side-by-side or Full document redline for the exact rendered text.",
       proposedText: "—",
+      currentSnippet: "See disclosure or Side-by-side for full rendered text.",
+      suggestedSnippetLines: ["—"],
       reason: "Structured fields match, but the formatted document text differs.",
     });
   }
@@ -291,7 +454,7 @@ export function countSuggestedChanges(assessment: RecipientPreviewDiffAssessment
 export function getRecipientPreviewSummaryBullets(assessment: RecipientPreviewDiffAssessment): string[] {
   const n = countSuggestedChanges(assessment);
   const lines: string[] = [];
-  lines.push(`${n} suggested change${n === 1 ? "" : "s"} detected`);
+  lines.push(`${n} suggested change${n === 1 ? "" : "s"}`);
   const rows = sortChangedFields(assessment.snapshotCompare.changedFields);
   for (const row of rows) {
     for (const line of materialSummaryLinesForRow(row)) {
@@ -301,7 +464,7 @@ export function getRecipientPreviewSummaryBullets(assessment: RecipientPreviewDi
   if (rows.length === 0 && assessment.hasMaterialTextDiff) {
     lines.push("Rendered document wording updated");
   }
-  lines.push("Owner's draft will not change unless they accept.");
+  lines.push("Nothing changes unless the owner accepts.");
   return lines;
 }
 
