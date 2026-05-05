@@ -371,7 +371,7 @@ test.describe("recipient + link flow QA", () => {
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
     await page.getByRole("button", { name: "Preview changes" }).click();
     await expect(page.getByText("Send suggested edits").first()).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/summary of material changes/i)).toBeVisible();
+    await expect(page.getByText("Material change summary", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Send suggested edits" }).first().click();
     await expect(page.getByText(/Suggested edits sent|waiting on the owner|queue/i).first()).toBeVisible({
       timeout: 15_000,

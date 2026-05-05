@@ -7,6 +7,16 @@ import type { RedlineResult } from "../vs01/agreementRedline";
 describe("RecipientRedlineInline", () => {
   afterEach(() => cleanup());
 
+  it("applies paragraph-friendly wrapping when paragraphBreaks is set", () => {
+    const redline: RedlineResult = {
+      hasChanges: true,
+      segments: [{ type: "same", text: "Line one\nLine two" }],
+    };
+    const { container } = render(<RecipientRedlineInline redline={redline} paragraphBreaks />);
+    const span = container.querySelector("[data-redline='same']");
+    expect(span?.className).toMatch(/whitespace-pre-wrap/);
+  });
+
   it("renders insert and delete markers for track-changes view", () => {
     const redline: RedlineResult = {
       hasChanges: true,

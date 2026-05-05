@@ -17,8 +17,9 @@ import {
 } from "../vs01/agreementCompare";
 import {
   assessRecipientPreviewDiff,
-  buildRecipientMaterialSummaryFromDiff,
-  numberedSectionChangeLines,
+  buildRecipientClauseCards,
+  getRecipientPreviewSummaryBullets,
+  isRecipientRedlineConsideredNoisy,
   recipientPreviewNoOpMessage,
   recipientSendConfirmationLine,
 } from "./recipientPreviewDiffModel";
@@ -250,7 +251,9 @@ export function AgreementRecipientReview({
   const [copyDraftFlash, setCopyDraftFlash] = useState(false);
   const [copyClauseFlash, setCopyClauseFlash] = useState(false);
   const [recipientPreview, setRecipientPreview] = useState<RecipientPreview | null>(null);
-  const [compareViewMode, setCompareViewMode] = useState<"redline" | "clean" | "side">("redline");
+  const [compareViewMode, setCompareViewMode] = useState<
+    "clauses" | "clean" | "side" | "fullRedline"
+  >("clauses");
   const [recipientPosture, setRecipientPosture] =
     useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
@@ -552,7 +555,7 @@ export function AgreementRecipientReview({
   }, [recipientPosture]);
 
   useEffect(() => {
-    if (!recipientPreview) setCompareViewMode("redline");
+    if (!recipientPreview) setCompareViewMode("clauses");
   }, [recipientPreview]);
 
   const previewDiff = useMemo(() => {
@@ -565,11 +568,7 @@ export function AgreementRecipientReview({
     );
   }, [recipientPreview]);
 
-  const redlineCharCount =
-    previewDiff?.redline.segments.reduce((n, s) => n + s.text.length, 0) ?? 0;
-  const redlineLarge =
-    Boolean(previewDiff) &&
-    (previewDiff!.redline.segments.length > 120 || redlineCharCount > 24_000);
+  const redlineNoisy = Boolean(previewDiff && isRecipientRedlineConsideredNoisy(previewDiff));
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -937,6 +936,10 @@ export function AgreementRecipientReview({
     );
   }
 
+  const clauseCards = previewDiff
+    ? buildRecipientClauseCards(previewDiff.snapshotCompare, previewDiff.hasMaterialTextDiff)
+    : [];
+
   const comparePanel =
     recipientPreview && previewDiff && !previewDiff.isCompleteNoOp ? (
       <div className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-4 shadow-sm">
@@ -945,10 +948,17 @@ export function AgreementRecipientReview({
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
               {MATERIAL_CHANGE_SUMMARY_LABEL}
             </div>
-            <p className="mt-1 text-[10px] leading-snug text-slate-300/95">
-              {buildRecipientMaterialSummaryFromDiff(previewDiff)}
-            </p>
-            <p className="mt-1 text-[10px] font-medium text-slate-200/95">
+            <ul className="mt-1.5 list-none space-y-0.5 p-0 text-[10px] leading-snug text-slate-200/95">
+              {getRecipientPreviewSummaryBullets(previewDiff).map((line, i) => (
+                <li key={`sum_${i}`} className="flex gap-1.5">
+                  <span className="mt-0.5 text-slate-500" aria-hidden>
+                    •
+                  </span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[10px] font-medium text-slate-200/95">
               {bundle && isSigningLockActive(bundle)
                 ? "Final: Final version ready for signature"
                 : "Editable: Draft in progress — you can still make edits"}
@@ -965,20 +975,19 @@ export function AgreementRecipientReview({
           </span>
         </div>
         <p className="mt-1 text-[10px] leading-snug text-slate-500">
-          LawDog organizes the differences; your current draft in LawDog is preserved until the owner reviews and
-          applies. Send only when this preview is the agreement path you want them to see.
+          LawDog highlights what you asked to change. The owner&apos;s saved draft stays as-is until they accept.
         </p>
         <div className="mt-3 flex flex-wrap gap-0.5 rounded-lg border border-slate-700/90 bg-slate-950/40 p-0.5">
           <button
             type="button"
             className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px] ${
-              compareViewMode === "redline"
+              compareViewMode === "clauses"
                 ? "bg-slate-800 text-slate-100 shadow-sm"
                 : "text-slate-500 hover:text-slate-300"
             }`}
-            onClick={() => setCompareViewMode("redline")}
+            onClick={() => setCompareViewMode("clauses")}
           >
-            Redline view
+            Changed clauses
           </button>
           <button
             type="button"
@@ -1002,34 +1011,56 @@ export function AgreementRecipientReview({
           >
             Side-by-side
           </button>
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px] ${
+              compareViewMode === "fullRedline"
+                ? "bg-slate-800 text-slate-100 shadow-sm"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+            onClick={() => setCompareViewMode("fullRedline")}
+            data-testid="recipient-tab-full-redline"
+          >
+            Full document redline
+          </button>
         </div>
 
-        {compareViewMode === "redline" ? (
-          <div className="mt-4 space-y-3">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Changed sections
+        {compareViewMode === "clauses" ? (
+          <div className="mt-4 space-y-3" data-testid="recipient-changed-clauses">
+            <p className="text-[10px] leading-snug text-slate-400">
+              Only the agreement parts your suggestion affects — similar to Word &quot;tracked changes&quot; for key
+              fields.
+            </p>
+            {clauseCards.map((card) => (
+              <div
+                key={card.id}
+                className="rounded-md border border-slate-700/80 bg-slate-950/40 px-3 py-2.5 text-[11px] leading-snug text-slate-100"
+              >
+                <div className="font-semibold text-slate-100">{card.sectionLabel}</div>
+                <div className="mt-2 text-slate-400">
+                  <span className="font-medium text-slate-500">Current: </span>
+                  <span className="text-slate-300">{card.currentText}</span>
+                </div>
+                <div className="mt-1 text-slate-200">
+                  <span className="font-medium text-emerald-200/90">Proposed: </span>
+                  <span>{card.proposedText}</span>
+                </div>
+                <p className="mt-2 border-t border-slate-800/80 pt-2 text-[10px] italic text-slate-400">{card.reason}</p>
               </div>
-              {previewDiff.snapshotCompare.hasChanges ? (
-                <ul className="mt-1.5 mb-0 list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">
-                  {numberedSectionChangeLines(previewDiff.snapshotCompare.changedFieldKeys).map((line, i) => (
-                    <li key={`rl_sec_${i}`}>{line}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-1.5 text-[11px] text-amber-200/90">No section-level field changes detected.</p>
-              )}
-            </div>
-            {redlineLarge ? (
-              <p className="text-[10px] leading-snug text-slate-500">
-                Large change — try <span className="text-slate-300">Side-by-side</span> if this is hard to scan.
+            ))}
+            {redlineNoisy ? (
+              <p className="text-[10px] text-slate-500">
+                This update also changes a lot of surrounding document text. Use{" "}
+                <button
+                  type="button"
+                  className="text-sky-300 underline decoration-sky-800/50 hover:text-sky-200"
+                  onClick={() => setCompareViewMode("fullRedline")}
+                >
+                  Full document redline
+                </button>{" "}
+                only if you need the raw compare.
               </p>
             ) : null}
-            <RecipientRedlineInline redline={previewDiff.redline} />
-            <p className="text-[10px] leading-snug text-slate-500">
-              <span className="text-emerald-300/90">Green</span> = additions,{" "}
-              <span className="text-rose-300/90">red strikethrough</span> = removals.
-            </p>
           </div>
         ) : null}
 
@@ -1046,81 +1077,64 @@ export function AgreementRecipientReview({
         ) : null}
 
         {compareViewMode === "side" ? (
-          <>
-            <div className="mt-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Changed sections
-              </div>
-              {previewDiff.snapshotCompare.hasChanges ? (
-                <ul className="mt-1.5 mb-0 list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">
-                  {numberedSectionChangeLines(previewDiff.snapshotCompare.changedFieldKeys).map((line, i) => (
-                    <li key={`side_sec_${i}`}>{line}</li>
-                  ))}
-                </ul>
-              ) : null}
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-md border border-slate-800/90 bg-white p-4 text-slate-900">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Current</div>
+              <div
+                className="prose prose-sm mt-2 max-w-none text-slate-900"
+                dangerouslySetInnerHTML={{
+                  __html: scrubAgreementHtml(recipientPreview.baselineHtml || "") || "<p>No preview.</p>",
+                }}
+              />
             </div>
-            {previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).length > 0 ? (
-              <div className="mt-3 space-y-2">
-                {previewDiff.snapshotCompare.changedFields
-                  .filter((r) => r.changed)
-                  .map((row) => (
-                    <div
-                      key={row.field}
-                      className="rounded-md border border-amber-800/35 bg-amber-950/15 px-3 py-2 text-[11px] leading-snug text-slate-200"
-                    >
-                      <div className="font-semibold text-amber-100/95">{agreementFieldLabel(row.field)}</div>
-                      <div className="mt-1 text-slate-400">
-                        <span className="text-slate-500">Before: </span>
-                        {row.before?.trim() ? row.before : "—"}
-                      </div>
-                      <div className="mt-0.5 text-slate-200">
-                        <span className="text-slate-500">After: </span>
-                        {row.after?.trim() ? row.after : "—"}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            ) : null}
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-md border border-slate-800/90 bg-white p-4 text-slate-900">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Current</div>
-                <div
-                  className="prose prose-sm mt-2 max-w-none text-slate-900"
-                  dangerouslySetInnerHTML={{
-                    __html: scrubAgreementHtml(recipientPreview.baselineHtml || "") || "<p>No preview.</p>",
-                  }}
-                />
-              </div>
-              <div className="rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Proposed</div>
-                <div
-                  className="prose prose-sm mt-2 max-w-none text-slate-900"
-                  dangerouslySetInnerHTML={{
-                    __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
-                  }}
-                />
-              </div>
+            <div className="rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Proposed</div>
+              <div
+                className="prose prose-sm mt-2 max-w-none text-slate-900"
+                dangerouslySetInnerHTML={{
+                  __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+                }}
+              />
             </div>
-          </>
+          </div>
         ) : null}
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-            disabled={saving || !previewDiff.canSubmit}
-            onClick={() => void commitSubmit()}
-          >
-            {saving ? "Sending…" : "Send suggested edits"}
-          </button>
-          <button
-            type="button"
-            className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
-            disabled={saving || previewing}
-            onClick={() => discardPreview()}
-          >
-            Dismiss preview
-          </button>
+        {compareViewMode === "fullRedline" ? (
+          <div className="mt-4 space-y-2">
+            <p className="rounded-md border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-[10px] leading-snug text-amber-100/95">
+              Advanced full-document comparison — may be noisy. For most reviews, use{" "}
+              <span className="font-medium text-amber-50">Changed clauses</span>.
+            </p>
+            <RecipientRedlineInline redline={previewDiff.redline} paragraphBreaks />
+            <p className="text-[10px] leading-snug text-slate-500">
+              <span className="text-emerald-300/90">Green</span> = additions,{" "}
+              <span className="text-rose-300/90">red strikethrough</span> = removals.
+            </p>
+          </div>
+        ) : null}
+
+        <div className="mt-4 space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              disabled={saving || !previewDiff.canSubmit}
+              onClick={() => void commitSubmit()}
+            >
+              {saving ? "Sending…" : "Send suggested edits"}
+            </button>
+            <button
+              type="button"
+              className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
+              disabled={saving || previewing}
+              onClick={() => discardPreview()}
+            >
+              Dismiss preview
+            </button>
+          </div>
+          <p className="max-w-xl text-[10px] leading-snug text-slate-500">
+            This sends your proposed changes to the owner. It does not change the agreement automatically.
+          </p>
         </div>
       </div>
     ) : null;
@@ -2340,10 +2354,10 @@ export function AgreementRecipientReview({
                 </button>
               </div>
               <p className="text-[10px] leading-snug text-slate-500">
-                After <span className="text-slate-400">Preview changes</span>, review the{" "}
-                <span className="text-slate-400">summary of material changes</span>, then{" "}
-                <span className="text-slate-400">Send suggested edits</span> for the owner — the saved draft in LawDog stays
-                as-is until they apply.
+                After <span className="text-slate-400">Preview changes</span>, check{" "}
+                <span className="text-slate-400">Changed clauses</span>, then{" "}
+                <span className="text-slate-400">Send suggested edits</span> — the owner&apos;s draft stays as-is until
+                they accept.
               </p>
 
               {comparePanel}
@@ -2378,6 +2392,9 @@ export function AgreementRecipientReview({
           >
             {saving ? "Sending…" : "Send suggested edits"}
           </button>
+          <p className="text-center text-[10px] leading-snug text-slate-500">
+            Sends to the owner only — does not change the agreement automatically.
+          </p>
           <button
             type="button"
             className="btn w-full rounded-lg border border-slate-600 px-4 py-3 text-sm text-slate-200 hover:bg-slate-900/60 disabled:opacity-50"

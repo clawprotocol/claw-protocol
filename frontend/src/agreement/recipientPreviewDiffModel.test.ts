@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { RedlineResult } from "../vs01/agreementRedline";
 import {
   assessRecipientPreviewDiff,
-  buildRecipientMaterialSummaryFromDiff,
+  buildRecipientClauseCards,
+  getRecipientPreviewSummaryBullets,
+  isRecipientRedlineNoisyRaw,
   numberedSectionChangeLines,
   recipientPreviewNoOpMessage,
+  recipientSendConfirmationLine,
 } from "./recipientPreviewDiffModel";
 import type { AgreementDraft } from "./agreementTypes";
 
@@ -54,7 +58,10 @@ describe("recipientPreviewDiffModel", () => {
     expect(a.hasMaterialTextDiff).toBe(true);
     expect(a.hasSnapshotDiff).toBe(true);
     expect(a.canSubmit).toBe(true);
-    expect(buildRecipientMaterialSummaryFromDiff(a)).toMatch(/Updated fields:/);
+    const bullets = getRecipientPreviewSummaryBullets(a);
+    expect(bullets[0]).toMatch(/2 suggested changes detected/);
+    expect(bullets.join(" ")).not.toMatch(/29844|characters of wording|diff segments/i);
+    expect(bullets.some((b) => /Owner's draft will not change/i.test(b))).toBe(true);
   });
 
   it("allows submit when only rendered text differs (text-only redline)", () => {
@@ -73,14 +80,12 @@ describe("recipientPreviewDiffModel", () => {
     ]);
   });
 
-  it("QA: Net 30 + pause-work style snapshot diff passes integrity (even if HTML identical)", () => {
+  it("Net 30 + pause-if-late builds two clause cards with plain-English reasons", () => {
     const base = baseDraft({
-      title: "Development agreement",
       purpose: "Custom software development.",
       payment_terms: "Net 15.",
     });
     const proposed = baseDraft({
-      title: "Development agreement",
       payment_terms: "Net 30. Net 15.",
       purpose:
         "Custom software development. The developer may pause work if payment is more than 15 days late until amounts are brought current.",
@@ -94,5 +99,23 @@ describe("recipientPreviewDiffModel", () => {
     expect(a.hasSnapshotDiff).toBe(true);
     expect(a.isCompleteNoOp).toBe(false);
     expect(a.canSubmit).toBe(true);
+    const cards = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff);
+    expect(cards.length).toBeGreaterThanOrEqual(2);
+    const pay = cards.find((c) => c.id === "payment_terms");
+    const pur = cards.find((c) => c.id === "purpose");
+    expect(pay?.proposedText).toMatch(/Net 30/i);
+    expect(pur?.reason.toLowerCase()).toMatch(/pause/);
+    const bullets = getRecipientPreviewSummaryBullets(a);
+    expect(bullets[0]).toMatch(/2 suggested changes detected/);
+    expect(recipientSendConfirmationLine(a)).toMatch(/2 suggested changes/);
   });
+
+  it("marks redline as noisy when segment count is huge (defaults away from full redline in UI)", () => {
+    const segs = Array.from({ length: 90 }, (_, i) =>
+      i % 2 === 0 ? { type: "delete" as const, text: "x" } : { type: "insert" as const, text: "y" },
+    );
+    const redline: RedlineResult = { hasChanges: true, segments: segs };
+    expect(isRecipientRedlineNoisyRaw(redline, 90)).toBe(true);
+  });
+
 });
