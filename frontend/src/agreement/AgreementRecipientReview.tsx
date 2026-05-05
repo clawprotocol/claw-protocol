@@ -19,7 +19,6 @@ import { buildAgreementRedline } from "../vs01/agreementRedline";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
 import {
-  AI_ASSISTIVE_SHORT,
   ESIGN_INTENT_SIGN_AGREEMENT_ACTION,
   NOT_LEGAL_ADVICE,
   PRODUCT_NOT_LAW_FIRM,
@@ -85,6 +84,7 @@ import {
   NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE,
   PASTE_OPTIONAL_NOTE_LABEL,
   PLAIN_ENGLISH_FIELD_LABEL,
+  REVIEWER_NOT_AUTOMATIC_LINE,
   UNIVERSAL_REVIEW_INTRO,
   UPLOAD_FILE_COMPARISON_COMING_SOON,
 } from "./universalReviewIntakeCopy";
@@ -265,7 +265,23 @@ export function AgreementRecipientReview({
   const joySignEmittedRef = useRef(false);
   const recipientFunnelOpenRef = useRef(false);
   const reviewerViewLoggedRef = useRef(false);
+  /** Scroll target when reviewer opens “Suggest changes”. */
+  const recipientSuggestPanelRef = useRef<HTMLDivElement>(null);
   const access = useAccess();
+
+  const scrollAndFocusSuggestPanel = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        const root = recipientSuggestPanelRef.current;
+        root?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const first =
+          root?.querySelector<HTMLElement>(
+            "#recipient-revision-input, #recipient-external-ai-paste, #pro-redline-recipient-suggest",
+          ) ?? null;
+        first?.focus({ preventScroll: true });
+      }, 16);
+    });
+  }, []);
 
   useEffect(() => {
     reviewerViewLoggedRef.current = false;
@@ -1451,7 +1467,7 @@ export function AgreementRecipientReview({
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement review</p>
             <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">
               {isPaidReviewerSurface
-                ? "You're reviewing this agreement"
+                ? "Review this agreement"
                 : "You've been invited to review an agreement"}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300">
@@ -1459,6 +1475,11 @@ export function AgreementRecipientReview({
                 ? "Suggest changes before anyone signs."
                 : "Read the terms, request changes, or sign securely on your phone. Nothing is final until you confirm."}
             </p>
+            {isPaidReviewerSurface ? (
+              <p className="mt-2 max-w-2xl text-xs leading-relaxed text-slate-400">
+                Your suggestions do not change the original until the owner accepts them.
+              </p>
+            ) : null}
             {recipientTrustCueStrip()}
             {recipientAgreementSummaryCard({
               agreementType,
@@ -1471,7 +1492,7 @@ export function AgreementRecipientReview({
             </p>
             {viewerLike ? (
               <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-                View-only access — you can read the agreement but can&apos;t suggest edits.
+                View-only access — you can read the agreement but can&apos;t suggest changes.
               </p>
             ) : null}
           </div>
@@ -1490,9 +1511,10 @@ export function AgreementRecipientReview({
               onClick={() => {
                 setFlowPhase("active");
                 setWorkspaceTab("revise");
+                scrollAndFocusSuggestPanel();
               }}
             >
-              Request changes
+              Suggest changes
             </button>
           </div>
         ) : null}
@@ -1521,9 +1543,10 @@ export function AgreementRecipientReview({
               onClick={() => {
                 setFlowPhase("active");
                 setWorkspaceTab("revise");
+                scrollAndFocusSuggestPanel();
               }}
             >
-              Request changes
+              Suggest changes
             </button>
           ) : null}
         </div>
@@ -1723,10 +1746,13 @@ export function AgreementRecipientReview({
           {entry.kind === "review" && recipientLinkRole === "reviewer" && !viewerLike ? (
             <>
               <h1 className="text-lg font-semibold tracking-tight text-slate-100 sm:text-xl">
-                You&apos;re reviewing this agreement
+                Review this agreement
               </h1>
               <p className="mt-1.5 text-sm leading-relaxed text-slate-300">
                 Suggest changes before anyone signs.
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                Your suggestions do not change the original until the owner accepts them.
               </p>
             </>
           ) : (
@@ -1734,7 +1760,7 @@ export function AgreementRecipientReview({
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Review Agreement</p>
               <p className="text-sm text-slate-300">
                 {workspaceTab === "read"
-                  ? "Read the agreement first — editing tools are under Suggest edits."
+                  ? "Read the agreement first — editing tools are under Suggest changes."
                   : "Describe what you’d like different, preview, then send your revised draft to the owner."}
               </p>
             </>
@@ -1763,8 +1789,8 @@ export function AgreementRecipientReview({
 
       {workspaceTab === "read" ? (
         <p className="text-xs leading-relaxed text-slate-400">
-          You can suggest changes or accept this agreement. The owner applies edits — nothing here overwrites their draft
-          directly.
+          You can suggest changes or say this looks good. The owner reviews and accepts changes — nothing here changes
+          the agreement automatically.
         </p>
       ) : null}
 
@@ -1781,7 +1807,7 @@ export function AgreementRecipientReview({
       isPaidProAgreementAuthoritative({ draft, agreementId, includeLocalCompletionMarker: false }) &&
       !viewerLike ? (
         <div className="rounded-lg border border-violet-800/45 bg-slate-950/50 px-4 py-4 text-slate-100">
-          <div className="text-xs font-semibold uppercase tracking-wide text-violet-200/90">Suggest changes</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-violet-200/90">Note for the owner</div>
           <p className="mt-1 text-[11px] leading-snug text-slate-400">
             Plain-language notes for the owner. Nothing is signed on this screen.
           </p>
@@ -1891,9 +1917,10 @@ export function AgreementRecipientReview({
               onClick={() => {
                 setWorkspaceTab("revise");
                 setError(null);
+                scrollAndFocusSuggestPanel();
               }}
             >
-              Suggest edits
+              Suggest changes
             </button>
           ) : null}
           {!viewerLike ? (
@@ -1903,7 +1930,7 @@ export function AgreementRecipientReview({
               disabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
               onClick={() => void acceptCurrentDraft()}
             >
-              {approving ? "Saving…" : "Accept current draft"}
+              {approving ? "Saving…" : "Looks good"}
             </button>
           ) : null}
           <button
@@ -1911,7 +1938,7 @@ export function AgreementRecipientReview({
             className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-900/60"
             onClick={() => setFlowPhase("declined")}
           >
-            Decline
+            Not participating
           </button>
           {recipientLinkRole === "signer" && canRecipientSign ? (
             <a
@@ -1931,7 +1958,7 @@ export function AgreementRecipientReview({
       ) : viewerLike ? (
         <p className="text-xs text-slate-500">You have view-only access to this agreement.</p>
       ) : (
-        <div className="space-y-3">
+        <div ref={recipientSuggestPanelRef} className="space-y-3">
           <button
             type="button"
             className="text-xs font-medium text-sky-300 underline decoration-sky-800/50 hover:text-sky-200"
@@ -1941,7 +1968,7 @@ export function AgreementRecipientReview({
               setError(null);
             }}
           >
-            ← Back to read-only view
+            ← Back to agreement
           </button>
 
           {hasPendingSuggestion ? (
@@ -1967,7 +1994,7 @@ export function AgreementRecipientReview({
                     setError(null);
                   }}
                 >
-                  Assisted preview
+                  Preview suggestions
                 </button>
                 <button
                   type="button"
@@ -1982,7 +2009,7 @@ export function AgreementRecipientReview({
                     setError(null);
                   }}
                 >
-                  Direct compare
+                  Compare text
                 </button>
               </div>
               {reviseTextMode === "direct" ? (
@@ -1992,14 +2019,11 @@ export function AgreementRecipientReview({
               <div className="space-y-2 rounded-md border border-slate-700/60 bg-slate-950/35 p-3">
                 <h3 className="text-sm font-semibold text-slate-100">{BRING_BACK_SUGGESTED_EDITS_TITLE}</h3>
                 <p className="text-[10px] leading-relaxed text-slate-400">{UNIVERSAL_REVIEW_INTRO}</p>
-                <p className="text-[0.65rem] leading-snug text-slate-500">
-                  {AI_ASSISTIVE_SHORT} The agreement owner still decides what to accept. Nothing in their master draft
-                  changes until they confirm a proposal.
-                </p>
                 <p className="text-[0.65rem] font-medium text-amber-100/80">{NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE}</p>
+                <p className="text-[0.65rem] leading-snug text-slate-500">{REVIEWER_NOT_AUTOMATIC_LINE}</p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="How to suggest edits">
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="How to suggest changes">
                 <button
                   type="button"
                   className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium ${

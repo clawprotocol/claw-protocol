@@ -6,6 +6,9 @@ import {
   MODE_PASTE_REVISED_DRAFT,
   MODE_SUGGEST_PLAIN_ENGLISH,
   MODE_UPLOAD_FILE,
+  NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE,
+  UNIVERSAL_REVIEW_INTRO,
+  UPLOAD_FILE_COMPARISON_COMING_SOON,
   allReviewIntakeQaStringScanSet,
 } from "./universalReviewIntakeCopy";
 
@@ -23,10 +26,15 @@ function tokenBannedInString(text: string, token: string): boolean {
 
 describe("universal review intake copy", () => {
   it("exposes the intended section title and three review paths", () => {
-    expect(BRING_BACK_SUGGESTED_EDITS_TITLE).toBe("Bring back suggested edits");
-    expect(MODE_SUGGEST_PLAIN_ENGLISH).toBe("Suggest in plain English");
+    expect(BRING_BACK_SUGGESTED_EDITS_TITLE).toBe("Suggest changes");
+    expect(UNIVERSAL_REVIEW_INTRO).toContain("LawDog will help organize the differences.");
+    expect(NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE).toBe(
+      "Nothing changes the owner's draft until they accept it.",
+    );
+    expect(MODE_SUGGEST_PLAIN_ENGLISH).toBe("Write suggestions");
     expect(MODE_PASTE_REVISED_DRAFT).toBe("Paste revised draft");
     expect(MODE_UPLOAD_FILE).toBe("Upload file");
+    expect(UPLOAD_FILE_COMPARISON_COMING_SOON).toBe("Upload comparison coming soon.");
   });
 
   it("does not include banned phrases in the QA scan set (guards calm collaborative language)", () => {

@@ -356,17 +356,17 @@ test.describe("recipient + link flow QA", () => {
     await installIsolatedAgreementsApi(page, state);
 
     await page.goto(`/agreements/${id}/review`, { waitUntil: "domcontentloaded" });
-    const requestChanges = page.getByRole("button", { name: "Request changes" });
-    if (await requestChanges.isVisible().catch(() => false)) {
-      await requestChanges.first().click();
+    const suggestChangesLanding = page.getByRole("button", { name: "Suggest changes" });
+    if (await suggestChangesLanding.isVisible().catch(() => false)) {
+      await suggestChangesLanding.first().click();
     } else {
       const reviewCta = page.getByRole("button", { name: "Review agreement" });
       await expect(reviewCta.first()).toBeVisible({ timeout: 30_000 });
       await reviewCta.first().click();
-      await expect(page.getByRole("button", { name: "Suggest edits" })).toBeVisible({ timeout: 20_000 });
-      await page.getByRole("button", { name: "Suggest edits" }).click();
+      await expect(page.getByRole("button", { name: "Suggest changes" })).toBeVisible({ timeout: 20_000 });
+      await page.getByRole("button", { name: "Suggest changes" }).click();
     }
-    await expect(page.getByText("Suggest in plain English", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Write suggestions", { exact: true })).toBeVisible({ timeout: 20_000 });
     const ta = page.locator("#recipient-revision-input");
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
     await page.getByRole("button", { name: "Preview changes" }).click();
