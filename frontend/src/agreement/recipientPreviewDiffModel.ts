@@ -41,6 +41,10 @@ export type RecipientPreviewDiffAssessment = {
   snapshotCompare: AgreementCompareResult;
   hasMaterialTextDiff: boolean;
   hasSnapshotDiff: boolean;
+  /** True when either rendered text or structured draft differs materially. */
+  hasAnyMaterialChange: boolean;
+  /** True only when both plain rendered text and snapshot fields are unchanged — then show “No changes detected”. */
+  isCompleteNoOp: boolean;
   changeCharCount: number;
   canSubmit: boolean;
 };
@@ -59,12 +63,16 @@ export function assessRecipientPreviewDiff(
   const hasMaterialTextDiff =
     redline.hasChanges && countRedlineChangeChars(redline) >= RECIPIENT_PREVIEW_MIN_DIFF_CHARS;
   const hasSnapshotDiff = snapshotCompare.hasChanges;
-  const canSubmit = hasMaterialTextDiff && hasSnapshotDiff;
+  const hasAnyMaterialChange = hasMaterialTextDiff || hasSnapshotDiff;
+  const isCompleteNoOp = !hasAnyMaterialChange;
+  const canSubmit = hasAnyMaterialChange;
   return {
     redline,
     snapshotCompare,
     hasMaterialTextDiff,
     hasSnapshotDiff,
+    hasAnyMaterialChange,
+    isCompleteNoOp,
     changeCharCount: countRedlineChangeChars(redline),
     canSubmit,
   };
@@ -100,12 +108,17 @@ export function buildRecipientMaterialSummaryFromDiff(assessment: RecipientPrevi
     parts.push(
       `About ${assessment.changeCharCount} characters of wording changed in the rendered document (${ops} diff segments).`,
     );
+  } else if (assessment.hasSnapshotDiff) {
+    parts.push("Structured draft fields differ from the current version (compare side-by-side for full text).");
   }
-  return parts.join(" ").trim() || "No material text changes.";
+  return parts.join(" ").trim() || "No material changes.";
 }
 
 export function recipientSendConfirmationLine(assessment: RecipientPreviewDiffAssessment): string {
-  const sections = assessment.snapshotCompare.changedFieldKeys.length;
+  const sections = Math.max(
+    assessment.snapshotCompare.changedFieldKeys.length,
+    assessment.hasMaterialTextDiff && assessment.snapshotCompare.changedFieldKeys.length === 0 ? 1 : 0,
+  );
   const changes = Math.max(
     1,
     assessment.redline.segments.filter((s) => s.type !== "same").length,

@@ -3280,6 +3280,127 @@ def _revise_instruction_fallback(current: AgreementDraft, instruction: str) -> A
     return next_data
 
 
+def _append_unique_purpose_sentence(purpose: str, addition: str) -> str:
+    clause = (addition or "").strip()
+    if not clause:
+        return (purpose or "").strip()
+    p = (purpose or "").strip()
+    head = clause[: min(72, len(clause))].lower()
+    if head and head in p.lower():
+        return p
+    joiner = ". " if p and not p.endswith((".", "?", "!")) else " "
+    return f"{p}{joiner}{clause}".strip()
+
+
+def _recipient_deterministic_merge_instruction(base: AgreementDraft, instruction: str) -> AgreementDraftCreate:
+    """
+    Apply common reviewer phrases to draft fields without an LLM (used when revise output
+    is still field-identical to the stored draft).
+    """
+    t = (instruction or "").strip()
+    lo = t.lower()
+    title = base.title or ""
+    jurisdiction = base.jurisdiction or ""
+    parties = list(base.parties or [])
+    purpose = base.purpose or ""
+    payment_terms = base.payment_terms or ""
+    duration = base.duration
+    due_date = base.due_date
+    effective_date = base.effective_date
+
+    fb = _revise_instruction_fallback(base, instruction)
+    title = fb.title or title
+    jurisdiction = fb.jurisdiction or jurisdiction
+    parties = list(fb.parties or parties)
+    purpose = fb.purpose or purpose
+    payment_terms = fb.payment_terms or payment_terms
+    duration = fb.duration if fb.duration is not None else duration
+    due_date = fb.due_date if fb.due_date is not None else due_date
+    effective_date = fb.effective_date if fb.effective_date is not None else effective_date
+
+    # Net N / payment terms (handles "update the payment terms to Net 30", "use net 30", etc.)
+    nm = re.search(r"(?:payment\s+terms?\s*(?:to|is|=|:)\s*)?net\s+(\d+)\b", lo, re.I)
+    if nm:
+        n = nm.group(1)
+        if n:
+            compact = re.sub(r"[\s_]", "", (payment_terms or "").lower())
+            if f"net{n}" not in compact:
+                payment_terms = (f"Net {n}. " + (payment_terms or "").strip()).strip()
+
+    # Late payment fee / penalty language
+    if re.search(r"late\s*(?:payment)?\s*(?:fee|penalt)|penalt\w*\s+for\s+late|interest\s+on\s+late", lo):
+        purpose = _append_unique_purpose_sentence(
+            purpose,
+            "Late payment may incur fees, interest, or other remedies described in the payment terms.",
+        )
+
+    # Pause / suspend work when payment is late (captures "more than 15 days late")
+    if re.search(r"\bpause\b.*\bwork\b|\bsuspend\b.*\bwork\b|\bmay\s+pause\b", lo) and (
+        "payment" in lo or "invoice" in lo or "paid" in lo
+    ):
+        dm = re.search(r"more\s+than\s+(\d+)\s*days?\s+late|(\d+)\s*days?\s*(?:past\s*due|late)", lo)
+        days = (dm.group(1) or dm.group(2)) if dm else "15"
+        purpose = _append_unique_purpose_sentence(
+            purpose,
+            f"The developer may pause work if payment is more than {days} days late until amounts are brought current.",
+        )
+
+    # Delivery / deadline changes
+    dvm = re.search(
+        r"(?:delivery|deadline)\s*(?:date)?\s*(?:in|within|of|to|=|:)?\s*(\d+)\s*days?",
+        lo,
+        re.I,
+    )
+    if dvm:
+        purpose = _append_unique_purpose_sentence(
+            purpose,
+            f"Delivery timeline: {dvm.group(1)} days from the effective date unless otherwise agreed in writing.",
+        )
+
+    # Revision rounds
+    rvm = re.search(r"(\d+)\s*(?:revision|review)\s*(?:rounds?|cycles?)", lo, re.I)
+    if rvm:
+        purpose = _append_unique_purpose_sentence(
+            purpose,
+            f"Up to {rvm.group(1)} revision rounds are included unless the parties agree otherwise.",
+        )
+
+    # Governing law (explicit phrase only; stop before "and" / "add" / sentence end)
+    if re.search(r"\bgoverning\s+law\b", lo):
+        gvm = re.search(
+            r"governing\s+law\s*(?:to|is|:)?\s*([A-Za-z][A-Za-z0-9\s]{1,40}?)(?:\s*[.,]|\s+and\b|\s+add\b|$)",
+            t,
+            re.I,
+        )
+        if gvm:
+            jurisdiction = gvm.group(1).strip(" .")
+
+    # Confidentiality / NDA
+    if re.search(r"\bconfidentiality\b|\bnon[-\s]?disclosure\b|\bnda\b", lo, re.I):
+        purpose = _append_unique_purpose_sentence(
+            purpose,
+            "The parties will treat confidential information under commercially reasonable confidentiality obligations.",
+        )
+
+    # Support / bug-fix period
+    if re.search(r"bug[-\s]?fix|support\s*(?:and\s*maintenance\s*)?period|warranty\s*period|maintenance\s*window", lo, re.I):
+        purpose = _append_unique_purpose_sentence(
+            purpose,
+            "A mutually agreed support and bug-fix period applies as further described in the statement of work.",
+        )
+
+    return AgreementDraftCreate(
+        title=title,
+        jurisdiction=jurisdiction,
+        parties=parties,
+        purpose=purpose,
+        payment_terms=payment_terms,
+        duration=duration,
+        due_date=due_date,
+        effective_date=effective_date,
+    )
+
+
 def _maybe_apply_recipient_deterministic_no_op_patch(
     base: AgreementDraft,
     instruction: str,
@@ -3287,34 +3408,13 @@ def _maybe_apply_recipient_deterministic_no_op_patch(
 ) -> AgreementDraftCreate:
     """
     Recipient-only: when the LLM/coalesced revision is field-identical to the base draft,
-    try deterministic instruction parsing (Net N, fallback phrases) so previews can still
-    produce a structural change without a second model call.
+    merge deterministic reviewer instruction patterns so previews can still change fields.
     """
     if _revision_comparison_blob(base) != _revision_comparison_blob(revised):
         return revised
-    lo = (instruction or "").strip().lower()
-    fb = _revise_instruction_fallback(base, instruction)
-    if _revision_comparison_blob(base) != _revision_comparison_blob(fb):
-        return fb
-    m = re.search(r"\b(?:use|switch|move)\s+(?:to\s+)?net\s+(\d+)\b", lo)
-    if not m:
-        m = re.search(r"\bnet\s+(\d+)\b", lo)
-    if m:
-        n = m.group(1)
-        pt0 = (base.payment_terms or "").strip()
-        compact = re.sub(r"[\s_]", "", pt0.lower())
-        if f"net{n}" not in compact:
-            new_pt = (f"Net {n}. " + pt0).strip()
-            return AgreementDraftCreate(
-                title=fb.title,
-                jurisdiction=fb.jurisdiction,
-                parties=fb.parties,
-                purpose=fb.purpose,
-                payment_terms=new_pt,
-                duration=fb.duration,
-                due_date=fb.due_date,
-                effective_date=fb.effective_date,
-            )
+    patched = _recipient_deterministic_merge_instruction(base, instruction)
+    if _revision_comparison_blob(base) != _revision_comparison_blob(patched):
+        return patched
     return revised
 
 
@@ -6247,6 +6347,32 @@ def revise_agreement(
     for hk, hv in usage_response_header(remaining if session_type == "recipient" else 9999).items():
         response.headers[hk] = hv
     wm = _watermark_active_for_agreement(agreement_id)
+    if session_type == "recipient":
+        try:
+            tok = (request.headers.get("X-Claw-Recipient-Access-Token") or "").strip()
+            blob_before = _revision_comparison_blob(draft)
+            blob_after = _revision_comparison_blob(next_draft)
+            fields_changed = blob_before != blob_after
+            html_before = _render_html(draft, watermark=wm)
+            html_after = _render_html(next_draft, watermark=wm)
+            rendered_changed = _norm_revision_comparison_text(html_before) != _norm_revision_comparison_text(
+                html_after
+            )
+            log.info(
+                "[recipient-revise] agreement_id=%s instruction_len=%s recipient_token_present=%s "
+                "fields_changed=%s rendered_changed=%s",
+                agreement_id,
+                len(instruction or ""),
+                bool(tok),
+                fields_changed,
+                rendered_changed,
+            )
+        except Exception as exc:
+            log.warning(
+                "[recipient-revise] diag_failed agreement_id=%s exc=%s",
+                agreement_id,
+                type(exc).__name__,
+            )
     return {
         "id": agreement_id,
         "draft": next_draft.model_dump(),

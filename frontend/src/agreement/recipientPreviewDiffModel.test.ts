@@ -37,6 +37,7 @@ describe("recipientPreviewDiffModel", () => {
     const p = baseDraft();
     const a = assessRecipientPreviewDiff(b, p, html, html);
     expect(a.hasMaterialTextDiff).toBe(false);
+    expect(a.isCompleteNoOp).toBe(true);
     expect(a.canSubmit).toBe(false);
     expect(recipientPreviewNoOpMessage()).toContain("No changes detected");
   });
@@ -56,12 +57,13 @@ describe("recipientPreviewDiffModel", () => {
     expect(buildRecipientMaterialSummaryFromDiff(a)).toMatch(/Updated fields:/);
   });
 
-  it("blocks submit when only HTML differs but snapshot fields match", () => {
+  it("allows submit when only rendered text differs (text-only redline)", () => {
     const d = baseDraft();
     const a = assessRecipientPreviewDiff(d, d, "<p>Alpha</p>", "<p>Beta gamma</p>");
     expect(a.hasMaterialTextDiff).toBe(true);
     expect(a.hasSnapshotDiff).toBe(false);
-    expect(a.canSubmit).toBe(false);
+    expect(a.isCompleteNoOp).toBe(false);
+    expect(a.canSubmit).toBe(true);
   });
 
   it("numberedSectionChangeLines labels snapshot keys", () => {
@@ -69,5 +71,28 @@ describe("recipientPreviewDiffModel", () => {
       "Section 1 — Payment terms modified",
       "Section 2 — Purpose modified",
     ]);
+  });
+
+  it("QA: Net 30 + pause-work style snapshot diff passes integrity (even if HTML identical)", () => {
+    const base = baseDraft({
+      title: "Development agreement",
+      purpose: "Custom software development.",
+      payment_terms: "Net 15.",
+    });
+    const proposed = baseDraft({
+      title: "Development agreement",
+      payment_terms: "Net 30. Net 15.",
+      purpose:
+        "Custom software development. The developer may pause work if payment is more than 15 days late until amounts are brought current.",
+    });
+    const a = assessRecipientPreviewDiff(
+      base,
+      proposed,
+      "<p>Agreement body v1</p>",
+      "<p>Agreement body v1</p>",
+    );
+    expect(a.hasSnapshotDiff).toBe(true);
+    expect(a.isCompleteNoOp).toBe(false);
+    expect(a.canSubmit).toBe(true);
   });
 });

@@ -744,7 +744,30 @@ export function AgreementRecipientReview({
       const html = String(payload?.rendered_html || "");
       if (!nextDraft) throw new Error("We couldn't load the proposed change. Please try again.");
       const integrity = assessRecipientPreviewDiff(baselineDraft, nextDraft, baselineHtml, html);
-      if (!integrity.hasMaterialTextDiff || !integrity.hasSnapshotDiff) {
+      const diag =
+        import.meta.env.DEV ||
+        (typeof window !== "undefined" &&
+          window.localStorage?.getItem("lawdogRecipientReviseDiag") === "1");
+      if (diag) {
+        const tok = Boolean(recipientAccessToken?.trim());
+        // eslint-disable-next-line no-console
+        console.info("[recipient-revise-preview]", {
+          agreementId,
+          instructionLen: apiInstruction.length,
+          recipientTokenPresent: tok,
+          httpStatus: res.status,
+          fieldsChanged: integrity.hasSnapshotDiff,
+          renderedTextChanged: integrity.hasMaterialTextDiff,
+          isCompleteNoOp: integrity.isCompleteNoOp,
+        });
+      }
+      if (integrity.isCompleteNoOp) {
+        if (diag) {
+          // eslint-disable-next-line no-console
+          console.info("[recipient-revise-preview] blocked_no_op", {
+            reason: "structured_and_rendered_unchanged",
+          });
+        }
         setError(recipientPreviewNoOpMessage());
         setRecipientPreview(null);
         return;
@@ -915,7 +938,7 @@ export function AgreementRecipientReview({
   }
 
   const comparePanel =
-    recipientPreview && previewDiff && previewDiff.hasMaterialTextDiff && previewDiff.hasSnapshotDiff ? (
+    recipientPreview && previewDiff && !previewDiff.isCompleteNoOp ? (
       <div className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
