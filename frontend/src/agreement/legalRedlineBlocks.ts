@@ -22,10 +22,22 @@ export type LegalRedlineBlock = {
   id: string;
   kind: LegalRedlineBlockKind;
   clauseNumber?: string;
+  /** First line / short label for UI. */
   heading?: string;
+  /** Display label (clause + heading when useful). */
+  label?: string;
   currentText?: string;
   proposedText?: string;
   segments: LegalRedlineSegment[];
+  /** Per-block segment-type counts. */
+  insertCount: number;
+  deleteCount: number;
+  sameCount: number;
+  hasInsert: boolean;
+  hasDelete: boolean;
+  hasChange: boolean;
+  /** Reserved for per-block instruction-gap hints (future); default false. */
+  requestedButNotReflected?: boolean;
 };
 
 export type LegalRedlineDocumentViewModel = {
@@ -42,6 +54,8 @@ export type LegalRedlineDocumentViewModel = {
   };
   hasChanges: boolean;
   fallbackReason?: string;
+  /** Reviewer requests not evidenced in the proposal (e.g. instruction capture gaps). */
+  requestedNotReflectedCount?: number;
 };
 
 export type ParsedPlainBlock = {
@@ -126,6 +140,10 @@ function blockHasMaterialChange(segments: LegalRedlineSegment[]): boolean {
   return segments.some((s) => (s.type !== "same" && s.text.replace(/\s+/g, " ").trim().length > 0));
 }
 
+function meaningfulNonSameSegment(text: string): boolean {
+  return text.replace(/\s+/g, "").length > 0;
+}
+
 function countSegmentTypes(segments: LegalRedlineSegment[]): {
   insertCount: number;
   deleteCount: number;
@@ -169,6 +187,28 @@ function aggregateStats(
     segmentCount,
     currentLen,
     proposedLen,
+  };
+}
+
+function enrichAlignedBlock(block: Omit<LegalRedlineBlock, "insertCount" | "deleteCount" | "sameCount" | "hasInsert" | "hasDelete" | "hasChange" | "label">): LegalRedlineBlock {
+  const counts = countSegmentTypes(block.segments);
+  const hasInsert = block.segments.some((s) => s.type === "insert" && meaningfulNonSameSegment(s.text));
+  const hasDelete = block.segments.some((s) => s.type === "delete" && meaningfulNonSameSegment(s.text));
+  const hasChange = hasInsert || hasDelete;
+  const labelParts = [block.clauseNumber ? String(block.clauseNumber) : "", block.heading ?? ""].filter(
+    (x) => !!x && String(x).trim(),
+  );
+  const computedLabel = labelParts.length > 0 ? labelParts.join(" — ") : block.heading;
+  return {
+    ...block,
+    insertCount: counts.insertCount,
+    deleteCount: counts.deleteCount,
+    sameCount: counts.sameCount,
+    hasInsert,
+    hasDelete,
+    hasChange,
+    label: computedLabel?.trim() || block.heading,
+    requestedButNotReflected: false,
   };
 }
 
@@ -237,25 +277,29 @@ export function alignParsedBlocksToLegalRedline(
       if (ca) {
         usedCurrent.add(ca.sourceIndex);
         const rl = buildAgreementRedline(ca.rawText, pb.rawText);
-        out.push({
-          id: makeBlockId("m", outIdx++),
-          kind: pb.kind,
-          clauseNumber: pb.clauseNumber ?? ca.clauseNumber,
-          heading: pb.headingLine || ca.headingLine,
-          currentText: ca.rawText,
-          proposedText: pb.rawText,
-          segments: mapSegments(rl.segments),
-        });
+        out.push(
+          enrichAlignedBlock({
+            id: makeBlockId("m", outIdx++),
+            kind: pb.kind,
+            clauseNumber: pb.clauseNumber ?? ca.clauseNumber,
+            heading: pb.headingLine || ca.headingLine,
+            currentText: ca.rawText,
+            proposedText: pb.rawText,
+            segments: mapSegments(rl.segments),
+          }),
+        );
       } else {
         const rl = buildAgreementRedline("", pb.rawText);
-        out.push({
-          id: makeBlockId("i", outIdx++),
-          kind: pb.kind,
-          clauseNumber: pb.clauseNumber,
-          heading: pb.headingLine,
-          proposedText: pb.rawText,
-          segments: mapSegments(rl.segments),
-        });
+        out.push(
+          enrichAlignedBlock({
+            id: makeBlockId("i", outIdx++),
+            kind: pb.kind,
+            clauseNumber: pb.clauseNumber,
+            heading: pb.headingLine,
+            proposedText: pb.rawText,
+            segments: mapSegments(rl.segments),
+          }),
+        );
       }
       continue;
     }
@@ -264,39 +308,45 @@ export function alignParsedBlocksToLegalRedline(
     if (ca && !ca.clauseNumber) {
       usedCurrent.add(ca.sourceIndex);
       const rl = buildAgreementRedline(ca.rawText, pb.rawText);
-      out.push({
-        id: makeBlockId("m", outIdx++),
-        kind: pb.kind,
-        clauseNumber: pb.clauseNumber ?? ca.clauseNumber,
-        heading: pb.headingLine || ca.headingLine,
-        currentText: ca.rawText,
-        proposedText: pb.rawText,
-        segments: mapSegments(rl.segments),
-      });
+      out.push(
+        enrichAlignedBlock({
+          id: makeBlockId("m", outIdx++),
+          kind: pb.kind,
+          clauseNumber: pb.clauseNumber ?? ca.clauseNumber,
+          heading: pb.headingLine || ca.headingLine,
+          currentText: ca.rawText,
+          proposedText: pb.rawText,
+          segments: mapSegments(rl.segments),
+        }),
+      );
     } else {
       const rl = buildAgreementRedline("", pb.rawText);
-      out.push({
-        id: makeBlockId("i", outIdx++),
-        kind: pb.kind,
-        clauseNumber: pb.clauseNumber,
-        heading: pb.headingLine,
-        proposedText: pb.rawText,
-        segments: mapSegments(rl.segments),
-      });
+      out.push(
+        enrichAlignedBlock({
+          id: makeBlockId("i", outIdx++),
+          kind: pb.kind,
+          clauseNumber: pb.clauseNumber,
+          heading: pb.headingLine,
+          proposedText: pb.rawText,
+          segments: mapSegments(rl.segments),
+        }),
+      );
     }
   }
 
   for (const ca of currentBlocks) {
     if (usedCurrent.has(ca.sourceIndex)) continue;
     const rl = buildAgreementRedline(ca.rawText, "");
-    out.push({
-      id: makeBlockId("d", outIdx++),
-      kind: ca.kind,
-      clauseNumber: ca.clauseNumber,
-      heading: ca.headingLine,
-      currentText: ca.rawText,
-      segments: mapSegments(rl.segments),
-    });
+    out.push(
+      enrichAlignedBlock({
+        id: makeBlockId("d", outIdx++),
+        kind: ca.kind,
+        clauseNumber: ca.clauseNumber,
+        heading: ca.headingLine,
+        currentText: ca.rawText,
+        segments: mapSegments(rl.segments),
+      }),
+    );
   }
 
   return out;

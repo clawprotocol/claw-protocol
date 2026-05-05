@@ -131,8 +131,8 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /Side-by-side/i }));
     const proposedCol = screen.getByTestId("recipient-side-by-side-proposed-column");
-    expect(proposedCol.querySelector('[data-testid="recipient-legal-redline-document"]')).toBeTruthy();
-    expect(proposedCol.querySelectorAll('[data-testid="recipient-legal-redline-block"]').length).toBeGreaterThan(1);
+    expect(proposedCol.querySelector('[data-testid="recipient-side-by-side-block-grid"]')).toBeTruthy();
+    expect(proposedCol.querySelectorAll('[data-testid="recipient-side-by-side-row"]').length).toBeGreaterThan(1);
     expect(proposedCol.querySelector("[data-redline]")).toBeTruthy();
 
     await userEvent.click(hideBtn);

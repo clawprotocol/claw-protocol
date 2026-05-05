@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { htmlToPlainTextForLegalRedline } from "./externalAiHandoff";
+import { decodeHtmlEntitiesOnce, htmlToPlainTextForLegalRedline } from "./externalAiHandoff";
 import {
   alignParsedBlocksToLegalRedline,
   buildLegalRedlineDocumentViewModel,
@@ -8,7 +8,24 @@ import {
   parsePlainTextIntoLegalBlocks,
 } from "./legalRedlineBlocks";
 
+describe("decodeHtmlEntitiesOnce", () => {
+  it("decodes common entities once", () => {
+    expect(decodeHtmlEntitiesOnce("&quot;X&quot;")).toBe('"X"');
+    expect(decodeHtmlEntitiesOnce("&amp;")).toBe("&");
+    expect(decodeHtmlEntitiesOnce("&#39;")).toBe("'");
+  });
+});
+
 describe("htmlToPlainTextForLegalRedline", () => {
+  it("decodes entities and preserves clause text (no literal &quot;)", () => {
+    const html = "<p>3.2 Payment</p><p>Client agrees to &quot;Net 30&quot; &amp; $100.</p>";
+    const plain = htmlToPlainTextForLegalRedline(html);
+    expect(plain).not.toContain("&quot;");
+    expect(plain).toMatch(/"Net 30"/);
+    expect(plain).toContain("&");
+    expect(plain).toContain("$100");
+  });
+
   it("maps block-level tags to paragraph breaks for block parsing", () => {
     const html = "<p>3.2 Payment</p><p>Due on receipt.</p><p>IN WITNESS WHEREOF</p><p>Sign.</p>";
     const plain = htmlToPlainTextForLegalRedline(html);
@@ -56,6 +73,9 @@ describe("buildLegalRedlineDocumentViewModel", () => {
       .join("");
     expect(joinedInserts).toMatch(/Net\s*30/i);
     expect(payBlock!.segments.some((s) => s.type === "delete")).toBe(true);
+    expect(payBlock!.hasChange).toBe(true);
+    expect(payBlock!.hasInsert).toBe(true);
+    expect(payBlock!.insertCount).toBeGreaterThanOrEqual(1);
   });
 
   it("isolates Net 30 in 3.2 block when HTML is converted with paragraph-preserving plain text", () => {

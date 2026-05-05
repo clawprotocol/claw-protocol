@@ -485,10 +485,14 @@ test.describe("recipient + link flow QA", () => {
     const legalDoc = page.getByTestId("recipient-legal-redline-document");
     await expect(legalDoc).toBeVisible();
     await expect(legalDoc).toHaveText(/\S{8,}/);
-    await expect(legalDoc.getByTestId("recipient-legal-redline-block")).toHaveCount(4);
+    await expect(page.getByTestId("recipient-redline-tracked-summary")).toBeVisible();
+    await expect(page.getByTestId("recipient-redline-instruction-gap-note")).toBeVisible();
+    await expect(legalDoc.locator("section[data-block-kind]")).toHaveCount(4);
+    await expect(legalDoc.getByTestId("recipient-redline-changed-block").first()).toBeVisible();
     await expect(wholeDoc.locator('[data-redline="insert"]').first()).toBeVisible({ timeout: 12_000 });
     await expect(wholeDoc.locator('[data-redline="insert"]').first()).toContainText(/Net\s*30/i);
     await expect(wholeDoc).toContainText(/Net\s*30/i);
+    await page.getByTestId("recipient-redline-next-change").click();
 
     await page.getByTestId("recipient-tab-changed-clauses").click();
     await expect(page.getByTestId("clause-track-changes-panel").first()).toBeVisible();
@@ -504,6 +508,10 @@ test.describe("recipient + link flow QA", () => {
 
     await page.getByTestId("recipient-tab-side-by-side").click();
     const proposedCol = page.getByTestId("recipient-side-by-side-proposed-column");
+    await expect(proposedCol.getByTestId("recipient-side-by-side-block-grid")).toBeVisible();
+    const row32 = proposedCol.locator('[data-testid="recipient-side-by-side-row"][data-clause-number="3.2"]');
+    await expect(row32).toBeVisible();
+    await expect(row32).toContainText(/Net\s*30/i);
     await expect(proposedCol.locator("[data-redline]")).not.toHaveCount(0);
 
     await page.getByRole("button", { name: "Hide changes" }).click();

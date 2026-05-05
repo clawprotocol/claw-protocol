@@ -25,7 +25,7 @@ export function lineLooksLikeSectionHeading(line: string): boolean {
   return /^\d+(?:\.\d+)*\.?\s+\S/.test(t);
 }
 
-function segmentLineClass(type: "same" | "insert" | "delete"): string {
+export function segmentLineClass(type: "same" | "insert" | "delete"): string {
   if (type === "same") {
     return "recipient-legal-redline-same text-[15px] leading-[1.65] text-slate-900";
   }
@@ -33,20 +33,21 @@ function segmentLineClass(type: "same" | "insert" | "delete"): string {
     return [
       "recipient-legal-redline-insert",
       "text-[15px] leading-[1.65]",
-      "rounded-sm px-2 py-1",
-      "bg-emerald-200 text-emerald-950",
-      "shadow-sm ring-1 ring-emerald-700/35",
-      "font-medium",
+      "rounded-sm px-1.5 py-0.5",
+      "font-semibold text-emerald-950",
+      "bg-emerald-200/95",
+      "underline decoration-emerald-700 decoration-2 underline-offset-2",
+      "shadow-sm ring-1 ring-emerald-600/40",
     ].join(" ");
   }
   return [
     "recipient-legal-redline-delete",
     "text-[15px] leading-[1.65]",
-    "rounded-sm px-2 py-1",
-    "bg-rose-200 text-rose-950",
-    "line-through decoration-2 decoration-rose-900/80",
-    "shadow-sm ring-1 ring-rose-700/35",
-    "font-medium",
+    "rounded-sm px-1.5 py-0.5",
+    "font-medium text-rose-950",
+    "bg-rose-100",
+    "line-through decoration-2 decoration-rose-800",
+    "shadow-sm ring-1 ring-rose-600/35",
   ].join(" ");
 }
 
@@ -67,7 +68,7 @@ function renderSegmentStream(segments: AnySeg[], keyPrefix: string): ReactNode[]
       const firstLine = lines[0] ?? "";
       const heading = lineLooksLikeSectionHeading(firstLine);
       return (
-        <div key={key} className={heading ? "mb-4 mt-5 border-b border-slate-200 pb-3 first:mt-0" : "mb-3 last:mb-0"}>
+        <div key={key} className={heading ? "mb-3 mt-4 border-b border-slate-200 pb-2 first:mt-0" : "mb-2 last:mb-0"}>
           {lines.map((line, li) => {
             const isFirstHeadingLine = heading && li === 0 && seg.type === "same";
             return (
@@ -88,6 +89,17 @@ function renderSegmentStream(segments: AnySeg[], keyPrefix: string): ReactNode[]
   });
 }
 
+/** Renders tracked-change segments (used in redline doc and side-by-side proposed cells). */
+export function RecipientLegalRedlineBlockSegments({
+  segments,
+  keyPrefix,
+}: {
+  segments: LegalRedlineSegment[];
+  keyPrefix: string;
+}): ReactNode {
+  return <div className="space-y-0">{renderSegmentStream(segments, keyPrefix)}</div>;
+}
+
 export function RecipientLegalRedlineDocument({ segments, document, variant = "page" }: Props) {
   const shell =
     variant === "page"
@@ -101,16 +113,28 @@ export function RecipientLegalRedlineDocument({ segments, document, variant = "p
     >
       {document ? (
         <div className="space-y-0">
-          {document.blocks.map((block) => (
-            <section
-              key={block.id}
-              data-testid="recipient-legal-redline-block"
-              data-block-kind={block.kind}
-              className="recipient-legal-redline-block mb-8 border-b border-slate-100 pb-8 last:mb-0 last:border-b-0 last:pb-0"
-            >
-              <div className="space-y-0">{renderSegmentStream(block.segments, block.id)}</div>
-            </section>
-          ))}
+          {document.blocks.map((block) => {
+            const changed = block.hasChange;
+            return (
+              <section
+                key={block.id}
+                data-testid={changed ? "recipient-redline-changed-block" : "recipient-legal-redline-block"}
+                data-block-kind={block.kind}
+                data-block-id={block.id}
+                data-clause-number={block.clauseNumber ?? ""}
+                className={[
+                  "recipient-legal-redline-block border-b border-slate-100 py-4 last:border-b-0",
+                  changed
+                    ? "border-l-4 border-l-amber-500 bg-amber-50/60 pl-4 pr-2 sm:pl-5"
+                    : "border-l-4 border-l-transparent pl-4 pr-2 sm:pl-5",
+                ].join(" ")}
+              >
+                <div className="space-y-0">
+                  <RecipientLegalRedlineBlockSegments segments={block.segments} keyPrefix={block.id} />
+                </div>
+              </section>
+            );
+          })}
         </div>
       ) : (
         <div className="space-y-0">{renderSegmentStream(segments ?? [], "legacy")}</div>

@@ -24,6 +24,7 @@ import {
 } from "./recipientPreviewDiffModel";
 import { RecipientChangedClauseCard } from "./RecipientChangedClauseCard";
 import { RecipientLegalRedlineDocument } from "./RecipientLegalRedlineDocument";
+import { RecipientLegalRedlineSideBySide } from "./RecipientLegalRedlineSideBySide";
 import { RecipientTrackedChangesToggle } from "./RecipientTrackedChangesToggle";
 import { buildLegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
@@ -268,6 +269,8 @@ export function AgreementRecipientReview({
   >("redline");
   const [showTrackedChanges, setShowTrackedChanges] = useState(true);
   const recipientRedlineViewModelLogKeyRef = useRef<string>("");
+  const wholeDocRedlineScrollRef = useRef<HTMLDivElement | null>(null);
+  const redlineChangeNavIdxRef = useRef(0);
   const [recipientPosture, setRecipientPosture] =
     useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
@@ -588,13 +591,38 @@ export function AgreementRecipientReview({
     );
   }, [recipientPreview]);
 
-  const legalRedlineDocumentVm = useMemo(() => {
+  const legalRedlineDocumentBaseVm = useMemo(() => {
     if (!recipientPreview) return null;
     return buildLegalRedlineDocumentViewModel(
       htmlToPlainTextForLegalRedline(recipientPreview.baselineHtml || ""),
       htmlToPlainTextForLegalRedline(recipientPreview.proposedHtml || ""),
     );
   }, [recipientPreview]);
+
+  const legalRedlineDocumentVm = useMemo(() => {
+    if (!legalRedlineDocumentBaseVm || !previewDiff) return legalRedlineDocumentBaseVm;
+    return {
+      ...legalRedlineDocumentBaseVm,
+      requestedNotReflectedCount: previewDiff.instructionCaptureWarning ? 1 : 0,
+    };
+  }, [legalRedlineDocumentBaseVm, previewDiff]);
+
+  useEffect(() => {
+    redlineChangeNavIdxRef.current = 0;
+  }, [recipientPreview?.revisionText, recipientPreview?.proposedDraft?.updated_at]);
+
+  const scrollWholeDocToChangedBlock = useCallback((delta: 1 | -1) => {
+    const root = wholeDocRedlineScrollRef.current;
+    if (!root) return;
+    const nodes = root.querySelectorAll('[data-testid="recipient-redline-changed-block"]');
+    const n = nodes.length;
+    if (n === 0) return;
+    redlineChangeNavIdxRef.current = (redlineChangeNavIdxRef.current + delta + n * 10) % n;
+    (nodes[redlineChangeNavIdxRef.current] as HTMLElement).scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }, []);
 
   useEffect(() => {
     if (!recipientPreview || !previewDiff || !legalRedlineDocumentVm) return;
@@ -1112,26 +1140,73 @@ export function AgreementRecipientReview({
 
         {compareViewMode === "redline" && legalRedlineDocumentVm ? (
           <div className="mt-4" data-testid="recipient-whole-doc-redline">
-            <p className="mb-3 text-sm font-medium text-slate-200">Agreement text with tracked changes</p>
+            <p className="mb-2 text-sm font-medium text-slate-200">Agreement text with tracked changes</p>
             {legalRedlineDocumentVm.fallbackReason ? (
               <p className="mb-2 text-sm leading-snug text-amber-100/95">{legalRedlineDocumentVm.fallbackReason}</p>
             ) : null}
-            <div className="min-h-[60vh] rounded-lg border border-slate-700/45 bg-slate-200/10 p-3 sm:p-5">
-              {showTrackedChanges ? (
-                <RecipientLegalRedlineDocument document={legalRedlineDocumentVm} variant="page" />
-              ) : (
-                <article
-                  className="mx-auto min-h-[60vh] w-full max-w-[42rem] rounded-lg border border-slate-300/90 bg-white px-6 py-8 shadow-md sm:px-10 sm:py-10"
-                  data-testid="recipient-clean-proposed-document"
+            {showTrackedChanges ? (
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <p
+                  className="text-sm font-medium text-slate-100"
+                  data-testid="recipient-redline-tracked-summary"
                 >
-                  <div
-                    className="prose prose-slate prose-p:mb-3 prose-p:leading-[1.65] max-w-none text-[15px] text-slate-900"
-                    dangerouslySetInnerHTML={{
-                      __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
-                    }}
-                  />
-                </article>
-              )}
+                  Tracked changes: {legalRedlineDocumentVm.stats.insertCount} insertion
+                  {legalRedlineDocumentVm.stats.insertCount === 1 ? "" : "s"} · {legalRedlineDocumentVm.stats.deleteCount}{" "}
+                  deletion{legalRedlineDocumentVm.stats.deleteCount === 1 ? "" : "s"} · {legalRedlineDocumentVm.stats.changedBlockCount}{" "}
+                  changed section{legalRedlineDocumentVm.stats.changedBlockCount === 1 ? "" : "s"}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-600 bg-slate-900/60 px-2.5 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    data-testid="recipient-redline-prev-change"
+                    disabled={legalRedlineDocumentVm.stats.changedBlockCount === 0}
+                    onClick={() => scrollWholeDocToChangedBlock(-1)}
+                  >
+                    Previous change
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-600 bg-slate-900/60 px-2.5 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    data-testid="recipient-redline-next-change"
+                    disabled={legalRedlineDocumentVm.stats.changedBlockCount === 0}
+                    onClick={() => scrollWholeDocToChangedBlock(1)}
+                  >
+                    Next change
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {showTrackedChanges && (legalRedlineDocumentVm.requestedNotReflectedCount ?? 0) > 0 ? (
+              <p
+                className="mb-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-snug text-amber-100/95"
+                data-testid="recipient-redline-instruction-gap-note"
+              >
+                Some of your written requests do not appear in the proposed document. Review the Changed clauses tab
+                before sending.
+              </p>
+            ) : null}
+            <div className="rounded-lg border border-slate-700/45 bg-slate-200/10 p-3 sm:p-5">
+              <div
+                ref={wholeDocRedlineScrollRef}
+                className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-white/95"
+              >
+                {showTrackedChanges ? (
+                  <RecipientLegalRedlineDocument document={legalRedlineDocumentVm} variant="page" />
+                ) : (
+                  <article
+                    className="mx-auto w-full max-w-[42rem] px-6 py-8 sm:px-10 sm:py-10"
+                    data-testid="recipient-clean-proposed-document"
+                  >
+                    <div
+                      className="prose prose-slate prose-p:mb-3 prose-p:leading-[1.65] max-w-none text-[15px] text-slate-900"
+                      dangerouslySetInnerHTML={{
+                        __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+                      }}
+                    />
+                  </article>
+                )}
+              </div>
             </div>
           </div>
         ) : null}
@@ -1162,40 +1237,14 @@ export function AgreementRecipientReview({
 
         {compareViewMode === "side" && legalRedlineDocumentVm ? (
           <div className="mt-4 space-y-2" data-testid="recipient-side-by-side">
-            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
-              <div className="flex min-h-[55vh] flex-col rounded-lg border border-slate-800/90 bg-white shadow-sm">
-                <div className="shrink-0 border-b border-slate-100 px-4 py-2 text-xs font-semibold text-slate-700">
-                  Current
-                </div>
-                <div className="flex-1 px-4 py-5">
-                  <div
-                    className="prose prose-sm prose-slate max-w-none text-[15px] leading-[1.65] text-slate-900"
-                    dangerouslySetInnerHTML={{
-                      __html: scrubAgreementHtml(recipientPreview.baselineHtml || "") || "<p>No preview.</p>",
-                    }}
-                  />
-                </div>
-              </div>
-              <div
-                className="flex min-h-[55vh] flex-col rounded-lg border border-emerald-900/25 bg-white shadow-sm"
-                data-testid="recipient-side-by-side-proposed-column"
-              >
-                <div className="shrink-0 border-b border-slate-100 px-4 py-2 text-xs font-semibold text-slate-700">
-                  Proposed
-                </div>
-                <div className="flex-1 px-3 py-4 sm:px-4 sm:py-5">
-                  {showTrackedChanges ? (
-                    <RecipientLegalRedlineDocument document={legalRedlineDocumentVm} variant="column" />
-                  ) : (
-                    <div
-                      className="prose prose-sm prose-slate max-w-none text-[15px] leading-[1.65] text-slate-900"
-                      dangerouslySetInnerHTML={{
-                        __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
-                      }}
-                    />
-                  )}
-                </div>
-              </div>
+            <p className="text-[11px] leading-snug text-slate-400">
+              Current and proposed are aligned row-by-row by legal block (same scroll).
+            </p>
+            <div data-testid="recipient-side-by-side-proposed-column">
+              <RecipientLegalRedlineSideBySide
+                document={legalRedlineDocumentVm}
+                showTrackedChanges={showTrackedChanges}
+              />
             </div>
           </div>
         ) : null}

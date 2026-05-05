@@ -69,7 +69,18 @@ describe("RecipientLegalRedlineDocument", () => {
   it("renders block document model as multiple sections with insert markers", () => {
     const document: LegalRedlineDocumentViewModel = {
       blocks: [
-        { id: "t0", kind: "title", segments: [{ type: "same", text: "Services Agreement" }] },
+        {
+          id: "t0",
+          kind: "title",
+          segments: [{ type: "same", text: "Services Agreement" }],
+          insertCount: 0,
+          deleteCount: 0,
+          sameCount: 1,
+          hasInsert: false,
+          hasDelete: false,
+          hasChange: false,
+          label: "Services Agreement",
+        },
         {
           id: "c32",
           kind: "clause",
@@ -79,6 +90,13 @@ describe("RecipientLegalRedlineDocument", () => {
             { type: "insert", text: "Net 30" },
             { type: "same", text: "." },
           ],
+          insertCount: 1,
+          deleteCount: 0,
+          sameCount: 2,
+          hasInsert: true,
+          hasDelete: false,
+          hasChange: true,
+          label: "3.2",
         },
       ],
       stats: {
@@ -95,7 +113,8 @@ describe("RecipientLegalRedlineDocument", () => {
     };
     render(<RecipientLegalRedlineDocument document={document} />);
     const root = screen.getByTestId("recipient-legal-redline-document");
-    expect(root.querySelectorAll('[data-testid="recipient-legal-redline-block"]').length).toBe(2);
+    expect(root.querySelectorAll('[data-testid="recipient-legal-redline-block"]').length).toBe(1);
+    expect(root.querySelectorAll('[data-testid="recipient-redline-changed-block"]').length).toBe(1);
     const ins = root.querySelector('[data-redline="insert"]');
     expect(ins?.textContent).toContain("Net 30");
   });
