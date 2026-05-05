@@ -88,6 +88,24 @@ describe("RecipientChangedClauseCard", () => {
     expect(root.querySelector("[data-redline]")).toBeNull();
   });
 
+  it("insert-only payment terms shows green data-redline insert and neutral additions label", () => {
+    const base = baseDraft({ payment_terms: "" });
+    const proposed = baseDraft({ payment_terms: "Invoices are due Net 30." });
+    const a = assessRecipientPreviewDiff(base, proposed, "<p>x</p>", "<p>x</p>");
+    const card = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff, a.clauseContext).find(
+      (c) => c.id === "payment_terms",
+    );
+    expect(card?.redlineView.canRenderTrackedDiff).toBe(true);
+    expect(card?.redlineView.hasDeletes).toBe(false);
+    expect(card?.redlineView.hasAdds).toBe(true);
+
+    render(<RecipientChangedClauseCard card={card!} showTrackedChanges />);
+
+    const root = screen.getByTestId("recipient-clause-card-payment_terms");
+    expect(root.querySelector('[data-redline="insert"]')).toBeTruthy();
+    expect(screen.getByTestId("clause-additions-label").textContent).toMatch(/Additions shown/i);
+  });
+
   it("shows requested-but-not-reflected warning when pause was asked but omitted from proposal", () => {
     const base = baseDraft({ payment_terms: "Net 15." });
     const proposed = baseDraft({ payment_terms: "Net 30." });

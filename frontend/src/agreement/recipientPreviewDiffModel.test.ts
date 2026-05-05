@@ -134,6 +134,7 @@ describe("recipientPreviewDiffModel", () => {
     expect(pay?.whatChangedBullets.some((b) => /Payment timing changed to Net 30/i.test(b))).toBe(true);
     expect(pay?.whatChangedBullets.some((b) => /pause work.*15 days late/i.test(b))).toBe(true);
     expect(pay?.trackMode).toBe("inline");
+    expect(pay?.redlineView.canRenderTrackedDiff).toBe(true);
     expect(pay?.redlineView.isReliableTrackedDiff).toBe(true);
     expect(pay?.redlineView.segments.some((s) => s.type === "delete")).toBe(true);
     expect(pay?.redlineView.segments.some((s) => s.type === "insert")).toBe(true);
@@ -179,6 +180,7 @@ describe("recipientPreviewDiffModel", () => {
       "Invoices are due Net 30.",
       { field: "payment_terms", mode: "clause" },
     );
+    expect(vm.canRenderTrackedDiff).toBe(true);
     expect(vm.isReliableTrackedDiff).toBe(true);
     expect(vm.hasDeletes).toBe(true);
     expect(vm.hasAdds).toBe(true);
@@ -186,14 +188,28 @@ describe("recipientPreviewDiffModel", () => {
     expect(vm.segments.some((s) => s.type === "insert")).toBe(true);
   });
 
-  it("buildRecipientRedlineViewModel: insert-only shows Added lines — not reliable tracked diff", () => {
+  it("buildRecipientRedlineViewModel: insert-only still has canRenderTrackedDiff (green inserts)", () => {
     const vm = buildRecipientRedlineViewModel("", "Invoices are due Net 30.", {
       field: "payment_terms",
       mode: "clause",
     });
-    expect(vm.isReliableTrackedDiff).toBe(false);
+    expect(vm.hasVisibleChanges).toBe(true);
+    expect(vm.hasAdds).toBe(true);
+    expect(vm.hasDeletes).toBe(false);
+    expect(vm.canRenderTrackedDiff).toBe(true);
+    expect(vm.isReliableTrackedDiff).toBe(true);
+    expect(vm.fallbackReason).toBeUndefined();
+    expect(vm.segments.some((s) => s.type === "insert")).toBe(true);
     expect(vm.addedLines.some((l) => /Net 30/i.test(l))).toBe(true);
-    expect(vm.fallbackReason).toMatch(/No delete segments/i);
+  });
+
+  it("buildRecipientRedlineViewModel: on receipt → Net 30 tracks without add-only fallbackReason", () => {
+    const vm = buildRecipientRedlineViewModel("Invoices are due on receipt.", "Invoices are due Net 30.", {
+      mode: "clause",
+    });
+    expect(vm.hasVisibleChanges).toBe(true);
+    expect(vm.canRenderTrackedDiff).toBe(true);
+    expect(vm.fallbackReason).toBeUndefined();
   });
 
   it("marks redline as noisy when segment count is huge (defaults away from full redline in UI)", () => {

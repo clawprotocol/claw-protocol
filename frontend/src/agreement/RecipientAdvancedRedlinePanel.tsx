@@ -19,8 +19,7 @@ function countChangeSegments(vm: RecipientRedlineViewModel | null): number {
  */
 export function RecipientAdvancedRedlinePanel({ viewModel, showTrackedChanges, proposedHtmlClean }: Props) {
   const [open, setOpen] = useState(false);
-  const hasRenderable =
-    Boolean(viewModel?.hasVisibleChanges && viewModel.isReliableTrackedDiff && countChangeSegments(viewModel) > 0);
+  const hasRenderable = Boolean(viewModel?.canRenderTrackedDiff && countChangeSegments(viewModel) > 0);
 
   return (
     <div className="mt-2 space-y-2" data-testid="recipient-advanced-redline-panel">
@@ -49,10 +48,17 @@ export function RecipientAdvancedRedlinePanel({ viewModel, showTrackedChanges, p
                 __html: proposedHtmlClean || "<p>No preview.</p>",
               }}
             />
-          ) : !hasRenderable ? (
+          ) : !hasRenderable && viewModel?.fallbackReason ? (
             <p className="text-[11px] leading-snug text-slate-600">
-              No reliable full-document redline segments. Review <strong>Changed clauses</strong> instead.
+              Full-document redline unavailable (often too large). Review <strong>Changed clauses</strong> for tracked edits.
             </p>
+          ) : !hasRenderable ? (
+            <div
+              className="prose prose-sm max-w-none whitespace-pre-wrap text-slate-900"
+              dangerouslySetInnerHTML={{
+                __html: proposedHtmlClean || "<p>No preview.</p>",
+              }}
+            />
           ) : (
             <div className="whitespace-pre-wrap break-words">
               <RecipientRedlineInline segments={viewModel!.segments} paragraphBreaks embedded contrast="high" />

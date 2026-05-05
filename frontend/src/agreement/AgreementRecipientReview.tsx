@@ -620,6 +620,8 @@ export function AgreementRecipientReview({
       htmlToPlainText(recipientPreview.proposedHtml || ""),
       { mode: "fullDocument" },
     );
+    const insertSeg = fullVm.segments.filter((s) => s.type === "insert").length;
+    const deleteSeg = fullVm.segments.filter((s) => s.type === "delete").length;
     // eslint-disable-next-line no-console
     console.info("[recipient-redline-view-model]", {
       agreementId,
@@ -629,6 +631,14 @@ export function AgreementRecipientReview({
       clauseHasVisibleChanges: cards.some((c) => c.redlineView.hasVisibleChanges),
       clauseHasDeletes: cards.some((c) => c.redlineView.hasDeletes),
       clauseHasAdds: cards.some((c) => c.redlineView.hasAdds),
+      hasVisibleChanges: fullVm.hasVisibleChanges,
+      hasAdds: fullVm.hasAdds,
+      hasDeletes: fullVm.hasDeletes,
+      segmentCount: fullVm.segments.length,
+      insertSegmentCount: insertSeg,
+      deleteSegmentCount: deleteSeg,
+      fallbackReason: fullVm.fallbackReason,
+      canRenderTrackedDiff: fullVm.canRenderTrackedDiff,
       fullDocHasVisibleChanges: fullVm.hasVisibleChanges,
       fullDocHasDeletes: fullVm.hasDeletes,
       fullDocHasAdds: fullVm.hasAdds,
@@ -1146,14 +1156,32 @@ export function AgreementRecipientReview({
               <div className="rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Proposed</div>
                 {showTrackedChanges ? (
-                  fullDocumentRedlineView?.hasVisibleChanges && fullDocumentRedlineView.isReliableTrackedDiff ? (
+                  fullDocumentRedlineView?.canRenderTrackedDiff ? (
                     <div className="mt-2 text-sm leading-normal text-slate-900" data-testid="recipient-side-by-side-redline">
                       <RecipientRedlineInline segments={fullDocumentRedlineView.segments} paragraphBreaks contrast="high" />
                     </div>
+                  ) : fullDocumentRedlineView?.fallbackReason ? (
+                    <>
+                      <p
+                        className="mt-2 text-[10px] leading-snug text-slate-500"
+                        data-testid="recipient-side-by-side-redline-fallback"
+                      >
+                        Full-document redline unavailable; changed clauses show tracked edits.
+                      </p>
+                      <div
+                        className="prose prose-sm mt-2 max-w-none text-slate-900"
+                        dangerouslySetInnerHTML={{
+                          __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+                        }}
+                      />
+                    </>
                   ) : (
-                    <p className="mt-2 text-[11px] leading-snug text-slate-600" data-testid="recipient-side-by-side-redline-fallback">
-                      No reliable full-document redline. Use <strong>Changed clauses</strong>.
-                    </p>
+                    <div
+                      className="prose prose-sm mt-2 max-w-none text-slate-900"
+                      dangerouslySetInnerHTML={{
+                        __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+                      }}
+                    />
                   )
                 ) : (
                   <div

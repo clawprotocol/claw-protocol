@@ -17,6 +17,21 @@ describe("RecipientRedlineInline", () => {
     expect(span?.className).toMatch(/whitespace-pre-wrap/);
   });
 
+  it("renders insert-only segments with data-redline insert", () => {
+    render(
+      <RecipientRedlineInline
+        segments={[
+          { type: "same", text: "Prefix " },
+          { type: "insert", text: "NEW" },
+        ]}
+        contrast="high"
+      />,
+    );
+    const root = screen.getByTestId("recipient-redline-inline");
+    expect(root.querySelector('[data-redline="insert"]')?.textContent).toContain("NEW");
+    expect(root.querySelector('[data-redline="delete"]')).toBeNull();
+  });
+
   it("renders insert and delete markers for track-changes view", () => {
     const redline: RedlineResult = {
       hasChanges: true,

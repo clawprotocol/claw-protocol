@@ -49,7 +49,12 @@ export type RecipientRedlineViewModel = {
   addedLines: string[];
   removedLines: string[];
   fallbackReason?: string;
-  /** True when delete segments exist — trustworthy Word-style removals (not add-only). */
+  /**
+   * True when insert/delete markup should render inline — includes **insert-only** diffs.
+   * False when full-document diff is noisy, or parser produced no change segments.
+   */
+  canRenderTrackedDiff: boolean;
+  /** @deprecated Alias of {@link canRenderTrackedDiff}; kept for older call sites. */
   isReliableTrackedDiff: boolean;
 };
 
@@ -106,6 +111,7 @@ export function buildRecipientRedlineViewModel(
         removedLines: [],
         fallbackReason:
           "Full-document compare is too large for inline redline — use Changed clauses for field-level changes.",
+        canRenderTrackedDiff: false,
         isReliableTrackedDiff: false,
       };
     }
@@ -118,6 +124,7 @@ export function buildRecipientRedlineViewModel(
 
   const hasDeletes = segments.some((s) => s.type === "delete" && meaningfulSegLen(s.text) >= 2);
   const hasAdds = segments.some((s) => s.type === "insert" && meaningfulSegLen(s.text) >= 2);
+  const hasMaterialSegments = hasDeletes || hasAdds;
 
   const removedLines = segments
     .filter((s) => s.type === "delete")
@@ -129,34 +136,29 @@ export function buildRecipientRedlineViewModel(
     .map((s) => trimCap(s.text.replace(/\s+/g, " ").trim(), 280))
     .filter((s) => s.length > 0);
 
-  let isReliableTrackedDiff = hasDeletes;
   let fallbackReason: string | undefined;
   let addedLines: string[] = [];
 
-  if (hasAdds && !hasDeletes) {
+  if (hasAdds) {
     addedLines = insertsRaw.map((t) => (/^added:/i.test(t) ? t : `Added: ${t}`));
-    fallbackReason = "No delete segments — additions only (not full tracked changes).";
   }
 
   if (mode === "clause" && options?.field === "payment_terms") {
     const hintLines = buildPaymentTermsSuggestedSnippetLines(rawProp, rawCur, options.proposedRenderedPlain);
     const formatted = hintLines.map((l) => (l.match(/^Added:/i) ? l : `Added: ${l.replace(/^Added:\s*/i, "")}`));
-    if (!isReliableTrackedDiff) {
+    if (!hasAdds) {
       addedLines = dedupeAddedLines([...formatted, ...addedLines]);
     }
   }
 
-  const anyChangeSegment = segments.some((s) => s.type !== "same" && meaningfulSegLen(s.text) >= 1);
-  let hasVisibleChanges =
-    isReliableTrackedDiff || addedLines.length > 0 || (hasAdds && hasDeletes) || (anyChangeSegment && (hasAdds || hasDeletes));
-
-  if (!isReliableTrackedDiff && addedLines.length === 0 && !anyChangeSegment) {
-    hasVisibleChanges = false;
-  }
-
-  if (!fallbackReason && !isReliableTrackedDiff && rawCur.trim() !== rawProp.trim() && addedLines.length === 0 && !hasAdds && !hasDeletes) {
+  if (rawCur.trim() !== rawProp.trim() && !hasMaterialSegments && addedLines.length === 0) {
     fallbackReason = "Could not derive insert/delete segments for this pair.";
   }
+
+  const hasVisibleChanges = hasMaterialSegments || addedLines.length > 0;
+
+  const canRenderTrackedDiff = Boolean(hasVisibleChanges && !fallbackReason);
+  const isReliableTrackedDiff = canRenderTrackedDiff;
 
   return {
     hasVisibleChanges,
@@ -166,6 +168,7 @@ export function buildRecipientRedlineViewModel(
     addedLines,
     removedLines,
     fallbackReason,
+    canRenderTrackedDiff,
     isReliableTrackedDiff,
   };
 }
@@ -657,13 +660,17 @@ export function buildRecipientClauseCards(
       mode: "clause",
     });
     const trackMode: RecipientClauseTrackMode =
-      redlineView.isReliableTrackedDiff ? "inline" : redlineView.addedLines.length > 0 ? "lines" : "inline";
+      redlineView.canRenderTrackedDiff && (redlineView.hasAdds || redlineView.hasDeletes)
+        ? "inline"
+        : redlineView.addedLines.length > 0
+          ? "lines"
+          : "inline";
     const trackAddedDisplayLines = redlineView.addedLines;
     let trackSnippetPair: { removed: string; added: string } | null = null;
     if (
       fieldRedline &&
       redlineHasSignificantRemovals(fieldRedline) &&
-      redlineView.isReliableTrackedDiff
+      redlineView.canRenderTrackedDiff
     ) {
       const del = fieldRedline.segments.find(
         (s) => s.type === "delete" && s.text.replace(/\s+/g, " ").trim().length >= 2,
@@ -709,6 +716,7 @@ export function buildRecipientClauseCards(
         addedLines: [],
         removedLines: [],
         fallbackReason: "Use Changed clauses or Side-by-side for surrounding text.",
+        canRenderTrackedDiff: false,
         isReliableTrackedDiff: false,
       },
       fieldRedline: null,

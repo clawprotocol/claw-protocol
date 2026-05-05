@@ -14,13 +14,14 @@ type Props = {
 };
 
 function inlineDisplaySegments(vm: RecipientClauseCard["redlineView"]): RedlineSegmentVM[] | null {
-  if (!vm.isReliableTrackedDiff || vm.segments.length === 0) return null;
+  if (!vm.canRenderTrackedDiff || vm.segments.length === 0) return null;
+  if (!(vm.hasAdds || vm.hasDeletes)) return null;
   const capped: RedlineResult = capRedlineChangeSegmentsForClauseUi({
     hasChanges: true,
     segments: vm.segments,
   });
   const display = buildClauseCardDisplayRedline(capped);
-  return display.segments;
+  return display.segments.length > 0 ? display.segments : null;
 }
 
 /**
@@ -103,14 +104,21 @@ export function RecipientChangedClauseCard({ card, showTrackedChanges }: Props) 
         <div className="mt-2" data-testid="clause-track-changes-panel">
           <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
           {inlineSegments && inlineSegments.length > 0 ? (
-            <div className="mt-0.5 rounded-md border border-slate-600/80 bg-white px-2 py-2 shadow-sm" data-testid="clause-field-redline">
-              <RecipientRedlineInline segments={inlineSegments} embedded contrast="high" />
+            <div className="mt-0.5">
+              {vm.hasAdds && !vm.hasDeletes ? (
+                <p className="mb-1 text-[9px] leading-snug text-slate-500" data-testid="clause-additions-label">
+                  Additions shown.
+                </p>
+              ) : null}
+              <div
+                className="rounded-md border border-slate-600/80 bg-white px-2 py-2 shadow-sm"
+                data-testid="clause-field-redline"
+              >
+                <RecipientRedlineInline segments={inlineSegments} embedded contrast="high" />
+              </div>
             </div>
           ) : vm.addedLines.length > 0 ? (
             <div className="mt-0.5" data-testid="clause-add-only-fallback">
-              {vm.fallbackReason ? (
-                <p className="mb-1 text-[9px] leading-snug text-slate-400">{vm.fallbackReason}</p>
-              ) : null}
               <ul className="mb-0 mt-1 space-y-1.5 rounded-md border border-slate-600/80 bg-white px-2 py-2" data-testid="clause-track-lines">
                 {vm.addedLines.map((line) => {
                   const body = line.replace(/^Added:\s*/i, "").trim();
