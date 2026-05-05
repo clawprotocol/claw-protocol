@@ -106,12 +106,14 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     expect(ins).toMatch(/[1-9]\d*\s+insertion/i);
     expect(ins).not.toMatch(/^0\s+insertions?$/i);
 
+    const panel = screen.getByTestId("recipient-suggested-changes-panel");
+    expect(within(panel).getByTestId("recipient-suggested-changes-what-this-means")).toBeTruthy();
+
     const legalRoot = screen.getByTestId("recipient-legal-redline-document");
     const insertEl = legalRoot.querySelector('[data-redline="insert"]');
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
 
-    const panel = screen.getByTestId("recipient-suggested-changes-panel");
     expect(within(panel).getByRole("button", { name: /Send these suggested edits/i })).toBeTruthy();
     expect(within(panel).getByRole("button", { name: /Dismiss preview/i })).toBeTruthy();
   });
@@ -255,6 +257,13 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
       }),
     );
     expect(scrollIntoViewMock).toHaveBeenCalled();
+
+    expect(
+      screen.getByText(/This updates the payment timing so payment is due on Net 30 terms/i),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/This adds a remedy allowing work to pause if payment is more than 15 days late/i),
+    ).toBeTruthy();
 
     expect(screen.queryByTestId("recipient-side-by-side-block-grid")).toBeNull();
     expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();

@@ -31,6 +31,7 @@ import {
   formatRecipientIntentAppliedLabel,
   recipientIntentStatusTestId,
   recipientRedlineAnchorForIntentCategory,
+  type RecipientInstructionIntentCategory,
 } from "./recipientInstructionIntents";
 import {
   buildRecipientLegalRedlinePlainTexts,
@@ -112,6 +113,17 @@ import {
 } from "./universalReviewIntakeCopy";
 
 const API_BASE = resolveApiBase();
+
+function recipientIntentAppliedExplanation(category: RecipientInstructionIntentCategory): string {
+  switch (category) {
+    case "payment_timing":
+      return "This updates the payment timing so payment is due on Net 30 terms.";
+    case "suspend_pause_work":
+      return "This adds a remedy allowing work to pause if payment is more than 15 days late.";
+    default:
+      return "This request appears in the proposed changes below.";
+  }
+}
 
 function mapDraftAssistBlockedMessage(serverMsg: string): string {
   const l = serverMsg.toLowerCase();
@@ -1275,23 +1287,28 @@ export function AgreementRecipientReview({
                       className="rounded-md border border-amber-700/35 bg-amber-950/25 px-2.5 py-2"
                     >
                       {it.status === "applied" ? (
-                        canScrollToRedline && anchorKey ? (
-                          <button
-                            type="button"
-                            className="w-full cursor-pointer rounded-sm text-left text-[13px] leading-snug text-emerald-100/95 underline decoration-emerald-400/80 decoration-1 underline-offset-2 hover:text-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
-                            onClick={() => scrollToNarrowRedlineAnchor(anchorKey)}
-                            onKeyDown={onKeyNavigate}
-                          >
-                            ✓ Added: {formatRecipientIntentAppliedLabel(it)}
-                            <span className="mt-0.5 block text-[10px] font-normal text-emerald-200/80 no-underline">
-                              View in document
-                            </span>
-                          </button>
-                        ) : (
-                          <p className="text-[13px] leading-snug text-emerald-100/95">
-                            ✓ Added: {formatRecipientIntentAppliedLabel(it)}
+                        <>
+                          {canScrollToRedline && anchorKey ? (
+                            <button
+                              type="button"
+                              className="w-full cursor-pointer rounded-sm text-left text-[13px] leading-snug text-emerald-100/95 underline decoration-emerald-400/80 decoration-1 underline-offset-2 hover:text-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+                              onClick={() => scrollToNarrowRedlineAnchor(anchorKey)}
+                              onKeyDown={onKeyNavigate}
+                            >
+                              ✓ Added: {formatRecipientIntentAppliedLabel(it)}
+                              <span className="mt-0.5 block text-[10px] font-normal text-emerald-200/80 no-underline">
+                                View in document
+                              </span>
+                            </button>
+                          ) : (
+                            <p className="text-[13px] leading-snug text-emerald-100/95">
+                              ✓ Added: {formatRecipientIntentAppliedLabel(it)}
+                            </p>
+                          )}
+                          <p className="mt-1.5 text-[11px] leading-snug text-emerald-200/85">
+                            {recipientIntentAppliedExplanation(it.category)}
                           </p>
-                        )
+                        </>
                       ) : it.status === "unclear" ? (
                         <>
                           <p className="text-[13px] leading-snug text-amber-50">
@@ -1349,6 +1366,28 @@ export function AgreementRecipientReview({
               </p>
             ) : null}
 
+            <div
+              className="mt-4 rounded-md border border-slate-600/60 bg-slate-950/40 px-3 py-3 text-slate-200"
+              data-testid="recipient-suggested-changes-what-this-means"
+            >
+              <p className="text-xs font-semibold text-slate-100">What this means</p>
+              <ul className="mt-2 list-disc space-y-1.5 pl-4 text-[11px] leading-relaxed text-slate-300">
+                <li>These are only suggestions.</li>
+                <li>The owner&apos;s agreement will not change unless they accept them.</li>
+                <li>
+                  <span className="text-emerald-200/95">Green text</span> is what you&apos;re proposing to add.
+                </li>
+                <li>
+                  <span className="text-rose-200/95">Red crossed-out text</span> is what you&apos;re proposing to
+                  remove.
+                </li>
+                <li>
+                  Use <span className="font-medium text-slate-200">Send these suggested edits</span> when you&apos;re
+                  ready to send this version to the owner.
+                </li>
+              </ul>
+            </div>
+
             <div className="mt-4 rounded-lg border border-slate-600/50 bg-slate-200/20 p-2 sm:p-3">
               <div
                 ref={suggestedChangesDocScrollRef}
@@ -1368,7 +1407,13 @@ export function AgreementRecipientReview({
           <p className="mt-3 text-sm text-amber-100/90">Preview comparison is unavailable. You can still dismiss or edit your note.</p>
         )}
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <p
+          className="mt-4 text-[11px] leading-relaxed text-slate-400"
+          data-testid="recipient-suggested-changes-send-reassurance"
+        >
+          Nothing is signed and nothing changes automatically. The owner reviews these suggestions first.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
           <button
             type="button"
             data-testid="recipient-open-send-suggested-edits-modal"
@@ -2017,8 +2062,7 @@ export function AgreementRecipientReview({
         >
           <h2 className="text-base font-semibold text-emerald-100">Suggested edits sent</h2>
           <p className="mt-2 text-sm leading-relaxed text-emerald-50/95">
-            Your proposed changes are now in the owner&apos;s queue. The owner can accept, decline, or continue
-            negotiating.
+            The owner can now review your proposed changes. Nothing has been signed yet.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -2668,6 +2712,9 @@ export function AgreementRecipientReview({
           role="toolbar"
           aria-label="Send or discard suggested edits"
         >
+          <p className="text-center text-[10px] leading-snug text-slate-400">
+            Nothing is signed and nothing changes automatically. The owner reviews these suggestions first.
+          </p>
           <button
             type="button"
             data-testid="recipient-open-send-suggested-edits-modal-mobile"
@@ -2677,9 +2724,6 @@ export function AgreementRecipientReview({
           >
             Send these suggested edits
           </button>
-          <p className="text-center text-[10px] leading-snug text-slate-500">
-            Sends to the owner only — does not change the agreement automatically.
-          </p>
           <button
             type="button"
             className="btn w-full rounded-lg border border-slate-600 px-4 py-3 text-sm text-slate-200 hover:bg-slate-900/60 disabled:opacity-50"
@@ -2708,10 +2752,11 @@ export function AgreementRecipientReview({
             onMouseDown={(e) => e.stopPropagation()}
           >
             <h2 id="recipient-send-suggested-edits-modal-title" className="text-lg font-semibold text-slate-100">
-              Send suggested edits?
+              Send these suggested edits?
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
-              You&apos;re sending these proposed changes to the owner. Nothing changes unless the owner accepts them.
+              This sends your proposed changes to the owner for review. The owner can accept, reject, or keep discussing
+              them. Nothing is signed yet.
             </p>
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
@@ -2730,7 +2775,7 @@ export function AgreementRecipientReview({
                 disabled={saving}
                 onClick={() => void performRecipientSuggestedEditsSubmit()}
               >
-                {saving ? "Sending…" : "Send suggested edits"}
+                {saving ? "Sending…" : "Send to owner"}
               </button>
             </div>
           </div>

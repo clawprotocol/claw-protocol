@@ -106,11 +106,25 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
+    const meanCard = within(panel).getByTestId("recipient-suggested-changes-what-this-means");
+    expect(meanCard.textContent).toContain("These are only suggestions.");
+    expect(meanCard.textContent).toContain("Green text");
+    expect(meanCard.textContent).toContain("Red crossed-out text");
+    expect(meanCard.textContent).toContain("Send these suggested edits");
+
+    expect(within(panel).getByTestId("recipient-suggested-changes-send-reassurance").textContent).toContain(
+      "Nothing is signed and nothing changes automatically.",
+    );
+
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Send suggested edits?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Send these suggested edits?" })).toBeTruthy();
+    expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
+      "This sends your proposed changes to the owner for review.",
+    );
+    expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain("Nothing is signed yet.");
 
     await userEvent.click(screen.getByTestId("recipient-send-suggested-edits-modal-dismiss"));
     await waitFor(() => {
@@ -118,11 +132,12 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
-    await userEvent.click(screen.getByTestId("recipient-send-suggested-edits-confirm"));
+    await userEvent.click(screen.getByRole("button", { name: "Send to owner" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-suggested-edits-sent-ack")).toBeTruthy();
     });
+    expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain("Nothing has been signed yet.");
     expect(screen.queryByTestId("recipient-suggested-changes-panel")).toBeNull();
 
     await userEvent.click(screen.getByTestId("recipient-suggested-edits-suggest-another"));
