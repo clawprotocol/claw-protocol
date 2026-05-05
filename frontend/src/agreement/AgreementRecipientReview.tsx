@@ -15,7 +15,14 @@ import {
   agreementFieldLabel,
   compareAgreementSnapshots,
 } from "../vs01/agreementCompare";
-import { buildAgreementRedline } from "../vs01/agreementRedline";
+import {
+  assessRecipientPreviewDiff,
+  buildRecipientMaterialSummaryFromDiff,
+  numberedSectionChangeLines,
+  recipientPreviewNoOpMessage,
+  recipientSendConfirmationLine,
+} from "./recipientPreviewDiffModel";
+import { RecipientRedlineInline } from "./RecipientRedlineInline";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
 import {
@@ -243,7 +250,7 @@ export function AgreementRecipientReview({
   const [copyDraftFlash, setCopyDraftFlash] = useState(false);
   const [copyClauseFlash, setCopyClauseFlash] = useState(false);
   const [recipientPreview, setRecipientPreview] = useState<RecipientPreview | null>(null);
-  const [compareViewMode, setCompareViewMode] = useState<"structured" | "redline">("structured");
+  const [compareViewMode, setCompareViewMode] = useState<"redline" | "clean" | "side">("redline");
   const [recipientPosture, setRecipientPosture] =
     useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
@@ -545,30 +552,24 @@ export function AgreementRecipientReview({
   }, [recipientPosture]);
 
   useEffect(() => {
-    if (!recipientPreview) setCompareViewMode("structured");
+    if (!recipientPreview) setCompareViewMode("redline");
   }, [recipientPreview]);
 
-  const revisionCompare = useMemo(() => {
+  const previewDiff = useMemo(() => {
     if (!recipientPreview) return null;
-    return compareAgreementSnapshots(
-      draftToSnapshot(recipientPreview.baselineDraft),
-      draftToSnapshot(recipientPreview.proposedDraft)
-    );
-  }, [recipientPreview]);
-
-  const redlinePreview = useMemo(() => {
-    if (!recipientPreview) return null;
-    return buildAgreementRedline(
-      htmlToPlainText(recipientPreview.baselineHtml),
-      htmlToPlainText(recipientPreview.proposedHtml)
+    return assessRecipientPreviewDiff(
+      recipientPreview.baselineDraft,
+      recipientPreview.proposedDraft,
+      recipientPreview.baselineHtml,
+      recipientPreview.proposedHtml,
     );
   }, [recipientPreview]);
 
   const redlineCharCount =
-    redlinePreview?.segments.reduce((n, s) => n + s.text.length, 0) ?? 0;
+    previewDiff?.redline.segments.reduce((n, s) => n + s.text.length, 0) ?? 0;
   const redlineLarge =
-    Boolean(redlinePreview) &&
-    (redlinePreview!.segments.length > 120 || redlineCharCount > 24_000);
+    Boolean(previewDiff) &&
+    (previewDiff!.redline.segments.length > 120 || redlineCharCount > 24_000);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -742,6 +743,12 @@ export function AgreementRecipientReview({
       const nextDraft = payload?.draft as AgreementDraft;
       const html = String(payload?.rendered_html || "");
       if (!nextDraft) throw new Error("We couldn't load the proposed change. Please try again.");
+      const integrity = assessRecipientPreviewDiff(baselineDraft, nextDraft, baselineHtml, html);
+      if (!integrity.hasMaterialTextDiff || !integrity.hasSnapshotDiff) {
+        setError(recipientPreviewNoOpMessage());
+        setRecipientPreview(null);
+        return;
+      }
       setRecipientPreview({
         baselineDraft,
         baselineHtml,
@@ -772,6 +779,17 @@ export function AgreementRecipientReview({
     }
     const p = recipientPreview;
     if (!p || saving) return;
+    if (!previewDiff?.canSubmit) {
+      setError(recipientPreviewNoOpMessage());
+      return;
+    }
+    if (
+      !window.confirm(
+        `${recipientSendConfirmationLine(previewDiff)}\n\nSend this version to the agreement owner?`,
+      )
+    ) {
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -897,13 +915,16 @@ export function AgreementRecipientReview({
   }
 
   const comparePanel =
-    recipientPreview && revisionCompare && redlinePreview ? (
+    recipientPreview && previewDiff && previewDiff.hasMaterialTextDiff && previewDiff.hasSnapshotDiff ? (
       <div className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
               {MATERIAL_CHANGE_SUMMARY_LABEL}
             </div>
+            <p className="mt-1 text-[10px] leading-snug text-slate-300/95">
+              {buildRecipientMaterialSummaryFromDiff(previewDiff)}
+            </p>
             <p className="mt-1 text-[10px] font-medium text-slate-200/95">
               {bundle && isSigningLockActive(bundle)
                 ? "Final: Final version ready for signature"
@@ -924,57 +945,100 @@ export function AgreementRecipientReview({
           LawDog organizes the differences; your current draft in LawDog is preserved until the owner reviews and
           applies. Send only when this preview is the agreement path you want them to see.
         </p>
-        <div className="mt-3 inline-flex rounded-lg border border-slate-700/90 bg-slate-950/40 p-0.5">
+        <div className="mt-3 flex flex-wrap gap-0.5 rounded-lg border border-slate-700/90 bg-slate-950/40 p-0.5">
           <button
             type="button"
-            className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
-              compareViewMode === "structured"
-                ? "bg-slate-800 text-slate-100 shadow-sm"
-                : "text-slate-500 hover:text-slate-300"
-            }`}
-            onClick={() => setCompareViewMode("structured")}
-          >
-            Compare drafts
-          </button>
-          <button
-            type="button"
-            className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
+            className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px] ${
               compareViewMode === "redline"
                 ? "bg-slate-800 text-slate-100 shadow-sm"
                 : "text-slate-500 hover:text-slate-300"
             }`}
             onClick={() => setCompareViewMode("redline")}
           >
-            View changes
+            Redline view
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px] ${
+              compareViewMode === "clean"
+                ? "bg-slate-800 text-slate-100 shadow-sm"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+            onClick={() => setCompareViewMode("clean")}
+          >
+            Clean proposed
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px] ${
+              compareViewMode === "side"
+                ? "bg-slate-800 text-slate-100 shadow-sm"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+            onClick={() => setCompareViewMode("side")}
+          >
+            Side-by-side
           </button>
         </div>
 
-        {compareViewMode === "structured" ? (
+        {compareViewMode === "redline" ? (
+          <div className="mt-4 space-y-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Changed sections
+              </div>
+              {previewDiff.snapshotCompare.hasChanges ? (
+                <ul className="mt-1.5 mb-0 list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">
+                  {numberedSectionChangeLines(previewDiff.snapshotCompare.changedFieldKeys).map((line, i) => (
+                    <li key={`rl_sec_${i}`}>{line}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1.5 text-[11px] text-amber-200/90">No section-level field changes detected.</p>
+              )}
+            </div>
+            {redlineLarge ? (
+              <p className="text-[10px] leading-snug text-slate-500">
+                Large change — try <span className="text-slate-300">Side-by-side</span> if this is hard to scan.
+              </p>
+            ) : null}
+            <RecipientRedlineInline redline={previewDiff.redline} />
+            <p className="text-[10px] leading-snug text-slate-500">
+              <span className="text-emerald-300/90">Green</span> = additions,{" "}
+              <span className="text-rose-300/90">red strikethrough</span> = removals.
+            </p>
+          </div>
+        ) : null}
+
+        {compareViewMode === "clean" ? (
+          <div className="mt-4 rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Proposed (clean)</div>
+            <div
+              className="prose prose-sm mt-2 max-w-none text-slate-900"
+              dangerouslySetInnerHTML={{
+                __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+              }}
+            />
+          </div>
+        ) : null}
+
+        {compareViewMode === "side" ? (
           <>
             <div className="mt-3">
               <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                 Changed sections
               </div>
-              {revisionCompare.hasChanges ? (
+              {previewDiff.snapshotCompare.hasChanges ? (
                 <ul className="mt-1.5 mb-0 list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">
-                  {revisionCompare.changedFieldKeys.map((key) => (
-                    <li key={key}>{agreementFieldLabel(key)}</li>
+                  {numberedSectionChangeLines(previewDiff.snapshotCompare.changedFieldKeys).map((line, i) => (
+                    <li key={`side_sec_${i}`}>{line}</li>
                   ))}
                 </ul>
-              ) : (
-                <p className="mt-1.5 text-[11px] text-amber-200/90">
-                  No section-by-section changes detected in the form fields.
-                </p>
-              )}
-              {!revisionCompare.hasChanges ? (
-                <p className="mt-1.5 text-[10px] text-slate-500">
-                  You can still submit if this matches what you intended.
-                </p>
               ) : null}
             </div>
-            {revisionCompare.changedFields.filter((r) => r.changed).length > 0 ? (
+            {previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).length > 0 ? (
               <div className="mt-3 space-y-2">
-                {revisionCompare.changedFields
+                {previewDiff.snapshotCompare.changedFields
                   .filter((r) => r.changed)
                   .map((row) => (
                     <div
@@ -1015,46 +1079,13 @@ export function AgreementRecipientReview({
               </div>
             </div>
           </>
-        ) : (
-          <div className="mt-4">
-            {redlineLarge ? (
-              <p className="mb-2 text-[10px] leading-snug text-slate-500">
-                Large change — side-by-side drafts may be easier to scan.
-              </p>
-            ) : null}
-            <div className="max-h-[28rem] overflow-y-auto rounded-md border border-slate-700/80 bg-white p-4 text-[0.8125rem] leading-relaxed text-slate-900">
-              {redlinePreview.segments.map((seg, idx) => {
-                if (seg.type === "same") {
-                  return <span key={`rl_${idx}`}>{seg.text}</span>;
-                }
-                if (seg.type === "insert") {
-                  return (
-                    <span
-                      key={`rl_${idx}`}
-                      className="bg-emerald-100/95 text-emerald-950 underline decoration-emerald-700/35 decoration-1 underline-offset-2"
-                    >
-                      {seg.text}
-                    </span>
-                  );
-                }
-                return (
-                  <span
-                    key={`rl_${idx}`}
-                    className="bg-rose-100/90 text-rose-950 line-through decoration-rose-700/40 decoration-1"
-                  >
-                    {seg.text}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        ) : null}
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
             className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-            disabled={saving}
+            disabled={saving || !previewDiff.canSubmit}
             onClick={() => void commitSubmit()}
           >
             {saving ? "Sending…" : "Send suggested edits"}
@@ -2319,7 +2350,7 @@ export function AgreementRecipientReview({
           <button
             type="button"
             className="btn w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-            disabled={saving}
+            disabled={saving || !previewDiff?.canSubmit}
             onClick={() => void commitSubmit()}
           >
             {saving ? "Sending…" : "Send suggested edits"}

@@ -32,7 +32,7 @@ export function DirectComparePanel({ defaultBefore }: Props) {
   return (
     <div className="space-y-4 rounded-2xl border border-slate-600/50 bg-slate-950/45 p-4 ring-1 ring-slate-700/25">
       <div>
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Direct compare</h3>
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Compare text</h3>
         <p className="mt-1 text-xs leading-relaxed text-slate-300">{DIRECT_COMPARE_MODE_INTRO}</p>
         <p className="mt-2 text-[0.7rem] font-medium text-amber-100/90">{DIRECT_COMPARE_DISCLAIMER}</p>
         {defaultBefore.trim() ? (

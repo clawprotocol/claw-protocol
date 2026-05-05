@@ -3280,6 +3280,44 @@ def _revise_instruction_fallback(current: AgreementDraft, instruction: str) -> A
     return next_data
 
 
+def _maybe_apply_recipient_deterministic_no_op_patch(
+    base: AgreementDraft,
+    instruction: str,
+    revised: AgreementDraftCreate,
+) -> AgreementDraftCreate:
+    """
+    Recipient-only: when the LLM/coalesced revision is field-identical to the base draft,
+    try deterministic instruction parsing (Net N, fallback phrases) so previews can still
+    produce a structural change without a second model call.
+    """
+    if _revision_comparison_blob(base) != _revision_comparison_blob(revised):
+        return revised
+    lo = (instruction or "").strip().lower()
+    fb = _revise_instruction_fallback(base, instruction)
+    if _revision_comparison_blob(base) != _revision_comparison_blob(fb):
+        return fb
+    m = re.search(r"\b(?:use|switch|move)\s+(?:to\s+)?net\s+(\d+)\b", lo)
+    if not m:
+        m = re.search(r"\bnet\s+(\d+)\b", lo)
+    if m:
+        n = m.group(1)
+        pt0 = (base.payment_terms or "").strip()
+        compact = re.sub(r"[\s_]", "", pt0.lower())
+        if f"net{n}" not in compact:
+            new_pt = (f"Net {n}. " + pt0).strip()
+            return AgreementDraftCreate(
+                title=fb.title,
+                jurisdiction=fb.jurisdiction,
+                parties=fb.parties,
+                purpose=fb.purpose,
+                payment_terms=new_pt,
+                duration=fb.duration,
+                due_date=fb.due_date,
+                effective_date=fb.effective_date,
+            )
+    return revised
+
+
 def _revise_llm_once(
     current: AgreementDraft,
     instruction: str,
@@ -6172,6 +6210,8 @@ def revise_agreement(
         ai_model_class=body.ai_model_class,
     )
     revised = _coalesce_revision_draft_with_base(draft, revised)
+    if session_type == "recipient":
+        revised = _maybe_apply_recipient_deterministic_no_op_patch(draft, instruction, revised)
     revision_validation = _validate_revision_expectations(draft, revised, instruction)
     now = _utc_now_iso()
     persist = bool(getattr(body, "persist", True))
