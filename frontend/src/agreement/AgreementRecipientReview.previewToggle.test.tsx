@@ -92,7 +92,7 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment terms to Net 30");
 
-    await userEvent.click(screen.getByRole("button", { name: /^Preview changes$/i }));
+    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-tracked-changes-toggle")).toBeTruthy();
@@ -127,4 +127,61 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
       expect(screen.getByTestId("recipient-advanced-redline-scroll")).toBeTruthy();
     });
   });
+
+  it(
+    "at narrow width the tracked-changes toggle and clause card remain in document",
+    async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (method === "POST" && url.includes("/revise")) {
+        return jsonResponse({
+          draft: revisedDraft,
+          rendered_html: "<p>Net thirty proposed rendering differs.</p>",
+        });
+      }
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: "<p>Baseline rendering unchanged.</p>" });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({ draft: initialDraft });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    render(
+      <div style={{ width: 360, maxWidth: "100%" }}>
+        <AccessProvider>
+          <AgreementRecipientReview agreementId={agreementId} recipientAccessToken="tok_test" />
+        </AccessProvider>
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
+    });
+    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    await userEvent.clear(instruction);
+    await userEvent.type(instruction, "Change payment terms to Net 30");
+    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("recipient-tracked-changes-toggle")).toBeTruthy();
+      },
+      { timeout: 8000 },
+    );
+    expect(screen.getByTestId("recipient-clause-card-payment_terms")).toBeTruthy();
+  }, 15_000);
 });

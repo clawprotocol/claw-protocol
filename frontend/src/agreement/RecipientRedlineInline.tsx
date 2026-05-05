@@ -1,7 +1,10 @@
-import type { RedlineResult } from "../vs01/agreementRedline";
+import type { RedlineSegmentVM } from "./recipientPreviewDiffModel";
 
 type Props = {
-  redline: RedlineResult;
+  /** Prefer passing canonical segments from {@link buildRecipientRedlineViewModel}. */
+  segments?: RedlineSegmentVM[];
+  /** @deprecated Wrap segments in a minimal object — prefer {@link segments}. */
+  redline?: { hasChanges: boolean; segments: RedlineSegmentVM[] };
   /** Preserve newlines inside each diff chunk (full-document compare). */
   paragraphBreaks?: boolean;
   /** Omit outer panel chrome (clause cards provide their own scroll/border). */
@@ -13,7 +16,7 @@ type Props = {
 };
 
 function segmentClass(
-  segType: "same" | "insert" | "delete",
+  segType: "same" | "delete" | "insert",
   highContrast: boolean,
 ): string {
   if (segType === "same") {
@@ -21,7 +24,7 @@ function segmentClass(
   }
   if (segType === "insert") {
     if (highContrast) {
-      return "rounded px-1 py-0.5 font-semibold bg-emerald-500 text-emerald-950 shadow-sm ring-1 ring-emerald-800/40";
+      return "rounded px-1 py-0.5 font-semibold bg-emerald-500 text-emerald-950 shadow-sm ring-1 ring-emerald-800/40 underline decoration-emerald-900/50 decoration-2 underline-offset-2";
     }
     return "rounded px-1 py-0.5 bg-emerald-100 text-emerald-950 underline decoration-emerald-700/35 decoration-1 underline-offset-2";
   }
@@ -32,18 +35,20 @@ function segmentClass(
 }
 
 /**
- * Inline insert/delete/same segments for recipient preview (track-changes style).
+ * Presentational tracked changes: renders supplied segments only (no diffing).
  */
 export function RecipientRedlineInline({
+  segments: segmentsProp,
   redline,
   paragraphBreaks,
   embedded,
   trackingStrong,
   contrast,
 }: Props) {
+  const segments = segmentsProp ?? redline?.segments ?? [];
   const highContrast = contrast !== "standard" || Boolean(trackingStrong);
   const wrap = paragraphBreaks ? "mb-1 block whitespace-pre-wrap break-words" : "";
-  const inner = redline.segments.map((seg, idx) => {
+  const inner = segments.map((seg, idx) => {
     if (seg.type === "same") {
       return (
         <span key={`rl_${idx}`} className={wrap || undefined} data-redline="same">

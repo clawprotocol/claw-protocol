@@ -3,22 +3,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RecipientAdvancedRedlinePanel } from "./RecipientAdvancedRedlinePanel";
-import type { RedlineResult } from "../vs01/agreementRedline";
+import { buildRecipientRedlineViewModel } from "./recipientPreviewDiffModel";
 
 describe("RecipientAdvancedRedlinePanel", () => {
   afterEach(() => cleanup());
 
   it("keeps advanced compare collapsed and uses constrained scroll container when opened", async () => {
-    const redline: RedlineResult = {
-      hasChanges: true,
-      segments: [
-        { type: "same", text: "Keep " },
-        { type: "insert", text: "new" },
-      ],
-    };
+    const viewModel = buildRecipientRedlineViewModel(
+      "Payment due on receipt within five days.",
+      "Payment is Net 30.",
+      { mode: "fullDocument" },
+    );
     render(
       <RecipientAdvancedRedlinePanel
-        redline={redline}
+        viewModel={viewModel}
         showTrackedChanges={true}
         proposedHtmlClean="<p>Clean proposed</p>"
       />,
@@ -29,7 +27,7 @@ describe("RecipientAdvancedRedlinePanel", () => {
     const scroll = () => screen.getByTestId("recipient-advanced-redline-scroll");
     await userEvent.click(screen.getByRole("button", { name: /Show advanced full-document compare/i }));
     const el = scroll();
-    expect(el.className).toMatch(/max-h-\[min\(32rem,70vh\)\]/);
+    expect(el.className).toMatch(/max-h-\[min\(28rem,65vh\)\]/);
     expect(el.className).toMatch(/overflow-auto/);
     expect(el.className).toMatch(/text-sm/);
     expect(el.className).not.toMatch(/text-xl/);

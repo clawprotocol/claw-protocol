@@ -3,41 +3,35 @@ import {
   CLAUSE_CARD_DISCLOSURE_CHAR_THRESHOLD,
   buildClauseCardDisplayRedline,
   capRedlineChangeSegmentsForClauseUi,
-  insertTextsForAddedPills,
-  redlineHasSignificantRemovals,
   type RecipientClauseCard,
+  type RedlineSegmentVM,
 } from "./recipientPreviewDiffModel";
+import type { RedlineResult } from "../vs01/agreementRedline";
 
 type Props = {
   card: RecipientClauseCard;
-  /** When true, show field-level redline (green/red). When false, clean proposed snippets only. */
   showTrackedChanges: boolean;
 };
 
+function inlineDisplaySegments(vm: RecipientClauseCard["redlineView"]): RedlineSegmentVM[] | null {
+  if (!vm.isReliableTrackedDiff || vm.segments.length === 0) return null;
+  const capped: RedlineResult = capRedlineChangeSegmentsForClauseUi({
+    hasChanges: true,
+    segments: vm.segments,
+  });
+  const display = buildClauseCardDisplayRedline(capped);
+  return display.segments;
+}
+
 /**
- * Changed-clause card: with tracked changes ON, always prefer inline redline (insert/delete) when the field diff has segments.
+ * Changed clause card — canonical {@link RecipientClauseCard.redlineView} only.
  */
 export function RecipientChangedClauseCard({ card, showTrackedChanges }: Props) {
   const long =
     card.currentText.length > CLAUSE_CARD_DISCLOSURE_CHAR_THRESHOLD ||
     card.proposedText.length > CLAUSE_CARD_DISCLOSURE_CHAR_THRESHOLD;
-  const fieldRl = card.fieldRedline;
-  const displayRedline = fieldRl
-    ? capRedlineChangeSegmentsForClauseUi(buildClauseCardDisplayRedline(fieldRl))
-    : null;
-  const hasFieldRedline = Boolean(displayRedline?.hasChanges);
-
-  const showInlineFallback =
-    !hasFieldRedline &&
-    card.trackMode === "inline" &&
-    Boolean(fieldRl?.hasChanges) &&
-    card.trackAddedDisplayLines.length === 0 &&
-    !card.trackSnippetPair;
-  const showDeleteInsertRow =
-    showInlineFallback && displayRedline && redlineHasSignificantRemovals(displayRedline);
-  const addedPills =
-    showInlineFallback && displayRedline && !showDeleteInsertRow ? insertTextsForAddedPills(fieldRl!) : [];
-  const useAddedPillsRow = !showDeleteInsertRow && addedPills.length > 0;
+  const vm = card.redlineView;
+  const inlineSegments = inlineDisplaySegments(vm);
 
   if (!showTrackedChanges) {
     return (
@@ -106,107 +100,39 @@ export function RecipientChangedClauseCard({ card, showTrackedChanges }: Props) 
           </ul>
         </div>
 
-        <div className="mt-2 space-y-1.5">
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Current</div>
-            <div
-              className="mt-0.5 rounded border border-slate-800/90 bg-slate-900/60 px-2 py-1 text-[10.5px] text-slate-300/95"
-              data-testid="clause-current-snippet"
-            >
-              {card.currentSnippet}
+        <div className="mt-2" data-testid="clause-track-changes-panel">
+          <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
+          {inlineSegments && inlineSegments.length > 0 ? (
+            <div className="mt-0.5 rounded-md border border-slate-600/80 bg-white px-2 py-2 shadow-sm" data-testid="clause-field-redline">
+              <RecipientRedlineInline segments={inlineSegments} embedded contrast="high" />
             </div>
-          </div>
-        </div>
-
-        {hasFieldRedline && displayRedline ? (
-          <div className="mt-2" data-testid="clause-field-redline">
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
-            <div className="mt-0.5 max-h-56 overflow-y-auto rounded-md border border-slate-600/80 bg-white px-2 py-2 shadow-sm">
-              <RecipientRedlineInline redline={displayRedline} paragraphBreaks embedded contrast="high" />
+          ) : vm.addedLines.length > 0 ? (
+            <div className="mt-0.5" data-testid="clause-add-only-fallback">
+              {vm.fallbackReason ? (
+                <p className="mb-1 text-[9px] leading-snug text-slate-400">{vm.fallbackReason}</p>
+              ) : null}
+              <ul className="mb-0 mt-1 space-y-1.5 rounded-md border border-slate-600/80 bg-white px-2 py-2" data-testid="clause-track-lines">
+                {vm.addedLines.map((line) => {
+                  const body = line.replace(/^Added:\s*/i, "").trim();
+                  return (
+                    <li key={line} className="list-none text-[10px] leading-snug text-slate-800">
+                      <span className="font-semibold text-slate-600">Added: </span>
+                      <span
+                        className="rounded bg-emerald-500 px-1 py-px font-semibold text-emerald-950 ring-1 ring-emerald-800/40"
+                        data-redline="insert"
+                      >
+                        {body}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
-          </div>
-        ) : null}
-
-        {!hasFieldRedline && card.trackMode === "lines" && card.trackAddedDisplayLines.length > 0 ? (
-          <div className="mt-2" data-testid="clause-track-lines">
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
-            <ul className="mb-0 mt-1 space-y-1.5 rounded-md border border-slate-600/80 bg-white px-2 py-2">
-              {card.trackAddedDisplayLines.map((line) => {
-                const body = line.startsWith("Added:") ? line.slice(6).trim() : line;
-                return (
-                  <li key={line} className="list-none text-[10px] leading-snug text-slate-800">
-                    <span className="font-semibold text-slate-600">Added: </span>
-                    <span className="rounded bg-emerald-500 px-1 py-px font-semibold text-emerald-950 ring-1 ring-emerald-800/40">
-                      {body}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ) : null}
-
-        {!hasFieldRedline && card.trackMode === "pair" && card.trackSnippetPair ? (
-          <div className="mt-2" data-testid="clause-track-pair">
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-1.5 rounded-md border border-slate-600/80 bg-white px-2 py-2 text-[10px] leading-snug">
-              <span
-                className="max-w-[48%] rounded bg-rose-400 px-1 py-px font-semibold text-rose-950 line-through decoration-rose-950 decoration-2 ring-1 ring-rose-800/45"
-                data-testid="clause-track-removed"
-              >
-                {card.trackSnippetPair.removed}
-              </span>
-              <span className="text-slate-400" aria-hidden>
-                →
-              </span>
-              <span
-                className="max-w-[48%] rounded bg-emerald-500 px-1 py-px font-semibold text-emerald-950 ring-1 ring-emerald-800/40"
-                data-testid="clause-track-inserted"
-              >
-                {card.trackSnippetPair.added}
-              </span>
-            </div>
-          </div>
-        ) : null}
-
-        {!hasFieldRedline && showInlineFallback && displayRedline ? (
-          <div className="mt-2" data-testid="clause-field-redline-fallback">
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
-            {showDeleteInsertRow ? (
-              <div className="mt-0.5 rounded-md border border-slate-600/80 bg-white px-2 py-1.5 shadow-sm">
-                <RecipientRedlineInline redline={displayRedline} paragraphBreaks embedded contrast="high" />
-              </div>
-            ) : useAddedPillsRow ? (
-              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 rounded-md border border-slate-600/80 bg-white px-2 py-1.5 text-[10px] text-slate-800">
-                <span className="font-semibold text-slate-600">Added:</span>
-                {addedPills.map((t, idx) => (
-                  <span
-                    key={`${idx}_${t.slice(0, 48)}`}
-                    className="max-w-full rounded px-1 py-0.5 font-semibold bg-emerald-500 text-emerald-950 ring-1 ring-emerald-800/40"
-                    data-redline="insert-pill"
-                  >
-                    {t}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-0.5 rounded-md border border-slate-600/80 bg-white px-2 py-1.5 shadow-sm">
-                <RecipientRedlineInline redline={displayRedline} paragraphBreaks embedded contrast="high" />
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        <div className="mt-2">
-          <div className="text-[9px] font-semibold uppercase tracking-wide text-emerald-200/70">Suggested (summary)</div>
-          <div
-            className="mt-0.5 space-y-1 rounded border border-emerald-900/35 bg-emerald-950/25 px-2 py-1 text-[10.5px] text-emerald-50/95"
-            data-testid="clause-suggested-snippet"
-          >
-            {card.suggestedSnippetLines.map((line) => (
-              <div key={line}>{line}</div>
-            ))}
-          </div>
+          ) : (
+            <p className="mt-1 text-[10px] leading-snug text-slate-400">
+              {vm.fallbackReason || "No tracked insert/delete segments for this field."}
+            </p>
+          )}
         </div>
       </div>
 

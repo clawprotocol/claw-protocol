@@ -4,6 +4,7 @@ import {
   assessRecipientPreviewDiff,
   buildPaymentTermsSuggestedSnippetLines,
   buildRecipientClauseCards,
+  buildRecipientRedlineViewModel,
   extractPaymentTermsCurrentSnippet,
   getRecipientPreviewSummaryBullets,
   instructionRequestsPauseWork,
@@ -132,9 +133,10 @@ describe("recipientPreviewDiffModel", () => {
     );
     expect(pay?.whatChangedBullets.some((b) => /Payment timing changed to Net 30/i.test(b))).toBe(true);
     expect(pay?.whatChangedBullets.some((b) => /pause work.*15 days late/i.test(b))).toBe(true);
-    expect(pay?.trackMode).toBe("lines");
-    expect(pay?.trackAddedDisplayLines.some((l) => /Added:.*Net 30/i.test(l))).toBe(true);
-    expect(pay?.trackAddedDisplayLines.some((l) => /Added:.*pause work/i.test(l))).toBe(true);
+    expect(pay?.trackMode).toBe("inline");
+    expect(pay?.redlineView.isReliableTrackedDiff).toBe(true);
+    expect(pay?.redlineView.segments.some((s) => s.type === "delete")).toBe(true);
+    expect(pay?.redlineView.segments.some((s) => s.type === "insert")).toBe(true);
   });
 
   it("warns when instruction requests pause-work but proposed omits it", () => {
@@ -169,6 +171,29 @@ describe("recipientPreviewDiffModel", () => {
     const lines = buildPaymentTermsSuggestedSnippetLines(after, before);
     expect(lines.some((l) => /Net\s*30/i.test(l))).toBe(true);
     expect(lines.some((l) => /pause work.*15 days late/i.test(l))).toBe(true);
+  });
+
+  it("buildRecipientRedlineViewModel: payment timing swap yields reliable deletes + inserts", () => {
+    const vm = buildRecipientRedlineViewModel(
+      "Invoices are due upon receipt. Late fees apply.",
+      "Invoices are due Net 30.",
+      { field: "payment_terms", mode: "clause" },
+    );
+    expect(vm.isReliableTrackedDiff).toBe(true);
+    expect(vm.hasDeletes).toBe(true);
+    expect(vm.hasAdds).toBe(true);
+    expect(vm.segments.some((s) => s.type === "delete")).toBe(true);
+    expect(vm.segments.some((s) => s.type === "insert")).toBe(true);
+  });
+
+  it("buildRecipientRedlineViewModel: insert-only shows Added lines — not reliable tracked diff", () => {
+    const vm = buildRecipientRedlineViewModel("", "Invoices are due Net 30.", {
+      field: "payment_terms",
+      mode: "clause",
+    });
+    expect(vm.isReliableTrackedDiff).toBe(false);
+    expect(vm.addedLines.some((l) => /Net 30/i.test(l))).toBe(true);
+    expect(vm.fallbackReason).toMatch(/No delete segments/i);
   });
 
   it("marks redline as noisy when segment count is huge (defaults away from full redline in UI)", () => {

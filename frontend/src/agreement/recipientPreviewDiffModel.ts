@@ -37,6 +37,139 @@ export function countRedlineChangeChars(redline: RedlineResult): number {
   return n;
 }
 
+/** Canonical segment for recipient UI (clause + full-document). */
+export type RedlineSegmentVM = { type: "same" | "delete" | "insert"; text: string };
+
+/** Single redline view model: one engine for clause cards, side-by-side, and advanced compare. */
+export type RecipientRedlineViewModel = {
+  hasVisibleChanges: boolean;
+  hasDeletes: boolean;
+  hasAdds: boolean;
+  segments: RedlineSegmentVM[];
+  addedLines: string[];
+  removedLines: string[];
+  fallbackReason?: string;
+  /** True when delete segments exist — trustworthy Word-style removals (not add-only). */
+  isReliableTrackedDiff: boolean;
+};
+
+export type BuildRecipientRedlineViewModelOptions = {
+  field?: string;
+  instructionPlain?: string;
+  proposedRenderedPlain?: string;
+  baselineRenderedPlain?: string;
+  mode?: "clause" | "fullDocument";
+};
+
+function meaningfulSegLen(text: string): number {
+  return text.replace(/\s+/g, " ").trim().length;
+}
+
+function dedupeAddedLines(lines: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of lines) {
+    const k = raw.replace(/\s+/g, " ").trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(raw);
+  }
+  return out;
+}
+
+/**
+ * Canonical redline view model from a current/proposed text pair (field snippets or full-document plain text).
+ * Does not use HTML structure — callers pass plain text (for full doc: htmlToPlainText(html) like buildRecipientPreviewRedline).
+ */
+export function buildRecipientRedlineViewModel(
+  currentText: string,
+  proposedText: string,
+  options?: BuildRecipientRedlineViewModelOptions,
+): RecipientRedlineViewModel {
+  const mode = options?.mode ?? "clause";
+  const rawCur = currentText ?? "";
+  const rawProp = proposedText ?? "";
+  const left = mode === "clause" ? capFieldTextForDiff(rawCur).trim() : rawCur.trim();
+  const right = mode === "clause" ? capFieldTextForDiff(rawProp).trim() : rawProp.trim();
+
+  const rl = buildAgreementRedline(left, right);
+
+  if (mode === "fullDocument") {
+    const cc = countRedlineChangeChars(rl);
+    if (isRecipientRedlineNoisyRaw(rl, cc)) {
+      return {
+        hasVisibleChanges: false,
+        hasDeletes: false,
+        hasAdds: false,
+        segments: [],
+        addedLines: [],
+        removedLines: [],
+        fallbackReason:
+          "Full-document compare is too large for inline redline — use Changed clauses for field-level changes.",
+        isReliableTrackedDiff: false,
+      };
+    }
+  }
+
+  const segments: RedlineSegmentVM[] = rl.segments.map((s) => ({
+    type: s.type,
+    text: s.text,
+  }));
+
+  const hasDeletes = segments.some((s) => s.type === "delete" && meaningfulSegLen(s.text) >= 2);
+  const hasAdds = segments.some((s) => s.type === "insert" && meaningfulSegLen(s.text) >= 2);
+
+  const removedLines = segments
+    .filter((s) => s.type === "delete")
+    .map((s) => trimCap(s.text.replace(/\s+/g, " ").trim(), 280))
+    .filter((s) => s.length > 0);
+
+  const insertsRaw = segments
+    .filter((s) => s.type === "insert")
+    .map((s) => trimCap(s.text.replace(/\s+/g, " ").trim(), 280))
+    .filter((s) => s.length > 0);
+
+  let isReliableTrackedDiff = hasDeletes;
+  let fallbackReason: string | undefined;
+  let addedLines: string[] = [];
+
+  if (hasAdds && !hasDeletes) {
+    addedLines = insertsRaw.map((t) => (/^added:/i.test(t) ? t : `Added: ${t}`));
+    fallbackReason = "No delete segments — additions only (not full tracked changes).";
+  }
+
+  if (mode === "clause" && options?.field === "payment_terms") {
+    const hintLines = buildPaymentTermsSuggestedSnippetLines(rawProp, rawCur, options.proposedRenderedPlain);
+    const formatted = hintLines.map((l) => (l.match(/^Added:/i) ? l : `Added: ${l.replace(/^Added:\s*/i, "")}`));
+    if (!isReliableTrackedDiff) {
+      addedLines = dedupeAddedLines([...formatted, ...addedLines]);
+    }
+  }
+
+  const anyChangeSegment = segments.some((s) => s.type !== "same" && meaningfulSegLen(s.text) >= 1);
+  let hasVisibleChanges =
+    isReliableTrackedDiff || addedLines.length > 0 || (hasAdds && hasDeletes) || (anyChangeSegment && (hasAdds || hasDeletes));
+
+  if (!isReliableTrackedDiff && addedLines.length === 0 && !anyChangeSegment) {
+    hasVisibleChanges = false;
+  }
+
+  if (!fallbackReason && !isReliableTrackedDiff && rawCur.trim() !== rawProp.trim() && addedLines.length === 0 && !hasAdds && !hasDeletes) {
+    fallbackReason = "Could not derive insert/delete segments for this pair.";
+  }
+
+  return {
+    hasVisibleChanges,
+    hasDeletes,
+    hasAdds,
+    segments,
+    addedLines,
+    removedLines,
+    fallbackReason,
+    isReliableTrackedDiff,
+  };
+}
+
 /** Above this, full-document redline is hidden behind “Full document redline” by default. */
 export const RECIPIENT_FULL_REDLINE_MAX_SEGMENTS = 72;
 
@@ -474,6 +607,8 @@ export type RecipientClauseCard = {
   sectionLabel: string;
   /** Word-style “what changed” bullets for this field. */
   whatChangedBullets: string[];
+  /** Canonical clause-level redline (field text vs field text). */
+  redlineView: RecipientRedlineViewModel;
   /** Inline diff for this field only (never full-document HTML). */
   fieldRedline: RedlineResult | null;
   /** Full field text (disclosure only). */
@@ -501,58 +636,6 @@ const EMPTY_CLAUSE_CONTEXT: RecipientClauseContext = {
   baselineRenderedPlain: "",
 };
 
-function buildTrackUiForRow(
-  row: AgreementFieldChange,
-  ctx: RecipientClauseContext,
-  rl: RedlineResult | null,
-): Pick<RecipientClauseCard, "trackMode" | "trackAddedDisplayLines" | "trackSnippetPair"> {
-  const trackAddedDisplayLines: string[] = [];
-  let trackSnippetPair: { removed: string; added: string } | null = null;
-  let trackMode: RecipientClauseTrackMode = "inline";
-
-  if (row.field === "payment_terms") {
-    const a = (row.after || "").trim();
-    const b = (row.before || "").trim();
-    const netA = a.match(/\bnet\s*(\d+)\b/i);
-    const netB = b.match(/\bnet\s*(\d+)\b/i);
-    if (netA && (!netB || netA[1] !== netB[1])) {
-      trackAddedDisplayLines.push(`Added: Invoices are due Net ${netA[1]}.`);
-    }
-    const pauseLine = extractPauseWorkBullet(a) || extractPauseWorkBullet(ctx.proposedRenderedPlain);
-    const hadPause = pauseWorkInBaseline(b, ctx.baselineRenderedPlain);
-    if (pauseLine && !hadPause) {
-      const p = pauseLine.endsWith(".") ? pauseLine.slice(0, -1) : pauseLine;
-      trackAddedDisplayLines.push(`Added: ${p}.`);
-    }
-    if (trackAddedDisplayLines.length > 0) {
-      return { trackMode: "lines", trackAddedDisplayLines, trackSnippetPair: null };
-    }
-  }
-
-  if (rl && redlineHasSignificantRemovals(rl)) {
-    const del = rl.segments.find((s) => s.type === "delete" && s.text.replace(/\s+/g, " ").trim().length >= 2);
-    const ins = rl.segments.find((s) => s.type === "insert" && s.text.replace(/\s+/g, " ").trim().length >= 2);
-    if (del && ins) {
-      trackSnippetPair = {
-        removed: trimCap(del.text.replace(/\s+/g, " ").trim(), 120),
-        added: trimCap(ins.text.replace(/\s+/g, " ").trim(), 120),
-      };
-      return { trackMode: "pair", trackAddedDisplayLines: [], trackSnippetPair };
-    }
-  }
-
-  if (rl?.hasChanges) {
-    for (const t of insertTextsForAddedPills(rl, 4, 120)) {
-      trackAddedDisplayLines.push(`Added: ${t}`);
-    }
-    if (trackAddedDisplayLines.length > 0) {
-      return { trackMode: "lines", trackAddedDisplayLines, trackSnippetPair: null };
-    }
-  }
-
-  return { trackMode, trackAddedDisplayLines, trackSnippetPair };
-}
-
 export function buildRecipientClauseCards(
   snapshotCompare: AgreementCompareResult,
   hasMaterialTextDiff: boolean,
@@ -566,20 +649,49 @@ export function buildRecipientClauseCards(
     const title = agreementFieldLabel(row.field);
     const { currentSnippet, suggestedSnippetLines } = buildClauseSnippetsForRow(row, ctx);
     const fieldRedline = buildFieldLevelRedlineCapped(row.before || "", row.after || "");
-    const track = buildTrackUiForRow(row, ctx, fieldRedline);
+    const redlineView = buildRecipientRedlineViewModel(row.before || "", row.after || "", {
+      field: row.field,
+      instructionPlain: ctx.recipientInstructionPlain,
+      proposedRenderedPlain: ctx.proposedRenderedPlain,
+      baselineRenderedPlain: ctx.baselineRenderedPlain,
+      mode: "clause",
+    });
+    const trackMode: RecipientClauseTrackMode =
+      redlineView.isReliableTrackedDiff ? "inline" : redlineView.addedLines.length > 0 ? "lines" : "inline";
+    const trackAddedDisplayLines = redlineView.addedLines;
+    let trackSnippetPair: { removed: string; added: string } | null = null;
+    if (
+      fieldRedline &&
+      redlineHasSignificantRemovals(fieldRedline) &&
+      redlineView.isReliableTrackedDiff
+    ) {
+      const del = fieldRedline.segments.find(
+        (s) => s.type === "delete" && s.text.replace(/\s+/g, " ").trim().length >= 2,
+      );
+      const ins = fieldRedline.segments.find(
+        (s) => s.type === "insert" && s.text.replace(/\s+/g, " ").trim().length >= 2,
+      );
+      if (del && ins) {
+        trackSnippetPair = {
+          removed: trimCap(del.text.replace(/\s+/g, " ").trim(), 120),
+          added: trimCap(ins.text.replace(/\s+/g, " ").trim(), 120),
+        };
+      }
+    }
     return {
       id: row.field,
       cardTitle: title,
       sectionLabel: title,
       whatChangedBullets: deriveClauseWhatChangedBullets(row, ctx),
+      redlineView,
       fieldRedline,
       currentText,
       proposedText,
       currentSnippet,
       suggestedSnippetLines,
-      trackMode: track.trackMode,
-      trackAddedDisplayLines: track.trackAddedDisplayLines,
-      trackSnippetPair: track.trackSnippetPair,
+      trackMode,
+      trackAddedDisplayLines,
+      trackSnippetPair,
       reason: clauseChangeReason(row),
     };
   });
@@ -589,6 +701,16 @@ export function buildRecipientClauseCards(
       cardTitle: "Document wording",
       sectionLabel: "Document wording",
       whatChangedBullets: ["Rendered document text differs from the current version."],
+      redlineView: {
+        hasVisibleChanges: false,
+        hasDeletes: false,
+        hasAdds: false,
+        segments: [],
+        addedLines: [],
+        removedLines: [],
+        fallbackReason: "Use Changed clauses or Side-by-side for surrounding text.",
+        isReliableTrackedDiff: false,
+      },
       fieldRedline: null,
       currentText: "See Side-by-side or Full document redline for the exact rendered text.",
       proposedText: "—",
