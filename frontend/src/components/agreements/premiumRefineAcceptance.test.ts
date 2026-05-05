@@ -3,6 +3,7 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   classifyPremiumRefineRevisionIntent,
   computeMajorHeadingPreservationRatio,
+  deriveStructuredAdvisoryKeys,
   evaluatePremiumRefineCandidate,
   extractMajorHeadingFingerprints,
   formatProRefineRejectedShortInline,
@@ -20,7 +21,10 @@ import {
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REJECTED_SHORT_PRIMARY,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
+  resolveStructuredAdvisoryKeysForAppend,
   shouldUseProRefineAdvisoryAppendSuccessCopy,
+  STRUCTURED_ADVISORY_ITEMS,
+  STRUCTURED_ADVISORY_KEY_ORDER,
 } from "./premiumRefineAcceptance";
 import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 
@@ -295,6 +299,45 @@ describe("PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE", () => {
   it("tells the user to review before sending", () => {
     expect(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE).toContain("Revision applied");
     expect(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE).toContain("Review before sending");
+  });
+});
+
+describe("structured deterministic advisory derivation", () => {
+  it("maps invoicing + payment timing from instruction text", () => {
+    const keys = deriveStructuredAdvisoryKeys("Add reviewer note with items: Clarify invoicing and payment timing", undefined);
+    expect(keys).toContain("invoicing");
+    expect(keys).toContain("payment_timing");
+  });
+
+  it("returns empty derive for meaningless input then resolve applies default keys", () => {
+    expect(deriveStructuredAdvisoryKeys("List items the other party should review.", undefined)).toEqual([]);
+    expect(resolveStructuredAdvisoryKeysForAppend("List items the other party should review.", undefined)).toEqual([
+      "acceptance",
+      "payment_timing",
+      "scope",
+    ]);
+  });
+
+  it("maps checklist-only topics without echoing checklist (keys only)", () => {
+    const keys = resolveStructuredAdvisoryKeysForAppend("", [
+      "Discuss IP assignment with counsel",
+      "NDA / confidentiality obligations",
+      "Termination for convenience and refunds",
+    ]);
+    expect(keys).toEqual(["confidentiality", "ip_ownership", "termination"]);
+  });
+
+  it("stable sort follows STRUCTURED_ADVISORY_KEY_ORDER and truncates to seven", () => {
+    const spam =
+      "payment invoice acceptance scope confidential IP terminate support access law venue dispute notice arbitration";
+    const keys = resolveStructuredAdvisoryKeysForAppend(spam, undefined);
+    expect(keys).toHaveLength(7);
+    expect(keys).toEqual(STRUCTURED_ADVISORY_KEY_ORDER.slice(0, 7));
+  });
+
+  it("structured item copy is fixed enterprise strings", () => {
+    expect(STRUCTURED_ADVISORY_ITEMS.payment_timing).toContain("due dates");
+    expect(STRUCTURED_ADVISORY_ITEMS.governing_law).toContain("dispute-resolution");
   });
 });
 

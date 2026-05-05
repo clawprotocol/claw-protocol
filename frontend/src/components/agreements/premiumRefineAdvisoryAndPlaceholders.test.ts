@@ -21,6 +21,7 @@ import {
   PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
   sanitizeAdvisoryNoteTextForAppend,
   scanPremiumRefinePlaceholderCorruption,
+  STRUCTURED_ADVISORY_ITEMS,
 } from "./premiumRefineAcceptance";
 
 function longBaseline(): string {
@@ -58,7 +59,7 @@ describe("advisory / comment intent classification", () => {
     );
   });
 
-  it("keeps late-fee clause edits as surgical_revision", () => {
+  it("keeps late-fee clause edits as surgical_revision (structured advisory does not change classification)", () => {
     expect(classifyPremiumRefineRevisionIntent("Add late fee of 5% after 10 days overdue")).toBe("surgical_revision");
   });
 });
@@ -153,6 +154,9 @@ describe("executePremiumRefineUpdate advisory fast path", () => {
     expect(out.acceptance.decision).toBe("accepted");
     expect(out.finalText.startsWith(baseline)).toBe(true);
     expect(out.finalText).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.acceptance);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.payment_timing);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.scope);
     expect(postPremiumRefine).toHaveBeenCalledTimes(1);
   });
 
@@ -221,6 +225,11 @@ describe("sanitizeAdvisoryNoteTextForAppend", () => {
     expect(sanitizeAdvisoryNoteTextForAppend("1.[ADDRESS_1] Street name")).toBe("");
     expect(sanitizeAdvisoryNoteTextForAppend("US $4,[ADDRESS_6] per month")).toBe("");
   });
+
+  it("drops list-prefixed section-dot corruption (not only line-start)", () => {
+    expect(sanitizeAdvisoryNoteTextForAppend("* 2.[A Broken section\nClean line.")).toBe("Clean line.");
+    expect(sanitizeAdvisoryNoteTextForAppend("- $ 4,500, [ extra")).toBe("");
+  });
 });
 
 describe("executePremiumRefineUpdate advisory placeholder sanitization", () => {
@@ -228,7 +237,7 @@ describe("executePremiumRefineUpdate advisory placeholder sanitization", () => {
     vi.mocked(postPremiumRefine).mockReset();
   });
 
-  it("accepts advisory append when model output contains placeholder lines (sanitized)", async () => {
+  it("accepts advisory append when model output is dirty — no raw model lines in final (structured defaults)", async () => {
     const baseline = longBaseline();
     const dirtyModel =
       "Suggested review:\n- Clarify invoicing cadence\n- Fix ship-to [ADDRESS_1] before countersign\n- Confirm notice address\n";
@@ -251,11 +260,14 @@ describe("executePremiumRefineUpdate advisory placeholder sanitization", () => {
     expect(out.finalText).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
     expect(out.finalText).not.toMatch(/\[ADDRESS_\d+\]/);
     expect(scanPremiumRefinePlaceholderCorruption(out.finalText).count).toBe(0);
-    expect(out.finalText).toContain("Clarify invoicing cadence");
-    expect(out.finalText).toContain("Confirm notice address");
+    expect(out.finalText).not.toContain("Clarify invoicing cadence");
+    expect(out.finalText).not.toContain("Confirm notice address");
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.acceptance);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.payment_timing);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.scope);
   });
 
-  it("drops corrupt checklist bullets but keeps clean ones", async () => {
+  it("checklist drives mapped bullets only — never echoes checklist wording", async () => {
     const baseline = longBaseline();
     vi.mocked(postPremiumRefine).mockResolvedValueOnce({
       updated_document_text: "z".repeat(4000),
@@ -268,15 +280,29 @@ describe("executePremiumRefineUpdate advisory placeholder sanitization", () => {
       baselineLen: baseline.length,
       intakeText: "B2B.",
       userInstruction: "List items the other party should review.",
-      refineChecklistBullets: ["Bad line [ADDRESS_1] here", "Good: review indemnity carve-outs"],
+      refineChecklistBullets: [
+        "Bad line [ADDRESS_1] here",
+        "Discuss IP assignment with counsel",
+        "NDA / confidentiality obligations",
+        "Termination for convenience and refunds",
+      ],
     });
     expect(out.acceptance.decision).toBe("accepted");
-    expect(out.finalText).toContain("Good: review indemnity carve-outs");
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.confidentiality);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.ip_ownership);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.termination);
+    expect(out.finalText).not.toContain("Good: review indemnity");
+    expect(out.finalText).not.toContain("Discuss IP assignment");
     expect(out.finalText).not.toMatch(/\[ADDRESS_1\]/);
     expect(scanPremiumRefinePlaceholderCorruption(out.finalText).count).toBe(0);
+    const ip = out.finalText.indexOf(STRUCTURED_ADVISORY_ITEMS.ip_ownership);
+    const term = out.finalText.indexOf(STRUCTURED_ADVISORY_ITEMS.termination);
+    const conf = out.finalText.indexOf(STRUCTURED_ADVISORY_ITEMS.confidentiality);
+    expect(conf).toBeLessThan(ip);
+    expect(ip).toBeLessThan(term);
   });
 
-  it("falls back to minimal safe reviewer bullets when checklist and model sanitize to empty", async () => {
+  it("fully corrupt checklist + model still yields default structured bullets", async () => {
     const baseline = longBaseline();
     vi.mocked(postPremiumRefine).mockResolvedValueOnce({
       updated_document_text: "[ADDRESS_1]\n[PARTY_2]\n",
@@ -294,8 +320,93 @@ describe("executePremiumRefineUpdate advisory placeholder sanitization", () => {
     expect(out.acceptance.decision).toBe("accepted");
     expect(out.finalText.startsWith(baseline)).toBe(true);
     expect(out.finalText).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
-    expect(out.finalText).toContain("Review final payment timing");
-    expect(out.finalText).toContain("Review delivery, acceptance, and revision timing");
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.acceptance);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.payment_timing);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.scope);
     expect(scanPremiumRefinePlaceholderCorruption(out.finalText).count).toBe(0);
+  });
+
+  it("QA §8: dirty multiline advisory instruction → accepted append, no corruption, fallback instruction", async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: "z".repeat(4000),
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const userInstruction = `Add reviewer note with items:
+
+* Clarify invoicing
+* [ADDRESS_1]
+* 2.[A Broken section
+* $ 4,500, [
+    Also mention payment timing.`;
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction,
+    });
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.refineApplyDecision).toBe("append_reviewer_note_preserve_document");
+    expect(out.finalText.startsWith(baseline)).toBe(true);
+    expect(out.finalText).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
+    expect(out.finalText).toContain("Reviewer requested a list of items the other party should review.");
+    expect(out.finalText).not.toContain("[ADDRESS_1]");
+    expect(out.finalText).not.toContain("[A");
+    expect(out.finalText).not.toContain("$ 4,500, [");
+    expect(out.finalText).not.toContain("Also mention payment timing");
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.invoicing);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.payment_timing);
+    expect(
+      out.finalText.indexOf(STRUCTURED_ADVISORY_ITEMS.payment_timing),
+    ).toBeLessThan(out.finalText.indexOf(STRUCTURED_ADVISORY_ITEMS.invoicing));
+    expect(premiumRefineTextContainsPlaceholderCorruption(out.finalText)).toBe(false);
+  });
+
+  it("QA §9: advisory prompt with only placeholder corruption still yields clean static append", async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: baseline,
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction: "Add reviewer note.\n\n[ADDRESS_1]",
+    });
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.refineApplyDecision).toBe("append_reviewer_note_preserve_document");
+    expect(out.finalText.startsWith(baseline)).toBe(true);
+    expect(out.finalText).not.toContain("[ADDRESS_1]");
+    expect(premiumRefineTextContainsPlaceholderCorruption(out.finalText)).toBe(false);
+  });
+
+  it("structured prompt: invoicing + payment timing maps to canonical bullets in stable order", async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: baseline,
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction: "Add reviewer note with items: Clarify invoicing and payment timing",
+    });
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.finalText.startsWith(baseline)).toBe(true);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.invoicing);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.payment_timing);
+    expect(out.finalText).not.toContain("Clarify invoicing and payment timing");
+    expect(out.finalText).not.toContain("Add reviewer note with items:");
+    expect(
+      out.finalText.indexOf(STRUCTURED_ADVISORY_ITEMS.payment_timing),
+    ).toBeLessThan(out.finalText.indexOf(STRUCTURED_ADVISORY_ITEMS.invoicing));
   });
 });

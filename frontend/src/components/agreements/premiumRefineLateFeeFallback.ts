@@ -1,4 +1,6 @@
 import {
+  assertStructuredAdvisoryAppendInvariants,
+  buildStructuredAdvisoryInnerMarkdown,
   classifyPremiumRefineRevisionIntent,
   evaluatePremiumRefineCandidate,
   isAdvisoryNoteOrCommentIntent,
@@ -8,7 +10,7 @@ import {
   premiumRefineTextContainsPlaceholderCorruption,
   PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
   PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
-  sanitizeAdvisoryNoteTextForAppend,
+  resolveStructuredAdvisoryKeysForAppend,
   scanPremiumRefinePlaceholderCorruption,
   tryPremiumRefineAdvisoryAppendAcceptance,
 } from "./premiumRefineAcceptance";
@@ -187,16 +189,39 @@ export function augmentPremiumRefineUserPrompt(instruction: string): string {
   return `${t}\n\n[Preserve-first editing: Return the COMPLETE agreement. Do not summarize, replace the agreement, or omit sections. Make only the requested change. If adding a clause, insert it into the most relevant existing section and preserve all other text. Apply this to the full document; preserve existing sections, headings, numbering, parties, signature blocks, and material clauses unless the user explicitly asked to shorten, simplify, summarize, rewrite from scratch, convert format, or replace the document. Return the complete updated document text only.]`;
 }
 
-const REVIEWER_NOTE_HEADING = "## REVIEWER NOTE / REQUESTED REVIEW ITEMS";
+/**
+ * Deterministic advisory appendix (structured defaults) — no user/model/checklist text echoed.
+ * Built from {@link resolveStructuredAdvisoryKeysForAppend} with empty input.
+ */
+export const STATIC_MINIMAL_SAFE_BLOCK = (() => {
+  const keys = resolveStructuredAdvisoryKeysForAppend("", undefined);
+  return `## REVIEWER NOTE / REQUESTED REVIEW ITEMS\n\n${buildStructuredAdvisoryInnerMarkdown(keys)}`.trim();
+})();
 
-/** Deterministic bullets when checklist/model/user advisory text sanitize to empty (no placeholders). */
-const ADVISORY_APPEND_MINIMAL_SAFE_MARKDOWN =
-  "**Suggested review items:**\n\n" +
-  "- Review final payment timing, including when the final balance becomes due.\n" +
-  "- Review delivery, acceptance, and revision timing before sending.\n" +
-  "- Review ownership of final deliverables and any retained developer tools or background materials.\n\n";
+const ADVISORY_APPEND_ADMIN_FOOTER =
+  "\n*This section is administrative / reviewer-facing. It does not amend the operative agreement text above unless the parties separately agree in writing.*\n";
 
-const ADVISORY_APPEND_DEFAULT_REQUEST_LABEL = "Review items before sending.";
+/** Baseline + static block + admin footer (placeholder-safe). */
+export function appendStaticAdvisoryMinimalSafeBlock(base: string): string {
+  return `${base.trimEnd()}\n\n${STATIC_MINIMAL_SAFE_BLOCK}${ADVISORY_APPEND_ADMIN_FOOTER}`;
+}
+
+function finalizeAdvisoryAppendDocGuard(base: string, candidate: string, context: string): string {
+  let out = candidate;
+  if (premiumRefineTextContainsPlaceholderCorruption(out)) {
+    // eslint-disable-next-line no-console
+    console.info("[premium-refine-advisory-final-corruption-blocked]", {
+      context,
+      priorLen: out.length,
+    });
+    out = appendStaticAdvisoryMinimalSafeBlock(base);
+  }
+  if (premiumRefineTextContainsPlaceholderCorruption(out)) {
+    // eslint-disable-next-line no-console
+    console.error("[premium-refine-advisory-final-corruption-invariant]", { context });
+  }
+  return out;
+}
 
 function appendLog(finalDoc: string, base: string): void {
   // eslint-disable-next-line no-console
@@ -209,112 +234,41 @@ function appendLog(finalDoc: string, base: string): void {
 }
 
 /**
- * Always prefix-preserves the authoritative agreement and appends a reviewer/advisory section.
- * Model output is included only when non-corrupt and not a truncated replacement of the whole doc.
+ * Prefix-preserves the authoritative agreement and appends a structured reviewer section.
+ * User instruction, checklist, and model output are used only for keyword → topic mapping; bullets are always
+ * fixed `STRUCTURED_ADVISORY_ITEMS` copy from `premiumRefineAcceptance`.
  */
 export function buildAdvisoryAppendPreserveDocument(args: {
   currentDocumentText: string;
   userInstruction: string;
+  /** Unused for appendix body — kept for call-site compatibility. */
   modelOut: string;
   checklistLines?: string[] | undefined;
-  /** Rebuild append using only {@link ADVISORY_APPEND_MINIMAL_SAFE_MARKDOWN} (no checklist/model). */
+  /** @deprecated No-op: output is always the structured template. */
   forceMinimalSafeReviewerBody?: boolean;
 }): string {
   const base = args.currentDocumentText;
-  const inst = args.userInstruction.trim();
-  const safeInst =
-    sanitizeAdvisoryNoteTextForAppend(inst).trim() ||
-    (premiumRefineTextContainsPlaceholderCorruption(inst) ? ADVISORY_APPEND_DEFAULT_REQUEST_LABEL : inst.trim()) ||
-    ADVISORY_APPEND_DEFAULT_REQUEST_LABEL;
-
-  const footer =
-    `\n*This section is administrative / reviewer-facing. It does not amend the operative agreement text above unless the parties separately agree in writing.*\n`;
 
   if (args.forceMinimalSafeReviewerBody) {
-    const mid = ADVISORY_APPEND_MINIMAL_SAFE_MARKDOWN;
-    if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
-      const addendum = `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${safeInst}\n${mid}${footer}`;
-      const finalDoc = base + addendum;
-      appendLog(finalDoc, base);
-      return finalDoc;
-    }
-    const tail = `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${safeInst}\n${mid}${footer}`;
-    const finalDoc = base + tail;
-    appendLog(finalDoc, base);
-    return finalDoc;
+    const out = finalizeAdvisoryAppendDocGuard(base, appendStaticAdvisoryMinimalSafeBlock(base), "force_minimal");
+    appendLog(out, base);
+    return out;
   }
 
-  let snippet = (args.modelOut || "").trim();
-  if (
-    snippet &&
-    normalizePremiumRefineTextForCompare(snippet) === normalizePremiumRefineTextForCompare(base)
-  ) {
-    snippet = "";
-  }
-  if (
-    snippet &&
-    snippet.length >= base.length * 0.92 &&
-    !snippet.startsWith(base.slice(0, Math.min(2000, base.length)))
-  ) {
-    snippet = "";
-  }
-  snippet = sanitizeAdvisoryNoteTextForAppend(snippet);
-  if (snippet && premiumRefineTextContainsPlaceholderCorruption(snippet)) {
-    snippet = "";
-  }
-  if (snippet && snippet.length > 4000) {
-    snippet = snippet.slice(0, 4000);
-    snippet = sanitizeAdvisoryNoteTextForAppend(snippet);
-    if (snippet && premiumRefineTextContainsPlaceholderCorruption(snippet)) {
-      snippet = "";
-    }
-  }
+  const keys = resolveStructuredAdvisoryKeysForAppend(args.userInstruction, args.checklistLines);
+  const inner = buildStructuredAdvisoryInnerMarkdown(keys);
+  const isAdditional = base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
+  const block = isAdditional
+    ? `### Additional reviewer note (same session)\n\n${inner}`
+    : `## REVIEWER NOTE / REQUESTED REVIEW ITEMS\n\n${inner}`;
+  const finalDoc = `${base.trimEnd()}\n\n---\n\n${block}${ADVISORY_APPEND_ADMIN_FOOTER}`;
 
-  const checklist = (args.checklistLines || [])
-    .map((c) => sanitizeAdvisoryNoteTextForAppend(String(c ?? "").trim()).trim())
-    .filter(Boolean)
-    .slice(0, 20);
-
-  const checklistBlock =
-    checklist.length > 0
-      ? `\n**Flagged / readiness items (from LawDog review):**\n${checklist.map((c) => `- ${c}`).join("\n")}\n`
-      : "";
-  const modelBlock = snippet ? `\n**Captured review points (from model output):**\n\n${snippet}\n` : "";
-
-  let midBody = `${checklistBlock}${modelBlock}`;
-  if (!midBody.trim()) {
-    midBody = ADVISORY_APPEND_MINIMAL_SAFE_MARKDOWN;
+  const guarded = finalizeAdvisoryAppendDocGuard(base, finalDoc, "build_advisory_append");
+  if (!premiumRefineTextContainsPlaceholderCorruption(base)) {
+    assertStructuredAdvisoryAppendInvariants(base, guarded);
   }
-
-  let finalDoc: string;
-  if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
-    const addendum = `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${safeInst}\n${midBody}${footer}`;
-    finalDoc = base + addendum;
-  } else {
-    const tail = `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${safeInst}\n${midBody}${footer}`;
-    finalDoc = base + tail;
-  }
-
-  if (
-    !premiumRefineTextContainsPlaceholderCorruption(base) &&
-    premiumRefineTextContainsPlaceholderCorruption(finalDoc)
-  ) {
-    // eslint-disable-next-line no-console
-    console.info("[premium-refine-advisory-sanitized-placeholder-note]", {
-      note: "rebuild_append_minimal_safe_only",
-      priorLen: finalDoc.length,
-    });
-    return buildAdvisoryAppendPreserveDocument({
-      currentDocumentText: base,
-      userInstruction: inst,
-      modelOut: "",
-      checklistLines: [],
-      forceMinimalSafeReviewerBody: true,
-    });
-  }
-
-  appendLog(finalDoc, base);
-  return finalDoc;
+  appendLog(guarded, base);
+  return guarded;
 }
 
 /** Merge LawDog premium-review / route bullets into the refine prompt when available. */
@@ -375,48 +329,16 @@ export function tryAppendReviewerNotePreserveDocument(args: {
   const base = args.currentDocumentText;
   if (!base || base.length < 500) return null;
   const shortRaw = (args.shortCandidate || "").trim();
-  if (shortRaw.length < 40) return null;
   if (shortRaw.length >= base.length * 0.92) return null;
 
-  let shortSan = sanitizeAdvisoryNoteTextForAppend(shortRaw);
-  if (shortSan && premiumRefineTextContainsPlaceholderCorruption(shortSan)) {
-    shortSan = "";
-  }
-  if (!shortSan.trim() || shortSan.length < 8) return null;
-
-  const safeInstr =
-    sanitizeAdvisoryNoteTextForAppend(args.userInstruction.trim()).trim() || ADVISORY_APPEND_DEFAULT_REQUEST_LABEL;
-
-  const checklist = (args.checklistLines || [])
-    .map((c) => sanitizeAdvisoryNoteTextForAppend(String(c ?? "").trim()).trim())
-    .filter(Boolean)
-    .slice(0, 20);
-  const checklistBlock =
-    checklist.length > 0
-      ? `\n**Flagged / readiness items (from LawDog review):**\n${checklist.map((c) => `- ${c}`).join("\n")}\n`
-      : "";
-
-  const shortBlock =
-    shortSan.length > 800
-      ? `\n**LawDog short output (preserved as reference — agreement text above is unchanged):**\n\n${shortSan}\n`
-      : `\n**Captured points:**\n\n${shortSan}\n`;
-
-  const footer =
-    `\n*This section is administrative / reviewer-facing. It does not amend the operative agreement text above unless the parties separately agree in writing.*\n`;
-
-  if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
-    const addendum =
-      `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${safeInstr}\n${checklistBlock}${shortBlock}${footer}`;
-    return {
-      text: base + addendum,
-      summaryLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
-    };
-  }
-
-  const tail =
-    `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${safeInstr}\n${checklistBlock}${shortBlock}${footer}`;
+  const text = buildAdvisoryAppendPreserveDocument({
+    currentDocumentText: base,
+    userInstruction: args.userInstruction,
+    modelOut: shortRaw,
+    checklistLines: args.checklistLines,
+  });
   return {
-    text: base + tail,
+    text,
     summaryLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   };
 }
@@ -633,14 +555,32 @@ function mergeAdvisoryAppendEvaluate(
   baselineLen: number,
   acc: PremiumRefineEvalResult,
 ): PremiumRefineEvalResult {
+  if (classifyPremiumRefineRevisionIntent(userInstruction) === "advisory_note_or_comment") {
+    return (
+      tryPremiumRefineAdvisoryAppendAcceptance({
+        userInstruction,
+        finalAppendDoc: built,
+        baselineText,
+        baselineLen,
+      }) ??
+      tryPremiumRefineAdvisoryAppendAcceptance({
+        userInstruction,
+        finalAppendDoc: appendStaticAdvisoryMinimalSafeBlock(baselineText),
+        baselineText,
+        baselineLen,
+      }) ??
+      acc
+    );
+  }
   if (acc.decision === "accepted") return acc;
-  const o = tryPremiumRefineAdvisoryAppendAcceptance({
-    userInstruction,
-    finalAppendDoc: built,
-    baselineText,
-    baselineLen,
-  });
-  return o ?? acc;
+  return (
+    tryPremiumRefineAdvisoryAppendAcceptance({
+      userInstruction,
+      finalAppendDoc: built,
+      baselineText,
+      baselineLen,
+    }) ?? acc
+  );
 }
 
 /**
@@ -704,12 +644,22 @@ export async function executePremiumRefineUpdate(args: {
     const summaryForAdvisoryAppendEval = premiumRefineSummaryIsUnchangedFailOpen(r0.summary_changes)
       ? undefined
       : r0.summary_changes;
-    const built = buildAdvisoryAppendPreserveDocument({
+    let built = buildAdvisoryAppendPreserveDocument({
       currentDocumentText: baselineText,
       userInstruction: inst,
       modelOut: modelExcerpt,
       checklistLines: refineChecklistBullets,
     });
+    if (
+      !tryPremiumRefineAdvisoryAppendAcceptance({
+        userInstruction: inst,
+        finalAppendDoc: built,
+        baselineText,
+        baselineLen,
+      })
+    ) {
+      built = appendStaticAdvisoryMinimalSafeBlock(baselineText);
+    }
     let accBuilt = evaluatePremiumRefineCandidate(
       built,
       baselineText,
@@ -755,12 +705,22 @@ export async function executePremiumRefineUpdate(args: {
         ),
       });
     }
-    const builtMinimal = buildAdvisoryAppendPreserveDocument({
+    let builtMinimal = buildAdvisoryAppendPreserveDocument({
       currentDocumentText: baselineText,
       userInstruction: inst,
       modelOut: "",
       checklistLines: refineChecklistBullets,
     });
+    if (
+      !tryPremiumRefineAdvisoryAppendAcceptance({
+        userInstruction: inst,
+        finalAppendDoc: builtMinimal,
+        baselineText,
+        baselineLen,
+      })
+    ) {
+      builtMinimal = appendStaticAdvisoryMinimalSafeBlock(baselineText);
+    }
     let accMin = evaluatePremiumRefineCandidate(
       builtMinimal,
       baselineText,
@@ -795,12 +755,22 @@ export async function executePremiumRefineUpdate(args: {
         ),
       });
     }
-    const forcedAdvisory = buildAdvisoryAppendPreserveDocument({
+    let forcedAdvisory = buildAdvisoryAppendPreserveDocument({
       currentDocumentText: baselineText,
       userInstruction: inst,
       modelOut: "",
       checklistLines: refineChecklistBullets,
     });
+    if (
+      !tryPremiumRefineAdvisoryAppendAcceptance({
+        userInstruction: inst,
+        finalAppendDoc: forcedAdvisory,
+        baselineText,
+        baselineLen,
+      })
+    ) {
+      forcedAdvisory = appendStaticAdvisoryMinimalSafeBlock(baselineText);
+    }
     let accForced = evaluatePremiumRefineCandidate(
       forcedAdvisory,
       baselineText,

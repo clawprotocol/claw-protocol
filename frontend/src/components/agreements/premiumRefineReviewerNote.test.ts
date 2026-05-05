@@ -14,7 +14,11 @@ import {
   executePremiumRefineUpdate,
   tryAppendReviewerNotePreserveDocument,
 } from "./premiumRefineLateFeeFallback";
-import { evaluatePremiumRefineCandidate, looksLikeReviewerNoteOrCommentIntent } from "./premiumRefineAcceptance";
+import {
+  evaluatePremiumRefineCandidate,
+  looksLikeReviewerNoteOrCommentIntent,
+  STRUCTURED_ADVISORY_ITEMS,
+} from "./premiumRefineAcceptance";
 
 function longBaseline(): string {
   return "AGREEMENT\n\n" + Array.from({ length: 900 }, (_, i) => `Section line ${i} with text and obligations.\n`).join("");
@@ -57,7 +61,9 @@ describe("tryAppendReviewerNotePreserveDocument", () => {
     expect(r!.text.startsWith(baseline)).toBe(true);
     expect(r!.text.length).toBeGreaterThan(baseline.length + 200);
     expect(r!.text).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
-    expect(r!.text).toContain("Weak: governing law");
+    expect(r!.text).toContain(STRUCTURED_ADVISORY_ITEMS.governing_law);
+    expect(r!.text).not.toContain("Weak: governing law");
+    expect(r!.text).not.toContain("Question: SLA credits");
     const acc = evaluatePremiumRefineCandidate(r!.text, baseline, baseline.length, undefined, "make reviewer notes");
     expect(acc.decision).toBe("accepted");
   });

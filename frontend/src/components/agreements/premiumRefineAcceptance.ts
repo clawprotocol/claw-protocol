@@ -144,8 +144,9 @@ export function instructionAllowsMaterialDocumentChange(userInstruction: string 
 const PREMIUM_REFINE_BRACKET_PLACEHOLDER_RE = /\[[A-Z][A-Z0-9_]*_\d+\]/g;
 /** e.g. `1.[ADDRESS_1]` */
 const PREMIUM_REFINE_SECTION_DOT_PLACEHOLDER_RE = /\b\d+\.\[[A-Z]/;
-/** e.g. `US $4,[ADDRESS_6]` */
-const PREMIUM_REFINE_MONEY_COMMA_BRACKET_RE = /\$\s*\d+\s*,\s*\[/i;
+/** e.g. `US $4,[ADDRESS_6]` or `$ 4,500, [` (formatted amount then stray bracket). */
+const PREMIUM_REFINE_MONEY_COMMA_BRACKET_RE =
+  /\$\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*,\s*\[/i;
 
 export function scanPremiumRefinePlaceholderCorruption(text: string): { count: number; samples: string[] } {
   const t = text || "";
@@ -170,10 +171,8 @@ export function premiumRefineTextContainsPlaceholderCorruption(text: string): bo
 const ADVISORY_SANITIZE_MIN_RETAIN_CHARS = 8;
 
 function lineContainsAdvisoryPlaceholderCorruption(line: string): boolean {
-  if (/\[[A-Z][A-Z0-9_]*_\d+\]/.test(line)) return true;
-  if (/^\s*\d+\.\[[A-Z]/.test(line)) return true;
-  if (/\$\s*\d+\s*,\s*\[/i.test(line)) return true;
-  return false;
+  /** Same rules as {@link premiumRefineTextContainsPlaceholderCorruption} — applies anywhere on the line (e.g. `* 2.[A…`). */
+  return premiumRefineTextContainsPlaceholderCorruption(line);
 }
 
 /**
@@ -191,6 +190,125 @@ export function sanitizeAdvisoryNoteTextForAppend(text: string): string {
   const out = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   if (out.length < ADVISORY_SANITIZE_MIN_RETAIN_CHARS) return "";
   return out;
+}
+
+/** Deterministic reviewer bullets — never echo user, checklist, or model text. */
+export const STRUCTURED_ADVISORY_ITEMS = {
+  payment_timing: "Confirm payment amounts, timing, due dates, and trigger conditions.",
+  invoicing: "Clarify invoicing process, delivery method, and payment instructions.",
+  acceptance: "Clarify acceptance criteria, review window, and what constitutes final delivery.",
+  scope: "Review scope of services, included deliverables, revisions, and out-of-scope handling.",
+  confidentiality: "Confirm confidentiality obligations, permitted disclosures, and return or deletion of confidential information.",
+  ip_ownership: "Review ownership of final deliverables, background materials, licenses, and third-party materials.",
+  termination: "Confirm termination rights, refund treatment, payment for work performed, and handoff obligations.",
+  support: "Decide whether any post-delivery support, bug-fix window, or maintenance obligation should be included.",
+  access_credentials: "Confirm who provides account access, credentials, third-party tools, and related fees.",
+  governing_law: "Confirm governing law, venue, notice method, and dispute-resolution process.",
+} as const;
+
+export type StructuredAdvisoryKey = keyof typeof STRUCTURED_ADVISORY_ITEMS;
+
+/** Stable canonical key order for sorting and truncation. */
+export const STRUCTURED_ADVISORY_KEY_ORDER = Object.keys(STRUCTURED_ADVISORY_ITEMS) as StructuredAdvisoryKey[];
+
+export const STRUCTURED_ADVISORY_DEFAULT_KEYS: StructuredAdvisoryKey[] = ["acceptance", "payment_timing", "scope"];
+
+/**
+ * Lowercase and strip placeholder / malformed fragments so keyword derivation never keys off raw corruption.
+ */
+export function normalizeTextForStructuredAdvisoryDerivation(raw: string): string {
+  let t = (raw || "").toLowerCase();
+  t = t.replace(/\[[a-z][a-z0-9_]*_\d+\]/gi, " ");
+  t = t.replace(/\[[A-Z][A-Z0-9_]*_\d+\]/g, " ");
+  t = t.replace(/\b\d+\s*\.\s*\[[a-z]/gi, " ");
+  t = t.replace(/\$\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*,\s*\[/gi, " ");
+  t = t.replace(/[^a-z0-9\s%.-]/gi, " ");
+  return t.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Derive advisory topic keys from instruction + optional checklist text only (no output text).
+ * Returns keys in {@link STRUCTURED_ADVISORY_KEY_ORDER} (subset, deduped).
+ */
+export function deriveStructuredAdvisoryKeys(input: string, checklist?: string[] | undefined): StructuredAdvisoryKey[] {
+  const parts = [input, ...((checklist || []).map((x) => String(x ?? "")) as string[])].filter((x) => x.trim().length);
+  const corpus = parts.join("\n");
+  const normalized = normalizeTextForStructuredAdvisoryDerivation(corpus);
+  if (!normalized) return [];
+  const found = new Set<StructuredAdvisoryKey>();
+
+  const add = (key: StructuredAdvisoryKey, re: RegExp) => {
+    if (re.test(normalized)) found.add(key);
+  };
+
+  add("payment_timing", /\b(payments?|payment|fees?|fee|late|deposit|upfront|final balance|pricing|due)\b/i);
+  add("invoicing", /\b(invoice|invoicing|bill|billing)\b/i);
+  add("acceptance", /\b(accept|acceptance|delivery|final delivery|review window)\b/i);
+  add("scope", /\b(scope|deliverable|deliverables|revisions?|out-of-scope|out of scope|change request)\b/i);
+  add("confidentiality", /\b(confidential|confidentiality|nda|non-disclosure|secret|non-public)\b/i);
+  add(
+    "ip_ownership",
+    /\b(intellectual property|\bips?\b|licenses?|licensing|background materials|work product|third-party materials)\b|\bip\s+assignment\b/i,
+  );
+  add("termination", /\b(terminate|termination|cancel|cancellation|refund|non-refundable|stop work)\b/i);
+  add("support", /\b(support|bug|maintenance|warranty|fix period)\b/i);
+  add("access_credentials", /\b(access|credentials|hosting|analytics|third-party tools)\b/i);
+  add(
+    "governing_law",
+    /\b(governing law|applicable law|venue|jurisdiction|dispute-resolution|dispute resolution|disputes?|arbitration|mediation|courts?|notices?)\b/i,
+  );
+
+  return STRUCTURED_ADVISORY_KEY_ORDER.filter((k) => found.has(k));
+}
+
+/**
+ * Resolves 3–7 deterministic bullets: defaults when nothing matched; fills to at least three using canonical order;
+ * truncates to seven in canonical order.
+ */
+export function resolveStructuredAdvisoryKeysForAppend(
+  input: string,
+  checklist?: string[] | undefined,
+): StructuredAdvisoryKey[] {
+  const derived = deriveStructuredAdvisoryKeys(input, checklist);
+  const selected = new Set<StructuredAdvisoryKey>(derived);
+  if (selected.size === 0) {
+    return [...STRUCTURED_ADVISORY_DEFAULT_KEYS];
+  }
+  if (selected.size < 3) {
+    for (const k of STRUCTURED_ADVISORY_KEY_ORDER) {
+      if (selected.size >= 3) break;
+      selected.add(k);
+    }
+  }
+  let ordered = STRUCTURED_ADVISORY_KEY_ORDER.filter((k) => selected.has(k));
+  if (ordered.length > 7) {
+    ordered = ordered.slice(0, 7);
+  }
+  return ordered;
+}
+
+export function buildStructuredAdvisoryInnerMarkdown(keys: readonly StructuredAdvisoryKey[]): string {
+  const bullets = keys.map((k) => `- ${STRUCTURED_ADVISORY_ITEMS[k]}`).join("\n");
+  return (
+    "**Requested by drafting party:** Reviewer requested a list of items the other party should review.\n\n" +
+    "**Flagged / readiness items (from LawDog review):**\n" +
+    bullets
+  );
+}
+
+/** Dev / CI invariant for structured advisory append (baseline must be corruption-free for prefix check). */
+export function assertStructuredAdvisoryAppendInvariants(baselineText: string, finalDoc: string): void {
+  if (premiumRefineTextContainsPlaceholderCorruption(baselineText)) return;
+  const base = baselineText.trimEnd();
+  if (!finalDoc.startsWith(base)) {
+    throw new Error("[advisory-append] baseline prefix invariant failed");
+  }
+  if (!finalDoc.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
+    throw new Error("[advisory-append] reviewer header invariant failed");
+  }
+  if (premiumRefineTextContainsPlaceholderCorruption(finalDoc)) {
+    throw new Error("[advisory-append] corruption invariant failed");
+  }
 }
 
 /**
@@ -418,7 +536,7 @@ export function tryPremiumRefineAdvisoryAppendAcceptance(args: {
     refinedLen,
     ratio,
     requiredSectionsPresent: premiumRefineRequiredSectionsAllPresent(doc),
-    revisionIntent: classifyPremiumRefineRevisionIntent(PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR),
+    revisionIntent: "advisory_note_or_comment",
     headingPreservationRatio: computeMajorHeadingPreservationRatio(base.trim(), doc),
   };
 }
