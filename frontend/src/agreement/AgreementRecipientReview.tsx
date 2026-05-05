@@ -579,9 +579,9 @@ export function AgreementRecipientReview({
     );
   }, [recipientPreview]);
 
-  const legalRedlineDocumentBaseVm = useMemo(() => {
+  const recipientRedlinePlainTexts = useMemo(() => {
     if (!recipientPreview || !previewDiff) return null;
-    const { currentPlain, proposedPlain } = buildRecipientLegalRedlinePlainTexts(
+    return buildRecipientLegalRedlinePlainTexts(
       recipientPreview.baselineDraft,
       recipientPreview.proposedDraft,
       recipientPreview.baselineHtml,
@@ -590,8 +590,15 @@ export function AgreementRecipientReview({
       recipientPreview.revisionText ?? "",
       previewDiff.snapshotCompare.changedFields,
     );
-    return buildLegalRedlineDocumentViewModel(currentPlain, proposedPlain);
   }, [recipientPreview, previewDiff]);
+
+  const legalRedlineDocumentBaseVm = useMemo(() => {
+    if (!recipientRedlinePlainTexts) return null;
+    return buildLegalRedlineDocumentViewModel(
+      recipientRedlinePlainTexts.currentPlain,
+      recipientRedlinePlainTexts.proposedPlain,
+    );
+  }, [recipientRedlinePlainTexts]);
 
   const legalRedlineDocumentVm = useMemo(() => {
     if (!legalRedlineDocumentBaseVm || !previewDiff) return legalRedlineDocumentBaseVm;
@@ -672,15 +679,17 @@ export function AgreementRecipientReview({
     const propHtml = recipientPreview.proposedHtml || "";
     const rawCur = htmlToPlainTextForLegalRedline(baseHtml);
     const rawProp = htmlToPlainTextForLegalRedline(propHtml);
-    const paired = buildRecipientLegalRedlinePlainTexts(
-      recipientPreview.baselineDraft,
-      recipientPreview.proposedDraft,
-      baseHtml,
-      propHtml,
-      previewDiff.hasSnapshotDiff,
-      recipientPreview.revisionText ?? "",
-      previewDiff.snapshotCompare.changedFields,
-    );
+    const paired =
+      recipientRedlinePlainTexts ??
+      buildRecipientLegalRedlinePlainTexts(
+        recipientPreview.baselineDraft,
+        recipientPreview.proposedDraft,
+        baseHtml,
+        propHtml,
+        previewDiff.hasSnapshotDiff,
+        recipientPreview.revisionText ?? "",
+        previewDiff.snapshotCompare.changedFields,
+      );
     const equalRawPlain =
       rawCur.replace(/\s+/g, " ").trim() === rawProp.replace(/\s+/g, " ").trim();
     const changedClauseCount = previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).length;
@@ -703,8 +712,10 @@ export function AgreementRecipientReview({
       wholeDocChangedBlockCount: legalRedlineDocumentVm.stats.changedBlockCount,
       wholeDocInsertCount: legalRedlineDocumentVm.stats.insertCount,
       wholeDocDeleteCount: legalRedlineDocumentVm.stats.deleteCount,
+      paymentTermsInlinePlacementFailed: paired.paymentTermsInlinePlacementFailed ?? false,
+      inlinePlacementDiags: paired.inlinePlacementDiags ?? [],
     });
-  }, [agreementId, legalRedlineDocumentVm, previewDiff, recipientPreview]);
+  }, [agreementId, legalRedlineDocumentVm, previewDiff, recipientPreview, recipientRedlinePlainTexts]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -1161,6 +1172,17 @@ export function AgreementRecipientReview({
               >
                 Not reflected:{" "}
                 {extractPauseRequestPhrase(recipientPreview.revisionText ?? "") ?? "pause work for late payment"}.
+              </p>
+            ) : null}
+
+            {recipientRedlinePlainTexts?.paymentTermsInlinePlacementFailed ? (
+              <p
+                className="mt-3 rounded-md border border-amber-700/40 bg-amber-950/25 px-3 py-2 text-xs leading-snug text-amber-100/95"
+                data-testid="recipient-redline-placement-callout"
+                role="status"
+              >
+                Requested edit not placed inline — we could not match a payment section in the shown document text.
+                Your note still goes to the owner.
               </p>
             ) : null}
 

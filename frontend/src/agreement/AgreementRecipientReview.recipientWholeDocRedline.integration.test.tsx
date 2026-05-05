@@ -39,8 +39,9 @@ const revisedDraft = {
   updated_at: new Date().toISOString(),
 };
 
-/** Identical rendered HTML for baseline and proposed — field-level change must still drive whole-doc redline. */
-const identicalListingHtml = "<p>Master services agreement (listing only).</p>";
+/** Same HTML for baseline and proposed; includes a payment line so literal/inline patch can land (no tail append). */
+const identicalListingHtml =
+  "<p>Master services agreement (listing only).</p><p>Invoices are payable upon receipt.</p>";
 
 describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
   afterEach(() => {
@@ -213,5 +214,88 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
 
     expect(screen.queryByTestId("recipient-side-by-side-block-grid")).toBeNull();
     expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();
+  });
+});
+
+const agreementIdPlacement = "ag_recipient_placement_fail";
+
+const initialPlacementDraft = {
+  ...initialDraft,
+  id: agreementIdPlacement,
+};
+
+const revisedPlacementDraft = {
+  ...revisedDraft,
+  id: agreementIdPlacement,
+};
+
+const listingOnlyNoPaymentHtml = "<p>Master services agreement (listing only).</p>";
+
+describe("AgreementRecipientReview payment inline placement failure", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows placement callout and does not put Net 30 after LawDog when HTML has no payment anchor", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
+
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({
+          rendered_html: `${listingOnlyNoPaymentHtml}<p>Created with LawDog — Draft for Review.</p>`,
+        });
+      }
+      if (method === "POST" && url.includes("/revise")) {
+        return jsonResponse({
+          draft: revisedPlacementDraft,
+          rendered_html: `${listingOnlyNoPaymentHtml}<p>Created with LawDog — Draft for Review.</p>`,
+        });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({ draft: initialPlacementDraft });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview agreementId={agreementIdPlacement} recipientAccessToken="tok_test" />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
+    });
+
+    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    fireEvent.change(instruction, { target: { value: "Change payment to Net 30" } });
+    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-redline-placement-callout")).toBeTruthy();
+    });
+
+    const legalRoot = screen.getByTestId("recipient-legal-redline-document");
+    const full = legalRoot.textContent ?? "";
+    const lawdog = full.toLowerCase().indexOf("created with lawdog");
+    if (lawdog >= 0 && /net\s*30/i.test(full)) {
+      expect(full.toLowerCase().indexOf("net 30")).toBeLessThan(lawdog);
+    } else {
+      expect(full).not.toMatch(/net\s*30/i);
+    }
+    expect(full).not.toMatch(/Agreement fields \(tracked for redline\)/i);
   });
 });

@@ -1,7 +1,7 @@
 /**
  * Whole-document recipient redline plain-text pair: owner baseline HTML vs proposed state.
- * Full /revise rendered HTML can diverge structurally; we prefer field-targeted patches on the
- * immutable baseline plain text when snapshot edits are patchable and the HTML diff is noisy.
+ * Field-patch mode never appends draft text to the tail of the document — payment edits must
+ * land inside a scored payment block or the patch is skipped (UI shows placement callout).
  */
 
 import type { AgreementDraft } from "./agreementTypes";
@@ -11,6 +11,7 @@ import {
   buildLegalRedlineDocumentViewModel,
   normalizeNewlinesForLegalRedline,
   parsePlainTextIntoLegalBlocks,
+  type ParsedPlainBlock,
 } from "./legalRedlineBlocks";
 
 const PATCHABLE_FIELDS = new Set([
@@ -25,6 +26,9 @@ const PATCHABLE_FIELDS = new Set([
 
 const NARROW_PAYMENT_TIMING_RE =
   /\b(payment|invoice|invoices|net|payable|receipt|due|late|arrears|pause|days?|day\b|30|15|60)\b/i;
+
+/** Minimum score to treat a block as a safe payment patch target (no tail append). */
+const MIN_PAYMENT_TARGET_SCORE = 10;
 
 /** Compact fingerprint for diagnostics (length + FNV-1a 32-bit). */
 export function fingerprintPlainText(s: string): string {
@@ -55,12 +59,24 @@ export function snippetAroundPaymentTerms(plain: string): string {
 
 export type RecipientWholeDocRedlineSourceMode = "baseline_vs_revise_html" | "baseline_vs_field_patch";
 
+export type RecipientRedlineInlinePlacementDiag = {
+  field: string;
+  mode: "literal_replace" | "payment_block_inline" | "skipped_no_safe_target" | "skipped_empty_after" | "n_a";
+  targetBlockIndex: number | null;
+  targetBlockLabel: string | null;
+  targetScore: number | null;
+  appendedFallbackUsed: false;
+};
+
 export type BuildRecipientLegalRedlinePlainTextsResult = {
   currentPlain: string;
   proposedPlain: string;
   sourceMode: RecipientWholeDocRedlineSourceMode;
   /** True when full HTML vs baseline had a large block diff but patch mode was used instead. */
   usedNoisyReviseGuard?: boolean;
+  /** True when payment_terms snapshot change could not be placed inside a scored payment block. */
+  paymentTermsInlinePlacementFailed?: boolean;
+  inlinePlacementDiags?: RecipientRedlineInlinePlacementDiag[];
 };
 
 function replaceFirst(haystack: string, needle: string, repl: string): string {
@@ -69,60 +85,195 @@ function replaceFirst(haystack: string, needle: string, repl: string): string {
   return haystack.slice(0, i) + repl + haystack.slice(i + needle.length);
 }
 
-function appendIfMissing(plain: string, fragment: string): string {
-  const f = fragment.trim();
-  if (!f || plain.includes(f)) return plain;
-  return `${plain}\n\n${f}`;
+function logInlinePlacement(diag: RecipientRedlineInlinePlacementDiag): void {
+  const diagOn =
+    typeof import.meta !== "undefined" &&
+    (import.meta.env?.DEV ||
+      (typeof globalThis !== "undefined" &&
+        (globalThis as unknown as { window?: Window }).window?.localStorage?.getItem("lawdogRecipientReviseDiag") ===
+          "1"));
+  if (!diagOn) return;
+  // eslint-disable-next-line no-console
+  console.info("[recipient-redline-inline-placement]", {
+    field: diag.field,
+    mode: diag.mode,
+    targetBlockIndex: diag.targetBlockIndex,
+    targetBlockLabel: diag.targetBlockLabel,
+    targetScore: diag.targetScore,
+    appendedFallbackUsed: diag.appendedFallbackUsed,
+  });
 }
 
-function scorePaymentLikeBlock(raw: string, beforeWords: string[]): number {
+const FOOTER_OR_BRANDING_RE =
+  /\b(created with lawdog|draft for review|lawdog\s*[—\-]|in\s+witness\s+whereof|witness\s+whereof|signature|signatures|page\s+\d+\s+of\s+\d+)\b/i;
+
+const PAYMENT_LEX_GLOBAL =
+  /\b(payment|payments|fee|fees|compensation|invoice|invoices|invoicing|payment schedule|total fee|expenses|taxes|tax|net|due|late|disputed|payable|receipt|receipts|wire|ach|usd)\b/gi;
+
+const PAYMENT_LEX_TEST =
+  /\b(payment|payments|fee|fees|compensation|invoice|invoices|invoicing|payment schedule|total fee|expenses|taxes|tax|net|due|late|disputed|payable|receipt|receipts|wire|ach|usd)\b/i;
+
+const PAYMENT_TIMING_LINE_RE =
+  /\b(invoice|invoices|payable|payment|due|net|receipt|fee|fees|compensation|within\s+\d+|days?\s+after)\b/i;
+
+function isFooterLikeBlock(raw: string, blockIndex: number, totalBlocks: number): boolean {
   const t = raw.toLowerCase();
+  if (FOOTER_OR_BRANDING_RE.test(t)) return true;
+  if (blockIndex >= totalBlocks - 1 && t.length < 500 && /\blawdog\b/.test(t)) return true;
+  return false;
+}
+
+function scorePaymentTargetBlock(
+  block: ParsedPlainBlock,
+  index: number,
+  totalBlocks: number,
+  beforeWords: string[],
+): number {
+  const raw = block.rawText;
+  const t = raw.toLowerCase();
+  if (block.kind === "signature" || block.kind === "footer") return -1000;
+  if (isFooterLikeBlock(raw, index, totalBlocks)) return -1000;
+
   let s = 0;
-  if (/\b(payment|invoice|invoices|net|receipt|due|payable|fee|compensation)\b/.test(t)) s += 6;
+  const lexMatches = raw.match(PAYMENT_LEX_GLOBAL);
+  if (lexMatches) s += Math.min(lexMatches.length * 3, 18);
+
+  if (/\b(listing only|sample only|marketing copy)\b/i.test(t) && !/\b(invoice|invoicing|payable|net\s*\d|due upon|fee schedule)\b/i.test(t)) {
+    s -= 30;
+  }
+  if (/\bpayment\s+detail\b/i.test(t) && !/\b(invoice|payable|net\s*\d|fee)\b/i.test(t)) s -= 20;
+
+  const cn = block.clauseNumber;
+  if (cn) {
+    const major = parseInt(String(cn).split(/[.-]/)[0] ?? "0", 10);
+    if ((major === 2 || major === 3) && PAYMENT_LEX_TEST.test(t)) s += 10;
+    else if (major === 2 || major === 3) s += 2;
+  }
+
+  if (/\b(payment schedule|invoice|invoicing|compensation|fees?\b.*payment|payment.*fees?)\b/i.test(t)) s += 6;
+
   for (const w of beforeWords) {
     if (w.length < 4) continue;
-    if (t.includes(w.toLowerCase())) s += 2;
+    if (t.includes(w.toLowerCase())) s += 4;
   }
+
+  if (index >= totalBlocks - 1 && s < MIN_PAYMENT_TARGET_SCORE) s -= 8;
   return s;
 }
 
+function rebuildPlainFromBlocks(blocks: ParsedPlainBlock[]): string {
+  return blocks.map((b) => b.rawText).join("\n\n");
+}
+
 /**
- * When `before` is not a literal substring of baseline plain (template omits draft wording),
- * replace the best-matching payment-like block body with `after`.
+ * Apply payment_terms change inside the best-scored block only. Never appends to document tail.
  */
-function patchPaymentTermsBlockInPlain(
+function applyPaymentTermsInlinePatch(
   plain: string,
   before: string,
   after: string,
-): string {
+): { ok: boolean; plain: string; diag: RecipientRedlineInlinePlacementDiag } {
+  const afterT = after.trim();
+  if (!afterT) {
+    const diag: RecipientRedlineInlinePlacementDiag = {
+      field: "payment_terms",
+      mode: "skipped_empty_after",
+      targetBlockIndex: null,
+      targetBlockLabel: null,
+      targetScore: null,
+      appendedFallbackUsed: false,
+    };
+    logInlinePlacement(diag);
+    return { ok: false, plain: normalizeNewlinesForLegalRedline(plain), diag };
+  }
+
   const norm = normalizeNewlinesForLegalRedline(plain);
   const beforeWords = before.split(/\s+/).filter((w) => w.length > 3);
   const blocks = parsePlainTextIntoLegalBlocks(norm);
-  if (blocks.length === 0) return appendIfMissing(norm, after);
+
+  if (blocks.length === 0) {
+    const diag: RecipientRedlineInlinePlacementDiag = {
+      field: "payment_terms",
+      mode: "skipped_no_safe_target",
+      targetBlockIndex: null,
+      targetBlockLabel: null,
+      targetScore: null,
+      appendedFallbackUsed: false,
+    };
+    logInlinePlacement(diag);
+    return { ok: false, plain: norm, diag };
+  }
 
   let best = -1;
   let bestScore = -1;
   for (let i = 0; i < blocks.length; i++) {
-    const sc = scorePaymentLikeBlock(blocks[i]!.rawText, beforeWords);
+    const sc = scorePaymentTargetBlock(blocks[i]!, i, blocks.length, beforeWords);
     if (sc > bestScore) {
       bestScore = sc;
       best = i;
     }
   }
-  if (best < 0 || bestScore < 4) {
-    return appendIfMissing(norm, after);
+
+  if (best < 0 || bestScore < MIN_PAYMENT_TARGET_SCORE) {
+    const diag: RecipientRedlineInlinePlacementDiag = {
+      field: "payment_terms",
+      mode: "skipped_no_safe_target",
+      targetBlockIndex: best >= 0 ? best : null,
+      targetBlockLabel: best >= 0 ? (blocks[best]!.headingLine || blocks[best]!.rawText).slice(0, 120) : null,
+      targetScore: bestScore >= 0 ? bestScore : null,
+      appendedFallbackUsed: false,
+    };
+    logInlinePlacement(diag);
+    return { ok: false, plain: norm, diag };
   }
+
   const b = blocks[best]!;
   const lines = b.rawText.split("\n");
-  const head = lines[0]?.trim() ?? "";
-  const hasClauseHead =
-    /^\d+(?:\.\d+)*\.?\s+\S/.test(head) || /^(article|section)\s+/i.test(head);
-  const newRaw =
-    hasClauseHead && lines.length > 1
-      ? `${lines[0]}\n${after}${lines.length > 2 ? "\n" + lines.slice(2).join("\n") : ""}`
-      : after;
+  const head = (lines[0] ?? "").trim();
+  const hasHeading =
+    /^\d+(?:\.\d+)*\.?\s+\S/.test(head) || /^(article|section)\s+/i.test(head) || (lines.length > 1 && head.length < 120);
+
+  let newRaw: string;
+  if (hasHeading && lines.length > 1) {
+    const bodyLines = lines.slice(1);
+    let hit = -1;
+    for (let j = 0; j < bodyLines.length; j++) {
+      if (PAYMENT_TIMING_LINE_RE.test(bodyLines[j]!)) {
+        hit = j;
+        break;
+      }
+    }
+    const j = hit >= 0 ? hit : 0;
+    const line = bodyLines[j] ?? "";
+    if (before.trim() && line.includes(before.trim())) {
+      bodyLines[j] = line.replace(before.trim(), afterT);
+    } else {
+      bodyLines[j] = afterT;
+    }
+    newRaw = `${lines[0]}\n${bodyLines.join("\n")}`;
+  } else {
+    const single = b.rawText.trim();
+    if (before.trim() && single.includes(before.trim())) {
+      newRaw = single.replace(before.trim(), afterT);
+    } else if (PAYMENT_TIMING_LINE_RE.test(single)) {
+      newRaw = afterT;
+    } else {
+      newRaw = afterT;
+    }
+  }
+
   blocks[best] = { ...b, rawText: newRaw };
-  return blocks.map((x) => x.rawText).join("\n\n");
+  const out = rebuildPlainFromBlocks(blocks);
+  const diag: RecipientRedlineInlinePlacementDiag = {
+    field: "payment_terms",
+    mode: "payment_block_inline",
+    targetBlockIndex: best,
+    targetBlockLabel: (b.headingLine || b.rawText).slice(0, 120),
+    targetScore: bestScore,
+    appendedFallbackUsed: false,
+  };
+  logInlinePlacement(diag);
+  return { ok: true, plain: out, diag };
 }
 
 function isNarrowPaymentTimingInstruction(instructionPlain: string): boolean {
@@ -131,41 +282,80 @@ function isNarrowPaymentTimingInstruction(instructionPlain: string): boolean {
   return NARROW_PAYMENT_TIMING_RE.test(t);
 }
 
-function buildFieldPatchPair(
-  baselinePlain: string,
-  changedPatchableRows: AgreementFieldChange[],
-): { currentPlain: string; proposedPlain: string } {
-  const sortedAugment = [...changedPatchableRows].sort(
-    (a, b) => (b.before ?? "").trim().length - (a.before ?? "").trim().length,
-  );
-  let currentPlain = baselinePlain;
-  for (const row of sortedAugment) {
-    const before = (row.before ?? "").trim();
-    if (before && !currentPlain.includes(before)) {
-      currentPlain = appendIfMissing(currentPlain, before);
-    }
-  }
+type FieldPatchPairResult = {
+  currentPlain: string;
+  proposedPlain: string;
+  paymentTermsInlinePlacementFailed: boolean;
+  inlinePlacementDiags: RecipientRedlineInlinePlacementDiag[];
+};
 
-  let proposedPlain = currentPlain;
+function buildFieldPatchPair(baselinePlain: string, changedPatchableRows: AgreementFieldChange[]): FieldPatchPairResult {
+  const inlinePlacementDiags: RecipientRedlineInlinePlacementDiag[] = [];
+  let paymentTermsInlinePlacementFailed = false;
+
+  let currentPlain = baselinePlain;
+  let proposedPlain = baselinePlain;
+
   const sortedReplace = [...changedPatchableRows].sort(
     (a, b) => (b.before ?? "").trim().length - (a.before ?? "").trim().length,
   );
+
   for (const row of sortedReplace) {
     const before = (row.before ?? "").trim();
     const after = (row.after ?? "").trim();
+
+    if (row.field === "payment_terms" && after) {
+      if (before && proposedPlain.includes(before)) {
+        proposedPlain = replaceFirst(proposedPlain, before, after);
+        inlinePlacementDiags.push({
+          field: "payment_terms",
+          mode: "literal_replace",
+          targetBlockIndex: null,
+          targetBlockLabel: null,
+          targetScore: null,
+          appendedFallbackUsed: false,
+        });
+        logInlinePlacement(inlinePlacementDiags[inlinePlacementDiags.length - 1]!);
+        continue;
+      }
+      const res = applyPaymentTermsInlinePatch(proposedPlain, before, after);
+      inlinePlacementDiags.push(res.diag);
+      if (res.ok) {
+        proposedPlain = res.plain;
+      } else {
+        paymentTermsInlinePlacementFailed = true;
+      }
+      continue;
+    }
+
     if (before && proposedPlain.includes(before)) {
       proposedPlain = replaceFirst(proposedPlain, before, after);
+      inlinePlacementDiags.push({
+        field: row.field,
+        mode: "literal_replace",
+        targetBlockIndex: null,
+        targetBlockLabel: null,
+        targetScore: null,
+        appendedFallbackUsed: false,
+      });
+      logInlinePlacement(inlinePlacementDiags[inlinePlacementDiags.length - 1]!);
       continue;
     }
-    if (row.field === "payment_terms" && after) {
-      proposedPlain = patchPaymentTermsBlockInPlain(proposedPlain, before, after);
-      continue;
-    }
+
     if (!before && after) {
-      proposedPlain = appendIfMissing(proposedPlain, after);
+      inlinePlacementDiags.push({
+        field: row.field,
+        mode: "skipped_no_safe_target",
+        targetBlockIndex: null,
+        targetBlockLabel: null,
+        targetScore: null,
+        appendedFallbackUsed: false,
+      });
+      logInlinePlacement(inlinePlacementDiags[inlinePlacementDiags.length - 1]!);
     }
   }
-  return { currentPlain, proposedPlain };
+
+  return { currentPlain, proposedPlain, paymentTermsInlinePlacementFailed, inlinePlacementDiags };
 }
 
 /**
@@ -197,7 +387,7 @@ export function buildRecipientLegalRedlinePlainTexts(
   const vmFull = buildLegalRedlineDocumentViewModel(cur, prop);
   const narrow = isNarrowPaymentTimingInstruction(instructionPlain);
 
-  let patchPair: { currentPlain: string; proposedPlain: string } | null = null;
+  let patchPair: FieldPatchPairResult | null = null;
   if (hasPatchableDiff) {
     patchPair = buildFieldPatchPair(cur, patchableChangedRows);
   }
@@ -213,7 +403,6 @@ export function buildRecipientLegalRedlinePlainTexts(
     if (!vmFull.hasChanges) {
       usePatch = true;
     } else if (!partiesChanged && patchableChangedRows.length === changedKeys.length) {
-      // Only structured text fields changed — always keep baseline structure.
       usePatch = true;
     } else if (narrow && vmFull.stats.changedBlockCount > 3 && hasPatchableDiff) {
       usePatch = true;
@@ -223,8 +412,7 @@ export function buildRecipientLegalRedlinePlainTexts(
   }
 
   if (usePatch && patchPair) {
-    const usedNoisyReviseGuard =
-      vmFull.hasChanges && vmFull.stats.changedBlockCount > 3;
+    const usedNoisyReviseGuard = vmFull.hasChanges && vmFull.stats.changedBlockCount > 3;
     const diag =
       typeof import.meta !== "undefined" &&
       import.meta.env?.DEV &&
@@ -243,6 +431,8 @@ export function buildRecipientLegalRedlinePlainTexts(
       proposedPlain: patchPair.proposedPlain,
       sourceMode: "baseline_vs_field_patch",
       usedNoisyReviseGuard,
+      paymentTermsInlinePlacementFailed: patchPair.paymentTermsInlinePlacementFailed,
+      inlinePlacementDiags: patchPair.inlinePlacementDiags,
     };
   }
 

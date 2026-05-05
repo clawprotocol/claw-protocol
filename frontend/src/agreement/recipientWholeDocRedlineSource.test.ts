@@ -30,12 +30,12 @@ function changedFieldsBetween(a: AgreementDraft, b: AgreementDraft) {
 }
 
 describe("buildRecipientLegalRedlinePlainTexts", () => {
-  it("when HTML is identical but payment terms differ, uses field patch and shows Net 30 insert without Agreement fields trailer", () => {
+  it("does not append payment text when no safe payment block; placement fails closed", () => {
     const sameHtml = "<p>Standard agreement body without payment detail.</p>";
     const current = minimalDraft({ payment_terms: "invoices are payable upon receipt" });
     const proposed = minimalDraft({ payment_terms: "invoices are payable Net 30" });
     const fields = changedFieldsBetween(current, proposed);
-    const { currentPlain, proposedPlain, sourceMode } = buildRecipientLegalRedlinePlainTexts(
+    const r = buildRecipientLegalRedlinePlainTexts(
       current,
       proposed,
       sameHtml,
@@ -44,19 +44,38 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
       "Change payment to Net 30",
       fields,
     );
-    expect(sourceMode).toBe("baseline_vs_field_patch");
-    expect(currentPlain).not.toContain("Agreement fields (tracked for redline)");
-    expect(proposedPlain).not.toContain("Agreement fields (tracked for redline)");
-    const vm = buildLegalRedlineDocumentViewModel(currentPlain, proposedPlain);
-    expect(vm.hasChanges).toBe(true);
-    expect(vm.stats.insertCount).toBeGreaterThan(0);
-    expect(vm.stats.changedBlockCount).toBeLessThanOrEqual(3);
-    const joined = vm.blocks
-      .flatMap((b) => b.segments)
-      .filter((s) => s.type === "insert")
-      .map((s) => s.text)
-      .join("");
-    expect(joined).toMatch(/Net\s*30/i);
+    expect(r.sourceMode).toBe("baseline_vs_field_patch");
+    expect(r.paymentTermsInlinePlacementFailed).toBe(true);
+    expect(r.currentPlain).toBe(r.proposedPlain);
+    expect(r.proposedPlain).not.toMatch(/Net\s*30/i);
+    expect(r.proposedPlain).not.toContain("Agreement fields (tracked for redline)");
+    const vm = buildLegalRedlineDocumentViewModel(r.currentPlain, r.proposedPlain);
+    expect(vm.hasChanges).toBe(false);
+  });
+
+  it("when HTML includes payment line matching draft, Net 30 appears inline (not after LawDog footer)", () => {
+    const html = `<p>3.2 Payment and Fees</p><p>Invoices are payable upon receipt.</p><p>IN WITNESS WHEREOF the parties execute.</p><p>Created with LawDog — Draft for Review.</p>`;
+    const current = minimalDraft({ payment_terms: "Invoices are payable upon receipt." });
+    const proposed = minimalDraft({ payment_terms: "Invoices are payable Net 30." });
+    const fields = changedFieldsBetween(current, proposed);
+    const r = buildRecipientLegalRedlinePlainTexts(
+      current,
+      proposed,
+      html,
+      html,
+      true,
+      "Net 30 and pause work after 15 days late",
+      fields,
+    );
+    expect(r.sourceMode).toBe("baseline_vs_field_patch");
+    expect(r.paymentTermsInlinePlacementFailed).not.toBe(true);
+    expect(r.proposedPlain.toLowerCase()).toMatch(/net\s*30/);
+    const lawdog = r.proposedPlain.toLowerCase().indexOf("created with lawdog");
+    const net = r.proposedPlain.toLowerCase().indexOf("net 30");
+    expect(lawdog).toBeGreaterThan(-1);
+    expect(net).toBeGreaterThan(-1);
+    expect(net).toBeLessThan(lawdog);
+    expect(r.proposedPlain.toLowerCase().lastIndexOf("net 30")).toBe(net);
   });
 
   it("when HTML-derived redline already has changes, still uses field patch if only structured fields changed", () => {
@@ -121,5 +140,9 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
     expect(insertJoined).toMatch(/Net\s*30/i);
     expect(proposedPlain.toLowerCase()).not.toMatch(/article iv|excepteur sint/i);
     expect(currentPlain.toLowerCase()).toContain("payment");
+    const lawdogIdx = proposedPlain.toLowerCase().indexOf("created with lawdog");
+    if (lawdogIdx >= 0) {
+      expect(proposedPlain.toLowerCase().indexOf("net 30")).toBeLessThan(lawdogIdx);
+    }
   });
 });
