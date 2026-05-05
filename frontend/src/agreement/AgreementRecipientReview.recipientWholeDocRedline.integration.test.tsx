@@ -47,7 +47,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows non-zero tracked summary and Net 30 insert when HTML matches but payment_terms changed", async () => {
+  it("shows summary chips and Net 30 insert when HTML matches but payment_terms changed; no tabs", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -95,22 +95,24 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-redline-tracked-summary")).toBeTruthy();
+      expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
     });
 
-    const summary = screen.getByTestId("recipient-redline-tracked-summary").textContent ?? "";
-    expect(summary).toMatch(/[1-9]\d*\s+insertion|[1-9]\d*\s+insertions/i);
-    expect(summary).not.toMatch(/0\s+insertions\s*·\s*0\s+deletions\s*·\s*0\s+changed/i);
+    expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();
+    expect(screen.queryByTestId("recipient-side-by-side-block-grid")).toBeNull();
+
+    const ins = screen.getByTestId("recipient-redline-chip-insertions").textContent ?? "";
+    expect(ins).toMatch(/[1-9]\d*\s+insertion/i);
+    expect(ins).not.toMatch(/^0\s+insertions?$/i);
 
     const legalRoot = screen.getByTestId("recipient-legal-redline-document");
     const insertEl = legalRoot.querySelector('[data-redline="insert"]');
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
 
-    await userEvent.click(screen.getByRole("button", { name: /Side-by-side/i }));
-    const grid = screen.getByTestId("recipient-side-by-side-block-grid");
-    expect(within(grid).getByText(/Net\s*30/i)).toBeTruthy();
-    expect(grid.querySelector('[data-redline="insert"]')).toBeTruthy();
+    const panel = screen.getByTestId("recipient-suggested-changes-panel");
+    expect(within(panel).getByRole("button", { name: /Send suggested edits/i })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: /Dismiss preview/i })).toBeTruthy();
   });
 });
 
@@ -194,7 +196,7 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-redline-tracked-summary")).toBeTruthy();
+      expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
     });
 
     const legalRoot = screen.getByTestId("recipient-legal-redline-document");
@@ -205,12 +207,11 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
 
-    expect(screen.getByTestId("recipient-redline-instruction-gap-note")).toBeTruthy();
+    const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
+    expect(callout.textContent).toMatch(/Not reflected:/i);
+    expect(callout.textContent).toMatch(/pause work after 15 days late/i);
 
-    await userEvent.click(screen.getByRole("button", { name: /Side-by-side/i }));
-    const grid = screen.getByTestId("recipient-side-by-side-block-grid");
-    expect(grid.textContent).not.toMatch(/Agreement fields \(tracked for redline\)/i);
-    expect(grid.textContent).not.toMatch(/Excepteur sint occaecat/i);
-    expect(within(grid).getByText(/Net\s*30/i)).toBeTruthy();
+    expect(screen.queryByTestId("recipient-side-by-side-block-grid")).toBeNull();
+    expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();
   });
 });

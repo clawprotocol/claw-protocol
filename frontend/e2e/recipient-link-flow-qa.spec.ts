@@ -379,7 +379,7 @@ test.describe("recipient + link flow QA", () => {
     });
   });
 
-  test("2b) Recipient preview: whole-document redline default + clauses + side-by-side (Net 30 + pause gap)", async ({
+  test("2b) Recipient preview: single suggested-changes surface (Net 30 + pause gap)", async ({
     page,
   }) => {
     test.setTimeout(90_000);
@@ -478,48 +478,30 @@ test.describe("recipient + link flow QA", () => {
     await page.getByRole("button", { name: "Preview changes" }).click();
     await expect(page.getByText("Send suggested edits").first()).toBeVisible({ timeout: 25_000 });
 
-    await expect(page.getByTestId("recipient-tracked-changes-toggle")).toBeVisible();
-    await expect(page.getByTestId("recipient-tab-redline")).toBeVisible();
-    const wholeDoc = page.getByTestId("recipient-whole-doc-redline");
-    await expect(wholeDoc).toBeVisible();
+    await expect(page.getByTestId("recipient-suggested-changes-panel")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Suggested changes" })).toBeVisible();
+    await expect(page.getByTestId("recipient-suggested-changes-document")).toBeVisible();
     const legalDoc = page.getByTestId("recipient-legal-redline-document");
     await expect(legalDoc).toBeVisible();
     await expect(legalDoc).toHaveText(/\S{8,}/);
-    await expect(page.getByTestId("recipient-redline-tracked-summary")).toBeVisible();
-    await expect(page.getByTestId("recipient-redline-instruction-gap-note")).toBeVisible();
+    await expect(page.getByTestId("recipient-redline-chip-insertions")).toBeVisible();
+    await expect(page.getByTestId("recipient-redline-chip-not-reflected")).toBeVisible();
+    const callout = page.getByTestId("recipient-redline-not-reflected-callout");
+    await expect(callout).toBeVisible();
+    await expect(callout).toContainText(/Not reflected:/i);
+    await expect(callout).toContainText(/pause work after 15 days late/i);
     await expect(legalDoc.locator("section[data-block-kind]")).toHaveCount(4);
     await expect(legalDoc.getByTestId("recipient-redline-changed-block").first()).toBeVisible();
-    await expect(wholeDoc.locator('[data-redline="insert"]').first()).toBeVisible({ timeout: 12_000 });
-    await expect(wholeDoc.locator('[data-redline="insert"]').first()).toContainText(/Net\s*30/i);
-    await expect(wholeDoc).toContainText(/Net\s*30/i);
-    await page.getByTestId("recipient-redline-next-change").click();
+    const docSurface = page.getByTestId("recipient-suggested-changes-document");
+    await expect(docSurface.locator('[data-redline="insert"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(docSurface.locator('[data-redline="insert"]').first()).toContainText(/Net\s*30/i);
+    await expect(docSurface).toContainText(/Net\s*30/i);
 
-    await page.getByTestId("recipient-tab-changed-clauses").click();
-    await expect(page.getByTestId("clause-track-changes-panel").first()).toBeVisible();
-    const payCard = page.getByTestId("recipient-clause-card-payment_terms");
-    await expect(
-      payCard
-        .locator('[data-redline="insert"]')
-        .or(payCard.getByTestId("clause-track-lines"))
-        .or(payCard.getByText(/Net\s*30/i))
-        .first(),
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Requested but not reflected")).toBeVisible();
+    await expect(page.getByTestId("recipient-tab-redline")).toHaveCount(0);
+    await expect(page.getByTestId("recipient-side-by-side-block-grid")).toHaveCount(0);
 
-    await page.getByTestId("recipient-tab-side-by-side").click();
-    const proposedCol = page.getByTestId("recipient-side-by-side-proposed-column");
-    await expect(proposedCol.getByTestId("recipient-side-by-side-block-grid")).toBeVisible();
-    const row32 = proposedCol.locator('[data-testid="recipient-side-by-side-row"][data-clause-number="3.2"]');
-    await expect(row32).toBeVisible();
-    await expect(row32).toContainText(/Net\s*30/i);
-    await expect(proposedCol.locator("[data-redline]")).not.toHaveCount(0);
-
-    await page.getByRole("button", { name: "Hide changes" }).click();
-    await expect(proposedCol.locator("[data-redline]")).toHaveCount(0);
-    await expect(proposedCol).toContainText(/Net\s*30/i);
-
-    await page.getByTestId("recipient-tab-clean-proposed").click();
-    await expect(page.getByText(/Net\s*30/).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send suggested edits" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Dismiss preview" }).first()).toBeVisible();
   });
 
   test("3) Owner: incoming suggestion + material change summary; apply; draft updates", async ({ page }) => {

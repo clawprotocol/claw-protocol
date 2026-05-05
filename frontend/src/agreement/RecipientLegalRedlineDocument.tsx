@@ -6,7 +6,8 @@ type Props = {
   /** @deprecated Prefer {@link document} for block-aware redline. */
   segments?: RedlineSegmentVM[];
   document?: LegalRedlineDocumentViewModel;
-  variant?: "page" | "column";
+  /** `suggested` — recipient single-surface review: contract typography, inline track marks only (no heavy block chrome). */
+  variant?: "page" | "column" | "suggested";
 };
 
 type AnySeg = LegalRedlineSegment | RedlineSegmentVM;
@@ -102,9 +103,11 @@ export function RecipientLegalRedlineBlockSegments({
 
 export function RecipientLegalRedlineDocument({ segments, document, variant = "page" }: Props) {
   const shell =
-    variant === "page"
-      ? "mx-auto w-full max-w-[42rem] rounded-lg border border-slate-300/90 bg-white px-6 py-8 shadow-md sm:px-10 sm:py-10"
-      : "mx-auto w-full max-w-none rounded-md border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-5 sm:py-6";
+    variant === "suggested"
+      ? "mx-auto w-full max-w-[40rem] rounded-md border border-slate-200/95 bg-white px-7 py-9 text-[15px] leading-[1.7] text-slate-900 shadow-sm sm:px-10 sm:py-11"
+      : variant === "page"
+        ? "mx-auto w-full max-w-[42rem] rounded-lg border border-slate-300/90 bg-white px-6 py-8 shadow-md sm:px-10 sm:py-10"
+        : "mx-auto w-full max-w-none rounded-md border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-5 sm:py-6";
 
   return (
     <article
@@ -115,6 +118,15 @@ export function RecipientLegalRedlineDocument({ segments, document, variant = "p
         <div className="space-y-0">
           {document.blocks.map((block) => {
             const changed = block.hasChange;
+            const blockChrome =
+              variant === "suggested"
+                ? "recipient-legal-redline-block border-b border-slate-100 py-3.5 last:border-b-0"
+                : [
+                    "recipient-legal-redline-block border-b border-slate-100 py-4 last:border-b-0",
+                    changed
+                      ? "border-l-4 border-l-amber-500 bg-amber-50/60 pl-4 pr-2 sm:pl-5"
+                      : "border-l-4 border-l-transparent pl-4 pr-2 sm:pl-5",
+                  ].join(" ");
             return (
               <section
                 key={block.id}
@@ -122,12 +134,7 @@ export function RecipientLegalRedlineDocument({ segments, document, variant = "p
                 data-block-kind={block.kind}
                 data-block-id={block.id}
                 data-clause-number={block.clauseNumber ?? ""}
-                className={[
-                  "recipient-legal-redline-block border-b border-slate-100 py-4 last:border-b-0",
-                  changed
-                    ? "border-l-4 border-l-amber-500 bg-amber-50/60 pl-4 pr-2 sm:pl-5"
-                    : "border-l-4 border-l-transparent pl-4 pr-2 sm:pl-5",
-                ].join(" ")}
+                className={blockChrome}
               >
                 <div className="space-y-0">
                   <RecipientLegalRedlineBlockSegments segments={block.segments} keyPrefix={block.id} />

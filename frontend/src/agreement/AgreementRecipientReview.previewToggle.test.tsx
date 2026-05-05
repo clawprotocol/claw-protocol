@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
@@ -39,12 +39,12 @@ const revisedDraft = {
   updated_at: new Date().toISOString(),
 };
 
-describe("AgreementRecipientReview tracked-changes toggle", () => {
+describe("AgreementRecipientReview suggested-changes single surface", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("preview defaults to Redline tab with whole-document insert markers; toggle affects side-by-side", async () => {
+  it("shows one redline document with insert markers and summary chips; no compare tabs", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -93,56 +93,36 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
     await userEvent.click(suggestButtons[0]!);
 
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
-    await userEvent.clear(instruction);
-    await userEvent.type(instruction, "Change payment terms to Net 30");
+    fireEvent.change(instruction, { target: { value: "Change payment terms to Net 30" } });
 
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-tracked-changes-toggle")).toBeTruthy();
+      expect(screen.getByTestId("recipient-suggested-changes-panel")).toBeTruthy();
     });
 
-    expect(screen.getByTestId("recipient-tab-redline")).toBeTruthy();
-    const wholeDocPanel = screen.getByTestId("recipient-whole-doc-redline");
+    expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();
+    expect(screen.queryByTestId("recipient-tab-clean-proposed")).toBeNull();
+    expect(screen.queryByTestId("recipient-tab-side-by-side")).toBeNull();
+    expect(screen.queryByTestId("recipient-tab-changed-clauses")).toBeNull();
+    expect(screen.queryByTestId("recipient-tracked-changes-toggle")).toBeNull();
+    expect(screen.queryByTestId("recipient-side-by-side-block-grid")).toBeNull();
+
+    expect(screen.getByTestId("recipient-suggested-changes-document")).toBeTruthy();
     const legalDocRoot = screen.getByTestId("recipient-legal-redline-document");
     expect(legalDocRoot).toBeTruthy();
     expect(legalDocRoot.querySelectorAll('[data-testid="recipient-legal-redline-block"]').length).toBeGreaterThan(1);
-    const insertEl = wholeDocPanel.querySelector('[data-redline="insert"]');
+    const insertEl = legalDocRoot.querySelector('[data-redline="insert"]');
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
     expect(legalDocRoot.textContent).toMatch(/Net|thirty/i);
 
-    await userEvent.click(screen.getByTestId("recipient-tab-changed-clauses"));
-    const clauseCard = await screen.findByTestId("recipient-clause-card-payment_terms");
-    const redline =
-      within(clauseCard).queryByTestId("clause-field-redline") ??
-      within(clauseCard).queryByTestId("clause-track-lines") ??
-      within(clauseCard).queryByTestId("clause-track-snippet-fallback") ??
-      within(clauseCard).queryByTestId("clause-field-redline-fallback");
-    expect(redline).toBeTruthy();
-    if (redline) {
-      expect(redline.querySelector("[data-redline]")).toBeTruthy();
-    }
-
-    const toggle = screen.getByTestId("recipient-tracked-changes-toggle");
-    const showBtn = within(toggle).getByRole("button", { name: /Show changes/i });
-    const hideBtn = within(toggle).getByRole("button", { name: /Hide changes/i });
-    expect(showBtn.getAttribute("aria-pressed")).toBe("true");
-
-    await userEvent.click(screen.getByRole("button", { name: /Side-by-side/i }));
-    const proposedCol = screen.getByTestId("recipient-side-by-side-proposed-column");
-    expect(proposedCol.querySelector('[data-testid="recipient-side-by-side-block-grid"]')).toBeTruthy();
-    expect(proposedCol.querySelectorAll('[data-testid="recipient-side-by-side-row"]').length).toBeGreaterThan(1);
-    expect(proposedCol.querySelector("[data-redline]")).toBeTruthy();
-
-    await userEvent.click(hideBtn);
-    expect(proposedCol.querySelector("[data-redline]")).toBeNull();
-    expect(proposedCol.textContent).toMatch(/Net\s*30/i);
+    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/\d+\s+insertion/i);
+    expect(screen.getByTestId("recipient-redline-chip-deletions").textContent).toMatch(/\d+\s+deletion/i);
+    expect(screen.getByTestId("recipient-redline-chip-sections").textContent).toMatch(/\d+\s+changed section/i);
   });
 
-  it(
-    "at narrow width the tracked-changes toggle and clause card remain in document",
-    async () => {
+  it("at narrow width the single suggested-changes surface remains available", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
         typeof input === "string"
@@ -189,16 +169,14 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
-    await userEvent.clear(instruction);
-    await userEvent.type(instruction, "Change payment terms to Net 30");
+    fireEvent.change(instruction, { target: { value: "Change payment terms to Net 30" } });
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
     await waitFor(
       () => {
-        expect(screen.getByTestId("recipient-tracked-changes-toggle")).toBeTruthy();
+        expect(screen.getByTestId("recipient-suggested-changes-document")).toBeTruthy();
       },
       { timeout: 8000 },
     );
-    await userEvent.click(screen.getByTestId("recipient-tab-changed-clauses"));
-    expect(screen.getByTestId("recipient-clause-card-payment_terms")).toBeTruthy();
+    expect(screen.queryByTestId("recipient-tab-changed-clauses")).toBeNull();
   }, 15_000);
 });

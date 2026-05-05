@@ -53,10 +53,10 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).toContain("Preview suggestions");
     expect(s).toContain("Compare text");
     expect(s).toContain("{MODE_SUGGEST_PLAIN_ENGLISH}");
-    expect(s).toContain("Changed clauses");
-    expect(s).toContain("Redline");
-    expect(s).toContain("recipient-tab-redline");
-    expect(s).toContain('"clauses"');
+    expect(s).toContain("Suggested changes");
+    expect(s).toContain("recipient-suggested-changes-panel");
+    expect(s).toContain("recipient-suggested-changes-document");
+    expect(s).not.toContain("recipient-tab-redline");
     expect(s).toContain("[reviewer-view-visible]");
     expect(s).not.toContain("LawDog Pro active");
   });

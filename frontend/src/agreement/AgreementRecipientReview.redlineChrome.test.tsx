@@ -96,10 +96,10 @@ describe("AgreementRecipientReview redline chrome", () => {
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-redline-tracked-summary")).toBeTruthy();
+      expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
     });
 
-    expect(screen.getByTestId("recipient-redline-tracked-summary").textContent).toMatch(/Tracked changes:/i);
+    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/\d+\s+insertion/i);
     const legalRoot = screen.getByTestId("recipient-legal-redline-document");
     expect(legalRoot.textContent).not.toMatch(/&quot;/);
     expect(legalRoot.textContent).not.toMatch(/&amp;/);
