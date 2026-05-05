@@ -3,12 +3,13 @@ import { VoiceAugmentedTextArea, type VoiceDictationControl } from "../../launch
 import {
   formatProRefineRejectedShortInline,
   pickAuthoritativeProCorpusForRefine,
+  PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   PRO_REFINE_APPLY_REVISION_BUTTON_LABEL,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REVISE_HELPER,
   PRO_REFINE_REVISE_SECTION_HEADING,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
-  PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE,
+  shouldUseProRefineAdvisoryAppendSuccessCopy,
 } from "./premiumRefineAcceptance";
 import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
 import {
@@ -96,6 +97,34 @@ function formatRecommendedCtaLabel(cta: PremiumReviewRoute["recommended_cta"]): 
 function formatRouteConfidenceLabel(conf: PremiumReviewRoute["confidence"]): string {
   if (conf === "medium") return "solid for review";
   return conf;
+}
+
+function resolvePremiumRefineSuccessUx(args: {
+  userInstruction: string;
+  whatChangedLine: string | null | undefined;
+  usedAppendReviewerNotePreserve: boolean;
+  refineApplyDecision: string | null;
+}): {
+  caption: string | null;
+  successMessage: string;
+  lastRefineDisplay: (r: PremiumRefineResponse) => PremiumRefineResponse;
+  scrollReviewerNote: boolean;
+} {
+  const useAdvisoryCopy = shouldUseProRefineAdvisoryAppendSuccessCopy({
+    userInstruction: args.userInstruction.trim(),
+    usedAppendReviewerNotePreserve: args.usedAppendReviewerNotePreserve,
+    refineApplyDecision: args.refineApplyDecision,
+  });
+  return {
+    caption: useAdvisoryCopy ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY : args.whatChangedLine?.trim() || null,
+    successMessage:
+      useAdvisoryCopy || args.usedAppendReviewerNotePreserve
+        ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
+        : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
+    lastRefineDisplay: (r) =>
+      useAdvisoryCopy ? { ...r, summary_changes: [PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY] } : r,
+    scrollReviewerNote: args.usedAppendReviewerNotePreserve,
+  };
 }
 
 /**
@@ -306,7 +335,13 @@ export function FinalizeYourAgreementPanel({
           return;
         }
         if (out && r) {
-          setLastRefine(r);
+          const ux = resolvePremiumRefineSuccessUx({
+            userInstruction: prompt.trim(),
+            whatChangedLine,
+            usedAppendReviewerNotePreserve,
+            refineApplyDecision,
+          });
+          setLastRefine(ux.lastRefineDisplay(r));
           markDocumentDirty?.();
           // eslint-disable-next-line no-console
           console.info("[premium-refine-ui-apply]", {
@@ -314,16 +349,11 @@ export function FinalizeYourAgreementPanel({
             containsReviewerSection: out.includes("## REVIEWER NOTE"),
           });
           onApplyDocumentText(out);
-          const wc = whatChangedLine?.trim() ? whatChangedLine.trim() : null;
-          onProRefineWhatChanged?.(wc);
-          setRefineWhatChangedCaption(wc);
+          onProRefineWhatChanged?.(ux.caption);
+          setRefineWhatChangedCaption(ux.caption);
           setPrompt("");
-          setRefineSuccessMessage(
-            usedAppendReviewerNotePreserve
-              ? PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE
-              : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
-          );
-          if (usedAppendReviewerNotePreserve) {
+          setRefineSuccessMessage(ux.successMessage);
+          if (ux.scrollReviewerNote) {
             window.requestAnimationFrame(() => {
               window.requestAnimationFrame(() => {
                 const ta = document.getElementById("claw-agreement-preview-editor") as HTMLTextAreaElement | null;
@@ -420,6 +450,7 @@ export function FinalizeYourAgreementPanel({
           unchangedDuplicateLateFee,
           surgicalRejectedShortExhausted,
           usedAppendReviewerNotePreserve,
+          refineApplyDecision: routeRefineApplyDecision,
         } = resolved;
         if (acc.decision === "rejected_unchanged") {
           setLastRefine(null);
@@ -444,7 +475,13 @@ export function FinalizeYourAgreementPanel({
           return;
         }
         if (out && r) {
-          setLastRefine(r);
+          const ux = resolvePremiumRefineSuccessUx({
+            userInstruction: seed,
+            whatChangedLine,
+            usedAppendReviewerNotePreserve,
+            refineApplyDecision: routeRefineApplyDecision,
+          });
+          setLastRefine(ux.lastRefineDisplay(r));
           markDocumentDirty?.();
           // eslint-disable-next-line no-console
           console.info("[premium-refine-ui-apply]", {
@@ -452,15 +489,10 @@ export function FinalizeYourAgreementPanel({
             containsReviewerSection: out.includes("## REVIEWER NOTE"),
           });
           onApplyDocumentText(out);
-          const wc = whatChangedLine?.trim() ? whatChangedLine.trim() : null;
-          onProRefineWhatChanged?.(wc);
-          setRefineWhatChangedCaption(wc);
-          setRefineSuccessMessage(
-            usedAppendReviewerNotePreserve
-              ? PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE
-              : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
-          );
-          if (usedAppendReviewerNotePreserve) {
+          onProRefineWhatChanged?.(ux.caption);
+          setRefineWhatChangedCaption(ux.caption);
+          setRefineSuccessMessage(ux.successMessage);
+          if (ux.scrollReviewerNote) {
             window.requestAnimationFrame(() => {
               window.requestAnimationFrame(() => {
                 const ta = document.getElementById("claw-agreement-preview-editor") as HTMLTextAreaElement | null;

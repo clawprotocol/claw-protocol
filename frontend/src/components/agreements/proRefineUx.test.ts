@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   formatProRefineRejectedShortInline,
+  PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   PRO_REFINE_REJECTED_SHORT_PRIMARY,
   PRO_REFINE_REVISE_HELPER,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
+  shouldUseProRefineAdvisoryAppendSuccessCopy,
 } from "./premiumRefineAcceptance";
 import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
 
@@ -16,6 +18,18 @@ describe("Paid Pro refine textarea helper + placeholder", () => {
     expect(PRO_REFINE_REVISE_HELPER).toBe(PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER);
     const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY).toContain("Appended reviewer note");
+    expect(
+      shouldUseProRefineAdvisoryAppendSuccessCopy({
+        userInstruction: "List items the other party should review.",
+        usedAppendReviewerNotePreserve: false,
+        refineApplyDecision: null,
+      }),
+    ).toBe(true);
+    expect(finalize).toContain("resolvePremiumRefineSuccessUx");
+    expect(finalize).toContain("shouldUseProRefineAdvisoryAppendSuccessCopy");
+    expect(intake).toContain("shouldUseProRefineAdvisoryAppendSuccessCopy");
+    expect(intake).toContain("PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY");
     expect(finalize).toContain("PRO_REFINE_REVISE_HELPER");
     expect(finalize).toContain("PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER");
     expect(intake).toContain("PRO_REFINE_REVISE_HELPER");

@@ -7,6 +7,7 @@ import {
   premiumRefineSummaryIsUnchangedFailOpen,
   premiumRefineTextContainsPlaceholderCorruption,
   PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+  PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   sanitizeAdvisoryNoteTextForAppend,
   scanPremiumRefinePlaceholderCorruption,
   tryPremiumRefineAdvisoryAppendAcceptance,
@@ -408,7 +409,7 @@ export function tryAppendReviewerNotePreserveDocument(args: {
       `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${safeInstr}\n${checklistBlock}${shortBlock}${footer}`;
     return {
       text: base + addendum,
-      summaryLine: "Appended an additional reviewer note; full agreement preserved.",
+      summaryLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
     };
   }
 
@@ -416,7 +417,7 @@ export function tryAppendReviewerNotePreserveDocument(args: {
     `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${safeInstr}\n${checklistBlock}${shortBlock}${footer}`;
   return {
     text: base + tail,
-    summaryLine: "Added a reviewer note / requested review items section; full agreement preserved.",
+    summaryLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   };
 }
 
@@ -616,8 +617,7 @@ function finalizePremiumRefineExecuteOutcome(args: {
       usedAppendReviewerNotePreserve: true,
       refineApplyDecision: "fallback_forced_append_reviewer_header",
       whatChangedLine:
-        args.outcome.whatChangedLine?.trim() ||
-        "Appended reviewer note section (fallback); full agreement preserved.",
+        args.outcome.whatChangedLine?.trim() || PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
     };
   }
   return args.outcome;
@@ -741,7 +741,7 @@ export async function executePremiumRefineUpdate(args: {
             finalText: built,
             acceptance: accBuilt,
             usedLocalLateFeeFallback: false,
-            whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
+            whatChangedLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
             unchangedDuplicateLateFee: false,
           },
           {
@@ -781,7 +781,7 @@ export async function executePremiumRefineUpdate(args: {
             finalText: builtMinimal,
             acceptance: accMin,
             usedLocalLateFeeFallback: false,
-            whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
+            whatChangedLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
             unchangedDuplicateLateFee: false,
           },
           {
@@ -821,7 +821,7 @@ export async function executePremiumRefineUpdate(args: {
             finalText: forcedAdvisory,
             acceptance: accForced,
             usedLocalLateFeeFallback: false,
-            whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
+            whatChangedLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
             unchangedDuplicateLateFee: false,
           },
           {

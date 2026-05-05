@@ -19,6 +19,15 @@ describe("FinalizeYourAgreementPanel Pro refine → host summary", () => {
     expect(s).toContain("refineWhatChangedCaption");
     expect(s).toContain("What changed: </span>");
   });
+
+  it("routes advisory append success through resolvePremiumRefineSuccessUx (caption + Latest update)", () => {
+    const p = join(__dirname, "FinalizeYourAgreementPanel.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("resolvePremiumRefineSuccessUx");
+    expect(s).toContain("PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY");
+    expect(s).toContain("lastRefineDisplay");
+    expect(s).toContain("summary_changes: [PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY]");
+  });
 });
 
 describe("FinalizeYourAgreementPanel send-for-review framing (copy only)", () => {

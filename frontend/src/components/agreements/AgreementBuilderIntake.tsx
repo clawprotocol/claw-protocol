@@ -403,12 +403,13 @@ import {
   formatProRefineRejectedShortInline,
   isProRefineRejectedShortMessage,
   PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE,
+  PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   PRO_REFINE_APPLY_REVISION_BUTTON_LABEL,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REVISE_HELPER,
   PRO_REFINE_REVISE_SECTION_HEADING,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
-  PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE,
+  shouldUseProRefineAdvisoryAppendSuccessCopy,
 } from "./premiumRefineAcceptance";
 import {
   buildPremiumRefineChecklistBullets,
@@ -5887,12 +5888,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           summary_changes: r?.summary_changes,
           usedLocalLateFeeFallback,
         });
+        const useAdvisoryAppendSuccessCopy = shouldUseProRefineAdvisoryAppendSuccessCopy({
+          userInstruction: instruction,
+          usedAppendReviewerNotePreserve,
+          refineApplyDecision,
+        });
         setReviewRefineUserMessage(
-          usedAppendReviewerNotePreserve
-            ? PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE
+          useAdvisoryAppendSuccessCopy || usedAppendReviewerNotePreserve
+            ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
             : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
         );
-        setProRefineWhatChangedSummary(whatChangedLine?.trim() ? whatChangedLine.trim() : null);
+        setProRefineWhatChangedSummary(
+          useAdvisoryAppendSuccessCopy
+            ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
+            : whatChangedLine?.trim()
+              ? whatChangedLine.trim()
+              : null,
+        );
         applyProRefineOutputToProSurfaceRef.current?.(out, {
           clearStepBuffer: true,
           scrollToReview: true,

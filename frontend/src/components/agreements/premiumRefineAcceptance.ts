@@ -701,6 +701,29 @@ export function isProRefineSurgicalExhaustedMessage(message: string | undefined)
 /** Shown inline after a premium refine is accepted and applied. */
 export const PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE = "Revision applied. Review before sending.";
 
+/** Success line for advisory / reviewer-note append (What changed + Latest update + toast). */
+export const PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY =
+  "Appended reviewer note; full agreement preserved.";
+
 /** After append-only reviewer note path (full agreement preserved). */
-export const PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE =
-  "Reviewer note added. Full agreement is unchanged above the note — review before sending.";
+export const PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE = PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY;
+
+/** True when UI should not surface generic `summary_changes` / model lines for this refine. */
+export function isAppendReviewerRefineDecision(decision: string | null | undefined): boolean {
+  const t = (decision || "").trim();
+  return (
+    t === "append_reviewer_note_preserve_document" ||
+    t === "append_reviewer_note_advisory_forced_after_eval_miss" ||
+    t === "fallback_forced_append_reviewer_header"
+  );
+}
+
+export function shouldUseProRefineAdvisoryAppendSuccessCopy(args: {
+  userInstruction: string;
+  usedAppendReviewerNotePreserve: boolean;
+  refineApplyDecision: string | null;
+}): boolean {
+  if (args.usedAppendReviewerNotePreserve) return true;
+  if (isAppendReviewerRefineDecision(args.refineApplyDecision)) return true;
+  return classifyPremiumRefineRevisionIntent(args.userInstruction) === "advisory_note_or_comment";
+}

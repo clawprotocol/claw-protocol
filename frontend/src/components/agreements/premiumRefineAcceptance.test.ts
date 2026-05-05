@@ -16,9 +16,11 @@ import {
   PREMIUM_REFINE_SURGICAL_HEADING_CHECK_MAX_RATIO,
   PREMIUM_REFINE_SURGICAL_MIN_LENGTH_RATIO,
   PREMIUM_REFINE_TRANSFORMATIONAL_HARD_REJECT_RATIO,
+  PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REJECTED_SHORT_PRIMARY,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
+  shouldUseProRefineAdvisoryAppendSuccessCopy,
 } from "./premiumRefineAcceptance";
 import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 
@@ -293,6 +295,45 @@ describe("PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE", () => {
   it("tells the user to review before sending", () => {
     expect(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE).toContain("Revision applied");
     expect(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE).toContain("Review before sending");
+  });
+});
+
+describe("PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY + shouldUseProRefineAdvisoryAppendSuccessCopy", () => {
+  it("uses the unified advisory append success line", () => {
+    expect(PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY).toBe(
+      "Appended reviewer note; full agreement preserved.",
+    );
+  });
+
+  it("detects advisory UX from intent, append flag, or apply decision", () => {
+    expect(
+      shouldUseProRefineAdvisoryAppendSuccessCopy({
+        userInstruction: "List items the other party should review.",
+        usedAppendReviewerNotePreserve: false,
+        refineApplyDecision: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseProRefineAdvisoryAppendSuccessCopy({
+        userInstruction: "Add late fee of 5% after 10 days overdue",
+        usedAppendReviewerNotePreserve: true,
+        refineApplyDecision: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseProRefineAdvisoryAppendSuccessCopy({
+        userInstruction: "Add late fee of 5% after 10 days overdue",
+        usedAppendReviewerNotePreserve: false,
+        refineApplyDecision: "append_reviewer_note_preserve_document",
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseProRefineAdvisoryAppendSuccessCopy({
+        userInstruction: "Add late fee of 5% after 10 days overdue",
+        usedAppendReviewerNotePreserve: false,
+        refineApplyDecision: null,
+      }),
+    ).toBe(false);
   });
 });
 
