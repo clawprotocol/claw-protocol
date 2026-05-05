@@ -250,8 +250,11 @@ export function deriveStructuredAdvisoryKeys(input: string, checklist?: string[]
     "ip_ownership",
     /\b(intellectual property|\bips?\b|licenses?|licensing|background materials|work product|third-party materials)\b|\bip\s+assignment\b/i,
   );
-  add("termination", /\b(terminate|termination|cancel|cancellation|refund|non-refundable|stop work)\b/i);
-  add("support", /\b(support|bug|maintenance|warranty|fix period)\b/i);
+  add(
+    "termination",
+    /\b(terminate|termination|cancel|cancellation|refund|non-refundable|stop work|stops?|mid[-\s]?project)\b/i,
+  );
+  add("support", /\b(support|bugs?|maintenance|warranty|fix period)\b/i);
   add("access_credentials", /\b(access|credentials|hosting|analytics|third-party tools)\b/i);
   add(
     "governing_law",
@@ -897,6 +900,27 @@ export function isAppendReviewerRefineDecision(decision: string | null | undefin
     t === "append_reviewer_note_advisory_forced_after_eval_miss" ||
     t === "fallback_forced_append_reviewer_header"
   );
+}
+
+/**
+ * UI / console diagnostics: never show `surgical_revision` for a successful advisory append when the
+ * user prompt is classified as advisory (eval historically used a synthetic instruction for length gates).
+ */
+export function effectivePremiumRefineApplyLogRevisionIntent(args: {
+  userInstruction: string;
+  acceptance: { decision: PremiumRefineApplyDecision; revisionIntent: PremiumRefineRevisionIntent };
+  refineApplyDecision: string | null;
+  usedAppendReviewerNotePreserve: boolean;
+}): PremiumRefineRevisionIntent {
+  const classified = classifyPremiumRefineRevisionIntent(args.userInstruction);
+  if (
+    args.acceptance.decision === "accepted" &&
+    classified === "advisory_note_or_comment" &&
+    (args.usedAppendReviewerNotePreserve || isAppendReviewerRefineDecision(args.refineApplyDecision))
+  ) {
+    return "advisory_note_or_comment";
+  }
+  return args.acceptance.revisionIntent;
 }
 
 export function shouldUseProRefineAdvisoryAppendSuccessCopy(args: {

@@ -4,6 +4,7 @@ import {
   classifyPremiumRefineRevisionIntent,
   computeMajorHeadingPreservationRatio,
   deriveStructuredAdvisoryKeys,
+  effectivePremiumRefineApplyLogRevisionIntent,
   evaluatePremiumRefineCandidate,
   extractMajorHeadingFingerprints,
   formatProRefineRejectedShortInline,
@@ -325,6 +326,27 @@ describe("PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE", () => {
   it("tells the user to review before sending", () => {
     expect(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE).toContain("Revision applied");
     expect(PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE).toContain("Review before sending");
+  });
+});
+
+describe("effectivePremiumRefineApplyLogRevisionIntent", () => {
+  it("reports advisory_note_or_comment for accepted append-shaped output with advisory user prompt", () => {
+    const baseline = "A".repeat(5000);
+    const doc =
+      `${baseline}\n\n---\n\n## REVIEWER NOTE / REQUESTED REVIEW ITEMS\n\n` +
+      "**Requested by drafting party:** Reviewer requested a list of items the other party should review.\n\n" +
+      "**Flagged / readiness items (from LawDog review):**\n- Clarify acceptance criteria, review window, and what constitutes final delivery.\n";
+    const acc = evaluatePremiumRefineCandidate(doc, baseline, baseline.length, undefined, "List items the other party should review.");
+    expect(acc.decision).toBe("accepted");
+    expect(acc.revisionIntent).toBe("advisory_note_or_comment");
+    expect(
+      effectivePremiumRefineApplyLogRevisionIntent({
+        userInstruction: "List items the other party should review.",
+        acceptance: acc,
+        refineApplyDecision: "append_reviewer_note_preserve_document",
+        usedAppendReviewerNotePreserve: true,
+      }),
+    ).toBe("advisory_note_or_comment");
   });
 });
 

@@ -8,7 +8,6 @@ import {
   normalizePremiumRefineTextForCompare,
   premiumRefineSummaryIsUnchangedFailOpen,
   premiumRefineTextContainsPlaceholderCorruption,
-  PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
   PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   resolveStructuredAdvisoryKeysForAppend,
   scanPremiumRefinePlaceholderCorruption,
@@ -517,13 +516,7 @@ function finalizePremiumRefineExecuteOutcome(args: {
       patchedLen: patched.length,
       containsReviewerAfterPatch: patched.includes("## REVIEWER NOTE"),
     });
-    const accPatched = evaluatePremiumRefineCandidate(
-      patched,
-      args.baselineText,
-      args.baselineLen,
-      undefined,
-      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
-    );
+    const accPatched = evaluatePremiumRefineCandidate(patched, args.baselineText, args.baselineLen, undefined, inst);
     if (accPatched.decision !== "accepted") {
       // eslint-disable-next-line no-console
       console.info("[premium-refine-fallback-forced-append]", {
@@ -665,12 +658,13 @@ export async function executePremiumRefineUpdate(args: {
       baselineText,
       baselineLen,
       summaryForAdvisoryAppendEval,
-      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+      inst,
     );
     accBuilt = mergeAdvisoryAppendEvaluate(inst, built, baselineText, baselineLen, accBuilt);
     // eslint-disable-next-line no-console
     console.info("[premium-refine-apply]", {
       intent: promptIntent,
+      revisionIntent: accBuilt.revisionIntent,
       authoritativeLen: baselineLen,
       candidateLen: raw.length,
       outputLen: built.length,
@@ -726,7 +720,7 @@ export async function executePremiumRefineUpdate(args: {
       baselineText,
       baselineLen,
       summaryForAdvisoryAppendEval,
-      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+      inst,
     );
     accMin = mergeAdvisoryAppendEvaluate(inst, builtMinimal, baselineText, baselineLen, accMin);
     if (accMin.decision === "accepted") {
@@ -776,7 +770,7 @@ export async function executePremiumRefineUpdate(args: {
       baselineText,
       baselineLen,
       undefined,
-      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+      inst,
     );
     accForced = mergeAdvisoryAppendEvaluate(inst, forcedAdvisory, baselineText, baselineLen, accForced);
     if (accForced.decision === "accepted") {

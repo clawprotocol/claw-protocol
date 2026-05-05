@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { VoiceAugmentedTextArea, type VoiceDictationControl } from "../../launch/VoiceAugmentedControl";
 import {
+  effectivePremiumRefineApplyLogRevisionIntent,
   formatProRefineRejectedShortInline,
   pickAuthoritativeProCorpusForRefine,
   PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
@@ -299,7 +300,12 @@ export function FinalizeYourAgreementPanel({
           refinedCandidateLen: acc.refinedLen,
           ratio: Number(acc.ratio.toFixed(4)),
           applyDecision: refineApplyDecision ?? acc.decision,
-          revisionIntent: acc.revisionIntent,
+          revisionIntent: effectivePremiumRefineApplyLogRevisionIntent({
+            userInstruction: prompt.trim(),
+            acceptance: acc,
+            refineApplyDecision,
+            usedAppendReviewerNotePreserve,
+          }),
           headingPreservationRatio: Number(acc.headingPreservationRatio.toFixed(4)),
           requiredSectionsPresent: acc.requiredSectionsPresent,
           preservedExistingDoc: acc.decision !== "accepted",

@@ -399,6 +399,7 @@ import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftClientAcceptance";
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import {
+  effectivePremiumRefineApplyLogRevisionIntent,
   pickAuthoritativeProCorpusForRefine,
   formatProRefineRejectedShortInline,
   isProRefineRejectedShortMessage,
@@ -5843,7 +5844,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           refinedCandidateLen: acceptance.refinedLen,
           ratio: Number(acceptance.ratio.toFixed(4)),
           applyDecision: refineApplyDecision ?? acceptance.decision,
-          revisionIntent: acceptance.revisionIntent,
+          revisionIntent: effectivePremiumRefineApplyLogRevisionIntent({
+            userInstruction: instruction,
+            acceptance,
+            refineApplyDecision,
+            usedAppendReviewerNotePreserve,
+          }),
           headingPreservationRatio: Number(acceptance.headingPreservationRatio.toFixed(4)),
           requiredSectionsPresent: acceptance.requiredSectionsPresent,
           preservedExistingDoc: acceptance.decision !== "accepted",

@@ -13,12 +13,14 @@ import {
   buildAdvisoryAppendPreserveDocument,
   executePremiumRefineUpdate,
 } from "./premiumRefineLateFeeFallback";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   classifyPremiumRefineRevisionIntent,
+  effectivePremiumRefineApplyLogRevisionIntent,
   evaluatePremiumRefineCandidate,
   isAdvisoryNoteOrCommentIntent,
+  pickAuthoritativeProCorpusForRefine,
   premiumRefineTextContainsPlaceholderCorruption,
-  PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
   sanitizeAdvisoryNoteTextForAppend,
   scanPremiumRefinePlaceholderCorruption,
   STRUCTURED_ADVISORY_ITEMS,
@@ -26,6 +28,35 @@ import {
 
 function longBaseline(): string {
   return "AGREEMENT\n\n" + Array.from({ length: 900 }, (_, i) => `Section line ${i} with text and obligations.\n`).join("");
+}
+
+const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
+
+/** Locked regression: prod QA conversational “notes for review” hand-off (May 2026). */
+const REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT = `Can you add some notes for review?
+
+like:
+- payment timing?
+- what happens if they stop mid project
+- do we need anything about bugs after launch`;
+
+function draftWithPremiumBodyForReviewLinkRegression(fullBody: string): ParsedDraftShape {
+  return {
+    title: "Services",
+    jurisdiction: "CA",
+    parties: [
+      { name: "A", role: "party" },
+      { name: "B", role: "party" },
+    ],
+    purpose: "Consulting",
+    payment_terms: "$1",
+    duration: "12m",
+    due_date: null,
+    effective_date: null,
+    payment: emptyPayment,
+    premium_full_document_text: fullBody,
+    premium_server_full_document_text: fullBody,
+  };
 }
 
 describe("advisory / comment intent classification", () => {
@@ -61,6 +92,24 @@ describe("advisory / comment intent classification", () => {
 
   it("keeps late-fee clause edits as surgical_revision (structured advisory does not change classification)", () => {
     expect(classifyPremiumRefineRevisionIntent("Add late fee of 5% after 10 days overdue")).toBe("surgical_revision");
+  });
+
+  it("locks REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT as advisory (regression)", () => {
+    expect(classifyPremiumRefineRevisionIntent(REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT)).toBe(
+      "advisory_note_or_comment",
+    );
+    expect(isAdvisoryNoteOrCommentIntent(REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT)).toBe(true);
+  });
+
+  it("keeps explicit operative edits as surgical_revision", () => {
+    expect(
+      classifyPremiumRefineRevisionIntent("Add a 5% late fee if payment is more than 10 days late."),
+    ).toBe("surgical_revision");
+    expect(classifyPremiumRefineRevisionIntent("Add confidentiality clause.")).toBe("surgical_revision");
+    expect(classifyPremiumRefineRevisionIntent("Replace the payment section with a simpler table.")).toBe(
+      "surgical_revision",
+    );
+    expect(classifyPremiumRefineRevisionIntent("Delete section 4.")).toBe("surgical_revision");
   });
 });
 
@@ -112,7 +161,7 @@ describe("advisory preserve + append behavior", () => {
       baseline,
       baseline.length,
       undefined,
-      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+      "Make note of anything that should be reviewed or improved in this agreement",
     );
     expect(acc.decision).toBe("accepted");
   });
@@ -160,7 +209,7 @@ describe("executePremiumRefineUpdate advisory fast path", () => {
     expect(postPremiumRefine).toHaveBeenCalledTimes(1);
   });
 
-  it("production QA: conversational notes-for-review multiline prompt append-preserves full baseline", async () => {
+  it("LOCKED REGRESSION: REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT — classify, execute, structured bullets, no placeholders", async () => {
     const baseline = longBaseline();
     vi.mocked(postPremiumRefine).mockResolvedValueOnce({
       updated_document_text: "z".repeat(4000),
@@ -168,28 +217,62 @@ describe("executePremiumRefineUpdate advisory fast path", () => {
       readiness_score: 50,
       suggested_next_step: "review",
     });
-    const userInstruction = `Can you add some notes for review?
-
-like:
-- payment timing?
-- what happens if they stop mid project
-- do we need anything about bugs after launch`;
-    expect(classifyPremiumRefineRevisionIntent(userInstruction)).toBe("advisory_note_or_comment");
-    expect(isAdvisoryNoteOrCommentIntent(userInstruction)).toBe(true);
+    expect(classifyPremiumRefineRevisionIntent(REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT)).toBe(
+      "advisory_note_or_comment",
+    );
+    expect(isAdvisoryNoteOrCommentIntent(REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT)).toBe(true);
     const out = await executePremiumRefineUpdate({
       baselineText: baseline,
       baselineLen: baseline.length,
       intakeText: "B2B.",
-      userInstruction,
+      userInstruction: REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT,
     });
     expect(out.refineApplyDecision).toBe("append_reviewer_note_preserve_document");
     expect(out.usedAppendReviewerNotePreserve).toBe(true);
     expect(out.acceptance.decision).toBe("accepted");
+    expect(out.acceptance.revisionIntent).toBe("advisory_note_or_comment");
+    expect(
+      effectivePremiumRefineApplyLogRevisionIntent({
+        userInstruction: REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT,
+        acceptance: out.acceptance,
+        refineApplyDecision: out.refineApplyDecision,
+        usedAppendReviewerNotePreserve: out.usedAppendReviewerNotePreserve,
+      }),
+    ).toBe("advisory_note_or_comment");
     expect(out.finalText.startsWith(baseline)).toBe(true);
     expect(out.finalText.slice(0, baseline.length)).toBe(baseline);
     expect(out.finalText).toContain("## REVIEWER NOTE / REQUESTED REVIEW ITEMS");
     expect(out.finalText.length).toBeGreaterThan(baseline.length);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.payment_timing);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.termination);
+    expect(out.finalText).toContain(STRUCTURED_ADVISORY_ITEMS.support);
+    expect(out.finalText).not.toMatch(/\[ADDRESS_\d+\]/);
+    expect(out.finalText).not.toContain("do we need anything about bugs after launch");
     expect(postPremiumRefine).toHaveBeenCalledTimes(1);
+  });
+
+  it("LOCKED REGRESSION: review-link corpus picks full post-refine body including reviewer heading", async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: "z".repeat(4000),
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction: REALISTIC_ADVISORY_NOTES_FOR_REVIEW_QA_PROMPT,
+    });
+    const draft = draftWithPremiumBodyForReviewLinkRegression(out.finalText);
+    const pick = pickAuthoritativeProCorpusForRefine({
+      draft,
+      agreementDocumentText: "",
+    });
+    expect(pick.text).toBe(out.finalText.trim());
+    expect(pick.text).toContain("## REVIEWER NOTE / REQUESTED REVIEW ITEMS");
+    expect(pick.text).toContain(STRUCTURED_ADVISORY_ITEMS.payment_timing);
   });
 
   it("advisory append still applies when API returns fail-open summary (prod QA)", async () => {
