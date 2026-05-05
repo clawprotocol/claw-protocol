@@ -379,7 +379,7 @@ test.describe("recipient + link flow QA", () => {
     });
   });
 
-  test("2b) Recipient preview: clause redline authoritative (Net 30 + pause gap); side-by-side vs full-doc)", async ({
+  test("2b) Recipient preview: whole-document redline default + clauses + side-by-side (Net 30 + pause gap)", async ({
     page,
   }) => {
     test.setTimeout(90_000);
@@ -466,6 +466,13 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByText("Send suggested edits").first()).toBeVisible({ timeout: 25_000 });
 
     await expect(page.getByTestId("recipient-tracked-changes-toggle")).toBeVisible();
+    await expect(page.getByTestId("recipient-tab-redline")).toBeVisible();
+    const wholeDoc = page.getByTestId("recipient-whole-doc-redline");
+    await expect(wholeDoc).toBeVisible();
+    await expect(wholeDoc.locator('[data-redline="insert"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(wholeDoc).toContainText(/Net\s*30/i);
+
+    await page.getByTestId("recipient-tab-changed-clauses").click();
     await expect(page.getByTestId("clause-track-changes-panel").first()).toBeVisible();
     const payCard = page.getByTestId("recipient-clause-card-payment_terms");
     await expect(
@@ -477,25 +484,16 @@ test.describe("recipient + link flow QA", () => {
     ).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("Requested but not reflected")).toBeVisible();
 
-    await page.getByRole("button", { name: /Side-by-side/i }).click();
+    await page.getByTestId("recipient-tab-side-by-side").click();
     const proposedCol = page.getByTestId("recipient-side-by-side-proposed-column");
-    await expect(proposedCol.getByTestId("recipient-side-by-side-tracked-summary")).toBeVisible();
-    await expect(
-      proposedCol
-        .getByTestId("recipient-side-by-side-tracked-summary")
-        .locator('[data-redline="insert"]')
-        .or(proposedCol.getByTestId("recipient-side-by-side-tracked-summary").getByText(/Net\s*30|Added:/i))
-        .first(),
-    ).toBeVisible();
+    await expect(proposedCol.locator("[data-redline]")).not.toHaveCount(0);
 
-    await page.getByTestId("recipient-tab-full-redline").click();
-    await page.getByTestId("recipient-advanced-redline-disclosure-trigger").click();
-    await expect(page.getByTestId("recipient-advanced-redline-panel")).toContainText(/full-document|inline redline|Changed clauses/i);
-
-    await page.getByRole("button", { name: /Side-by-side/i }).click();
     await page.getByRole("button", { name: "Hide changes" }).click();
     await expect(proposedCol.locator("[data-redline]")).toHaveCount(0);
-    await expect(proposedCol.getByText(/Net\s*30/i).first()).toBeVisible();
+    await expect(proposedCol).toContainText(/Net\s*30/i);
+
+    await page.getByTestId("recipient-tab-clean-proposed").click();
+    await expect(page.getByText(/Net\s*30/).first()).toBeVisible();
   });
 
   test("3) Owner: incoming suggestion + material change summary; apply; draft updates", async ({ page }) => {

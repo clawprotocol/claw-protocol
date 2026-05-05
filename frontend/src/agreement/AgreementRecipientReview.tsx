@@ -18,15 +18,14 @@ import {
 import {
   assessRecipientPreviewDiff,
   buildRecipientClauseCards,
-  buildRecipientRedlineViewModel,
   getRecipientPreviewSummaryBullets,
-  isRecipientRedlineConsideredNoisy,
   recipientPreviewNoOpMessage,
   recipientSendConfirmationLine,
 } from "./recipientPreviewDiffModel";
-import { RecipientAdvancedRedlinePanel } from "./RecipientAdvancedRedlinePanel";
 import { RecipientChangedClauseCard } from "./RecipientChangedClauseCard";
+import { RecipientRedlineInline } from "./RecipientRedlineInline";
 import { RecipientTrackedChangesToggle } from "./RecipientTrackedChangesToggle";
+import { buildWholeDocumentRedlineViewModel } from "./wholeDocumentRedlineModel";
 import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
@@ -265,8 +264,8 @@ export function AgreementRecipientReview({
   const [copyClauseFlash, setCopyClauseFlash] = useState(false);
   const [recipientPreview, setRecipientPreview] = useState<RecipientPreview | null>(null);
   const [compareViewMode, setCompareViewMode] = useState<
-    "clauses" | "clean" | "side" | "fullRedline"
-  >("clauses");
+    "redline" | "clean" | "side" | "clauses"
+  >("redline");
   const [showTrackedChanges, setShowTrackedChanges] = useState(true);
   const recipientRedlineViewModelLogKeyRef = useRef<string>("");
   const [recipientPosture, setRecipientPosture] =
@@ -570,7 +569,7 @@ export function AgreementRecipientReview({
   }, [recipientPosture]);
 
   useEffect(() => {
-    if (!recipientPreview) setCompareViewMode("clauses");
+    if (!recipientPreview) setCompareViewMode("redline");
   }, [recipientPreview]);
 
   useEffect(() => {
@@ -589,35 +588,27 @@ export function AgreementRecipientReview({
     );
   }, [recipientPreview]);
 
-  const fullDocumentRedlineView = useMemo(() => {
+  const wholeDocumentRedlineVm = useMemo(() => {
     if (!recipientPreview) return null;
-    return buildRecipientRedlineViewModel(
+    return buildWholeDocumentRedlineViewModel(
       htmlToPlainText(recipientPreview.baselineHtml || ""),
       htmlToPlainText(recipientPreview.proposedHtml || ""),
-      { mode: "fullDocument" },
     );
   }, [recipientPreview]);
 
-  const redlineNoisy = Boolean(previewDiff && isRecipientRedlineConsideredNoisy(previewDiff));
-
   useEffect(() => {
-    if (!recipientPreview || !previewDiff) return;
+    if (!recipientPreview || !previewDiff || !wholeDocumentRedlineVm) return;
     const diag =
       import.meta.env.DEV ||
       (typeof window !== "undefined" && window.localStorage?.getItem("lawdogRecipientReviseDiag") === "1");
     if (!diag) return;
-    const k = `${agreementId}:${recipientPreview.revisionText}:${recipientPreview.proposedDraft.updated_at}:${showTrackedChanges}`;
+    const k = `${agreementId}:${recipientPreview.revisionText}:${recipientPreview.proposedDraft.updated_at}:${showTrackedChanges}:${wholeDocumentRedlineVm.stats.segmentCount}`;
     if (k === recipientRedlineViewModelLogKeyRef.current) return;
     recipientRedlineViewModelLogKeyRef.current = k;
     const cards = buildRecipientClauseCards(
       previewDiff.snapshotCompare,
       previewDiff.hasMaterialTextDiff,
       previewDiff.clauseContext,
-    );
-    const fullVm = buildRecipientRedlineViewModel(
-      htmlToPlainText(recipientPreview.baselineHtml || ""),
-      htmlToPlainText(recipientPreview.proposedHtml || ""),
-      { mode: "fullDocument" },
     );
     // eslint-disable-next-line no-console
     console.info("[recipient-redline-diagnosis]", {
@@ -634,9 +625,21 @@ export function AgreementRecipientReview({
         addedLines: c.redlineView.addedLines,
         fallbackReason: c.redlineView.fallbackReason ?? null,
       })),
-      fullDocFallbackReason: fullVm.fallbackReason ?? null,
+      wholeDocFallbackReason: wholeDocumentRedlineVm.fallbackReason ?? null,
     });
-  }, [agreementId, previewDiff, recipientPreview, showTrackedChanges]);
+    // eslint-disable-next-line no-console
+    console.info("[recipient-whole-doc-redline]", {
+      agreementId,
+      currentLen: wholeDocumentRedlineVm.stats.currentLen,
+      proposedLen: wholeDocumentRedlineVm.stats.proposedLen,
+      hasChanges: wholeDocumentRedlineVm.hasChanges,
+      insertCount: wholeDocumentRedlineVm.stats.insertCount,
+      deleteCount: wholeDocumentRedlineVm.stats.deleteCount,
+      sameCount: wholeDocumentRedlineVm.stats.sameCount,
+      segmentCount: wholeDocumentRedlineVm.stats.segmentCount,
+      fallbackReason: wholeDocumentRedlineVm.fallbackReason ?? null,
+    });
+  }, [agreementId, previewDiff, recipientPreview, showTrackedChanges, wholeDocumentRedlineVm]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -1047,13 +1050,14 @@ export function AgreementRecipientReview({
           <button
             type="button"
             className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px] ${
-              compareViewMode === "clauses"
+              compareViewMode === "redline"
                 ? "bg-slate-800 text-slate-100 shadow-sm"
                 : "text-slate-500 hover:text-slate-300"
             }`}
-            onClick={() => setCompareViewMode("clauses")}
+            onClick={() => setCompareViewMode("redline")}
+            data-testid="recipient-tab-redline"
           >
-            Changed clauses
+            Redline
           </button>
           <button
             type="button"
@@ -1063,6 +1067,7 @@ export function AgreementRecipientReview({
                 : "text-slate-500 hover:text-slate-300"
             }`}
             onClick={() => setCompareViewMode("clean")}
+            data-testid="recipient-tab-clean-proposed"
           >
             Clean proposed
           </button>
@@ -1074,24 +1079,50 @@ export function AgreementRecipientReview({
                 : "text-slate-500 hover:text-slate-300"
             }`}
             onClick={() => setCompareViewMode("side")}
+            data-testid="recipient-tab-side-by-side"
           >
             Side-by-side
           </button>
           <button
             type="button"
             className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors sm:px-3 sm:text-[11px] ${
-              compareViewMode === "fullRedline"
+              compareViewMode === "clauses"
                 ? "bg-slate-800 text-slate-100 shadow-sm"
                 : "text-slate-500 hover:text-slate-300"
             }`}
-            onClick={() => setCompareViewMode("fullRedline")}
-            data-testid="recipient-tab-full-redline"
-            title="Advanced full-document compare"
+            onClick={() => setCompareViewMode("clauses")}
+            data-testid="recipient-tab-changed-clauses"
           >
-            <span className="hidden sm:inline">Advanced full-document</span>
-            <span className="sm:hidden">Advanced</span>
+            Changed clauses
           </button>
         </div>
+
+        {compareViewMode === "redline" && wholeDocumentRedlineVm ? (
+          <div className="mt-4" data-testid="recipient-whole-doc-redline">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Agreement text (tracked)
+            </div>
+            {wholeDocumentRedlineVm.fallbackReason ? (
+              <p className="mt-1 text-[10px] leading-snug text-amber-100/90">{wholeDocumentRedlineVm.fallbackReason}</p>
+            ) : null}
+            {showTrackedChanges ? (
+              <div className="mt-2 max-h-[min(70vh,40rem)] overflow-auto rounded-md border border-slate-600/80 bg-white px-3 py-3 text-sm leading-relaxed text-slate-900 shadow-sm sm:max-h-[min(75vh,48rem)]">
+                <RecipientRedlineInline
+                  segments={wholeDocumentRedlineVm.segments}
+                  paragraphBreaks
+                  contrast="high"
+                />
+              </div>
+            ) : (
+              <div
+                className="prose prose-sm mt-2 max-h-[min(70vh,40rem)] max-w-none overflow-auto rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900 sm:max-h-[min(75vh,48rem)]"
+                dangerouslySetInnerHTML={{
+                  __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+                }}
+              />
+            )}
+          </div>
+        ) : null}
 
         {compareViewMode === "clauses" ? (
           <div className="mt-3 space-y-2" data-testid="recipient-changed-clauses">
@@ -1102,19 +1133,6 @@ export function AgreementRecipientReview({
                 showTrackedChanges={showTrackedChanges}
               />
             ))}
-            {redlineNoisy ? (
-              <p className="text-[10px] text-slate-500">
-                This update also changes a lot of surrounding document text. Optional{" "}
-                <button
-                  type="button"
-                  className="text-sky-300 underline decoration-sky-800/50 hover:text-sky-200"
-                  onClick={() => setCompareViewMode("fullRedline")}
-                >
-                  Advanced full-document compare
-                </button>{" "}
-                if you need it.
-              </p>
-            ) : null}
           </div>
         ) : null}
 
@@ -1130,13 +1148,13 @@ export function AgreementRecipientReview({
           </div>
         ) : null}
 
-        {compareViewMode === "side" ? (
+        {compareViewMode === "side" && wholeDocumentRedlineVm ? (
           <div className="mt-4 space-y-2" data-testid="recipient-side-by-side">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div className="rounded-md border border-slate-800/90 bg-white p-4 text-slate-900">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Current</div>
                 <div
-                  className="prose prose-sm mt-2 max-w-none text-slate-900"
+                  className="prose prose-sm mt-2 max-h-[min(65vh,36rem)] max-w-none overflow-auto text-slate-900 md:max-h-[min(70vh,42rem)]"
                   dangerouslySetInnerHTML={{
                     __html: scrubAgreementHtml(recipientPreview.baselineHtml || "") || "<p>No preview.</p>",
                   }}
@@ -1148,40 +1166,16 @@ export function AgreementRecipientReview({
               >
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Proposed</div>
                 {showTrackedChanges ? (
-                  <>
-                    <div
-                      className="mt-2 space-y-2 rounded-md border border-slate-200 bg-slate-50/80 p-2"
-                      data-testid="recipient-side-by-side-tracked-summary"
-                    >
-                      <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-600">
-                        Tracked change summary
-                      </div>
-                      <div className="space-y-2">
-                        {clauseCards.map((card) => (
-                          <RecipientChangedClauseCard
-                            key={card.id}
-                            card={card}
-                            showTrackedChanges
-                            compact
-                          />
-                        ))}
-                      </div>
-                    </div>
-                    <div className="mt-3 border-t border-slate-200 pt-3">
-                      <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-600">
-                        Proposed document
-                      </div>
-                      <div
-                        className="prose prose-sm mt-2 max-w-none text-slate-900"
-                        dangerouslySetInnerHTML={{
-                          __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
-                        }}
-                      />
-                    </div>
-                  </>
+                  <div className="mt-2 max-h-[min(65vh,36rem)] overflow-auto text-sm leading-relaxed text-slate-900 md:max-h-[min(70vh,42rem)]">
+                    <RecipientRedlineInline
+                      segments={wholeDocumentRedlineVm.segments}
+                      paragraphBreaks
+                      contrast="high"
+                    />
+                  </div>
                 ) : (
                   <div
-                    className="prose prose-sm mt-2 max-w-none text-slate-900"
+                    className="prose prose-sm mt-2 max-h-[min(65vh,36rem)] max-w-none overflow-auto text-slate-900 md:max-h-[min(70vh,42rem)]"
                     dangerouslySetInnerHTML={{
                       __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
                     }}
@@ -1189,16 +1183,6 @@ export function AgreementRecipientReview({
                 )}
               </div>
             </div>
-          </div>
-        ) : null}
-
-        {compareViewMode === "fullRedline" ? (
-          <div className="mt-3">
-            <RecipientAdvancedRedlinePanel
-              viewModel={fullDocumentRedlineView}
-              showTrackedChanges={showTrackedChanges}
-              proposedHtmlClean={scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>"}
-            />
           </div>
         ) : null}
 
@@ -2428,8 +2412,8 @@ export function AgreementRecipientReview({
                 </button>
               </div>
               <p className="text-[10px] leading-snug text-slate-500">
-                Use <span className="text-slate-400">Preview changes</span>, review <span className="text-slate-400">Changed clauses</span>, then{" "}
-                <span className="text-slate-400">Send suggested edits</span>.
+                Use <span className="text-slate-400">Preview changes</span>, review the <span className="text-slate-400">Redline</span> (or{" "}
+                <span className="text-slate-400">Changed clauses</span>), then <span className="text-slate-400">Send suggested edits</span>.
               </p>
 
               {comparePanel}

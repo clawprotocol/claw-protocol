@@ -44,7 +44,7 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
     vi.restoreAllMocks();
   });
 
-  it("toggle defaults ON, affects clauses and side-by-side; advanced compare collapsed by default", async () => {
+  it("preview defaults to Redline tab with whole-document insert markers; toggle affects side-by-side", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -98,12 +98,11 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
       expect(screen.getByTestId("recipient-tracked-changes-toggle")).toBeTruthy();
     });
 
-    const toggle = screen.getByTestId("recipient-tracked-changes-toggle");
-    const showBtn = within(toggle).getByRole("button", { name: /Show changes/i });
-    const hideBtn = within(toggle).getByRole("button", { name: /Hide changes/i });
-    expect(showBtn.getAttribute("aria-pressed")).toBe("true");
-    expect(hideBtn.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("recipient-tab-redline")).toBeTruthy();
+    const wholeDocPanel = screen.getByTestId("recipient-whole-doc-redline");
+    expect(wholeDocPanel.querySelector('[data-redline="insert"]')).toBeTruthy();
 
+    await userEvent.click(screen.getByTestId("recipient-tab-changed-clauses"));
     const clauseCard = await screen.findByTestId("recipient-clause-card-payment_terms");
     const redline =
       within(clauseCard).queryByTestId("clause-field-redline") ??
@@ -115,18 +114,17 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
       expect(redline.querySelector("[data-redline]")).toBeTruthy();
     }
 
+    const toggle = screen.getByTestId("recipient-tracked-changes-toggle");
+    const showBtn = within(toggle).getByRole("button", { name: /Show changes/i });
+    const hideBtn = within(toggle).getByRole("button", { name: /Hide changes/i });
+    expect(showBtn.getAttribute("aria-pressed")).toBe("true");
+
     await userEvent.click(screen.getByRole("button", { name: /Side-by-side/i }));
-    expect(screen.getByTestId("recipient-side-by-side-tracked-summary")).toBeTruthy();
+    const proposedCol = screen.getByTestId("recipient-side-by-side-proposed-column");
+    expect(proposedCol.querySelector("[data-redline]")).toBeTruthy();
 
     await userEvent.click(hideBtn);
-    expect(screen.queryByTestId("recipient-side-by-side-tracked-summary")).toBeNull();
-
-    await userEvent.click(screen.getByTestId("recipient-tab-full-redline"));
-    expect(screen.queryByTestId("recipient-advanced-redline-scroll")).toBeNull();
-    await userEvent.click(screen.getByTestId("recipient-advanced-redline-disclosure-trigger"));
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-advanced-redline-scroll")).toBeTruthy();
-    });
+    expect(proposedCol.querySelector("[data-redline]")).toBeNull();
   });
 
   it(
@@ -183,6 +181,7 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
       },
       { timeout: 8000 },
     );
+    await userEvent.click(screen.getByTestId("recipient-tab-changed-clauses"));
     expect(screen.getByTestId("recipient-clause-card-payment_terms")).toBeTruthy();
   }, 15_000);
 });
