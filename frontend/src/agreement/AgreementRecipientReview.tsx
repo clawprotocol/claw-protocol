@@ -20,7 +20,6 @@ import {
   buildRecipientClauseCards,
   extractPauseRequestPhrase,
   recipientPreviewNoOpMessage,
-  recipientSendConfirmationLine,
 } from "./recipientPreviewDiffModel";
 import { RecipientLegalRedlineDocument } from "./RecipientLegalRedlineDocument";
 import {
@@ -276,6 +275,8 @@ export function AgreementRecipientReview({
   const [copyDraftFlash, setCopyDraftFlash] = useState(false);
   const [copyClauseFlash, setCopyClauseFlash] = useState(false);
   const [recipientPreview, setRecipientPreview] = useState<RecipientPreview | null>(null);
+  const [sendSuggestedEditsModalOpen, setSendSuggestedEditsModalOpen] = useState(false);
+  const [recipientSuggestedEditsSentAck, setRecipientSuggestedEditsSentAck] = useState(false);
   const recipientRedlineViewModelLogKeyRef = useRef<string>("");
   const recipientRedlineSourceLogKeyRef = useRef<string>("");
   const [recipientPosture, setRecipientPosture] =
@@ -508,7 +509,15 @@ export function AgreementRecipientReview({
     setTypedConfirm("");
     setSignedAtLabel(null);
     setFullyExecutedAtSign(false);
+    setSendSuggestedEditsModalOpen(false);
+    setRecipientSuggestedEditsSentAck(false);
   }, [agreementId]);
+
+  useEffect(() => {
+    if (!recipientPreview && sendSuggestedEditsModalOpen) {
+      setSendSuggestedEditsModalOpen(false);
+    }
+  }, [recipientPreview, sendSuggestedEditsModalOpen]);
 
   useEffect(() => {
     if (recipientFunnelOpenRef.current) return;
@@ -1008,7 +1017,7 @@ export function AgreementRecipientReview({
     }
   }
 
-  async function commitSubmit() {
+  function openSendSuggestedEditsModal() {
     if (needsPersonalizedLink) {
       setError("Use the personal review link from the sender (it includes your participant id).");
       return;
@@ -1023,11 +1032,25 @@ export function AgreementRecipientReview({
       setError(recipientPreviewNoOpMessage());
       return;
     }
-    if (
-      !window.confirm(
-        `${recipientSendConfirmationLine(previewDiff)}\n\nSend this version to the agreement owner?`,
-      )
-    ) {
+    setSendSuggestedEditsModalOpen(true);
+  }
+
+  async function performRecipientSuggestedEditsSubmit() {
+    if (needsPersonalizedLink) {
+      setError("Use the personal review link from the sender (it includes your participant id).");
+      setSendSuggestedEditsModalOpen(false);
+      return;
+    }
+    if (bundle && isSigningLockActive(bundle)) {
+      setError("Review is closed on this agreement — you can still read the document.");
+      setSendSuggestedEditsModalOpen(false);
+      return;
+    }
+    const p = recipientPreview;
+    if (!p || saving) return;
+    if (!previewDiff?.canSubmit) {
+      setError(recipientPreviewNoOpMessage());
+      setSendSuggestedEditsModalOpen(false);
       return;
     }
     setSaving(true);
@@ -1037,22 +1060,22 @@ export function AgreementRecipientReview({
       const submitted = await submitRecipientProposalApi(
         agreementId,
         {
-        instruction: p.revisionText,
-        proposer_id: participantPid,
-        proposer_display_name: proposerDisplayNameForApi,
-        draft: {
-          title: d.title,
-          jurisdiction: d.jurisdiction,
-          parties: d.parties,
-          purpose: d.purpose,
-          payment_terms: d.payment_terms,
-          duration: d.duration,
-          due_date: d.due_date,
-          effective_date: d.effective_date,
+          instruction: p.revisionText,
+          proposer_id: participantPid,
+          proposer_display_name: proposerDisplayNameForApi,
+          draft: {
+            title: d.title,
+            jurisdiction: d.jurisdiction,
+            parties: d.parties,
+            purpose: d.purpose,
+            payment_terms: d.payment_terms,
+            duration: d.duration,
+            due_date: d.due_date,
+            effective_date: d.effective_date,
+          },
+          rendered_html: p.proposedHtml,
         },
-        rendered_html: p.proposedHtml,
-        },
-        recipientAccessToken
+        recipientAccessToken,
       );
       if (!submitted.ok) {
         if (
@@ -1062,8 +1085,9 @@ export function AgreementRecipientReview({
           setError(
             submitted.error === "recipient_proposal_already_pending_from_participant"
               ? "You already have a suggestion in the queue for this agreement."
-              : "You already have a suggestion waiting for the owner. Wait for them to review it."
+              : "You already have a suggestion waiting for the owner. Wait for them to review it.",
           );
+          setSendSuggestedEditsModalOpen(false);
           await refresh();
           return;
         }
@@ -1075,6 +1099,8 @@ export function AgreementRecipientReview({
         );
       }
       trackAgreementFunnelEvent("recipient_submitted_edits", { entry_kind: entry.kind }, { planTier: String(access.tier), agreementId });
+      setSendSuggestedEditsModalOpen(false);
+      setRecipientSuggestedEditsSentAck(true);
       setInstruction("");
       setExternalAiPaste("");
       setRecipientPreview(null);
@@ -1155,7 +1181,7 @@ export function AgreementRecipientReview({
   }
 
   const comparePanel =
-    recipientPreview && previewDiff && !previewDiff.isCompleteNoOp ? (
+    recipientPreview && previewDiff && !previewDiff.isCompleteNoOp && !recipientSuggestedEditsSentAck ? (
       <div
         className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-4 shadow-sm"
         data-testid="recipient-suggested-changes-panel"
@@ -1345,11 +1371,12 @@ export function AgreementRecipientReview({
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
+            data-testid="recipient-open-send-suggested-edits-modal"
             className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
             disabled={saving || !previewDiff.canSubmit}
-            onClick={() => void commitSubmit()}
+            onClick={() => openSendSuggestedEditsModal()}
           >
-            {saving ? "Sending…" : "Send suggested edits"}
+            Send these suggested edits
           </button>
           <button
             type="button"
@@ -1965,11 +1992,14 @@ export function AgreementRecipientReview({
     };
   })();
 
-  const suggestControlsDisabled = saving || previewing || hasPendingSuggestion;
+  const suggestControlsDisabled =
+    saving || previewing || hasPendingSuggestion || recipientSuggestedEditsSentAck;
 
   return (
     <div
-      className={`vs01-agreement-review-inner space-y-6 sm:pb-8 ${recipientPreview ? "pb-32" : "pb-24"}`}
+      className={`vs01-agreement-review-inner space-y-6 sm:pb-8 ${
+        recipientPreview && !recipientSuggestedEditsSentAck ? "pb-32" : "pb-24"
+      }`}
     >
       <div
         className={`rounded-lg border px-4 py-3 text-sm leading-snug ${statusBanner.wrap}`}
@@ -1978,6 +2008,48 @@ export function AgreementRecipientReview({
         <div className="font-semibold">{statusBanner.title}</div>
         <p className="mt-1 text-xs opacity-95">{statusBanner.detail}</p>
       </div>
+
+      {entry.kind === "review" && recipientSuggestedEditsSentAck ? (
+        <div
+          className="rounded-lg border border-emerald-700/45 bg-emerald-950/30 px-4 py-4 text-slate-50 shadow-sm"
+          data-testid="recipient-suggested-edits-sent-ack"
+          role="status"
+        >
+          <h2 className="text-base font-semibold text-emerald-100">Suggested edits sent</h2>
+          <p className="mt-2 text-sm leading-relaxed text-emerald-50/95">
+            Your proposed changes are now in the owner&apos;s queue. The owner can accept, decline, or continue
+            negotiating.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+              data-testid="recipient-suggested-edits-back-to-agreement"
+              onClick={() => {
+                setWorkspaceTab("read");
+                window.requestAnimationFrame(() => {
+                  document.querySelector(".prose")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                });
+              }}
+            >
+              Back to agreement
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-emerald-600/60 px-4 py-2 text-sm font-medium text-emerald-100 hover:bg-emerald-950/50"
+              data-testid="recipient-suggested-edits-suggest-another"
+              onClick={() => {
+                setRecipientSuggestedEditsSentAck(false);
+                setWorkspaceTab("revise");
+                setError(null);
+                scrollAndFocusSuggestPanel();
+              }}
+            >
+              Suggest another change
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {entry.kind === "review" ? (
         <p className="rounded-md border border-slate-800/70 bg-slate-950/35 px-3 py-2 text-[11px] leading-snug text-slate-500">
@@ -2199,7 +2271,7 @@ export function AgreementRecipientReview({
             <button
               type="button"
               className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-45"
-              disabled={hasPendingSuggestion}
+              disabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
               onClick={() => {
                 setWorkspaceTab("revise");
                 setError(null);
@@ -2561,7 +2633,7 @@ export function AgreementRecipientReview({
                 <button
                   type="button"
                   className="btn rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-                  disabled={!canPreview || hasPendingSuggestion}
+                  disabled={!canPreview || hasPendingSuggestion || recipientSuggestedEditsSentAck}
                   onClick={() => void previewChanges()}
                 >
                   {previewing ? "Working…" : "Preview changes"}
@@ -2569,7 +2641,7 @@ export function AgreementRecipientReview({
               </div>
               <p className="text-[10px] leading-snug text-slate-500">
                 Use <span className="text-slate-400">Preview changes</span>, review <span className="text-slate-400">Suggested changes</span>, then{" "}
-                <span className="text-slate-400">Send suggested edits</span>.
+                <span className="text-slate-400">Send these suggested edits</span>.
               </p>
 
               {comparePanel}
@@ -2590,7 +2662,7 @@ export function AgreementRecipientReview({
 
       {error ? <p className="text-xs text-rose-300">{error}</p> : null}
 
-      {recipientPreview ? (
+      {recipientPreview && !recipientSuggestedEditsSentAck ? (
         <div
           className="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-slate-800/90 bg-slate-950/95 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur sm:hidden"
           role="toolbar"
@@ -2598,11 +2670,12 @@ export function AgreementRecipientReview({
         >
           <button
             type="button"
+            data-testid="recipient-open-send-suggested-edits-modal-mobile"
             className="btn w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
             disabled={saving || !previewDiff?.canSubmit}
-            onClick={() => void commitSubmit()}
+            onClick={() => openSendSuggestedEditsModal()}
           >
-            {saving ? "Sending…" : "Send suggested edits"}
+            Send these suggested edits
           </button>
           <p className="text-center text-[10px] leading-snug text-slate-500">
             Sends to the owner only — does not change the agreement automatically.
@@ -2615,6 +2688,52 @@ export function AgreementRecipientReview({
           >
             Dismiss preview
           </button>
+        </div>
+      ) : null}
+
+      {sendSuggestedEditsModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          data-testid="recipient-send-suggested-edits-modal"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setSendSuggestedEditsModalOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipient-send-suggested-edits-modal-title"
+            className="max-w-md rounded-xl border border-slate-600 bg-slate-900 p-5 shadow-xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2 id="recipient-send-suggested-edits-modal-title" className="text-lg font-semibold text-slate-100">
+              Send suggested edits?
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-slate-300">
+              You&apos;re sending these proposed changes to the owner. Nothing changes unless the owner accepts them.
+            </p>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                data-testid="recipient-send-suggested-edits-modal-dismiss"
+                className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                disabled={saving}
+                onClick={() => setSendSuggestedEditsModalOpen(false)}
+              >
+                Keep reviewing
+              </button>
+              <button
+                type="button"
+                data-testid="recipient-send-suggested-edits-confirm"
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                disabled={saving}
+                onClick={() => void performRecipientSuggestedEditsSubmit()}
+              >
+                {saving ? "Sending…" : "Send suggested edits"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

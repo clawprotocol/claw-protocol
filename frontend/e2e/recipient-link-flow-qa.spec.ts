@@ -370,11 +370,12 @@ test.describe("recipient + link flow QA", () => {
     const ta = page.locator("#recipient-revision-input");
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
     await page.getByRole("button", { name: "Preview changes" }).click();
-    await expect(page.getByText("Send suggested edits").first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Send these suggested edits").first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("recipient-preview-summary-heading")).toBeVisible();
-    page.once("dialog", (d) => void d.accept());
-    await page.getByRole("button", { name: "Send suggested edits" }).first().click();
-    await expect(page.getByText(/Suggested edits sent|waiting on the owner|queue/i).first()).toBeVisible({
+    await page.getByRole("button", { name: "Send these suggested edits" }).first().click();
+    await expect(page.getByTestId("recipient-send-suggested-edits-modal")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("recipient-send-suggested-edits-confirm").click();
+    await expect(page.getByTestId("recipient-suggested-edits-sent-ack")).toBeVisible({
       timeout: 15_000,
     });
   });
@@ -476,7 +477,7 @@ test.describe("recipient + link flow QA", () => {
     const ta = page.locator("#recipient-revision-input");
     await ta.fill("Net 30 and pause work after 15 days late");
     await page.getByRole("button", { name: "Preview changes" }).click();
-    await expect(page.getByText("Send suggested edits").first()).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText("Send these suggested edits").first()).toBeVisible({ timeout: 25_000 });
 
     await expect(page.getByTestId("recipient-suggested-changes-panel")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Suggested changes" })).toBeVisible();
@@ -502,7 +503,7 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByTestId("recipient-tab-redline")).toHaveCount(0);
     await expect(page.getByTestId("recipient-side-by-side-block-grid")).toHaveCount(0);
 
-    await expect(page.getByRole("button", { name: "Send suggested edits" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send these suggested edits" }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Dismiss preview" }).first()).toBeVisible();
   });
 

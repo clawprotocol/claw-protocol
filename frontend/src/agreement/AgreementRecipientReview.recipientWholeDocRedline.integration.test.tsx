@@ -112,7 +112,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
-    expect(within(panel).getByRole("button", { name: /Send suggested edits/i })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: /Send these suggested edits/i })).toBeTruthy();
     expect(within(panel).getByRole("button", { name: /Dismiss preview/i })).toBeTruthy();
   });
 });
