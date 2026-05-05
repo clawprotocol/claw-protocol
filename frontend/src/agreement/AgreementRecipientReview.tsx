@@ -29,6 +29,7 @@ import {
 } from "./legalRedlineBlocks";
 import {
   buildRecipientLegalRedlinePlainTexts,
+  extractPaymentPlacementCalloutSnippet,
   fingerprintPlainText,
   snippetAroundPaymentTerms,
 } from "./recipientWholeDocRedlineSource";
@@ -1182,7 +1183,17 @@ export function AgreementRecipientReview({
               </p>
             ) : null}
 
-            {recipientRedlinePlainTexts?.paymentTermsInlinePlacementFailed ? (
+            {recipientRedlinePlainTexts?.paymentTermsInlinePlacementFailed &&
+            recipientRedlinePlainTexts.narrowRecipientTargetedRedline ? (
+              <p
+                className="mt-3 rounded-md border border-amber-700/45 bg-amber-950/30 px-3 py-2 text-sm leading-snug text-amber-50"
+                data-testid="recipient-redline-narrow-unsafe-payment-callout"
+                role="status"
+              >
+                Requested but not safely placed inline:{" "}
+                {extractPaymentPlacementCalloutSnippet(String(recipientPreview.proposedDraft.payment_terms ?? ""))}.
+              </p>
+            ) : recipientRedlinePlainTexts?.paymentTermsInlinePlacementFailed ? (
               <p
                 className="mt-3 rounded-md border border-amber-700/40 bg-amber-950/25 px-3 py-2 text-xs leading-snug text-amber-100/95"
                 data-testid="recipient-redline-placement-callout"

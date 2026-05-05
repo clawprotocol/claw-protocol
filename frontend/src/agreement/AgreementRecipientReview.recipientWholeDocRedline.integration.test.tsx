@@ -293,7 +293,9 @@ describe("AgreementRecipientReview payment inline placement failure", () => {
 
     await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
-    fireEvent.change(instruction, { target: { value: "Change payment to Net 30" } });
+    fireEvent.change(instruction, {
+      target: { value: "Contract update request only." },
+    });
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
 
     await waitFor(() => {
@@ -309,5 +311,132 @@ describe("AgreementRecipientReview payment inline placement failure", () => {
       expect(full).not.toMatch(/net\s*30/i);
     }
     expect(full).not.toMatch(/Agreement fields \(tracked for redline\)/i);
+  });
+});
+
+const baselineQaPartyNoiseHtml = `<div>
+  <p>3. Compensation and Invoicing</p>
+  <p>Invoices are payable upon receipt.</p>
+  <p>CLIENT:</p>
+  <p>Sarah Collins</p>
+  <p>DEVELOPER:</p>
+  <p>Anthem Blanchard</p>
+  <p>Email for Notices: legal@example.com</p>
+  <p>Execution and signature placement below.</p>
+  <p>IN WITNESS WHEREOF, the parties agree.</p>
+  <p>Created with LawDog — Draft for Review.</p>
+</div>`;
+
+const agreementIdQaNarrow = "ag_narrow_redline_qa_party_noise";
+
+const initialDraftQaNarrow = {
+  ...initialDraft,
+  id: agreementIdQaNarrow,
+};
+
+const revisedDraftQaNarrow = {
+  ...revisedDraft,
+  id: agreementIdQaNarrow,
+};
+
+describe("AgreementRecipientReview narrow payment redline QA (party/signature/footer drift)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("places Net 30 only in payment wording; insert/delete never spans boilerplate strings", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
+
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: baselineQaPartyNoiseHtml });
+      }
+      if (method === "POST" && url.includes("/revise")) {
+        return jsonResponse({
+          draft: revisedDraftQaNarrow,
+          rendered_html: divergentReviseRenderedHtml,
+        });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({ draft: initialDraftQaNarrow });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview agreementId={agreementIdQaNarrow} recipientAccessToken="tok_test" />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
+    });
+
+    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    fireEvent.change(instruction, {
+      target: { value: "Net 30 and pause work after 15 days late" },
+    });
+    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
+    });
+
+    const legalRoot = screen.getByTestId("recipient-legal-redline-document");
+    const insText = [...legalRoot.querySelectorAll('[data-redline="insert"]')]
+      .map((el) => el.textContent ?? "")
+      .join(" ");
+    expect(insText).toMatch(/Net\s*30/i);
+    expect(insText.toLowerCase()).toMatch(/invoice|payable|compensation|fee|payment|due|receipt|net/);
+
+    const forbidden = [
+      "Signature",
+      "CLIENT",
+      "DEVELOPER",
+      "Sarah Collins",
+      "Anthem Blanchard",
+      "Created with LawDog",
+      "Draft for Review",
+      "IN WITNESS",
+      "Email for Notices",
+      "Execution and signature",
+    ];
+    for (const el of legalRoot.querySelectorAll('[data-redline="insert"], [data-redline="delete"]')) {
+      const t = el.textContent ?? "";
+      for (const f of forbidden) {
+        expect(t).not.toContain(f);
+      }
+    }
+
+    const fullLower = (legalRoot.textContent ?? "").toLowerCase();
+    const iw = fullLower.indexOf("in witness whereof");
+    const netIdx = fullLower.indexOf("net 30");
+    expect(iw).toBeGreaterThan(-1);
+    expect(netIdx).toBeGreaterThan(-1);
+    expect(netIdx).toBeLessThan(iw);
+
+    const insChip = screen.getByTestId("recipient-redline-chip-insertions").textContent ?? "";
+    const delChip = screen.getByTestId("recipient-redline-chip-deletions").textContent ?? "";
+    const secChip = screen.getByTestId("recipient-redline-chip-sections").textContent ?? "";
+    expect(parseInt(insChip, 10)).toBeLessThanOrEqual(2);
+    expect(parseInt(delChip, 10)).toBeLessThanOrEqual(1);
+    expect(parseInt(secChip, 10)).toBeLessThanOrEqual(1);
+
+    const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
+    expect(callout.textContent).toMatch(/pause work after 15 days late/i);
   });
 });

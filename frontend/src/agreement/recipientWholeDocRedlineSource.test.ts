@@ -3,7 +3,11 @@ import {
   buildLegalRedlineDocumentViewModel,
   filterNarrowRecipientPaymentRedlineNoise,
 } from "./legalRedlineBlocks";
-import { buildRecipientLegalRedlinePlainTexts } from "./recipientWholeDocRedlineSource";
+import {
+  buildRecipientLegalRedlinePlainTexts,
+  extractPaymentPlacementCalloutSnippet,
+  splitPlainTextAtRecipientPaymentNoiseBoundary,
+} from "./recipientWholeDocRedlineSource";
 import type { AgreementDraft } from "./agreementTypes";
 import { compareAgreementSnapshots } from "../vs01/agreementCompare";
 import { draftToSnapshot } from "./agreementVersionStore";
@@ -31,6 +35,22 @@ function minimalDraft(overrides: Partial<AgreementDraft>): AgreementDraft {
 function changedFieldsBetween(a: AgreementDraft, b: AgreementDraft) {
   return compareAgreementSnapshots(draftToSnapshot(a), draftToSnapshot(b)).changedFields;
 }
+
+describe("splitPlainTextAtRecipientPaymentNoiseBoundary", () => {
+  it("cuts before IN WITNESS so payment edits stay in the head prefix", () => {
+    const raw = "Invoices are payable upon receipt.\n\nIN WITNESS WHEREOF\nAlice";
+    const { head, tail } = splitPlainTextAtRecipientPaymentNoiseBoundary(raw);
+    expect(head).toContain("upon receipt");
+    expect(tail).toContain("IN WITNESS");
+    expect(head).not.toContain("IN WITNESS");
+  });
+});
+
+describe("extractPaymentPlacementCalloutSnippet", () => {
+  it("returns Net N from payment terms after text", () => {
+    expect(extractPaymentPlacementCalloutSnippet("Invoices are payable Net 30.")).toMatch(/net\s*30/i);
+  });
+});
 
 describe("buildRecipientLegalRedlinePlainTexts", () => {
   it("does not append payment text when no safe payment block; placement fails closed", () => {

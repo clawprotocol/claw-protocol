@@ -399,6 +399,26 @@ function blockLooksStrongPayment(t: string): boolean {
  * Blocks that should never show insert/delete styling for a narrow payment-only recipient suggestion,
  * even if template drift or alignment makes the word-diff noisy.
  */
+/** Insert/delete text that is clearly boilerplate drift, not payment timing (narrow path sanitizer). */
+function narrowPaymentSpuriousInsertDeleteLeak(b: LegalRedlineBlock): boolean {
+  const raw = `${b.currentText ?? ""}\n${b.proposedText ?? ""}`;
+  if (blockLooksStrongPayment(raw)) return false;
+  const insDel = b.segments
+    .filter((s) => s.type === "insert" || s.type === "delete")
+    .map((s) => s.text)
+    .join(" ")
+    .toLowerCase();
+  if (!insDel.replace(/\s+/g, "").length) return false;
+  if (/\bnet\s*\d+\b/.test(insDel) || /\b(invoice|invoices|payable|receipt|payment)\b/.test(insDel)) return false;
+  return (
+    /\b(in witness whereof|created with lawdog|draft for review|email for notices|execution and signature|sarah collins|anthem blanchard)\b/i.test(
+      insDel,
+    ) ||
+    /\b(client|developer)\s*:/i.test(insDel) ||
+    /\bsignature\b/i.test(insDel)
+  );
+}
+
 export function isRecipientRedlineNoiseBlockForNarrowPayment(b: LegalRedlineBlock): boolean {
   const raw = `${b.currentText ?? ""}\n${b.proposedText ?? ""}`;
   if (blockLooksStrongPayment(raw)) return false;
@@ -410,10 +430,12 @@ export function isRecipientRedlineNoiseBlockForNarrowPayment(b: LegalRedlineBloc
 
   if (/\b(created with lawdog|draft for review)\b/.test(t)) return true;
   if (/\bin witness whereof\b/.test(t)) return true;
-  if (/execution and signature placement/i.test(t)) return true;
+  if (/execution and signature/i.test(t)) return true;
   if (/^notices\b/i.test(firstLine)) return true;
+  if (/\bemail\s+for\s+notices\b/.test(t)) return true;
 
   if (/\bemail\s*:/i.test(t) || (/\bemail\b/.test(t) && /@/.test(t))) return true;
+  if (/(^|\n)\s*(client|developer)\s*:\s*/im.test(raw)) return true;
 
   const lines = raw.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   for (const line of lines.slice(0, 8)) {
@@ -455,7 +477,7 @@ export function filterNarrowRecipientPaymentRedlineNoise(
   const droppedBlocks: Array<{ id: string; kind: LegalRedlineBlockKind; label?: string }> = [];
   const blocks = vm.blocks.map((b) => {
     if (!blockHasMaterialChange(b.segments)) return b;
-    if (!isRecipientRedlineNoiseBlockForNarrowPayment(b)) return b;
+    if (!isRecipientRedlineNoiseBlockForNarrowPayment(b) && !narrowPaymentSpuriousInsertDeleteLeak(b)) return b;
     droppedBlocks.push({ id: b.id, kind: b.kind, label: b.label });
     return collapseBlockToSameOnly(b);
   });
