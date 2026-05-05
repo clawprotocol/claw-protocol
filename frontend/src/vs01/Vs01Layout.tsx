@@ -5,6 +5,7 @@ import { LawdogLogoLink } from "../components/ui/LawdogLogoLink";
 import "./vs01.css";
 
 export type Vs01LayoutHero = {
+  /** Omitted on surfaces where no product eyebrow is shown (e.g. public recipient review). */
   eyebrow?: string;
   title: string;
   subtitle: string;
@@ -19,6 +20,11 @@ export type Vs01LayoutProps = {
   productNav?: { label: string; onClick: () => void } | null;
   /** e.g. plan / usage summary — kept visually secondary to hero copy. */
   headerAside?: ReactNode;
+  /**
+   * First sentence after the disclaimer lead-in (evidence / verification).
+   * Default references CLAW for legacy VS01 surfaces; recipient-facing flows should pass LawDog wording.
+   */
+  footerEvidenceSentence?: string;
 };
 
 const DEFAULT_HERO: Vs01LayoutHero = {
@@ -33,8 +39,12 @@ const DEFAULT_HERO: Vs01LayoutHero = {
  * VS01 pilot shell: accent strip, header, main slot, footer/disclaimer.
  * API-free; children typically {@link Vs01Wizard}.
  */
-export function Vs01Layout({ children, hero, productNav, headerAside }: Vs01LayoutProps) {
+const DEFAULT_FOOTER_EVIDENCE_SENTENCE =
+  "CLAW outputs are evidence records; verification is cryptographic and file-based.";
+
+export function Vs01Layout({ children, hero, productNav, headerAside, footerEvidenceSentence }: Vs01LayoutProps) {
   const h = hero ?? DEFAULT_HERO;
+  const evidenceSentence = footerEvidenceSentence ?? DEFAULT_FOOTER_EVIDENCE_SENTENCE;
   return (
     <div className="vs01-root">
       <div className="vs01-accent-strip" aria-hidden />
@@ -53,7 +63,7 @@ export function Vs01Layout({ children, hero, productNav, headerAside }: Vs01Layo
             ) : null}
             {headerAside ? <div className="vs01-header-aside">{headerAside}</div> : null}
             <div className="vs01-header-brand">
-              <span className="vs01-header-eyebrow">{h.eyebrow}</span>
+              {h.eyebrow ? <span className="vs01-header-eyebrow">{h.eyebrow}</span> : null}
               <h1 id="vs01-shell-title" className="vs01-header-title">
                 {h.title}
               </h1>
@@ -66,7 +76,7 @@ export function Vs01Layout({ children, hero, productNav, headerAside }: Vs01Layo
         <footer className="vs01-footer">
           <p>
             <strong>Disclaimer:</strong> This interface is informational. {NOT_LEGAL_ADVICE}
-            CLAW outputs are evidence records; verification is cryptographic and file-based.
+            {evidenceSentence}
           </p>
           <p>
             VS01 receipt ids often look like <code>rcpt_…</code>. They are{" "}

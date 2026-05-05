@@ -54,7 +54,7 @@ export function buildVersionShareText(args: {
   const ins = args.instruction.trim().replace(/\s+/g, " ");
   const short = ins.length > 180 ? `${ins.slice(0, 177)}…` : ins;
   return [
-    `CLAW · ${args.agreementId.slice(0, 12)}… · v${args.versionOrdinal}`,
+    `LawDog · ${args.agreementId.slice(0, 12)}… · v${args.versionOrdinal}`,
     short ? `Note: ${short}` : null,
     `Saved: ${new Date(args.createdAt).toLocaleString()}`,
     `Public verify: ${verify}`,

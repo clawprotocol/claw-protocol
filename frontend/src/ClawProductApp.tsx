@@ -81,6 +81,15 @@ const AGREEMENT_HERO: Vs01LayoutHero = {
   tagline: "Version history and redlines stay with each agreement before it hits the signing flow.",
 };
 
+/** Public recipient agreement review (`/agreements/.../review`) — LawDog-only chrome, no CLAW eyebrow. */
+const RECIPIENT_REVIEW_HERO: Vs01LayoutHero = {
+  title: "Review workspace",
+  subtitle: "Read the agreement, suggest changes, or continue when it looks good.",
+};
+
+const LAWDOG_FOOTER_EVIDENCE_SENTENCE =
+  "LawDog produces verifiable evidence records; verification is cryptographic and file-based.";
+
 const VERIFY_HERO: Vs01LayoutHero = {
   eyebrow: "CLAW",
   title: "Public verification",
@@ -384,9 +393,10 @@ export function ClawProductApp() {
   if (reviewInfo) {
     return (
       <Vs01Layout
-        hero={AGREEMENT_HERO}
+        hero={RECIPIENT_REVIEW_HERO}
         headerAside={ACCESS_HEADER_ASIDE}
         productNav={{ label: "← Home", onClick: () => navigate("/") }}
+        footerEvidenceSentence={LAWDOG_FOOTER_EVIDENCE_SENTENCE}
       >
         <div className="vs01-card vs01-card--envelope">
           <AgreementReviewGate

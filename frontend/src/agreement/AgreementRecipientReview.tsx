@@ -28,9 +28,9 @@ import {
 } from "./legalRedlineBlocks";
 import {
   countRecipientIntentGaps,
-  formatRecipientIntentAppliedLabel,
   recipientIntentStatusTestId,
   recipientRedlineAnchorForIntentCategory,
+  type RecipientInstructionIntent,
   type RecipientInstructionIntentCategory,
 } from "./recipientInstructionIntents";
 import {
@@ -100,15 +100,11 @@ import {
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
 import {
-  BRING_BACK_SUGGESTED_EDITS_TITLE,
   MODE_PASTE_REVISED_DRAFT,
   MODE_SUGGEST_PLAIN_ENGLISH,
   MODE_UPLOAD_FILE,
-  NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE,
   PASTE_OPTIONAL_NOTE_LABEL,
   PLAIN_ENGLISH_FIELD_LABEL,
-  REVIEWER_NOT_AUTOMATIC_LINE,
-  UNIVERSAL_REVIEW_INTRO,
   UPLOAD_FILE_COMPARISON_COMING_SOON,
 } from "./universalReviewIntakeCopy";
 
@@ -117,12 +113,27 @@ const API_BASE = resolveApiBase();
 function recipientIntentAppliedExplanation(category: RecipientInstructionIntentCategory): string {
   switch (category) {
     case "payment_timing":
-      return "This updates the payment timing so payment is due on Net 30 terms.";
+      return "Updates when payment is due.";
     case "suspend_pause_work":
-      return "This adds a remedy allowing work to pause if payment is more than 15 days late.";
+      return "Adds a pause if payment is over 15 days late.";
     default:
-      return "This request appears in the proposed changes below.";
+      return "Shown in the preview below.";
   }
+}
+
+/** Short row title for applied intents (recipient suggested-changes list). */
+function recipientIntentAppliedRowHeading(it: RecipientInstructionIntent): string {
+  if (it.status !== "applied") return it.normalizedIntent;
+  if (it.category === "payment_timing") {
+    const src = `${it.originalText} ${it.normalizedIntent}`;
+    const m = src.match(/\bnet\s*(\d+)\b/i);
+    const n = m ? m[1] : "30";
+    return `Net ${n} payment timing`;
+  }
+  if (it.category === "suspend_pause_work") {
+    return "Pause work after 15 days late";
+  }
+  return it.normalizedIntent;
 }
 
 function mapDraftAssistBlockedMessage(serverMsg: string): string {
@@ -1262,7 +1273,9 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-not-reflected-callout"
                 role="status"
               >
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-100/90">Request status</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-100/90">
+                  Your requested changes
+                </p>
                 <ul className="space-y-2.5" data-testid="recipient-intent-coverage-list">
                   {recipientRedlinePlainTexts.instructionIntentOutcomes.map((it) => {
                     const anchor = recipientRedlineAnchorForIntentCategory(it.category);
@@ -1295,14 +1308,14 @@ export function AgreementRecipientReview({
                               onClick={() => scrollToNarrowRedlineAnchor(anchorKey)}
                               onKeyDown={onKeyNavigate}
                             >
-                              ✓ Added: {formatRecipientIntentAppliedLabel(it)}
+                              ✓ {recipientIntentAppliedRowHeading(it)}
                               <span className="mt-0.5 block text-[10px] font-normal text-emerald-200/80 no-underline">
                                 View in document
                               </span>
                             </button>
                           ) : (
                             <p className="text-[13px] leading-snug text-emerald-100/95">
-                              ✓ Added: {formatRecipientIntentAppliedLabel(it)}
+                              ✓ {recipientIntentAppliedRowHeading(it)}
                             </p>
                           )}
                           <p className="mt-1.5 text-[11px] leading-snug text-emerald-200/85">
@@ -1366,27 +1379,16 @@ export function AgreementRecipientReview({
               </p>
             ) : null}
 
-            <div
-              className="mt-4 rounded-md border border-slate-600/60 bg-slate-950/40 px-3 py-3 text-slate-200"
+            <p
+              className="mt-3 text-[11px] leading-snug text-slate-400"
               data-testid="recipient-suggested-changes-what-this-means"
             >
-              <p className="text-xs font-semibold text-slate-100">What this means</p>
-              <ul className="mt-2 list-disc space-y-1.5 pl-4 text-[11px] leading-relaxed text-slate-300">
-                <li>These are only suggestions.</li>
-                <li>The owner&apos;s agreement will not change unless they accept them.</li>
-                <li>
-                  <span className="text-emerald-200/95">Green text</span> is what you&apos;re proposing to add.
-                </li>
-                <li>
-                  <span className="text-rose-200/95">Red crossed-out text</span> is what you&apos;re proposing to
-                  remove.
-                </li>
-                <li>
-                  Use <span className="font-medium text-slate-200">Send these suggested edits</span> when you&apos;re
-                  ready to send this version to the owner.
-                </li>
-              </ul>
-            </div>
+              <span className="font-medium text-emerald-200/90">Green</span> = added.{" "}
+              <span className="font-medium text-rose-200/90">Red</span> = removed. These are suggestions only — nothing
+              changes unless the owner accepts. Use{" "}
+              <span className="font-medium text-slate-200">Send suggestions for review</span> to send them to the owner
+              for review (not a signed agreement).
+            </p>
 
             <div className="mt-4 rounded-lg border border-slate-600/50 bg-slate-200/20 p-2 sm:p-3">
               <div
@@ -1411,7 +1413,7 @@ export function AgreementRecipientReview({
           className="mt-4 text-[11px] leading-relaxed text-slate-400"
           data-testid="recipient-suggested-changes-send-reassurance"
         >
-          Nothing is signed and nothing changes automatically. The owner reviews these suggestions first.
+          Nothing is signed. Sending shares suggestions for the owner to review first — not a signed agreement.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <button
@@ -1421,7 +1423,7 @@ export function AgreementRecipientReview({
             disabled={saving || !previewDiff.canSubmit}
             onClick={() => openSendSuggestedEditsModal()}
           >
-            Send these suggested edits
+            Send suggestions for review
           </button>
           <button
             type="button"
@@ -1867,65 +1869,56 @@ export function AgreementRecipientReview({
           ) : null}
         </div>
 
-        {!viewerLike ? (
-          <div className="sm:hidden">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {canSignFromHub ? (
+              <a
+                className="vs01-btn inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
+                href={agreementSigningPath(agreementId, lockedVid, undefined, participantPid || undefined)}
+              >
+                {primaryCtaLabel}
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="vs01-btn rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
+                onClick={() => setFlowPhase("active")}
+              >
+                {primaryCtaLabel}
+              </button>
+            )}
+            {!viewerLike ? (
+              <div className="flex w-full min-w-[12rem] flex-col gap-1 sm:w-auto">
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary rounded-lg px-4 py-2.5 text-sm"
+                  onClick={() => {
+                    setFlowPhase("active");
+                    setWorkspaceTab("revise");
+                    scrollAndFocusSuggestPanel();
+                  }}
+                >
+                  Suggest changes
+                </button>
+                <p className="text-[10px] leading-snug text-slate-500 sm:max-w-[14rem]">
+                  Ask for edits before anything is signed.
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="text-[11px] text-slate-500">
             <button
               type="button"
-              className="vs01-btn vs01-btn--secondary w-full rounded-lg px-4 py-2.5 text-sm"
-              onClick={() => {
-                setFlowPhase("active");
-                setWorkspaceTab("revise");
-                scrollAndFocusSuggestPanel();
-              }}
+              className="text-slate-400 underline decoration-slate-700 underline-offset-2 hover:text-slate-200"
+              onClick={() => setFlowPhase("declined")}
             >
-              Suggest changes
+              I&apos;m not participating
             </button>
           </div>
-        ) : null}
-
-        <div className="hidden flex-col gap-2 sm:flex sm:flex-row sm:flex-wrap">
-          {canSignFromHub ? (
-            <a
-              className="vs01-btn inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
-              href={agreementSigningPath(agreementId, lockedVid, undefined, participantPid || undefined)}
-            >
-              {primaryCtaLabel}
-            </a>
-          ) : (
-            <button
-              type="button"
-              className="vs01-btn rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
-              onClick={() => setFlowPhase("active")}
-            >
-              {primaryCtaLabel}
-            </button>
-          )}
-          {!viewerLike ? (
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary rounded-lg px-4 py-2.5 text-sm"
-              onClick={() => {
-                setFlowPhase("active");
-                setWorkspaceTab("revise");
-                scrollAndFocusSuggestPanel();
-              }}
-            >
-              Suggest changes
-            </button>
-          ) : null}
         </div>
 
-        <div className="text-[11px] text-slate-500 sm:pl-0">
-          <button
-            type="button"
-            className="text-slate-400 underline decoration-slate-700 underline-offset-2 hover:text-slate-200"
-            onClick={() => setFlowPhase("declined")}
-          >
-            I&apos;m not participating
-          </button>
-        </div>
-
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-800/90 bg-slate-950/95 p-4 backdrop-blur sm:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-slate-800/90 bg-slate-950/95 p-4 backdrop-blur sm:hidden">
           {canSignFromHub ? (
             <a
               className="vs01-btn inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500"
@@ -1942,6 +1935,24 @@ export function AgreementRecipientReview({
               {primaryCtaLabel}
             </button>
           )}
+          {!viewerLike ? (
+            <>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary w-full rounded-lg px-4 py-2.5 text-sm"
+                onClick={() => {
+                  setFlowPhase("active");
+                  setWorkspaceTab("revise");
+                  scrollAndFocusSuggestPanel();
+                }}
+              >
+                Suggest changes
+              </button>
+              <p className="text-center text-[10px] leading-snug text-slate-500">
+                Ask for edits before anything is signed.
+              </p>
+            </>
+          ) : null}
         </div>
       </div>
     );
@@ -2060,9 +2071,9 @@ export function AgreementRecipientReview({
           data-testid="recipient-suggested-edits-sent-ack"
           role="status"
         >
-          <h2 className="text-base font-semibold text-emerald-100">Suggested edits sent</h2>
+          <h2 className="text-base font-semibold text-emerald-100">Suggestions sent</h2>
           <p className="mt-2 text-sm leading-relaxed text-emerald-50/95">
-            The owner can now review your proposed changes. Nothing has been signed yet.
+            The owner can review your suggested changes. Nothing has been signed.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -2311,24 +2322,40 @@ export function AgreementRecipientReview({
 
       {workspaceTab === "read" ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <button
+            type="button"
+            className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
+            onClick={() => {
+              window.requestAnimationFrame(() => {
+                document.querySelector(".prose")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            }}
+          >
+            Review agreement
+          </button>
           {!viewerLike ? (
-            <button
-              type="button"
-              className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-45"
-              disabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
-              onClick={() => {
-                setWorkspaceTab("revise");
-                setError(null);
-                scrollAndFocusSuggestPanel();
-              }}
-            >
-              Suggest changes
-            </button>
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-45"
+                disabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+                onClick={() => {
+                  setWorkspaceTab("revise");
+                  setError(null);
+                  scrollAndFocusSuggestPanel();
+                }}
+              >
+                Suggest changes
+              </button>
+              <p className="text-[10px] leading-snug text-slate-500 sm:max-w-[16rem]">
+                Ask for edits before anything is signed.
+              </p>
+            </div>
           ) : null}
           {!viewerLike ? (
             <button
               type="button"
-              className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-45"
+              className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-900/60 disabled:opacity-45"
               disabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
               onClick={() => void acceptCurrentDraft()}
             >
@@ -2337,10 +2364,10 @@ export function AgreementRecipientReview({
           ) : null}
           <button
             type="button"
-            className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-900/60"
+            className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-400 hover:bg-slate-900/60"
             onClick={() => setFlowPhase("declined")}
           >
-            Not participating
+            I&apos;m not participating
           </button>
           {recipientLinkRole === "signer" && canRecipientSign ? (
             <a
@@ -2419,12 +2446,18 @@ export function AgreementRecipientReview({
               ) : (
                 <>
               <div className="space-y-2 rounded-md border border-slate-700/60 bg-slate-950/35 p-3">
-                <h3 className="text-sm font-semibold text-slate-100">{BRING_BACK_SUGGESTED_EDITS_TITLE}</h3>
-                <p className="text-[10px] leading-relaxed text-slate-400">{UNIVERSAL_REVIEW_INTRO}</p>
-                <p className="text-[0.65rem] font-medium text-amber-100/80">{NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE}</p>
-                <p className="text-[0.65rem] leading-snug text-slate-500">{REVIEWER_NOT_AUTOMATIC_LINE}</p>
+                <h3 className="text-sm font-semibold text-slate-100">Suggest changes</h3>
+                <p className="text-[11px] leading-relaxed text-slate-400">
+                  Write what you want changed. LawDog will show a preview before anything is sent.
+                </p>
+                <p className="text-[0.65rem] font-medium text-amber-100/80">Nothing changes unless the owner accepts.</p>
               </div>
 
+              <details className="group rounded-md border border-slate-800/80 bg-slate-950/25 p-2">
+                <summary className="cursor-pointer list-none text-[11px] font-medium text-sky-300/95 marker:content-none [&::-webkit-details-marker]:hidden">
+                  Advanced copy tools
+                </summary>
+                <div className="mt-2 space-y-2 border-t border-slate-800/60 pt-2">
               <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="How to suggest changes">
                 <button
                   type="button"
@@ -2590,6 +2623,8 @@ export function AgreementRecipientReview({
                   </div>
                 ) : null}
               </div>
+                </div>
+              </details>
 
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-posture">
@@ -2685,7 +2720,7 @@ export function AgreementRecipientReview({
               </div>
               <p className="text-[10px] leading-snug text-slate-500">
                 Use <span className="text-slate-400">Preview changes</span>, review <span className="text-slate-400">Suggested changes</span>, then{" "}
-                <span className="text-slate-400">Send these suggested edits</span>.
+                <span className="text-slate-400">Send suggestions for review</span>.
               </p>
 
               {comparePanel}
@@ -2713,7 +2748,7 @@ export function AgreementRecipientReview({
           aria-label="Send or discard suggested edits"
         >
           <p className="text-center text-[10px] leading-snug text-slate-400">
-            Nothing is signed and nothing changes automatically. The owner reviews these suggestions first.
+            Nothing is signed. Sending shares suggestions for the owner to review first — not a signed agreement.
           </p>
           <button
             type="button"
@@ -2722,7 +2757,7 @@ export function AgreementRecipientReview({
             disabled={saving || !previewDiff?.canSubmit}
             onClick={() => openSendSuggestedEditsModal()}
           >
-            Send these suggested edits
+            Send suggestions for review
           </button>
           <button
             type="button"
@@ -2752,11 +2787,11 @@ export function AgreementRecipientReview({
             onMouseDown={(e) => e.stopPropagation()}
           >
             <h2 id="recipient-send-suggested-edits-modal-title" className="text-lg font-semibold text-slate-100">
-              Send these suggested edits?
+              Send suggestions for review?
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
-              This sends your proposed changes to the owner for review. The owner can accept, reject, or keep discussing
-              them. Nothing is signed yet.
+              These changes will be sent to the agreement owner. Nothing is signed, and the agreement will not change
+              unless the owner accepts.
             </p>
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
@@ -2775,7 +2810,7 @@ export function AgreementRecipientReview({
                 disabled={saving}
                 onClick={() => void performRecipientSuggestedEditsSubmit()}
               >
-                {saving ? "Sending…" : "Send to owner"}
+                {saving ? "Sending…" : "Send suggestions"}
               </button>
             </div>
           </div>

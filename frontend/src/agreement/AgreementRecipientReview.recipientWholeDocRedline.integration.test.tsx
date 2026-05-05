@@ -114,7 +114,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
 
-    expect(within(panel).getByRole("button", { name: /Send these suggested edits/i })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: /Send suggestions for review/i })).toBeTruthy();
     expect(within(panel).getByRole("button", { name: /Dismiss preview/i })).toBeTruthy();
   });
 });
@@ -236,34 +236,31 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
     expect(screen.getByTestId("recipient-intent-coverage-list")).toBeTruthy();
-    expect(callout.textContent).toMatch(/Added:/i);
+    expect(callout.textContent).toMatch(/Your requested changes/i);
     expect(callout.textContent).not.toMatch(/Could not add:/i);
     const list = screen.getByTestId("recipient-intent-coverage-list");
-    expect(within(list).getAllByRole("button", { name: /Added:/i })).toHaveLength(2);
+    expect(within(list).getAllByRole("button", { name: /Net 30 payment timing/i })).toHaveLength(1);
+    expect(within(list).getAllByRole("button", { name: /Pause work after 15 days late/i })).toHaveLength(1);
 
     expect(legalRoot.querySelector('[data-recipient-redline-anchor="payment_timing"]')).toBeTruthy();
     expect(legalRoot.querySelector('[data-recipient-redline-anchor="pause_suspend_work"]')).toBeTruthy();
     scrollIntoViewMock.mockClear();
     await userEvent.click(
       within(screen.getByTestId("recipient-intent-status-payment_timing")).getByRole("button", {
-        name: /Added:/i,
+        name: /Net 30 payment timing/i,
       }),
     );
     expect(scrollIntoViewMock).toHaveBeenCalled();
     scrollIntoViewMock.mockClear();
     await userEvent.click(
       within(screen.getByTestId("recipient-intent-status-pause_suspend_work")).getByRole("button", {
-        name: /Added:/i,
+        name: /Pause work after 15 days late/i,
       }),
     );
     expect(scrollIntoViewMock).toHaveBeenCalled();
 
-    expect(
-      screen.getByText(/This updates the payment timing so payment is due on Net 30 terms/i),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/This adds a remedy allowing work to pause if payment is more than 15 days late/i),
-    ).toBeTruthy();
+    expect(screen.getByText(/Updates when payment is due/i)).toBeTruthy();
+    expect(screen.getByText(/Adds a pause if payment is over 15 days late/i)).toBeTruthy();
 
     expect(screen.queryByTestId("recipient-side-by-side-block-grid")).toBeNull();
     expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();
@@ -478,7 +475,7 @@ describe("AgreementRecipientReview narrow payment redline QA (party/signature/fo
     expect(parseInt(secChip, 10)).toBeLessThanOrEqual(1);
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
-    expect(callout.textContent).toMatch(/Added:/i);
+    expect(callout.textContent).toMatch(/Your requested changes/i);
     expect(callout.textContent).not.toMatch(/Could not add:/i);
     expect(insText).toMatch(/pause work until all overdue/i);
   });

@@ -41,15 +41,14 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).toContain("Your suggestions do not change the original until the owner accepts them.");
     expect(s).toContain("Suggest changes");
     expect(s).toContain("Looks good");
-    expect(s).toContain("Not participating");
+    expect(s).toContain("I&apos;m not participating");
     expect(s).toContain("← Back to agreement");
     expect(s).toContain("scrollAndFocusSuggestPanel");
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain("{BRING_BACK_SUGGESTED_EDITS_TITLE}");
-    expect(s).toContain("{UNIVERSAL_REVIEW_INTRO}");
-    expect(s).toContain("{NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE}");
+    expect(s).toContain("Write what you want changed. LawDog will show a preview before anything is sent.");
+    expect(s).toContain("Nothing changes unless the owner accepts.");
     expect(s).toContain("Preview suggestions");
     expect(s).toContain("Compare text");
     expect(s).toContain("{MODE_SUGGEST_PLAIN_ENGLISH}");

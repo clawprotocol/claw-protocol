@@ -106,25 +106,31 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
-    const meanCard = within(panel).getByTestId("recipient-suggested-changes-what-this-means");
-    expect(meanCard.textContent).toContain("These are only suggestions.");
-    expect(meanCard.textContent).toContain("Green text");
-    expect(meanCard.textContent).toContain("Red crossed-out text");
-    expect(meanCard.textContent).toContain("Send these suggested edits");
+    expect(panel.textContent).not.toMatch(/\bCLAW\b/i);
+
+    const legend = within(panel).getByTestId("recipient-suggested-changes-what-this-means");
+    expect(legend.textContent).toContain("Green");
+    expect(legend.textContent).toContain("added");
+    expect(legend.textContent).toContain("Red");
+    expect(legend.textContent).toContain("removed");
+    expect(legend.textContent).toContain("suggestions only");
+    expect(legend.textContent).toContain("Send suggestions for review");
 
     expect(within(panel).getByTestId("recipient-suggested-changes-send-reassurance").textContent).toContain(
-      "Nothing is signed and nothing changes automatically.",
+      "Nothing is signed.",
     );
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Send these suggested edits?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Send suggestions for review?" })).toBeTruthy();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
-      "This sends your proposed changes to the owner for review.",
+      "These changes will be sent to the agreement owner.",
     );
-    expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain("Nothing is signed yet.");
+    expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
+      "Nothing is signed",
+    );
 
     await userEvent.click(screen.getByTestId("recipient-send-suggested-edits-modal-dismiss"));
     await waitFor(() => {
@@ -132,12 +138,13 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
-    await userEvent.click(screen.getByRole("button", { name: "Send to owner" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send suggestions" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-suggested-edits-sent-ack")).toBeTruthy();
     });
-    expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain("Nothing has been signed yet.");
+    expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain("Suggestions sent");
+    expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain("Nothing has been signed");
     expect(screen.queryByTestId("recipient-suggested-changes-panel")).toBeNull();
 
     await userEvent.click(screen.getByTestId("recipient-suggested-edits-suggest-another"));
