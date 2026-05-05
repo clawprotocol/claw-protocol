@@ -160,6 +160,38 @@ describe("executePremiumRefineUpdate advisory fast path", () => {
     expect(postPremiumRefine).toHaveBeenCalledTimes(1);
   });
 
+  it("production QA: conversational notes-for-review multiline prompt append-preserves full baseline", async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: "z".repeat(4000),
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const userInstruction = `Can you add some notes for review?
+
+like:
+- payment timing?
+- what happens if they stop mid project
+- do we need anything about bugs after launch`;
+    expect(classifyPremiumRefineRevisionIntent(userInstruction)).toBe("advisory_note_or_comment");
+    expect(isAdvisoryNoteOrCommentIntent(userInstruction)).toBe(true);
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction,
+    });
+    expect(out.refineApplyDecision).toBe("append_reviewer_note_preserve_document");
+    expect(out.usedAppendReviewerNotePreserve).toBe(true);
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.finalText.startsWith(baseline)).toBe(true);
+    expect(out.finalText.slice(0, baseline.length)).toBe(baseline);
+    expect(out.finalText).toContain("## REVIEWER NOTE / REQUESTED REVIEW ITEMS");
+    expect(out.finalText.length).toBeGreaterThan(baseline.length);
+    expect(postPremiumRefine).toHaveBeenCalledTimes(1);
+  });
+
   it("advisory append still applies when API returns fail-open summary (prod QA)", async () => {
     const baseline = longBaseline();
     vi.mocked(postPremiumRefine).mockResolvedValueOnce({

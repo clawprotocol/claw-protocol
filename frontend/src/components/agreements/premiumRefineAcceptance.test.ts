@@ -257,6 +257,32 @@ describe("classifyPremiumRefineRevisionIntent", () => {
     expect(classifyPremiumRefineRevisionIntent("Replace the entire document with a memo")).toBe("transformational_revision");
     expect(classifyPremiumRefineRevisionIntent("Convert this to bullet points")).toBe("transformational_revision");
   });
+
+  it("classifies realistic human review-note prompts as advisory_note_or_comment", () => {
+    const qaPrompt = `Can you add some notes for review?
+
+like:
+- payment timing?
+- what happens if they stop mid project
+- do we need anything about bugs after launch`;
+    expect(classifyPremiumRefineRevisionIntent(qaPrompt)).toBe("advisory_note_or_comment");
+    expect(classifyPremiumRefineRevisionIntent("Anything I should double check before sending this?")).toBe(
+      "advisory_note_or_comment",
+    );
+    expect(
+      classifyPremiumRefineRevisionIntent(
+        "Feels like payment and delivery might be unclear — can you flag anything?",
+      ),
+    ).toBe("advisory_note_or_comment");
+  });
+
+  it("keeps explicit operative edits as surgical_revision", () => {
+    expect(
+      classifyPremiumRefineRevisionIntent("Add a 5% late fee if payment is more than 10 days late."),
+    ).toBe("surgical_revision");
+    expect(classifyPremiumRefineRevisionIntent("Add confidentiality clause.")).toBe("surgical_revision");
+    expect(classifyPremiumRefineRevisionIntent("Change governing law to Oklahoma.")).toBe("surgical_revision");
+  });
 });
 
 describe("instructionAllowsExtremeShrink", () => {

@@ -312,15 +312,78 @@ export function assertStructuredAdvisoryAppendInvariants(baselineText: string, f
 }
 
 /**
+ * Explicit operative edits — must stay {@link PremiumRefineRevisionIntent} `surgical_revision`, not advisory.
+ * Kept conservative so "add some notes for review" does not match late-fee / clause-add patterns.
+ */
+function hasStrongOperativeEditIntent(raw: string): boolean {
+  const t = raw.trim().toLowerCase();
+  if (!t) return false;
+
+  if (/\badd\s+(?:a|an)?\s*\d+(?:\.\d+)?\s*%\b.*\b(?:late|fee|overdue|days?)\b/i.test(t)) return true;
+  if (/\badd\s+(?:a|an)?\s*(?:late[-\s]?payment\s+)?fee\b.*\b\d+(?:\.\d+)?\s*%/i.test(t)) return true;
+  if (/\badd\s+(?:a|an)?\s*\d+(?:\.\d+)?\s*%\s*(?:late|fee|if)\b/i.test(t)) return true;
+
+  if (/\badd\s+(?:a|an)?\s*(?:confidentiality|non[-\s]?disclosure|nda)\s+clause\b/i.test(t)) return true;
+  if (/\badd\s+(?:a|an)?\s*(?:mutual\s+)?(?:indemnity|non[-\s]?compete|liquidated\s+damages)\s+clause\b/i.test(t))
+    return true;
+
+  if (/\bchange\s+governing\s+law\b/i.test(t)) return true;
+  if (/\bchange\s+(?:the\s+)?deadline\b/i.test(t)) return true;
+  if (/\bmake\s+the\s+deadline\b/i.test(t)) return true;
+
+  if (/\breplace\s+(?:the\s+)?(?:payment|confidentiality|indemnity|entire|whole)\s+section\b/i.test(t)) return true;
+  if (/\breplace\s+section\s+\d+/i.test(t)) return true;
+
+  if (/\bdelete\s+section\b/i.test(t)) return true;
+  if (/\bremove\s+section\b/i.test(t)) return true;
+  if (/\bamend\s+section\b/i.test(t)) return true;
+  if (/\binsert\s+(?:a|an)?\s+clause\b/i.test(t)) return true;
+
+  return false;
+}
+
+/**
  * Advisory / comment / reviewer guidance — preserve agreement bytes and append notes, never treat as surgical rewrite.
  */
 export function isAdvisoryNoteOrCommentIntent(userInstruction: string | undefined): boolean {
   const raw = (userInstruction || "").trim();
   if (raw.length < 8) return false;
+  if (hasStrongOperativeEditIntent(raw)) return false;
   const t = raw.toLowerCase();
 
+  /** Realistic hand-off / pre-send review language (not operative rewrites). */
+  const humanReviewAsk =
+    /\bnotes?\s+for\s+review\b/i.test(raw) ||
+    /\badd\s+(?:some\s+)?notes?\s+for\s+review\b/i.test(raw) ||
+    /\bcan\s+you\s+add\s+(?:some\s+)?notes?\s+for\s+review\b/i.test(raw) ||
+    /\bflag\s+anything\??\b/i.test(t) ||
+    /\bflag\s+what(?:ever)?\b/i.test(t) ||
+    /\banything\s+i\s+should\s+double[-\s]?check\b/i.test(t) ||
+    /\bbefore\s+i\s+send\b/i.test(t) ||
+    /\bbefore\s+sending(?:\s+this)?\b/i.test(t) ||
+    /\bwhat\s+should\s+(?:the\s+)?(?:other\s+party|counterparty)\s+review\b/i.test(t) ||
+    /\banything\s+unclear\b/i.test(t) ||
+    /\banything\s+i\s+missed\b/i.test(t) ||
+    /\bdouble[-\s]?check\b/i.test(t) &&
+      /\b(before\s+send|sending|this|review|anything|unclear|party|agreement|contract)\b/i.test(t) ||
+    (/\bfeels\s+like\b/i.test(t) && /\bflag\b/i.test(t)) ||
+    (/\b(can\s+you\s+)?flag\b/i.test(t) &&
+      /\b(anything|unclear|open|missing|risks?|gaps?|concerns?)\b/i.test(t)) ||
+    (/\b(risks?|gaps?|concerns?)\b/i.test(t) &&
+      /\b(for\s+review|to\s+review|before\s+i\s+send|notes?\b|flag|double[-\s]?check|reviewer)\b/i.test(t));
+
+  if (humanReviewAsk) return true;
+
+  /** Conversational review bullets (questions / open points), usually after a review ask or "like:". */
+  const hasReviewishBulletQuestions =
+    /\n\s*[-*•]\s*[^\n]{2,120}\?/m.test(raw) &&
+    /\b(like|review|notes?|flag|check|unclear|timing|launch|project|party|happen|bugs?|support|cancel|delivery|acceptance|mid[-\s]?project)\b/i.test(
+      t,
+    );
+  if (hasReviewishBulletQuestions) return true;
+
   const noteVerb =
-    /\b(make\s+(?:a\s+)?notes?|noted?|note\s+(?:of|that|to)|add\s+(?:a\s+)?note|capture\s+(?:a\s+)?note|jot\s+down|leave\s+(?:a\s+)?note|note\s+this)\b/i.test(
+    /\b(make\s+(?:a\s+)?notes?|noted?|note\s+(?:of|that|to)|add\s+(?:some\s+)?(?:a\s+)?notes?\b|capture\s+(?:a\s+)?notes?|jot\s+down|leave\s+(?:a\s+)?notes?|note\s+this)\b/i.test(
       raw,
     );
   const reviewLens = /\b(reviewer|reviewer's|for\s+the\s+reviewer|review\s+notes?|peer\s+review|comments?\s+for|requested\s+review)\b/i.test(
@@ -331,13 +394,13 @@ export function isAdvisoryNoteOrCommentIntent(userInstruction: string | undefine
       t,
     );
   if (noteVerb && (reviewLens || practiceOrItems)) return true;
-  if (reviewLens && /\b(note|notes|summarize|capture|record)\b/i.test(t)) return true;
-  if (/\bbest\s+practices?\b/i.test(t) && /\b(note|notes|reviewer|comment)\b/i.test(t)) return true;
+  if (reviewLens && /\b(notes?|summarize|capture|record)\b/i.test(t)) return true;
+  if (/\bbest\s+practices?\b/i.test(t) && /\b(notes?|reviewer|comment)\b/i.test(t)) return true;
   if (/\bapply\b/i.test(t) && /\b(issues?|comments?|flags?|best)\b/i.test(t) && (noteVerb || /\breviewer\b/i.test(t)))
     return true;
 
   // QA + universal review / improvement phrasing (not clause edits like "Add late fee…")
-  if (/\bmake\s+note\b/i.test(raw) && /\b(review|improv|agreement|contract|anything)\b/i.test(t)) return true;
+  if (/\bmake\s+notes?\b/i.test(raw) && /\b(review|improv|agreement|contract|anything)\b/i.test(t)) return true;
   if (/\b(anything|everything)\s+that\s+should\s+be\s+(reviewed|improved)\b/i.test(t)) return true;
   if (/\banything\s+to\s+review\b/i.test(t)) return true;
 
@@ -351,19 +414,19 @@ export function isAdvisoryNoteOrCommentIntent(userInstruction: string | undefine
   if (/\bsigner\s+should\s+review\b/i.test(t)) return true;
   if (/\b(?:the\s+)?party\s+should\s+review\b/i.test(t)) return true;
 
-  if (/\bfor\s+review\b/i.test(t) && /\b(note|list|items?|checklist|comments?|instruction)\b/i.test(t)) return true;
+  if (/\bfor\s+review\b/i.test(t) && /\b(notes?|list|items?|checklist|comments?|instruction)\b/i.test(t)) return true;
   if (/\b(add|leave)\s+(?:a\s+)?comments?\b/i.test(t) && /\b(review|reviewer|agreement|counterparty)\b/i.test(t))
     return true;
   if (/\bflag\s+(?:the\s+)?(risks?|issues?|gaps?|concerns?|open\s+items?)\b/i.test(t)) return true;
-  if (/\bred\s+flags?\b/i.test(t) && /\b(list|note|add|capture|flag)\b/i.test(t)) return true;
+  if (/\bred\s+flags?\b/i.test(t) && /\b(list|notes?|add|capture|flag)\b/i.test(t)) return true;
   if (/\bbest\s+practic(es?|e)\b/i.test(t) && /\b(suggest|recommended|review|change)\b/i.test(t)) return true;
-  if (/\bfor\s+(?:the\s+)?(?:reviewer|other\s+party|counterparty|signer)\b/i.test(t) && /\b(note|comment|list|checklist)\b/i.test(t))
+  if (/\bfor\s+(?:the\s+)?(?:reviewer|other\s+party|counterparty|signer)\b/i.test(t) && /\b(notes?|comment|list|checklist)\b/i.test(t))
     return true;
   if (/\b(review\s+checklist|negotiation\s+checklist|add\s+(?:a\s+)?checklist)\b/i.test(t)) return true;
   if (/\b(summarize|list)\s+what\s+to\s+review\b/i.test(t)) return true;
   if (/\b(flag\s+what\s+matters)\b/i.test(t)) return true;
   if (/\b(recommended\s+changes|improvement\s+suggestions|negotiation\s+flags)\b/i.test(t)) return true;
-  if (/\bopen\s+issues?\b/i.test(t) && /\b(note|add|list|capture|flag)\b/i.test(t)) return true;
+  if (/\bopen\s+issues?\b/i.test(t) && /\b(notes?|add|list|capture|flag)\b/i.test(t)) return true;
 
   return false;
 }
