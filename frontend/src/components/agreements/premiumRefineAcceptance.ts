@@ -167,6 +167,32 @@ export function premiumRefineTextContainsPlaceholderCorruption(text: string): bo
   return scanPremiumRefinePlaceholderCorruption(text).count > 0;
 }
 
+const ADVISORY_SANITIZE_MIN_RETAIN_CHARS = 8;
+
+function lineContainsAdvisoryPlaceholderCorruption(line: string): boolean {
+  if (/\[[A-Z][A-Z0-9_]*_\d+\]/.test(line)) return true;
+  if (/^\s*\d+\.\[[A-Z]/.test(line)) return true;
+  if (/\$\s*\d+\s*,\s*\[/i.test(line)) return true;
+  return false;
+}
+
+/**
+ * Strip LawDog-style placeholder corruption from advisory / checklist / model-excerpt text.
+ * Removes whole lines that contain bracket tokens, section-dot corruption, or money+bracket corruption.
+ */
+export function sanitizeAdvisoryNoteTextForAppend(text: string): string {
+  const raw = (text || "").replace(/\r\n/g, "\n");
+  if (!raw.trim()) return "";
+  const kept: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (lineContainsAdvisoryPlaceholderCorruption(line)) continue;
+    kept.push(line);
+  }
+  const out = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (out.length < ADVISORY_SANITIZE_MIN_RETAIN_CHARS) return "";
+  return out;
+}
+
 /**
  * Advisory / comment / reviewer guidance — preserve agreement bytes and append notes, never treat as surgical rewrite.
  */
@@ -355,6 +381,47 @@ type LengthDecision = {
 /** Synthetic instruction so length gate treats append-only output as surgical preserve expansion. */
 export const PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR =
   "Precise surgical wording tweak in section 2 only; preserve all other agreement text.";
+
+/**
+ * When {@link classifyPremiumRefineRevisionIntent} is advisory, accept append-preserve output that
+ * keeps the baseline clean, prefixes the baseline, includes the reviewer heading, and has no
+ * placeholder corruption — even if generic length gates would reject.
+ */
+export function tryPremiumRefineAdvisoryAppendAcceptance(args: {
+  userInstruction: string;
+  finalAppendDoc: string;
+  baselineText: string;
+  baselineLen: number;
+}): {
+  decision: "accepted";
+  refinedLen: number;
+  ratio: number;
+  requiredSectionsPresent: boolean;
+  revisionIntent: PremiumRefineRevisionIntent;
+  headingPreservationRatio: number;
+} | null {
+  if (classifyPremiumRefineRevisionIntent(args.userInstruction) !== "advisory_note_or_comment") {
+    return null;
+  }
+  const base = args.baselineText;
+  const doc = (args.finalAppendDoc || "").trim();
+  if (!base.trim().length || !doc.length) return null;
+  if (premiumRefineTextContainsPlaceholderCorruption(base)) return null;
+  if (premiumRefineTextContainsPlaceholderCorruption(doc)) return null;
+  if (!doc.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) return null;
+  if (!doc.startsWith(base)) return null;
+
+  const refinedLen = doc.length;
+  const ratio = args.baselineLen > 0 ? refinedLen / args.baselineLen : 1;
+  return {
+    decision: "accepted",
+    refinedLen,
+    ratio,
+    requiredSectionsPresent: premiumRefineRequiredSectionsAllPresent(doc),
+    revisionIntent: classifyPremiumRefineRevisionIntent(PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR),
+    headingPreservationRatio: computeMajorHeadingPreservationRatio(base.trim(), doc),
+  };
+}
 
 function decideTransformational(
   _refinedLen: number,

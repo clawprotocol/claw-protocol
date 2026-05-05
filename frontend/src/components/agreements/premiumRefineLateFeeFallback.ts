@@ -7,7 +7,9 @@ import {
   premiumRefineSummaryIsUnchangedFailOpen,
   premiumRefineTextContainsPlaceholderCorruption,
   PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+  sanitizeAdvisoryNoteTextForAppend,
   scanPremiumRefinePlaceholderCorruption,
+  tryPremiumRefineAdvisoryAppendAcceptance,
 } from "./premiumRefineAcceptance";
 import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
 
@@ -186,6 +188,25 @@ export function augmentPremiumRefineUserPrompt(instruction: string): string {
 
 const REVIEWER_NOTE_HEADING = "## REVIEWER NOTE / REQUESTED REVIEW ITEMS";
 
+/** Deterministic bullets when checklist/model/user advisory text sanitize to empty (no placeholders). */
+const ADVISORY_APPEND_MINIMAL_SAFE_MARKDOWN =
+  "**Suggested review items:**\n\n" +
+  "- Review final payment timing, including when the final balance becomes due.\n" +
+  "- Review delivery, acceptance, and revision timing before sending.\n" +
+  "- Review ownership of final deliverables and any retained developer tools or background materials.\n\n";
+
+const ADVISORY_APPEND_DEFAULT_REQUEST_LABEL = "Review items before sending.";
+
+function appendLog(finalDoc: string, base: string): void {
+  // eslint-disable-next-line no-console
+  console.info("[premium-refine-append]", {
+    appended: true,
+    baselineLen: base.length,
+    finalLen: finalDoc.length,
+    hasReviewerHeader: finalDoc.includes("## REVIEWER NOTE"),
+  });
+}
+
 /**
  * Always prefix-preserves the authoritative agreement and appends a reviewer/advisory section.
  * Model output is included only when non-corrupt and not a truncated replacement of the whole doc.
@@ -195,56 +216,103 @@ export function buildAdvisoryAppendPreserveDocument(args: {
   userInstruction: string;
   modelOut: string;
   checklistLines?: string[] | undefined;
+  /** Rebuild append using only {@link ADVISORY_APPEND_MINIMAL_SAFE_MARKDOWN} (no checklist/model). */
+  forceMinimalSafeReviewerBody?: boolean;
 }): string {
   const base = args.currentDocumentText;
   const inst = args.userInstruction.trim();
-  let snippet = (args.modelOut || "").trim();
-  if (snippet && premiumRefineTextContainsPlaceholderCorruption(snippet)) {
-    snippet = "";
+  const safeInst =
+    sanitizeAdvisoryNoteTextForAppend(inst).trim() ||
+    (premiumRefineTextContainsPlaceholderCorruption(inst) ? ADVISORY_APPEND_DEFAULT_REQUEST_LABEL : inst.trim()) ||
+    ADVISORY_APPEND_DEFAULT_REQUEST_LABEL;
+
+  const footer =
+    `\n*This section is administrative / reviewer-facing. It does not amend the operative agreement text above unless the parties separately agree in writing.*\n`;
+
+  if (args.forceMinimalSafeReviewerBody) {
+    const mid = ADVISORY_APPEND_MINIMAL_SAFE_MARKDOWN;
+    if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
+      const addendum = `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${safeInst}\n${mid}${footer}`;
+      const finalDoc = base + addendum;
+      appendLog(finalDoc, base);
+      return finalDoc;
+    }
+    const tail = `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${safeInst}\n${mid}${footer}`;
+    const finalDoc = base + tail;
+    appendLog(finalDoc, base);
+    return finalDoc;
   }
+
+  let snippet = (args.modelOut || "").trim();
   if (
     snippet &&
     normalizePremiumRefineTextForCompare(snippet) === normalizePremiumRefineTextForCompare(base)
   ) {
     snippet = "";
   }
-  if (snippet && snippet.length < base.length * 0.92 && !snippet.startsWith(base.slice(0, Math.min(2000, base.length)))) {
+  if (
+    snippet &&
+    snippet.length >= base.length * 0.92 &&
+    !snippet.startsWith(base.slice(0, Math.min(2000, base.length)))
+  ) {
     snippet = "";
   }
-  const checklist = (args.checklistLines || []).filter(Boolean).slice(0, 20);
+  snippet = sanitizeAdvisoryNoteTextForAppend(snippet);
+  if (snippet && premiumRefineTextContainsPlaceholderCorruption(snippet)) {
+    snippet = "";
+  }
+  if (snippet && snippet.length > 4000) {
+    snippet = snippet.slice(0, 4000);
+    snippet = sanitizeAdvisoryNoteTextForAppend(snippet);
+    if (snippet && premiumRefineTextContainsPlaceholderCorruption(snippet)) {
+      snippet = "";
+    }
+  }
+
+  const checklist = (args.checklistLines || [])
+    .map((c) => sanitizeAdvisoryNoteTextForAppend(String(c ?? "").trim()).trim())
+    .filter(Boolean)
+    .slice(0, 20);
+
   const checklistBlock =
     checklist.length > 0
       ? `\n**Flagged / readiness items (from LawDog review):**\n${checklist.map((c) => `- ${c}`).join("\n")}\n`
       : "";
-  const modelBlock = snippet
-    ? snippet.length > 4000
-      ? `\n**Captured review points (excerpt from model output):**\n\n${snippet.slice(0, 4000)}\n`
-      : `\n**Captured review points (from model output):**\n\n${snippet}\n`
-    : "";
-  const footer =
-    `\n*This section is administrative / reviewer-facing. It does not amend the operative agreement text above unless the parties separately agree in writing.*\n`;
+  const modelBlock = snippet ? `\n**Captured review points (from model output):**\n\n${snippet}\n` : "";
 
-  if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
-    const addendum = `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${inst}\n${checklistBlock}${modelBlock}${footer}`;
-    const finalDoc = base + addendum;
-    // eslint-disable-next-line no-console
-    console.info("[premium-refine-append]", {
-      appended: true,
-      baselineLen: base.length,
-      finalLen: finalDoc.length,
-      hasReviewerHeader: finalDoc.includes("## REVIEWER NOTE"),
-    });
-    return finalDoc;
+  let midBody = `${checklistBlock}${modelBlock}`;
+  if (!midBody.trim()) {
+    midBody = ADVISORY_APPEND_MINIMAL_SAFE_MARKDOWN;
   }
-  const tail = `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${inst}\n${checklistBlock}${modelBlock}${footer}`;
-  const finalDoc = base + tail;
-  // eslint-disable-next-line no-console
-  console.info("[premium-refine-append]", {
-    appended: true,
-    baselineLen: base.length,
-    finalLen: finalDoc.length,
-    hasReviewerHeader: finalDoc.includes("## REVIEWER NOTE"),
-  });
+
+  let finalDoc: string;
+  if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
+    const addendum = `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${safeInst}\n${midBody}${footer}`;
+    finalDoc = base + addendum;
+  } else {
+    const tail = `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${safeInst}\n${midBody}${footer}`;
+    finalDoc = base + tail;
+  }
+
+  if (
+    !premiumRefineTextContainsPlaceholderCorruption(base) &&
+    premiumRefineTextContainsPlaceholderCorruption(finalDoc)
+  ) {
+    // eslint-disable-next-line no-console
+    console.info("[premium-refine-advisory-sanitized-placeholder-note]", {
+      note: "rebuild_append_minimal_safe_only",
+      priorLen: finalDoc.length,
+    });
+    return buildAdvisoryAppendPreserveDocument({
+      currentDocumentText: base,
+      userInstruction: inst,
+      modelOut: "",
+      checklistLines: [],
+      forceMinimalSafeReviewerBody: true,
+    });
+  }
+
+  appendLog(finalDoc, base);
   return finalDoc;
 }
 
@@ -305,27 +373,39 @@ export function tryAppendReviewerNotePreserveDocument(args: {
   if (!isAdvisoryNoteOrCommentIntent(args.userInstruction)) return null;
   const base = args.currentDocumentText;
   if (!base || base.length < 500) return null;
-  const short = (args.shortCandidate || "").trim();
-  if (short.length < 40) return null;
-  if (short.length >= base.length * 0.92) return null;
+  const shortRaw = (args.shortCandidate || "").trim();
+  if (shortRaw.length < 40) return null;
+  if (shortRaw.length >= base.length * 0.92) return null;
 
-  const checklist = (args.checklistLines || []).filter(Boolean).slice(0, 20);
+  let shortSan = sanitizeAdvisoryNoteTextForAppend(shortRaw);
+  if (shortSan && premiumRefineTextContainsPlaceholderCorruption(shortSan)) {
+    shortSan = "";
+  }
+  if (!shortSan.trim() || shortSan.length < 8) return null;
+
+  const safeInstr =
+    sanitizeAdvisoryNoteTextForAppend(args.userInstruction.trim()).trim() || ADVISORY_APPEND_DEFAULT_REQUEST_LABEL;
+
+  const checklist = (args.checklistLines || [])
+    .map((c) => sanitizeAdvisoryNoteTextForAppend(String(c ?? "").trim()).trim())
+    .filter(Boolean)
+    .slice(0, 20);
   const checklistBlock =
     checklist.length > 0
       ? `\n**Flagged / readiness items (from LawDog review):**\n${checklist.map((c) => `- ${c}`).join("\n")}\n`
       : "";
 
   const shortBlock =
-    short.length > 800
-      ? `\n**LawDog short output (preserved as reference — agreement text above is unchanged):**\n\n${short}\n`
-      : `\n**Captured points:**\n\n${short}\n`;
+    shortSan.length > 800
+      ? `\n**LawDog short output (preserved as reference — agreement text above is unchanged):**\n\n${shortSan}\n`
+      : `\n**Captured points:**\n\n${shortSan}\n`;
 
   const footer =
     `\n*This section is administrative / reviewer-facing. It does not amend the operative agreement text above unless the parties separately agree in writing.*\n`;
 
   if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
     const addendum =
-      `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${args.userInstruction.trim()}\n${checklistBlock}${shortBlock}${footer}`;
+      `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${safeInstr}\n${checklistBlock}${shortBlock}${footer}`;
     return {
       text: base + addendum,
       summaryLine: "Appended an additional reviewer note; full agreement preserved.",
@@ -333,7 +413,7 @@ export function tryAppendReviewerNotePreserveDocument(args: {
   }
 
   const tail =
-    `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${args.userInstruction.trim()}\n${checklistBlock}${shortBlock}${footer}`;
+    `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${safeInstr}\n${checklistBlock}${shortBlock}${footer}`;
   return {
     text: base + tail,
     summaryLine: "Added a reviewer note / requested review items section; full agreement preserved.",
@@ -543,6 +623,26 @@ function finalizePremiumRefineExecuteOutcome(args: {
   return args.outcome;
 }
 
+type PremiumRefineEvalResult = ReturnType<typeof evaluatePremiumRefineCandidate>;
+
+/** Advisory append-preserve: accept when baseline is clean and append is a safe prefix extension. */
+function mergeAdvisoryAppendEvaluate(
+  userInstruction: string,
+  built: string,
+  baselineText: string,
+  baselineLen: number,
+  acc: PremiumRefineEvalResult,
+): PremiumRefineEvalResult {
+  if (acc.decision === "accepted") return acc;
+  const o = tryPremiumRefineAdvisoryAppendAcceptance({
+    userInstruction,
+    finalAppendDoc: built,
+    baselineText,
+    baselineLen,
+  });
+  return o ?? acc;
+}
+
 /**
  * Paid Pro refine: POST → accept gate → optional surgical preserve retry → deterministic deliverables clause.
  */
@@ -593,17 +693,10 @@ export async function executePremiumRefineUpdate(args: {
         samples: ph.samples,
       });
     }
-    let modelExcerpt = ph.count > 0 ? "" : raw;
+    let modelExcerpt = raw;
     if (
       modelExcerpt &&
       normalizePremiumRefineTextForCompare(modelExcerpt) === normalizePremiumRefineTextForCompare(baselineText)
-    ) {
-      modelExcerpt = "";
-    }
-    if (
-      modelExcerpt &&
-      modelExcerpt.length < baselineLen * 0.92 &&
-      !modelExcerpt.startsWith(baselineText.slice(0, Math.min(2000, baselineText.length)))
     ) {
       modelExcerpt = "";
     }
@@ -617,13 +710,14 @@ export async function executePremiumRefineUpdate(args: {
       modelOut: modelExcerpt,
       checklistLines: refineChecklistBullets,
     });
-    const accBuilt = evaluatePremiumRefineCandidate(
+    let accBuilt = evaluatePremiumRefineCandidate(
       built,
       baselineText,
       baselineLen,
       summaryForAdvisoryAppendEval,
       PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
     );
+    accBuilt = mergeAdvisoryAppendEvaluate(inst, built, baselineText, baselineLen, accBuilt);
     // eslint-disable-next-line no-console
     console.info("[premium-refine-apply]", {
       intent: promptIntent,
@@ -667,13 +761,14 @@ export async function executePremiumRefineUpdate(args: {
       modelOut: "",
       checklistLines: refineChecklistBullets,
     });
-    const accMin = evaluatePremiumRefineCandidate(
+    let accMin = evaluatePremiumRefineCandidate(
       builtMinimal,
       baselineText,
       baselineLen,
       summaryForAdvisoryAppendEval,
       PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
     );
+    accMin = mergeAdvisoryAppendEvaluate(inst, builtMinimal, baselineText, baselineLen, accMin);
     if (accMin.decision === "accepted") {
       return finalizePremiumRefineExecuteOutcome({
         userInstruction: inst,
@@ -706,13 +801,14 @@ export async function executePremiumRefineUpdate(args: {
       modelOut: "",
       checklistLines: refineChecklistBullets,
     });
-    const accForced = evaluatePremiumRefineCandidate(
+    let accForced = evaluatePremiumRefineCandidate(
       forcedAdvisory,
       baselineText,
       baselineLen,
       undefined,
       PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
     );
+    accForced = mergeAdvisoryAppendEvaluate(inst, forcedAdvisory, baselineText, baselineLen, accForced);
     if (accForced.decision === "accepted") {
       return finalizePremiumRefineExecuteOutcome({
         userInstruction: inst,

@@ -19,6 +19,7 @@ import {
   isAdvisoryNoteOrCommentIntent,
   premiumRefineTextContainsPlaceholderCorruption,
   PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+  sanitizeAdvisoryNoteTextForAppend,
   scanPremiumRefinePlaceholderCorruption,
 } from "./premiumRefineAcceptance";
 
@@ -207,5 +208,94 @@ describe("scanPremiumRefinePlaceholderCorruption samples", () => {
     const s = scanPremiumRefinePlaceholderCorruption("[ADDRESS_1] and [PARTY_2] plus noise " + "x".repeat(5000));
     expect(s.count).toBeGreaterThanOrEqual(2);
     expect(s.samples.every((x) => x.length < 100)).toBe(true);
+  });
+});
+
+describe("sanitizeAdvisoryNoteTextForAppend", () => {
+  it("drops lines with bracket placeholders and collapses blank runs", () => {
+    const raw = "Good line about payment.\nShip to [ADDRESS_1] on time.\nAnother good line.\n\n\n";
+    expect(sanitizeAdvisoryNoteTextForAppend(raw)).toBe("Good line about payment.\nAnother good line.");
+  });
+
+  it("drops section-dot and money-comma corruption lines", () => {
+    expect(sanitizeAdvisoryNoteTextForAppend("1.[ADDRESS_1] Street name")).toBe("");
+    expect(sanitizeAdvisoryNoteTextForAppend("US $4,[ADDRESS_6] per month")).toBe("");
+  });
+});
+
+describe("executePremiumRefineUpdate advisory placeholder sanitization", () => {
+  beforeEach(() => {
+    vi.mocked(postPremiumRefine).mockReset();
+  });
+
+  it("accepts advisory append when model output contains placeholder lines (sanitized)", async () => {
+    const baseline = longBaseline();
+    const dirtyModel =
+      "Suggested review:\n- Clarify invoicing cadence\n- Fix ship-to [ADDRESS_1] before countersign\n- Confirm notice address\n";
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: dirtyModel,
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction: "List items the other party should review.",
+    });
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.refineApplyDecision).toBe("append_reviewer_note_preserve_document");
+    expect(out.usedAppendReviewerNotePreserve).toBe(true);
+    expect(out.finalText.startsWith(baseline)).toBe(true);
+    expect(out.finalText).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
+    expect(out.finalText).not.toMatch(/\[ADDRESS_\d+\]/);
+    expect(scanPremiumRefinePlaceholderCorruption(out.finalText).count).toBe(0);
+    expect(out.finalText).toContain("Clarify invoicing cadence");
+    expect(out.finalText).toContain("Confirm notice address");
+  });
+
+  it("drops corrupt checklist bullets but keeps clean ones", async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: "z".repeat(4000),
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction: "List items the other party should review.",
+      refineChecklistBullets: ["Bad line [ADDRESS_1] here", "Good: review indemnity carve-outs"],
+    });
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.finalText).toContain("Good: review indemnity carve-outs");
+    expect(out.finalText).not.toMatch(/\[ADDRESS_1\]/);
+    expect(scanPremiumRefinePlaceholderCorruption(out.finalText).count).toBe(0);
+  });
+
+  it("falls back to minimal safe reviewer bullets when checklist and model sanitize to empty", async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: "[ADDRESS_1]\n[PARTY_2]\n",
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction: "List items the other party should review.",
+      refineChecklistBullets: ["Only [ADDRESS_1] corrupt", "1.[ADDRESS_1] bad"],
+    });
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.finalText.startsWith(baseline)).toBe(true);
+    expect(out.finalText).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
+    expect(out.finalText).toContain("Review final payment timing");
+    expect(out.finalText).toContain("Review delivery, acceptance, and revision timing");
+    expect(scanPremiumRefinePlaceholderCorruption(out.finalText).count).toBe(0);
   });
 });
