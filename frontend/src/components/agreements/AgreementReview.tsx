@@ -2002,6 +2002,16 @@ const AgreementReview: React.FC<Props> = ({
   /** Premium post-upgrade: same surfaces as streamlined simple-home (LawDog copy + fork), even without router priming. */
   const premiumLawdogSimpleHome = Boolean(isStreamlinedSimple || simpleFlowUpsellSuppressed);
   const streamlinedPremiumIntentForCopy = premiumLawdogSimpleHome ? simpleFlowPremiumHandoffIntent ?? null : null;
+  const simpleSendReviewIntent =
+    (streamlinedPremiumIntentForCopy ?? simpleFlowPremiumHandoffIntent) === "review";
+  /** Paid Pro review-link handoff: hide upsell strips, redline/export chrome, keep a tight confirmation surface. */
+  const simpleHomePaidReviewLinkHandoff = Boolean(
+    isSimpleHomeReview && simpleFlowUpsellSuppressed && simpleSendReviewIntent,
+  );
+  /** Premium review intent on `/app/send` send step — final review-link prep (not the signature workspace). */
+  const simpleHomeReviewLinkSendStep = Boolean(
+    isSimpleHomeReview && premiumLawdogSimpleHome && simpleFlowPhase === "send" && simpleSendReviewIntent,
+  );
   /** Premium on `/app/send`: fork choice lives in parent until intent is non-null. */
   const premiumAwaitingStreamlinedFork = Boolean(
     premiumLawdogSimpleHome && simpleSendActionsUnlocked && simpleFlowPhase === "review" && simpleFlowPremiumHandoffIntent === null,
@@ -4475,7 +4485,8 @@ const AgreementReview: React.FC<Props> = ({
         </div>
       ) : null}
       {isSimpleHomeReview &&
-      !(simpleFlowPhase === "send" && simplePaidProAuthoritativeSendSurface) ? (
+      !(simpleFlowPhase === "send" && simplePaidProAuthoritativeSendSurface) &&
+      !simpleHomeReviewLinkSendStep ? (
         <details className="rounded-lg border border-slate-800/60 bg-slate-950/25 px-3 py-2 text-slate-400 [&_summary::-webkit-details-marker]:hidden">
           <summary className="cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-300">
             Understand roles
@@ -4524,15 +4535,19 @@ const AgreementReview: React.FC<Props> = ({
           <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
             {isSimpleHomeReview
               ? simplePaidProAuthoritativeSendSurface && simpleFlowPhase === "send"
-                ? "Recipients"
+                ? simpleHomeReviewLinkSendStep
+                  ? "Recipient setup"
+                  : "Recipients"
                 : "Signature delivery"
               : "People on this agreement"}
           </div>
           {isSimpleHomeReview && simpleFlowPhase === "send" ? (
             <p className="mt-2 text-[11px] leading-relaxed text-slate-500 sm:text-xs">
-              {simplePaidProAuthoritativeSendSurface
-                ? "LawDog creates a secure review link — it does not email recipients automatically. Add names and emails below so signers are labeled correctly."
-                : "Parties are listed in the agreement. Only people with emails entered below will receive signature requests."}
+              {simpleHomeReviewLinkSendStep
+                ? "Names and emails label each private review link. Nothing is sent automatically."
+                : simplePaidProAuthoritativeSendSurface
+                  ? "LawDog creates a secure review link — it does not email recipients automatically. Add names and emails below so signers are labeled correctly."
+                  : "Parties are listed in the agreement. Only people with emails entered below will receive signature requests."}
             </p>
           ) : null}
         </div>
@@ -5995,8 +6010,7 @@ const AgreementReview: React.FC<Props> = ({
 
           {economicsBannerEl}
 
-          {simpleFlowUpsellSuppressed &&
-          !(simpleFlowPhase === "send" && (streamlinedPremiumIntentForCopy ?? simpleFlowPremiumHandoffIntent) === "review") ? (
+          {simpleFlowUpsellSuppressed && !simpleHomePaidReviewLinkHandoff ? (
             <div
               className="mb-4 rounded-lg border border-emerald-800/40 bg-emerald-950/[0.12] px-4 py-3"
               role="status"
@@ -6118,14 +6132,14 @@ const AgreementReview: React.FC<Props> = ({
                 <div className="space-y-2">
                   <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-[1.625rem]">
                     {streamlinedPremiumIntentForCopy === "review"
-                      ? "Collaborate Before Signing"
+                      ? "Prepare review link"
                       : streamlinedPremiumIntentForCopy === "signature"
                         ? "Review before sending for signature"
                         : "Review before sending"}
                   </h1>
                   <p className="max-w-none text-sm leading-relaxed text-slate-400 lg:max-w-[44rem]">
                     {streamlinedPremiumIntentForCopy === "review"
-                      ? "Work the language together before anyone signs — cleaner review, faster alignment, then you control when it goes out."
+                      ? "Choose who can review this agreement. Nothing is signed."
                       : streamlinedPremiumIntentForCopy === "signature"
                         ? "Finalize terms here, then send for tracked e‑signature — professional delivery, signer progress, and proof when the deal closes."
                         : "Check the agreement below. Nothing is sent until you confirm."}
@@ -6137,7 +6151,7 @@ const AgreementReview: React.FC<Props> = ({
                     Prepare review link
                   </h1>
                   <p className="max-w-none text-sm leading-relaxed text-slate-400 lg:max-w-[44rem]">
-                    Confirm recipient details on the right, then continue to confirmation to create a private review link.
+                    Choose who can review this agreement. Nothing is signed.
                   </p>
                 </div>
               ) : premiumLawdogSimpleHome && simpleFlowPhase === "send" && streamlinedPremiumIntentForCopy === "signature" ? (
@@ -6168,8 +6182,31 @@ const AgreementReview: React.FC<Props> = ({
                   ))}
                 </div>
               ) : null}
-              {simplePreviewBlock}
-              {draft && isPaidProAgreementAuthoritative({ draft, agreementId }) ? (
+              {simpleHomeReviewLinkSendStep && draft ? (
+                <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-4 py-4 sm:px-5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Agreement summary</p>
+                  <p className="mt-2 text-base font-semibold tracking-tight text-slate-100">
+                    {(draft.title || "").trim() || "Agreement"}
+                  </p>
+                  <p className="mt-2 text-sm text-slate-300">
+                    <span className="font-medium text-slate-500">Parties: </span>
+                    {streamlinedPartiesHeadline}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-500">Review link only · Nothing is signed</p>
+                </div>
+              ) : null}
+              {simpleHomeReviewLinkSendStep ? (
+                <details className="mt-2 rounded-xl border border-slate-800/70 bg-slate-950/[0.35] [&_summary::-webkit-details-marker]:hidden">
+                  <summary className="cursor-pointer list-none px-4 py-3 text-left marker:hidden hover:bg-slate-900/35">
+                    <span className="text-sm font-semibold text-slate-100">Agreement preview</span>
+                    <span className="mt-0.5 block text-xs font-normal text-slate-500">Collapsed — expand for a read-only view.</span>
+                  </summary>
+                  <div className="border-t border-slate-800/50 px-1 pb-3 pt-2">{simplePreviewBlock}</div>
+                </details>
+              ) : (
+                simplePreviewBlock
+              )}
+              {draft && isPaidProAgreementAuthoritative({ draft, agreementId }) && !simpleSendReviewIntent ? (
                 <div className="mt-6">
                   <ProRedlineOwnerPanel
                     agreementId={agreementId}
@@ -6198,7 +6235,7 @@ const AgreementReview: React.FC<Props> = ({
                   <span>Revising agreement preview…</span>
                 </div>
               ) : null}
-              {compareChangesPanel ? (
+              {compareChangesPanel && !simpleHomeReviewLinkSendStep ? (
                 <div id={SIMPLE_HOME_REVISION_COMPARE_ANCHOR_ID} className="scroll-mt-24">
                   {compareChangesPanel}
                 </div>
@@ -6236,10 +6273,12 @@ const AgreementReview: React.FC<Props> = ({
 
               {premiumLawdogSimpleHome ? (
                 <>
-                  <p className="text-sm leading-snug text-slate-300">
-                    <span className="font-medium text-slate-500">Parties: </span>
-                    {streamlinedPartiesHeadline}
-                  </p>
+                  {!simpleHomeReviewLinkSendStep ? (
+                    <p className="text-sm leading-snug text-slate-300">
+                      <span className="font-medium text-slate-500">Parties: </span>
+                      {streamlinedPartiesHeadline}
+                    </p>
+                  ) : null}
                   {simpleFlowPhase === "send" ? (
                     simpleSendActionsUnlocked ? (
                       <>
@@ -6265,14 +6304,46 @@ const AgreementReview: React.FC<Props> = ({
                                     className={`vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 ${
                                       watermarkSendModalOpen ? "hidden" : ""
                                     }`}
-                                    disabled={Boolean(savingField) || simpleFlowAdvanceBusy}
-                                    onClick={() => setWatermarkSendModalOpen(true)}
+                                    disabled={
+                                      Boolean(savingField) ||
+                                      simpleFlowAdvanceBusy ||
+                                      (recipientGateBlocksSend &&
+                                        !(simpleHomeReviewLinkSendStep && simpleFlowPremiumHandoffIntent === "review"))
+                                    }
+                                    onClick={() => {
+                                      if (
+                                        simpleHomeReviewLinkSendStep &&
+                                        recipientGateBlocksSend &&
+                                        simpleFlowPremiumHandoffIntent === "review"
+                                      ) {
+                                        setSimpleSendRecipientEditorOpen(true);
+                                        window.requestAnimationFrame(() => {
+                                          document
+                                            .getElementById("simple-send-recipients-v1-anchor")
+                                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                        });
+                                        return;
+                                      }
+                                      setWatermarkSendModalOpen(true);
+                                    }}
                                   >
                                     {simpleFlowPremiumHandoffIntent === "review"
-                                      ? "Continue to confirmation"
+                                      ? simpleHomeReviewLinkSendStep && recipientGateBlocksSend
+                                        ? "Add recipient emails"
+                                        : "Continue to confirmation"
                                       : "Review and send"}
                                   </button>
-                                  {onSimpleFlowBack ? (
+                                  {simpleHomeReviewLinkSendStep && onBackToNew ? (
+                                    <button
+                                      type="button"
+                                      className={`vs01-btn vs01-btn--secondary w-full min-h-[2.75rem] px-6 ${
+                                        watermarkSendModalOpen ? "hidden" : ""
+                                      }`}
+                                      onClick={() => onBackToNew()}
+                                    >
+                                      Back to draft
+                                    </button>
+                                  ) : onSimpleFlowBack ? (
                                     <button
                                       type="button"
                                       className={`vs01-btn vs01-btn--secondary w-full min-h-[2.75rem] px-6 ${
@@ -6292,12 +6363,14 @@ const AgreementReview: React.FC<Props> = ({
                             ) : (
                             <>
                               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200/95">
-                                Agreement ready
+                                {simpleHomeReviewLinkSendStep ? "Recipient setup" : "Agreement ready"}
                               </p>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                                {streamlinedPremiumIntentForCopy === "review"
-                                  ? "LawDog creates secure review links — it does not email recipients automatically. Use the button below to generate links you copy and share."
-                                  : "LawDog creates secure signing links — it does not email recipients automatically. Use the button below to generate links you copy and share."}
+                                {simpleHomeReviewLinkSendStep
+                                  ? "Confirm who can open a private review link. You copy and share it — nothing is signed."
+                                  : streamlinedPremiumIntentForCopy === "review"
+                                    ? "LawDog creates secure review links — it does not email recipients automatically. Use the button below to generate links you copy and share."
+                                    : "LawDog creates secure signing links — it does not email recipients automatically. Use the button below to generate links you copy and share."}
                               </p>
                               {recipientGateBlocksSend ? (
                                 <p
@@ -6317,8 +6390,26 @@ const AgreementReview: React.FC<Props> = ({
                                 <button
                                   type="button"
                                   className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
-                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || recipientGateBlocksSend}
+                                  disabled={
+                                    Boolean(savingField) ||
+                                    simpleFlowAdvanceBusy ||
+                                    (recipientGateBlocksSend &&
+                                      !(simpleHomeReviewLinkSendStep && streamlinedPremiumIntentForCopy === "review"))
+                                  }
                                   onClick={() => {
+                                    if (
+                                      simpleHomeReviewLinkSendStep &&
+                                      recipientGateBlocksSend &&
+                                      streamlinedPremiumIntentForCopy === "review"
+                                    ) {
+                                      setSimpleSendRecipientEditorOpen(true);
+                                      window.requestAnimationFrame(() => {
+                                        document
+                                          .getElementById("simple-send-recipients-v1-anchor")
+                                          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                      });
+                                      return;
+                                    }
                                     logCreateReviewLinksClick("primary_cta_click", {
                                       intent: streamlinedPremiumIntentForCopy ?? null,
                                     });
@@ -6330,10 +6421,20 @@ const AgreementReview: React.FC<Props> = ({
                                   }}
                                 >
                                   {streamlinedPremiumIntentForCopy === "review"
-                                    ? "Continue to confirmation"
+                                    ? simpleHomeReviewLinkSendStep && recipientGateBlocksSend
+                                      ? "Add recipient emails"
+                                      : "Continue to confirmation"
                                     : "Review and send"}
                                 </button>
-                                {onSimpleFlowBack ? (
+                                {simpleHomeReviewLinkSendStep && onBackToNew ? (
+                                  <button
+                                    type="button"
+                                    className="vs01-btn vs01-btn--secondary w-full min-h-[2.75rem] px-6"
+                                    onClick={() => onBackToNew()}
+                                  >
+                                    Back to draft
+                                  </button>
+                                ) : onSimpleFlowBack ? (
                                   <button
                                     type="button"
                                     className="vs01-btn vs01-btn--secondary w-full min-h-[2.75rem] px-6"
@@ -6363,11 +6464,12 @@ const AgreementReview: React.FC<Props> = ({
                           ) : streamlinedPremiumIntentForCopy === "review" ? (
                             <>
                               <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                                Review link
+                                {simpleHomeReviewLinkSendStep ? "Recipient setup" : "Review link"}
                               </h3>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                                Create a private review link — you copy and share it. Nothing reaches anyone until you
-                                do.
+                                {simpleHomeReviewLinkSendStep
+                                  ? "Add who can open the private review link. LawDog does not email them for you."
+                                  : "Create a private review link — you copy and share it. Nothing reaches anyone until you do."}
                               </p>
                               {recipientGateBlocksSend ? (
                                 <p
@@ -6382,17 +6484,40 @@ const AgreementReview: React.FC<Props> = ({
                                 <button
                                   type="button"
                                   className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 disabled:cursor-not-allowed disabled:opacity-45"
-                                  disabled={Boolean(savingField) || simpleFlowAdvanceBusy || recipientGateBlocksSend}
+                                  disabled={
+                                    Boolean(savingField) ||
+                                    simpleFlowAdvanceBusy ||
+                                    (recipientGateBlocksSend && !simpleHomeReviewLinkSendStep)
+                                  }
                                   onClick={() => {
+                                    if (simpleHomeReviewLinkSendStep && recipientGateBlocksSend) {
+                                      setSimpleSendRecipientEditorOpen(true);
+                                      window.requestAnimationFrame(() => {
+                                        document
+                                          .getElementById("simple-send-recipients-v1-anchor")
+                                          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                      });
+                                      return;
+                                    }
                                     logCreateReviewLinksClick("primary_cta_click", {
                                       intent: streamlinedPremiumIntentForCopy ?? null,
                                     });
                                     requestReviewLinkCreateConfirmation();
                                   }}
                                 >
-                                  Continue to confirmation
+                                  {simpleHomeReviewLinkSendStep && recipientGateBlocksSend
+                                    ? "Add recipient emails"
+                                    : "Continue to confirmation"}
                                 </button>
-                                {onSimpleFlowBack ? (
+                                {simpleHomeReviewLinkSendStep && onBackToNew ? (
+                                  <button
+                                    type="button"
+                                    className="vs01-btn vs01-btn--secondary w-full min-h-[2.75rem] px-6"
+                                    onClick={() => onBackToNew()}
+                                  >
+                                    Back to draft
+                                  </button>
+                                ) : onSimpleFlowBack ? (
                                   <button
                                     type="button"
                                     className="vs01-btn vs01-btn--secondary w-full min-h-[2.75rem] px-6"
@@ -6402,32 +6527,34 @@ const AgreementReview: React.FC<Props> = ({
                                   </button>
                                 ) : null}
                               </div>
-                              <ul className="mt-4 space-y-2 text-xs leading-relaxed text-slate-400">
-                                <li className="flex gap-2">
-                                  <span className="text-emerald-400" aria-hidden>
-                                    ✓
-                                  </span>
-                                  <span>Request changes, compare versions, and send revised drafts in one workspace</span>
-                                </li>
-                                <li className="flex gap-2">
-                                  <span className="text-emerald-400" aria-hidden>
-                                    ✓
-                                  </span>
-                                  <span>Suggested edits and approvals from your reviewers</span>
-                                </li>
-                                <li className="flex gap-2">
-                                  <span className="text-emerald-400" aria-hidden>
-                                    ✓
-                                  </span>
-                                  <span>Finalize signatures when terms are ready</span>
-                                </li>
-                                <li className="flex gap-2">
-                                  <span className="text-emerald-400" aria-hidden>
-                                    ✓
-                                  </span>
-                                  <span>Nothing reaches reviewers until you share a link</span>
-                                </li>
-                              </ul>
+                              {!simpleHomeReviewLinkSendStep ? (
+                                <ul className="mt-4 space-y-2 text-xs leading-relaxed text-slate-400">
+                                  <li className="flex gap-2">
+                                    <span className="text-emerald-400" aria-hidden>
+                                      ✓
+                                    </span>
+                                    <span>Request changes, compare versions, and send revised drafts in one workspace</span>
+                                  </li>
+                                  <li className="flex gap-2">
+                                    <span className="text-emerald-400" aria-hidden>
+                                      ✓
+                                    </span>
+                                    <span>Suggested edits and approvals from your reviewers</span>
+                                  </li>
+                                  <li className="flex gap-2">
+                                    <span className="text-emerald-400" aria-hidden>
+                                      ✓
+                                    </span>
+                                    <span>Finalize signatures when terms are ready</span>
+                                  </li>
+                                  <li className="flex gap-2">
+                                    <span className="text-emerald-400" aria-hidden>
+                                      ✓
+                                    </span>
+                                    <span>Nothing reaches reviewers until you share a link</span>
+                                  </li>
+                                </ul>
+                              ) : null}
                             </>
                           ) : (
                             <>
@@ -6492,11 +6619,20 @@ const AgreementReview: React.FC<Props> = ({
                           )}
                           {!simplePaidProAuthoritativeSendSurface ? (
                             <>
-                              <details className="mt-5 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
-                                <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400">
+                              <details
+                                className="mt-5 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden"
+                                {...(simpleHomeReviewLinkSendStep ? { open: true } : {})}
+                              >
+                                <summary
+                                  className={`cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden hover:text-slate-400 ${
+                                    simpleHomeReviewLinkSendStep ? "hidden" : ""
+                                  }`}
+                                >
                                   Recipients and delivery setup
                                 </summary>
-                                <div className="mt-3 border-t border-slate-800/50 pt-3">{recipientsBlock}</div>
+                                <div className={`border-slate-800/50 pt-3 ${simpleHomeReviewLinkSendStep ? "" : "mt-3 border-t"}`}>
+                                  {recipientsBlock}
+                                </div>
                               </details>
                               {featureFlags.sendPaymentRequestsUi ? (
                                 <details className="mt-2 rounded-lg border border-slate-800/55 bg-slate-950/30 px-2 py-1.5 [&_summary::-webkit-details-marker]:hidden">
@@ -6533,12 +6669,27 @@ const AgreementReview: React.FC<Props> = ({
                           />
                         ) : null}
                       </>
-                    ) : simpleFlowUpsellSuppressed ? (
+                    ) : simpleFlowUpsellSuppressed && !simpleHomePaidReviewLinkHandoff ? (
                       <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
                         <p className="text-sm font-semibold text-emerald-100">{FUNNEL_PRO_ACTIVE_TITLE}</p>
                         <p className="mt-2 text-xs leading-relaxed text-slate-400">
                           {FUNNEL_PRO_ACTIVE_BODY} Add recipients above, then confirm send.
                         </p>
+                      </div>
+                    ) : simpleFlowUpsellSuppressed && simpleHomePaidReviewLinkHandoff ? (
+                      <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
+                        <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                          Unlock send to add recipient emails and finish your review link.
+                        </p>
+                        {onRequestSendUnlock ? (
+                          <button
+                            type="button"
+                            className="vs01-btn vs01-btn--primary mt-5 w-full min-h-[2.75rem] px-6"
+                            onClick={() => onRequestSendUnlock()}
+                          >
+                            {simpleFlowUnlockCtaLabel ?? "Unlock signing"}
+                          </button>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
@@ -6632,12 +6783,27 @@ const AgreementReview: React.FC<Props> = ({
                           />
                         ) : null}
                       </>
-                    ) : simpleFlowUpsellSuppressed ? (
+                    ) : simpleFlowUpsellSuppressed && !simpleHomePaidReviewLinkHandoff ? (
                       <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
                         <p className="text-sm font-semibold text-emerald-100">{FUNNEL_PRO_ACTIVE_TITLE}</p>
                         <p className="mt-2 text-xs leading-relaxed text-slate-400">
                           {FUNNEL_PRO_ACTIVE_BODY} Add signers below, then confirm send.
                         </p>
+                      </div>
+                    ) : simpleFlowUpsellSuppressed && simpleHomePaidReviewLinkHandoff ? (
+                      <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
+                        <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                          Unlock send to add recipient emails and finish your review link.
+                        </p>
+                        {onRequestSendUnlock ? (
+                          <button
+                            type="button"
+                            className="vs01-btn vs01-btn--primary mt-5 w-full min-h-[2.75rem] px-6"
+                            onClick={() => onRequestSendUnlock()}
+                          >
+                            {simpleFlowUnlockCtaLabel ?? "Unlock signing"}
+                          </button>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5">
@@ -6739,29 +6905,31 @@ const AgreementReview: React.FC<Props> = ({
                         </div>
                       ) : null}
                       <p className="text-sm font-medium text-slate-200">
-                        {agreementReadiness && isSimpleHomeReview && !premiumLawdogSimpleHome
-                          ? readinessCtaHelper(agreementReadiness.level)
-                          : premiumLawdogSimpleHome
-                            ? simpleFlowPhase === "review"
-                              ? premiumAwaitingStreamlinedFork
-                                ? "Choose Collaborate Before Signing or Send above before you continue."
-                                : streamlinedPremiumIntentForCopy === "review"
-                                  ? "Collaborate on terms next — recipients can review and revise before anyone signs."
-                                  : streamlinedPremiumIntentForCopy === "signature"
-                                    ? "Close this agreement faster with tracked e-signature and clear proof."
-                                    : "Create → Review → Send."
-                              : simpleSendActionsUnlocked
+                        {simpleHomeReviewLinkSendStep
+                          ? "Add recipients above, then confirm to create your private review link."
+                          : agreementReadiness && isSimpleHomeReview && !premiumLawdogSimpleHome
+                            ? readinessCtaHelper(agreementReadiness.level)
+                            : premiumLawdogSimpleHome
+                              ? simpleFlowPhase === "review"
                                 ? premiumAwaitingStreamlinedFork
-                                  ? "Choose your path at the top first, then add recipients and confirm in the send panel."
+                                  ? "Choose Review link or Signing link at the top before you continue."
                                   : streamlinedPremiumIntentForCopy === "review"
-                                    ? "Add recipients, then share your review draft link."
-                                    : "Add recipients, then send your signature request."
-                                : "Upgrade to send to close faster, see signer progress, and send professionally."
-                            : simpleFlowPhase === "review"
-                              ? REVIEW_STRUCTURED_WIN_LINE
-                              : simpleSendActionsUnlocked
-                                ? "Recipients are set below — send when you are ready."
-                                : "Unlock signing to close faster, monitor delivery, and keep proof."}
+                                    ? "Continue when you are ready to set up recipients and your review link."
+                                    : streamlinedPremiumIntentForCopy === "signature"
+                                      ? "Close this agreement faster with tracked e-signature and clear proof."
+                                      : "Create → Review → Send."
+                                : simpleSendActionsUnlocked
+                                  ? premiumAwaitingStreamlinedFork
+                                    ? "Choose your path at the top first, then add recipients and confirm in the send panel."
+                                    : streamlinedPremiumIntentForCopy === "review"
+                                      ? "Add recipients, then share your review draft link."
+                                      : "Add recipients, then send your signature request."
+                                  : "Upgrade to send to close faster, see signer progress, and send professionally."
+                              : simpleFlowPhase === "review"
+                                ? REVIEW_STRUCTURED_WIN_LINE
+                                : simpleSendActionsUnlocked
+                                  ? "Recipients are set below — send when you are ready."
+                                  : "Unlock signing to close faster, monitor delivery, and keep proof."}
                       </p>
                       {!premiumLawdogSimpleHome ? (
                         <p className="text-xs leading-relaxed text-slate-500">
@@ -6803,19 +6971,6 @@ const AgreementReview: React.FC<Props> = ({
                             role="status"
                           >
                             You&apos;re about to send this for signature — nothing goes out without confirmation.
-                          </p>
-                        ) : null}
-                        {isSimpleHomeReview &&
-                        simpleFlowPhase === "review" &&
-                        requiredComplete &&
-                        premiumLawdogSimpleHome &&
-                        streamlinedPremiumIntentForCopy === "review" ? (
-                          <p
-                            className="w-full text-center text-xs font-medium leading-snug text-slate-300 sm:text-right"
-                            role="status"
-                          >
-                            You&apos;re moving to collaboration — share a review draft first; nothing finalizes until
-                            you choose.
                           </p>
                         ) : null}
                         {isSimpleHomeReview &&
@@ -6965,13 +7120,15 @@ const AgreementReview: React.FC<Props> = ({
                         Send &amp; Request Payment
                       </button>
                     ) : premiumLawdogSimpleHome && simpleFlowPhase === "send" && simpleSendActionsUnlocked ? (
-                      <p className="w-full text-center text-xs leading-relaxed text-slate-500 sm:text-right sm:max-w-md">
-                        {premiumAwaitingStreamlinedFork
-                          ? "Choose your premium path at the top of the page, then confirm send in the panel above."
-                          : streamlinedPremiumIntentForCopy === "review"
-                            ? "Confirm send in the panel above — collaboration stays first on this path."
-                            : "Confirm send in the panel above — signature delivery stays first on this path."}
-                      </p>
+                      simpleHomeReviewLinkSendStep ? null : (
+                        <p className="w-full text-center text-xs leading-relaxed text-slate-500 sm:text-right sm:max-w-md">
+                          {premiumAwaitingStreamlinedFork
+                            ? "Choose your premium path at the top of the page, then confirm send in the panel above."
+                            : streamlinedPremiumIntentForCopy === "review"
+                              ? "Confirm send in the panel above — collaboration stays first on this path."
+                              : "Confirm send in the panel above — signature delivery stays first on this path."}
+                        </p>
+                      )
                     ) : (
                       <>
                         <button
@@ -7045,25 +7202,27 @@ const AgreementReview: React.FC<Props> = ({
                       </button>
                     ) : null}
                     {simpleFlowPhase === "send" && requiredComplete ? (
-                      <p className="w-full text-center text-[11px] leading-relaxed text-slate-500 sm:text-right">
-                        {canonicalUnpaidSendShell
-                          ? "Nothing is sent until you confirm."
-                          : isSimpleHomeReview
-                            ? sendInviteReadyCount >= 1
-                              ? premiumAwaitingStreamlinedFork
-                                ? "Choose your path at the top first, then confirm in the send panel above."
-                                : premiumLawdogSimpleHome && streamlinedPremiumIntentForCopy === "review"
-                                  ? "Nothing is delivered until you tap send — review drafts stay on your LawDog path."
-                                  : premiumLawdogSimpleHome && streamlinedPremiumIntentForCopy === "signature"
-                                    ? "Nothing is sent until you confirm tracked signature in the panel above."
-                                    : "Nothing is sent until you tap the send button above."
-                              : "Add at least one signer email and mobile number to send."
-                            : premiumLawdogSimpleHome && streamlinedPremiumIntentForCopy === "review"
-                              ? "Nothing is delivered until you confirm — collaboration stays first on this path."
-                              : premiumLawdogSimpleHome && streamlinedPremiumIntentForCopy === "signature"
-                                ? "Nothing is sent until you confirm tracked signature in the panel above."
-                                : "Nothing is sent until you press Send."}
-                      </p>
+                      simpleHomeReviewLinkSendStep ? null : (
+                        <p className="w-full text-center text-[11px] leading-relaxed text-slate-500 sm:text-right">
+                          {canonicalUnpaidSendShell
+                            ? "Nothing is sent until you confirm."
+                            : isSimpleHomeReview
+                              ? sendInviteReadyCount >= 1
+                                ? premiumAwaitingStreamlinedFork
+                                  ? "Choose your path at the top first, then confirm in the send panel above."
+                                  : premiumLawdogSimpleHome && streamlinedPremiumIntentForCopy === "review"
+                                    ? "Nothing is delivered until you tap send — review drafts stay on your LawDog path."
+                                    : premiumLawdogSimpleHome && streamlinedPremiumIntentForCopy === "signature"
+                                      ? "Nothing is sent until you confirm tracked signature in the panel above."
+                                      : "Nothing is sent until you tap the send button above."
+                                : "Add at least one signer email and mobile number to send."
+                              : premiumLawdogSimpleHome && streamlinedPremiumIntentForCopy === "review"
+                                ? "Nothing is delivered until you confirm — collaboration stays first on this path."
+                                : premiumLawdogSimpleHome && streamlinedPremiumIntentForCopy === "signature"
+                                  ? "Nothing is sent until you confirm tracked signature in the panel above."
+                                  : "Nothing is sent until you press Send."}
+                        </p>
+                      )
                     ) : null}
                     <div
                       className={`flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs font-medium ${

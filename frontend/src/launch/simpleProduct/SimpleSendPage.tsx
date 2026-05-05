@@ -356,9 +356,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
     showPremiumFork
       ? "Pick how you close: collaborate on changes before signing, or send for tracked signature — both paths keep you looking deal-ready."
       : premiumSendUnlocked && simpleFlowPremiumHandoffIntent === "review"
-        ? simpleFlowPhase === "review"
-          ? "Collaboration — redline together, then share a review link when the terms feel right."
-          : "Deliver your review link — counterparties see a clean workspace; nothing finalizes until you confirm."
+        ? "Choose who can review this agreement. Nothing is signed."
         : premiumSendUnlocked && simpleFlowPremiumHandoffIntent === "signature"
           ? simpleFlowPhase === "review"
             ? "Signature — lock the draft, add signers, then send a tracked request with proof on file."
