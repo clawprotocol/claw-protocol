@@ -36,6 +36,15 @@ const NARROW_PAYMENT_TIMING_RE =
 /** Minimum score to treat a block as a safe payment patch target (no tail append). */
 const MIN_PAYMENT_TARGET_SCORE = 10;
 
+/** Narrow recipient path requires a higher score + strong payment head (no “fake” payment blocks). */
+const MIN_NARROW_PAYMENT_TARGET_SCORE = 11;
+
+/**
+ * Head prefix must clearly read as invoice / timing / payment economics (not generic “fees” alone).
+ */
+const STRONG_PAYMENT_HEAD_LEX =
+  /\b(invoice|invoices|invoicing|payable|net\s*\d|payment\s+terms|payment\s+schedule|disputed\s+amounts?|late\s+payment|due\s+(?:on\s+)?receipt|upon\s+receipt|past\s+due|arrears|within\s+\d+\s*days?\s+(?:of\s+)?(?:invoice|receipt))\b/i;
+
 /** Compact fingerprint for diagnostics (length + FNV-1a 32-bit). */
 export function fingerprintPlainText(s: string): string {
   const t = String(s ?? "").slice(0, 12000);
@@ -172,6 +181,9 @@ export function splitPlainTextAtRecipientPaymentNoiseBoundary(raw: string): { he
     "draft for review",
     "execution and signature",
     "email for notices",
+    "effective date",
+    "signatures:",
+    "signature:",
   ];
   for (const p of phraseStarts) {
     const i = low.indexOf(p);
@@ -191,11 +203,13 @@ function paymentTargetHeadPoisoned(head: string): boolean {
   const h = head.toLowerCase();
   if (/\b(in witness whereof|created with lawdog|draft for review|execution and signature)\b/.test(h)) return true;
   if (/\bemail\s+for\s+notices\b/.test(h)) return true;
+  if (/\beffective date\b/.test(h)) return true;
   if (/(^|\n)\s*(client|developer)\s*:\s*/im.test(head)) return true;
   if (/(^|\n)\s*by\s*:\s*/im.test(head)) return true;
   if (/(^|\n)\s*(name|title|date)\s*:\s*/im.test(head)) return true;
   if (/\bemail\s+.*@/.test(h)) return true;
   if (/(^|\n)\s*signature\b/im.test(head)) return true;
+  if (/\b(?:signatures?|signed)\s*:/im.test(head)) return true;
   return false;
 }
 
@@ -222,6 +236,7 @@ function scorePaymentTargetBlock(
   totalBlocks: number,
   beforeWords: string[],
   safeHead: string,
+  strictPaymentHead: boolean,
 ): number {
   const raw = block.rawText;
   const head = safeHead;
@@ -232,6 +247,7 @@ function scorePaymentTargetBlock(
   if (!headTrim) return -1000;
   if (paymentTargetHeadPoisoned(head)) return -1000;
   if (!REQUIRED_PAYMENT_TARGET_LEX.test(head)) return -1000;
+  if (strictPaymentHead && !STRONG_PAYMENT_HEAD_LEX.test(head)) return -1000;
 
   let s = 0;
   const lexMatches = head.match(PAYMENT_LEX_GLOBAL);
@@ -258,6 +274,20 @@ function scorePaymentTargetBlock(
 
   if (index >= totalBlocks - 1 && s < MIN_PAYMENT_TARGET_SCORE) s -= 8;
   return s;
+}
+
+/** After a narrow payment edit, boilerplate tails from key anchors onward must be byte-identical (no accidental edits). */
+function narrowRecipientBoilerplateTailStable(beforePlain: string, afterPlain: string): boolean {
+  const anchors = ["in witness whereof", "created with lawdog", "draft for review"];
+  for (const needle of anchors) {
+    const lo = needle.toLowerCase();
+    const ib = beforePlain.toLowerCase().indexOf(lo);
+    const ia = afterPlain.toLowerCase().indexOf(lo);
+    if (ib < 0 && ia < 0) continue;
+    if (ib < 0 || ia < 0) return false;
+    if (beforePlain.slice(ib) !== afterPlain.slice(ia)) return false;
+  }
+  return true;
 }
 
 function rebuildPlainFromBlocks(blocks: ParsedPlainBlock[]): string {
@@ -491,14 +521,15 @@ function applyPaymentTermsInlinePatch(
   for (let i = 0; i < blocks.length; i++) {
     const raw = blocks[i]!.rawText;
     const { head } = splitPlainTextAtRecipientPaymentNoiseBoundary(raw);
-    const sc = scorePaymentTargetBlock(blocks[i]!, i, blocks.length, beforeWords, head);
+    const sc = scorePaymentTargetBlock(blocks[i]!, i, blocks.length, beforeWords, head, narrowMicro);
     if (sc > bestScore) {
       bestScore = sc;
       best = i;
     }
   }
 
-  if (best < 0 || bestScore < MIN_PAYMENT_TARGET_SCORE) {
+  const minScore = narrowMicro ? MIN_NARROW_PAYMENT_TARGET_SCORE : MIN_PAYMENT_TARGET_SCORE;
+  if (best < 0 || bestScore < minScore) {
     const diag: RecipientRedlineInlinePlacementDiag = {
       field: "payment_terms",
       mode: "skipped_no_safe_target",
@@ -539,6 +570,26 @@ function applyPaymentTermsInlinePatch(
 
   blocks[best] = { ...b, rawText: newRaw };
   const out = rebuildPlainFromBlocks(blocks);
+  if (narrowMicro && !narrowRecipientBoilerplateTailStable(norm, out)) {
+    const diag: RecipientRedlineInlinePlacementDiag = {
+      field: "payment_terms",
+      mode: "skipped_no_safe_target",
+      targetBlockIndex: best,
+      targetBlockLabel: (b.headingLine || b.rawText).slice(0, 120),
+      targetScore: bestScore,
+      appendedFallbackUsed: false,
+    };
+    logInlinePlacement(diag);
+    return {
+      ok: false,
+      plain: norm,
+      diag,
+      meta: {
+        ...emptyMeta,
+        rejectedNoiseBlockCount,
+      },
+    };
+  }
   const selectedBlockKey = b.clauseNumber ?? `idx:${best}`;
   const selectedBlockLabel = (b.headingLine || b.rawText).slice(0, 120);
   const selectedBlockSnippet = head.replace(/\s+/g, " ").trim().slice(0, 160);

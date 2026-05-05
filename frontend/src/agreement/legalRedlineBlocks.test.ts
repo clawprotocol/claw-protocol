@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { decodeHtmlEntitiesOnce, htmlToPlainTextForLegalRedline } from "./externalAiHandoff";
+import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import {
   alignParsedBlocksToLegalRedline,
   buildLegalRedlineDocumentViewModel,
   extractClauseNumberFromFirstLine,
   filterNarrowRecipientPaymentRedlineNoise,
+  narrowPaymentInsertDeleteContainsBoilerplate,
   normalizeClauseNumberKey,
   parsePlainTextIntoLegalBlocks,
+  sanitizeNarrowRecipientPaymentRedlineBoilerplateSegments,
 } from "./legalRedlineBlocks";
 
 describe("decodeHtmlEntitiesOnce", () => {
@@ -170,6 +173,71 @@ describe("filterNarrowRecipientPaymentRedlineNoise", () => {
         expect(b.hasChange).toBe(false);
       }
     }
+
+    const forbidden = [
+      /in witness whereof/i,
+      /\bsignature\b/i,
+      /\beffective date\b/i,
+      /\bclient\s*:/i,
+      /\bdeveloper\s*:/i,
+      /\bemail for notices\b/i,
+      /created with lawdog/i,
+      /execution and signature/i,
+    ];
+    for (const b of filtered.blocks) {
+      for (const s of b.segments) {
+        if (s.type !== "insert" && s.type !== "delete") continue;
+        for (const re of forbidden) {
+          expect(s.text).not.toMatch(re);
+        }
+      }
+    }
+  });
+
+  it("sanitizes insert/delete segments that contain witness or LawDog boilerplate to same", () => {
+    const vm: LegalRedlineDocumentViewModel = {
+      blocks: [
+        {
+          id: "x1",
+          kind: "paragraph",
+          label: "x",
+          segments: [
+            { type: "same", text: "Invoices " },
+            { type: "delete", text: "IN WITNESS WHEREOF the parties execute." },
+            { type: "insert", text: "Net 30. " },
+          ],
+          insertCount: 1,
+          deleteCount: 1,
+          sameCount: 1,
+          hasInsert: true,
+          hasDelete: true,
+          hasChange: true,
+        },
+      ],
+      stats: {
+        blockCount: 1,
+        changedBlockCount: 1,
+        insertCount: 1,
+        deleteCount: 1,
+        sameCount: 1,
+        segmentCount: 3,
+        currentLen: 10,
+        proposedLen: 10,
+      },
+      hasChanges: true,
+    };
+    const s = sanitizeNarrowRecipientPaymentRedlineBoilerplateSegments(vm);
+    expect(s.blocks[0]!.segments.some((seg) => seg.type === "delete")).toBe(false);
+    expect(s.blocks[0]!.segments.filter((seg) => seg.type === "insert").map((seg) => seg.text).join("")).toMatch(
+      /Net\s*30/i,
+    );
+  });
+
+  it("narrowPaymentInsertDeleteContainsBoilerplate flags execution and party lines", () => {
+    expect(narrowPaymentInsertDeleteContainsBoilerplate("IN WITNESS WHEREOF")).toBe(true);
+    expect(narrowPaymentInsertDeleteContainsBoilerplate("CLIENT: Acme")).toBe(true);
+    expect(narrowPaymentInsertDeleteContainsBoilerplate("Email for Notices: a@b.co")).toBe(true);
+    expect(narrowPaymentInsertDeleteContainsBoilerplate("Net 30")).toBe(false);
   });
 
   it("is a no-op when narrowPaymentInstruction is false", () => {

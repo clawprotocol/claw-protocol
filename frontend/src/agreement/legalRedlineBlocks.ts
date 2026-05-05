@@ -144,6 +144,79 @@ function meaningfulNonSameSegment(text: string): boolean {
   return text.replace(/\s+/g, "").length > 0;
 }
 
+/** Insert/delete text that must never be styled as a redline change for narrow payment instructions. */
+export function narrowPaymentInsertDeleteContainsBoilerplate(text: string): boolean {
+  const s = String(text ?? "");
+  if (!s.trim()) return false;
+  const low = s.toLowerCase();
+  if (/\bin witness whereof\b/.test(low)) return true;
+  if (/\bcreated with lawdog\b|\bdraft for review\b/.test(low)) return true;
+  if (/\bemail for notices\b/.test(low)) return true;
+  if (/execution and signature/i.test(s)) return true;
+  if (/\b(client|developer)\s*:/.test(low)) return true;
+  if (/\beffective date\b/.test(low)) return true;
+  if (/\bparty execution\b|\bexecution by the parties\b/i.test(s)) return true;
+  if (/\b(?:signatures?|signed)\s*:/.test(low)) return true;
+  if (/\(signature\)/i.test(s)) return true;
+  return false;
+}
+
+function mergeAdjacentSameSegments(segments: LegalRedlineSegment[]): LegalRedlineSegment[] {
+  const out: LegalRedlineSegment[] = [];
+  for (const s of segments) {
+    const prev = out[out.length - 1];
+    if (prev && prev.type === "same" && s.type === "same") {
+      prev.text += s.text;
+    } else {
+      out.push({ type: s.type, text: s.text });
+    }
+  }
+  return out;
+}
+
+export function recomputeLegalRedlineBlock(block: LegalRedlineBlock, segments: LegalRedlineSegment[]): LegalRedlineBlock {
+  const counts = countSegmentTypes(segments);
+  const hasInsert = segments.some((s) => s.type === "insert" && meaningfulNonSameSegment(s.text));
+  const hasDelete = segments.some((s) => s.type === "delete" && meaningfulNonSameSegment(s.text));
+  const hasChange = hasInsert || hasDelete;
+  return {
+    ...block,
+    segments,
+    insertCount: counts.insertCount,
+    deleteCount: counts.deleteCount,
+    sameCount: counts.sameCount,
+    hasInsert,
+    hasDelete,
+    hasChange,
+  };
+}
+
+/**
+ * Collapses insert/delete segments that accidentally include signature / witness / party boilerplate
+ * (alignment drift) to “same” so chips and styling stay payment-only.
+ */
+export function sanitizeNarrowRecipientPaymentRedlineBoilerplateSegments(
+  vm: LegalRedlineDocumentViewModel,
+): LegalRedlineDocumentViewModel {
+  const blocks = vm.blocks.map((b) => {
+    const next = mergeAdjacentSameSegments(
+      b.segments.map((s) => {
+        if (s.type !== "insert" && s.type !== "delete") return s;
+        if (!narrowPaymentInsertDeleteContainsBoilerplate(s.text)) return s;
+        return { type: "same" as const, text: s.text };
+      }),
+    );
+    const dirty =
+      next.length !== b.segments.length ||
+      next.some((s, i) => s.type !== b.segments[i]?.type || s.text !== b.segments[i]?.text);
+    if (!dirty) return b;
+    return recomputeLegalRedlineBlock(b, next);
+  });
+  const stats = aggregateStats(blocks, vm.stats.currentLen, vm.stats.proposedLen);
+  const hasChanges = blocks.some((blk) => blockHasMaterialChange(blk.segments));
+  return { ...vm, blocks, stats, hasChanges };
+}
+
 function countSegmentTypes(segments: LegalRedlineSegment[]): {
   insertCount: number;
   deleteCount: number;
@@ -416,13 +489,8 @@ function narrowPaymentSpuriousInsertDeleteLeak(b: LegalRedlineBlock): boolean {
     /\bpause\s+work\s+until\b/.test(insDel)
   )
     return false;
-  return (
-    /\b(in witness whereof|created with lawdog|draft for review|email for notices|execution and signature|sarah collins|anthem blanchard)\b/i.test(
-      insDel,
-    ) ||
-    /\b(client|developer)\s*:/i.test(insDel) ||
-    /\bsignature\b/i.test(insDel)
-  );
+  if (narrowPaymentInsertDeleteContainsBoilerplate(insDel)) return true;
+  return /\b(sarah collins|anthem blanchard)\b/i.test(insDel) || /\bsignature\b/i.test(insDel);
 }
 
 export function isRecipientRedlineNoiseBlockForNarrowPayment(b: LegalRedlineBlock): boolean {
@@ -437,6 +505,7 @@ export function isRecipientRedlineNoiseBlockForNarrowPayment(b: LegalRedlineBloc
   if (/\b(created with lawdog|draft for review)\b/.test(t)) return true;
   if (/\bin witness whereof\b/.test(t)) return true;
   if (/execution and signature/i.test(t)) return true;
+  if (/\beffective date\b/.test(t)) return true;
   if (/^notices\b/i.test(firstLine)) return true;
   if (/\bemail\s+for\s+notices\b/.test(t)) return true;
 
@@ -479,6 +548,8 @@ export function filterNarrowRecipientPaymentRedlineNoise(
   options: { narrowPaymentInstruction: boolean },
 ): LegalRedlineDocumentViewModel {
   if (!options.narrowPaymentInstruction) return vm;
+
+  vm = sanitizeNarrowRecipientPaymentRedlineBoilerplateSegments(vm);
 
   const droppedBlocks: Array<{ id: string; kind: LegalRedlineBlockKind; label?: string }> = [];
   const blocks = vm.blocks.map((b) => {

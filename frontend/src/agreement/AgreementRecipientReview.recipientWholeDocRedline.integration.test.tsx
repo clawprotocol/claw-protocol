@@ -151,10 +151,13 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
   });
 
   it("keeps baseline structure, applies Net 30 and pause remedy in payment block, hides Agreement fields trailer, two intents applied", async () => {
-    Object.defineProperty(Element.prototype, "scrollIntoView", {
-      configurable: true,
-      value: vi.fn(),
-    });
+    const scrollIntoViewMock = vi.fn();
+    for (const proto of [Element.prototype, HTMLElement.prototype]) {
+      Object.defineProperty(proto, "scrollIntoView", {
+        configurable: true,
+        value: scrollIntoViewMock,
+      });
+    }
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
         typeof input === "string"
@@ -234,7 +237,24 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     expect(callout.textContent).toMatch(/Added:/i);
     expect(callout.textContent).not.toMatch(/Could not add:/i);
     const list = screen.getByTestId("recipient-intent-coverage-list");
-    expect(within(list).getAllByText(/Added:/i)).toHaveLength(2);
+    expect(within(list).getAllByRole("button", { name: /Added:/i })).toHaveLength(2);
+
+    expect(legalRoot.querySelector('[data-recipient-redline-anchor="payment_timing"]')).toBeTruthy();
+    expect(legalRoot.querySelector('[data-recipient-redline-anchor="pause_suspend_work"]')).toBeTruthy();
+    scrollIntoViewMock.mockClear();
+    await userEvent.click(
+      within(screen.getByTestId("recipient-intent-status-payment_timing")).getByRole("button", {
+        name: /Added:/i,
+      }),
+    );
+    expect(scrollIntoViewMock).toHaveBeenCalled();
+    scrollIntoViewMock.mockClear();
+    await userEvent.click(
+      within(screen.getByTestId("recipient-intent-status-pause_suspend_work")).getByRole("button", {
+        name: /Added:/i,
+      }),
+    );
+    expect(scrollIntoViewMock).toHaveBeenCalled();
 
     expect(screen.queryByTestId("recipient-side-by-side-block-grid")).toBeNull();
     expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();

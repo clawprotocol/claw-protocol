@@ -118,4 +118,52 @@ describe("RecipientLegalRedlineDocument", () => {
     const ins = root.querySelector('[data-redline="insert"]');
     expect(ins?.textContent).toContain("Net 30");
   });
+
+  it("adds data-recipient-redline-anchor for narrow payment timing + pause inserts", () => {
+    const pause =
+      "If payment is more than fifteen (15) days late, Developer may pause work until all overdue undisputed amounts are paid.";
+    const document: LegalRedlineDocumentViewModel = {
+      blocks: [
+        {
+          id: "pay",
+          kind: "paragraph",
+          segments: [
+            { type: "same", text: "Invoices are payable " },
+            { type: "delete", text: "upon receipt" },
+            { type: "insert", text: `Net 30. ${pause}` },
+            { type: "same", text: "." },
+          ],
+          insertCount: 1,
+          deleteCount: 1,
+          sameCount: 2,
+          hasInsert: true,
+          hasDelete: true,
+          hasChange: true,
+          label: "Payment",
+        },
+      ],
+      stats: {
+        blockCount: 1,
+        changedBlockCount: 1,
+        insertCount: 1,
+        deleteCount: 1,
+        sameCount: 2,
+        segmentCount: 4,
+        currentLen: 1,
+        proposedLen: 1,
+      },
+      hasChanges: true,
+    };
+    render(
+      <RecipientLegalRedlineDocument
+        document={document}
+        variant="suggested"
+        recipientNarrowIntentAnchors
+        highlightedRecipientAnchor="payment_timing"
+      />,
+    );
+    const root = screen.getByTestId("recipient-legal-redline-document");
+    expect(root.querySelector('[data-recipient-redline-anchor="payment_timing"]')).toBeTruthy();
+    expect(root.querySelector('[data-recipient-redline-anchor="pause_suspend_work"]')).toBeTruthy();
+  });
 });

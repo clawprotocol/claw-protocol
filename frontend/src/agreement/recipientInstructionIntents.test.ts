@@ -4,6 +4,8 @@ import {
   countRecipientIntentGaps,
   extractRecipientInstructionIntents,
   finalizeRecipientInstructionIntents,
+  recipientIntentStatusTestId,
+  recipientRedlineAnchorForIntentCategory,
 } from "./recipientInstructionIntents";
 import { compareAgreementSnapshots } from "../vs01/agreementCompare";
 import { draftToSnapshot } from "./agreementVersionStore";
@@ -56,6 +58,16 @@ function finalize(
     fieldPatchDisplay: opts?.fieldPatchDisplay ?? true,
   });
 }
+
+describe("recipient intent status anchors", () => {
+  it("maps categories to stable test ids and redline anchor keys", () => {
+    expect(recipientIntentStatusTestId("payment_timing")).toBe("recipient-intent-status-payment_timing");
+    expect(recipientIntentStatusTestId("suspend_pause_work")).toBe("recipient-intent-status-pause_suspend_work");
+    expect(recipientRedlineAnchorForIntentCategory("payment_timing")).toBe("payment_timing");
+    expect(recipientRedlineAnchorForIntentCategory("suspend_pause_work")).toBe("pause_suspend_work");
+    expect(recipientRedlineAnchorForIntentCategory("late_fee")).toBeNull();
+  });
+});
 
 describe("recipient instruction intents", () => {
   it("A: multi-part payment request yields distinct intents", () => {

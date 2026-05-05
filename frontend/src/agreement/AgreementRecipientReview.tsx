@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { AgreementDraft } from "./agreementTypes";
 import {
   clearPendingRecipientNotice,
@@ -30,6 +30,8 @@ import {
 import {
   countRecipientIntentGaps,
   formatRecipientIntentAppliedLabel,
+  recipientIntentStatusTestId,
+  recipientRedlineAnchorForIntentCategory,
 } from "./recipientInstructionIntents";
 import {
   buildRecipientLegalRedlinePlainTexts,
@@ -606,6 +608,9 @@ export function AgreementRecipientReview({
     return previewDiff?.instructionCaptureWarning ? 1 : 0;
   }, [recipientRedlinePlainTexts?.instructionIntentOutcomes, previewDiff?.instructionCaptureWarning]);
 
+  const [narrowRedlineHighlightAnchor, setNarrowRedlineHighlightAnchor] = useState<string | null>(null);
+  const suggestedChangesDocScrollRef = useRef<HTMLDivElement>(null);
+
   const legalRedlineDocumentBaseVm = useMemo(() => {
     if (!recipientRedlinePlainTexts) return null;
     let vm = buildLegalRedlineDocumentViewModel(
@@ -617,6 +622,36 @@ export function AgreementRecipientReview({
     }
     return vm;
   }, [recipientRedlinePlainTexts]);
+
+  const narrowIntentAnchorPresence = useMemo(() => {
+    const absent = { payment_timing: false, pause_suspend_work: false };
+    if (!legalRedlineDocumentBaseVm || !recipientRedlinePlainTexts?.narrowRecipientTargetedRedline) return absent;
+    let payment_timing = false;
+    let pause_suspend_work = false;
+    for (const b of legalRedlineDocumentBaseVm.blocks) {
+      for (const s of b.segments) {
+        if (s.type !== "insert") continue;
+        if (/\bnet\s*\d+/i.test(s.text)) payment_timing = true;
+        if (/pause work until all overdue/i.test(s.text)) pause_suspend_work = true;
+      }
+    }
+    return { payment_timing, pause_suspend_work };
+  }, [legalRedlineDocumentBaseVm, recipientRedlinePlainTexts?.narrowRecipientTargetedRedline]);
+
+  const scrollToNarrowRedlineAnchor = useCallback((anchor: string) => {
+    const shell = suggestedChangesDocScrollRef.current;
+    const el =
+      (shell?.querySelector(`[data-recipient-redline-anchor="${anchor}"]`) as HTMLElement | null) ??
+      (typeof document !== "undefined"
+        ? (document.querySelector(
+            `[data-testid="recipient-suggested-changes-document"] [data-recipient-redline-anchor="${anchor}"]`,
+          ) as HTMLElement | null)
+        : null);
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    setNarrowRedlineHighlightAnchor(anchor);
+    window.setTimeout(() => setNarrowRedlineHighlightAnchor(null), 2200);
+  }, []);
 
   const legalRedlineDocumentVm = useMemo(() => {
     if (!legalRedlineDocumentBaseVm || !previewDiff) return legalRedlineDocumentBaseVm;
@@ -1191,12 +1226,46 @@ export function AgreementRecipientReview({
               >
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-100/90">Request status</p>
                 <ul className="space-y-2.5" data-testid="recipient-intent-coverage-list">
-                  {recipientRedlinePlainTexts.instructionIntentOutcomes.map((it) => (
-                    <li key={it.id} className="rounded-md border border-amber-700/35 bg-amber-950/25 px-2.5 py-2">
+                  {recipientRedlinePlainTexts.instructionIntentOutcomes.map((it) => {
+                    const anchor = recipientRedlineAnchorForIntentCategory(it.category);
+                    const anchorKey =
+                      anchor === "payment_timing" || anchor === "pause_suspend_work" ? anchor : null;
+                    const canScrollToRedline =
+                      it.status === "applied" &&
+                      ((anchorKey === "payment_timing" && narrowIntentAnchorPresence.payment_timing) ||
+                        (anchorKey === "pause_suspend_work" && narrowIntentAnchorPresence.pause_suspend_work));
+                    const statusTestId = recipientIntentStatusTestId(it.category);
+                    const onKeyNavigate = (e: KeyboardEvent) => {
+                      if (!canScrollToRedline || !anchorKey) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        scrollToNarrowRedlineAnchor(anchorKey);
+                      }
+                    };
+                    return (
+                    <li
+                      key={it.id}
+                      data-testid={statusTestId}
+                      className="rounded-md border border-amber-700/35 bg-amber-950/25 px-2.5 py-2"
+                    >
                       {it.status === "applied" ? (
-                        <p className="text-[13px] leading-snug text-emerald-100/95">
-                          ✓ Added: {formatRecipientIntentAppliedLabel(it)}
-                        </p>
+                        canScrollToRedline && anchorKey ? (
+                          <button
+                            type="button"
+                            className="w-full cursor-pointer rounded-sm text-left text-[13px] leading-snug text-emerald-100/95 underline decoration-emerald-400/80 decoration-1 underline-offset-2 hover:text-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+                            onClick={() => scrollToNarrowRedlineAnchor(anchorKey)}
+                            onKeyDown={onKeyNavigate}
+                          >
+                            ✓ Added: {formatRecipientIntentAppliedLabel(it)}
+                            <span className="mt-0.5 block text-[10px] font-normal text-emerald-200/80 no-underline">
+                              View in document
+                            </span>
+                          </button>
+                        ) : (
+                          <p className="text-[13px] leading-snug text-emerald-100/95">
+                            ✓ Added: {formatRecipientIntentAppliedLabel(it)}
+                          </p>
+                        )
                       ) : it.status === "unclear" ? (
                         <>
                           <p className="text-[13px] leading-snug text-amber-50">
@@ -1217,7 +1286,8 @@ export function AgreementRecipientReview({
                         </>
                       )}
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </div>
             ) : previewDiff.instructionCaptureWarning ? (
@@ -1238,7 +1308,8 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-narrow-unsafe-payment-callout"
                 role="status"
               >
-                Requested but not safely placed inline:{" "}
+                Could not safely place these payment edits in the matched payment section of the document shown
+                below. Your note still goes to the owner. Requested timing:{" "}
                 {extractPaymentPlacementCalloutSnippet(String(recipientPreview.proposedDraft.payment_terms ?? ""))}.
               </p>
             ) : recipientRedlinePlainTexts?.paymentTermsInlinePlacementFailed ? (
@@ -1254,10 +1325,16 @@ export function AgreementRecipientReview({
 
             <div className="mt-4 rounded-lg border border-slate-600/50 bg-slate-200/20 p-2 sm:p-3">
               <div
+                ref={suggestedChangesDocScrollRef}
                 className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
                 data-testid="recipient-suggested-changes-document"
               >
-                <RecipientLegalRedlineDocument document={legalRedlineDocumentVm} variant="suggested" />
+                <RecipientLegalRedlineDocument
+                  document={legalRedlineDocumentVm}
+                  variant="suggested"
+                  recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
+                  highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
+                />
               </div>
             </div>
           </>

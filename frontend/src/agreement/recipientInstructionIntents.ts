@@ -292,6 +292,19 @@ export function countRecipientIntentGaps(intents: readonly RecipientInstructionI
   return intents.filter((i) => i.status === "failed" || i.status === "unclear").length;
 }
 
+/** Stable `data-testid` for request-status rows (scroll targets use {@link recipientRedlineAnchorForIntentCategory}). */
+export function recipientIntentStatusTestId(category: RecipientInstructionIntentCategory): string {
+  if (category === "suspend_pause_work") return "recipient-intent-status-pause_suspend_work";
+  return `recipient-intent-status-${category}`;
+}
+
+/** `data-recipient-redline-anchor` value aligned with intent categories for narrow payment preview. */
+export function recipientRedlineAnchorForIntentCategory(category: RecipientInstructionIntentCategory): string | null {
+  if (category === "payment_timing") return "payment_timing";
+  if (category === "suspend_pause_work") return "pause_suspend_work";
+  return null;
+}
+
 /** Short label after “Added:” for applied intents. */
 export function formatRecipientIntentAppliedLabel(it: RecipientInstructionIntent): string {
   switch (it.category) {

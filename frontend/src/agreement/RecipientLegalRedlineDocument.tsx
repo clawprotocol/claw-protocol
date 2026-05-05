@@ -8,9 +8,44 @@ type Props = {
   document?: LegalRedlineDocumentViewModel;
   /** `suggested` — recipient single-surface review: contract typography, inline track marks only (no heavy block chrome). */
   variant?: "page" | "column" | "suggested";
+  /** When true, split narrow payment inserts into scroll targets (`data-recipient-redline-anchor`). */
+  recipientNarrowIntentAnchors?: boolean;
+  /** Brief highlight ring for the anchor matching an intent-status click. */
+  highlightedRecipientAnchor?: string | null;
 };
 
 type AnySeg = LegalRedlineSegment | RedlineSegmentVM;
+
+const PAUSE_REMEDY_ANCHOR_RE =
+  /If payment is more than\s+[\w-]+\s+\(\d+\)\s+days late,\s+Developer may pause work until all overdue undisputed amounts are paid\./i;
+
+type RecipientAnchor = "payment_timing" | "pause_suspend_work";
+
+function splitTimingInsertChunk(s: string): { text: string; anchor?: RecipientAnchor }[] {
+  const m = s.match(/\b(net\s*\d+\.?)/i);
+  if (!m || m.index == null) return s ? [{ text: s }] : [];
+  const i = m.index;
+  const out: { text: string; anchor?: RecipientAnchor }[] = [];
+  if (i > 0) out.push({ text: s.slice(0, i) });
+  out.push({ text: m[1]!, anchor: "payment_timing" });
+  if (i + m[1]!.length < s.length) out.push({ text: s.slice(i + m[1]!.length) });
+  return out;
+}
+
+function splitInsertForRecipientAnchors(full: string): { text: string; anchor?: RecipientAnchor }[] {
+  const rest = String(full ?? "");
+  const pm = PAUSE_REMEDY_ANCHOR_RE.exec(rest);
+  if (pm?.index != null && pm[0]) {
+    const i = pm.index;
+    const out: { text: string; anchor?: RecipientAnchor }[] = [];
+    if (i > 0) out.push(...splitTimingInsertChunk(rest.slice(0, i)));
+    out.push({ text: pm[0], anchor: "pause_suspend_work" });
+    const after = rest.slice(i + pm[0].length);
+    if (after) out.push(...splitTimingInsertChunk(after));
+    return out.length ? out : [{ text: rest }];
+  }
+  return splitTimingInsertChunk(rest);
+}
 
 /** Exported for tests: split segment body into paragraphs, then lines. */
 export function splitSegmentTextToParagraphLines(text: string): string[][] {
@@ -52,7 +87,59 @@ export function segmentLineClass(type: "same" | "insert" | "delete"): string {
   ].join(" ");
 }
 
-function renderSegmentStream(segments: AnySeg[], keyPrefix: string): ReactNode[] {
+function renderAnchoredInsertLine(
+  line: string,
+  keyBase: string,
+  highlightedRecipientAnchor: string | null | undefined,
+): ReactNode {
+  const pieces = splitInsertForRecipientAnchors(line);
+  if (pieces.length === 0) {
+    return (
+      <span key={keyBase} data-redline="insert" className={`block ${segmentLineClass("insert")}`}>
+        {line.length > 0 ? line : "\u00a0"}
+      </span>
+    );
+  }
+  if (pieces.length <= 1 && !pieces[0]?.anchor) {
+    return (
+      <span
+        key={keyBase}
+        data-redline="insert"
+        className={`block ${segmentLineClass("insert")}`}
+      >
+        {line.length > 0 ? line : "\u00a0"}
+      </span>
+    );
+  }
+  return (
+    <span key={keyBase} className={`block ${segmentLineClass("insert")}`} data-redline="insert">
+      {pieces.map((p, pi) => {
+        const hl =
+          p.anchor && highlightedRecipientAnchor && p.anchor === highlightedRecipientAnchor
+            ? " ring-2 ring-amber-400 ring-offset-1 ring-offset-white transition-shadow duration-300"
+            : "";
+        return (
+          <span
+            key={`${keyBase}_p${pi}`}
+            className={hl.trim() || undefined}
+            data-recipient-redline-anchor={p.anchor}
+          >
+            {p.text}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function renderSegmentStream(
+  segments: AnySeg[],
+  keyPrefix: string,
+  opts?: {
+    recipientNarrowIntentAnchors?: boolean;
+    highlightedRecipientAnchor?: string | null;
+  },
+): ReactNode[] {
   return segments.flatMap((seg, segIdx) => {
     const blocks = splitSegmentTextToParagraphLines(seg.text);
     if (blocks.length === 0) {
@@ -72,6 +159,9 @@ function renderSegmentStream(segments: AnySeg[], keyPrefix: string): ReactNode[]
         <div key={key} className={heading ? "mb-3 mt-4 border-b border-slate-200 pb-2 first:mt-0" : "mb-2 last:mb-0"}>
           {lines.map((line, li) => {
             const isFirstHeadingLine = heading && li === 0 && seg.type === "same";
+            if (seg.type === "insert" && opts?.recipientNarrowIntentAnchors) {
+              return renderAnchoredInsertLine(line, `${key}_l${li}`, opts.highlightedRecipientAnchor);
+            }
             return (
               <span
                 key={li}
@@ -94,14 +184,31 @@ function renderSegmentStream(segments: AnySeg[], keyPrefix: string): ReactNode[]
 export function RecipientLegalRedlineBlockSegments({
   segments,
   keyPrefix,
+  recipientNarrowIntentAnchors,
+  highlightedRecipientAnchor,
 }: {
   segments: LegalRedlineSegment[];
   keyPrefix: string;
+  recipientNarrowIntentAnchors?: boolean;
+  highlightedRecipientAnchor?: string | null;
 }): ReactNode {
-  return <div className="space-y-0">{renderSegmentStream(segments, keyPrefix)}</div>;
+  return (
+    <div className="space-y-0">
+      {renderSegmentStream(segments, keyPrefix, {
+        recipientNarrowIntentAnchors,
+        highlightedRecipientAnchor,
+      })}
+    </div>
+  );
 }
 
-export function RecipientLegalRedlineDocument({ segments, document, variant = "page" }: Props) {
+export function RecipientLegalRedlineDocument({
+  segments,
+  document,
+  variant = "page",
+  recipientNarrowIntentAnchors,
+  highlightedRecipientAnchor,
+}: Props) {
   const shell =
     variant === "suggested"
       ? "mx-auto w-full max-w-[40rem] rounded-md border border-slate-200/95 bg-white px-7 py-9 text-[15px] leading-[1.7] text-slate-900 shadow-sm sm:px-10 sm:py-11"
@@ -137,14 +244,24 @@ export function RecipientLegalRedlineDocument({ segments, document, variant = "p
                 className={blockChrome}
               >
                 <div className="space-y-0">
-                  <RecipientLegalRedlineBlockSegments segments={block.segments} keyPrefix={block.id} />
+                  <RecipientLegalRedlineBlockSegments
+                    segments={block.segments}
+                    keyPrefix={block.id}
+                    recipientNarrowIntentAnchors={recipientNarrowIntentAnchors}
+                    highlightedRecipientAnchor={highlightedRecipientAnchor}
+                  />
                 </div>
               </section>
             );
           })}
         </div>
       ) : (
-        <div className="space-y-0">{renderSegmentStream(segments ?? [], "legacy")}</div>
+        <div className="space-y-0">
+          {renderSegmentStream(segments ?? [], "legacy", {
+            recipientNarrowIntentAnchors,
+            highlightedRecipientAnchor,
+          })}
+        </div>
       )}
     </article>
   );
