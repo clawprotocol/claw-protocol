@@ -26,7 +26,6 @@ import {
 } from "./recipientPreviewDiffModel";
 import { RecipientAdvancedRedlinePanel } from "./RecipientAdvancedRedlinePanel";
 import { RecipientChangedClauseCard } from "./RecipientChangedClauseCard";
-import { RecipientRedlineInline } from "./RecipientRedlineInline";
 import { RecipientTrackedChangesToggle } from "./RecipientTrackedChangesToggle";
 import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
@@ -620,32 +619,22 @@ export function AgreementRecipientReview({
       htmlToPlainText(recipientPreview.proposedHtml || ""),
       { mode: "fullDocument" },
     );
-    const insertSeg = fullVm.segments.filter((s) => s.type === "insert").length;
-    const deleteSeg = fullVm.segments.filter((s) => s.type === "delete").length;
     // eslint-disable-next-line no-console
-    console.info("[recipient-redline-view-model]", {
+    console.info("[recipient-redline-diagnosis]", {
       agreementId,
-      fieldsChanged: previewDiff.snapshotCompare.changedFieldKeys,
-      showTrackedChanges,
-      clauseCount: cards.length,
-      clauseHasVisibleChanges: cards.some((c) => c.redlineView.hasVisibleChanges),
-      clauseHasDeletes: cards.some((c) => c.redlineView.hasDeletes),
-      clauseHasAdds: cards.some((c) => c.redlineView.hasAdds),
-      hasVisibleChanges: fullVm.hasVisibleChanges,
-      hasAdds: fullVm.hasAdds,
-      hasDeletes: fullVm.hasDeletes,
-      segmentCount: fullVm.segments.length,
-      insertSegmentCount: insertSeg,
-      deleteSegmentCount: deleteSeg,
-      fallbackReason: fullVm.fallbackReason,
-      canRenderTrackedDiff: fullVm.canRenderTrackedDiff,
-      fullDocHasVisibleChanges: fullVm.hasVisibleChanges,
-      fullDocHasDeletes: fullVm.hasDeletes,
-      fullDocHasAdds: fullVm.hasAdds,
-      fallbackReasons: [
-        ...cards.map((c) => c.redlineView.fallbackReason).filter(Boolean),
-        fullVm.fallbackReason,
-      ].filter(Boolean),
+      instruction: recipientPreview.revisionText ?? "",
+      changedClauseCount: cards.length,
+      clauseIds: cards.map((c) => c.id),
+      clauses: cards.map((c) => ({
+        id: c.id,
+        beforeLen: c.currentText.length,
+        afterLen: c.proposedText.length,
+        hasAdds: c.redlineView.hasAdds,
+        hasDeletes: c.redlineView.hasDeletes,
+        addedLines: c.redlineView.addedLines,
+        fallbackReason: c.redlineView.fallbackReason ?? null,
+      })),
+      fullDocFallbackReason: fullVm.fallbackReason ?? null,
     });
   }, [agreementId, previewDiff, recipientPreview, showTrackedChanges]);
 
@@ -1099,8 +1088,8 @@ export function AgreementRecipientReview({
             data-testid="recipient-tab-full-redline"
             title="Advanced full-document compare"
           >
-            <span className="hidden sm:inline">Adv. full-document</span>
-            <span className="sm:hidden">Full doc</span>
+            <span className="hidden sm:inline">Advanced full-document</span>
+            <span className="sm:hidden">Advanced</span>
           </button>
         </div>
 
@@ -1115,15 +1104,15 @@ export function AgreementRecipientReview({
             ))}
             {redlineNoisy ? (
               <p className="text-[10px] text-slate-500">
-                This update also changes a lot of surrounding document text. Use{" "}
+                This update also changes a lot of surrounding document text. Optional{" "}
                 <button
                   type="button"
                   className="text-sky-300 underline decoration-sky-800/50 hover:text-sky-200"
                   onClick={() => setCompareViewMode("fullRedline")}
                 >
-                  Adv. full-document
+                  Advanced full-document compare
                 </button>{" "}
-                compare only if you need it.
+                if you need it.
               </p>
             ) : null}
           </div>
@@ -1153,36 +1142,43 @@ export function AgreementRecipientReview({
                   }}
                 />
               </div>
-              <div className="rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900">
+              <div
+                className="rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900"
+                data-testid="recipient-side-by-side-proposed-column"
+              >
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Proposed</div>
                 {showTrackedChanges ? (
-                  fullDocumentRedlineView?.canRenderTrackedDiff ? (
-                    <div className="mt-2 text-sm leading-normal text-slate-900" data-testid="recipient-side-by-side-redline">
-                      <RecipientRedlineInline segments={fullDocumentRedlineView.segments} paragraphBreaks contrast="high" />
+                  <>
+                    <div
+                      className="mt-2 space-y-2 rounded-md border border-slate-200 bg-slate-50/80 p-2"
+                      data-testid="recipient-side-by-side-tracked-summary"
+                    >
+                      <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-600">
+                        Tracked change summary
+                      </div>
+                      <div className="space-y-2">
+                        {clauseCards.map((card) => (
+                          <RecipientChangedClauseCard
+                            key={card.id}
+                            card={card}
+                            showTrackedChanges
+                            compact
+                          />
+                        ))}
+                      </div>
                     </div>
-                  ) : fullDocumentRedlineView?.fallbackReason ? (
-                    <>
-                      <p
-                        className="mt-2 text-[10px] leading-snug text-slate-500"
-                        data-testid="recipient-side-by-side-redline-fallback"
-                      >
-                        Full-document redline unavailable; changed clauses show tracked edits.
-                      </p>
+                    <div className="mt-3 border-t border-slate-200 pt-3">
+                      <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-600">
+                        Proposed document
+                      </div>
                       <div
                         className="prose prose-sm mt-2 max-w-none text-slate-900"
                         dangerouslySetInnerHTML={{
                           __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
                         }}
                       />
-                    </>
-                  ) : (
-                    <div
-                      className="prose prose-sm mt-2 max-w-none text-slate-900"
-                      dangerouslySetInnerHTML={{
-                        __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
-                      }}
-                    />
-                  )
+                    </div>
+                  </>
                 ) : (
                   <div
                     className="prose prose-sm mt-2 max-w-none text-slate-900"

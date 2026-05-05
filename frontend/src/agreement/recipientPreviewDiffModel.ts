@@ -585,7 +585,8 @@ const GENERIC_CLAUSE_BULLETS = new Set([
   "Purpose / scope text updated.",
 ]);
 
-const INSTRUCTION_GAP_BULLET_PREFIX = "Requested but not reflected:";
+/** Prefix for clause bullets that describe instruction gaps (shown in Track changes, amber). */
+export const INSTRUCTION_GAP_BULLET_PREFIX = "Requested but not reflected:";
 
 function isCountableClauseBullet(b: string): boolean {
   if (GENERIC_CLAUSE_BULLETS.has(b)) return false;

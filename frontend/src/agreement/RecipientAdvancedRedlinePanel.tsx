@@ -24,7 +24,8 @@ export function RecipientAdvancedRedlinePanel({ viewModel, showTrackedChanges, p
   return (
     <div className="mt-2 space-y-2" data-testid="recipient-advanced-redline-panel">
       <p className="rounded-md border border-amber-900/35 bg-amber-950/20 px-2 py-1.5 text-[10px] leading-snug text-amber-100/95">
-        Optional full-document compare — prefer <span className="font-medium text-amber-50">Changed clauses</span>.
+        <span className="font-medium text-amber-50">Advanced full-document compare</span> is optional — clause-level{" "}
+        <span className="font-medium text-amber-50">Changed clauses</span> and Side-by-side summaries stay authoritative.
       </p>
       <button
         type="button"

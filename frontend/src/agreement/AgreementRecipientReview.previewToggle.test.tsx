@@ -108,6 +108,7 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
     const redline =
       within(clauseCard).queryByTestId("clause-field-redline") ??
       within(clauseCard).queryByTestId("clause-track-lines") ??
+      within(clauseCard).queryByTestId("clause-track-snippet-fallback") ??
       within(clauseCard).queryByTestId("clause-field-redline-fallback");
     expect(redline).toBeTruthy();
     if (redline) {
@@ -115,10 +116,10 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
     }
 
     await userEvent.click(screen.getByRole("button", { name: /Side-by-side/i }));
-    expect(screen.getByTestId("recipient-side-by-side-redline")).toBeTruthy();
+    expect(screen.getByTestId("recipient-side-by-side-tracked-summary")).toBeTruthy();
 
     await userEvent.click(hideBtn);
-    expect(screen.queryByTestId("recipient-side-by-side-redline")).toBeNull();
+    expect(screen.queryByTestId("recipient-side-by-side-tracked-summary")).toBeNull();
 
     await userEvent.click(screen.getByTestId("recipient-tab-full-redline"));
     expect(screen.queryByTestId("recipient-advanced-redline-scroll")).toBeNull();

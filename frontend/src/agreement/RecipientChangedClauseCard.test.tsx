@@ -121,7 +121,9 @@ describe("RecipientChangedClauseCard", () => {
     render(<RecipientChangedClauseCard card={card!} showTrackedChanges />);
 
     const root = screen.getByTestId("recipient-clause-card-payment_terms");
-    expect(within(root).getByTestId("clause-what-changed").textContent).toMatch(/Requested but not reflected/i);
-    expect(within(root).getByTestId("clause-what-changed").textContent).toMatch(/pause/i);
+    expect(within(root).getByTestId("clause-requested-not-reflected-row").textContent).toMatch(
+      /Requested but not reflected/i,
+    );
+    expect(within(root).getByTestId("clause-track-changes-panel").textContent).toMatch(/pause/i);
   });
 });

@@ -372,10 +372,130 @@ test.describe("recipient + link flow QA", () => {
     await page.getByRole("button", { name: "Preview changes" }).click();
     await expect(page.getByText("Send suggested edits").first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("recipient-preview-summary-heading")).toBeVisible();
+    page.once("dialog", (d) => void d.accept());
     await page.getByRole("button", { name: "Send suggested edits" }).first().click();
     await expect(page.getByText(/Suggested edits sent|waiting on the owner|queue/i).first()).toBeVisible({
       timeout: 15_000,
     });
+  });
+
+  test("2b) Recipient preview: clause redline authoritative (Net 30 + pause gap); side-by-side vs full-doc)", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const state: { drafts: Map<string, DraftRec> } = { drafts: new Map() };
+    const id = "ag_recv_redline_clause_qa";
+    const now = new Date().toISOString();
+    const draft: DraftRec = {
+      id,
+      title: "E2E Services Agreement",
+      jurisdiction: "California",
+      parties: [
+        { name: "Studio LLC", role: "owner" },
+        { name: "Client LLC", role: "party" },
+      ],
+      purpose: "Professional services (E2E).",
+      payment_terms: "Net 15.",
+      duration: "6 months",
+      due_date: null,
+      effective_date: "2026-02-01",
+      versions: [{ version: 1, created_at: now, note: "created" }],
+      audit_log: [],
+      created_at: now,
+      updated_at: now,
+    };
+    state.drafts.set(id, draft);
+    await installIsolatedAgreementsApi(page, state);
+
+    await page.route("**/api/agreements/**", async (route) => {
+      const url = route.request().url();
+      const method = route.request().method();
+      if (url.includes("/revise") && method === "POST") {
+        const body = route.request().postDataJSON() as { instruction?: string } | null;
+        const inst = body?.instruction || "";
+        if (inst.includes("Net 30 and pause work after 15 days late")) {
+          const draftId = (url.match(/\/agreements\/([^/]+)\//)?.[1] as string) || id;
+          const noisySuffix = `<div aria-hidden="true">${"W".repeat(3200)}</div>`;
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              draft: {
+                id: draftId,
+                title: "E2E Services Agreement",
+                jurisdiction: "California",
+                parties: [
+                  { name: "Studio LLC", role: "party" },
+                  { name: "Client LLC", role: "party" },
+                ],
+                purpose: "Professional services and deliverables (preview merge).",
+                payment_terms: "Net 30.",
+                duration: "12 months",
+                due_date: null,
+                effective_date: "2026-01-01",
+                versions: [{ version: 1, created_at: new Date().toISOString(), note: "e2e" }],
+                audit_log: [],
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              },
+              rendered_html: `<p>Invoices are due <strong>Net 30</strong>.</p>${noisySuffix}`,
+            }),
+          });
+          return;
+        }
+      }
+      await route.fallback();
+    });
+
+    await page.goto(`/agreements/${id}/review`, { waitUntil: "domcontentloaded" });
+    const suggestChangesLanding = page.getByRole("button", { name: "Suggest changes" });
+    if (await suggestChangesLanding.isVisible().catch(() => false)) {
+      await suggestChangesLanding.first().click();
+    } else {
+      const reviewCta = page.getByRole("button", { name: "Review agreement" });
+      await expect(reviewCta.first()).toBeVisible({ timeout: 30_000 });
+      await reviewCta.first().click();
+      await expect(page.getByRole("button", { name: "Suggest changes" })).toBeVisible({ timeout: 20_000 });
+      await page.getByRole("button", { name: "Suggest changes" }).click();
+    }
+    await expect(page.getByText("Write suggestions", { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    const ta = page.locator("#recipient-revision-input");
+    await ta.fill("Net 30 and pause work after 15 days late");
+    await page.getByRole("button", { name: "Preview changes" }).click();
+    await expect(page.getByText("Send suggested edits").first()).toBeVisible({ timeout: 25_000 });
+
+    await expect(page.getByTestId("recipient-tracked-changes-toggle")).toBeVisible();
+    await expect(page.getByTestId("clause-track-changes-panel").first()).toBeVisible();
+    const payCard = page.getByTestId("recipient-clause-card-payment_terms");
+    await expect(
+      payCard
+        .locator('[data-redline="insert"]')
+        .or(payCard.getByTestId("clause-track-lines"))
+        .or(payCard.getByText(/Net\s*30/i))
+        .first(),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Requested but not reflected")).toBeVisible();
+
+    await page.getByRole("button", { name: /Side-by-side/i }).click();
+    const proposedCol = page.getByTestId("recipient-side-by-side-proposed-column");
+    await expect(proposedCol.getByTestId("recipient-side-by-side-tracked-summary")).toBeVisible();
+    await expect(
+      proposedCol
+        .getByTestId("recipient-side-by-side-tracked-summary")
+        .locator('[data-redline="insert"]')
+        .or(proposedCol.getByTestId("recipient-side-by-side-tracked-summary").getByText(/Net\s*30|Added:/i))
+        .first(),
+    ).toBeVisible();
+
+    await page.getByTestId("recipient-tab-full-redline").click();
+    await page.getByTestId("recipient-advanced-redline-disclosure-trigger").click();
+    await expect(page.getByTestId("recipient-advanced-redline-panel")).toContainText(/full-document|inline redline|Changed clauses/i);
+
+    await page.getByRole("button", { name: /Side-by-side/i }).click();
+    await page.getByRole("button", { name: "Hide changes" }).click();
+    await expect(proposedCol.locator("[data-redline]")).toHaveCount(0);
+    await expect(proposedCol.getByText(/Net\s*30/i).first()).toBeVisible();
   });
 
   test("3) Owner: incoming suggestion + material change summary; apply; draft updates", async ({ page }) => {
