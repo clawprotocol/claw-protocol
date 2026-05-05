@@ -196,6 +196,17 @@ export function isAdvisoryNoteOrCommentIntent(userInstruction: string | undefine
   if (/\bmake\s+note\b/i.test(raw) && /\b(review|improv|agreement|contract|anything)\b/i.test(t)) return true;
   if (/\b(anything|everything)\s+that\s+should\s+be\s+(reviewed|improved)\b/i.test(t)) return true;
   if (/\banything\s+to\s+review\b/i.test(t)) return true;
+
+  // List / review-item handoffs for another party — no "note" or "comment" required
+  if (/\blist\s+items\b/i.test(t) && /\b(?:the\s+)?(?:other\s+party|counterparty|signer)\b/i.test(t) && /\breview\b/i.test(t))
+    return true;
+  if (/\bitems\s+the\s+other\s+party\s+should\s+review\b/i.test(t)) return true;
+  if (/\bother\s+party\s+should\s+review\b/i.test(t)) return true;
+  if (/\blist\s+review\s+items\b/i.test(t)) return true;
+  if (/\bcounterparty\s+should\s+review\b/i.test(t)) return true;
+  if (/\bsigner\s+should\s+review\b/i.test(t)) return true;
+  if (/\b(?:the\s+)?party\s+should\s+review\b/i.test(t)) return true;
+
   if (/\bfor\s+review\b/i.test(t) && /\b(note|list|items?|checklist|comments?|instruction)\b/i.test(t)) return true;
   if (/\b(add|leave)\s+(?:a\s+)?comments?\b/i.test(t) && /\b(review|reviewer|agreement|counterparty)\b/i.test(t))
     return true;

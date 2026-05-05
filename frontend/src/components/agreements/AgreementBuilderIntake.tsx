@@ -948,6 +948,21 @@ function scrollLikelyReviewSectionIntoView(): void {
   document.getElementById("claw-simple-create-preview")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/** Temporary QA helper: scroll the agreement preview textarea to the bottom so appended reviewer notes are visible. */
+function scrollAgreementPreviewTextareaToBottomForReviewerNote(): void {
+  const bump = () => {
+    const ta = document.getElementById("claw-agreement-preview-editor") as HTMLTextAreaElement | null;
+    if (ta && typeof ta.scrollHeight === "number") {
+      ta.scrollTop = ta.scrollHeight;
+      return;
+    }
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+  };
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(bump);
+  });
+}
+
 function buildUpgradeCheckoutCompletionLabel(
   d: { title?: string | null; parties?: readonly { name?: string | null }[] } | null | undefined,
 ): string {
@@ -1538,7 +1553,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const proRefineIntakeTextForProPanelsRef = useRef("");
   const proRefineCurrentDocumentTextForProPanelsRef = useRef("");
   const applyProRefineOutputToProSurfaceRef = useRef<
-    ((outRaw: string, opts?: { clearStepBuffer?: boolean; scrollToReview?: boolean }) => void) | null
+    | ((
+        outRaw: string,
+        opts?: {
+          clearStepBuffer?: boolean;
+          scrollToReview?: boolean;
+          /** QA: after reviewer-note append, scroll preview textarea to bottom. */
+          scrollReviewerNoteToVisible?: boolean;
+        },
+      ) => void)
+    | null
   >(null);
   const wasPremiumPaidDocumentSurfaceRef = useRef(false);
   const premiumPipelineOutputBodyRef = useRef("");
@@ -5869,7 +5893,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
         );
         setProRefineWhatChangedSummary(whatChangedLine?.trim() ? whatChangedLine.trim() : null);
-        applyProRefineOutputToProSurfaceRef.current?.(out, { clearStepBuffer: true, scrollToReview: true });
+        applyProRefineOutputToProSurfaceRef.current?.(out, {
+          clearStepBuffer: true,
+          scrollToReview: true,
+          scrollReviewerNoteToVisible: usedAppendReviewerNotePreserve,
+        });
         return true;
       }
 
@@ -7479,7 +7507,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!out) return;
     const clearStep = opts?.clearStepBuffer === true;
     const scroll = opts?.scrollToReview === true;
+    const scrollReviewer = opts?.scrollReviewerNoteToVisible === true;
     const normalized = collapseDuplicateEsignNoticesInFullPreview(out);
+    // eslint-disable-next-line no-console
+    console.info("[premium-refine-ui-apply]", {
+      newDocLen: normalized.length,
+      containsReviewerSection: normalized.includes("## REVIEWER NOTE"),
+    });
     agreementDocumentDirtyRef.current = true;
     premiumPipelineOutputBodyRef.current = normalized;
     hydratedPremiumBodyRef.current = normalized;
@@ -7529,6 +7563,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       window.requestAnimationFrame(() => {
         scrollLikelyReviewSectionIntoView();
       });
+    }
+    if (scrollReviewer) {
+      scrollAgreementPreviewTextareaToBottomForReviewerNote();
     }
   };
 
@@ -14255,7 +14292,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   routePrimaryActionNonce={finalizeRoutePrimaryActionNonce}
                                   onRouteFixPrimary={bumpFinalizeRoutePrimaryActionNonce}
                                   onApplyDocumentText={(t) => {
-                                    applyProRefineOutputToProSurfaceRef.current?.(t, { clearStepBuffer: false, scrollToReview: true });
+                                    applyProRefineOutputToProSurfaceRef.current?.(t, {
+                                      clearStepBuffer: false,
+                                      scrollToReview: true,
+                                      scrollReviewerNoteToVisible: t.includes("## REVIEWER NOTE"),
+                                    });
                                   }}
                                   onProRefineWhatChanged={(line) => {
                                     const t = (line || "").trim();

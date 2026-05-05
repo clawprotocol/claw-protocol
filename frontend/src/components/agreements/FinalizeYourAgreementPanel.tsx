@@ -308,6 +308,11 @@ export function FinalizeYourAgreementPanel({
         if (out && r) {
           setLastRefine(r);
           markDocumentDirty?.();
+          // eslint-disable-next-line no-console
+          console.info("[premium-refine-ui-apply]", {
+            newDocLen: out.length,
+            containsReviewerSection: out.includes("## REVIEWER NOTE"),
+          });
           onApplyDocumentText(out);
           const wc = whatChangedLine?.trim() ? whatChangedLine.trim() : null;
           onProRefineWhatChanged?.(wc);
@@ -318,6 +323,18 @@ export function FinalizeYourAgreementPanel({
               ? PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE
               : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
           );
+          if (usedAppendReviewerNotePreserve) {
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => {
+                const ta = document.getElementById("claw-agreement-preview-editor") as HTMLTextAreaElement | null;
+                if (ta && typeof ta.scrollHeight === "number") {
+                  ta.scrollTop = ta.scrollHeight;
+                } else {
+                  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+                }
+              });
+            });
+          }
         } else if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[agreement-refine] FinalizeYourAgreementPanel#runUpdate empty model output", { r });
@@ -429,6 +446,11 @@ export function FinalizeYourAgreementPanel({
         if (out && r) {
           setLastRefine(r);
           markDocumentDirty?.();
+          // eslint-disable-next-line no-console
+          console.info("[premium-refine-ui-apply]", {
+            newDocLen: out.length,
+            containsReviewerSection: out.includes("## REVIEWER NOTE"),
+          });
           onApplyDocumentText(out);
           const wc = whatChangedLine?.trim() ? whatChangedLine.trim() : null;
           onProRefineWhatChanged?.(wc);
@@ -438,6 +460,18 @@ export function FinalizeYourAgreementPanel({
               ? PRO_REFINE_REVIEWER_NOTE_APPLIED_USER_MESSAGE
               : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
           );
+          if (usedAppendReviewerNotePreserve) {
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => {
+                const ta = document.getElementById("claw-agreement-preview-editor") as HTMLTextAreaElement | null;
+                if (ta && typeof ta.scrollHeight === "number") {
+                  ta.scrollTop = ta.scrollHeight;
+                } else {
+                  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+                }
+              });
+            });
+          }
         }
       } catch (e2) {
         setRefineSuccessMessage(null);

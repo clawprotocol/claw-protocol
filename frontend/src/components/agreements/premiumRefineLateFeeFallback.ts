@@ -226,10 +226,26 @@ export function buildAdvisoryAppendPreserveDocument(args: {
 
   if (base.includes("REVIEWER NOTE / REQUESTED REVIEW ITEMS")) {
     const addendum = `\n\n---\n\n### Additional reviewer note (same session)\n\n**Requested:** ${inst}\n${checklistBlock}${modelBlock}${footer}`;
-    return base + addendum;
+    const finalDoc = base + addendum;
+    // eslint-disable-next-line no-console
+    console.info("[premium-refine-append]", {
+      appended: true,
+      baselineLen: base.length,
+      finalLen: finalDoc.length,
+      hasReviewerHeader: finalDoc.includes("## REVIEWER NOTE"),
+    });
+    return finalDoc;
   }
   const tail = `\n\n---\n\n${REVIEWER_NOTE_HEADING}\n\n**Requested by drafting party:** ${inst}\n${checklistBlock}${modelBlock}${footer}`;
-  return base + tail;
+  const finalDoc = base + tail;
+  // eslint-disable-next-line no-console
+  console.info("[premium-refine-append]", {
+    appended: true,
+    baselineLen: base.length,
+    finalLen: finalDoc.length,
+    hasReviewerHeader: finalDoc.includes("## REVIEWER NOTE"),
+  });
+  return finalDoc;
 }
 
 /** Merge LawDog premium-review / route bullets into the refine prompt when available. */
@@ -431,6 +447,102 @@ function toExecuteExtras(
   return { ...base, ...extras };
 }
 
+function logPremiumRefineDebugLine(args: {
+  userInstruction: string;
+  intent: ReturnType<typeof classifyPremiumRefineRevisionIntent>;
+  currentDocLen: number;
+  candidateLen: number;
+  outputLen: number;
+  applyDecision: string | null;
+  usedAppendReviewerNotePreserve: boolean;
+}): void {
+  const promptPreview = args.userInstruction.slice(0, 120);
+  // eslint-disable-next-line no-console
+  console.info("[premium-refine-debug]", {
+    promptPreview,
+    intent: args.intent,
+    isAdvisory: args.intent === "advisory_note_or_comment",
+    currentDocLen: args.currentDocLen,
+    candidateLen: args.candidateLen,
+    outputLen: args.outputLen,
+    applyDecision: args.applyDecision,
+    usedAppendReviewerNotePreserve: args.usedAppendReviewerNotePreserve,
+  });
+}
+
+/**
+ * Single exit: QA logs + advisory visibility fallback when the pipeline returns “accepted”
+ * without a reviewer heading (prod classification / UI drift diagnosis).
+ */
+function finalizePremiumRefineExecuteOutcome(args: {
+  userInstruction: string;
+  baselineText: string;
+  baselineLen: number;
+  refineChecklistBullets: string[] | undefined;
+  candidateLen: number;
+  outcome: PremiumRefineExecuteOutcome;
+}): PremiumRefineExecuteOutcome {
+  const inst = args.userInstruction.trim();
+  const intent = classifyPremiumRefineRevisionIntent(inst);
+  const applyDecision = args.outcome.refineApplyDecision ?? args.outcome.acceptance.decision;
+  logPremiumRefineDebugLine({
+    userInstruction: inst,
+    intent,
+    currentDocLen: args.baselineLen,
+    candidateLen: args.candidateLen,
+    outputLen: args.outcome.finalText.length,
+    applyDecision,
+    usedAppendReviewerNotePreserve: args.outcome.usedAppendReviewerNotePreserve,
+  });
+
+  if (
+    intent === "advisory_note_or_comment" &&
+    args.outcome.acceptance.decision === "accepted" &&
+    !args.outcome.finalText.includes("## REVIEWER NOTE")
+  ) {
+    const appendBase =
+      args.outcome.finalText.length >= args.baselineLen * 0.92 ? args.outcome.finalText : args.baselineText;
+    const patched = buildAdvisoryAppendPreserveDocument({
+      currentDocumentText: appendBase,
+      userInstruction: inst,
+      modelOut: "",
+      checklistLines: args.refineChecklistBullets,
+    });
+    // eslint-disable-next-line no-console
+    console.info("[premium-refine-fallback-forced-append]", {
+      appendBaseLen: appendBase.length,
+      patchedLen: patched.length,
+      containsReviewerAfterPatch: patched.includes("## REVIEWER NOTE"),
+    });
+    const accPatched = evaluatePremiumRefineCandidate(
+      patched,
+      args.baselineText,
+      args.baselineLen,
+      undefined,
+      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+    );
+    if (accPatched.decision !== "accepted") {
+      // eslint-disable-next-line no-console
+      console.info("[premium-refine-fallback-forced-append]", {
+        note: "patched_eval_not_accepted",
+        decision: accPatched.decision,
+      });
+      return args.outcome;
+    }
+    return {
+      ...args.outcome,
+      finalText: patched,
+      acceptance: accPatched,
+      usedAppendReviewerNotePreserve: true,
+      refineApplyDecision: "fallback_forced_append_reviewer_header",
+      whatChangedLine:
+        args.outcome.whatChangedLine?.trim() ||
+        "Appended reviewer note section (fallback); full agreement preserved.",
+    };
+  }
+  return args.outcome;
+}
+
 /**
  * Paid Pro refine: POST → accept gate → optional surgical preserve retry → deterministic deliverables clause.
  */
@@ -495,6 +607,10 @@ export async function executePremiumRefineUpdate(args: {
     ) {
       modelExcerpt = "";
     }
+    /** API fail-open summaries must not block client-side append (deterministic preserve). */
+    const summaryForAdvisoryAppendEval = premiumRefineSummaryIsUnchangedFailOpen(r0.summary_changes)
+      ? undefined
+      : r0.summary_changes;
     const built = buildAdvisoryAppendPreserveDocument({
       currentDocumentText: baselineText,
       userInstruction: inst,
@@ -505,7 +621,7 @@ export async function executePremiumRefineUpdate(args: {
       built,
       baselineText,
       baselineLen,
-      r0.summary_changes,
+      summaryForAdvisoryAppendEval,
       PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
     );
     // eslint-disable-next-line no-console
@@ -520,23 +636,30 @@ export async function executePremiumRefineUpdate(args: {
       placeholderTokenCount: ph.count,
     });
     if (accBuilt.decision === "accepted") {
-      return toExecuteExtras(
-        {
-          finalText: built,
-          acceptance: accBuilt,
-          usedLocalLateFeeFallback: false,
-          whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
-          unchangedDuplicateLateFee: false,
-        },
-        {
-          usedClientDeliverablesFinalPaymentFallback: false,
-          usedSurgicalPreserveRetry,
-          surgicalRejectedShortExhausted: false,
-          lastRefineResponse: lastR,
-          usedAppendReviewerNotePreserve: true,
-          refineApplyDecision: "append_reviewer_note_preserve_document",
-        },
-      );
+      return finalizePremiumRefineExecuteOutcome({
+        userInstruction: inst,
+        baselineText,
+        baselineLen,
+        refineChecklistBullets,
+        candidateLen: raw.length,
+        outcome: toExecuteExtras(
+          {
+            finalText: built,
+            acceptance: accBuilt,
+            usedLocalLateFeeFallback: false,
+            whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
+            unchangedDuplicateLateFee: false,
+          },
+          {
+            usedClientDeliverablesFinalPaymentFallback: false,
+            usedSurgicalPreserveRetry,
+            surgicalRejectedShortExhausted: false,
+            lastRefineResponse: lastR,
+            usedAppendReviewerNotePreserve: true,
+            refineApplyDecision: "append_reviewer_note_preserve_document",
+          },
+        ),
+      });
     }
     const builtMinimal = buildAdvisoryAppendPreserveDocument({
       currentDocumentText: baselineText,
@@ -548,28 +671,81 @@ export async function executePremiumRefineUpdate(args: {
       builtMinimal,
       baselineText,
       baselineLen,
-      r0.summary_changes,
+      summaryForAdvisoryAppendEval,
       PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
     );
     if (accMin.decision === "accepted") {
-      return toExecuteExtras(
-        {
-          finalText: builtMinimal,
-          acceptance: accMin,
-          usedLocalLateFeeFallback: false,
-          whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
-          unchangedDuplicateLateFee: false,
-        },
-        {
-          usedClientDeliverablesFinalPaymentFallback: false,
-          usedSurgicalPreserveRetry,
-          surgicalRejectedShortExhausted: false,
-          lastRefineResponse: lastR,
-          usedAppendReviewerNotePreserve: true,
-          refineApplyDecision: "append_reviewer_note_preserve_document",
-        },
-      );
+      return finalizePremiumRefineExecuteOutcome({
+        userInstruction: inst,
+        baselineText,
+        baselineLen,
+        refineChecklistBullets,
+        candidateLen: raw.length,
+        outcome: toExecuteExtras(
+          {
+            finalText: builtMinimal,
+            acceptance: accMin,
+            usedLocalLateFeeFallback: false,
+            whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
+            unchangedDuplicateLateFee: false,
+          },
+          {
+            usedClientDeliverablesFinalPaymentFallback: false,
+            usedSurgicalPreserveRetry,
+            surgicalRejectedShortExhausted: false,
+            lastRefineResponse: lastR,
+            usedAppendReviewerNotePreserve: true,
+            refineApplyDecision: "append_reviewer_note_preserve_document",
+          },
+        ),
+      });
     }
+    const forcedAdvisory = buildAdvisoryAppendPreserveDocument({
+      currentDocumentText: baselineText,
+      userInstruction: inst,
+      modelOut: "",
+      checklistLines: refineChecklistBullets,
+    });
+    const accForced = evaluatePremiumRefineCandidate(
+      forcedAdvisory,
+      baselineText,
+      baselineLen,
+      undefined,
+      PREMIUM_REFINE_EVAL_APPEND_ONLY_INSTR,
+    );
+    if (accForced.decision === "accepted") {
+      return finalizePremiumRefineExecuteOutcome({
+        userInstruction: inst,
+        baselineText,
+        baselineLen,
+        refineChecklistBullets,
+        candidateLen: raw.length,
+        outcome: toExecuteExtras(
+          {
+            finalText: forcedAdvisory,
+            acceptance: accForced,
+            usedLocalLateFeeFallback: false,
+            whatChangedLine: "Appended advisory / reviewer note; full agreement preserved.",
+            unchangedDuplicateLateFee: false,
+          },
+          {
+            usedClientDeliverablesFinalPaymentFallback: false,
+            usedSurgicalPreserveRetry,
+            surgicalRejectedShortExhausted: false,
+            lastRefineResponse: lastR,
+            usedAppendReviewerNotePreserve: true,
+            refineApplyDecision: "append_reviewer_note_advisory_forced_after_eval_miss",
+          },
+        ),
+      });
+    }
+    // eslint-disable-next-line no-console
+    console.warn("[premium-refine-advisory]", {
+      note: "append_eval_paths_exhausted_non_accept",
+      accBuilt: accBuilt.decision,
+      accMin: accMin.decision,
+      accForced: accForced.decision,
+    });
   }
 
   let resolved = runResolve(r0);
@@ -585,13 +761,20 @@ export async function executePremiumRefineUpdate(args: {
       preservationFallbackUsed: false,
       placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(resolved.finalText).count,
     });
-    return toExecuteExtras(resolved, {
-      usedClientDeliverablesFinalPaymentFallback: false,
-      usedSurgicalPreserveRetry,
-      surgicalRejectedShortExhausted: false,
-      lastRefineResponse: lastR,
-      usedAppendReviewerNotePreserve: false,
-      refineApplyDecision: null,
+    return finalizePremiumRefineExecuteOutcome({
+      userInstruction: inst,
+      baselineText,
+      baselineLen,
+      refineChecklistBullets,
+      candidateLen: (r0.updated_document_text || "").trim().length,
+      outcome: toExecuteExtras(resolved, {
+        usedClientDeliverablesFinalPaymentFallback: false,
+        usedSurgicalPreserveRetry,
+        surgicalRejectedShortExhausted: false,
+        lastRefineResponse: lastR,
+        usedAppendReviewerNotePreserve: false,
+        refineApplyDecision: null,
+      }),
     });
   }
 
@@ -623,13 +806,20 @@ export async function executePremiumRefineUpdate(args: {
         preservationFallbackUsed: false,
         placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(resolved.finalText).count,
       });
-      return toExecuteExtras(resolved, {
-        usedClientDeliverablesFinalPaymentFallback: false,
-        usedSurgicalPreserveRetry,
-        surgicalRejectedShortExhausted: false,
-        lastRefineResponse: lastR,
-        usedAppendReviewerNotePreserve: false,
-        refineApplyDecision: null,
+      return finalizePremiumRefineExecuteOutcome({
+        userInstruction: inst,
+        baselineText,
+        baselineLen,
+        refineChecklistBullets,
+        candidateLen: (r1.updated_document_text || "").trim().length,
+        outcome: toExecuteExtras(resolved, {
+          usedClientDeliverablesFinalPaymentFallback: false,
+          usedSurgicalPreserveRetry,
+          surgicalRejectedShortExhausted: false,
+          lastRefineResponse: lastR,
+          usedAppendReviewerNotePreserve: false,
+          refineApplyDecision: null,
+        }),
       });
     }
   }
@@ -653,23 +843,30 @@ export async function executePremiumRefineUpdate(args: {
           preservationFallbackUsed: true,
           placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(out2).count,
         });
-        return toExecuteExtras(
-          {
-            finalText: out2,
-            acceptance: acc2,
-            usedLocalLateFeeFallback: false,
-            whatChangedLine: cdf.summaryLine,
-            unchangedDuplicateLateFee: false,
-          },
-          {
-            usedClientDeliverablesFinalPaymentFallback: true,
-            usedSurgicalPreserveRetry,
-            surgicalRejectedShortExhausted: false,
-            lastRefineResponse: lastR,
-            usedAppendReviewerNotePreserve: false,
-            refineApplyDecision: null,
-          },
-        );
+        return finalizePremiumRefineExecuteOutcome({
+          userInstruction: inst,
+          baselineText,
+          baselineLen,
+          refineChecklistBullets,
+          candidateLen: out2.length,
+          outcome: toExecuteExtras(
+            {
+              finalText: out2,
+              acceptance: acc2,
+              usedLocalLateFeeFallback: false,
+              whatChangedLine: cdf.summaryLine,
+              unchangedDuplicateLateFee: false,
+            },
+            {
+              usedClientDeliverablesFinalPaymentFallback: true,
+              usedSurgicalPreserveRetry,
+              surgicalRejectedShortExhausted: false,
+              lastRefineResponse: lastR,
+              usedAppendReviewerNotePreserve: false,
+              refineApplyDecision: null,
+            },
+          ),
+        });
       }
     }
   }
@@ -683,7 +880,10 @@ export async function executePremiumRefineUpdate(args: {
     });
     if (note) {
       const out3 = note.text;
-      const acc3 = evaluatePremiumRefineCandidate(out3, baselineText, baselineLen, lastR?.summary_changes, inst);
+      const summaryForNoteEval = premiumRefineSummaryIsUnchangedFailOpen(lastR?.summary_changes)
+        ? undefined
+        : lastR?.summary_changes;
+      const acc3 = evaluatePremiumRefineCandidate(out3, baselineText, baselineLen, summaryForNoteEval, inst);
       if (acc3.decision === "accepted") {
         // eslint-disable-next-line no-console
         console.info("[premium-refine-apply]", {
@@ -695,23 +895,30 @@ export async function executePremiumRefineUpdate(args: {
           preservationFallbackUsed: true,
           placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(out3).count,
         });
-        return toExecuteExtras(
-          {
-            finalText: out3,
-            acceptance: acc3,
-            usedLocalLateFeeFallback: false,
-            whatChangedLine: note.summaryLine,
-            unchangedDuplicateLateFee: false,
-          },
-          {
-            usedClientDeliverablesFinalPaymentFallback: false,
-            usedSurgicalPreserveRetry,
-            surgicalRejectedShortExhausted: false,
-            lastRefineResponse: lastR,
-            usedAppendReviewerNotePreserve: true,
-            refineApplyDecision: "append_reviewer_note_preserve_document",
-          },
-        );
+        return finalizePremiumRefineExecuteOutcome({
+          userInstruction: inst,
+          baselineText,
+          baselineLen,
+          refineChecklistBullets,
+          candidateLen: (lastR?.updated_document_text || "").trim().length,
+          outcome: toExecuteExtras(
+            {
+              finalText: out3,
+              acceptance: acc3,
+              usedLocalLateFeeFallback: false,
+              whatChangedLine: note.summaryLine,
+              unchangedDuplicateLateFee: false,
+            },
+            {
+              usedClientDeliverablesFinalPaymentFallback: false,
+              usedSurgicalPreserveRetry,
+              surgicalRejectedShortExhausted: false,
+              lastRefineResponse: lastR,
+              usedAppendReviewerNotePreserve: true,
+              refineApplyDecision: "append_reviewer_note_preserve_document",
+            },
+          ),
+        });
       }
     }
   }
@@ -732,12 +939,19 @@ export async function executePremiumRefineUpdate(args: {
     placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(resolved.finalText).count,
   });
 
-  return toExecuteExtras(resolved, {
-    usedClientDeliverablesFinalPaymentFallback: false,
-    usedSurgicalPreserveRetry,
-    surgicalRejectedShortExhausted: surgicalExhausted,
-    lastRefineResponse: lastR,
-    usedAppendReviewerNotePreserve: false,
-    refineApplyDecision: null,
+  return finalizePremiumRefineExecuteOutcome({
+    userInstruction: inst,
+    baselineText,
+    baselineLen,
+    refineChecklistBullets,
+    candidateLen: (lastR?.updated_document_text || "").trim().length,
+    outcome: toExecuteExtras(resolved, {
+      usedClientDeliverablesFinalPaymentFallback: false,
+      usedSurgicalPreserveRetry,
+      surgicalRejectedShortExhausted: surgicalExhausted,
+      lastRefineResponse: lastR,
+      usedAppendReviewerNotePreserve: false,
+      refineApplyDecision: null,
+    }),
   });
 }

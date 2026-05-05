@@ -8,7 +8,7 @@ vi.mock("./premiumRefineApi", async (importOriginal) => {
   };
 });
 
-import { postPremiumRefine } from "./premiumRefineApi";
+import { postPremiumRefine, PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import {
   buildAdvisoryAppendPreserveDocument,
   executePremiumRefineUpdate,
@@ -36,6 +36,25 @@ describe("advisory / comment intent classification", () => {
   it("classifies reviewer comment prompts as advisory", () => {
     expect(classifyPremiumRefineRevisionIntent("Add comments for the reviewer")).toBe("advisory_note_or_comment");
     expect(classifyPremiumRefineRevisionIntent("Flag risks and open issues")).toBe("advisory_note_or_comment");
+  });
+
+  it('classifies "List items the other party should review." as advisory (placeholder copy)', () => {
+    const p = "List items the other party should review.";
+    expect(isAdvisoryNoteOrCommentIntent(p)).toBe(true);
+    expect(classifyPremiumRefineRevisionIntent(p)).toBe("advisory_note_or_comment");
+  });
+
+  it("classifies related list / party-review phrases as advisory", () => {
+    expect(classifyPremiumRefineRevisionIntent("List review items before we send.")).toBe("advisory_note_or_comment");
+    expect(classifyPremiumRefineRevisionIntent("Counterparty should review indemnity and data.")).toBe(
+      "advisory_note_or_comment",
+    );
+    expect(classifyPremiumRefineRevisionIntent("Signer should review the signature blocks.")).toBe(
+      "advisory_note_or_comment",
+    );
+    expect(classifyPremiumRefineRevisionIntent("Items the other party should review include payment.")).toBe(
+      "advisory_note_or_comment",
+    );
   });
 
   it("keeps late-fee clause edits as surgical_revision", () => {
@@ -112,6 +131,49 @@ describe("advisory preserve + append behavior", () => {
 describe("executePremiumRefineUpdate advisory fast path", () => {
   beforeEach(() => {
     vi.mocked(postPremiumRefine).mockReset();
+  });
+
+  it('"List items the other party should review." append-preserves baseline and sets append decision', async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: "z".repeat(4000),
+      summary_changes: ["Stub"],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction: "List items the other party should review.",
+    });
+    expect(out.refineApplyDecision).toBe("append_reviewer_note_preserve_document");
+    expect(out.usedAppendReviewerNotePreserve).toBe(true);
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.finalText.startsWith(baseline)).toBe(true);
+    expect(out.finalText).toContain("REVIEWER NOTE / REQUESTED REVIEW ITEMS");
+    expect(postPremiumRefine).toHaveBeenCalledTimes(1);
+  });
+
+  it("advisory append still applies when API returns fail-open summary (prod QA)", async () => {
+    const baseline = longBaseline();
+    vi.mocked(postPremiumRefine).mockResolvedValueOnce({
+      updated_document_text: baseline,
+      summary_changes: [PRO_REFINE_UNAVAILABLE_USER_MESSAGE],
+      readiness_score: 50,
+      suggested_next_step: "review",
+    });
+    const out = await executePremiumRefineUpdate({
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      intakeText: "B2B.",
+      userInstruction: "List items the other party should review.",
+    });
+    expect(out.acceptance.decision).toBe("accepted");
+    expect(out.usedAppendReviewerNotePreserve).toBe(true);
+    expect(out.finalText).toContain("## REVIEWER NOTE");
+    expect(out.finalText.startsWith(baseline)).toBe(true);
+    expect(postPremiumRefine).toHaveBeenCalledTimes(1);
   });
 
   it("QA prompt with 6k corrupt-like short response still append-preserves full baseline in one POST", async () => {
