@@ -27,6 +27,11 @@ import { RecipientLegalRedlineDocument } from "./RecipientLegalRedlineDocument";
 import { RecipientLegalRedlineSideBySide } from "./RecipientLegalRedlineSideBySide";
 import { RecipientTrackedChangesToggle } from "./RecipientTrackedChangesToggle";
 import { buildLegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import {
+  buildRecipientLegalRedlinePlainTexts,
+  fingerprintPlainText,
+  snippetAroundPaymentTerms,
+} from "./recipientWholeDocRedlineSource";
 import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
@@ -269,6 +274,7 @@ export function AgreementRecipientReview({
   >("redline");
   const [showTrackedChanges, setShowTrackedChanges] = useState(true);
   const recipientRedlineViewModelLogKeyRef = useRef<string>("");
+  const recipientRedlineSourceLogKeyRef = useRef<string>("");
   const wholeDocRedlineScrollRef = useRef<HTMLDivElement | null>(null);
   const redlineChangeNavIdxRef = useRef(0);
   const [recipientPosture, setRecipientPosture] =
@@ -592,12 +598,16 @@ export function AgreementRecipientReview({
   }, [recipientPreview]);
 
   const legalRedlineDocumentBaseVm = useMemo(() => {
-    if (!recipientPreview) return null;
-    return buildLegalRedlineDocumentViewModel(
-      htmlToPlainTextForLegalRedline(recipientPreview.baselineHtml || ""),
-      htmlToPlainTextForLegalRedline(recipientPreview.proposedHtml || ""),
+    if (!recipientPreview || !previewDiff) return null;
+    const { currentPlain, proposedPlain } = buildRecipientLegalRedlinePlainTexts(
+      recipientPreview.baselineDraft,
+      recipientPreview.proposedDraft,
+      recipientPreview.baselineHtml,
+      recipientPreview.proposedHtml,
+      previewDiff.hasSnapshotDiff,
     );
-  }, [recipientPreview]);
+    return buildLegalRedlineDocumentViewModel(currentPlain, proposedPlain);
+  }, [recipientPreview, previewDiff]);
 
   const legalRedlineDocumentVm = useMemo(() => {
     if (!legalRedlineDocumentBaseVm || !previewDiff) return legalRedlineDocumentBaseVm;
@@ -681,6 +691,50 @@ export function AgreementRecipientReview({
       fallbackReason: legalRedlineDocumentVm.fallbackReason ?? null,
     });
   }, [agreementId, previewDiff, recipientPreview, showTrackedChanges, legalRedlineDocumentVm]);
+
+  useEffect(() => {
+    if (!recipientPreview || !previewDiff || !legalRedlineDocumentVm) return;
+    const diag =
+      import.meta.env.DEV ||
+      (typeof window !== "undefined" && window.localStorage?.getItem("lawdogRecipientReviseDiag") === "1");
+    if (!diag) return;
+    const k = `${agreementId}:${recipientPreview.revisionText}:${recipientPreview.proposedDraft.updated_at}`;
+    if (k === recipientRedlineSourceLogKeyRef.current) return;
+    recipientRedlineSourceLogKeyRef.current = k;
+    const baseHtml = recipientPreview.baselineHtml || "";
+    const propHtml = recipientPreview.proposedHtml || "";
+    const rawCur = htmlToPlainTextForLegalRedline(baseHtml);
+    const rawProp = htmlToPlainTextForLegalRedline(propHtml);
+    const paired = buildRecipientLegalRedlinePlainTexts(
+      recipientPreview.baselineDraft,
+      recipientPreview.proposedDraft,
+      baseHtml,
+      propHtml,
+      previewDiff.hasSnapshotDiff,
+    );
+    const equalRawPlain =
+      rawCur.replace(/\s+/g, " ").trim() === rawProp.replace(/\s+/g, " ").trim();
+    const changedClauseCount = previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).length;
+    // eslint-disable-next-line no-console
+    console.info("[recipient-redline-source-pair]", {
+      agreementId,
+      baselineHtmlLen: baseHtml.length,
+      proposedHtmlLen: propHtml.length,
+      baselineLen: paired.currentPlain.length,
+      proposedLen: paired.proposedPlain.length,
+      baselineFingerprint: fingerprintPlainText(paired.currentPlain),
+      proposedFingerprint: fingerprintPlainText(paired.proposedPlain),
+      equalTexts: equalRawPlain,
+      equalHtmlLengths: baseHtml.length === propHtml.length,
+      usedStructuredDraftTrailer: paired.currentPlain !== rawCur || paired.proposedPlain !== rawProp,
+      baselineSnippet: snippetAroundPaymentTerms(paired.currentPlain),
+      proposedSnippet: snippetAroundPaymentTerms(paired.proposedPlain),
+      changedClauseCount,
+      wholeDocChangedBlockCount: legalRedlineDocumentVm.stats.changedBlockCount,
+      wholeDocInsertCount: legalRedlineDocumentVm.stats.insertCount,
+      wholeDocDeleteCount: legalRedlineDocumentVm.stats.deleteCount,
+    });
+  }, [agreementId, legalRedlineDocumentVm, previewDiff, recipientPreview]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -821,7 +875,23 @@ export function AgreementRecipientReview({
     setError(null);
     try {
       const baselineDraft = cloneDraftForRecipientPreview(draft);
-      const baselineHtml = renderedHtml;
+      const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
+      /** Immutable owner-current HTML: re-fetch from /render immediately before revise (not React state alone). */
+      let baselineHtml = renderedHtml;
+      try {
+        const rr = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`, {
+          method: "POST",
+          headers: readHeaders,
+        });
+        if (rr.ok) {
+          const rrBody = await rr.text();
+          const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
+          const fresh = String(rp?.rendered_html ?? "").trim();
+          if (fresh.length > 0) baselineHtml = fresh;
+        }
+      } catch {
+        /* keep last renderedHtml from state */
+      }
       const apiInstruction = `${recipientPostureInstructionPreamble(recipientPosture)}\n\n${text}`;
       const res = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/revise`, {
         method: "POST",
