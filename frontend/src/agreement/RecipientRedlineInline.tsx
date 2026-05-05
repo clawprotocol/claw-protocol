@@ -6,28 +6,42 @@ type Props = {
   paragraphBreaks?: boolean;
   /** Omit outer panel chrome (clause cards provide their own scroll/border). */
   embedded?: boolean;
-  /** Higher-contrast insert/delete for compact clause cards. */
+  /** @deprecated Use {@link contrast} — kept for call sites. */
   trackingStrong?: boolean;
+  /** High-contrast insert/delete (recipient review default). */
+  contrast?: "standard" | "high";
 };
 
-function segmentClass(segType: "same" | "insert" | "delete", trackingStrong?: boolean): string {
-  if (segType === "same") return trackingStrong ? "text-slate-700" : "text-slate-800";
+function segmentClass(
+  segType: "same" | "insert" | "delete",
+  highContrast: boolean,
+): string {
+  if (segType === "same") {
+    return highContrast ? "text-slate-800" : "text-slate-800";
+  }
   if (segType === "insert") {
-    if (trackingStrong) {
-      return "rounded-sm bg-emerald-400 px-0.5 py-px font-semibold text-emerald-950 shadow-sm ring-1 ring-emerald-700/25";
+    if (highContrast) {
+      return "rounded px-1 py-0.5 font-semibold bg-emerald-500 text-emerald-950 shadow-sm ring-1 ring-emerald-800/40";
     }
-    return "bg-emerald-100/95 text-emerald-950 underline decoration-emerald-700/35 decoration-1 underline-offset-2";
+    return "rounded px-1 py-0.5 bg-emerald-100 text-emerald-950 underline decoration-emerald-700/35 decoration-1 underline-offset-2";
   }
-  if (trackingStrong) {
-    return "rounded-sm bg-rose-300 px-0.5 py-px font-semibold text-rose-950 line-through decoration-rose-800 decoration-2";
+  if (highContrast) {
+    return "rounded px-1 py-0.5 font-semibold bg-rose-400 text-rose-950 line-through decoration-rose-950 decoration-2 ring-1 ring-rose-800/45";
   }
-  return "bg-rose-100/90 text-rose-950 line-through decoration-rose-700/40 decoration-1";
+  return "rounded px-1 py-0.5 bg-rose-100 text-rose-950 line-through decoration-rose-700/40 decoration-1";
 }
 
 /**
  * Inline insert/delete/same segments for recipient preview (track-changes style).
  */
-export function RecipientRedlineInline({ redline, paragraphBreaks, embedded, trackingStrong }: Props) {
+export function RecipientRedlineInline({
+  redline,
+  paragraphBreaks,
+  embedded,
+  trackingStrong,
+  contrast,
+}: Props) {
+  const highContrast = contrast !== "standard" || Boolean(trackingStrong);
   const wrap = paragraphBreaks ? "mb-1 block whitespace-pre-wrap break-words" : "";
   const inner = redline.segments.map((seg, idx) => {
     if (seg.type === "same") {
@@ -42,7 +56,7 @@ export function RecipientRedlineInline({ redline, paragraphBreaks, embedded, tra
         <span
           key={`rl_${idx}`}
           data-redline="insert"
-          className={`${segmentClass("insert", trackingStrong)} ${wrap}`.trim()}
+          className={`${segmentClass("insert", highContrast)} ${wrap}`.trim()}
         >
           {seg.text}
         </span>
@@ -52,7 +66,7 @@ export function RecipientRedlineInline({ redline, paragraphBreaks, embedded, tra
       <span
         key={`rl_${idx}`}
         data-redline="delete"
-        className={`${segmentClass("delete", trackingStrong)} ${wrap}`.trim()}
+        className={`${segmentClass("delete", highContrast)} ${wrap}`.trim()}
       >
         {seg.text}
       </span>
@@ -60,7 +74,7 @@ export function RecipientRedlineInline({ redline, paragraphBreaks, embedded, tra
   });
 
   if (embedded) {
-    return <div className="text-[0.75rem] leading-relaxed text-slate-900">{inner}</div>;
+    return <div className="text-[0.8125rem] leading-relaxed text-slate-900">{inner}</div>;
   }
 
   return (

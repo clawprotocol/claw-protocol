@@ -151,7 +151,7 @@ describe("recipientPreviewDiffModel", () => {
     const pay = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff, a.clauseContext).find(
       (c) => c.id === "payment_terms",
     );
-    expect(pay?.whatChangedBullets.some((b) => /not found in the proposed draft/i.test(b))).toBe(true);
+    expect(pay?.whatChangedBullets.some((b) => /Requested but not reflected:/i.test(b))).toBe(true);
   });
 
   it("counts one semantic unit for Net-only payment change", () => {

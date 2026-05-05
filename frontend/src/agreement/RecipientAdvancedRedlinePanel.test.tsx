@@ -16,7 +16,13 @@ describe("RecipientAdvancedRedlinePanel", () => {
         { type: "insert", text: "new" },
       ],
     };
-    render(<RecipientAdvancedRedlinePanel redline={redline} />);
+    render(
+      <RecipientAdvancedRedlinePanel
+        redline={redline}
+        showTrackedChanges={true}
+        proposedHtmlClean="<p>Clean proposed</p>"
+      />,
+    );
     const panel = screen.getByTestId("recipient-advanced-redline-panel");
     expect(panel.querySelector('[data-testid="recipient-advanced-redline-scroll"]')).toBeNull();
 

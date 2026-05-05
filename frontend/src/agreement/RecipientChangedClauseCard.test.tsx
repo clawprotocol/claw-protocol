@@ -32,7 +32,7 @@ function baseDraft(over: Partial<AgreementDraft> = {}): AgreementDraft {
 describe("RecipientChangedClauseCard", () => {
   afterEach(() => cleanup());
 
-  it("shows track-change Added lines, compact bullets, and full text only in disclosure", async () => {
+  it("tracked ON renders field redline with data-redline insert/delete when before/after exists", async () => {
     const base = baseDraft();
     const proposed = baseDraft({
       payment_terms:
@@ -46,19 +46,64 @@ describe("RecipientChangedClauseCard", () => {
     );
     expect(card).toBeDefined();
     expect(card!.cardTitle).toBe("Payment terms");
-    expect(card!.trackMode).toBe("lines");
+    expect(card!.fieldRedline?.hasChanges).toBe(true);
 
-    render(<RecipientChangedClauseCard card={card!} />);
+    render(<RecipientChangedClauseCard card={card!} showTrackedChanges />);
 
     const root = screen.getByTestId("recipient-clause-card-payment_terms");
     const primary = within(root).getByTestId("clause-card-primary");
-    expect(within(primary).getByTestId("clause-track-lines").textContent).toMatch(/Added:.*Net 30/i);
-    expect(within(primary).getByTestId("clause-track-lines").textContent).toMatch(/pause work/i);
-    expect(primary.textContent).not.toMatch(/until brought current/i);
+    const redlineRoot = within(primary).getByTestId("clause-field-redline");
+    expect(redlineRoot.querySelector('[data-redline="insert"]')).toBeTruthy();
+    expect(redlineRoot.querySelector('[data-redline="delete"]')).toBeTruthy();
+    expect(primary.querySelector('[data-redline="insert-pill"]')).toBeNull();
+
+    const primaryText = primary.textContent ?? "";
+    expect(primaryText.length).toBeLessThan(8000);
+    expect(primaryText).not.toMatch(/Additional terms apply per schedule A.*Additional terms apply per schedule A/s);
 
     const details = within(root).getByTestId("clause-full-before-after");
     expect(details.hasAttribute("open")).toBe(false);
     await userEvent.click(details.querySelector("summary")!);
     expect(within(details).getByText(/until brought current/i)).toBeTruthy();
+  });
+
+  it("tracked OFF renders clean proposed only — no data-redline markers", () => {
+    const base = baseDraft();
+    const proposed = baseDraft({
+      payment_terms:
+        "Net 30. Invoices due within 30 days. The developer may pause work if payment is more than 15 days late until brought current.",
+    });
+    const a = assessRecipientPreviewDiff(base, proposed, "<p>x</p>", "<p>x</p>", {
+      recipientInstructionPlain: "Net 30",
+    });
+    const card = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff, a.clauseContext).find(
+      (c) => c.id === "payment_terms",
+    );
+    expect(card).toBeDefined();
+
+    render(<RecipientChangedClauseCard card={card!} showTrackedChanges={false} />);
+
+    const root = screen.getByTestId("recipient-clause-card-payment_terms");
+    expect(within(root).getByTestId("clause-clean-proposed")).toBeTruthy();
+    expect(root.querySelector("[data-redline]")).toBeNull();
+  });
+
+  it("shows requested-but-not-reflected warning when pause was asked but omitted from proposal", () => {
+    const base = baseDraft({ payment_terms: "Net 15." });
+    const proposed = baseDraft({ payment_terms: "Net 30." });
+    const a = assessRecipientPreviewDiff(base, proposed, "<p>x</p>", "<p>x</p>", {
+      recipientInstructionPlain: "Net 30 and pause work after 15 days late",
+    });
+    expect(a.instructionCaptureWarning).toBe(true);
+    const card = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff, a.clauseContext).find(
+      (c) => c.id === "payment_terms",
+    );
+    expect(card).toBeDefined();
+
+    render(<RecipientChangedClauseCard card={card!} showTrackedChanges />);
+
+    const root = screen.getByTestId("recipient-clause-card-payment_terms");
+    expect(within(root).getByTestId("clause-what-changed").textContent).toMatch(/Requested but not reflected/i);
+    expect(within(root).getByTestId("clause-what-changed").textContent).toMatch(/pause/i);
   });
 });

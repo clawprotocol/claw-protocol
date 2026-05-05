@@ -299,6 +299,17 @@ export function instructionRequestsPauseWork(instr: string): boolean {
   );
 }
 
+/** Short phrase from reviewer instruction for “requested but not reflected” messaging. */
+export function extractPauseRequestPhrase(instr: string): string | null {
+  const t = (instr || "").trim();
+  if (!t) return null;
+  const m =
+    t.match(/pause\s+work\s+after[^.!?]{0,100}/i) ||
+    t.match(/pause\s+work[^.!?]{0,140}/i) ||
+    t.match(/suspend\s+work[^.!?]{0,100}/i);
+  return m ? m[0].trim().replace(/\s+/g, " ") : null;
+}
+
 function pauseWorkInProposed(afterField: string, proposedRenderedPlain?: string): boolean {
   return !!(
     extractPauseWorkBullet(afterField) ||
@@ -342,7 +353,10 @@ export function deriveClauseWhatChangedBullets(
       bullets.push(pauseLine.endsWith(".") ? pauseLine : `${pauseLine}.`);
     }
     if (instructionRequestsPauseWork(instr) && !pauseWorkInProposed(a, proposedPlain)) {
-      bullets.push("Pause-work edit was requested but not found in the proposed draft.");
+      const phrase = extractPauseRequestPhrase(instr);
+      bullets.push(
+        `Requested but not reflected: ${phrase || "pause work for late payment"}.`,
+      );
     }
     if (bullets.length === 0) bullets.push("Payment terms updated.");
   } else if (row.field === "purpose") {
@@ -435,7 +449,7 @@ const GENERIC_CLAUSE_BULLETS = new Set([
   "Purpose / scope text updated.",
 ]);
 
-const INSTRUCTION_GAP_BULLET_PREFIX = "Pause-work edit was requested but not found";
+const INSTRUCTION_GAP_BULLET_PREFIX = "Requested but not reflected:";
 
 function isCountableClauseBullet(b: string): boolean {
   if (GENERIC_CLAUSE_BULLETS.has(b)) return false;

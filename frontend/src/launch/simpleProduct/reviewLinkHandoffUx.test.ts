@@ -54,7 +54,7 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).toContain("Compare text");
     expect(s).toContain("{MODE_SUGGEST_PLAIN_ENGLISH}");
     expect(s).toContain("Changed clauses");
-    expect(s).toContain("Advanced redline");
+    expect(s).toContain("Adv. full-document");
     expect(s).toContain("recipient-tab-full-redline");
     expect(s).toContain('"clauses"');
     expect(s).toContain("[reviewer-view-visible]");
