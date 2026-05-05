@@ -77,6 +77,8 @@ export type BuildRecipientLegalRedlinePlainTextsResult = {
   /** True when payment_terms snapshot change could not be placed inside a scored payment block. */
   paymentTermsInlinePlacementFailed?: boolean;
   inlinePlacementDiags?: RecipientRedlineInlinePlacementDiag[];
+  /** When true, UI should run {@link filterNarrowRecipientPaymentRedlineNoise} on the legal redline VM. */
+  narrowRecipientTargetedRedline?: boolean;
 };
 
 function replaceFirst(haystack: string, needle: string, repl: string): string {
@@ -276,7 +278,7 @@ function applyPaymentTermsInlinePatch(
   return { ok: true, plain: out, diag };
 }
 
-function isNarrowPaymentTimingInstruction(instructionPlain: string): boolean {
+export function isNarrowPaymentTimingInstruction(instructionPlain: string): boolean {
   const t = String(instructionPlain ?? "").trim();
   if (!t) return false;
   return NARROW_PAYMENT_TIMING_RE.test(t);
@@ -289,7 +291,12 @@ type FieldPatchPairResult = {
   inlinePlacementDiags: RecipientRedlineInlinePlacementDiag[];
 };
 
-function buildFieldPatchPair(baselinePlain: string, changedPatchableRows: AgreementFieldChange[]): FieldPatchPairResult {
+function buildFieldPatchPair(
+  baselinePlain: string,
+  changedPatchableRows: AgreementFieldChange[],
+  options?: { narrowPaymentInstruction?: boolean },
+): FieldPatchPairResult {
+  const narrowPayment = Boolean(options?.narrowPaymentInstruction);
   const inlinePlacementDiags: RecipientRedlineInlinePlacementDiag[] = [];
   let paymentTermsInlinePlacementFailed = false;
 
@@ -306,7 +313,23 @@ function buildFieldPatchPair(baselinePlain: string, changedPatchableRows: Agreem
 
     if (row.field === "payment_terms" && after) {
       if (before && proposedPlain.includes(before)) {
-        proposedPlain = replaceFirst(proposedPlain, before, after);
+        if (
+          narrowPayment &&
+          /\bupon\s+receipt\b/i.test(before) &&
+          /\bnet\s*30\b/i.test(after) &&
+          /\bupon\s+receipt\b/i.test(proposedPlain)
+        ) {
+          const re = /\bupon\s+receipt\b/i;
+          const m = re.exec(proposedPlain);
+          if (m) {
+            proposedPlain =
+              proposedPlain.slice(0, m.index) + "Net 30" + proposedPlain.slice(m.index + m[0].length);
+          } else {
+            proposedPlain = replaceFirst(proposedPlain, before, after);
+          }
+        } else {
+          proposedPlain = replaceFirst(proposedPlain, before, after);
+        }
         inlinePlacementDiags.push({
           field: "payment_terms",
           mode: "literal_replace",
@@ -376,7 +399,12 @@ export function buildRecipientLegalRedlinePlainTexts(
   const prop = htmlToPlainTextForLegalRedline(proposedHtml || "");
 
   if (!hasSnapshotDiff) {
-    return { currentPlain: cur, proposedPlain: prop, sourceMode: "baseline_vs_revise_html" };
+    return {
+      currentPlain: cur,
+      proposedPlain: prop,
+      sourceMode: "baseline_vs_revise_html",
+      narrowRecipientTargetedRedline: false,
+    };
   }
 
   const changedKeys = changedFields.filter((r) => r.changed).map((r) => r.field);
@@ -389,7 +417,7 @@ export function buildRecipientLegalRedlinePlainTexts(
 
   let patchPair: FieldPatchPairResult | null = null;
   if (hasPatchableDiff) {
-    patchPair = buildFieldPatchPair(cur, patchableChangedRows);
+    patchPair = buildFieldPatchPair(cur, patchableChangedRows, { narrowPaymentInstruction: narrow });
   }
 
   const vmPatch =
@@ -400,13 +428,11 @@ export function buildRecipientLegalRedlinePlainTexts(
   let usePatch = false;
 
   if (patchPair && vmPatch) {
-    if (!vmFull.hasChanges) {
+    if (narrow && hasPatchableDiff) {
+      usePatch = true;
+    } else if (!vmFull.hasChanges) {
       usePatch = true;
     } else if (!partiesChanged && patchableChangedRows.length === changedKeys.length) {
-      usePatch = true;
-    } else if (narrow && vmFull.stats.changedBlockCount > 3 && hasPatchableDiff) {
-      usePatch = true;
-    } else if (narrow && hasPatchableDiff && vmPatch.stats.changedBlockCount + 2 < vmFull.stats.changedBlockCount) {
       usePatch = true;
     }
   }
@@ -433,8 +459,14 @@ export function buildRecipientLegalRedlinePlainTexts(
       usedNoisyReviseGuard,
       paymentTermsInlinePlacementFailed: patchPair.paymentTermsInlinePlacementFailed,
       inlinePlacementDiags: patchPair.inlinePlacementDiags,
+      narrowRecipientTargetedRedline: Boolean(narrow && usePatch),
     };
   }
 
-  return { currentPlain: cur, proposedPlain: prop, sourceMode: "baseline_vs_revise_html" };
+  return {
+    currentPlain: cur,
+    proposedPlain: prop,
+    sourceMode: "baseline_vs_revise_html",
+    narrowRecipientTargetedRedline: false,
+  };
 }

@@ -4,6 +4,7 @@ import {
   alignParsedBlocksToLegalRedline,
   buildLegalRedlineDocumentViewModel,
   extractClauseNumberFromFirstLine,
+  filterNarrowRecipientPaymentRedlineNoise,
   normalizeClauseNumberKey,
   parsePlainTextIntoLegalBlocks,
 } from "./legalRedlineBlocks";
@@ -121,5 +122,61 @@ describe("alignParsedBlocksToLegalRedline", () => {
     const b = parsePlainTextIntoLegalBlocks("Intro changed.\n\n3.1 X");
     const out = alignParsedBlocksToLegalRedline(a, b);
     expect(out.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("filterNarrowRecipientPaymentRedlineNoise", () => {
+  it("collapses signature, party-line, and LawDog drift while keeping payment Net 30 redline", () => {
+    const cur = [
+      "3.2 Payment Schedule",
+      "Invoices are payable upon receipt.",
+      "",
+      "IN WITNESS WHEREOF",
+      "CLIENT",
+      "By: __________",
+      "",
+      "Created with LawDog — Draft for Review.",
+    ].join("\n");
+    const prop = [
+      "3.2 Payment Schedule",
+      "Invoices are payable Net 30.",
+      "",
+      "IN WITNESS WHEREOF",
+      "CLIENT LLC",
+      "By: __________",
+      "",
+      "Created with LawDog — Draft for Review — QA.",
+    ].join("\n");
+    const vm = buildLegalRedlineDocumentViewModel(cur, prop);
+    const filtered = filterNarrowRecipientPaymentRedlineNoise(vm, { narrowPaymentInstruction: true });
+
+    const pay = filtered.blocks.find((b) => b.clauseNumber === "3.2");
+    expect(pay).toBeDefined();
+    expect(pay!.hasChange).toBe(true);
+    expect(
+      pay!.segments
+        .filter((s) => s.type === "insert")
+        .map((s) => s.text)
+        .join(""),
+    ).toMatch(/Net\s*30/i);
+
+    for (const b of filtered.blocks) {
+      if (b.kind === "signature") {
+        expect(b.hasChange).toBe(false);
+        expect(b.segments.every((s) => s.type === "same")).toBe(true);
+      }
+      const blob = `${b.currentText ?? ""}\n${b.proposedText ?? ""}`.toLowerCase();
+      if (blob.includes("created with lawdog")) {
+        expect(b.hasChange).toBe(false);
+      }
+    }
+  });
+
+  it("is a no-op when narrowPaymentInstruction is false", () => {
+    const cur = "IN WITNESS WHEREOF\nAlice";
+    const prop = "IN WITNESS WHEREOF\nBob";
+    const vm = buildLegalRedlineDocumentViewModel(cur, prop);
+    const filtered = filterNarrowRecipientPaymentRedlineNoise(vm, { narrowPaymentInstruction: false });
+    expect(filtered.blocks.some((b) => b.hasChange)).toBe(true);
   });
 });

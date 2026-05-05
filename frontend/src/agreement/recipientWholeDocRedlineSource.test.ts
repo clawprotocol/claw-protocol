@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildLegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import {
+  buildLegalRedlineDocumentViewModel,
+  filterNarrowRecipientPaymentRedlineNoise,
+} from "./legalRedlineBlocks";
 import { buildRecipientLegalRedlinePlainTexts } from "./recipientWholeDocRedlineSource";
 import type { AgreementDraft } from "./agreementTypes";
 import { compareAgreementSnapshots } from "../vs01/agreementCompare";
@@ -68,6 +71,7 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
       fields,
     );
     expect(r.sourceMode).toBe("baseline_vs_field_patch");
+    expect(r.narrowRecipientTargetedRedline).toBe(true);
     expect(r.paymentTermsInlinePlacementFailed).not.toBe(true);
     expect(r.proposedPlain.toLowerCase()).toMatch(/net\s*30/);
     const lawdog = r.proposedPlain.toLowerCase().indexOf("created with lawdog");
@@ -116,7 +120,13 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
     const current = minimalDraft({ payment_terms: "Invoices are payable upon receipt." });
     const proposed = minimalDraft({ payment_terms: "Invoices are payable Net 30." });
     const fields = changedFieldsBetween(current, proposed);
-    const { currentPlain, proposedPlain, sourceMode, usedNoisyReviseGuard } = buildRecipientLegalRedlinePlainTexts(
+    const {
+      currentPlain,
+      proposedPlain,
+      sourceMode,
+      usedNoisyReviseGuard,
+      narrowRecipientTargetedRedline,
+    } = buildRecipientLegalRedlinePlainTexts(
       current,
       proposed,
       baselineHtml,
@@ -127,6 +137,7 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
     );
     expect(sourceMode).toBe("baseline_vs_field_patch");
     expect(usedNoisyReviseGuard).toBe(true);
+    expect(narrowRecipientTargetedRedline).toBe(true);
     expect(currentPlain).not.toContain("Agreement fields (tracked for redline)");
     expect(proposedPlain).not.toContain("Agreement fields (tracked for redline)");
     const vm = buildLegalRedlineDocumentViewModel(currentPlain, proposedPlain);
@@ -144,5 +155,9 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
     if (lawdogIdx >= 0) {
       expect(proposedPlain.toLowerCase().indexOf("net 30")).toBeLessThan(lawdogIdx);
     }
+    const vmFiltered = filterNarrowRecipientPaymentRedlineNoise(vm, { narrowPaymentInstruction: true });
+    expect(vmFiltered.stats.changedBlockCount).toBe(1);
+    expect(vmFiltered.stats.insertCount).toBeGreaterThanOrEqual(1);
+    expect(vmFiltered.stats.deleteCount).toBeLessThanOrEqual(1);
   });
 });

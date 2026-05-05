@@ -23,7 +23,10 @@ import {
   recipientSendConfirmationLine,
 } from "./recipientPreviewDiffModel";
 import { RecipientLegalRedlineDocument } from "./RecipientLegalRedlineDocument";
-import { buildLegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import {
+  buildLegalRedlineDocumentViewModel,
+  filterNarrowRecipientPaymentRedlineNoise,
+} from "./legalRedlineBlocks";
 import {
   buildRecipientLegalRedlinePlainTexts,
   fingerprintPlainText,
@@ -594,10 +597,14 @@ export function AgreementRecipientReview({
 
   const legalRedlineDocumentBaseVm = useMemo(() => {
     if (!recipientRedlinePlainTexts) return null;
-    return buildLegalRedlineDocumentViewModel(
+    let vm = buildLegalRedlineDocumentViewModel(
       recipientRedlinePlainTexts.currentPlain,
       recipientRedlinePlainTexts.proposedPlain,
     );
+    if (recipientRedlinePlainTexts.narrowRecipientTargetedRedline) {
+      vm = filterNarrowRecipientPaymentRedlineNoise(vm, { narrowPaymentInstruction: true });
+    }
+    return vm;
   }, [recipientRedlinePlainTexts]);
 
   const legalRedlineDocumentVm = useMemo(() => {

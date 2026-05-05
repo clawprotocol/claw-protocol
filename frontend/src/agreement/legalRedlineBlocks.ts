@@ -370,3 +370,110 @@ export function buildLegalRedlineDocumentViewModel(
     fallbackReason: detectFallbackReason(blocks),
   };
 }
+
+function collapseBlockToSameOnly(b: LegalRedlineBlock): LegalRedlineBlock {
+  const text = (b.currentText ?? b.proposedText ?? "").trim() || "\u00a0";
+  const segments: LegalRedlineSegment[] = [{ type: "same", text }];
+  const counts = countSegmentTypes(segments);
+  return {
+    ...b,
+    proposedText: b.currentText ?? b.proposedText,
+    segments,
+    insertCount: counts.insertCount,
+    deleteCount: counts.deleteCount,
+    sameCount: counts.sameCount,
+    hasInsert: false,
+    hasDelete: false,
+    hasChange: false,
+  };
+}
+
+function blockLooksStrongPayment(t: string): boolean {
+  const s = t.toLowerCase();
+  return /\b(invoice|invoicing|payable|net\s*\d|payment schedule|fee schedule|compensation|past due|late payment|payment terms)\b/.test(
+    s,
+  );
+}
+
+/**
+ * Blocks that should never show insert/delete styling for a narrow payment-only recipient suggestion,
+ * even if template drift or alignment makes the word-diff noisy.
+ */
+export function isRecipientRedlineNoiseBlockForNarrowPayment(b: LegalRedlineBlock): boolean {
+  const raw = `${b.currentText ?? ""}\n${b.proposedText ?? ""}`;
+  if (blockLooksStrongPayment(raw)) return false;
+
+  const t = raw.toLowerCase();
+  const firstLine = (b.heading ?? b.currentText ?? b.proposedText ?? "").split("\n")[0]?.trim() ?? "";
+
+  if (b.kind === "signature" || b.kind === "footer") return true;
+
+  if (/\b(created with lawdog|draft for review)\b/.test(t)) return true;
+  if (/\bin witness whereof\b/.test(t)) return true;
+  if (/execution and signature placement/i.test(t)) return true;
+  if (/^notices\b/i.test(firstLine)) return true;
+
+  if (/\bemail\s*:/i.test(t) || (/\bemail\b/.test(t) && /@/.test(t))) return true;
+
+  const lines = raw.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  for (const line of lines.slice(0, 8)) {
+    const low = line.toLowerCase();
+    if (/^(signed|signature)\b/.test(low)) return true;
+    if (/^(by|name|title|date)\s*:/.test(low)) return true;
+    if (/^(client|developer)\s*$/i.test(line)) return true;
+  }
+
+  const nonEmpty = lines.filter((l) => l.length > 0);
+  if (
+    nonEmpty.length <= 6 &&
+    nonEmpty.some((l) => /^client\s*$/i.test(l)) &&
+    nonEmpty.some((l) => /^developer\s*$/i.test(l))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function recipientRedlineNoiseFilterDiagEnabled(): boolean {
+  return (
+    typeof import.meta !== "undefined" &&
+    (import.meta.env?.DEV ||
+      (typeof globalThis !== "undefined" &&
+        (globalThis as unknown as { window?: Window }).window?.localStorage?.getItem("lawdogRecipientReviseDiag") ===
+          "1"))
+  );
+}
+
+/** Collapses noisy blocks to “same” so they are not counted or styled as redline changes. */
+export function filterNarrowRecipientPaymentRedlineNoise(
+  vm: LegalRedlineDocumentViewModel,
+  options: { narrowPaymentInstruction: boolean },
+): LegalRedlineDocumentViewModel {
+  if (!options.narrowPaymentInstruction) return vm;
+
+  const droppedBlocks: Array<{ id: string; kind: LegalRedlineBlockKind; label?: string }> = [];
+  const blocks = vm.blocks.map((b) => {
+    if (!blockHasMaterialChange(b.segments)) return b;
+    if (!isRecipientRedlineNoiseBlockForNarrowPayment(b)) return b;
+    droppedBlocks.push({ id: b.id, kind: b.kind, label: b.label });
+    return collapseBlockToSameOnly(b);
+  });
+
+  if (droppedBlocks.length > 0 && recipientRedlineNoiseFilterDiagEnabled()) {
+    // eslint-disable-next-line no-console
+    console.warn("[recipient-redline-noise-filter]", {
+      droppedBlocks,
+      reason: "narrow_payment_instruction",
+    });
+  }
+
+  const stats = aggregateStats(blocks, vm.stats.currentLen, vm.stats.proposedLen);
+  const hasChanges = blocks.some((blk) => blockHasMaterialChange(blk.segments));
+  return {
+    ...vm,
+    blocks,
+    stats,
+    hasChanges,
+  };
+}

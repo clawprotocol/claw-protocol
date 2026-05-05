@@ -121,6 +121,8 @@ const baselineStructuredHtml = `<div>
   <p>Master Services Agreement</p>
   <p>3.2 Payment</p>
   <p>Invoices are payable upon receipt.</p>
+  <p>IN WITNESS WHEREOF the parties execute.</p>
+  <p>Created with LawDog — Draft for Review.</p>
 </div>`;
 
 const divergentReviseRenderedHtml = `<article>
@@ -207,6 +209,16 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     const insertEl = legalRoot.querySelector('[data-redline="insert"]');
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
+
+    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/^1\s+insertion$/i);
+    expect(screen.getByTestId("recipient-redline-chip-deletions").textContent).toMatch(/^0\s+deletion|^1\s+deletion$/i);
+    expect(screen.getByTestId("recipient-redline-chip-sections").textContent).toMatch(/^1\s+changed section$/i);
+
+    for (const el of legalRoot.querySelectorAll('[data-redline="insert"], [data-redline="delete"]')) {
+      const t = (el.textContent ?? "").toLowerCase();
+      expect(t).not.toContain("lawdog");
+      expect(t).not.toContain("in witness whereof");
+    }
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
     expect(callout.textContent).toMatch(/Not reflected:/i);
