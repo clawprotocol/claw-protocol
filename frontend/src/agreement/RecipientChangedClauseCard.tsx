@@ -13,21 +13,26 @@ type Props = {
 };
 
 /**
- * Compact “track changes” clause card: heading, Current / Suggested snippets, bullets, tracked row; full text in disclosure.
+ * Compact track-changes clause card: title, bullets, then lines / pair / inline diff; full text in disclosure only.
  */
 export function RecipientChangedClauseCard({ card }: Props) {
   const long =
     card.currentText.length > CLAUSE_CARD_DISCLOSURE_CHAR_THRESHOLD ||
     card.proposedText.length > CLAUSE_CARD_DISCLOSURE_CHAR_THRESHOLD;
   const fieldRl = card.fieldRedline;
-  const showTracked = Boolean(fieldRl?.hasChanges);
+  const showSnippets = card.trackMode === "inline";
   const displayRedline = fieldRl
     ? capRedlineChangeSegmentsForClauseUi(buildClauseCardDisplayRedline(fieldRl))
     : null;
+  const showInlineFallback =
+    card.trackMode === "inline" &&
+    Boolean(fieldRl?.hasChanges) &&
+    card.trackAddedDisplayLines.length === 0 &&
+    !card.trackSnippetPair;
   const showDeleteInsertRow =
-    showTracked && displayRedline && redlineHasSignificantRemovals(displayRedline);
+    showInlineFallback && displayRedline && redlineHasSignificantRemovals(displayRedline);
   const addedPills =
-    showTracked && displayRedline && !showDeleteInsertRow ? insertTextsForAddedPills(fieldRl!) : [];
+    showInlineFallback && displayRedline && !showDeleteInsertRow ? insertTextsForAddedPills(fieldRl!) : [];
   const useAddedPillsRow = !showDeleteInsertRow && addedPills.length > 0;
 
   return (
@@ -46,29 +51,6 @@ export function RecipientChangedClauseCard({ card }: Props) {
           </span>
         </div>
 
-        <div className="mt-2 space-y-1.5">
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Current</div>
-            <div
-              className="mt-0.5 rounded border border-slate-800/90 bg-slate-900/60 px-2 py-1 text-[10.5px] text-slate-300/95"
-              data-testid="clause-current-snippet"
-            >
-              {card.currentSnippet}
-            </div>
-          </div>
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-emerald-200/70">Suggested</div>
-            <div
-              className="mt-0.5 space-y-1 rounded border border-emerald-900/35 bg-emerald-950/25 px-2 py-1 text-[10.5px] text-emerald-50/95"
-              data-testid="clause-suggested-snippet"
-            >
-              {card.suggestedSnippetLines.map((line) => (
-                <div key={line}>{line}</div>
-              ))}
-            </div>
-          </div>
-        </div>
-
         <div className="mt-2">
           <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">What changed</div>
           <ul className="mb-0 mt-0.5 list-disc space-y-0.5 pl-4 text-[10.5px] text-slate-200" data-testid="clause-what-changed">
@@ -78,9 +60,74 @@ export function RecipientChangedClauseCard({ card }: Props) {
           </ul>
         </div>
 
-        {showTracked && displayRedline ? (
+        {card.trackMode === "lines" && card.trackAddedDisplayLines.length > 0 ? (
+          <div className="mt-2" data-testid="clause-track-lines">
+            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
+            <ul className="mb-0 mt-1 space-y-1.5 rounded-md border border-slate-600/80 bg-white px-2 py-2">
+              {card.trackAddedDisplayLines.map((line) => {
+                const body = line.startsWith("Added:") ? line.slice(6).trim() : line;
+                return (
+                  <li key={line} className="list-none text-[10px] leading-snug text-slate-800">
+                    <span className="font-semibold text-slate-600">Added: </span>
+                    <span className="rounded bg-emerald-300/95 px-1 py-px font-medium text-emerald-950">{body}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+
+        {card.trackMode === "pair" && card.trackSnippetPair ? (
+          <div className="mt-2" data-testid="clause-track-pair">
+            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
+            <div className="mt-1 flex flex-wrap items-baseline gap-1.5 rounded-md border border-slate-600/80 bg-white px-2 py-2 text-[10px] leading-snug">
+              <span
+                className="max-w-[48%] rounded bg-rose-200/95 px-1 py-px font-medium text-rose-950 line-through decoration-rose-800 decoration-2"
+                data-testid="clause-track-removed"
+              >
+                {card.trackSnippetPair.removed}
+              </span>
+              <span className="text-slate-400" aria-hidden>
+                →
+              </span>
+              <span
+                className="max-w-[48%] rounded bg-emerald-300/95 px-1 py-px font-medium text-emerald-950"
+                data-testid="clause-track-inserted"
+              >
+                {card.trackSnippetPair.added}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        {showSnippets ? (
+          <div className="mt-2 space-y-1.5">
+            <div>
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Current</div>
+              <div
+                className="mt-0.5 rounded border border-slate-800/90 bg-slate-900/60 px-2 py-1 text-[10.5px] text-slate-300/95"
+                data-testid="clause-current-snippet"
+              >
+                {card.currentSnippet}
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-emerald-200/70">Suggested</div>
+              <div
+                className="mt-0.5 space-y-1 rounded border border-emerald-900/35 bg-emerald-950/25 px-2 py-1 text-[10.5px] text-emerald-50/95"
+                data-testid="clause-suggested-snippet"
+              >
+                {card.suggestedSnippetLines.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showInlineFallback && displayRedline ? (
           <div className="mt-2" data-testid="clause-field-redline">
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Tracked changes</div>
+            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Track changes</div>
             {showDeleteInsertRow ? (
               <div className="mt-0.5 rounded-md border border-slate-600/80 bg-white px-2 py-1.5 shadow-sm">
                 <RecipientRedlineInline redline={displayRedline} paragraphBreaks embedded trackingStrong />

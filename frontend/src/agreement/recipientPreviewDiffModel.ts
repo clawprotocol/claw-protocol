@@ -164,7 +164,11 @@ export function extractPaymentTermsCurrentSnippet(before: string): string {
 /**
  * Short suggested payment lines (Net timing + pause-work), for compact cards — not the full field paragraph.
  */
-export function buildPaymentTermsSuggestedSnippetLines(afterRaw: string, beforeRaw: string): string[] {
+export function buildPaymentTermsSuggestedSnippetLines(
+  afterRaw: string,
+  beforeRaw: string,
+  proposedRenderedPlain?: string,
+): string[] {
   const after = normalizeClauseOneLine(afterRaw);
   const before = normalizeClauseOneLine(beforeRaw);
   const lines: string[] = [];
@@ -173,7 +177,9 @@ export function buildPaymentTermsSuggestedSnippetLines(afterRaw: string, beforeR
   if (netA && (!netB || netA[1] !== netB[1])) {
     lines.push(`Invoices are due Net ${netA[1]}.`);
   }
-  const pauseA = extractPauseWorkBullet(afterRaw);
+  const pauseA =
+    extractPauseWorkBullet(afterRaw) ||
+    (proposedRenderedPlain ? extractPauseWorkBullet(proposedRenderedPlain) : null);
   const pauseB = extractPauseWorkBullet(beforeRaw);
   if (pauseA && !pauseB) {
     lines.push(pauseA.endsWith(".") ? pauseA : `${pauseA}.`);
@@ -184,14 +190,18 @@ export function buildPaymentTermsSuggestedSnippetLines(afterRaw: string, beforeR
   return lines;
 }
 
-function buildClauseSnippetsForRow(row: AgreementFieldChange): {
+function buildClauseSnippetsForRow(row: AgreementFieldChange, ctx?: RecipientClauseContext): {
   currentSnippet: string;
   suggestedSnippetLines: string[];
 } {
   if (row.field === "payment_terms") {
     return {
       currentSnippet: extractPaymentTermsCurrentSnippet(row.before || ""),
-      suggestedSnippetLines: buildPaymentTermsSuggestedSnippetLines(row.after || "", row.before || ""),
+      suggestedSnippetLines: buildPaymentTermsSuggestedSnippetLines(
+        row.after || "",
+        row.before || "",
+        ctx?.proposedRenderedPlain,
+      ),
     };
   }
   const b = normalizeClauseOneLine(row.before || "");
@@ -269,24 +279,71 @@ function extractNetTimingLine(after: string, before: string): string | null {
 
 function extractPauseWorkBullet(text: string): string | null {
   const t = text || "";
-  if (!/\bpause\b.*\bwork\b|\bmay\s+pause\b|\bsuspend\b.*\bwork\b/i.test(t)) return null;
-  const dm = t.match(/more\s+than\s+(\d+)\s*days?\s+late|(\d+)\s*days?\s*(?:past\s*due|late)/i);
-  const days = dm ? (dm[1] || dm[2]) : "15";
+  const hasPauseWork =
+    /\bpause\s+work\b|\bmay\s+pause\b|\bpause\s+work\s+after\b|\bpause\s+work\s+if\b|\bsuspend\s+work\b|\bsuspend\b.*\bwork\b|\bpause\b.*\bwork\b.*\blate\b/i.test(
+      t,
+    );
+  if (!hasPauseWork) return null;
+  const dm = t.match(
+    /more\s+than\s+(\d+)\s*days?\s+late|(\d+)\s*days?\s*(?:past\s*due|late)|after\s+(\d+)\s*days?\s*late/i,
+  );
+  const days = dm ? (dm[1] || dm[2] || dm[3]) : "15";
   return `Developer may pause work if payment is more than ${days} days late`;
 }
 
+/** Reviewer instruction mentions pause / suspend work for late payment. */
+export function instructionRequestsPauseWork(instr: string): boolean {
+  const t = (instr || "").toLowerCase();
+  return /\bpause\s*[- ]?\s*work\b|\bsuspend\s*[- ]?\s*work\b|\bpause\b.*\b(late|days)\b|\bwork\b.*\b(after|more\s+than)\b.*\bdays?\b.*\blate\b/i.test(
+    t,
+  );
+}
+
+function pauseWorkInProposed(afterField: string, proposedRenderedPlain?: string): boolean {
+  return !!(
+    extractPauseWorkBullet(afterField) ||
+    (proposedRenderedPlain && extractPauseWorkBullet(proposedRenderedPlain))
+  );
+}
+
+function pauseWorkInBaseline(beforeField: string, baselineRenderedPlain?: string): boolean {
+  return !!(
+    extractPauseWorkBullet(beforeField) ||
+    (baselineRenderedPlain && extractPauseWorkBullet(baselineRenderedPlain))
+  );
+}
+
+/** Snapshot + instruction context for clause bullets, counts, and capture warnings. */
+export type RecipientClauseContext = {
+  recipientInstructionPlain?: string;
+  proposedRenderedPlain: string;
+  baselineRenderedPlain: string;
+};
+
 /** Deterministic bullets for the “What changed” area on a clause card. */
-export function deriveClauseWhatChangedBullets(row: AgreementFieldChange): string[] {
+export function deriveClauseWhatChangedBullets(
+  row: AgreementFieldChange,
+  ctx?: RecipientClauseContext,
+): string[] {
   const bullets: string[] = [];
   const b = (row.before || "").trim();
   const a = (row.after || "").trim();
   const blo = b.toLowerCase();
+  const proposedPlain = ctx?.proposedRenderedPlain || "";
+  const baselinePlain = ctx?.baselineRenderedPlain || "";
+  const instr = ctx?.recipientInstructionPlain || "";
 
   if (row.field === "payment_terms") {
     const netLine = extractNetTimingLine(a, b);
     if (netLine) bullets.push(netLine);
-    const pauseInPayment = extractPauseWorkBullet(a);
-    if (pauseInPayment && !extractPauseWorkBullet(b)) bullets.push(pauseInPayment);
+    const pauseLine = extractPauseWorkBullet(a) || extractPauseWorkBullet(proposedPlain);
+    const hadPause = pauseWorkInBaseline(b, baselinePlain);
+    if (pauseLine && !hadPause) {
+      bullets.push(pauseLine.endsWith(".") ? pauseLine : `${pauseLine}.`);
+    }
+    if (instructionRequestsPauseWork(instr) && !pauseWorkInProposed(a, proposedPlain)) {
+      bullets.push("Pause-work edit was requested but not found in the proposed draft.");
+    }
     if (bullets.length === 0) bullets.push("Payment terms updated.");
   } else if (row.field === "purpose") {
     const pauseB = extractPauseWorkBullet(a);
@@ -353,12 +410,18 @@ function friendlyFieldSummaryLine(field: string, row: AgreementFieldChange): str
 }
 
 /** Material summary lines for the preview header (one row can yield two lines, e.g. Net 30 + pause in payment_terms). */
-function materialSummaryLinesForRow(row: AgreementFieldChange): string[] {
+function materialSummaryLinesForRow(row: AgreementFieldChange, ctx?: RecipientClauseContext): string[] {
   if (row.field === "payment_terms") {
     const out: string[] = [];
-    const net = extractNetTimingLine((row.after || "").trim(), (row.before || "").trim());
+    const a = (row.after || "").trim();
+    const b = (row.before || "").trim();
+    const proposedPlain = ctx?.proposedRenderedPlain || "";
+    const baselinePlain = ctx?.baselineRenderedPlain || "";
+    const net = extractNetTimingLine(a, b);
     if (net) out.push(net);
-    if (extractPauseWorkBullet(row.after || "") && !extractPauseWorkBullet(row.before || "")) {
+    const pauseLine = extractPauseWorkBullet(a) || extractPauseWorkBullet(proposedPlain);
+    const hadPause = pauseWorkInBaseline(b, baselinePlain);
+    if (pauseLine && !hadPause) {
       out.push("Pause-work right added for late payment.");
     }
     if (out.length === 0) out.push("Payment terms updated");
@@ -372,12 +435,22 @@ const GENERIC_CLAUSE_BULLETS = new Set([
   "Purpose / scope text updated.",
 ]);
 
-function countChangeUnitsForRow(row: AgreementFieldChange): number {
+const INSTRUCTION_GAP_BULLET_PREFIX = "Pause-work edit was requested but not found";
+
+function isCountableClauseBullet(b: string): boolean {
+  if (GENERIC_CLAUSE_BULLETS.has(b)) return false;
+  if (b.startsWith(INSTRUCTION_GAP_BULLET_PREFIX)) return false;
+  return true;
+}
+
+function countChangeUnitsForRow(row: AgreementFieldChange, ctx?: RecipientClauseContext): number {
   if (!row.changed) return 0;
-  const bullets = deriveClauseWhatChangedBullets(row);
-  const meaningful = bullets.filter((b) => !GENERIC_CLAUSE_BULLETS.has(b));
+  const bullets = deriveClauseWhatChangedBullets(row, ctx);
+  const meaningful = bullets.filter(isCountableClauseBullet);
   return meaningful.length > 0 ? meaningful.length : 1;
 }
+
+export type RecipientClauseTrackMode = "lines" | "pair" | "inline";
 
 export type RecipientClauseCard = {
   id: string;
@@ -397,32 +470,102 @@ export type RecipientClauseCard = {
   currentSnippet: string;
   /** Compact suggested value lines for the card body. */
   suggestedSnippetLines: string[];
+  /** Primary track-changes presentation for this card. */
+  trackMode: RecipientClauseTrackMode;
+  /** “Added: …” rows (compact, no full field). */
+  trackAddedDisplayLines: string[];
+  /** Red/green snippet pair when there is a meaningful deletion + insertion. */
+  trackSnippetPair: { removed: string; added: string } | null;
   reason: string;
 };
 
 /** When max(current, proposed) exceeds this, primary UI uses inline redline + disclosure for full text. */
 export const CLAUSE_CARD_DISCLOSURE_CHAR_THRESHOLD = 220;
 
+const EMPTY_CLAUSE_CONTEXT: RecipientClauseContext = {
+  proposedRenderedPlain: "",
+  baselineRenderedPlain: "",
+};
+
+function buildTrackUiForRow(
+  row: AgreementFieldChange,
+  ctx: RecipientClauseContext,
+  rl: RedlineResult | null,
+): Pick<RecipientClauseCard, "trackMode" | "trackAddedDisplayLines" | "trackSnippetPair"> {
+  const trackAddedDisplayLines: string[] = [];
+  let trackSnippetPair: { removed: string; added: string } | null = null;
+  let trackMode: RecipientClauseTrackMode = "inline";
+
+  if (row.field === "payment_terms") {
+    const a = (row.after || "").trim();
+    const b = (row.before || "").trim();
+    const netA = a.match(/\bnet\s*(\d+)\b/i);
+    const netB = b.match(/\bnet\s*(\d+)\b/i);
+    if (netA && (!netB || netA[1] !== netB[1])) {
+      trackAddedDisplayLines.push(`Added: Invoices are due Net ${netA[1]}.`);
+    }
+    const pauseLine = extractPauseWorkBullet(a) || extractPauseWorkBullet(ctx.proposedRenderedPlain);
+    const hadPause = pauseWorkInBaseline(b, ctx.baselineRenderedPlain);
+    if (pauseLine && !hadPause) {
+      const p = pauseLine.endsWith(".") ? pauseLine.slice(0, -1) : pauseLine;
+      trackAddedDisplayLines.push(`Added: ${p}.`);
+    }
+    if (trackAddedDisplayLines.length > 0) {
+      return { trackMode: "lines", trackAddedDisplayLines, trackSnippetPair: null };
+    }
+  }
+
+  if (rl && redlineHasSignificantRemovals(rl)) {
+    const del = rl.segments.find((s) => s.type === "delete" && s.text.replace(/\s+/g, " ").trim().length >= 2);
+    const ins = rl.segments.find((s) => s.type === "insert" && s.text.replace(/\s+/g, " ").trim().length >= 2);
+    if (del && ins) {
+      trackSnippetPair = {
+        removed: trimCap(del.text.replace(/\s+/g, " ").trim(), 120),
+        added: trimCap(ins.text.replace(/\s+/g, " ").trim(), 120),
+      };
+      return { trackMode: "pair", trackAddedDisplayLines: [], trackSnippetPair };
+    }
+  }
+
+  if (rl?.hasChanges) {
+    for (const t of insertTextsForAddedPills(rl, 4, 120)) {
+      trackAddedDisplayLines.push(`Added: ${t}`);
+    }
+    if (trackAddedDisplayLines.length > 0) {
+      return { trackMode: "lines", trackAddedDisplayLines, trackSnippetPair: null };
+    }
+  }
+
+  return { trackMode, trackAddedDisplayLines, trackSnippetPair };
+}
+
 export function buildRecipientClauseCards(
   snapshotCompare: AgreementCompareResult,
   hasMaterialTextDiff: boolean,
+  context?: RecipientClauseContext,
 ): RecipientClauseCard[] {
+  const ctx: RecipientClauseContext = context ?? EMPTY_CLAUSE_CONTEXT;
   const rows = sortChangedFields(snapshotCompare.changedFields);
   const cards: RecipientClauseCard[] = rows.map((row) => {
     const currentText = row.before?.trim() ? row.before : "—";
     const proposedText = row.after?.trim() ? row.after : "—";
     const title = agreementFieldLabel(row.field);
-    const { currentSnippet, suggestedSnippetLines } = buildClauseSnippetsForRow(row);
+    const { currentSnippet, suggestedSnippetLines } = buildClauseSnippetsForRow(row, ctx);
+    const fieldRedline = buildFieldLevelRedlineCapped(row.before || "", row.after || "");
+    const track = buildTrackUiForRow(row, ctx, fieldRedline);
     return {
       id: row.field,
       cardTitle: title,
       sectionLabel: title,
-      whatChangedBullets: deriveClauseWhatChangedBullets(row),
-      fieldRedline: buildFieldLevelRedlineCapped(row.before || "", row.after || ""),
+      whatChangedBullets: deriveClauseWhatChangedBullets(row, ctx),
+      fieldRedline,
       currentText,
       proposedText,
       currentSnippet,
       suggestedSnippetLines,
+      trackMode: track.trackMode,
+      trackAddedDisplayLines: track.trackAddedDisplayLines,
+      trackSnippetPair: track.trackSnippetPair,
       reason: clauseChangeReason(row),
     };
   });
@@ -437,6 +580,9 @@ export function buildRecipientClauseCards(
       proposedText: "—",
       currentSnippet: "See disclosure or Side-by-side for full rendered text.",
       suggestedSnippetLines: ["—"],
+      trackMode: "inline",
+      trackAddedDisplayLines: [],
+      trackSnippetPair: null,
       reason: "Structured fields match, but the formatted document text differs.",
     });
   }
@@ -444,8 +590,9 @@ export function buildRecipientClauseCards(
 }
 
 export function countSuggestedChanges(assessment: RecipientPreviewDiffAssessment): number {
+  const ctx = assessment.clauseContext;
   const rows = sortChangedFields(assessment.snapshotCompare.changedFields).filter((r) => r.changed);
-  let n = rows.reduce((acc, r) => acc + countChangeUnitsForRow(r), 0);
+  let n = rows.reduce((acc, r) => acc + countChangeUnitsForRow(r, ctx), 0);
   if (n === 0 && assessment.hasMaterialTextDiff) n = 1;
   return n;
 }
@@ -456,17 +603,26 @@ export function getRecipientPreviewSummaryBullets(assessment: RecipientPreviewDi
   const lines: string[] = [];
   lines.push(`${n} suggested change${n === 1 ? "" : "s"}`);
   const rows = sortChangedFields(assessment.snapshotCompare.changedFields);
+  const ctx = assessment.clauseContext;
   for (const row of rows) {
-    for (const line of materialSummaryLinesForRow(row)) {
+    for (const line of materialSummaryLinesForRow(row, ctx)) {
       lines.push(line);
     }
   }
   if (rows.length === 0 && assessment.hasMaterialTextDiff) {
     lines.push("Rendered document wording updated");
   }
+  if (assessment.instructionCaptureWarning) {
+    lines.push("Some requested edits may not be reflected. Review before sending.");
+  }
   lines.push("Nothing changes unless the owner accepts.");
   return lines;
 }
+
+export type AssessRecipientPreviewDiffOptions = {
+  /** Plain reviewer instruction (no posture preamble) — used for capture checks vs proposed output. */
+  recipientInstructionPlain?: string;
+};
 
 export type RecipientPreviewDiffAssessment = {
   redline: RedlineResult;
@@ -479,6 +635,9 @@ export type RecipientPreviewDiffAssessment = {
   isCompleteNoOp: boolean;
   changeCharCount: number;
   canSubmit: boolean;
+  clauseContext: RecipientClauseContext;
+  /** Instruction asked for pause-work but proposed draft + rendered text do not contain it. */
+  instructionCaptureWarning: boolean;
 };
 
 export function assessRecipientPreviewDiff(
@@ -486,6 +645,7 @@ export function assessRecipientPreviewDiff(
   proposedDraft: AgreementDraft,
   baselineHtml: string,
   proposedHtml: string,
+  options?: AssessRecipientPreviewDiffOptions,
 ): RecipientPreviewDiffAssessment {
   const redline = buildRecipientPreviewRedline(baselineHtml, proposedHtml);
   const snapshotCompare = compareAgreementSnapshots(
@@ -498,6 +658,14 @@ export function assessRecipientPreviewDiff(
   const hasAnyMaterialChange = hasMaterialTextDiff || hasSnapshotDiff;
   const isCompleteNoOp = !hasAnyMaterialChange;
   const canSubmit = hasAnyMaterialChange;
+  const baselineRenderedPlain = normalizeRecipientPreviewPlain(baselineHtml);
+  const proposedRenderedPlain = normalizeRecipientPreviewPlain(proposedHtml);
+  const recipientInstructionPlain = (options?.recipientInstructionPlain ?? "").trim();
+  const wantedPause = instructionRequestsPauseWork(recipientInstructionPlain);
+  const hasPauseInProposed =
+    !!extractPauseWorkBullet(proposedDraft.payment_terms || "") ||
+    !!extractPauseWorkBullet(proposedRenderedPlain);
+  const instructionCaptureWarning = wantedPause && !hasPauseInProposed;
   return {
     redline,
     snapshotCompare,
@@ -507,6 +675,12 @@ export function assessRecipientPreviewDiff(
     isCompleteNoOp,
     changeCharCount: countRedlineChangeChars(redline),
     canSubmit,
+    clauseContext: {
+      recipientInstructionPlain,
+      proposedRenderedPlain,
+      baselineRenderedPlain,
+    },
+    instructionCaptureWarning,
   };
 }
 

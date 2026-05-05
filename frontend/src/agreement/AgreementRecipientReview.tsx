@@ -23,8 +23,9 @@ import {
   recipientPreviewNoOpMessage,
   recipientSendConfirmationLine,
 } from "./recipientPreviewDiffModel";
+import { RecipientAdvancedRedlinePanel } from "./RecipientAdvancedRedlinePanel";
 import { RecipientChangedClauseCard } from "./RecipientChangedClauseCard";
-import { RecipientRedlineInline } from "./RecipientRedlineInline";
+import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
 import {
@@ -86,7 +87,6 @@ import {
 } from "./portableReviewCopy";
 import {
   BRING_BACK_SUGGESTED_EDITS_TITLE,
-  MATERIAL_CHANGE_SUMMARY_LABEL,
   MODE_PASTE_REVISED_DRAFT,
   MODE_SUGGEST_PLAIN_ENGLISH,
   MODE_UPLOAD_FILE,
@@ -222,6 +222,16 @@ type RecipientPreview = {
 /** Stable copy for tests and recipient Pro redline submit success. */
 export const PRO_REDLINE_REVIEWER_SUGGEST_SUCCESS_COPY =
   "Suggestion sent. The agreement owner chooses what to accept.";
+
+function recipientVoiceErrorMessage(raw: string): string {
+  const t = (raw || "").trim().toLowerCase();
+  if (!(raw || "").trim()) return "Voice input error — try again or type.";
+  if (t.includes("not-allowed") || t.includes("permission")) {
+    return "Microphone wasn't available — you can keep typing.";
+  }
+  const u = (raw || "").trim();
+  return u.length > 160 ? `${u.slice(0, 157)}…` : u;
+}
 
 /**
  * Recipient-facing review: read-first hub, preview (persist=false) + pending proposal on send (owner applies).
@@ -566,6 +576,7 @@ export function AgreementRecipientReview({
       recipientPreview.proposedDraft,
       recipientPreview.baselineHtml,
       recipientPreview.proposedHtml,
+      { recipientInstructionPlain: recipientPreview.revisionText },
     );
   }, [recipientPreview]);
 
@@ -585,7 +596,11 @@ export function AgreementRecipientReview({
     const key = `${agreementId}:${recipientPreview.revisionText ?? ""}:${recipientPreview.proposedDraft.updated_at ?? ""}`;
     if (key === recipientClauseDiagKeyRef.current) return;
     recipientClauseDiagKeyRef.current = key;
-    const cards = buildRecipientClauseCards(previewDiff.snapshotCompare, previewDiff.hasMaterialTextDiff);
+    const cards = buildRecipientClauseCards(
+      previewDiff.snapshotCompare,
+      previewDiff.hasMaterialTextDiff,
+      previewDiff.clauseContext,
+    );
     for (const c of cards) {
       // eslint-disable-next-line no-console
       console.info("[recipient-changed-clause-card]", {
@@ -770,7 +785,9 @@ export function AgreementRecipientReview({
       const nextDraft = payload?.draft as AgreementDraft;
       const html = String(payload?.rendered_html || "");
       if (!nextDraft) throw new Error("We couldn't load the proposed change. Please try again.");
-      const integrity = assessRecipientPreviewDiff(baselineDraft, nextDraft, baselineHtml, html);
+      const integrity = assessRecipientPreviewDiff(baselineDraft, nextDraft, baselineHtml, html, {
+        recipientInstructionPlain: text.trim(),
+      });
       const diag =
         import.meta.env.DEV ||
         (typeof window !== "undefined" &&
@@ -965,7 +982,11 @@ export function AgreementRecipientReview({
   }
 
   const clauseCards = previewDiff
-    ? buildRecipientClauseCards(previewDiff.snapshotCompare, previewDiff.hasMaterialTextDiff)
+    ? buildRecipientClauseCards(
+        previewDiff.snapshotCompare,
+        previewDiff.hasMaterialTextDiff,
+        previewDiff.clauseContext,
+      )
     : [];
 
   const comparePanel =
@@ -973,8 +994,11 @@ export function AgreementRecipientReview({
       <div className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-3 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              {MATERIAL_CHANGE_SUMMARY_LABEL}
+            <div
+              className="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
+              data-testid="recipient-preview-summary-heading"
+            >
+              Summary
             </div>
             <ul className="mt-1 list-none space-y-0.5 p-0 text-[10px] leading-snug text-slate-200/95">
               {getRecipientPreviewSummaryBullets(previewDiff).map((line, i) => (
@@ -1037,7 +1061,7 @@ export function AgreementRecipientReview({
             onClick={() => setCompareViewMode("fullRedline")}
             data-testid="recipient-tab-full-redline"
           >
-            Full document redline (advanced)
+            Advanced redline
           </button>
         </div>
 
@@ -1054,7 +1078,7 @@ export function AgreementRecipientReview({
                   className="text-sky-300 underline decoration-sky-800/50 hover:text-sky-200"
                   onClick={() => setCompareViewMode("fullRedline")}
                 >
-                  Full document redline
+                  Advanced redline
                 </button>{" "}
                 only if you need the raw compare.
               </p>
@@ -1098,16 +1122,8 @@ export function AgreementRecipientReview({
         ) : null}
 
         {compareViewMode === "fullRedline" ? (
-          <div className="mt-4 space-y-2">
-            <p className="rounded-md border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-[10px] leading-snug text-amber-100/95">
-              Advanced full-document comparison — may be noisy. For most reviews, use{" "}
-              <span className="font-medium text-amber-50">Changed clauses</span>.
-            </p>
-            <RecipientRedlineInline redline={previewDiff.redline} paragraphBreaks />
-            <p className="text-[10px] leading-snug text-slate-500">
-              <span className="text-emerald-300/90">Green</span> = additions,{" "}
-              <span className="text-rose-300/90">red strikethrough</span> = removals.
-            </p>
+          <div className="mt-3">
+            <RecipientAdvancedRedlinePanel redline={previewDiff.redline} />
           </div>
         ) : null}
 
@@ -2299,36 +2315,32 @@ export function AgreementRecipientReview({
               ) : null}
 
               {universalIntakeMode === "plain" ? (
-                <>
-                  <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-revision-input">
-                    {PLAIN_ENGLISH_FIELD_LABEL}
-                  </label>
-                  <p className="text-[10px] leading-snug text-slate-500">
-                    Describe the change in your own words. The owner can review and accept in their workspace.
-                  </p>
-                </>
+                <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-revision-input">
+                  {PLAIN_ENGLISH_FIELD_LABEL}
+                </label>
               ) : (
-                <>
-                  <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-revision-input">
-                    {PASTE_OPTIONAL_NOTE_LABEL}
-                  </label>
-                  <p className="text-[10px] leading-snug text-slate-500">
-                    Add a short cover note; your pasted text above is what LawDog will compare in preview.
-                  </p>
-                </>
+                <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-revision-input">
+                  {PASTE_OPTIONAL_NOTE_LABEL}
+                </label>
               )}
-              <textarea
+              <VoiceAugmentedTextArea
                 id="recipient-revision-input"
-                className="min-h-[5.5rem] w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                data-testid="recipient-revision-voice-field"
+                className="min-h-[5.5rem] w-full resize-y rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
                 placeholder={
-                  universalIntakeMode === "plain" ? "Be specific about what should change…" : "E.g. “Focus the fee clause first.” (optional)"
+                  universalIntakeMode === "plain"
+                    ? "Be specific about what should change…"
+                    : "E.g. “Focus the fee clause first.” (optional)"
                 }
                 value={instruction}
-                disabled={suggestControlsDisabled}
-                onChange={(e) => {
-                  setInstruction(e.target.value);
+                onValueChange={(v) => {
+                  setInstruction(v);
                   setRecipientPreview(null);
                 }}
+                disabled={suggestControlsDisabled}
+                surface="dark"
+                voiceSubtleIdle={false}
+                onVoiceError={(m) => setError(recipientVoiceErrorMessage(m))}
               />
               <div className="flex flex-wrap items-center gap-2">
                 <button

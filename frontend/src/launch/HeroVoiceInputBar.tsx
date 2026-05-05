@@ -53,7 +53,24 @@ export function HeroVoiceInputBar(props: {
     idleAttract = false,
   } = props;
   const light = surface === "light";
-  if (!enabled || !isSupported) return null;
+  if (!enabled) return null;
+  if (!isSupported) {
+    return (
+      <div className="pointer-events-auto absolute bottom-3 right-3 flex flex-col items-end gap-2 sm:bottom-4 sm:right-4">
+        <button
+          type="button"
+          disabled
+          aria-label="Dictation not supported in this browser"
+          title="Dictation not supported in this browser — you can keep typing."
+          className={`flex h-11 w-11 shrink-0 cursor-not-allowed items-center justify-center rounded-xl border opacity-45 grayscale sm:h-12 sm:w-12 ${
+            light ? "border-slate-200 bg-slate-50 text-slate-400" : "border-slate-700 bg-slate-900/80 text-slate-500"
+          }`}
+        >
+          <MicIcon className="h-5 w-5" />
+        </button>
+      </div>
+    );
+  }
 
   const recording = phase === "recording";
   const processing = phase === "processing";

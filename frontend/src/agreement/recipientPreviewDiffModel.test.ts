@@ -6,6 +6,7 @@ import {
   buildRecipientClauseCards,
   extractPaymentTermsCurrentSnippet,
   getRecipientPreviewSummaryBullets,
+  instructionRequestsPauseWork,
   isRecipientRedlineNoisyRaw,
   numberedSectionChangeLines,
   recipientPreviewNoOpMessage,
@@ -101,7 +102,7 @@ describe("recipientPreviewDiffModel", () => {
     expect(a.hasSnapshotDiff).toBe(true);
     expect(a.isCompleteNoOp).toBe(false);
     expect(a.canSubmit).toBe(true);
-    const cards = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff);
+    const cards = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff, a.clauseContext);
     const pay = cards.find((c) => c.id === "payment_terms");
     expect(cards.filter((c) => c.id === "purpose")).toEqual([]);
     expect(pay?.proposedText).toMatch(/Net 30/i);
@@ -115,6 +116,49 @@ describe("recipientPreviewDiffModel", () => {
     expect(bullets[0]).toMatch(/^2 suggested changes$/);
     expect(bullets.some((b) => /Pause-work right added for late payment/i.test(b))).toBe(true);
     expect(recipientSendConfirmationLine(a)).toMatch(/2 suggested changes/);
+  });
+
+  it("detects pause-work from rendered HTML when payment field text is short", () => {
+    const base = baseDraft({ payment_terms: "Net 15." });
+    const proposed = baseDraft({ payment_terms: "Net 30." });
+    const propHtml =
+      "<p>Net 30 applies. The developer may pause work if payment is more than 15 days late.</p>";
+    const a = assessRecipientPreviewDiff(base, proposed, "<p>Old</p>", propHtml, {
+      recipientInstructionPlain: "Net 30 and pause work after 15 days late",
+    });
+    expect(a.instructionCaptureWarning).toBe(false);
+    const pay = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff, a.clauseContext).find(
+      (c) => c.id === "payment_terms",
+    );
+    expect(pay?.whatChangedBullets.some((b) => /Payment timing changed to Net 30/i.test(b))).toBe(true);
+    expect(pay?.whatChangedBullets.some((b) => /pause work.*15 days late/i.test(b))).toBe(true);
+    expect(pay?.trackMode).toBe("lines");
+    expect(pay?.trackAddedDisplayLines.some((l) => /Added:.*Net 30/i.test(l))).toBe(true);
+    expect(pay?.trackAddedDisplayLines.some((l) => /Added:.*pause work/i.test(l))).toBe(true);
+  });
+
+  it("warns when instruction requests pause-work but proposed omits it", () => {
+    const base = baseDraft({ payment_terms: "Net 15." });
+    const proposed = baseDraft({ payment_terms: "Net 30." });
+    const a = assessRecipientPreviewDiff(base, proposed, "<p>x</p>", "<p>x</p>", {
+      recipientInstructionPlain: "Net 30 and pause work after 15 days late",
+    });
+    expect(a.instructionCaptureWarning).toBe(true);
+    expect(instructionRequestsPauseWork("Net 30 and pause work after 15 days late")).toBe(true);
+    const sum = getRecipientPreviewSummaryBullets(a);
+    expect(sum.some((b) => /Some requested edits may not be reflected/i.test(b))).toBe(true);
+    expect(sum[0]).toMatch(/^1 suggested change$/);
+    const pay = buildRecipientClauseCards(a.snapshotCompare, a.hasMaterialTextDiff, a.clauseContext).find(
+      (c) => c.id === "payment_terms",
+    );
+    expect(pay?.whatChangedBullets.some((b) => /not found in the proposed draft/i.test(b))).toBe(true);
+  });
+
+  it("counts one semantic unit for Net-only payment change", () => {
+    const base = baseDraft({ payment_terms: "Net 15." });
+    const proposed = baseDraft({ payment_terms: "Net 30." });
+    const a = assessRecipientPreviewDiff(base, proposed, "<p>x</p>", "<p>x</p>");
+    expect(getRecipientPreviewSummaryBullets(a)[0]).toMatch(/^1 suggested change$/);
   });
 
   it("extracts concise payment snippets for Net 30 and pause-work", () => {

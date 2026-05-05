@@ -371,7 +371,7 @@ test.describe("recipient + link flow QA", () => {
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
     await page.getByRole("button", { name: "Preview changes" }).click();
     await expect(page.getByText("Send suggested edits").first()).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("Material change summary", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("recipient-preview-summary-heading")).toBeVisible();
     await page.getByRole("button", { name: "Send suggested edits" }).first().click();
     await expect(page.getByText(/Suggested edits sent|waiting on the owner|queue/i).first()).toBeVisible({
       timeout: 15_000,
@@ -434,14 +434,14 @@ test.describe("recipient + link flow QA", () => {
     const state = { drafts: new Map<string, DraftRec>([[id, d]]) };
     await installIsolatedAgreementsApi(page, state);
     await page.goto(`/app/agreements/${id}`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Material change summary", { exact: true })).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByTestId("recipient-preview-summary-heading")).toBeVisible({ timeout: 45_000 });
     await expect(
       page.getByText("Suggested edits", { exact: true }).or(page.getByText(/pending your review/)),
     ).toBeVisible();
     const applyBtn = page.getByRole("button", { name: "Apply changes" });
     await expect(applyBtn).toBeVisible();
     await applyBtn.click();
-    await expect(page.getByText("Material change summary", { exact: true })).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId("recipient-preview-summary-heading")).toHaveCount(0, { timeout: 20_000 });
   });
 
   test("4) Simple send: signing path copy stresses links, not “already emailed”", async ({ page }) => {
