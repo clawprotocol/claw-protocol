@@ -469,6 +469,9 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByTestId("recipient-tab-redline")).toBeVisible();
     const wholeDoc = page.getByTestId("recipient-whole-doc-redline");
     await expect(wholeDoc).toBeVisible();
+    const legalDoc = page.getByTestId("recipient-legal-redline-document");
+    await expect(legalDoc).toBeVisible();
+    await expect(legalDoc).toHaveText(/\S{8,}/);
     await expect(wholeDoc.locator('[data-redline="insert"]').first()).toBeVisible({ timeout: 12_000 });
     await expect(wholeDoc).toContainText(/Net\s*30/i);
 

@@ -23,7 +23,7 @@ import {
   recipientSendConfirmationLine,
 } from "./recipientPreviewDiffModel";
 import { RecipientChangedClauseCard } from "./RecipientChangedClauseCard";
-import { RecipientRedlineInline } from "./RecipientRedlineInline";
+import { RecipientLegalRedlineDocument } from "./RecipientLegalRedlineDocument";
 import { RecipientTrackedChangesToggle } from "./RecipientTrackedChangesToggle";
 import { buildWholeDocumentRedlineViewModel } from "./wholeDocumentRedlineModel";
 import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
@@ -1099,28 +1099,27 @@ export function AgreementRecipientReview({
 
         {compareViewMode === "redline" && wholeDocumentRedlineVm ? (
           <div className="mt-4" data-testid="recipient-whole-doc-redline">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              Agreement text (tracked)
-            </div>
+            <p className="mb-3 text-sm font-medium text-slate-200">Agreement text with tracked changes</p>
             {wholeDocumentRedlineVm.fallbackReason ? (
-              <p className="mt-1 text-[10px] leading-snug text-amber-100/90">{wholeDocumentRedlineVm.fallbackReason}</p>
+              <p className="mb-2 text-sm leading-snug text-amber-100/95">{wholeDocumentRedlineVm.fallbackReason}</p>
             ) : null}
-            {showTrackedChanges ? (
-              <div className="mt-2 max-h-[min(70vh,40rem)] overflow-auto rounded-md border border-slate-600/80 bg-white px-3 py-3 text-sm leading-relaxed text-slate-900 shadow-sm sm:max-h-[min(75vh,48rem)]">
-                <RecipientRedlineInline
-                  segments={wholeDocumentRedlineVm.segments}
-                  paragraphBreaks
-                  contrast="high"
-                />
-              </div>
-            ) : (
-              <div
-                className="prose prose-sm mt-2 max-h-[min(70vh,40rem)] max-w-none overflow-auto rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900 sm:max-h-[min(75vh,48rem)]"
-                dangerouslySetInnerHTML={{
-                  __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
-                }}
-              />
-            )}
+            <div className="min-h-[60vh] rounded-lg border border-slate-700/45 bg-slate-200/10 p-3 sm:p-5">
+              {showTrackedChanges ? (
+                <RecipientLegalRedlineDocument segments={wholeDocumentRedlineVm.segments} variant="page" />
+              ) : (
+                <article
+                  className="mx-auto min-h-[60vh] w-full max-w-[42rem] rounded-lg border border-slate-300/90 bg-white px-6 py-8 shadow-md sm:px-10 sm:py-10"
+                  data-testid="recipient-clean-proposed-document"
+                >
+                  <div
+                    className="prose prose-slate prose-p:mb-3 prose-p:leading-[1.65] max-w-none text-[15px] text-slate-900"
+                    dangerouslySetInnerHTML={{
+                      __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+                    }}
+                  />
+                </article>
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -1150,37 +1149,39 @@ export function AgreementRecipientReview({
 
         {compareViewMode === "side" && wholeDocumentRedlineVm ? (
           <div className="mt-4 space-y-2" data-testid="recipient-side-by-side">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div className="rounded-md border border-slate-800/90 bg-white p-4 text-slate-900">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Current</div>
-                <div
-                  className="prose prose-sm mt-2 max-h-[min(65vh,36rem)] max-w-none overflow-auto text-slate-900 md:max-h-[min(70vh,42rem)]"
-                  dangerouslySetInnerHTML={{
-                    __html: scrubAgreementHtml(recipientPreview.baselineHtml || "") || "<p>No preview.</p>",
-                  }}
-                />
-              </div>
-              <div
-                className="rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900"
-                data-testid="recipient-side-by-side-proposed-column"
-              >
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Proposed</div>
-                {showTrackedChanges ? (
-                  <div className="mt-2 max-h-[min(65vh,36rem)] overflow-auto text-sm leading-relaxed text-slate-900 md:max-h-[min(70vh,42rem)]">
-                    <RecipientRedlineInline
-                      segments={wholeDocumentRedlineVm.segments}
-                      paragraphBreaks
-                      contrast="high"
-                    />
-                  </div>
-                ) : (
+            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
+              <div className="flex min-h-[55vh] flex-col rounded-lg border border-slate-800/90 bg-white shadow-sm">
+                <div className="shrink-0 border-b border-slate-100 px-4 py-2 text-xs font-semibold text-slate-700">
+                  Current
+                </div>
+                <div className="flex-1 px-4 py-5">
                   <div
-                    className="prose prose-sm mt-2 max-h-[min(65vh,36rem)] max-w-none overflow-auto text-slate-900 md:max-h-[min(70vh,42rem)]"
+                    className="prose prose-sm prose-slate max-w-none text-[15px] leading-[1.65] text-slate-900"
                     dangerouslySetInnerHTML={{
-                      __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+                      __html: scrubAgreementHtml(recipientPreview.baselineHtml || "") || "<p>No preview.</p>",
                     }}
                   />
-                )}
+                </div>
+              </div>
+              <div
+                className="flex min-h-[55vh] flex-col rounded-lg border border-emerald-900/25 bg-white shadow-sm"
+                data-testid="recipient-side-by-side-proposed-column"
+              >
+                <div className="shrink-0 border-b border-slate-100 px-4 py-2 text-xs font-semibold text-slate-700">
+                  Proposed
+                </div>
+                <div className="flex-1 px-3 py-4 sm:px-4 sm:py-5">
+                  {showTrackedChanges ? (
+                    <RecipientLegalRedlineDocument segments={wholeDocumentRedlineVm.segments} variant="column" />
+                  ) : (
+                    <div
+                      className="prose prose-sm prose-slate max-w-none text-[15px] leading-[1.65] text-slate-900"
+                      dangerouslySetInnerHTML={{
+                        __html: scrubAgreementHtml(recipientPreview.proposedHtml || "") || "<p>No preview.</p>",
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             </div>
           </div>

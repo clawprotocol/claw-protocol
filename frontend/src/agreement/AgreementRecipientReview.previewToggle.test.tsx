@@ -100,7 +100,9 @@ describe("AgreementRecipientReview tracked-changes toggle", () => {
 
     expect(screen.getByTestId("recipient-tab-redline")).toBeTruthy();
     const wholeDocPanel = screen.getByTestId("recipient-whole-doc-redline");
+    expect(screen.getByTestId("recipient-legal-redline-document")).toBeTruthy();
     expect(wholeDocPanel.querySelector('[data-redline="insert"]')).toBeTruthy();
+    expect(screen.getByTestId("recipient-legal-redline-document").textContent).toMatch(/Net|thirty/i);
 
     await userEvent.click(screen.getByTestId("recipient-tab-changed-clauses"));
     const clauseCard = await screen.findByTestId("recipient-clause-card-payment_terms");

@@ -36,6 +36,7 @@ function segmentClass(
 
 /**
  * Presentational tracked changes: renders supplied segments only (no diffing).
+ * Whole-document reader layout lives in `RecipientLegalRedlineDocument`.
  */
 export function RecipientRedlineInline({
   segments: segmentsProp,
