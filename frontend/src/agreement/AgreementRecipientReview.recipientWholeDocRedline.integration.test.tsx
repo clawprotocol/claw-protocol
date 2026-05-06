@@ -89,7 +89,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");
@@ -196,7 +196,7 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
     fireEvent.change(instruction, {
       target: { value: "Net 30 and pause work after 15 days late" },
@@ -329,7 +329,7 @@ describe("AgreementRecipientReview payment inline placement failure", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
     fireEvent.change(instruction, {
       target: { value: "Contract update request only." },
@@ -423,7 +423,7 @@ describe("AgreementRecipientReview narrow payment redline QA (party/signature/fo
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
     fireEvent.change(instruction, {
       target: { value: "Net 30 and pause work after 15 days late" },

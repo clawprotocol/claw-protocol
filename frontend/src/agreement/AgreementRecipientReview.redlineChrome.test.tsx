@@ -60,6 +60,15 @@ describe("AgreementRecipientReview redline chrome", () => {
               : String(input);
       const method = (init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
 
+      if (method === "POST" && url.includes("recipient-preview-export-pdf")) {
+        const buf = new Uint8Array(120);
+        buf[0] = 0x25;
+        buf[1] = 0x50;
+        buf[2] = 0x44;
+        buf[3] = 0x46;
+        return new Response(buf, { status: 200, headers: { "Content-Type": "application/pdf" } });
+      }
+
       if (method === "POST" && url.includes("/revise")) {
         return jsonResponse({
           draft: revisedDraft,
@@ -89,7 +98,7 @@ describe("AgreementRecipientReview redline chrome", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment terms to Net 30");
@@ -105,5 +114,39 @@ describe("AgreementRecipientReview redline chrome", () => {
     expect(legalRoot.textContent).not.toMatch(/&amp;/);
     expect(legalRoot.querySelector('[data-redline="insert"]')).toBeTruthy();
     expect(legalRoot.querySelectorAll('[data-testid="recipient-redline-changed-block"]').length).toBeGreaterThan(0);
+
+    const exportDetails = screen.getByTestId("recipient-preview-versions-export");
+    expect(exportDetails.textContent).not.toMatch(/\bCLAW\b/i);
+    await userEvent.click(screen.getByText("Download / copy versions"));
+    expect(screen.getByTestId("recipient-preview-versions-export-title").textContent).toContain("Use outside LawDog");
+    expect(screen.getByTestId("recipient-copy-original-draft")).toBeTruthy();
+    expect(screen.getByTestId("recipient-copy-proposed-draft")).toBeTruthy();
+    expect(screen.getByTestId("recipient-copy-redline-summary")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download current PDF/i })).toBeTruthy();
+    expect((screen.getByTestId("recipient-download-original-pdf") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("recipient-download-proposed-pdf") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("recipient-download-redline-pdf") as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(screen.getByTestId("recipient-download-original-pdf"));
+    await waitFor(() => {
+      const calls = vi.mocked(globalThis.fetch).mock.calls;
+      const pdfCall = calls.find((c) => String(c[0]).includes("recipient-preview-export-pdf"));
+      expect(pdfCall).toBeTruthy();
+      const init = pdfCall![1] as RequestInit;
+      expect(init.method?.toUpperCase()).toBe("POST");
+      expect(String(init.body)).toContain('"export_kind":"original"');
+      expect(String(init.body)).toContain("<p>Services Agreement</p>");
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const prev = globalThis.navigator.clipboard;
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    await userEvent.click(screen.getByTestId("recipient-copy-original-draft"));
+    expect(writeText).toHaveBeenCalled();
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: prev,
+    });
   });
 });

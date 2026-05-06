@@ -12,12 +12,12 @@ export const BANNED_HOSTILE_REVIEW_TOKENS = [
   "fight",
 ] as const;
 
-/** Section heading in recipient “suggest changes” flow (replaces legacy “Bring back suggested edits”). */
-export const BRING_BACK_SUGGESTED_EDITS_TITLE = "Suggest changes";
+/** Section heading in recipient request-changes flow (replaces legacy “Bring back suggested edits”). */
+export const BRING_BACK_SUGGESTED_EDITS_TITLE = "Request changes";
 export const UNIVERSAL_REVIEW_INTRO =
   "Write comments, paste revised wording, or upload an edited draft. LawDog will help organize the differences.";
 
-export const MODE_SUGGEST_PLAIN_ENGLISH = "Write suggestions";
+export const MODE_SUGGEST_PLAIN_ENGLISH = "Write request";
 export const MODE_PASTE_REVISED_DRAFT = "Paste revised draft";
 export const MODE_UPLOAD_FILE = "Upload file";
 export const UPLOAD_FILE_COMPARISON_COMING_SOON = "Upload comparison coming soon.";
@@ -33,7 +33,7 @@ export const MATERIAL_CHANGE_SUMMARY_LABEL = "Material change summary";
 
 export const OWNER_INCOMING_SUGGESTED_EDITS_HEADING = "Suggested edits";
 export const PLAIN_ENGLISH_FIELD_LABEL = "Your notes in plain English";
-export const PASTE_OPTIONAL_NOTE_LABEL = "Optional short note (optional)";
+export const PASTE_OPTIONAL_NOTE_LABEL = "Optional note to the owner";
 
 import {
   DIRECT_COMPARE_DISCLAIMER,

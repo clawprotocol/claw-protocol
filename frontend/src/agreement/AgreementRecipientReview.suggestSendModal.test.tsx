@@ -95,7 +95,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Suggest changes/i })[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
     const instruction = await screen.findByLabelText(/Your notes in plain English/i);
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");

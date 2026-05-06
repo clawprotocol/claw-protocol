@@ -83,7 +83,7 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
 
     for (const root of [landingDesktop!, landingMobile!]) {
       expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.reviewAgreement })).toBeTruthy();
-      expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.suggestChanges })).toBeTruthy();
+      expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.requestChanges })).toBeTruthy();
       expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.looksGood })).toBeTruthy();
       expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.notParticipating })).toBeTruthy();
     }
@@ -98,16 +98,18 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
 
     const docActions = screen.getByTestId("recipient-party-review-actions");
     expect(docActions.getAttribute("data-placement")).toBe("document-read");
+    expect(within(docActions).getByText(recipientPartyReviewCopy.doneReadingPrompt)).toBeTruthy();
+    expect(within(docActions).getByText(recipientPartyReviewCopy.requestChangesHelper)).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.reviewAgain })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.suggestChanges })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.requestChanges })).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.looksGood })).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.notParticipating })).toBeTruthy();
 
-    await userEvent.click(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.suggestChanges }));
+    await userEvent.click(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.requestChanges }));
     expect(await screen.findByTestId("recipient-revision-voice-field")).toBeTruthy();
   });
 
-  it("Suggest changes from landing opens the composer", async () => {
+  it("Request changes from landing opens the composer", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -144,7 +146,7 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
     const landingDesktop = screen
       .getAllByTestId("recipient-party-review-actions")
       .find((el) => el.getAttribute("data-placement") === "landing")!;
-    await userEvent.click(within(landingDesktop).getByRole("button", { name: recipientPartyReviewCopy.suggestChanges }));
+    await userEvent.click(within(landingDesktop).getByRole("button", { name: recipientPartyReviewCopy.requestChanges }));
     expect((await screen.findAllByTestId("recipient-revision-voice-field")).length).toBeGreaterThan(0);
   });
 });

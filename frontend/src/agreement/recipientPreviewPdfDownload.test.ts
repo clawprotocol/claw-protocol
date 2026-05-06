@@ -25,6 +25,24 @@ describe("downloadRecipientPreviewPdf", () => {
     }
   }
 
+  it("humanizes bare Failed to fetch from thrown fetch errors", async () => {
+    if (typeof URL.createObjectURL !== "function") {
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        value: vi.fn(() => "blob:unit-test"),
+      });
+    }
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(
+      downloadRecipientPreviewPdf({
+        agreementId: "a1",
+        readHeaders: {},
+        exportKind: "original",
+        html: "<p>x</p>",
+      }),
+    ).rejects.toThrow(/temporarily unavailable/i);
+  });
+
   it("throws friendly message on 503 without downloading", async () => {
     stubUrlObjectApis();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

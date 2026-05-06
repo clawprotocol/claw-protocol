@@ -46,8 +46,27 @@ async function messageFor503RecipientPdf(res: Response): Promise<string> {
   return RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE;
 }
 
+function humanizePdfDownloadFailureMessage(message: string): string {
+  const m = (message || "").trim();
+  if (!m) return RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE;
+  const low = m.toLowerCase();
+  if (
+    low.includes("failed to fetch") ||
+    low.includes("networkerror") ||
+    low.includes("load failed") ||
+    low.includes("err_network") ||
+    low.includes("ecconnreset") ||
+    low.includes("econnreset")
+  ) {
+    return RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE;
+  }
+  return m;
+}
+
 export async function downloadRecipientPreviewPdf(req: RecipientPreviewPdfExportRequest): Promise<void> {
-  const res = await fetch(
+  let res: Response;
+  try {
+    res = await fetch(
     `${API_BASE}/api/agreements/${encodeURIComponent(req.agreementId)}/recipient-preview-export-pdf`,
     {
       method: "POST",
@@ -57,12 +76,18 @@ export async function downloadRecipientPreviewPdf(req: RecipientPreviewPdfExport
       },
       body: JSON.stringify({ export_kind: req.exportKind, html: req.html }),
     },
-  );
+    );
+  } catch (e: unknown) {
+    const raw = e instanceof Error ? e.message : String(e ?? "");
+    throw new Error(humanizePdfDownloadFailureMessage(raw));
+  }
   if (!res.ok) {
     const msg =
       res.status === 503
         ? await messageFor503RecipientPdf(res)
-        : await errorMessageFromResponse(res, "Could not create PDF. Try again.");
+        : humanizePdfDownloadFailureMessage(
+            await errorMessageFromResponse(res, "Could not create PDF. Try again."),
+          );
     throw new Error(msg);
   }
   const ct = (res.headers.get("content-type") || "").toLowerCase();

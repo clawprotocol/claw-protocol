@@ -28,9 +28,9 @@ export function buildRecipientRevisionText(
 export const PORTABLE_REVIEW_HEADER = "Review in your preferred tool";
 export const PORTABLE_REVIEW_SUB =
   "Copy the current draft, revise elsewhere if you like, then bring back suggested edits. LawDog will organize the differences. Nothing in the owner’s draft changes until you send and they confirm — use Preview to check first.";
-export const PORTABLE_REVIEW_PASTE_LABEL = "Paste revised draft";
+export const PORTABLE_REVIEW_PASTE_LABEL = "Paste your revised version";
 export const PORTABLE_REVIEW_PASTE_PLACEHOLDER =
-  "Paste revised text or review notes here. Paste is supported today. File upload and OCR comparison are coming soon.";
+  "Paste the full agreement text or the sections you changed. Plain text is fine.";
 export const PORTABLE_REVIEW_OCR_FOOTNOTE =
   "Paste revised text for now. File comparison and upload are coming soon.";
 

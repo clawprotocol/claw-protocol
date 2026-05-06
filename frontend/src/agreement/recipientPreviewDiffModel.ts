@@ -778,7 +778,7 @@ export type RecipientPreviewDiffAssessment = {
   hasSnapshotDiff: boolean;
   /** True when either rendered text or structured draft differs materially. */
   hasAnyMaterialChange: boolean;
-  /** True only when both plain rendered text and snapshot fields are unchanged — then show “No changes detected”. */
+  /** True only when both plain rendered text and snapshot fields are unchanged — then show no-op preview message. */
   isCompleteNoOp: boolean;
   changeCharCount: number;
   canSubmit: boolean;
@@ -832,7 +832,7 @@ export function assessRecipientPreviewDiff(
 }
 
 export function recipientPreviewNoOpMessage(): string {
-  return "No changes detected — revise or paste edits";
+  return "No clear changes found. Adjust your request or pasted draft, then try Preview again.";
 }
 
 export function sectionChangeLabels(changedFieldKeys: string[]): string[] {

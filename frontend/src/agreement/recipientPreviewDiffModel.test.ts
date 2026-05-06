@@ -47,7 +47,7 @@ describe("recipientPreviewDiffModel", () => {
     expect(a.hasMaterialTextDiff).toBe(false);
     expect(a.isCompleteNoOp).toBe(true);
     expect(a.canSubmit).toBe(false);
-    expect(recipientPreviewNoOpMessage()).toContain("No changes detected");
+    expect(recipientPreviewNoOpMessage()).toContain("No clear changes found");
   });
 
   it("allows submit when text and snapshot both differ", () => {

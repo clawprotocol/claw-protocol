@@ -425,6 +425,10 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
     [canOpenStep, wizardBoot, wizardDraftReady, agreementId]
   );
 
+  const ownerJumpToRecipientsStep = useCallback(() => {
+    guardedSetStep(3);
+  }, [guardedSetStep]);
+
   const reviewSection = useMemo((): AgreementReviewSection | undefined => {
     if (!agreementId || currentSection === null) return undefined;
     return currentSection;
@@ -680,6 +684,7 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
                     }
                     onCanonicalDraftLoaded={clearReviewPrimedDraft}
                     onWorkspaceDetailsNotReady={handleWorkspaceDetailsNotReady}
+                    onOwnerJumpToRecipientsStep={ownerJumpToRecipientsStep}
                   />
                 </AgreementReviewErrorBoundary>
               </div>
@@ -723,6 +728,7 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
                   }
                   onCanonicalDraftLoaded={clearReviewPrimedDraft}
                   onWorkspaceDetailsNotReady={handleWorkspaceDetailsNotReady}
+                  onOwnerJumpToRecipientsStep={ownerJumpToRecipientsStep}
                 />
               </AgreementReviewErrorBoundary>
               <div className="vs01-agreement-step-actions">

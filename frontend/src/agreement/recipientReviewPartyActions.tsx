@@ -8,15 +8,18 @@ export const recipientPartyReviewCopy = {
   reviewAgreement: "Review agreement",
   reviewAgain: "Review again",
   reviewAndSign: "Review and sign",
-  suggestChanges: "Suggest changes",
+  /** Opens the same revise composer as the historical “Suggest changes” action. */
+  requestChanges: "Request changes",
   looksGood: "Looks good",
   notParticipating: "I'm not participating",
   reviewHelper: "Read before deciding.",
-  suggestHelper: "Ask for edits before anyone signs.",
+  requestChangesHelper: "Ask for edits before anyone signs.",
   looksGoodHelper: "Continue when the draft works for you.",
   notParticipatingHelper: "Step away from this review.",
   assuranceLine: "Take your time — nothing changes unless the owner accepts it.",
   nextStepSummary: "Next: Read it, request edits, or mark it ready.",
+  /** Shown above the action stack after the recipient has read to the bottom of the agreement. */
+  doneReadingPrompt: "Done reading? Choose what happens next.",
 } as const;
 
 export type RecipientPartyReviewActionsPlacement = "landing" | "landing-mobile" | "document-read";
@@ -30,9 +33,9 @@ type RecipientPartyReviewActionsProps = {
   promoteLooksGoodVisually: boolean;
   looksGoodLoading?: boolean;
   looksGoodDisabled?: boolean;
-  suggestDisabled?: boolean;
+  requestChangesDisabled?: boolean;
   onReviewPrimary: () => void;
-  onSuggest: () => void;
+  onRequestChanges: () => void;
   onLooksGood: () => void;
   onNotParticipating: () => void;
   /** Extra row after the four choices (e.g. Ready to sign). */
@@ -50,7 +53,7 @@ const btnDecline =
 function HelperUnder({ text, placement }: { text: string; placement: RecipientPartyReviewActionsPlacement }) {
   const isMobile = placement === "landing-mobile";
   if (isMobile) return null;
-  return <p className="mt-1 max-w-xl text-xs leading-snug text-slate-400 sm:text-[13px]">{text}</p>;
+  return <p className="mt-1 max-w-xl text-xs leading-snug text-slate-400 sm:text-sm">{text}</p>;
 }
 
 /**
@@ -65,9 +68,9 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
     promoteLooksGoodVisually,
     looksGoodLoading,
     looksGoodDisabled,
-    suggestDisabled,
+    requestChangesDisabled,
     onReviewPrimary,
-    onSuggest,
+    onRequestChanges,
     onLooksGood,
     onNotParticipating,
     children,
@@ -85,10 +88,9 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
   const looksGoodIsPrimaryVisual = !viewerLike && promoteLooksGoodVisually && !canSignFromHub;
 
   const reviewClass = reviewIsPrimaryVisual ? btnPrimary : btnQuiet;
-  const suggestClass = `${btnSecondary} disabled:opacity-45`;
+  const requestChangesClass = `${btnSecondary} disabled:opacity-45`;
   const looksClass = `${looksGoodIsPrimaryVisual ? btnPrimary : btnQuiet} disabled:opacity-45`;
   const looksDisabled = Boolean(looksGoodDisabled || looksGoodLoading);
-
 
   if (viewerLike) {
     return (
@@ -125,11 +127,14 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
       data-testid="recipient-party-review-actions"
       data-placement={placement}
     >
+      {!viewerLike && placement === "document-read" ? (
+        <div className="space-y-2">
+          <p className="text-sm font-medium leading-snug text-slate-100">{recipientPartyReviewCopy.doneReadingPrompt}</p>
+          <p className="text-xs leading-snug text-slate-400 sm:text-sm">{recipientPartyReviewCopy.assuranceLine}</p>
+        </div>
+      ) : null}
       {!viewerLike && placement !== "document-read" ? (
         <p className="text-center text-sm leading-snug text-slate-300 sm:text-left">{recipientPartyReviewCopy.assuranceLine}</p>
-      ) : null}
-      {!viewerLike && placement === "document-read" ? (
-        <p className="text-xs leading-snug text-slate-400 sm:text-sm">{recipientPartyReviewCopy.assuranceLine}</p>
       ) : null}
 
       {canSignFromHub && primarySigningHref ? (
@@ -143,10 +148,15 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
       )}
       <HelperUnder text={recipientPartyReviewCopy.reviewHelper} placement={placement} />
 
-      <button type="button" className={suggestClass} disabled={suggestDisabled} onClick={onSuggest}>
-        {recipientPartyReviewCopy.suggestChanges}
+      <button
+        type="button"
+        className={requestChangesClass}
+        disabled={requestChangesDisabled}
+        onClick={onRequestChanges}
+      >
+        {recipientPartyReviewCopy.requestChanges}
       </button>
-      <HelperUnder text={recipientPartyReviewCopy.suggestHelper} placement={placement} />
+      <HelperUnder text={recipientPartyReviewCopy.requestChangesHelper} placement={placement} />
 
       <button type="button" className={looksClass} disabled={looksDisabled} onClick={onLooksGood}>
         {looksGoodLoading ? "Saving…" : recipientPartyReviewCopy.looksGood}
