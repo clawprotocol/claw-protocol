@@ -54,16 +54,24 @@ export function splitSegmentTextToParagraphLines(text: string): string[][] {
   return raw.split(/\n\n+/).map((block) => block.split(/\n/));
 }
 
-/** Lines like "3. Compensation" or "3.1 Payment Schedule" get slightly stronger typography. */
+/**
+ * True only for short, title-like numbered lines — not merged heading+body paragraphs
+ * (e.g. "2.1 … The total fee…") which must stay normal weight on `same` segments.
+ */
 export function lineLooksLikeSectionHeading(line: string): boolean {
   const t = line.trim();
-  if (t.length < 4 || t.length > 160) return false;
-  return /^\d+(?:\.\d+)*\.?\s+\S/.test(t);
+  if (t.length < 4 || t.length > 100) return false;
+  if (!/^\d+(?:\.\d+)*\.?\s+\S/.test(t)) return false;
+  // Mid-line sentence start after the opening clause → body text, not a standalone heading.
+  if (/\.\s+(?:The|This|These|Those|A|An|Each|Every|All|Some|If|When|Where)\b/i.test(t.slice(18))) {
+    return false;
+  }
+  return true;
 }
 
 export function segmentLineClass(type: "same" | "insert" | "delete"): string {
   if (type === "same") {
-    return "recipient-legal-redline-same text-[15px] leading-[1.65] text-slate-900";
+    return "recipient-legal-redline-same font-normal text-[15px] leading-[1.65] text-slate-900 antialiased";
   }
   if (type === "insert") {
     return [
@@ -151,25 +159,18 @@ function renderSegmentStream(
         </div>,
       ];
     }
-    return blocks.map((lines, blockIdx) => {
-      const key = `${keyPrefix}_s${segIdx}_b${blockIdx}`;
-      const firstLine = lines[0] ?? "";
-      const heading = lineLooksLikeSectionHeading(firstLine);
-      return (
+      return blocks.map((lines, blockIdx) => {
+        const key = `${keyPrefix}_s${segIdx}_b${blockIdx}`;
+        const firstLine = lines[0] ?? "";
+        const heading = lineLooksLikeSectionHeading(firstLine);
+        return (
         <div key={key} className={heading ? "mb-3 mt-4 border-b border-slate-200 pb-2 first:mt-0" : "mb-2 last:mb-0"}>
           {lines.map((line, li) => {
-            const isFirstHeadingLine = heading && li === 0 && seg.type === "same";
             if (seg.type === "insert" && opts?.recipientNarrowIntentAnchors) {
               return renderAnchoredInsertLine(line, `${key}_l${li}`, opts.highlightedRecipientAnchor);
             }
             return (
-              <span
-                key={li}
-                data-redline={seg.type}
-                className={`block ${segmentLineClass(seg.type)} ${
-                  isFirstHeadingLine ? "text-[16px] font-semibold tracking-tight text-slate-900" : ""
-                }`.trim()}
-              >
+              <span key={li} data-redline={seg.type} className={`block ${segmentLineClass(seg.type)}`}>
                 {line.length > 0 ? line : "\u00a0"}
               </span>
             );

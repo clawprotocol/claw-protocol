@@ -3543,6 +3543,11 @@ const AgreementReview: React.FC<Props> = ({
       </div>
     ) : null;
 
+  /**
+   * Owner QA surface: incoming `recipient_proposal_pending` — queue, material change summary, draft compare,
+   * explicit Apply / reject paths (`applyOpenRecipientProposal` / `rejectOpenRecipientProposal`). Master draft
+   * unchanged until owner applies; audit_log records proposal events.
+   */
   const recipientProposalPanel =
     showWorkspaceRichHistory &&
     openRecipientProposal &&

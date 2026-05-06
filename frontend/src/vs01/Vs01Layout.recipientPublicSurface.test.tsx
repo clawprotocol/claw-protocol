@@ -12,6 +12,7 @@ describe("Vs01Layout recipient-facing surface", () => {
           subtitle: "Read the agreement, suggest changes, or continue when it looks good.",
         }}
         footerEvidenceSentence="LawDog produces verifiable evidence records; verification is cryptographic and file-based."
+        recipientPublicFooter={true}
       >
         <div>Child</div>
       </Vs01Layout>,
@@ -20,5 +21,8 @@ describe("Vs01Layout recipient-facing surface", () => {
     expect(container.textContent).not.toMatch(/\bCLAW\b/);
     expect(screen.getByRole("heading", { name: "Review workspace" })).toBeTruthy();
     expect(screen.queryByText("CLAW", { exact: true })).toBeNull();
+    expect(screen.getAllByText("LawDog is software, not a law firm.").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Verification is cryptographic and file-based.").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Legal disclosures")).toBeTruthy();
   });
 });

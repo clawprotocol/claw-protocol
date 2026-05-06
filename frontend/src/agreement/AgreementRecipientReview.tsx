@@ -1304,12 +1304,12 @@ export function AgreementRecipientReview({
                           {canScrollToRedline && anchorKey ? (
                             <button
                               type="button"
-                              className="w-full cursor-pointer rounded-sm text-left text-[13px] leading-snug text-emerald-100/95 underline decoration-emerald-400/80 decoration-1 underline-offset-2 hover:text-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+                              className="w-full cursor-pointer rounded-sm text-left text-[13px] leading-snug text-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
                               onClick={() => scrollToNarrowRedlineAnchor(anchorKey)}
                               onKeyDown={onKeyNavigate}
                             >
-                              ✓ {recipientIntentAppliedRowHeading(it)}
-                              <span className="mt-0.5 block text-[10px] font-normal text-emerald-200/80 no-underline">
+                              <span className="block font-medium text-emerald-50/95">✓ {recipientIntentAppliedRowHeading(it)}</span>
+                              <span className="mt-1 block text-[11px] font-normal text-emerald-100/95 underline decoration-emerald-400/90 decoration-1 underline-offset-2 hover:text-white hover:decoration-emerald-200">
                                 View in document
                               </span>
                             </button>
@@ -2043,8 +2043,8 @@ export function AgreementRecipientReview({
     }
     return {
       wrap: "border-slate-700 bg-slate-900/50 text-slate-200",
-      title: "Draft — changes may still occur",
-      detail: "You can suggest changes or accept this agreement.",
+      title: "Draft under review",
+      detail: "Changes can still be requested before signing.",
     };
   })();
 
@@ -2626,27 +2626,32 @@ export function AgreementRecipientReview({
                 </div>
               </details>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-posture">
-                  Your approach
-                </label>
-                <select
-                  id="recipient-posture"
-                  className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-                  value={recipientPosture}
-                  disabled={suggestControlsDisabled}
-                  onChange={(e) => setRecipientPosture(e.target.value as NegotiationPosture)}
-                >
-                  {NEGOTIATION_POSTURE_OPTIONS.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] leading-snug text-slate-500">
-                  This shapes how your suggested changes are framed.
-                </p>
-              </div>
+              <details className="rounded-md border border-slate-800/70 bg-slate-950/20 px-2 py-1.5">
+                <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
+                  Negotiation tone (optional)
+                </summary>
+                <div className="mt-2 space-y-2 border-t border-slate-800/50 pt-2">
+                  <label className="text-[11px] font-medium text-slate-400" htmlFor="recipient-posture">
+                    Tone for your suggestions
+                  </label>
+                  <select
+                    id="recipient-posture"
+                    className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                    value={recipientPosture}
+                    disabled={suggestControlsDisabled}
+                    onChange={(e) => setRecipientPosture(e.target.value as NegotiationPosture)}
+                  >
+                    {NEGOTIATION_POSTURE_OPTIONS.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] leading-snug text-slate-500">
+                    Optional framing for your note — default is cooperative.
+                  </p>
+                </div>
+              </details>
 
               {showSuggestionBlock ? (
                 <div className="space-y-1">

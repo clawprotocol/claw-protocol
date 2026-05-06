@@ -397,6 +397,7 @@ export function ClawProductApp() {
         headerAside={ACCESS_HEADER_ASIDE}
         productNav={{ label: "← Home", onClick: () => navigate("/") }}
         footerEvidenceSentence={LAWDOG_FOOTER_EVIDENCE_SENTENCE}
+        recipientPublicFooter
       >
         <div className="vs01-card vs01-card--envelope">
           <AgreementReviewGate

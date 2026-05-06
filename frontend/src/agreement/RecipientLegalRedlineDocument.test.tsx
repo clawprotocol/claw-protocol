@@ -22,10 +22,16 @@ describe("splitSegmentTextToParagraphLines", () => {
 });
 
 describe("lineLooksLikeSectionHeading", () => {
-  it("detects numbered section lines", () => {
+  it("detects short numbered title lines only", () => {
     expect(lineLooksLikeSectionHeading("3. Compensation and Payment")).toBe(true);
     expect(lineLooksLikeSectionHeading("3.1 Payment Schedule")).toBe(true);
     expect(lineLooksLikeSectionHeading("Plain sentence.")).toBe(false);
+  });
+
+  it("rejects merged heading+body paragraphs so same-line typography stays normal", () => {
+    const merged =
+      "2. Fees and Payment 2.1 Total Project Fee. The total fee for the services under this Agreement is Seven Thousand Five Hundred Dollars (US $7,500).";
+    expect(lineLooksLikeSectionHeading(merged)).toBe(false);
   });
 });
 
@@ -64,6 +70,128 @@ describe("RecipientLegalRedlineDocument", () => {
     const root = screen.getByTestId("recipient-legal-redline-document");
     const blocks = root.querySelectorAll(".recipient-legal-redline-same");
     expect(blocks.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not apply heading-only chrome to merged numbered+body same text", () => {
+    const merged =
+      "2. Fees and Payment 2.1 Total Project Fee. The total fee for the services under this Agreement is Seven Thousand Five Hundred Dollars (US $7,500).";
+    const document: LegalRedlineDocumentViewModel = {
+      blocks: [
+        {
+          id: "pay",
+          kind: "paragraph",
+          segments: [
+            { type: "same", text: merged },
+            { type: "delete", text: "upon receipt" },
+            { type: "insert", text: "Net 30" },
+            { type: "same", text: " for payment." },
+          ],
+          insertCount: 1,
+          deleteCount: 1,
+          sameCount: 2,
+          hasInsert: true,
+          hasDelete: true,
+          hasChange: true,
+          label: "payment",
+        },
+        {
+          id: "caps",
+          kind: "paragraph",
+          segments: [{ type: "same", text: "CONFIDENTIALITY. Recipient shall not disclose." }],
+          insertCount: 0,
+          deleteCount: 0,
+          sameCount: 1,
+          hasInsert: false,
+          hasDelete: false,
+          hasChange: false,
+          label: "caps",
+        },
+        {
+          id: "sig",
+          kind: "signature",
+          segments: [{ type: "same", text: "IN WITNESS WHEREOF, the parties execute below." }],
+          insertCount: 0,
+          deleteCount: 0,
+          sameCount: 1,
+          hasInsert: false,
+          hasDelete: false,
+          hasChange: false,
+          label: "sig",
+        },
+        {
+          id: "foot",
+          kind: "paragraph",
+          segments: [{ type: "same", text: "Created with LawDog — Draft for Review." }],
+          insertCount: 0,
+          deleteCount: 0,
+          sameCount: 1,
+          hasInsert: false,
+          hasDelete: false,
+          hasChange: false,
+          label: "footer",
+        },
+      ],
+      stats: {
+        blockCount: 4,
+        changedBlockCount: 1,
+        insertCount: 1,
+        deleteCount: 1,
+        sameCount: 4,
+        segmentCount: 6,
+        currentLen: 1,
+        proposedLen: 1,
+      },
+      hasChanges: true,
+    };
+    render(<RecipientLegalRedlineDocument document={document} variant="suggested" />);
+    const root = screen.getByTestId("recipient-legal-redline-document");
+    const sameSpans = root.querySelectorAll('[data-redline="same"]');
+    const mergedSame = [...sameSpans].find((el) => (el.textContent || "").includes("2. Fees and Payment"));
+    expect(mergedSame).toBeTruthy();
+    expect(mergedSame?.className).toMatch(/font-normal/);
+    expect(mergedSame?.className).not.toMatch(/font-semibold/);
+
+    const ins = root.querySelector('[data-redline="insert"]');
+    expect(ins?.textContent).toMatch(/Net\s*30/i);
+    expect(ins?.textContent).not.toMatch(/IN WITNESS WHEREOF/i);
+    expect(ins?.textContent).not.toMatch(/LawDog/i);
+    const del = root.querySelector('[data-redline="delete"]');
+    expect(del?.textContent).toMatch(/upon receipt/i);
+  });
+
+  it("keeps standalone short numbered titles on same segments at normal weight (no injected semibold)", () => {
+    const document: LegalRedlineDocumentViewModel = {
+      blocks: [
+        {
+          id: "h1",
+          kind: "paragraph",
+          segments: [{ type: "same", text: "2. FEES AND PAYMENT" }],
+          insertCount: 0,
+          deleteCount: 0,
+          sameCount: 1,
+          hasInsert: false,
+          hasDelete: false,
+          hasChange: false,
+          label: "h",
+        },
+      ],
+      stats: {
+        blockCount: 1,
+        changedBlockCount: 0,
+        insertCount: 0,
+        deleteCount: 0,
+        sameCount: 1,
+        segmentCount: 1,
+        currentLen: 1,
+        proposedLen: 1,
+      },
+      hasChanges: false,
+    };
+    render(<RecipientLegalRedlineDocument document={document} variant="suggested" />);
+    const el = screen.getByTestId("recipient-legal-redline-document").querySelector('[data-redline="same"]');
+    expect(el?.textContent).toContain("2. FEES");
+    expect(el?.className).toMatch(/font-normal/);
+    expect(el?.className).not.toMatch(/font-semibold/);
   });
 
   it("renders block document model as multiple sections with insert markers", () => {
