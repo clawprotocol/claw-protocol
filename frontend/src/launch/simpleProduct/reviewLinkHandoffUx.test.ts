@@ -36,12 +36,14 @@ describe("Review link handoff UX (LawDog)", () => {
   it("AgreementRecipientReview reviewer surface uses reviewer heading", () => {
     const p = join(__dirname, "../../agreement/AgreementRecipientReview.tsx");
     const s = readFileSync(p, "utf8");
+    const party = readFileSync(join(__dirname, "../../agreement/recipientReviewPartyActions.tsx"), "utf8");
     expect(s).toContain("Review this agreement");
     expect(s).toContain("Suggest changes before anyone signs.");
     expect(s).toContain("Your suggestions do not change the original until the owner accepts them.");
-    expect(s).toContain("Suggest changes");
-    expect(s).toContain("Looks good");
-    expect(s).toContain("I&apos;m not participating");
+    expect(s).toContain("recipientReviewPartyActions");
+    expect(party).toContain("Suggest changes");
+    expect(party).toContain("Looks good");
+    expect(party).toContain("I'm not participating");
     expect(s).toContain("← Back to agreement");
     expect(s).toContain("scrollAndFocusSuggestPanel");
     expect(s).not.toContain("Bring back suggested edits");

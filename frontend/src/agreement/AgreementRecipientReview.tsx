@@ -107,6 +107,7 @@ import {
   PLAIN_ENGLISH_FIELD_LABEL,
   UPLOAD_FILE_COMPARISON_COMING_SOON,
 } from "./universalReviewIntakeCopy";
+import { RecipientPartyReviewActions, recipientPartyReviewCopy } from "./recipientReviewPartyActions";
 
 const API_BASE = resolveApiBase();
 
@@ -1822,12 +1823,11 @@ export function AgreementRecipientReview({
           ? "Resolve open change requests with the sender before signing."
           : signingReadyHub
             ? "Review the terms — signing opens when the sender finishes setup."
-            : "Review the terms — you can request changes before anything is finalized.";
-    const primaryCtaLabel = canSignFromHub ? "Review and sign" : "Review agreement";
+            : recipientPartyReviewCopy.nextStepSummary;
     const isPaidReviewerSurface =
       entry.kind === "review" && recipientLinkRole === "reviewer" && !viewerLike;
     return (
-      <div className="vs01-agreement-review-inner space-y-5 p-6 pb-28 sm:pb-6">
+      <div className="vs01-agreement-review-inner space-y-5 p-6 pb-52 sm:pb-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement review</p>
@@ -1839,13 +1839,17 @@ export function AgreementRecipientReview({
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300">
               {isPaidReviewerSurface
                 ? "Suggest changes before anyone signs."
-                : "Read the terms, request changes, or sign securely on your phone. Nothing is final until you confirm."}
+                : "Read the terms, request changes, or sign securely on your phone — nothing is final until you confirm."}
             </p>
             {isPaidReviewerSurface ? (
               <p className="mt-2 max-w-2xl text-xs leading-relaxed text-slate-400">
                 Your suggestions do not change the original until the owner accepts them.
               </p>
-            ) : null}
+            ) : (
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
+                {recipientPartyReviewCopy.assuranceLine}
+              </p>
+            )}
             {recipientTrustCueStrip()}
             {recipientAgreementSummaryCard({
               agreementType,
@@ -1869,90 +1873,62 @@ export function AgreementRecipientReview({
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            {canSignFromHub ? (
-              <a
-                className="vs01-btn inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
-                href={agreementSigningPath(agreementId, lockedVid, undefined, participantPid || undefined)}
-              >
-                {primaryCtaLabel}
-              </a>
-            ) : (
-              <button
-                type="button"
-                className="vs01-btn rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
-                onClick={() => setFlowPhase("active")}
-              >
-                {primaryCtaLabel}
-              </button>
-            )}
-            {!viewerLike ? (
-              <div className="flex w-full min-w-[12rem] flex-col gap-1 sm:w-auto">
-                <button
-                  type="button"
-                  className="vs01-btn vs01-btn--secondary rounded-lg px-4 py-2.5 text-sm"
-                  onClick={() => {
-                    setFlowPhase("active");
-                    setWorkspaceTab("revise");
-                    scrollAndFocusSuggestPanel();
-                  }}
-                >
-                  Suggest changes
-                </button>
-                <p className="text-[10px] leading-snug text-slate-500 sm:max-w-[14rem]">
-                  Ask for edits before anything is signed.
-                </p>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="text-[11px] text-slate-500">
-            <button
-              type="button"
-              className="text-slate-400 underline decoration-slate-700 underline-offset-2 hover:text-slate-200"
-              onClick={() => setFlowPhase("declined")}
-            >
-              I&apos;m not participating
-            </button>
-          </div>
+        <div className="hidden sm:block">
+          <RecipientPartyReviewActions
+            placement="landing"
+            viewerLike={viewerLike}
+            canSignFromHub={canSignFromHub}
+            primarySigningHref={
+              canSignFromHub
+                ? agreementSigningPath(agreementId, lockedVid, undefined, participantPid || undefined)
+                : undefined
+            }
+            promoteLooksGoodVisually={false}
+            looksGoodLoading={approving}
+            looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
+            suggestDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+            onReviewPrimary={() => setFlowPhase("active")}
+            onSuggest={() => {
+              setFlowPhase("active");
+              setWorkspaceTab("revise");
+              scrollAndFocusSuggestPanel();
+            }}
+            onLooksGood={() => {
+              setFlowPhase("active");
+              setWorkspaceTab("read");
+              window.setTimeout(() => void acceptCurrentDraft(), 0);
+            }}
+            onNotParticipating={() => setFlowPhase("declined")}
+          />
         </div>
 
-        <div className="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-slate-800/90 bg-slate-950/95 p-4 backdrop-blur sm:hidden">
-          {canSignFromHub ? (
-            <a
-              className="vs01-btn inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500"
-              href={agreementSigningPath(agreementId, lockedVid, undefined, participantPid || undefined)}
-            >
-              {primaryCtaLabel}
-            </a>
-          ) : (
-            <button
-              type="button"
-              className="vs01-btn w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500"
-              onClick={() => setFlowPhase("active")}
-            >
-              {primaryCtaLabel}
-            </button>
-          )}
-          {!viewerLike ? (
-            <>
-              <button
-                type="button"
-                className="vs01-btn vs01-btn--secondary w-full rounded-lg px-4 py-2.5 text-sm"
-                onClick={() => {
-                  setFlowPhase("active");
-                  setWorkspaceTab("revise");
-                  scrollAndFocusSuggestPanel();
-                }}
-              >
-                Suggest changes
-              </button>
-              <p className="text-center text-[10px] leading-snug text-slate-500">
-                Ask for edits before anything is signed.
-              </p>
-            </>
-          ) : null}
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-800/90 bg-slate-950/95 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur sm:hidden">
+          <RecipientPartyReviewActions
+            placement="landing-mobile"
+            viewerLike={viewerLike}
+            canSignFromHub={canSignFromHub}
+            primarySigningHref={
+              canSignFromHub
+                ? agreementSigningPath(agreementId, lockedVid, undefined, participantPid || undefined)
+                : undefined
+            }
+            promoteLooksGoodVisually={false}
+            looksGoodLoading={approving}
+            looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
+            suggestDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+            onReviewPrimary={() => setFlowPhase("active")}
+            onSuggest={() => {
+              setFlowPhase("active");
+              setWorkspaceTab("revise");
+              scrollAndFocusSuggestPanel();
+            }}
+            onLooksGood={() => {
+              setFlowPhase("active");
+              setWorkspaceTab("read");
+              window.setTimeout(() => void acceptCurrentDraft(), 0);
+            }}
+            onNotParticipating={() => setFlowPhase("declined")}
+          />
         </div>
       </div>
     );
@@ -2167,8 +2143,8 @@ export function AgreementRecipientReview({
               <h1 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">
                 Review this agreement
               </h1>
-              <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                Suggest changes before signing. Nothing changes unless the owner accepts.
+              <p className="mt-1 text-sm leading-relaxed text-slate-400">
+                Suggest changes before signing. {recipientPartyReviewCopy.assuranceLine}
               </p>
             </>
           ) : (
@@ -2176,7 +2152,7 @@ export function AgreementRecipientReview({
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Review Agreement</p>
               <p className="text-sm text-slate-300">
                 {workspaceTab === "read"
-                  ? "Read the agreement first — editing tools are under Suggest changes."
+                  ? recipientPartyReviewCopy.nextStepSummary
                   : "Describe what you’d like different, preview, then send your revised draft to the owner."}
               </p>
             </>
@@ -2200,12 +2176,6 @@ export function AgreementRecipientReview({
         <span className="text-slate-500">·</span>
         <span>{(draft.title || "").trim() || "Agreement"}</span>
       </div>
-
-      {workspaceTab === "read" ? (
-        <p className="text-xs leading-relaxed text-slate-400">
-          Read the document, then use Suggest changes when you are ready.
-        </p>
-      ) : null}
 
       <div className="rounded-lg border border-slate-700 bg-white p-6 text-slate-900 shadow-sm sm:p-8">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
@@ -2321,69 +2291,42 @@ export function AgreementRecipientReview({
       ) : null}
 
       {workspaceTab === "read" ? (
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          <button
-            type="button"
-            className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
-            onClick={() => {
-              window.requestAnimationFrame(() => {
-                document.querySelector(".prose")?.scrollIntoView({ behavior: "smooth", block: "start" });
-              });
-            }}
-          >
-            Review agreement
-          </button>
-          {!viewerLike ? (
-            <div className="flex flex-col gap-1">
-              <button
-                type="button"
-                className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-45"
-                disabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
-                onClick={() => {
-                  setWorkspaceTab("revise");
-                  setError(null);
-                  scrollAndFocusSuggestPanel();
-                }}
-              >
-                Suggest changes
-              </button>
-              <p className="text-[10px] leading-snug text-slate-500 sm:max-w-[16rem]">
-                Ask for edits before anything is signed.
-              </p>
-            </div>
-          ) : null}
-          {!viewerLike ? (
-            <button
-              type="button"
-              className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-900/60 disabled:opacity-45"
-              disabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
-              onClick={() => void acceptCurrentDraft()}
-            >
-              {approving ? "Saving…" : "Looks good"}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-400 hover:bg-slate-900/60"
-            onClick={() => setFlowPhase("declined")}
-          >
-            I&apos;m not participating
-          </button>
+        <RecipientPartyReviewActions
+          placement="document-read"
+          viewerLike={viewerLike}
+          canSignFromHub={false}
+          promoteLooksGoodVisually
+          looksGoodLoading={approving}
+          looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
+          suggestDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+          onReviewPrimary={() => {
+            window.requestAnimationFrame(() => {
+              document.querySelector(".prose")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+          }}
+          onSuggest={() => {
+            setWorkspaceTab("revise");
+            setError(null);
+            scrollAndFocusSuggestPanel();
+          }}
+          onLooksGood={() => void acceptCurrentDraft()}
+          onNotParticipating={() => setFlowPhase("declined")}
+        >
           {recipientLinkRole === "signer" && canRecipientSign ? (
             <a
-              className="inline-flex items-center justify-center rounded-lg border border-sky-700 bg-sky-950/40 px-4 py-2.5 text-sm font-semibold text-sky-100 hover:bg-sky-900/50"
+              className="inline-flex w-full items-center justify-center rounded-lg border border-sky-700 bg-sky-950/40 px-4 py-3 text-base font-semibold text-sky-100 hover:bg-sky-900/50"
               href={agreementSigningPath(agreementId, lockedSignVid, undefined, participantPid || undefined)}
             >
               Ready to sign
             </a>
           ) : recipientLinkRole === "signer" ? (
-            <span className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950/40 px-4 py-2.5 text-sm text-slate-500">
+            <span className="inline-flex w-full items-center justify-center rounded-lg border border-slate-700 bg-slate-950/40 px-4 py-3 text-sm text-slate-500">
               {signingBlockedByProposalQueue
                 ? "Resolve open change requests before signing"
                 : "Waiting for final version before signing"}
             </span>
           ) : null}
-        </div>
+        </RecipientPartyReviewActions>
       ) : viewerLike ? (
         <p className="text-xs text-slate-500">You have view-only access to this agreement.</p>
       ) : (

@@ -9,7 +9,7 @@ describe("Vs01Layout recipient-facing surface", () => {
       <Vs01Layout
         hero={{
           title: "Review workspace",
-          subtitle: "Read the agreement, suggest changes, or continue when it looks good.",
+          subtitle: "Read it, request edits, mark it ready, or step away — same choices top to bottom.",
         }}
         footerEvidenceSentence="LawDog produces verifiable evidence records; verification is cryptographic and file-based."
         recipientPublicFooter={true}

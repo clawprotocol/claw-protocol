@@ -84,7 +84,7 @@ const AGREEMENT_HERO: Vs01LayoutHero = {
 /** Public recipient agreement review (`/agreements/.../review`) — LawDog-only chrome, no CLAW eyebrow. */
 const RECIPIENT_REVIEW_HERO: Vs01LayoutHero = {
   title: "Review workspace",
-  subtitle: "Read the agreement, suggest changes, or continue when it looks good.",
+  subtitle: "Read it, request edits, mark it ready, or step away — same choices top to bottom.",
 };
 
 const LAWDOG_FOOTER_EVIDENCE_SENTENCE =
