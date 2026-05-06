@@ -260,6 +260,35 @@ type RecipientPreview = {
 export const PRO_REDLINE_REVIEWER_SUGGEST_SUCCESS_COPY =
   "Suggestion sent. The agreement owner chooses what to accept.";
 
+/** Shown when revise preview fails due to browser/network fetch issues (e.g. `ERR_NETWORK_CHANGED`). */
+export const RECIPIENT_REVISE_PREVIEW_CONNECTION_ERROR =
+  "Connection hiccup — your note is still here. Please try Preview changes again.";
+
+function recipientRevisePreviewNetworkishFailure(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : String(e ?? "");
+  const m = msg.toLowerCase();
+  return (
+    m.includes("failed to fetch") ||
+    m.includes("networkerror") ||
+    m.includes("err_network") ||
+    m.includes("network changed") ||
+    m.includes("load failed") ||
+    m.includes("ecconnreset") ||
+    m.includes("econnreset")
+  );
+}
+
+function recipientRevisePreviewUserFacingError(e: unknown): string {
+  if (recipientRevisePreviewNetworkishFailure(e)) {
+    return RECIPIENT_REVISE_PREVIEW_CONNECTION_ERROR;
+  }
+  if (e instanceof Error) {
+    const t = e.message.trim();
+    if (t) return t;
+  }
+  return RECIPIENT_REVISE_PREVIEW_CONNECTION_ERROR;
+}
+
 function recipientVoiceErrorMessage(raw: string): string {
   const t = (raw || "").trim().toLowerCase();
   if (!(raw || "").trim()) return "Voice input error — try again or type.";
@@ -301,6 +330,7 @@ export function AgreementRecipientReview({
   const [recipientPreview, setRecipientPreview] = useState<RecipientPreview | null>(null);
   const [sendSuggestedEditsModalOpen, setSendSuggestedEditsModalOpen] = useState(false);
   const [recipientSuggestedEditsSentAck, setRecipientSuggestedEditsSentAck] = useState(false);
+  const [recipientRevisePreviewError, setRecipientRevisePreviewError] = useState<string | null>(null);
   const recipientRedlineViewModelLogKeyRef = useRef<string>("");
   const recipientRedlineSourceLogKeyRef = useRef<string>("");
   const [recipientPosture, setRecipientPosture] =
@@ -609,6 +639,7 @@ export function AgreementRecipientReview({
 
   useEffect(() => {
     setRecipientPreview(null);
+    setRecipientRevisePreviewError(null);
   }, [recipientPosture]);
 
   const previewDiff = useMemo(() => {
@@ -940,6 +971,7 @@ export function AgreementRecipientReview({
     }
     setPreviewing(true);
     setError(null);
+    setRecipientRevisePreviewError(null);
     try {
       const baselineDraft = cloneDraftForRecipientPreview(draft);
       const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
@@ -1018,10 +1050,12 @@ export function AgreementRecipientReview({
             reason: "structured_and_rendered_unchanged",
           });
         }
+        setRecipientRevisePreviewError(null);
         setError(recipientPreviewNoOpMessage());
         setRecipientPreview(null);
         return;
       }
+      setRecipientRevisePreviewError(null);
       setRecipientPreview({
         baselineDraft,
         baselineHtml,
@@ -1034,7 +1068,9 @@ export function AgreementRecipientReview({
       });
       access.recordUsage("revision_previews");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not generate preview.");
+      // eslint-disable-next-line no-console
+      console.warn("[recipient-revise-preview] failed", e);
+      setRecipientRevisePreviewError(recipientRevisePreviewUserFacingError(e));
       setRecipientPreview(null);
     } finally {
       setPreviewing(false);
@@ -1127,6 +1163,7 @@ export function AgreementRecipientReview({
       setRecipientSuggestedEditsSentAck(true);
       setInstruction("");
       setExternalAiPaste("");
+      setRecipientRevisePreviewError(null);
       setRecipientPreview(null);
       setSuggestionUsed(false);
       setWorkspaceTab("read");
@@ -1140,6 +1177,7 @@ export function AgreementRecipientReview({
 
   function discardPreview() {
     setRecipientPreview(null);
+    setRecipientRevisePreviewError(null);
   }
 
   async function acceptCurrentDraft() {
@@ -2337,6 +2375,7 @@ export function AgreementRecipientReview({
             onClick={() => {
               setWorkspaceTab("read");
               setRecipientPreview(null);
+              setRecipientRevisePreviewError(null);
               setError(null);
             }}
           >
@@ -2363,6 +2402,7 @@ export function AgreementRecipientReview({
                   onClick={() => {
                     setReviseTextMode("assisted");
                     setRecipientPreview(null);
+                    setRecipientRevisePreviewError(null);
                     setError(null);
                   }}
                 >
@@ -2378,6 +2418,7 @@ export function AgreementRecipientReview({
                   onClick={() => {
                     setReviseTextMode("direct");
                     setRecipientPreview(null);
+                    setRecipientRevisePreviewError(null);
                     setError(null);
                   }}
                 >
@@ -2413,6 +2454,7 @@ export function AgreementRecipientReview({
                     setUniversalIntakeMode("plain");
                     setExternalAiPaste("");
                     setRecipientPreview(null);
+                    setRecipientRevisePreviewError(null);
                     setError(null);
                   }}
                 >
@@ -2428,6 +2470,7 @@ export function AgreementRecipientReview({
                   onClick={() => {
                     setUniversalIntakeMode("paste");
                     setRecipientPreview(null);
+                    setRecipientRevisePreviewError(null);
                     setError(null);
                   }}
                 >
@@ -2561,6 +2604,7 @@ export function AgreementRecipientReview({
                       onChange={(e) => {
                         setExternalAiPaste(e.target.value);
                         setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
                       }}
                     />
                   </div>
@@ -2650,6 +2694,7 @@ export function AgreementRecipientReview({
                 onValueChange={(v) => {
                   setInstruction(v);
                   setRecipientPreview(null);
+                  setRecipientRevisePreviewError(null);
                 }}
                 disabled={suggestControlsDisabled}
                 surface="dark"
@@ -2666,6 +2711,15 @@ export function AgreementRecipientReview({
                   {previewing ? "Working…" : "Preview changes"}
                 </button>
               </div>
+              {recipientRevisePreviewError ? (
+                <p
+                  role="alert"
+                  data-testid="recipient-revise-preview-error"
+                  className="text-sm leading-snug text-amber-200/95"
+                >
+                  {recipientRevisePreviewError}
+                </p>
+              ) : null}
               <p className="text-[10px] leading-snug text-slate-500">
                 Use <span className="text-slate-400">Preview changes</span>, review <span className="text-slate-400">Suggested changes</span>, then{" "}
                 <span className="text-slate-400">Send suggestions for review</span>.
