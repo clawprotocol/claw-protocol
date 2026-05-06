@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.services.agreement_pdf_story_capability import reset_agreement_pdf_story_capability_cache_for_tests
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
@@ -2407,3 +2408,107 @@ def test_vs01_signing_seed_structured_detail_when_finalize_meta_missing_document
     assert detail.get("agreement_id") == agreement_id
     assert detail.get("stage") == "response_serialization"
     assert detail.get("code") == "vs01_finalize_incomplete"
+
+
+def test_recipient_preview_export_pdf_requires_recipient_token_or_org(monkeypatch, tmp_path):
+    reset_agreement_pdf_story_capability_cache_for_tests()
+    pytest.importorskip("fitz")
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-signing-secret-for-magic-link")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "PDF export test",
+            "jurisdiction": "DE",
+            "parties": [
+                {"name": "Owner Co", "role": "owner"},
+                {"name": "Signer Co", "role": "signer"},
+            ],
+            "purpose": "Services",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    upd = client.post(
+        f"/api/agreements/{aid}/update-field",
+        headers=_ORG_H,
+        json={
+            "field": "parties",
+            "value": [
+                {"name": "Owner Co", "role": "owner", "id": "pid-owner"},
+                {"name": "Signer Co", "role": "signer", "id": "pid-signer"},
+            ],
+        },
+    )
+    assert upd.status_code == 200
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG_H,
+        json={
+            "mode": "review",
+            "role": "signer",
+            "recipient_party_id": "pid-signer",
+            "inviter_display_name": "Owner Co",
+        },
+    )
+    assert mint.status_code == 200
+    tok = mint.json()["token"]
+    recv_hdr = {"X-Claw-Recipient-Access-Token": tok}
+
+    denied = client.post(
+        f"/api/agreements/{aid}/recipient-preview-export-pdf",
+        json={"export_kind": "original", "html": "<p>Hello</p>"},
+    )
+    assert denied.status_code == 403
+
+    bad = client.post(
+        f"/api/agreements/{aid}/recipient-preview-export-pdf",
+        headers={"X-Claw-Recipient-Access-Token": "not-a-real-token"},
+        json={"export_kind": "original", "html": "<p>Hello</p>"},
+    )
+    assert bad.status_code == 403
+
+    ok = client.post(
+        f"/api/agreements/{aid}/recipient-preview-export-pdf",
+        headers=recv_hdr,
+        json={"export_kind": "original", "html": "<p>Hello PDF</p>"},
+    )
+    assert ok.status_code == 200
+    assert ok.headers.get("content-type", "").startswith("application/pdf")
+    cd = ok.headers.get("content-disposition") or ""
+    assert "lawdog-original-draft.pdf" in cd
+    assert ok.content.startswith(b"%PDF")
+
+    ok_prop = client.post(
+        f"/api/agreements/{aid}/recipient-preview-export-pdf",
+        headers=recv_hdr,
+        json={"export_kind": "proposed", "html": "<p>Proposed only</p>"},
+    )
+    assert ok_prop.status_code == 200
+    assert "lawdog-proposed-draft.pdf" in (ok_prop.headers.get("content-disposition") or "")
+
+    red = client.post(
+        f"/api/agreements/{aid}/recipient-preview-export-pdf",
+        headers=recv_hdr,
+        json={
+            "export_kind": "redline",
+            "html": "<article><p style='margin:0'><span style='text-decoration:line-through'>Old</span>"
+            " <span style='text-decoration:underline'>New</span></p></article>",
+        },
+    )
+    assert red.status_code == 200
+    assert "lawdog-redline-preview.pdf" in (red.headers.get("content-disposition") or "")
+
+    empty = client.post(
+        f"/api/agreements/{aid}/recipient-preview-export-pdf",
+        headers=recv_hdr,
+        json={"export_kind": "original", "html": "  \n\t  "},
+    )
+    assert empty.status_code == 422

@@ -523,14 +523,29 @@ _LIVENESS_SUMMARY = (
 )
 
 
+def _public_health_payload() -> dict:
+    """Liveness + lightweight capability flags (no secrets or file paths)."""
+    from backend.services.agreement_pdf_story_capability import assess_agreement_pdf_story_capability
+
+    cap = assess_agreement_pdf_story_capability()
+    return {
+        "ok": True,
+        "summary": _LIVENESS_SUMMARY,
+        "recipient_pdf_export": {
+            "available": bool(cap.get("available")),
+            "engine": cap.get("engine") or "fallback",
+        },
+    }
+
+
 @app.get("/health")
 async def health():
-    return JSONResponse({"ok": True, "summary": _LIVENESS_SUMMARY})
+    return JSONResponse(_public_health_payload())
 
 
 @app.get("/v1/healthz")
 async def healthz():
-    return JSONResponse({"ok": True, "summary": _LIVENESS_SUMMARY})
+    return JSONResponse(_public_health_payload())
 
 
 @app.get("/v1/readyz")

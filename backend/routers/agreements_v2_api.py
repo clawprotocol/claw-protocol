@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from backend.config.anchor_network_config import (
     ALLOWED_AGREEMENT_ANCHOR_NETWORKS,
@@ -89,6 +89,10 @@ from backend.config.feed_anchor_policy import settlement_anchor_network_hint
 from backend.proof_status.store import ProofLayerStore
 from backend.services import document_service
 from backend.services.agreement_draft_store import list_draft_agreement_ids_newest_first, load_draft, save_draft
+from backend.services.agreement_pdf_story_capability import (
+    RECIPIENT_PREVIEW_PDF_STORY_RENDER_MODES,
+    assess_agreement_pdf_story_capability,
+)
 from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
 from backend.services.claw_feed_service import record_public_feed_event_if_applicable
 from backend.services.claw_feed_store import get_claw_feed_store
@@ -2313,6 +2317,32 @@ def premium_review_route(request: Request, body: PremiumReviewRouteRequest) -> P
 class AgreementRenderResponse(BaseModel):
     id: str
     rendered_html: str
+
+
+RecipientPreviewPdfExportKind = Literal["original", "proposed", "redline"]
+
+
+class RecipientPreviewPdfExportBody(BaseModel):
+    """Client supplies the same scrubbed HTML shown in the preview (original / proposed) or inline-styled redline HTML."""
+
+    export_kind: RecipientPreviewPdfExportKind = "original"
+    html: str = Field(..., min_length=1, max_length=1_200_000)
+
+    @field_validator("html", mode="before")
+    @classmethod
+    def _trim_html(cls, v: object) -> str:
+        return ("" if v is None else str(v)).strip()
+
+
+_RECIPIENT_PREVIEW_PDF_FILENAMES: Dict[str, str] = {
+    "original": "lawdog-original-draft.pdf",
+    "proposed": "lawdog-proposed-draft.pdf",
+    "redline": "lawdog-redline-preview.pdf",
+}
+
+_RECIPIENT_PDF_EXPORT_UNAVAILABLE_USER = (
+    "PDF export is temporarily unavailable. Please use Copy or Download text for now."
+)
 
 
 SessionType = Literal["owner", "recipient"]
@@ -5158,6 +5188,62 @@ def render_agreement(agreement_id: str, request: Request) -> AgreementRenderResp
     return AgreementRenderResponse(
         id=agreement_id,
         rendered_html=_render_html(draft, watermark=wm),
+    )
+
+
+@router.post("/{agreement_id}/recipient-preview-export-pdf")
+def post_recipient_preview_export_pdf(
+    agreement_id: str,
+    request: Request,
+    body: RecipientPreviewPdfExportBody,
+) -> Response:
+    """
+    Turn preview HTML into a downloadable PDF (same Story pipeline as VS01 seed, recipient typography profile).
+    Caller must pass the HTML currently shown for that export variant (original baseline, proposed, or redline).
+    """
+    aid = (agreement_id or "").strip()
+    if not aid:
+        raise HTTPException(status_code=400, detail="missing_agreement_id")
+    assert_agreement_full_draft_read_allowed(request, aid)
+    cap = assess_agreement_pdf_story_capability()
+    if not cap.get("available"):
+        log.warning(
+            "[recipient-pdf-export] rejected agreement_id=%s reason=%s",
+            aid,
+            (cap.get("reason") or "")[:400],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "recipient_pdf_export_unavailable",
+                "message": _RECIPIENT_PDF_EXPORT_UNAVAILABLE_USER,
+            },
+        )
+
+    built = agreement_rendered_html_to_pdf_bytes(
+        body.html,
+        title="Agreement",
+        story_css_profile="recipient",
+    )
+    if built.render_mode not in RECIPIENT_PREVIEW_PDF_STORY_RENDER_MODES:
+        log.warning(
+            "[recipient-pdf-export] rejected_non_story_render agreement_id=%s render_mode=%s",
+            aid,
+            built.render_mode,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "recipient_pdf_export_unavailable",
+                "message": _RECIPIENT_PDF_EXPORT_UNAVAILABLE_USER,
+            },
+        )
+
+    fn = _RECIPIENT_PREVIEW_PDF_FILENAMES.get(body.export_kind) or "lawdog-agreement.pdf"
+    return Response(
+        content=built.pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
     )
 
 
