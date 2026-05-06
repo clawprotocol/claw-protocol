@@ -290,18 +290,18 @@ test.describe("paid LawDog review-link path (hydrate + mint + proposal)", () => 
     await installPaidReviewLinkRoutes(recipientPage, state);
     await recipientPage.goto(counterpartyReviewUrl, { waitUntil: "domcontentloaded" });
 
-    const suggestChangesLanding = recipientPage.getByRole("button", { name: "Suggest changes" });
-    if (await suggestChangesLanding.isVisible().catch(() => false)) {
-      await suggestChangesLanding.first().click();
+    const requestChangesLanding = recipientPage.getByRole("button", { name: "Request changes" });
+    if (await requestChangesLanding.isVisible().catch(() => false)) {
+      await requestChangesLanding.first().click();
     } else {
       const reviewCta = recipientPage.getByRole("button", { name: "Review agreement" });
       await expect(reviewCta.first()).toBeVisible({ timeout: 30_000 });
       await reviewCta.first().click();
-      await expect(recipientPage.getByRole("button", { name: "Suggest changes" })).toBeVisible({ timeout: 20_000 });
-      await recipientPage.getByRole("button", { name: "Suggest changes" }).click();
+      await expect(recipientPage.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
+      await recipientPage.getByRole("button", { name: "Request changes" }).click();
     }
 
-    await expect(recipientPage.getByText("Write suggestions", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(recipientPage.getByText("Write request", { exact: true })).toBeVisible({ timeout: 20_000 });
     const ta = recipientPage.locator("#recipient-revision-input");
     await ta.fill("Change final delivery deadline to 45 days after the effective date.");
     await recipientPage.getByRole("button", { name: "Preview changes" }).click();

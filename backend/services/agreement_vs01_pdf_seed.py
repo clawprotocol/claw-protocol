@@ -7,7 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from html import escape
-from typing import Any, Final, Optional
+from typing import Any, Final, Literal, Optional
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +106,9 @@ def _strip_scripts_and_styles(html: str) -> str:
     return s[:_MAX_HTML_CHARS]
 
 
+StoryCssProfile = Literal["vs01", "recipient"]
+
+
 def _vs01_signing_story_user_css() -> str:
     """
     CSS for PyMuPDF Story: Letter @page with ~1in bottom reserve (footer + VS01 gray auto-initials),
@@ -117,6 +120,22 @@ def _vs01_signing_story_user_css() -> str:
         "margin:0;padding:0;}"
         "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
         "orphans:3;widows:3;margin-top:28pt;padding-top:10pt;}"
+    )
+
+
+def _recipient_preview_export_user_css() -> str:
+    """
+    Typography aligned with agreement `_render_html` long-form path (Georgia ~15px / 1.65).
+    Bottom margin is modest — recipient exports do not reserve VS01 auto-initials band.
+    """
+    return (
+        "@page{size:letter;margin:48pt 52pt 56pt 52pt;}"
+        "body{font-family:Georgia,'Times New Roman',Times,serif;font-size:15px;line-height:1.65;"
+        "color:#0f172a;margin:0;padding:0;}"
+        "h1,h2,h3,h4,p,li,td,th,table,pre,div,span,header,section,article{font-family:Georgia,'Times New Roman',Times,serif;}"
+        "pre{white-space:pre-wrap;}"
+        "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
+        "orphans:3;widows:3;margin-top:20pt;padding-top:10pt;}"
     )
 
 
@@ -150,7 +169,10 @@ def _plaintext_pdf_bytes(fitz: object, body_inner: str) -> bytes:
 
 
 def agreement_rendered_html_to_pdf_bytes(
-    html: str, *, title: str = "Agreement"
+    html: str,
+    *,
+    title: str = "Agreement",
+    story_css_profile: StoryCssProfile = "vs01",
 ) -> AgreementVs01PdfBuild:
     """
     Best-effort HTML → multi-page Letter PDF via PyMuPDF Story + DocumentWriter (in-memory).
@@ -159,6 +181,9 @@ def agreement_rendered_html_to_pdf_bytes(
     Falls back to plain-text layout if Story fails. If PyMuPDF is unavailable or fails, uses pypdf
     blank Letter, then a stdlib-only minimal valid PDF so VS01 seed never fails solely on optional
     PDF libraries missing from the image.
+
+    ``story_css_profile``: ``vs01`` uses Helvetica + bottom margin reserve for signing seed footers;
+    ``recipient`` uses Georgia 15px/1.65 to align with agreement preview HTML.
     """
     body_inner = _strip_scripts_and_styles(html)
     fitz = _import_fitz_module()
@@ -175,7 +200,11 @@ def agreement_rendered_html_to_pdf_bytes(
             f"{body_inner}"
             "</body></html>"
         )
-        user_css = _vs01_signing_story_user_css()
+        user_css = (
+            _recipient_preview_export_user_css()
+            if story_css_profile == "recipient"
+            else _vs01_signing_story_user_css()
+        )
 
         mediabox = fitz.paper_rect("letter")
         where = mediabox + (

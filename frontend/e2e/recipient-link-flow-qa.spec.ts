@@ -356,17 +356,17 @@ test.describe("recipient + link flow QA", () => {
     await installIsolatedAgreementsApi(page, state);
 
     await page.goto(`/agreements/${id}/review`, { waitUntil: "domcontentloaded" });
-    const suggestChangesLanding = page.getByRole("button", { name: "Suggest changes" });
-    if (await suggestChangesLanding.isVisible().catch(() => false)) {
-      await suggestChangesLanding.first().click();
+    const requestChangesLanding = page.getByRole("button", { name: "Request changes" });
+    if (await requestChangesLanding.isVisible().catch(() => false)) {
+      await requestChangesLanding.first().click();
     } else {
       const reviewCta = page.getByRole("button", { name: "Review agreement" });
       await expect(reviewCta.first()).toBeVisible({ timeout: 30_000 });
       await reviewCta.first().click();
-      await expect(page.getByRole("button", { name: "Suggest changes" })).toBeVisible({ timeout: 20_000 });
-      await page.getByRole("button", { name: "Suggest changes" }).click();
+      await expect(page.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
+      await page.getByRole("button", { name: "Request changes" }).click();
     }
-    await expect(page.getByText("Write suggestions", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Write request", { exact: true })).toBeVisible({ timeout: 20_000 });
     const ta = page.locator("#recipient-revision-input");
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
     await page.getByRole("button", { name: "Preview changes" }).click();
@@ -462,17 +462,17 @@ test.describe("recipient + link flow QA", () => {
     });
 
     await page.goto(`/agreements/${id}/review`, { waitUntil: "domcontentloaded" });
-    const suggestChangesLanding = page.getByRole("button", { name: "Suggest changes" });
-    if (await suggestChangesLanding.isVisible().catch(() => false)) {
-      await suggestChangesLanding.first().click();
+    const requestChangesLanding = page.getByRole("button", { name: "Request changes" });
+    if (await requestChangesLanding.isVisible().catch(() => false)) {
+      await requestChangesLanding.first().click();
     } else {
       const reviewCta = page.getByRole("button", { name: "Review agreement" });
       await expect(reviewCta.first()).toBeVisible({ timeout: 30_000 });
       await reviewCta.first().click();
-      await expect(page.getByRole("button", { name: "Suggest changes" })).toBeVisible({ timeout: 20_000 });
-      await page.getByRole("button", { name: "Suggest changes" }).click();
+      await expect(page.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
+      await page.getByRole("button", { name: "Request changes" }).click();
     }
-    await expect(page.getByText("Write suggestions", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Write request", { exact: true })).toBeVisible({ timeout: 20_000 });
 
     const ta = page.locator("#recipient-revision-input");
     await ta.fill("Net 30 and pause work after 15 days late");

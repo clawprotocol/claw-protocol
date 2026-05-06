@@ -69,7 +69,30 @@ import {
   type PaidProSendBranchMeta,
 } from "./sendHandoffAuthoritativeCorpus";
 import { DirectComparePanel } from "../../agreement/DirectComparePanel";
-import { MATERIAL_CHANGE_SUMMARY_LABEL, OWNER_INCOMING_SUGGESTED_EDITS_HEADING } from "../../agreement/universalReviewIntakeCopy";
+import { MATERIAL_CHANGE_SUMMARY_LABEL } from "../../agreement/universalReviewIntakeCopy";
+import {
+  OWNER_CTA_ACCEPT_AND_CONTINUE,
+  OWNER_CTA_MAKE_MORE_CHANGES,
+  OWNER_ACCEPT_SUGGESTED_CHANGES_SUCCESS_DETAIL,
+  OWNER_ACCEPT_SUGGESTED_CHANGES_SUCCESS_TITLE,
+  OWNER_CTA_DISMISS_SUCCESS,
+  OWNER_CTA_GO_TO_SIGNERS,
+  OWNER_CTA_REJECT_SUGGESTIONS,
+  OWNER_CTA_REVIEW_SUGGESTED_CHANGES,
+  OWNER_FINALIZE_LOCK_HINT,
+  OWNER_LOCK_AND_CONTINUE_TO_SIGNING,
+  OWNER_MAKE_MORE_CHANGES_LINE,
+  OWNER_MULTIPLE_SUGGESTIONS_LABEL,
+  OWNER_NEXT_CONFIRM_SIGNERS_AND_SEND,
+  OWNER_NEXT_LOCK_THEN_SEND,
+  OWNER_NEXT_SEND_FOR_SIGNATURE,
+  OWNER_POST_ACCEPT_LOCK_EXPLAINER,
+  OWNER_REVIEW_BEFORE_SIGNING,
+  OWNER_SEND_FOR_SIGNATURE,
+  OWNER_SUGGESTED_CHANGES_NOT_SIGNED_LINE,
+  OWNER_SUGGESTED_CHANGES_RECEIVED_TITLE,
+  OWNER_SUGGESTED_CHANGES_REVIEW_SUBTEXT,
+} from "../../agreement/ownerRecipientSuggestedEditsCopy";
 import {
   OWNER_PORTABLE_REVIEW_SUB,
   PORTABLE_REVIEW_HEADER,
@@ -403,6 +426,11 @@ type Props = {
   simpleFlowPremiumHandoffIntent?: PremiumSendIntent | null;
   /** Optional: run after user picks reviewer-handoff; parent may reset Pro celebration + phase. */
   onContinueToReviewerSetup?: () => void;
+  /**
+   * Workspace stepper: when `section` is `finalize` only, recipient UI is not mounted — use this to jump to the
+   * Recipients step (e.g. after accepting edits, “Go to signers”).
+   */
+  onOwnerJumpToRecipientsStep?: () => void;
   /** Simple launch: paid-Pro send routing metadata — parent skips SendConversionModal when `bypass` is true. */
   onPaidProSendBranchMeta?: (meta: PaidProSendBranchMeta) => void;
   /** Paid Pro VS01 return: signature-first landing — avoid review-first status and negotiation-heavy chrome. */
@@ -757,6 +785,7 @@ const AgreementReview: React.FC<Props> = ({
   postVs01SignatureFirstLanding = false,
   onBridgeHandoffDraftSnapshot,
   reviewLinkMintFailureMessage = null,
+  onOwnerJumpToRecipientsStep,
 }) => {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState<string>("");
@@ -794,6 +823,11 @@ const AgreementReview: React.FC<Props> = ({
   const [negotiationCommitSeq, setNegotiationCommitSeq] = useState(0);
   const [compareViewMode, setCompareViewMode] = useState<"structured" | "redline">("structured");
   const [recipientProposalBusy, setRecipientProposalBusy] = useState<"apply" | "reject" | null>(null);
+  /** After “Make more changes”, nudge owner toward editing before locking for signature. */
+  const [ownerMakeMoreChangesHint, setOwnerMakeMoreChangesHint] = useState(false);
+  /** After accepting recipient suggested edits — highlight finalize / signing handoff until lock or dismiss. */
+  const [ownerPostAcceptSigningGuide, setOwnerPostAcceptSigningGuide] = useState(false);
+  const recipientProposalDetailRef = useRef<HTMLDivElement | null>(null);
   const [rpCompareMode, setRpCompareMode] = useState<"structured" | "redline">("structured");
   const [copyDraftFlash, setCopyDraftFlash] = useState(false);
   const [copyClauseFlash, setCopyClauseFlash] = useState(false);
@@ -1151,6 +1185,7 @@ const AgreementReview: React.FC<Props> = ({
   useEffect(() => {
     if (openRecipientProposals.length === 0) {
       setRecipientProposalFocusId(null);
+      setOwnerMakeMoreChangesHint(false);
       return;
     }
     setRecipientProposalFocusId((cur) => {
@@ -1198,6 +1233,13 @@ const AgreementReview: React.FC<Props> = ({
   const rpRedlineLarge =
     Boolean(rpRedlinePreview) &&
     (rpRedlinePreview!.segments.length > 120 || rpRedlineCharCount > 24_000);
+  const rpRedlineHasDiff = Boolean(rpRedlinePreview?.hasChanges);
+
+  useEffect(() => {
+    if (rpCompareMode === "redline" && !rpRedlineHasDiff) {
+      setRpCompareMode("structured");
+    }
+  }, [rpCompareMode, rpRedlineHasDiff]);
 
   const negotiationTimelineSignals = useMemo(() => {
     if (!vb || vb.versions.length === 0) return null;
@@ -1536,6 +1578,15 @@ const AgreementReview: React.FC<Props> = ({
       trackAgreementFunnelEvent("owner_applied_edits", { surface: "agreement_review" }, { planTier: String(access.tier), agreementId });
       await loadDraft({ silent: true });
       await loadRendered();
+      setOwnerMakeMoreChangesHint(false);
+      setOwnerPostAcceptSigningGuide(true);
+      window.requestAnimationFrame(() => {
+        const el = document.getElementById("owner-finalize-signing");
+        el?.scrollIntoView({ behavior: "smooth", block: "start" });
+        window.requestAnimationFrame(() => {
+          el?.focus({ preventScroll: true });
+        });
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not apply suggestion.");
     } finally {
@@ -2082,7 +2133,12 @@ const AgreementReview: React.FC<Props> = ({
   useEffect(() => {
     expiryWarnLoggedRef.current = false;
     watermarkShownLoggedRef.current = false;
+    setOwnerPostAcceptSigningGuide(false);
   }, [agreementId]);
+
+  useEffect(() => {
+    if (signingLocked) setOwnerPostAcceptSigningGuide(false);
+  }, [signingLocked]);
 
   useEffect(() => {
     if (!economicsOverlay || economicsOverlay.tier !== "free") return;
@@ -3544,28 +3600,29 @@ const AgreementReview: React.FC<Props> = ({
     ) : null;
 
   /**
-   * Owner QA surface: incoming `recipient_proposal_pending` — queue, material change summary, draft compare,
-   * explicit Apply / reject paths (`applyOpenRecipientProposal` / `rejectOpenRecipientProposal`). Master draft
-   * unchanged until owner applies; audit_log records proposal events.
+   * Owner-facing: incoming `recipient_proposal_pending` — suggested edits, compare, accept / revise / reject.
+   * Master draft is unchanged until the owner accepts; audit records proposal events.
    */
   const recipientProposalPanel =
     showWorkspaceRichHistory &&
     openRecipientProposal &&
     recipientProposalNormalized &&
     rpRevisionCompare &&
-    rpRedlinePreview &&
     !signingLocked &&
     !collaborationReadOnly ? (
       <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex flex-col gap-3">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-amber-100/90">
-              {openRecipientProposals.length > 1
-                ? `${OWNER_INCOMING_SUGGESTED_EDITS_HEADING} pending (${openRecipientProposals.length})`
-                : `${OWNER_INCOMING_SUGGESTED_EDITS_HEADING} — pending your review`}
-            </div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200/90">
+              {OWNER_REVIEW_BEFORE_SIGNING}
+            </p>
+            <h2 className="mt-1 text-base font-semibold tracking-tight text-amber-50">
+              {OWNER_SUGGESTED_CHANGES_RECEIVED_TITLE}
+            </h2>
+            <p className="mt-1 text-sm leading-snug text-amber-100/90">{OWNER_SUGGESTED_CHANGES_REVIEW_SUBTEXT}</p>
+            <p className="mt-2 text-xs leading-snug text-amber-200/90">{OWNER_SUGGESTED_CHANGES_NOT_SIGNED_LINE}</p>
             {openRecipientProposal.proposer_display_name || openRecipientProposal.proposer_id ? (
-              <p className="mt-1 text-[11px] font-medium text-amber-50/95">
+              <p className="mt-2 text-[11px] font-medium text-amber-50/95">
                 Proposed by{" "}
                 {openRecipientProposal.proposer_display_name?.trim() ||
                   openRecipientProposal.proposer_id ||
@@ -3573,12 +3630,12 @@ const AgreementReview: React.FC<Props> = ({
               </p>
             ) : null}
             {openRecipientProposals.length > 1 ? (
-              <div className="mt-2">
-                <label className="text-[10px] text-slate-500" htmlFor="owner-proposal-queue">
-                  Queue
+              <div className="mt-3">
+                <label className="text-[10px] text-slate-400" htmlFor="owner-suggested-changes-select">
+                  {OWNER_MULTIPLE_SUGGESTIONS_LABEL}
                 </label>
                 <select
-                  id="owner-proposal-queue"
+                  id="owner-suggested-changes-select"
                   className="mt-0.5 block w-full max-w-md rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-[11px] text-slate-100"
                   value={recipientProposalFocusId || openRecipientProposal.proposal_id}
                   onChange={(e) => setRecipientProposalFocusId(e.target.value || null)}
@@ -3594,165 +3651,204 @@ const AgreementReview: React.FC<Props> = ({
                 </select>
               </div>
             ) : null}
-            <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-300">
-              {MATERIAL_CHANGE_SUMMARY_LABEL}
-            </div>
-            <p className="mt-1 text-[10px] font-medium text-slate-200/95">
-              Received: suggested edits to review
-            </p>
-            <p className="mt-1 text-[10px] leading-snug text-amber-200/85">
-              Compare their proposal to your current draft. Applying merges into your saved draft; declining dismisses
-              only this item. If you have other open requests, you can review them after this one. Nothing changes without
-              your choice here.
-            </p>
-            {openRecipientProposal.instruction ? (
-              <p className="mt-2 text-[11px] text-slate-300">
-                <span className="font-semibold text-slate-400">Their note: </span>
-                {openRecipientProposal.instruction.length > 280
-                  ? `${openRecipientProposal.instruction.slice(0, 277)}…`
-                  : openRecipientProposal.instruction}
-              </p>
-            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn rounded-lg border border-amber-700/50 bg-amber-950/40 px-3 py-2 text-xs font-semibold text-amber-50 hover:bg-amber-950/70"
+              onClick={() => {
+                recipientProposalDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                window.requestAnimationFrame(() => {
+                  recipientProposalDetailRef.current?.focus({ preventScroll: true });
+                });
+              }}
+            >
+              {OWNER_CTA_REVIEW_SUGGESTED_CHANGES}
+            </button>
+            <button
+              type="button"
+              className="btn rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-45"
+              disabled={recipientProposalBusy !== null}
+              onClick={() => void applyOpenRecipientProposal()}
+            >
+              {recipientProposalBusy === "apply" ? "Applying…" : OWNER_CTA_ACCEPT_AND_CONTINUE}
+            </button>
+            <button
+              type="button"
+              className="btn rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-900/60 disabled:opacity-45"
+              disabled={recipientProposalBusy !== null}
+              onClick={() => {
+                setOwnerMakeMoreChangesHint(true);
+                window.requestAnimationFrame(() => {
+                  document.getElementById("owner-revise-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  document.getElementById("agreement-review-revision-instruction")?.focus();
+                });
+              }}
+            >
+              {OWNER_CTA_MAKE_MORE_CHANGES}
+            </button>
+            <button
+              type="button"
+              className="btn rounded-lg border border-rose-900/50 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-950/40 disabled:opacity-45"
+              disabled={recipientProposalBusy !== null}
+              onClick={() => void rejectOpenRecipientProposal()}
+            >
+              {recipientProposalBusy === "reject" ? "Rejecting…" : OWNER_CTA_REJECT_SUGGESTIONS}
+            </button>
           </div>
         </div>
-        <div className="mt-3 inline-flex rounded-lg border border-slate-700/90 bg-slate-950/40 p-0.5">
-          <button
-            type="button"
-            className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
-              rpCompareMode === "structured"
-                ? "bg-slate-800 text-slate-100 shadow-sm"
-                : "text-slate-500 hover:text-slate-300"
-            }`}
-            onClick={() => setRpCompareMode("structured")}
-          >
-            Compare drafts
-          </button>
-          <button
-            type="button"
-            className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
-              rpCompareMode === "redline"
-                ? "bg-slate-800 text-slate-100 shadow-sm"
-                : "text-slate-500 hover:text-slate-300"
-            }`}
-            onClick={() => setRpCompareMode("redline")}
-          >
-            View changes
-          </button>
-        </div>
 
-        {rpCompareMode === "structured" ? (
-          <>
-            <div className="mt-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Changed sections</div>
-              {rpRevisionCompare.hasChanges ? (
-                <ul className="mt-1.5 mb-0 list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">
-                  {rpRevisionCompare.changedFieldKeys.map((key) => (
-                    <li key={key}>{agreementFieldLabel(key)}</li>
-                  ))}
-                </ul>
+        <div
+          id="owner-suggested-changes-detail"
+          ref={recipientProposalDetailRef}
+          tabIndex={-1}
+          className="mt-5 rounded-md border border-amber-800/30 bg-slate-950/25 p-3 outline-none ring-amber-700/30 focus-visible:ring-2"
+        >
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">{MATERIAL_CHANGE_SUMMARY_LABEL}</div>
+          <p className="mt-1 text-[11px] text-slate-300">
+            Your current draft is unchanged until you accept. Side by side: original (left) and their suggested version
+            (right).
+          </p>
+          {openRecipientProposal.instruction ? (
+            <p className="mt-2 text-[11px] text-slate-200">
+              <span className="font-semibold text-slate-400">Requested changes: </span>
+              {openRecipientProposal.instruction.length > 400
+                ? `${openRecipientProposal.instruction.slice(0, 397)}…`
+                : openRecipientProposal.instruction}
+            </p>
+          ) : null}
+
+          <div className="mt-3 inline-flex rounded-lg border border-slate-700/90 bg-slate-950/40 p-0.5">
+            <button
+              type="button"
+              className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                rpCompareMode === "structured"
+                  ? "bg-slate-800 text-slate-100 shadow-sm"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+              onClick={() => setRpCompareMode("structured")}
+            >
+              Compare drafts
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                rpCompareMode === "redline"
+                  ? "bg-slate-800 text-slate-100 shadow-sm"
+                  : "text-slate-500 hover:text-slate-300"
+              } ${!rpRedlineHasDiff ? "cursor-not-allowed opacity-45" : ""}`}
+              disabled={!rpRedlineHasDiff}
+              onClick={() => {
+                if (rpRedlineHasDiff) setRpCompareMode("redline");
+              }}
+            >
+              View changes
+            </button>
+          </div>
+
+          {rpCompareMode === "structured" ? (
+            <>
+              <div className="mt-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Changed sections</div>
+                {rpRevisionCompare.hasChanges ? (
+                  <ul className="mt-1.5 mb-0 list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">
+                    {rpRevisionCompare.changedFieldKeys.map((key) => (
+                      <li key={key}>{agreementFieldLabel(key)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1.5 text-[11px] text-amber-200/90">
+                    No section-by-section changes detected in the form fields.
+                  </p>
+                )}
+              </div>
+              {rpRevisionCompare.changedFields.filter((r) => r.changed).length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {rpRevisionCompare.changedFields
+                    .filter((r) => r.changed)
+                    .map((row) => (
+                      <div
+                        key={row.field}
+                        className="rounded-md border border-amber-800/35 bg-amber-950/15 px-3 py-2 text-[11px] leading-snug text-slate-200"
+                      >
+                        <div className="font-semibold text-amber-100/95">{agreementFieldLabel(row.field)}</div>
+                        <div className="mt-1 text-slate-400">
+                          <span className="text-slate-500">Before: </span>
+                          {row.before?.trim() ? row.before : "—"}
+                        </div>
+                        <div className="mt-0.5 text-slate-200">
+                          <span className="text-slate-500">After: </span>
+                          {row.after?.trim() ? row.after : "—"}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : null}
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-md border border-slate-800/90 bg-white p-4 text-slate-900">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Current draft</div>
+                  <div
+                    className="prose prose-sm mt-2 max-h-[min(48vh,26rem)] max-w-none overflow-y-auto overscroll-y-contain touch-pan-y text-slate-900"
+                    dangerouslySetInnerHTML={{
+                      __html: renderedHtmlDisplay || "<p>No preview.</p>",
+                    }}
+                  />
+                </div>
+                <div className="rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                    Their suggested edits
+                  </div>
+                  <div
+                    className="prose prose-sm mt-2 max-h-[min(48vh,26rem)] max-w-none overflow-y-auto overscroll-y-contain touch-pan-y text-slate-900"
+                    dangerouslySetInnerHTML={{
+                      __html: recipientProposalHtmlDisplay || "<p>No preview.</p>",
+                    }}
+                  />
+                </div>
+              </div>
+            </>
+          ) : rpRedlinePreview ? (
+            <div className="mt-4">
+              {rpRedlineLarge ? (
+                <p className="mb-2 text-[10px] leading-snug text-slate-500">
+                  Large change — comparing versions side by side may be easier.
+                </p>
+              ) : null}
+              {rpRedlineHasDiff ? (
+                <div className="max-h-[28rem] overflow-y-auto overscroll-y-contain touch-pan-y rounded-md border border-slate-700/80 bg-white p-4 text-[0.8125rem] leading-relaxed text-slate-900">
+                  {rpRedlinePreview.segments.map((seg, idx) => {
+                    if (seg.type === "same") {
+                      return <span key={`rprl_${idx}`}>{seg.text}</span>;
+                    }
+                    if (seg.type === "insert") {
+                      return (
+                        <span
+                          key={`rprl_${idx}`}
+                          className="bg-emerald-100/95 text-emerald-950 underline decoration-emerald-700/35 decoration-1 underline-offset-2"
+                        >
+                          {seg.text}
+                        </span>
+                      );
+                    }
+                    return (
+                      <span
+                        key={`rprl_${idx}`}
+                        className="bg-rose-100/90 text-rose-950 line-through decoration-rose-700/40 decoration-1"
+                      >
+                        {seg.text}
+                      </span>
+                    );
+                  })}
+                </div>
               ) : (
-                <p className="mt-1.5 text-[11px] text-amber-200/90">
-                  No section-by-section changes detected in the form fields.
+                <p className="text-[11px] text-amber-200/90">
+                  No inline text highlights for this suggestion — use Compare drafts to review the full documents.
                 </p>
               )}
             </div>
-            {rpRevisionCompare.changedFields.filter((r) => r.changed).length > 0 ? (
-              <div className="mt-3 space-y-2">
-                {rpRevisionCompare.changedFields
-                  .filter((r) => r.changed)
-                  .map((row) => (
-                    <div
-                      key={row.field}
-                      className="rounded-md border border-amber-800/35 bg-amber-950/15 px-3 py-2 text-[11px] leading-snug text-slate-200"
-                    >
-                      <div className="font-semibold text-amber-100/95">{agreementFieldLabel(row.field)}</div>
-                      <div className="mt-1 text-slate-400">
-                        <span className="text-slate-500">Before: </span>
-                        {row.before?.trim() ? row.before : "—"}
-                      </div>
-                      <div className="mt-0.5 text-slate-200">
-                        <span className="text-slate-500">After: </span>
-                        {row.after?.trim() ? row.after : "—"}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            ) : null}
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-md border border-slate-800/90 bg-white p-4 text-slate-900">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">Current draft</div>
-                <div
-                  className="prose prose-sm mt-2 max-h-[min(48vh,26rem)] max-w-none overflow-y-auto overscroll-y-contain touch-pan-y text-slate-900"
-                  dangerouslySetInnerHTML={{
-                    __html: renderedHtmlDisplay || "<p>No preview.</p>",
-                  }}
-                />
-              </div>
-              <div className="rounded-md border border-emerald-900/30 bg-white p-4 text-slate-900">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                  Their suggested edits
-                </div>
-                <div
-                  className="prose prose-sm mt-2 max-h-[min(48vh,26rem)] max-w-none overflow-y-auto overscroll-y-contain touch-pan-y text-slate-900"
-                  dangerouslySetInnerHTML={{
-                    __html: recipientProposalHtmlDisplay || "<p>No preview.</p>",
-                  }}
-                />
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="mt-4">
-            {rpRedlineLarge ? (
-              <p className="mb-2 text-[10px] leading-snug text-slate-500">
-                Large change — comparing versions side by side may be easier.
-              </p>
-            ) : null}
-            <div className="max-h-[28rem] overflow-y-auto overscroll-y-contain touch-pan-y rounded-md border border-slate-700/80 bg-white p-4 text-[0.8125rem] leading-relaxed text-slate-900">
-              {rpRedlinePreview.segments.map((seg, idx) => {
-                if (seg.type === "same") {
-                  return <span key={`rprl_${idx}`}>{seg.text}</span>;
-                }
-                if (seg.type === "insert") {
-                  return (
-                    <span
-                      key={`rprl_${idx}`}
-                      className="bg-emerald-100/95 text-emerald-950 underline decoration-emerald-700/35 decoration-1 underline-offset-2"
-                    >
-                      {seg.text}
-                    </span>
-                  );
-                }
-                return (
-                  <span
-                    key={`rprl_${idx}`}
-                    className="bg-rose-100/90 text-rose-950 line-through decoration-rose-700/40 decoration-1"
-                  >
-                    {seg.text}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-45"
-            disabled={recipientProposalBusy !== null}
-            onClick={() => void applyOpenRecipientProposal()}
-          >
-            {recipientProposalBusy === "apply" ? "Applying…" : "Apply changes"}
-          </button>
-          <button
-            type="button"
-            className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60 disabled:opacity-45"
-            disabled={recipientProposalBusy !== null}
-            onClick={() => void rejectOpenRecipientProposal()}
-          >
-            {recipientProposalBusy === "reject" ? "Declining…" : "Decline"}
-          </button>
+          ) : (
+            <p className="mt-4 text-[11px] text-amber-200/90">Preview unavailable for this suggestion.</p>
+          )}
         </div>
       </div>
     ) : null;
@@ -4064,7 +4160,12 @@ const AgreementReview: React.FC<Props> = ({
     "Example: remove equity, keep consulting only, and set payment to $5,000/month after launch";
 
   const reviseBlock = isWorkspace ? (
-    <div className="rounded-lg border border-slate-800/90 bg-slate-900/40 p-4">
+    <div id="owner-revise-workspace" className="rounded-lg border border-slate-800/90 bg-slate-900/40 p-4">
+      {ownerMakeMoreChangesHint ? (
+        <p className="mb-3 rounded-md border border-sky-800/40 bg-sky-950/30 px-3 py-2 text-sm leading-snug text-sky-100">
+          {OWNER_MAKE_MORE_CHANGES_LINE}
+        </p>
+      ) : null}
       {!isSimpleHomeReview ? (
         <div className="mb-3 text-sm font-semibold tracking-tight text-slate-100">Type or speak a change</div>
       ) : null}
@@ -4437,7 +4538,7 @@ const AgreementReview: React.FC<Props> = ({
       : null;
 
   const recipientsBlock = isWorkspace ? (canonicalUnpaidSendShell || sendShellTierGatePending ? null : (
-    <div className={isSimpleHomeReview ? "space-y-5" : "space-y-5"}>
+    <div id="owner-signing-recipients-setup" className={isSimpleHomeReview ? "space-y-5" : "space-y-5"}>
       {isSimpleHomeReview ? null : (
         <p className="text-sm leading-relaxed text-slate-400">
           Add signers and reviewers below. Use the button at the bottom to send signature requests.
@@ -5310,6 +5411,12 @@ const AgreementReview: React.FC<Props> = ({
       : 0;
   const signingHandoffReady =
     Boolean(isSigningLockActive(vb)) && signerCount >= 1 && requiredComplete;
+  const ownerSigningNeedsRecipientSetup = signerCount < 1 || signingApproverMissingList.length > 0;
+  const ownerPostAcceptNextStepCopy = ownerSigningNeedsRecipientSetup
+    ? OWNER_NEXT_CONFIRM_SIGNERS_AND_SEND
+    : signingHandoffReady
+      ? OWNER_NEXT_SEND_FOR_SIGNATURE
+      : OWNER_NEXT_LOCK_THEN_SEND;
 
   const lockVidPanel = vb?.signingLock?.lockedVersionId ?? "";
   const lockedVerForPanel =
@@ -5585,7 +5692,7 @@ const AgreementReview: React.FC<Props> = ({
             window.location.assign("/");
           }}
         >
-          Send to signing
+          {signingHandoffReady ? OWNER_SEND_FOR_SIGNATURE : "Send to signing"}
         </button>
       </div>
     </div>
@@ -5655,6 +5762,11 @@ const AgreementReview: React.FC<Props> = ({
         <div className="rounded-lg border border-emerald-700/45 bg-emerald-950/25 px-4 py-4 text-sm text-emerald-100">
           <p className="font-semibold text-emerald-50">Final version ready for signature</p>
           <p className="mt-1 text-xs text-emerald-100/85">Recipients will sign this final version only.</p>
+          {signingHandoffReady ? (
+            <p className="mt-2 text-xs font-medium text-sky-100/95">{OWNER_NEXT_SEND_FOR_SIGNATURE}</p>
+          ) : ownerSigningNeedsRecipientSetup ? (
+            <p className="mt-2 text-xs font-medium text-amber-100/95">{OWNER_NEXT_CONFIRM_SIGNERS_AND_SEND}</p>
+          ) : null}
           {ownerReopenSlot ? <div className="mt-3">{ownerReopenSlot}</div> : null}
         </div>
           ) : finalizeReadOnly ? (
@@ -5666,8 +5778,60 @@ const AgreementReview: React.FC<Props> = ({
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-700/90 bg-slate-900/35 px-4 py-4 text-sm text-slate-200">
+        <div
+          id="owner-finalize-signing"
+          tabIndex={-1}
+          className="rounded-lg border border-slate-700/90 bg-slate-900/35 px-4 py-4 text-sm text-slate-200 outline-none ring-sky-500/30 focus-visible:ring-2"
+        >
+          {ownerPostAcceptSigningGuide ? (
+            <div
+              className="mb-4 rounded-lg border border-emerald-700/45 bg-emerald-950/30 px-3 py-3"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-sm font-semibold text-emerald-50">{OWNER_ACCEPT_SUGGESTED_CHANGES_SUCCESS_TITLE}</p>
+              <p className="mt-1 text-xs leading-snug text-emerald-100/90">
+                {OWNER_ACCEPT_SUGGESTED_CHANGES_SUCCESS_DETAIL}
+              </p>
+              <p className="mt-2 text-xs leading-snug text-slate-300/95">{OWNER_POST_ACCEPT_LOCK_EXPLAINER}</p>
+              <p className="mt-2 text-xs font-medium text-sky-100/95">{ownerPostAcceptNextStepCopy}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {ownerSigningNeedsRecipientSetup ? (
+                  <button
+                    type="button"
+                    className="btn rounded-lg border border-sky-700/50 bg-sky-950/40 px-3 py-1.5 text-xs font-semibold text-sky-50 hover:bg-sky-950/70"
+                    onClick={() => {
+                      if (section === "finalize" && onOwnerJumpToRecipientsStep) {
+                        onOwnerJumpToRecipientsStep();
+                        window.setTimeout(() => {
+                          document
+                            .getElementById("owner-signing-recipients-setup")
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }, 120);
+                        return;
+                      }
+                      document
+                        .getElementById("owner-signing-recipients-setup")
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    {OWNER_CTA_GO_TO_SIGNERS}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-900/60"
+                  onClick={() => setOwnerPostAcceptSigningGuide(false)}
+                >
+                  {OWNER_CTA_DISMISS_SUCCESS}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <p className="font-semibold text-slate-100">Lock this version for signing</p>
+          {!ownerPostAcceptSigningGuide ? (
+            <p className="mt-1 text-xs font-medium text-sky-200/95">{OWNER_FINALIZE_LOCK_HINT}</p>
+          ) : null}
           <p className="mt-1 text-xs text-slate-400">
             The revision highlighted in history (
             {versionHumanLabelForLock || `row ${versionOrdinalToLock || "—"}`}) becomes the stable signing copy. Pick
@@ -5762,7 +5926,11 @@ const AgreementReview: React.FC<Props> = ({
               })();
             }}
           >
-            {signingLockBusy ? "Locking…" : "Finalize this version for signing"}
+            {signingLockBusy
+              ? "Locking…"
+              : ownerPostAcceptSigningGuide
+                ? OWNER_LOCK_AND_CONTINUE_TO_SIGNING
+                : "Finalize this version for signing"}
           </button>
         </div>
           )}
