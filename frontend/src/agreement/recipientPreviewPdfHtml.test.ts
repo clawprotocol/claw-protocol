@@ -128,4 +128,11 @@ describe("wrapRecipientVersionPdfHtml + sanitize", () => {
   it("sanitize strips scripts", () => {
     expect(sanitizeHtmlForRecipientPdfExport('<p>x</p><script>1</script>')).not.toContain("<script");
   });
+
+  it("does not use redline styling or audit header — original/proposed exports are single-version HTML only", () => {
+    const html = wrapRecipientVersionPdfHtml("<p>Baseline agreement text only.</p>");
+    expect(html).not.toMatch(/line-through/i);
+    expect(html).not.toMatch(/Redline Review PDF/);
+    expect(html).not.toMatch(/text-decoration:underline/i);
+  });
 });

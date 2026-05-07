@@ -128,6 +128,134 @@ describe("alignParsedBlocksToLegalRedline", () => {
   });
 });
 
+/** QA-style fixture: payment edits must stay in Section 3, not bleed into other clauses. */
+function webDevAgreementOriginalPlain(): string {
+  return [
+    "Web Development Agreement",
+    "Between ClientCo and DevShop LLC.",
+    "",
+    "RECITALS",
+    "Client engages Developer for web services.",
+    "",
+    "3.2 Payment Terms",
+    "Invoices are due on receipt of invoice. Client pays undisputed amounts within ten days.",
+    "",
+    "3.3 Past Due Amounts",
+    "Late invoices bear interest at five percent per month.",
+    "",
+    "5 Confidentiality",
+    "Recipient shall hold Confidential Information in strict confidence for five years.",
+    "",
+    "11 Force Majeure",
+    "Neither party is liable for delays caused by events beyond reasonable control.",
+    "",
+    "13 Governing Law and Venue",
+    "This Agreement is governed by the laws of Delaware. Venue lies in Wilmington courts.",
+    "",
+    "IN WITNESS WHEREOF",
+    "ClientCo",
+    "By: __________________ Name:",
+    "",
+    "DevShop LLC",
+    "By: __________________ Name:",
+    "",
+    "Created with LawDog — Draft for Review.",
+  ].join("\n");
+}
+
+function webDevAgreementProposedPlain(): string {
+  return [
+    "Web Development Agreement",
+    "Between ClientCo and DevShop LLC.",
+    "",
+    "RECITALS",
+    "Client engages Developer for web services.",
+    "",
+    "3.2 Payment Terms",
+    "Invoices are due Net 30. Client pays undisputed amounts within thirty days. If any undisputed invoice is more than fifteen days past due, Developer may pause work until cured.",
+    "",
+    "3.3 Past Due Amounts",
+    "Late invoices bear interest at five percent per month.",
+    "",
+    "5 Confidentiality",
+    "Recipient shall hold Confidential Information in strict confidence for five years.",
+    "",
+    "11 Force Majeure",
+    "Neither party is liable for delays caused by events beyond reasonable control.",
+    "",
+    "13 Governing Law and Venue",
+    "This Agreement is governed by the laws of Delaware. Venue lies in Wilmington courts.",
+    "",
+    "IN WITNESS WHEREOF",
+    "ClientCo",
+    "By: __________________ Name:",
+    "",
+    "DevShop LLC",
+    "By: __________________ Name:",
+    "",
+    "Created with LawDog — Draft for Review.",
+  ].join("\n");
+}
+
+describe("Web Development Agreement redline regression (QA)", () => {
+  it("does not duplicate document title as separate conflicting blocks", () => {
+    const cur = webDevAgreementOriginalPlain();
+    const prop = webDevAgreementProposedPlain();
+    const doc = buildLegalRedlineDocumentViewModel(cur, prop);
+    const titleHits = doc.blocks.filter((b) =>
+      `${b.currentText ?? ""}${b.proposedText ?? ""}`.includes("Web Development Agreement"),
+    );
+    expect(titleHits.length).toBe(1);
+  });
+
+  it("keeps Net 30 / pause-work payment language in clause 3.2 only (not confidentiality, force majeure, venue)", () => {
+    const doc = buildLegalRedlineDocumentViewModel(webDevAgreementOriginalPlain(), webDevAgreementProposedPlain());
+
+    expect(doc.blocks.some((b) => b.clauseNumber === "3.2")).toBe(true);
+    for (const n of ["5", "11", "13"]) {
+      expect(doc.blocks.some((b) => b.clauseNumber === n)).toBe(true);
+    }
+
+    const insertsFor = (clause: string) =>
+      doc.blocks
+        .filter((b) => b.clauseNumber === clause)
+        .flatMap((b) => b.segments.filter((s) => s.type === "insert"))
+        .map((s) => s.text)
+        .join(" ");
+
+    expect(insertsFor("3.2")).toMatch(/Net\s*30/i);
+    expect(insertsFor("3.2")).toMatch(/pause/i);
+
+    for (const clause of ["5", "11", "13"]) {
+      expect(insertsFor(clause)).not.toMatch(/Net\s*30/i);
+      expect(insertsFor(clause)).not.toMatch(/pause\s+work/i);
+    }
+  });
+
+  it("does not double page-count by concatenating full original and full proposed for every block", () => {
+    const cur = webDevAgreementOriginalPlain();
+    const prop = webDevAgreementProposedPlain();
+    const doc = buildLegalRedlineDocumentViewModel(cur, prop);
+    const doubleDump = cur + "\n" + prop;
+    const redlineJoin = doc.blocks
+      .flatMap((b) => b.segments.map((s) => s.text))
+      .join("");
+    expect(redlineJoin.length).toBeLessThan(doubleDump.length * 0.85);
+  });
+
+  it("does not show more than one LawDog draft footer as a material change", () => {
+    const doc = buildLegalRedlineDocumentViewModel(webDevAgreementOriginalPlain(), webDevAgreementProposedPlain());
+    const footerish = doc.blocks.filter(
+      (b) =>
+        (b.currentText ?? b.proposedText ?? "").toLowerCase().includes("created with lawdog") ||
+        b.label?.toLowerCase().includes("lawdog"),
+    );
+    for (const b of footerish) {
+      expect(b.hasChange).toBe(false);
+    }
+  });
+});
+
 describe("filterNarrowRecipientPaymentRedlineNoise", () => {
   it("collapses signature, party-line, and LawDog drift while keeping payment Net 30 redline", () => {
     const cur = [

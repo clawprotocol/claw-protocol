@@ -323,6 +323,174 @@ function clauseKeysEqual(a?: string, b?: string): boolean {
   return normalizeClauseNumberKey(a) === normalizeClauseNumberKey(b);
 }
 
+function normPlainCollapseWs(s: string): string {
+  return normalizeNewlinesForLegalRedline(String(s ?? ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function jaccardWordSimilarity(a: string, b: string): number {
+  const wa = normPlainCollapseWs(a)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const wb = normPlainCollapseWs(b)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (wa.length === 0 && wb.length === 0) return 1;
+  const A = new Set(wa);
+  const B = new Set(wb);
+  let inter = 0;
+  for (const w of A) {
+    if (B.has(w)) inter++;
+  }
+  const union = A.size + B.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+function kindsCompatibleForAlignment(ca: ParsedPlainBlock, pb: ParsedPlainBlock): boolean {
+  if (ca.kind === pb.kind) return true;
+  if (
+    (ca.kind === "paragraph" || ca.kind === "clause") &&
+    (pb.kind === "paragraph" || pb.kind === "clause")
+  ) {
+    return true;
+  }
+  if (
+    (ca.kind === "heading" || ca.kind === "title") &&
+    (pb.kind === "heading" || pb.kind === "title")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Optimal global alignment score for unnumbered blocks (Needleman–Wunsch).
+ * Hard-rejects incompatible kinds and unrelated low-overlap pairs so gaps beat bad matches.
+ */
+function matchScoreForUnnumberedDp(ca: ParsedPlainBlock, pb: ParsedPlainBlock): number {
+  if (!kindsCompatibleForAlignment(ca, pb)) return -2_000_000;
+
+  const hk = normHeadingKey(ca.headingLine);
+  const hp = normHeadingKey(pb.headingLine);
+  const jac = jaccardWordSimilarity(ca.rawText, pb.rawText);
+
+  if (!(hk && hp && hk === hp) && jac < 0.09) {
+    return -2_000_000;
+  }
+
+  let score = 0;
+  if (hk && hp && hk === hp) {
+    score += 950;
+  } else if (
+    hk &&
+    hp &&
+    (hk.startsWith(hp.slice(0, Math.min(28, hp.length))) || hp.startsWith(hk.slice(0, Math.min(28, hk.length))))
+  ) {
+    score += 420;
+  }
+
+  score += Math.round(jac * 520);
+  const od = Math.abs(ca.sourceIndex - pb.sourceIndex);
+  score += Math.max(0, 140 - od * 28);
+  return score;
+}
+
+/**
+ * Diff two aligned blocks: word-level when similarity is high; otherwise one delete + one insert
+ * (avoids cross-section token weaving from global LCS).
+ */
+function diffAlignedBlockSegments(currentText: string, proposedText: string): LegalRedlineSegment[] {
+  const cur = String(currentText ?? "");
+  const prop = String(proposedText ?? "");
+  if (normPlainCollapseWs(cur) === normPlainCollapseWs(prop)) {
+    return cur ? [{ type: "same", text: cur }] : [{ type: "same", text: "" }];
+  }
+  if (!prop.trim()) {
+    return cur.trim() ? [{ type: "delete", text: cur }] : [{ type: "same", text: "" }];
+  }
+  if (!cur.trim()) {
+    return mapSegments(buildAgreementRedline("", prop).segments);
+  }
+
+  const jac = jaccardWordSimilarity(cur, prop);
+  const maxLen = Math.max(cur.length, prop.length);
+  if (maxLen > 280 && jac < 0.26) {
+    return [
+      { type: "delete", text: cur },
+      { type: "insert", text: prop },
+    ];
+  }
+
+  return mapSegments(buildAgreementRedline(cur, prop).segments);
+}
+
+function alignUnnumberedBlockSequencesDp(
+  uCur: ParsedPlainBlock[],
+  uProp: ParsedPlainBlock[],
+): Map<number, number> {
+  const pairs = new Map<number, number>();
+  const n = uCur.length;
+  const m = uProp.length;
+  const GAP = -58;
+  const NEG = -1e15;
+
+  const dp: number[][] = Array.from({ length: n + 1 }, () => Array(m + 1).fill(NEG));
+  dp[0]![0] = 0;
+  for (let i = 1; i <= n; i++) {
+    dp[i]![0] = dp[i - 1]![0]! + GAP;
+  }
+  for (let j = 1; j <= m; j++) {
+    dp[0]![j] = dp[0]![j - 1]! + GAP;
+  }
+
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      const ms = matchScoreForUnnumberedDp(uCur[i - 1]!, uProp[j - 1]!);
+      const diag = dp[i - 1]![j - 1]! + ms;
+      const up = dp[i - 1]![j]! + GAP;
+      const left = dp[i]![j - 1]! + GAP;
+      dp[i]![j] = Math.max(diag, up, left);
+    }
+  }
+
+  let i = n;
+  let j = m;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0) {
+      const ms = matchScoreForUnnumberedDp(uCur[i - 1]!, uProp[j - 1]!);
+      const diag = dp[i - 1]![j - 1]! + ms;
+      if (dp[i]![j] === diag) {
+        pairs.set(uProp[j - 1]!.sourceIndex, uCur[i - 1]!.sourceIndex);
+        i--;
+        j--;
+        continue;
+      }
+    }
+    if (i > 0 && dp[i]![j] === dp[i - 1]![j]! + GAP) {
+      i--;
+      continue;
+    }
+    if (j > 0 && dp[i]![j] === dp[i]![j - 1]! + GAP) {
+      j--;
+      continue;
+    }
+    if (i > 0 && j > 0) {
+      pairs.set(uProp[j - 1]!.sourceIndex, uCur[i - 1]!.sourceIndex);
+      i--;
+      j--;
+    } else if (i > 0) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+
+  return pairs;
+}
+
 export function alignParsedBlocksToLegalRedline(
   currentBlocks: ParsedPlainBlock[],
   proposedBlocks: ParsedPlainBlock[],
@@ -339,31 +507,61 @@ export function alignParsedBlocksToLegalRedline(
     return undefined;
   };
 
-  const nextUnusedCurrentUnnumberedMatching = (pb: ParsedPlainBlock): ParsedPlainBlock | undefined => {
-    const key = normHeadingKey(pb.headingLine);
-    if (!key) return undefined;
-    for (const ca of currentBlocks) {
-      if (usedCurrent.has(ca.sourceIndex)) continue;
-      if (ca.clauseNumber) continue;
-      if (normHeadingKey(ca.headingLine) === key) return ca;
+  // Pair numbered clauses first; remaining unnumbered blocks are aligned with global DP (document order).
+  const clausePairPbToCa = new Map<number, number>();
+  for (const pb of proposedBlocks) {
+    if (!pb.clauseNumber) continue;
+    const ca = nextUnusedCurrentWithClause(pb.clauseNumber);
+    if (ca) {
+      usedCurrent.add(ca.sourceIndex);
+      clausePairPbToCa.set(pb.sourceIndex, ca.sourceIndex);
     }
-    return undefined;
-  };
+  }
 
-  const nextUnusedCurrentUnnumbered = (): ParsedPlainBlock | undefined => {
-    for (const ca of currentBlocks) {
-      if (usedCurrent.has(ca.sourceIndex)) continue;
-      if (!ca.clauseNumber) return ca;
-    }
-    return undefined;
-  };
+  const uCur = currentBlocks.filter(
+    (c) => !usedCurrent.has(c.sourceIndex) && !c.clauseNumber,
+  );
+  const uProp = proposedBlocks.filter((p) => !p.clauseNumber);
+  const unnumberedPairPbToCa = alignUnnumberedBlockSequencesDp(uCur, uProp);
 
   for (const pb of proposedBlocks) {
     if (pb.clauseNumber) {
-      const ca = nextUnusedCurrentWithClause(pb.clauseNumber);
-      if (ca) {
+      const caSid = clausePairPbToCa.get(pb.sourceIndex);
+      if (caSid !== undefined) {
+        const ca = currentBlocks.find((c) => c.sourceIndex === caSid);
+        if (ca) {
+          out.push(
+            enrichAlignedBlock({
+              id: makeBlockId("m", outIdx++),
+              kind: pb.kind,
+              clauseNumber: pb.clauseNumber ?? ca.clauseNumber,
+              heading: pb.headingLine || ca.headingLine,
+              currentText: ca.rawText,
+              proposedText: pb.rawText,
+              segments: diffAlignedBlockSegments(ca.rawText, pb.rawText),
+            }),
+          );
+        }
+      } else {
+        out.push(
+          enrichAlignedBlock({
+            id: makeBlockId("i", outIdx++),
+            kind: pb.kind,
+            clauseNumber: pb.clauseNumber,
+            heading: pb.headingLine,
+            proposedText: pb.rawText,
+            segments: diffAlignedBlockSegments("", pb.rawText),
+          }),
+        );
+      }
+      continue;
+    }
+
+    const caSid = unnumberedPairPbToCa.get(pb.sourceIndex);
+    if (caSid !== undefined) {
+      const ca = currentBlocks.find((c) => c.sourceIndex === caSid);
+      if (ca && !usedCurrent.has(ca.sourceIndex)) {
         usedCurrent.add(ca.sourceIndex);
-        const rl = buildAgreementRedline(ca.rawText, pb.rawText);
         out.push(
           enrichAlignedBlock({
             id: makeBlockId("m", outIdx++),
@@ -372,58 +570,27 @@ export function alignParsedBlocksToLegalRedline(
             heading: pb.headingLine || ca.headingLine,
             currentText: ca.rawText,
             proposedText: pb.rawText,
-            segments: mapSegments(rl.segments),
+            segments: diffAlignedBlockSegments(ca.rawText, pb.rawText),
           }),
         );
-      } else {
-        const rl = buildAgreementRedline("", pb.rawText);
-        out.push(
-          enrichAlignedBlock({
-            id: makeBlockId("i", outIdx++),
-            kind: pb.kind,
-            clauseNumber: pb.clauseNumber,
-            heading: pb.headingLine,
-            proposedText: pb.rawText,
-            segments: mapSegments(rl.segments),
-          }),
-        );
+        continue;
       }
-      continue;
     }
 
-    const ca = nextUnusedCurrentUnnumberedMatching(pb) ?? nextUnusedCurrentUnnumbered();
-    if (ca && !ca.clauseNumber) {
-      usedCurrent.add(ca.sourceIndex);
-      const rl = buildAgreementRedline(ca.rawText, pb.rawText);
-      out.push(
-        enrichAlignedBlock({
-          id: makeBlockId("m", outIdx++),
-          kind: pb.kind,
-          clauseNumber: pb.clauseNumber ?? ca.clauseNumber,
-          heading: pb.headingLine || ca.headingLine,
-          currentText: ca.rawText,
-          proposedText: pb.rawText,
-          segments: mapSegments(rl.segments),
-        }),
-      );
-    } else {
-      const rl = buildAgreementRedline("", pb.rawText);
-      out.push(
-        enrichAlignedBlock({
-          id: makeBlockId("i", outIdx++),
-          kind: pb.kind,
-          clauseNumber: pb.clauseNumber,
-          heading: pb.headingLine,
-          proposedText: pb.rawText,
-          segments: mapSegments(rl.segments),
-        }),
-      );
-    }
+    out.push(
+      enrichAlignedBlock({
+        id: makeBlockId("i", outIdx++),
+        kind: pb.kind,
+        clauseNumber: pb.clauseNumber,
+        heading: pb.headingLine,
+        proposedText: pb.rawText,
+        segments: diffAlignedBlockSegments("", pb.rawText),
+      }),
+    );
   }
 
   for (const ca of currentBlocks) {
     if (usedCurrent.has(ca.sourceIndex)) continue;
-    const rl = buildAgreementRedline(ca.rawText, "");
     out.push(
       enrichAlignedBlock({
         id: makeBlockId("d", outIdx++),
@@ -431,7 +598,7 @@ export function alignParsedBlocksToLegalRedline(
         clauseNumber: ca.clauseNumber,
         heading: ca.headingLine,
         currentText: ca.rawText,
-        segments: mapSegments(rl.segments),
+        segments: diffAlignedBlockSegments(ca.rawText, ""),
       }),
     );
   }
