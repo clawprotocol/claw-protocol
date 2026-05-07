@@ -1,4 +1,4 @@
-"""PREMIUM_REWRITE revision path: similarity gate, escalation retries, agreement categories."""
+"""Premium revise: surgical default, material-upgrade path, similarity gate, retries, agreement categories."""
 
 import json
 from unittest.mock import patch
@@ -212,9 +212,9 @@ def test_premium_rewrite_payload_and_system_use_premium_mode(monkeypatch):
     with patch("backend.routers.agreements_v2_api.call_legal_llm", side_effect=_cap):
         av._revise_with_instruction(draft, "Upgrade the draft", ai_model_class="premium")
     assert seen_sys
-    assert "PREMIUM_REWRITE" in seen_sys[0]
+    assert "PREMIUM_MATERIAL_UPGRADE" in seen_sys[0]
     user0 = json.loads(seen_user[0])
-    assert user0.get("mode") == "PREMIUM_REWRITE"
+    assert user0.get("mode") == "PREMIUM_MATERIAL_UPGRADE"
 
 
 def test_premium_llm_failure_returns_fallback_without_loop(monkeypatch):
@@ -226,3 +226,78 @@ def test_premium_llm_failure_returns_fallback_without_loop(monkeypatch):
     with patch("backend.routers.agreements_v2_api.call_legal_llm", side_effect=_boom):
         out = av._revise_with_instruction(draft, "change payment terms to net 45", ai_model_class="premium")
     assert "net 45" in (out.payment_terms or "").lower()
+
+
+def test_premium_surgical_no_similarity_escalation_on_high_similarity(monkeypatch):
+    """Narrow instructions must not append AUTO_REWRITE_ESCALATION when output stays close to baseline."""
+    draft = _draft(
+        title="Independent Contractor Agreement",
+        purpose="Beta will provide warehouse staffing support for Alpha.",
+        payment_terms="Invoices are due on receipt. Late fees may apply as described in Exhibit A.",
+    )
+    identical = {
+        "title": draft.title,
+        "jurisdiction": draft.jurisdiction,
+        "parties": [{"name": p.name, "role": p.role} for p in draft.parties],
+        "purpose": draft.purpose,
+        "payment_terms": draft.payment_terms,
+        "duration": draft.duration,
+        "due_date": draft.due_date,
+        "effective_date": draft.effective_date,
+    }
+    user_contents: list[str] = []
+
+    def _cap(**kwargs):
+        user_contents.append(kwargs["messages"][1]["content"])
+        return json.dumps(identical)
+
+    with patch("backend.routers.agreements_v2_api.call_legal_llm", side_effect=_cap):
+        av._revise_with_instruction(
+            draft, "Net 30 and pause work after 15 days late", ai_model_class="premium"
+        )
+    assert len(user_contents) == 1
+    assert "AUTO_REWRITE_ESCALATION" not in user_contents[0]
+
+
+def test_premium_surgical_retries_with_minimal_suffix_when_payment_terms_overbroad(monkeypatch):
+    """Overbroad payment_terms rewrite should trigger MINIMAL_EDIT_RETRY, not material escalation."""
+    base_pt = "Net 15. Invoices are issued monthly on the first business day. Late fees per Exhibit A."
+    draft = _draft(
+        title="Services Agreement",
+        purpose="Vendor will deliver the agreed scope.",
+        payment_terms=base_pt,
+    )
+    identical = {
+        "title": draft.title,
+        "jurisdiction": draft.jurisdiction,
+        "parties": [{"name": p.name, "role": p.role} for p in draft.parties],
+        "purpose": draft.purpose,
+        "payment_terms": base_pt,
+        "duration": draft.duration,
+        "due_date": draft.due_date,
+        "effective_date": draft.effective_date,
+    }
+    bad = dict(identical)
+    bad["payment_terms"] = " ".join(["Unrelated wholesale payment replacement wording."] * 30)
+    good = dict(identical)
+    good["payment_terms"] = base_pt + " Net 30 applies. Vendor may pause work if invoices are 15+ days late."
+
+    responses = [json.dumps(bad), json.dumps(good)]
+
+    def _seq(**_kwargs):
+        return responses.pop(0)
+
+    user_contents: list[str] = []
+
+    def _cap(**kwargs):
+        user_contents.append(kwargs["messages"][1]["content"])
+        return _seq()
+
+    with patch("backend.routers.agreements_v2_api.call_legal_llm", side_effect=_cap):
+        out = av._revise_with_instruction(
+            draft, "Net 30 and pause work after 15 days late", ai_model_class="premium"
+        )
+    assert len(user_contents) == 2
+    assert "MINIMAL_EDIT_RETRY" in user_contents[1]
+    assert "AUTO_REWRITE_ESCALATION" not in user_contents[1]
+    assert "Net 30" in (out.payment_terms or "")

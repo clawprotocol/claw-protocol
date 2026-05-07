@@ -57,6 +57,11 @@ from backend.agreements.premium_refine_narrow import (
     classify_narrow_amendment_prompt,
     try_apply_narrow_amendment,
 )
+from backend.agreements.revision_surgical import (
+    MINIMAL_REVISION_RETRY_SUFFIX,
+    instruction_requests_material_rewrite,
+    is_overbroad_structured_revision,
+)
 from backend.agreements.premium_intent_schema import (
     build_premium_intent_skeleton,
     evaluate_premium_intent_schema,
@@ -2353,7 +2358,8 @@ class AgreementReviseRequest(BaseModel):
     session_type: SessionType = "owner"
     # When False, run the same revise pipeline but do not persist (workspace preview / compare).
     persist: bool = True
-    # basic = STARTER_PREVIEW revise (minimal edits). premium = PREMIUM_REWRITE (material upgrade + similarity-based auto-retry).
+    # basic = STARTER_PREVIEW revise (minimal edits). premium = PREMIUM_SURGICAL by default, or
+    # PREMIUM_MATERIAL_UPGRADE when the instruction explicitly asks for a broad polish (similarity-based auto-retry).
     ai_model_class: Literal["basic", "premium"] = "basic"
 
 
@@ -3242,14 +3248,37 @@ def _revise_system_prompt_starter_preview() -> str:
     )
 
 
-def _revise_system_prompt_premium_rewrite() -> str:
+def _revise_system_prompt_premium_surgical() -> str:
     return (
-        "You are CLAW's premium agreement rewriter (PREMIUM_REWRITE mode — distinct from starter preview).\n"
-        "Paid users expect a visibly upgraded, send-ready draft, not a near-copy of the prior wording.\n"
+        "You are CLAW's premium agreement editor (PREMIUM_SURGICAL mode — negotiation-style redlines).\n"
         "Return ONLY strict JSON matching:\n"
         '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":"","email":null,"phone":null}], '
         '"purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
-        "User intent is sacred; exact prior wording is optional.\n"
+        "MINIMAL CHANGE (default expectation):\n"
+        "- Preserve original structure, clause numbering, headings, and sentence order inside each JSON prose field "
+        "whenever possible.\n"
+        "- Keep **unchanged language verbatim**; do not paraphrase sentences the user did not ask to change.\n"
+        "- Prefer **insertions and short appended sentences** over replacing whole paragraphs or entire payment sections.\n"
+        "- Modify only text **directly implicated** by the user's instruction; do not restate surrounding deal context.\n"
+        "- Avoid injected commentary, “explainer” paragraphs, or commercial rewrites beyond the ask.\n"
+        "Material facts: preserve party names and roles, jurisdiction, stated amounts and cadence, dates, durations, "
+        "and existing obligations unless the instruction clearly changes them.\n"
+        "Do not invent new parties, dollar amounts, dates, or jurisdictions absent from the current draft or instruction.\n"
+        "Multi-part instructions: implement each item with the smallest edit that satisfies it.\n"
+        "In the output JSON `parties` array, echo each party's `email` and `phone` from `current_draft.parties` when those "
+        "fields exist (same order). Omitting them wipes client-visible contact data.\n"
+        "Do not add commentary outside JSON."
+    )
+
+
+def _revise_system_prompt_premium_rewrite() -> str:
+    return (
+        "You are CLAW's premium agreement rewriter (PREMIUM_MATERIAL_UPGRADE mode — user asked for a broad polish).\n"
+        "Paid users asked for a visibly upgraded, send-ready draft in this pass — not a near-copy of the prior wording.\n"
+        "Return ONLY strict JSON matching:\n"
+        '{ "title":"", "jurisdiction":"", "parties":[{"name":"","role":"","email":null,"phone":null}], '
+        '"purpose":"", "payment_terms":"", "duration":null, "due_date":null, "effective_date":null }\n'
+        "User intent is sacred; you may materially improve clarity, grouping, and tone in prose fields.\n"
         "Treat the revision instruction as authorization to materially upgrade the draft (not a minimal line patch).\n"
         "Preserve material facts: party names and roles, jurisdiction, pricing amounts and cadence, dates, durations, "
         "obligations the user already stated, and any bespoke requests in the instruction.\n"
@@ -3514,6 +3543,13 @@ def _revise_with_instruction(
         )
         return out
 
+    want_material = instruction_requests_material_rewrite(instruction)
+    system_prompt = (
+        _revise_system_prompt_premium_rewrite()
+        if want_material
+        else _revise_system_prompt_premium_surgical()
+    )
+    payload_mode = "PREMIUM_MATERIAL_UPGRADE" if want_material else "PREMIUM_SURGICAL"
     combined = (instruction or "").strip()
     last: Optional[AgreementDraftCreate] = None
     temps = (0.12, 0.28, 0.42)
@@ -3524,22 +3560,38 @@ def _revise_with_instruction(
             combined,
             trace_context=trace_context,
             ai_model_class=ai_model_class,
-            system_prompt=_revise_system_prompt_premium_rewrite(),
+            system_prompt=system_prompt,
             max_tokens=960,
             temperature=temperature,
-            payload_mode="PREMIUM_REWRITE",
+            payload_mode=payload_mode,
         )
         last = revised
         if not llm_ok:
             return revised
         sim = agreement_revision_similarity(current, revised)
-        if sim <= PREMIUM_REVISION_SIMILARITY_CEILING:
+        if want_material:
+            if sim <= PREMIUM_REVISION_SIMILARITY_CEILING:
+                return revised
+            if attempt < PREMIUM_REVISION_MAX_ATTEMPTS - 1:
+                combined = (instruction or "").strip() + _premium_revision_retry_escalation(
+                    instruction, level=attempt + 2
+                )
+            continue
+        if not is_overbroad_structured_revision(current, revised, instruction):
             return revised
         if attempt < PREMIUM_REVISION_MAX_ATTEMPTS - 1:
-            combined = (instruction or "").strip() + _premium_revision_retry_escalation(
-                instruction, level=attempt + 2
-            )
+            combined = (instruction or "").strip() + MINIMAL_REVISION_RETRY_SUFFIX
+            continue
+        break
     assert last is not None
+    if not want_material and is_overbroad_structured_revision(current, last, instruction):
+        det = _recipient_deterministic_merge_instruction(current, instruction)
+        if _revision_comparison_blob(det) != _revision_comparison_blob(current):
+            return det
+    if not want_material and _revision_comparison_blob(last) == _revision_comparison_blob(current):
+        det = _recipient_deterministic_merge_instruction(current, instruction)
+        if _revision_comparison_blob(det) != _revision_comparison_blob(current):
+            return det
     return last
 
 
@@ -6151,7 +6203,8 @@ def _negotiate_assist_llm(
         "- If mode is summary: options may be an empty array [].\n"
         "- If mode is options: what_changed may be an empty string.\n"
         "- Provide exactly 3 options when mode is options or both.\n"
-        "- Each `instruction` must be self-contained for the agreement editor.\n"
+        "- Each `instruction` must be self-contained for the agreement editor and **surgical**: minimal edits, "
+        "preserve unchanged language, prefer short insertions over replacing whole clauses.\n"
         "- Do not claim the other party accepted anything.\n"
         "- No markdown, no prose outside JSON.\n"
     )

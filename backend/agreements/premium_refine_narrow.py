@@ -64,16 +64,102 @@ CLIENT_DELIVERABLES_FINAL_PAYMENT_CLAUSE = (
 )
 
 
+def _classify_payment_timing_pause(p: str) -> bool:
+    """Net / invoice timing plus pause or overdue-days — narrow payment edit (not generic late-fee %)."""
+    has_net = bool(re.search(r"\bnet\s*(?:\d+|thirty|forty[-\s]?five|sixty)\b", p))
+    if not has_net:
+        return False
+    has_pause_work = bool(
+        re.search(
+            r"\bpause\b.*\b(work|services|performance)\b|\bsuspend\b.*\b(work|services|performance)\b",
+            p,
+        )
+    )
+    has_days_risk = bool(re.search(r"\b\d+\s*days?\b", p)) and bool(
+        re.search(r"\b(late|overdue|unpaid|past\s+due|after)\b", p)
+    )
+    return bool(has_pause_work and (has_days_risk or "invoice" in p or "payment" in p))
+
+
+def _parse_net_and_pause_days(user_prompt: str) -> Tuple[int, int]:
+    p = user_prompt or ""
+    net_m = re.search(r"net\s*(\d+)", p, re.I)
+    if net_m:
+        net_days = int(net_m.group(1))
+    elif re.search(r"net\s+thirty\b", p, re.I):
+        net_days = 30
+    else:
+        net_m2 = re.search(r"net\s*(?:forty[-\s]?five|45)\b", p, re.I)
+        net_days = 45 if net_m2 else 30
+    pause_m = re.search(
+        r"(?:more\s+than\s+|after\s+)?(\d+)\s*days?\s*(?:late|past|overdue|unpaid)?",
+        p,
+        re.I,
+    )
+    pause_days = int(pause_m.group(1)) if pause_m else 15
+    return net_days, pause_days
+
+
+def _insert_payment_timing_pause_fallback(doc: str, user_prompt: str) -> Optional[str]:
+    """Deterministic insert after Payment Schedule (or Fees and Payment) when structure matches."""
+    net_days, pause_days = _parse_net_and_pause_days(user_prompt)
+    low = doc.lower()
+    if "may pause work if undisputed invoices remain unpaid" in low:
+        return None
+    sched = re.search(
+        r"(?m)^(?:#{1,4}\s*)?(?:Payment\s+Schedule|\d+\.\d+\s+Payment\s+Schedule)\s*$",
+        doc,
+        re.I,
+    )
+    anchor_region_start = sched.end() if sched else None
+    if anchor_region_start is None:
+        fp = re.search(r"(?m)^(?:#{1,4}\s*)?(?:Fees\s+and\s+Payment|Payment\s+and\s+Fees)\s*$", doc, re.I)
+        if not fp:
+            return None
+        anchor_region_start = fp.end()
+    tail2 = doc[anchor_region_start:]
+    mnext = re.search(r"\n##\s+\S", tail2)
+    sub = tail2[: mnext.start()] if mnext else tail2[: min(len(tail2), 8000)]
+    insert_at = anchor_region_start + len(sub.rstrip())
+    block = (
+        f"\n\nUnless otherwise agreed in writing, undisputed invoices are payable within {net_days} calendar days "
+        f"of the invoice date.\n\n"
+        f"The developer may pause work if undisputed invoices remain unpaid more than {pause_days} calendar days "
+        "after written notice.\n"
+    )
+    return doc[:insert_at] + block + doc[insert_at:]
+
+
+def validate_payment_timing_pause_document(*, original: str, updated: str) -> bool:
+    if not updated or not original:
+        return False
+    lo, lu = len(original), len(updated)
+    if lu < lo:
+        return False
+    if lu > int(lo * 1.55):
+        return False
+    if not _anchors_preserved(original, updated):
+        return False
+    low = updated.lower()
+    if "pause" not in low:
+        return False
+    if "invoice" not in low and "invoices" not in low:
+        return False
+    return True
+
+
 def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
     """
     Map a user refinement prompt to a narrow amendment kind, or None for generic refine.
 
-    Kinds: late_fee, governing_law, delivery_acceptance, support_period, termination,
-    client_deliverables_final_payment.
+    Kinds: payment_timing_pause, late_fee, governing_law, delivery_acceptance, support_period,
+    termination, client_deliverables_final_payment.
     """
     p = (prompt or "").strip().lower()
     if not p or len(p) < 8:
         return None
+    if _classify_payment_timing_pause(p):
+        return "payment_timing_pause"
     if re.search(r"\b(no|not|without|remove|delete|drop|avoid)\b.*\b(late\s+fee|late\s+payment)\b", p):
         return None
     if re.search(r"\b(final\s+payment|before\s+final\s+payment|payment\s+is\s+due)\b", p) and re.search(
@@ -390,6 +476,9 @@ _SUMMARY_FOR_KIND: Dict[str, List[str]] = {
     "client_deliverables_final_payment": [
         "Added client approval of deliverables before final payment, preserving the full agreement."
     ],
+    "payment_timing_pause": [
+        "Localized payment timing (net days) and a narrow pause-for-nonpayment sentence; preserved the rest verbatim."
+    ],
 }
 
 
@@ -424,6 +513,21 @@ def try_apply_narrow_amendment(
             original=doc, updated=patched, kind="client_deliverables_final_payment"
         ):
             return ok_response(patched, _SUMMARY_FOR_KIND["client_deliverables_final_payment"])
+        return None
+
+    if kind == "payment_timing_pause":
+        fb = _insert_payment_timing_pause_fallback(doc, user_refinement_prompt)
+        if fb and validate_payment_timing_pause_document(original=doc, updated=fb):
+            return ok_response(fb, _SUMMARY_FOR_KIND["payment_timing_pause"])
+        alt = _try_llm_narrow_anchor_patch(
+            kind=kind,
+            doc=doc,
+            user_prompt=user_refinement_prompt,
+            call_legal_llm_fn=call_legal_llm_fn,
+            llm_model=llm_model,
+        )
+        if alt and validate_payment_timing_pause_document(original=doc, updated=alt):
+            return ok_response(alt, _SUMMARY_FOR_KIND["payment_timing_pause"])
         return None
 
     if kind == "late_fee":

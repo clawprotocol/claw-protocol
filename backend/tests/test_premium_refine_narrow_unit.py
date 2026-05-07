@@ -313,3 +313,79 @@ def test_try_apply_client_deliverables_final_payment_deterministic_without_llm()
     assert "approval" in low
     assert "in witness whereof" in low
     assert len(text) >= int(len(doc) * 0.9)
+
+
+def _fixture_payment_schedule_net30_pause() -> str:
+    """Long body + Section 3 payment schedule (3.2) + unrelated following section (## 4)."""
+    upfront = "Client pays fifty percent USD upfront upon execution."
+    final_pay = "The remaining fifty percent is due within ten days of final delivery."
+    parts = [
+        "# Agreement\n\n",
+        "## Parties\n\nParty A and Party B.\n\n",
+        "## 2 Scope\n\n",
+        "".join(f"Scope operational filler line {i} for length.\n" for i in range(180)),
+        "\n## 3 Compensation and Payment\n\n",
+        "This Section describes fees and milestone payments under the agreement.\n\n",
+        "### 3.2 Payment Schedule\n\n",
+        upfront + "\n\n",
+        final_pay + "\n\n",
+        "## 4 Intellectual Property\n\n",
+        "Each party retains its pre-existing IP.\n\n",
+        "## 5 Confidentiality\n\n",
+        "Obligations survive termination.\n",
+    ]
+    return "".join(parts)
+
+
+def test_payment_timing_pause_qa_phrase_narrow_insert_not_whole_clause_replace():
+    """
+    Regression: QA phrase should splice net/pause sentences after 3.2 body, preserving schedule lines verbatim.
+    """
+    qa = "Net 30 and pause work after 15 days late"
+    assert classify_narrow_amendment_prompt(qa) == "payment_timing_pause"
+
+    upfront = "Client pays fifty percent USD upfront upon execution."
+    final_pay = "The remaining fifty percent is due within ten days of final delivery."
+    ip_marker = "## 4 Intellectual Property\n\nEach party retains its pre-existing IP.\n"
+    doc = _fixture_payment_schedule_net30_pause()
+    assert len(doc) >= 200
+
+    def no_llm(*_a, **_k):
+        raise AssertionError("LLM must not run for deterministic payment_timing_pause insert")
+
+    out = try_apply_narrow_amendment(
+        kind="payment_timing_pause",
+        current_document_text=doc,
+        user_refinement_prompt=qa,
+        call_legal_llm_fn=no_llm,
+        llm_model=None,
+    )
+    assert out is not None
+    text = out["updated_document_text"]
+    low = text.lower()
+
+    assert text.count(upfront) == 1
+    assert text.count(final_pay) == 1
+    idx_up = text.index(upfront)
+    idx_fin = text.index(final_pay)
+    assert idx_up < idx_fin
+    assert text[idx_up : idx_up + len(upfront)] == upfront
+    assert text[idx_fin : idx_fin + len(final_pay)] == final_pay
+    assert doc.index(upfront) == idx_up
+    assert doc.index(final_pay) == idx_fin
+
+    assert "30 calendar days" in text
+    assert "15 calendar days" in text
+    assert "may pause work" in low
+    assert "undisputed invoices" in low
+
+    assert ip_marker in text
+    assert text.count("## 4 Intellectual Property") == 1
+    assert text.count("### 3.2 Payment Schedule") == 1
+
+    insert_block_start = text.index("Unless otherwise agreed in writing")
+    assert insert_block_start > idx_fin + len(final_pay)
+    assert text.index(ip_marker) > insert_block_start
+
+    assert len(text) <= int(len(doc) * 1.55)
+    assert len(text) < len(doc) + 900
