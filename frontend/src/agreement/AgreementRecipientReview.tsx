@@ -1348,8 +1348,8 @@ export function AgreementRecipientReview({
               ) : null}
             </div>
 
-            {recipientRedlinePlainTexts?.instructionIntentOutcomes &&
-            recipientRedlinePlainTexts.instructionIntentOutcomes.length > 0 ? (
+            {((recipientRedlinePlainTexts?.instructionIntentOutcomes?.length ?? 0) > 0 ||
+              Boolean(recipientRedlinePlainTexts?.instructionContextSummary)) ? (
               <div
                 className="mt-3 rounded-md border border-amber-600/55 bg-amber-950/35 px-3 py-2.5 text-sm leading-snug text-amber-50"
                 data-testid="recipient-redline-not-reflected-callout"
@@ -1358,8 +1358,17 @@ export function AgreementRecipientReview({
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-100/90">
                   Your requested changes
                 </p>
+                {recipientRedlinePlainTexts?.instructionContextSummary ? (
+                  <p
+                    className="mb-2.5 text-[11px] leading-snug text-amber-100/90"
+                    data-testid="recipient-instruction-context-summary"
+                  >
+                    {recipientRedlinePlainTexts?.instructionContextSummary}
+                  </p>
+                ) : null}
+                {(recipientRedlinePlainTexts?.instructionIntentOutcomes ?? []).length > 0 ? (
                 <ul className="space-y-2.5" data-testid="recipient-intent-coverage-list">
-                  {recipientRedlinePlainTexts.instructionIntentOutcomes.map((it) => {
+                  {(recipientRedlinePlainTexts?.instructionIntentOutcomes ?? []).map((it) => {
                     const anchor = recipientRedlineAnchorForIntentCategory(it.category);
                     const anchorKey =
                       anchor === "payment_timing" || anchor === "pause_suspend_work" ? anchor : null;
@@ -1427,6 +1436,7 @@ export function AgreementRecipientReview({
                     );
                   })}
                 </ul>
+                ) : null}
               </div>
             ) : previewDiff.instructionCaptureWarning ? (
               <p

@@ -10,6 +10,8 @@ import { htmlToPlainTextForLegalRedline } from "./externalAiHandoff";
 import { instructionRequestsPauseWork, pauseWorkInProposed } from "./recipientPreviewDiffModel";
 import {
   finalizeRecipientInstructionIntents,
+  formatRecipientInstructionContextSummary,
+  routeRecipientInstructionLanes,
   type RecipientInstructionIntent,
 } from "./recipientInstructionIntents";
 import {
@@ -110,6 +112,8 @@ export type BuildRecipientLegalRedlinePlainTextsResult = {
   recipientRedlineTargetedPatchDiag?: RecipientRedlineTargetedPatchDiag;
   /** Per-request coverage when snapshot diff exists (applied / failed / unclear). */
   instructionIntentOutcomes?: RecipientInstructionIntent[];
+  /** Drafting + persona lines routed out of amendment cards (compact summary for the preview panel). */
+  instructionContextSummary?: string | null;
 };
 
 function replaceFirst(haystack: string, needle: string, repl: string): string {
@@ -738,9 +742,12 @@ function buildInstructionIntentOutcomes(
   paymentTermsInlinePlacementFailed: boolean | undefined,
   narrowRecipientTargetedRedline: boolean | undefined,
   sourceMode: RecipientWholeDocRedlineSourceMode,
-): RecipientInstructionIntent[] | undefined {
+):
+  | { outcomes: RecipientInstructionIntent[]; contextSummary: string | null }
+  | undefined {
   if (!instructionPlain.trim()) return undefined;
-  return finalizeRecipientInstructionIntents({
+  const lanes = routeRecipientInstructionLanes(instructionPlain);
+  const outcomes = finalizeRecipientInstructionIntents({
     instructionPlain,
     currentPlain,
     proposedPlain,
@@ -751,6 +758,7 @@ function buildInstructionIntentOutcomes(
     narrowRecipientTargetedRedline: Boolean(narrowRecipientTargetedRedline),
     fieldPatchDisplay: sourceMode === "baseline_vs_field_patch",
   });
+  return { outcomes, contextSummary: formatRecipientInstructionContextSummary(lanes) };
 }
 
 export function buildRecipientLegalRedlinePlainTexts(
@@ -849,7 +857,7 @@ export function buildRecipientLegalRedlinePlainTexts(
       logRecipientRedlineTargetedPatch(recipientRedlineTargetedPatchDiag);
     }
 
-    const instructionIntentOutcomes = buildInstructionIntentOutcomes(
+    const intentBundle = buildInstructionIntentOutcomes(
       instructionPlain,
       patchPair.currentPlain,
       patchPair.proposedPlain,
@@ -870,11 +878,12 @@ export function buildRecipientLegalRedlinePlainTexts(
       inlinePlacementDiags: patchPair.inlinePlacementDiags,
       narrowRecipientTargetedRedline: Boolean(narrow && usePatch),
       recipientRedlineTargetedPatchDiag,
-      instructionIntentOutcomes,
+      instructionIntentOutcomes: intentBundle?.outcomes,
+      instructionContextSummary: intentBundle?.contextSummary ?? null,
     };
   }
 
-  const instructionIntentOutcomes = buildInstructionIntentOutcomes(
+  const intentBundle = buildInstructionIntentOutcomes(
     instructionPlain,
     cur,
     prop,
@@ -891,6 +900,7 @@ export function buildRecipientLegalRedlinePlainTexts(
     proposedPlain: prop,
     sourceMode: "baseline_vs_revise_html",
     narrowRecipientTargetedRedline: false,
-    instructionIntentOutcomes,
+    instructionIntentOutcomes: intentBundle?.outcomes,
+    instructionContextSummary: intentBundle?.contextSummary ?? null,
   };
 }

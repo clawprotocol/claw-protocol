@@ -117,6 +117,7 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
     const outcomes = r.instructionIntentOutcomes ?? [];
     expect(outcomes.filter((i) => i.status === "applied")).toHaveLength(2);
     expect(outcomes.filter((i) => i.status === "failed" || i.status === "unclear")).toHaveLength(0);
+    expect(r.instructionContextSummary).toBeNull();
     const lawdog = r.proposedPlain.toLowerCase().indexOf("created with lawdog");
     const net = r.proposedPlain.toLowerCase().indexOf("net 30");
     expect(lawdog).toBeGreaterThan(-1);
