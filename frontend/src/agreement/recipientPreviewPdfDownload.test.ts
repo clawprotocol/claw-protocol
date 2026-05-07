@@ -3,7 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE,
   downloadRecipientPreviewPdf,
+  humanizeRecipientPdfExportErrorMessage,
 } from "./recipientPreviewPdfDownload";
+
+describe("humanizeRecipientPdfExportErrorMessage", () => {
+  it("maps Failed to fetch to the friendly unavailable copy", () => {
+    expect(humanizeRecipientPdfExportErrorMessage("Failed to fetch")).toBe(RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE);
+  });
+});
 
 describe("downloadRecipientPreviewPdf", () => {
   afterEach(() => {

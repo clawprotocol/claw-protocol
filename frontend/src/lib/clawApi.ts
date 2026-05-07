@@ -28,12 +28,12 @@ function getRuntimePublicApiBase(): string {
 function logApiBaseResolvedOnce(resolved: string, source: "env" | "runtime_meta" | "dev_fallback" | "same_origin"): void {
   if (loggedApiBaseOnce) return;
   loggedApiBaseOnce = true;
+  /** Vitest (`MODE === "test"`) and explicit suppress keep CI / Playwright / unit stdout quiet. */
+  if (import.meta.env.MODE === "test") return;
+  if (String(import.meta.env.VITE_CLAW_SUPPRESS_API_BASE_LOG ?? "").trim() === "1") return;
+  /** Production stays silent unless operators opt in (safe host-only payload). */
+  if (import.meta.env.PROD && String(import.meta.env.VITE_CLAW_LOG_API_BASE ?? "").trim() !== "1") return;
   try {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.info("[CLAW] API base (once)", { source, base: resolved || "(empty/same-origin)" });
-      return;
-    }
     if (import.meta.env.PROD) {
       let host = "same_origin";
       if (resolved) {
@@ -43,9 +43,13 @@ function logApiBaseResolvedOnce(resolved: string, source: "env" | "runtime_meta"
           host = "invalid";
         }
       }
-      // Safe: no tokens, no path/query
       // eslint-disable-next-line no-console
       console.info("[CLAW] API base (once)", { source, apiHost: host });
+      return;
+    }
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[CLAW] API base (once)", { source, base: resolved || "(empty/same-origin)" });
     }
   } catch {
     /* ignore */

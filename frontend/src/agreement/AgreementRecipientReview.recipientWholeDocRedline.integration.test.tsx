@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
@@ -45,6 +45,7 @@ const identicalListingHtml =
 
 describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -90,7 +91,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
@@ -149,6 +150,7 @@ const revisedDraftDrift = {
 
 describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", () => {
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -197,7 +199,7 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Net 30 and pause work after 15 days late" },
     });
@@ -283,6 +285,7 @@ const listingOnlyNoPaymentHtml = "<p>Master services agreement (listing only).</
 
 describe("AgreementRecipientReview payment inline placement failure", () => {
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -330,7 +333,7 @@ describe("AgreementRecipientReview payment inline placement failure", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Contract update request only." },
     });
@@ -379,6 +382,7 @@ const revisedDraftQaNarrow = {
 
 describe("AgreementRecipientReview narrow payment redline QA (party/signature/footer drift)", () => {
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -424,7 +428,7 @@ describe("AgreementRecipientReview narrow payment redline QA (party/signature/fo
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Net 30 and pause work after 15 days late" },
     });

@@ -34,6 +34,13 @@ export const PORTABLE_REVIEW_PASTE_PLACEHOLDER =
 export const PORTABLE_REVIEW_OCR_FOOTNOTE =
   "Paste revised text for now. File comparison and upload are coming soon.";
 
+/** Recipient “Request changes” panel — copy/export disclosure (agreement-focused, no share/marketing framing). */
+export const RECIPIENT_COPY_EXPORT_SECTION_TITLE = "Copy / export";
+export const RECIPIENT_COPY_EXPORT_SECTION_HELPER =
+  "Copy the draft if you want to review it elsewhere, then paste revised language back here.";
+export const RECIPIENT_COPY_EXPORT_PREVIEW_LINE =
+  "When you are ready, use Preview changes — nothing sends until then.";
+
 /** Owner workspace: same portable flow, but apply/discard is local. */
 export const OWNER_PORTABLE_REVIEW_SUB =
   "Copy the current draft, revise in your preferred tool, then bring back suggested edits. LawDog will organize the differences. Your saved draft does not change until you preview and apply, or you discard the preview.";

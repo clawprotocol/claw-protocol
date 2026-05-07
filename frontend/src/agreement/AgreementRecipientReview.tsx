@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { AgreementDraft } from "./agreementTypes";
 import {
   clearPendingRecipientNotice,
@@ -78,11 +78,16 @@ import {
 } from "./negotiationPostures";
 import type { NegotiationRiskTier } from "./negotiationRisk";
 import { useAccess } from "../access/AccessContext";
-import { buildAgreementSocialSummary } from "./agreementSharing";
 import { ClawTrustFooter } from "../components/claw/ClawTrustFooter";
 import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge";
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
-import { CANONICAL_PROOF_SENTENCE, JOY_COPY } from "../joy/clawJoyCopy";
+import { recipientExportBasenameFromTitle } from "./recipientExportFilenames";
+import {
+  RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE,
+  RECIPIENT_SIGN_ONE_DONE_HEADLINE,
+  RECIPIENT_SIGN_RECORD_SUBLINE,
+} from "./recipientReviewTrustCopy";
+import { recipientReviewDevInfo, recipientReviewDevWarn } from "./recipientReviewDevLog";
 import { JoyMilestoneMark } from "../joy/JoyMilestone";
 import { emitActionCompleted } from "../joy/joyTelemetry";
 import { errorMessageFromResponse, resolveApiBase } from "../lib/clawApi";
@@ -95,16 +100,16 @@ import { cloneDraftForRecipientPreview } from "./recipientPreviewBaseline";
 import {
   PORTABLE_REVIEW_PASTE_LABEL,
   PORTABLE_REVIEW_PASTE_PLACEHOLDER,
-  PORTABLE_REVIEW_SUB,
+  RECIPIENT_COPY_EXPORT_PREVIEW_LINE,
+  RECIPIENT_COPY_EXPORT_SECTION_HELPER,
+  RECIPIENT_COPY_EXPORT_SECTION_TITLE,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
 import {
   MODE_PASTE_REVISED_DRAFT,
   MODE_SUGGEST_PLAIN_ENGLISH,
-  MODE_UPLOAD_FILE,
   PASTE_OPTIONAL_NOTE_LABEL,
   PLAIN_ENGLISH_FIELD_LABEL,
-  UPLOAD_FILE_COMPARISON_COMING_SOON,
 } from "./universalReviewIntakeCopy";
 import { RecipientAgreementReadPdfExport } from "./recipientAgreementReadPdfExport";
 import { RecipientPartyReviewActions, recipientPartyReviewCopy } from "./recipientReviewPartyActions";
@@ -357,6 +362,17 @@ export function AgreementRecipientReview({
   const reviewerViewLoggedRef = useRef(false);
   /** Scroll target when reviewer opens “Request changes”. */
   const recipientSuggestPanelRef = useRef<HTMLDivElement>(null);
+  const previewChangesButtonRef = useRef<HTMLButtonElement>(null);
+  const previewSummaryHeadingRef = useRef<HTMLHeadingElement>(null);
+  const recipientReadDocAnchorRef = useRef<HTMLDivElement>(null);
+  /** Stable per agreement (not `useId`) so React StrictMode / tests never see duplicate label targets. */
+  const intakeFieldIdSuffix = useMemo(
+    () => agreementId.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "agreement",
+    [agreementId],
+  );
+  const revisionPlainFieldId = `recipient-revision-plain-${intakeFieldIdSuffix}`;
+  const revisionPasteNoteFieldId = `recipient-revision-paste-note-${intakeFieldIdSuffix}`;
+  const externalPasteFieldId = `recipient-external-paste-${intakeFieldIdSuffix}`;
   const access = useAccess();
 
   const scrollAndFocusSuggestPanel = useCallback(() => {
@@ -368,7 +384,7 @@ export function AgreementRecipientReview({
         }
         const first =
           root?.querySelector<HTMLElement>(
-            "#recipient-revision-input, #recipient-external-ai-paste, #pro-redline-recipient-suggest",
+            '[data-testid="recipient-revision-voice-field"], [data-testid="recipient-revised-draft-paste"], #pro-redline-recipient-suggest',
           ) ?? null;
         first?.focus({ preventScroll: true });
       }, 16);
@@ -384,8 +400,7 @@ export function AgreementRecipientReview({
     if (!recipientAccessToken.trim()) return;
     if (reviewerViewLoggedRef.current) return;
     reviewerViewLoggedRef.current = true;
-    // eslint-disable-next-line no-console
-    console.info("[reviewer-view-visible]", { agreementId, mode: "reviewer" as const });
+    recipientReviewDevInfo("[reviewer-view-visible]", { agreementId, mode: "reviewer" as const });
   }, [agreementId, entry.kind, recipientAccessToken, recipientLinkRole]);
 
   const frictionPatterns = useMemo(
@@ -728,6 +743,15 @@ export function AgreementRecipientReview({
     };
   }, [legalRedlineDocumentBaseVm, previewDiff, recipientIntentGapCount]);
 
+  useLayoutEffect(() => {
+    if (!recipientPreview || recipientSuggestedEditsSentAck) return;
+    if (!previewDiff || previewDiff.isCompleteNoOp) return;
+    const id = window.requestAnimationFrame(() => {
+      previewSummaryHeadingRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [recipientPreview, recipientSuggestedEditsSentAck, previewDiff]);
+
   useEffect(() => {
     if (!recipientPreview || !previewDiff || !legalRedlineDocumentVm) return;
     const diag =
@@ -982,7 +1006,7 @@ export function AgreementRecipientReview({
     try {
       const baselineDraft = cloneDraftForRecipientPreview(draft);
       const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
-      /** Immutable owner-current HTML: re-fetch from /render immediately before revise (not React state alone). */
+      /** Owner-current HTML snapshot: re-fetch from /render immediately before revise (not React state alone). */
       let baselineHtml = renderedHtml;
       try {
         const rr = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`, {
@@ -1076,7 +1100,7 @@ export function AgreementRecipientReview({
       access.recordUsage("revision_previews");
     } catch (e: unknown) {
       // eslint-disable-next-line no-console
-      console.warn("[recipient-revise-preview] failed", e);
+      recipientReviewDevWarn("[recipient-revise-preview] failed", e);
       setRecipientRevisePreviewError(recipientRevisePreviewUserFacingError(e));
       setRecipientPreview(null);
     } finally {
@@ -1185,6 +1209,9 @@ export function AgreementRecipientReview({
   function discardPreview() {
     setRecipientPreview(null);
     setRecipientRevisePreviewError(null);
+    window.requestAnimationFrame(() => {
+      previewChangesButtonRef.current?.focus({ preventScroll: true });
+    });
   }
 
   async function acceptCurrentDraft() {
@@ -1255,12 +1282,14 @@ export function AgreementRecipientReview({
         className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-4 shadow-sm"
         data-testid="recipient-suggested-changes-panel"
       >
-        <h3
+        <h2
+          ref={previewSummaryHeadingRef}
+          tabIndex={-1}
           className="text-base font-semibold tracking-tight text-slate-100"
           data-testid="recipient-preview-summary-heading"
         >
           Suggested changes
-        </h3>
+        </h2>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
           Review the proposed edits before sending. Nothing changes unless the owner accepts.
         </p>
@@ -1448,6 +1477,7 @@ export function AgreementRecipientReview({
                   readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
                   scrubbedOriginalHtml: scrubAgreementHtml(recipientPreview.baselineHtml),
                   scrubbedProposedHtml: scrubAgreementHtml(recipientPreview.proposedHtml),
+                  exportBasename: recipientExportBasenameFromTitle(draft?.title, agreementId),
                 }}
               />
             ) : null}
@@ -1636,14 +1666,14 @@ export function AgreementRecipientReview({
                 <JoyMilestoneMark className="shrink-0 scale-90" />
                 <div className="min-w-0 flex-1 text-center sm:text-left">
                   <p className="text-lg font-semibold">
-                    {showCelebrate ? JOY_COPY.signSealedProof : JOY_COPY.signLockedIn}
+                    {showCelebrate ? RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE : RECIPIENT_SIGN_ONE_DONE_HEADLINE}
                   </p>
                   {showCelebrate ? (
                     <>
                       <p className="mt-2 text-sm opacity-95">
                         All required signers have completed this agreement.
                       </p>
-                      <p className="mt-2 text-xs leading-relaxed text-emerald-100/90">{CANONICAL_PROOF_SENTENCE}</p>
+                      <p className="mt-2 text-xs leading-relaxed text-emerald-100/90">{RECIPIENT_SIGN_RECORD_SUBLINE}</p>
                     </>
                   ) : null}
                   {!showCelebrate && signingLine ? (
@@ -2230,7 +2260,7 @@ export function AgreementRecipientReview({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 sm:text-[13px]">
-        <ProofBadge state={recipientProofBadge} />
+        <ProofBadge state={recipientProofBadge} title="Agreement status (LawDog)" />
         <span className="rounded-md border border-slate-700 bg-slate-950/50 px-2 py-0.5 font-medium text-slate-300">
           {versionLabelHub}
         </span>
@@ -2241,7 +2271,9 @@ export function AgreementRecipientReview({
       <div className="rounded-lg border border-slate-700 bg-white p-6 text-slate-900 shadow-sm sm:p-8">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
         <div
-          className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900"
+          ref={recipientReadDocAnchorRef}
+          tabIndex={-1}
+          className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
           dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
         />
       </div>
@@ -2287,6 +2319,7 @@ export function AgreementRecipientReview({
           {!viewerLike && entry.kind === "review" ? (
             <RecipientAgreementReadPdfExport
               agreementId={agreementId}
+              agreementTitle={draft?.title}
               readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
               scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
             />
@@ -2411,6 +2444,9 @@ export function AgreementRecipientReview({
               setRecipientPreview(null);
               setRecipientRevisePreviewError(null);
               setError(null);
+              window.requestAnimationFrame(() => {
+                recipientReadDocAnchorRef.current?.focus({ preventScroll: true });
+              });
             }}
           >
             ← Back to agreement
@@ -2511,11 +2547,11 @@ export function AgreementRecipientReview({
 
               {universalIntakeMode === "plain" ? (
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-revision-input">
+                  <label className="text-sm font-semibold text-slate-200" htmlFor={revisionPlainFieldId}>
                     {PLAIN_ENGLISH_FIELD_LABEL}
                   </label>
                   <VoiceAugmentedTextArea
-                    id="recipient-revision-input"
+                    id={revisionPlainFieldId}
                     data-testid="recipient-revision-voice-field"
                     className="min-h-[5.5rem] w-full resize-y rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
                     placeholder="Be specific about what should change…"
@@ -2533,14 +2569,14 @@ export function AgreementRecipientReview({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-external-ai-paste">
+                  <label className="text-sm font-semibold text-slate-200" htmlFor={externalPasteFieldId}>
                     {PORTABLE_REVIEW_PASTE_LABEL}
                   </label>
                   <p className="text-xs leading-snug text-slate-400 sm:text-[13px]">
                     LawDog will compare it with the current draft before anything is sent.
                   </p>
                   <textarea
-                    id="recipient-external-ai-paste"
+                    id={externalPasteFieldId}
                     data-testid="recipient-revised-draft-paste"
                     className="min-h-[10rem] w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
                     placeholder={PORTABLE_REVIEW_PASTE_PLACEHOLDER}
@@ -2552,11 +2588,11 @@ export function AgreementRecipientReview({
                       setRecipientRevisePreviewError(null);
                     }}
                   />
-                  <label className="text-sm font-semibold text-slate-200" htmlFor="recipient-revision-input">
+                  <label className="text-sm font-semibold text-slate-200" htmlFor={revisionPasteNoteFieldId}>
                     {PASTE_OPTIONAL_NOTE_LABEL}
                   </label>
                   <VoiceAugmentedTextArea
-                    id="recipient-revision-input"
+                    id={revisionPasteNoteFieldId}
                     data-testid="recipient-revision-voice-field-paste-note"
                     className="min-h-[4.5rem] w-full resize-y rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
                     placeholder="E.g. focus on payment timing first. (optional)"
@@ -2576,116 +2612,97 @@ export function AgreementRecipientReview({
 
               <details className="group rounded-md border border-slate-800/80 bg-slate-950/25 p-2">
                 <summary className="cursor-pointer list-none text-xs font-medium text-sky-300/95 marker:content-none [&::-webkit-details-marker]:hidden sm:text-[13px]">
-                  Advanced copy tools
+                  {RECIPIENT_COPY_EXPORT_SECTION_TITLE}
                 </summary>
                 <div className="mt-2 space-y-2 border-t border-slate-800/60 pt-2">
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  disabled
-                  className="cursor-not-allowed rounded-md border border-dashed border-slate-600/60 px-2.5 py-1.5 text-xs font-medium text-slate-500"
-                  title={UPLOAD_FILE_COMPARISON_COMING_SOON}
-                >
-                  {MODE_UPLOAD_FILE}
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-600 sm:text-xs">{UPLOAD_FILE_COMPARISON_COMING_SOON}</p>
-
-              <div className="rounded-md border border-dashed border-slate-600/70 bg-slate-950/30 p-3">
-                <p className="text-xs leading-snug text-slate-500 sm:text-[13px]">
-                  {PORTABLE_REVIEW_SUB} When you are ready, use <span className="text-slate-400">Preview changes</span> —
-                  nothing sends until then.
-                </p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
-            onClick={() => {
-              void (async () => {
-                try {
-                  await navigator.clipboard.writeText(htmlToPlainText(renderedHtml));
-                  setCopyDraftFlash(true);
-                  window.setTimeout(() => setCopyDraftFlash(false), 1800);
-                } catch {
-                  setError("Could not copy to clipboard.");
-                }
-              })();
-            }}
-                  >
-                    Copy full draft
-                  </button>
-                  {copyDraftFlash ? <span className="text-[10px] text-emerald-400">Draft copied</span> : null}
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800 disabled:opacity-40"
-                    disabled={!draft || !topFrictionClauseId}
-                    onClick={() => {
-                      if (!draft || !topFrictionClauseId) return;
-                      void (async () => {
-                        try {
-                          await navigator.clipboard.writeText(draftExcerptForClause(draft, topFrictionClauseId));
-                          setCopyClauseFlash(true);
-                          window.setTimeout(() => setCopyClauseFlash(false), 1800);
-                        } catch {
-                          setError("Could not copy to clipboard.");
-                        }
-                      })();
-                    }}
-                  >
-                    Copy clause
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
-                    onClick={() => {
-                      if (!draft) return;
-                      void (async () => {
-                        try {
-                          await navigator.clipboard.writeText(buildAgreementSocialSummary({ draft }));
-                          setCopyClauseFlash(true);
-                          window.setTimeout(() => setCopyClauseFlash(false), 1800);
-                        } catch {
-                          setError("Could not copy to clipboard.");
-                        }
-                      })();
-                    }}
-                  >
-                    Copy for X / social
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
-                    onClick={() => {
-                      if (!draft) return;
-                      const p = (draft.purpose || "").trim();
-                      const pay = (draft.payment_terms || "").trim();
-                      if (!p && !pay) {
-                        setError("No key terms to copy yet.");
-                        return;
-                      }
-                      void (async () => {
-                        try {
-                          await navigator.clipboard.writeText(
-                            [p && `Purpose: ${p}`, pay && `Payment: ${pay}`].filter(Boolean).join("\n\n")
-                          );
-                          setCopyClauseFlash(true);
-                          window.setTimeout(() => setCopyClauseFlash(false), 1800);
-                        } catch {
-                          setError("Could not copy to clipboard.");
-                        }
-                      })();
-                    }}
-                  >
-                    Copy key terms
-                  </button>
-                  {copyClauseFlash ? <span className="text-[10px] text-emerald-400">Copied</span> : null}
-                </div>
-                {!topFrictionClauseId ? (
-                  <p className="mt-1 text-[11px] text-slate-600 sm:text-xs">
-                    Clause-level copy follows where you are in the document; key terms stay available below.
+                  <p className="text-xs leading-snug text-slate-500 sm:text-[13px]">
+                    {RECIPIENT_COPY_EXPORT_SECTION_HELPER}
                   </p>
-                ) : null}
-              </div>
+                  <p className="text-[11px] leading-snug text-slate-500 sm:text-xs">
+                    {RECIPIENT_COPY_EXPORT_PREVIEW_LINE}
+                  </p>
+                  <div className="rounded-md border border-dashed border-slate-600/70 bg-slate-950/30 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await navigator.clipboard.writeText(
+                                htmlToPlainText(renderedHtmlDisplay || renderedHtml || ""),
+                              );
+                              setCopyDraftFlash(true);
+                              window.setTimeout(() => setCopyDraftFlash(false), 1800);
+                            } catch {
+                              setError("Could not copy to clipboard.");
+                            }
+                          })();
+                        }}
+                      >
+                        Copy text — full draft
+                      </button>
+                      {copyDraftFlash ? <span className="text-[10px] text-emerald-400">Draft copied</span> : null}
+                      {draft && topFrictionClauseId ? (
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
+                          onClick={() => {
+                            if (!draft || !topFrictionClauseId) return;
+                            void (async () => {
+                              try {
+                                await navigator.clipboard.writeText(draftExcerptForClause(draft, topFrictionClauseId));
+                                setCopyClauseFlash(true);
+                                window.setTimeout(() => setCopyClauseFlash(false), 1800);
+                              } catch {
+                                setError("Could not copy to clipboard.");
+                              }
+                            })();
+                          }}
+                        >
+                          Copy text — clause
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
+                        onClick={() => {
+                          if (!draft) return;
+                          const p = (draft.purpose || "").trim();
+                          const pay = (draft.payment_terms || "").trim();
+                          if (!p && !pay) {
+                            setError("No key terms to copy yet.");
+                            return;
+                          }
+                          void (async () => {
+                            try {
+                              await navigator.clipboard.writeText(
+                                [p && `Purpose: ${p}`, pay && `Payment: ${pay}`].filter(Boolean).join("\n\n"),
+                              );
+                              setCopyClauseFlash(true);
+                              window.setTimeout(() => setCopyClauseFlash(false), 1800);
+                            } catch {
+                              setError("Could not copy to clipboard.");
+                            }
+                          })();
+                        }}
+                      >
+                        Copy text — key terms
+                      </button>
+                      {copyClauseFlash ? <span className="text-[10px] text-emerald-400">Copied</span> : null}
+                    </div>
+                    {entry.kind === "review" && !recipientPreview ? (
+                      <div className="mt-2 border-t border-slate-800/50 pt-2">
+                        <RecipientAgreementReadPdfExport
+                          bare
+                          agreementId={agreementId}
+                          agreementTitle={draft?.title}
+                          readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+                          scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </details>
 
@@ -2755,6 +2772,7 @@ export function AgreementRecipientReview({
               ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 <button
+                  ref={previewChangesButtonRef}
                   type="button"
                   className="btn rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
                   disabled={!canPreview || hasPendingSuggestion || recipientSuggestedEditsSentAck}
@@ -2791,7 +2809,7 @@ export function AgreementRecipientReview({
         </p>
       ) : null}
 
-      <ClawTrustFooter agreementId={agreementId} />
+      <ClawTrustFooter agreementId={agreementId} variant="recipient" />
 
       {error ? <p className="text-xs text-rose-300">{error}</p> : null}
 

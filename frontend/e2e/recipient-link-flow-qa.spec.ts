@@ -367,7 +367,7 @@ test.describe("recipient + link flow QA", () => {
       await page.getByRole("button", { name: "Request changes" }).click();
     }
     await expect(page.getByText("Write request", { exact: true })).toBeVisible({ timeout: 20_000 });
-    const ta = page.locator("#recipient-revision-input");
+    const ta = page.getByTestId("recipient-revision-voice-field");
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
     await page.getByRole("button", { name: "Preview changes" }).click();
     await expect(page.getByText("Send suggestions for review").first()).toBeVisible({ timeout: 20_000 });
@@ -474,7 +474,7 @@ test.describe("recipient + link flow QA", () => {
     }
     await expect(page.getByText("Write request", { exact: true })).toBeVisible({ timeout: 20_000 });
 
-    const ta = page.locator("#recipient-revision-input");
+    const ta = page.getByTestId("recipient-revision-voice-field");
     await ta.fill("Net 30 and pause work after 15 days late");
     await page.getByRole("button", { name: "Preview changes" }).click();
     await expect(page.getByText("Send suggestions for review").first()).toBeVisible({ timeout: 25_000 });

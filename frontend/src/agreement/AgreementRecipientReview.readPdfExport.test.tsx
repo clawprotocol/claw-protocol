@@ -33,12 +33,14 @@ const draft = {
   audit_log: [],
 };
 
+const bannedInBlock = ["CLAW", "social", "tweet", "twitter", "facebook", "linkedin"] as const;
+
 describe("AgreementRecipientReview read-tab PDF export", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("shows Download agreement disclosure with current PDF on read state", async () => {
+  it("shows visible Download agreement block with PDF control after Review agreement", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
       if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
@@ -65,9 +67,17 @@ describe("AgreementRecipientReview read-tab PDF export", () => {
     await waitFor(() => {
       expect(screen.getByTestId("recipient-read-download-agreement")).toBeTruthy();
     });
-    expect(screen.getByText("Download agreement")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Download agreement/i })).toBeTruthy();
     expect(screen.getByText(/Save a copy before you decide/i)).toBeTruthy();
-    await userEvent.click(screen.getByText("Download agreement"));
-    expect(await screen.findByTestId("recipient-read-download-current-pdf")).toBeTruthy();
+    expect(screen.getByTestId("recipient-read-download-pdf")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download PDF/i })).toBeTruthy();
+    expect(screen.queryAllByTestId("recipient-read-download-pdf")).toHaveLength(1);
+
+    const block = screen.getByTestId("recipient-read-download-agreement").textContent ?? "";
+    const upper = block.toUpperCase();
+    for (const b of bannedInBlock) {
+      expect(upper.includes(b.toUpperCase()), `unexpected “${b}” in export block`).toBe(false);
+    }
+    expect(block.toLowerCase()).not.toMatch(/\bpost\b/);
   });
 });

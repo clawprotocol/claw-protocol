@@ -21,14 +21,14 @@ describe("RecipientPreviewVersionsExport PDF UX", () => {
           readHeaders: {},
           scrubbedOriginalHtml: "<p>Hello.</p>",
           scrubbedProposedHtml: "<p>Hello there.</p>",
+          exportBasename: "hello-deal",
         }}
       />,
     );
-    await userEvent.click(screen.getByText("Download / copy versions"));
-    await userEvent.click(screen.getByRole("button", { name: /Download current PDF/i }));
+    await userEvent.click(screen.getByTestId("recipient-preview-download-original-pdf"));
     await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toContain("temporarily unavailable");
+      expect(screen.getByTestId("recipient-pdf-export-error").textContent).toMatch(/Original PDF:.*temporarily unavailable/is);
     });
-    expect(screen.getByRole("status").textContent).not.toMatch(/failed to fetch/i);
+    expect(screen.getByTestId("recipient-pdf-export-error").textContent).not.toMatch(/failed to fetch/i);
   });
 });

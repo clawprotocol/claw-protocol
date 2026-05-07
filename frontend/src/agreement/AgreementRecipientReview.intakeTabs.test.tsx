@@ -76,5 +76,9 @@ describe("AgreementRecipientReview request intake modes", () => {
     expect(screen.getByTestId("recipient-revised-draft-paste")).toBeTruthy();
     expect(screen.getByTestId("recipient-paste-empty-hint")).toBeTruthy();
     expect(screen.getByText(/LawDog will compare it with the current draft/i)).toBeTruthy();
+
+    await userEvent.click(screen.getByText("Copy / export"));
+    expect(await screen.findByTestId("recipient-request-copy-export-pdf")).toBeTruthy();
+    expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(0);
   });
 });

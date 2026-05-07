@@ -1,4 +1,5 @@
 import { errorMessageFromResponse, resolveApiBase } from "../lib/clawApi";
+import { recipientExportBasenameFromTitle, recipientPdfDownloadFilename } from "./recipientExportFilenames";
 import type { RecipientPreviewPdfExportKind } from "./recipientPreviewPdfHtml";
 
 const API_BASE = resolveApiBase();
@@ -12,12 +13,10 @@ export type RecipientPreviewPdfExportRequest = {
   readHeaders: Record<string, string>;
   exportKind: RecipientPreviewPdfExportKind;
   html: string;
-};
-
-const FILENAME_FOR_KIND: Record<RecipientPreviewPdfExportKind, string> = {
-  original: "lawdog-original-draft.pdf",
-  proposed: "lawdog-proposed-draft.pdf",
-  redline: "lawdog-redline-preview.pdf",
+  /**
+   * Slug basename for downloads (e.g. from agreement title). Defaults to `agreement` when empty/unsafe.
+   */
+  fileBasename?: string;
 };
 
 function saveBlob(blob: Blob, filename: string) {
@@ -32,6 +31,14 @@ function saveBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function resolvedPdfFilename(req: RecipientPreviewPdfExportRequest): string {
+  const base =
+    req.fileBasename && req.fileBasename.trim().length > 0
+      ? req.fileBasename.trim()
+      : recipientExportBasenameFromTitle(undefined, req.agreementId);
+  return recipientPdfDownloadFilename(base, req.exportKind);
+}
+
 async function messageFor503RecipientPdf(res: Response): Promise<string> {
   try {
     const raw = await res.text();
@@ -44,6 +51,11 @@ async function messageFor503RecipientPdf(res: Response): Promise<string> {
     /* use default */
   }
   return RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE;
+}
+
+/** Normalize any thrown message for recipient-facing PDF export UI (no raw “Failed to fetch”). */
+export function humanizeRecipientPdfExportErrorMessage(message: string): string {
+  return humanizePdfDownloadFailureMessage(message);
 }
 
 function humanizePdfDownloadFailureMessage(message: string): string {
@@ -67,25 +79,25 @@ export async function downloadRecipientPreviewPdf(req: RecipientPreviewPdfExport
   let res: Response;
   try {
     res = await fetch(
-    `${API_BASE}/api/agreements/${encodeURIComponent(req.agreementId)}/recipient-preview-export-pdf`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...req.readHeaders,
+      `${API_BASE}/api/agreements/${encodeURIComponent(req.agreementId)}/recipient-preview-export-pdf`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...req.readHeaders,
+        },
+        body: JSON.stringify({ export_kind: req.exportKind, html: req.html }),
       },
-      body: JSON.stringify({ export_kind: req.exportKind, html: req.html }),
-    },
     );
   } catch (e: unknown) {
     const raw = e instanceof Error ? e.message : String(e ?? "");
-    throw new Error(humanizePdfDownloadFailureMessage(raw));
+    throw new Error(humanizeRecipientPdfExportErrorMessage(raw));
   }
   if (!res.ok) {
     const msg =
       res.status === 503
         ? await messageFor503RecipientPdf(res)
-        : humanizePdfDownloadFailureMessage(
+        : humanizeRecipientPdfExportErrorMessage(
             await errorMessageFromResponse(res, "Could not create PDF. Try again."),
           );
     throw new Error(msg);
@@ -98,5 +110,5 @@ export async function downloadRecipientPreviewPdf(req: RecipientPreviewPdfExport
   if (!blob || blob.size < 64) {
     throw new Error(RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE);
   }
-  saveBlob(blob, FILENAME_FOR_KIND[req.exportKind]);
+  saveBlob(blob, resolvedPdfFilename(req));
 }

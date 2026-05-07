@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
@@ -41,6 +41,7 @@ const revisedDraft = {
 
 describe("AgreementRecipientReview suggested-changes single surface", () => {
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -92,7 +93,7 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
     const suggestButtons = screen.getAllByRole("button", { name: /Request changes/i });
     await userEvent.click(suggestButtons[0]!);
 
-    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, { target: { value: "Change payment terms to Net 30" } });
 
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
@@ -168,7 +169,7 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, { target: { value: "Change payment terms to Net 30" } });
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
     await waitFor(

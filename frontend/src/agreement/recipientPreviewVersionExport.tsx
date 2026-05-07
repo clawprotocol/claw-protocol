@@ -1,7 +1,12 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NOT_LEGAL_ADVICE } from "../compliance/disclosureCopy";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
-import { downloadRecipientPreviewPdf } from "./recipientPreviewPdfDownload";
+import { recipientTextDownloadFilename } from "./recipientExportFilenames";
+import {
+  RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE,
+  downloadRecipientPreviewPdf,
+  humanizeRecipientPdfExportErrorMessage,
+} from "./recipientPreviewPdfDownload";
 import { buildRecipientRedlinePdfHtml, type RecipientPreviewPdfExportKind } from "./recipientPreviewPdfHtml";
 
 /** Plain-text summary of block redline for copy/export (no HTML). */
@@ -32,6 +37,8 @@ export type RecipientPreviewPdfReadContext = {
   readHeaders: Record<string, string>;
   scrubbedOriginalHtml: string;
   scrubbedProposedHtml: string;
+  /** Slug basename for PDF and text downloads (from agreement title + id). */
+  exportBasename: string;
 };
 
 type Props = {
@@ -41,100 +48,264 @@ type Props = {
 };
 
 /**
- * Compact disclosure for reviewers who want copies outside LawDog.
- * PDFs: server-rendered (PyMuPDF Story) from the same HTML as the visible preview.
+ * Original / proposed / redline PDFs and copy helpers. PDF actions stay visible (not hidden in a collapsed disclosure).
  */
 export function RecipientPreviewVersionsExport({ plainSource, legalRedlineVm, pdfReadContext }: Props) {
-  const [flash, setFlash] = useState<string | null>(null);
+  const [copyAck, setCopyAck] = useState<"original" | "proposed" | "redline" | null>(null);
+  const [pdfErrors, setPdfErrors] = useState<Partial<Record<RecipientPreviewPdfExportKind, string | null>>>({});
+  const [copyFlowError, setCopyFlowError] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState<RecipientPreviewPdfExportKind | null>(null);
-  const redlinePlain = useCallback(() => legalRedlineDocumentVmToPlainSummary(legalRedlineVm), [legalRedlineVm]);
+  const [a11yStatus, setA11yStatus] = useState("");
+  const pdfInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  const pdfReadContextRef = useRef(pdfReadContext);
+  const legalRedlineVmRef = useRef(legalRedlineVm);
+  const pdfErrorTimersRef = useRef<Partial<Record<RecipientPreviewPdfExportKind, ReturnType<typeof setTimeout>>>>({});
+  const copyErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pdfExportErrorRegionRef = useRef<HTMLDivElement>(null);
 
-  const copyText = useCallback(async (label: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setFlash(label);
-      window.setTimeout(() => setFlash(null), 2000);
-    } catch {
-      setFlash("Could not copy");
-      window.setTimeout(() => setFlash(null), 2500);
-    }
+  pdfReadContextRef.current = pdfReadContext;
+  legalRedlineVmRef.current = legalRedlineVm;
+
+  const redlinePlain = useCallback(() => legalRedlineDocumentVmToPlainSummary(legalRedlineVmRef.current), []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      pdfInFlightRef.current = false;
+      for (const k of Object.keys(pdfErrorTimersRef.current) as RecipientPreviewPdfExportKind[]) {
+        const t = pdfErrorTimersRef.current[k];
+        if (t) clearTimeout(t);
+      }
+      pdfErrorTimersRef.current = {};
+      if (copyErrorTimerRef.current) {
+        clearTimeout(copyErrorTimerRef.current);
+        copyErrorTimerRef.current = null;
+      }
+    };
   }, []);
 
-  const downloadTextFile = (filename: string, body: string) => {
-    const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const safeSet = useCallback((fn: () => void) => {
+    if (mountedRef.current) fn();
+  }, []);
+
+  const clearCopyAckSoon = useCallback(() => {
+    window.setTimeout(() => safeSet(() => setCopyAck(null)), 2000);
+  }, [safeSet]);
+
+  const schedulePdfErrorClear = useCallback(
+    (kind: RecipientPreviewPdfExportKind) => {
+      const prev = pdfErrorTimersRef.current[kind];
+      if (prev) clearTimeout(prev);
+      pdfErrorTimersRef.current[kind] = setTimeout(() => {
+        pdfErrorTimersRef.current[kind] = undefined;
+        safeSet(() => setPdfErrors((p) => ({ ...p, [kind]: null })));
+      }, 3200);
+    },
+    [safeSet],
+  );
+
+  const copyText = useCallback(
+    async (label: "original" | "proposed" | "redline", text: string) => {
+      safeSet(() => setCopyFlowError(null));
+      try {
+        await navigator.clipboard.writeText(text);
+        safeSet(() => setCopyAck(label));
+        clearCopyAckSoon();
+      } catch {
+        safeSet(() => setCopyFlowError("Could not copy."));
+        if (copyErrorTimerRef.current) clearTimeout(copyErrorTimerRef.current);
+        copyErrorTimerRef.current = setTimeout(() => {
+          copyErrorTimerRef.current = null;
+          safeSet(() => setCopyFlowError(null));
+        }, 2500);
+      }
+    },
+    [clearCopyAckSoon, safeSet],
+  );
+
+  const downloadTextFile = useCallback(
+    (kind: RecipientPreviewPdfExportKind, body: string) => {
+      const ctx = pdfReadContextRef.current;
+      const base = ctx?.exportBasename ?? "agreement";
+      const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = recipientTextDownloadFilename(base, kind);
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    [],
+  );
 
   const onPdf = useCallback(
     async (kind: RecipientPreviewPdfExportKind) => {
-      const ctx = pdfReadContext;
-      if (!ctx || pdfBusy) return;
+      const ctx = pdfReadContextRef.current;
+      if (!ctx || pdfBusy !== null || pdfInFlightRef.current) return;
+      const vm = legalRedlineVmRef.current;
       const html =
         kind === "original"
           ? ctx.scrubbedOriginalHtml
           : kind === "proposed"
             ? ctx.scrubbedProposedHtml
-            : buildRecipientRedlinePdfHtml(legalRedlineVm);
+            : buildRecipientRedlinePdfHtml(vm);
       if (!html.trim()) {
-        setFlash("Nothing to export yet.");
-        window.setTimeout(() => setFlash(null), 2200);
+        safeSet(() => setPdfErrors((p) => ({ ...p, [kind]: "Nothing to export yet." })));
+        schedulePdfErrorClear(kind);
         return;
       }
-      setPdfBusy(kind);
+      const announce =
+        kind === "original"
+          ? "Preparing original PDF."
+          : kind === "proposed"
+            ? "Preparing proposed PDF."
+            : "Preparing redline PDF.";
+      pdfInFlightRef.current = true;
+      safeSet(() => {
+        setPdfBusy(kind);
+        setPdfErrors((p) => ({ ...p, [kind]: null }));
+        setA11yStatus(announce);
+      });
       try {
         await downloadRecipientPreviewPdf({
           agreementId: ctx.agreementId,
           readHeaders: ctx.readHeaders,
           exportKind: kind,
           html,
+          fileBasename: ctx.exportBasename,
         });
+        safeSet(() => setA11yStatus("PDF download started."));
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "PDF export failed.";
-        setFlash(msg);
-        window.setTimeout(() => setFlash(null), 3200);
+        const raw = e instanceof Error ? e.message : String(e ?? "");
+        const msg = humanizeRecipientPdfExportErrorMessage(raw.trim() || RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE);
+        safeSet(() => {
+          setPdfErrors((p) => ({ ...p, [kind]: msg }));
+          setA11yStatus(`PDF export failed. ${msg}`);
+        });
+        schedulePdfErrorClear(kind);
       } finally {
-        setPdfBusy(null);
+        pdfInFlightRef.current = false;
+        safeSet(() => setPdfBusy(null));
+        window.setTimeout(() => safeSet(() => setA11yStatus("")), 900);
       }
     },
-    [legalRedlineVm, pdfBusy, pdfReadContext],
+    [pdfBusy, safeSet, schedulePdfErrorClear],
   );
 
   const linkBtn =
-    "text-left text-xs font-semibold text-sky-300/95 underline decoration-sky-500/40 underline-offset-2 hover:text-sky-200 sm:text-[13px]";
+    "min-w-0 max-w-full break-words text-left text-[11px] font-semibold text-sky-300/95 underline decoration-sky-500/40 decoration-1 underline-offset-2 hover:text-sky-200 sm:text-xs";
   const pdfBtnBase =
-    "block w-full rounded border px-2 py-1.5 text-left text-xs transition-colors border-slate-600/70 bg-slate-900/40 text-slate-200 hover:bg-slate-900/70 hover:border-slate-500/80 disabled:cursor-not-allowed disabled:opacity-45 sm:text-[13px]";
+    "min-w-0 max-w-full break-words rounded border px-2 py-1.5 text-left text-[11px] transition-colors border-slate-600/60 bg-slate-900/35 text-slate-200 hover:bg-slate-900/65 hover:border-slate-500/70 disabled:cursor-not-allowed disabled:opacity-45 sm:text-xs";
 
   const pdfReady = Boolean(pdfReadContext);
+  const anyPdfErr = Boolean(pdfErrors.original || pdfErrors.proposed || pdfErrors.redline || copyFlowError);
+
+  useLayoutEffect(() => {
+    if (!anyPdfErr) return;
+    const id = window.requestAnimationFrame(() => {
+      pdfExportErrorRegionRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [anyPdfErr]);
 
   return (
-    <details
-      className="mt-3 rounded-md border border-slate-600/60 bg-slate-950/40 px-3 py-2 [&_summary::-webkit-details-marker]:hidden"
+    <div
+      className="mt-2 rounded-md border border-slate-600/50 bg-slate-950/35 px-2.5 py-2 sm:px-3 sm:py-2.5"
       data-testid="recipient-preview-versions-export"
     >
-      <summary className="cursor-pointer list-none text-xs font-semibold text-slate-300 hover:text-slate-200 sm:text-[13px]">
-        Download / copy versions
-      </summary>
-      <div className="mt-2 border-t border-slate-700/50 pt-2">
-        <p className="text-xs font-semibold text-slate-200" data-testid="recipient-preview-versions-export-title">
-          Use outside LawDog
+      <p className="sr-only" aria-live="polite">
+        {a11yStatus}
+      </p>
+      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-300 sm:text-xs">
+        Export review versions
+      </h3>
+      <p className="mt-0.5 text-[11px] leading-snug text-slate-400 sm:text-xs">
+        Save the original, proposed version, or redline before sending.{" "}
+        <span className="text-slate-500">{NOT_LEGAL_ADVICE}</span>
+      </p>
+
+      <div
+        className="mt-2 grid grid-cols-1 gap-1 min-[400px]:grid-cols-2 min-[400px]:gap-1.5"
+        role="group"
+        aria-label="Download PDF versions"
+      >
+        <button
+          type="button"
+          disabled={!pdfReady || pdfBusy === "original"}
+          aria-busy={pdfBusy === "original"}
+          className={pdfBtnBase}
+          data-testid="recipient-preview-download-original-pdf"
+          onClick={() => {
+            safeSet(() => setPdfErrors((p) => ({ ...p, original: null })));
+            void onPdf("original");
+          }}
+        >
+          {pdfBusy === "original" ? "Preparing PDF…" : "Download original PDF"}
+        </button>
+        <button
+          type="button"
+          disabled={!pdfReady || pdfBusy === "proposed"}
+          aria-busy={pdfBusy === "proposed"}
+          className={pdfBtnBase}
+          data-testid="recipient-preview-download-proposed-pdf"
+          onClick={() => {
+            safeSet(() => setPdfErrors((p) => ({ ...p, proposed: null })));
+            void onPdf("proposed");
+          }}
+        >
+          {pdfBusy === "proposed" ? "Preparing PDF…" : "Download proposed PDF"}
+        </button>
+        <button
+          type="button"
+          disabled={!pdfReady || pdfBusy === "redline"}
+          aria-busy={pdfBusy === "redline"}
+          className={`${pdfBtnBase} min-[400px]:col-span-2`}
+          data-testid="recipient-preview-download-redline-pdf"
+          onClick={() => {
+            safeSet(() => setPdfErrors((p) => ({ ...p, redline: null })));
+            void onPdf("redline");
+          }}
+        >
+          {pdfBusy === "redline" ? "Preparing PDF…" : "Download redline PDF"}
+        </button>
+      </div>
+
+      {anyPdfErr ? (
+        <div
+          ref={pdfExportErrorRegionRef}
+          tabIndex={-1}
+          className="mt-1.5 space-y-0.5 outline-none focus-visible:ring-2 focus-visible:ring-amber-400/50"
+          data-testid="recipient-pdf-export-error"
+          role="alert"
+        >
+          {pdfErrors.original ? (
+            <p className="text-[10px] text-amber-100/95 sm:text-[11px]">Original PDF: {pdfErrors.original}</p>
+          ) : null}
+          {pdfErrors.proposed ? (
+            <p className="text-[10px] text-amber-100/95 sm:text-[11px]">Proposed PDF: {pdfErrors.proposed}</p>
+          ) : null}
+          {pdfErrors.redline ? (
+            <p className="text-[10px] text-amber-100/95 sm:text-[11px]">Redline PDF: {pdfErrors.redline}</p>
+          ) : null}
+          {copyFlowError ? <p className="text-[10px] text-amber-100/95 sm:text-[11px]">{copyFlowError}</p> : null}
+        </div>
+      ) : null}
+
+      <div className="mt-2 border-t border-slate-700/40 pt-2">
+        <p className="text-[11px] font-medium text-slate-400 sm:text-xs">Copy text · Download text</p>
+        <p className="mt-0.5 text-[10px] leading-snug text-slate-500 sm:text-[11px]">
+          Optional plain-text copies for your files.
         </p>
-        <p className="mt-1 text-[11px] leading-snug text-slate-400">
-          Download or copy a version if you want to review it with counsel, another tool, or your own notes.{" "}
-          <span className="text-slate-500">{NOT_LEGAL_ADVICE}</span>
-        </p>
-        <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+        <div className="mt-1.5 grid grid-cols-1 gap-1 min-[400px]:grid-cols-2 min-[400px]:gap-1.5">
           <button
             type="button"
             className={linkBtn}
             data-testid="recipient-copy-original-draft"
             onClick={() => void copyText("original", plainSource.currentPlain)}
           >
-            Copy original draft
+            Copy text — original
           </button>
           <button
             type="button"
@@ -142,7 +313,7 @@ export function RecipientPreviewVersionsExport({ plainSource, legalRedlineVm, pd
             data-testid="recipient-copy-proposed-draft"
             onClick={() => void copyText("proposed", plainSource.proposedPlain)}
           >
-            Copy proposed draft
+            Copy text — proposed
           </button>
           <button
             type="button"
@@ -150,83 +321,45 @@ export function RecipientPreviewVersionsExport({ plainSource, legalRedlineVm, pd
             data-testid="recipient-copy-redline-summary"
             onClick={() => void copyText("redline", redlinePlain())}
           >
-            Copy redline preview
+            Copy text — redline summary
           </button>
-          <span className="hidden sm:block" aria-hidden />
+          <span className="hidden min-[400px]:block" aria-hidden />
           <button
             type="button"
-            className="text-left text-[11px] font-semibold text-slate-500"
+            className="text-left text-[10px] font-medium text-slate-500 hover:text-slate-400 sm:text-[11px]"
             data-testid="recipient-download-original-text"
-            onClick={() => downloadTextFile("lawdog-original-draft.txt", plainSource.currentPlain)}
+            onClick={() => downloadTextFile("original", plainSource.currentPlain)}
           >
-            Download text — Original
+            Download text — original
           </button>
           <button
             type="button"
-            className="text-left text-[11px] font-semibold text-slate-500"
+            className="text-left text-[10px] font-medium text-slate-500 hover:text-slate-400 sm:text-[11px]"
             data-testid="recipient-download-proposed-text"
-            onClick={() => downloadTextFile("lawdog-proposed-draft.txt", plainSource.proposedPlain)}
+            onClick={() => downloadTextFile("proposed", plainSource.proposedPlain)}
           >
-            Download text — Proposed
+            Download text — proposed
           </button>
           <button
             type="button"
-            className="text-left text-[11px] font-semibold text-slate-500"
+            className="text-left text-[10px] font-medium text-slate-500 hover:text-slate-400 sm:text-[11px]"
             data-testid="recipient-download-redline-text"
-            onClick={() => downloadTextFile("lawdog-redline-preview.txt", redlinePlain())}
+            onClick={() => downloadTextFile("redline", redlinePlain())}
           >
-            Download text — Redline
+            Download text — redline
           </button>
         </div>
-        <div className="mt-3 space-y-1 border-t border-slate-700/40 pt-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:text-[11px]">Download PDF</p>
-          <button
-            type="button"
-            disabled={!pdfReady || pdfBusy !== null}
-            className={pdfBtnBase}
-            data-testid="recipient-download-original-pdf"
-            onClick={() => void onPdf("original")}
-          >
-            {pdfBusy === "original" ? "Preparing PDF…" : "Download current PDF"}
-          </button>
-          <button
-            type="button"
-            disabled={!pdfReady || pdfBusy !== null}
-            className={pdfBtnBase}
-            data-testid="recipient-download-proposed-pdf"
-            onClick={() => void onPdf("proposed")}
-          >
-            {pdfBusy === "proposed" ? "Preparing PDF…" : "Download proposed PDF"}
-          </button>
-          <button
-            type="button"
-            disabled={!pdfReady || pdfBusy !== null}
-            className={pdfBtnBase}
-            data-testid="recipient-download-redline-pdf"
-            onClick={() => void onPdf("redline")}
-          >
-            {pdfBusy === "redline" ? "Preparing PDF…" : "Download redline PDF"}
-          </button>
-        </div>
-        {flash ? (
-          <p
-            className={`mt-2 text-[11px] ${
-              flash === "original" || flash === "proposed" || flash === "redline"
-                ? "text-emerald-200/90"
-                : "text-amber-100/95"
-            }`}
-            role="status"
-          >
-            {flash === "original"
-              ? "Copied original."
-              : flash === "proposed"
-                ? "Copied proposed."
-                : flash === "redline"
-                  ? "Copied redline summary."
-                  : flash}
-          </p>
-        ) : null}
       </div>
-    </details>
+
+      {copyAck ? (
+        <p className="mt-1.5 text-[10px] text-emerald-200/90 sm:text-[11px]" role="status">
+          {copyAck === "original"
+            ? "Copied text — original."
+            : copyAck === "proposed"
+              ? "Copied text — proposed."
+              : "Copied text — redline summary."}
+        </p>
+      ) : null}
+    </div>
   );
 }

@@ -15,7 +15,7 @@ export const LEGAL_WEBSITE_TERMS_VERSION = "1.0";
  * **Production:** embed a monitored inbox at **frontend build time** via the standard Vite privacy-email variable for
  * this repo (see `frontend/.env.example` and `docs/architecture/ENV_TOPOLOGY.md` — implemented as `import.meta.env.VITE_LAWDOG_PRIVACY_EMAIL`).
  * Returns null when unset; the Policy then directs users to published support/privacy channels (no env names in UI).
- * Production builds without this variable log a console-only operator warning at startup (`privacyInboxDeployGuard.ts`).
+ * Non-production builds without this variable log a console-only operator warning at startup (`privacyInboxDeployGuard.ts`). Production browsers do not emit that warning.
  */
 export function getLegalPrivacyInquiryEmail(): string | null {
   const raw = import.meta.env.VITE_LAWDOG_PRIVACY_EMAIL;

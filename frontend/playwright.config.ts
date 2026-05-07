@@ -19,5 +19,10 @@ export default defineConfig({
     url: "http://127.0.0.1:4173",
     reuseExistingServer: true,
     timeout: 120000,
+    env: {
+      ...process.env,
+      /** Quiets `[CLAW] API base (once)` in Playwright-driven dev sessions (see `clawApi.ts`). */
+      VITE_CLAW_SUPPRESS_API_BASE_LOG: "1",
+    },
   },
 });

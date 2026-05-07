@@ -96,7 +96,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
@@ -151,10 +151,10 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("recipient-suggested-edits-sent-ack")).toBeNull();
     });
-    expect(await screen.findByLabelText(/Your notes in plain English/i)).toBeTruthy();
+    expect(await screen.findByTestId("recipient-revision-voice-field")).toBeTruthy();
 
-    await userEvent.clear(await screen.findByLabelText(/Your notes in plain English/i));
-    await userEvent.type(screen.getByLabelText(/Your notes in plain English/i), "Change payment to Net 30.");
+    await userEvent.clear(await screen.findByTestId("recipient-revision-voice-field"));
+    await userEvent.type(screen.getByTestId("recipient-revision-voice-field"), "Change payment to Net 30.");
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();

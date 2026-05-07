@@ -99,7 +99,7 @@ describe("AgreementRecipientReview redline chrome", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    const instruction = await screen.findByLabelText(/Your notes in plain English/i);
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment terms to Net 30");
     await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
@@ -115,26 +115,47 @@ describe("AgreementRecipientReview redline chrome", () => {
     expect(legalRoot.querySelector('[data-redline="insert"]')).toBeTruthy();
     expect(legalRoot.querySelectorAll('[data-testid="recipient-redline-changed-block"]').length).toBeGreaterThan(0);
 
-    const exportDetails = screen.getByTestId("recipient-preview-versions-export");
-    expect(exportDetails.textContent).not.toMatch(/\bCLAW\b/i);
-    await userEvent.click(screen.getByText("Download / copy versions"));
-    expect(screen.getByTestId("recipient-preview-versions-export-title").textContent).toContain("Use outside LawDog");
+    const exportRoot = screen.getByTestId("recipient-preview-versions-export");
+    expect(exportRoot.textContent).not.toMatch(/\bCLAW\b/i);
+    expect(screen.queryAllByTestId("recipient-read-download-pdf")).toHaveLength(0);
+    expect(screen.queryAllByTestId("recipient-request-copy-export-pdf")).toHaveLength(0);
+    expect(screen.getByRole("heading", { name: /Export review versions/i })).toBeTruthy();
+    expect(screen.getByText(/Save the original, proposed version, or redline before sending/i)).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-original-draft")).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-proposed-draft")).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-redline-summary")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Download current PDF/i })).toBeTruthy();
-    expect((screen.getByTestId("recipient-download-original-pdf") as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByTestId("recipient-download-proposed-pdf") as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByTestId("recipient-download-redline-pdf") as HTMLButtonElement).disabled).toBe(false);
-    await userEvent.click(screen.getByTestId("recipient-download-original-pdf"));
+    expect(screen.getByRole("button", { name: /Download original PDF/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download proposed PDF/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download redline PDF/i })).toBeTruthy();
+    expect((screen.getByTestId("recipient-preview-download-original-pdf") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("recipient-preview-download-proposed-pdf") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("recipient-preview-download-redline-pdf") as HTMLButtonElement).disabled).toBe(false);
+
+    await userEvent.click(screen.getByTestId("recipient-preview-download-original-pdf"));
     await waitFor(() => {
       const calls = vi.mocked(globalThis.fetch).mock.calls;
-      const pdfCall = calls.find((c) => String(c[0]).includes("recipient-preview-export-pdf"));
-      expect(pdfCall).toBeTruthy();
-      const init = pdfCall![1] as RequestInit;
+      const pdfCalls = calls.filter((c) => String(c[0]).includes("recipient-preview-export-pdf"));
+      expect(pdfCalls.length).toBeGreaterThan(0);
+      const init = pdfCalls[pdfCalls.length - 1]![1] as RequestInit;
       expect(init.method?.toUpperCase()).toBe("POST");
       expect(String(init.body)).toContain('"export_kind":"original"');
       expect(String(init.body)).toContain("<p>Services Agreement</p>");
+    });
+
+    await userEvent.click(screen.getByTestId("recipient-preview-download-proposed-pdf"));
+    await waitFor(() => {
+      const calls = vi.mocked(globalThis.fetch).mock.calls;
+      const pdfCalls = calls.filter((c) => String(c[0]).includes("recipient-preview-export-pdf"));
+      const last = pdfCalls[pdfCalls.length - 1]![1] as RequestInit;
+      expect(String(last.body)).toContain('"export_kind":"proposed"');
+    });
+
+    await userEvent.click(screen.getByTestId("recipient-preview-download-redline-pdf"));
+    await waitFor(() => {
+      const calls = vi.mocked(globalThis.fetch).mock.calls;
+      const pdfCalls = calls.filter((c) => String(c[0]).includes("recipient-preview-export-pdf"));
+      const last = pdfCalls[pdfCalls.length - 1]![1] as RequestInit;
+      expect(String(last.body)).toContain('"export_kind":"redline"');
     });
     const writeText = vi.fn().mockResolvedValue(undefined);
     const prev = globalThis.navigator.clipboard;
