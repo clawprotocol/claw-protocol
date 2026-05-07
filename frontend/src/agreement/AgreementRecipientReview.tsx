@@ -535,6 +535,13 @@ export function AgreementRecipientReview({
     const m = draft.parties.find((p) => (p.id || "").trim() === participantPid);
     return m?.name?.trim() || recipientLabel;
   }, [draft?.parties, participantPid, recipientLabel]);
+
+  const reviewerEmailForExport = useMemo(() => {
+    if (!draft?.parties?.length || !participantPid) return null;
+    const m = draft.parties.find((p) => String(p.id || "").trim() === participantPid);
+    const e = (m?.email || "").trim();
+    return e.length > 0 ? e : null;
+  }, [draft?.parties, participantPid]);
   const agreementFullyExecuted = useMemo(() => isAgreementMarkedSignedInAudit(draft), [draft]);
   const mySignatureDone = useMemo(
     () => isParticipantSignatureComplete(draft, participantPid),
@@ -1478,6 +1485,9 @@ export function AgreementRecipientReview({
                   scrubbedOriginalHtml: scrubAgreementHtml(recipientPreview.baselineHtml),
                   scrubbedProposedHtml: scrubAgreementHtml(recipientPreview.proposedHtml),
                   exportBasename: recipientExportBasenameFromTitle(draft?.title, agreementId),
+                  reviewerDisplayName: proposerDisplayNameForApi,
+                  reviewerEmail: reviewerEmailForExport,
+                  agreementTitleDisplay: draft?.title ?? null,
                 }}
               />
             ) : null}

@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NOT_LEGAL_ADVICE } from "../compliance/disclosureCopy";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
-import { recipientTextDownloadFilename } from "./recipientExportFilenames";
+import { recipientReviewerSlugFromDisplayName, recipientTextDownloadFilename } from "./recipientExportFilenames";
 import {
   RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE,
   downloadRecipientPreviewPdf,
   humanizeRecipientPdfExportErrorMessage,
 } from "./recipientPreviewPdfDownload";
-import { buildRecipientRedlinePdfHtml, type RecipientPreviewPdfExportKind } from "./recipientPreviewPdfHtml";
+import {
+  buildRecipientRedlinePdfHtml,
+  type RecipientPreviewPdfExportKind,
+  wrapRecipientVersionPdfHtml,
+} from "./recipientPreviewPdfHtml";
 
 /** Plain-text summary of block redline for copy/export (no HTML). */
 export function legalRedlineDocumentVmToPlainSummary(vm: LegalRedlineDocumentViewModel): string {
@@ -39,6 +43,10 @@ export type RecipientPreviewPdfReadContext = {
   scrubbedProposedHtml: string;
   /** Slug basename for PDF and text downloads (from agreement title + id). */
   exportBasename: string;
+  /** Optional — audit metadata and filename segment for export. */
+  reviewerDisplayName?: string | null;
+  reviewerEmail?: string | null;
+  agreementTitleDisplay?: string | null;
 };
 
 type Props = {
@@ -133,7 +141,9 @@ export function RecipientPreviewVersionsExport({ plainSource, legalRedlineVm, pd
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = recipientTextDownloadFilename(base, kind);
+      const at = new Date();
+      const rev = recipientReviewerSlugFromDisplayName(ctx?.reviewerDisplayName ?? undefined);
+      a.download = recipientTextDownloadFilename(base, kind, { exportedAt: at, reviewerSlug: rev });
       a.click();
       URL.revokeObjectURL(url);
     },
@@ -145,12 +155,20 @@ export function RecipientPreviewVersionsExport({ plainSource, legalRedlineVm, pd
       const ctx = pdfReadContextRef.current;
       if (!ctx || pdfBusy !== null || pdfInFlightRef.current) return;
       const vm = legalRedlineVmRef.current;
+      const exportedAt = new Date();
+      const reviewerSlug = recipientReviewerSlugFromDisplayName(ctx.reviewerDisplayName ?? undefined);
       const html =
         kind === "original"
-          ? ctx.scrubbedOriginalHtml
+          ? wrapRecipientVersionPdfHtml(ctx.scrubbedOriginalHtml)
           : kind === "proposed"
-            ? ctx.scrubbedProposedHtml
-            : buildRecipientRedlinePdfHtml(vm);
+            ? wrapRecipientVersionPdfHtml(ctx.scrubbedProposedHtml)
+            : buildRecipientRedlinePdfHtml(vm, {
+                agreementId: ctx.agreementId,
+                agreementTitle: ctx.agreementTitleDisplay ?? null,
+                reviewerDisplayName: ctx.reviewerDisplayName ?? null,
+                reviewerEmail: ctx.reviewerEmail ?? null,
+                generatedAt: exportedAt,
+              });
       if (!html.trim()) {
         safeSet(() => setPdfErrors((p) => ({ ...p, [kind]: "Nothing to export yet." })));
         schedulePdfErrorClear(kind);
@@ -175,6 +193,8 @@ export function RecipientPreviewVersionsExport({ plainSource, legalRedlineVm, pd
           exportKind: kind,
           html,
           fileBasename: ctx.exportBasename,
+          reviewerSlug,
+          exportedAt,
         });
         safeSet(() => setA11yStatus("PDF download started."));
       } catch (e: unknown) {

@@ -6,6 +6,7 @@ import {
   downloadRecipientPreviewPdf,
   humanizeRecipientPdfExportErrorMessage,
 } from "./recipientPreviewPdfDownload";
+import { wrapRecipientVersionPdfHtml } from "./recipientPreviewPdfHtml";
 
 type Props = {
   agreementId: string;
@@ -84,8 +85,9 @@ export function RecipientAgreementReadPdfExport({
         agreementId: idSnapshot,
         readHeaders: headersSnapshot,
         exportKind: "original",
-        html: htmlSnapshot,
+        html: wrapRecipientVersionPdfHtml(htmlSnapshot),
         fileBasename: baseSnapshot,
+        exportedAt: new Date(),
       });
       safeSet(() => setA11yStatus("PDF download started."));
     } catch (e: unknown) {

@@ -282,7 +282,7 @@ test.describe("recipient review export hardening", () => {
     const download = page.waitForEvent("download", { timeout: 20_000 });
     await proposed.click();
     const dl = await download;
-    expect(dl.suggestedFilename()).toMatch(/^e2e-services-agreement-proposed\.pdf$/);
+    expect(dl.suggestedFilename()).toMatch(/^e2e-services-agreement-proposed-(?:[a-z0-9-]+-)?\d{4}-\d{2}-\d{2}T\d{4}\.pdf$/);
 
     await expect(page.getByTestId("recipient-pdf-export-error")).toHaveCount(0, { timeout: 8000 });
     await expect(proposed).toBeEnabled();

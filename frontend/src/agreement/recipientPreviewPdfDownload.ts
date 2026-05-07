@@ -17,6 +17,10 @@ export type RecipientPreviewPdfExportRequest = {
    * Slug basename for downloads (e.g. from agreement title). Defaults to `agreement` when empty/unsafe.
    */
   fileBasename?: string;
+  /** Sanitized reviewer slug for proposed/redline filename segment. */
+  reviewerSlug?: string | null;
+  /** Defaults to time of download; keep stable for tests via fake timers. */
+  exportedAt?: Date;
 };
 
 function saveBlob(blob: Blob, filename: string) {
@@ -36,7 +40,10 @@ function resolvedPdfFilename(req: RecipientPreviewPdfExportRequest): string {
     req.fileBasename && req.fileBasename.trim().length > 0
       ? req.fileBasename.trim()
       : recipientExportBasenameFromTitle(undefined, req.agreementId);
-  return recipientPdfDownloadFilename(base, req.exportKind);
+  return recipientPdfDownloadFilename(base, req.exportKind, {
+    reviewerSlug: req.reviewerSlug ?? undefined,
+    exportedAt: req.exportedAt ?? new Date(),
+  });
 }
 
 async function messageFor503RecipientPdf(res: Response): Promise<string> {

@@ -174,6 +174,20 @@ function mergeAdjacentSameSegments(segments: LegalRedlineSegment[]): LegalRedlin
   return out;
 }
 
+/** Merge consecutive segments of the same type (insert/delete/same) for PDF/export readability. */
+export function mergeAdjacentRedlineSegmentsAllTypes(segments: LegalRedlineSegment[]): LegalRedlineSegment[] {
+  const out: LegalRedlineSegment[] = [];
+  for (const s of segments) {
+    const prev = out[out.length - 1];
+    if (prev && prev.type === s.type) {
+      prev.text += s.text;
+    } else {
+      out.push({ type: s.type, text: s.text });
+    }
+  }
+  return out;
+}
+
 export function recomputeLegalRedlineBlock(block: LegalRedlineBlock, segments: LegalRedlineSegment[]): LegalRedlineBlock {
   const counts = countSegmentTypes(segments);
   const hasInsert = segments.some((s) => s.type === "insert" && meaningfulNonSameSegment(s.text));
