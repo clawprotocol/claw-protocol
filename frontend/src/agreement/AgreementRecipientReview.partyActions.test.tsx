@@ -39,7 +39,7 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows the same four action labels on landing (desktop + mobile) and after entering review on document controls", async () => {
+  it("document-first: draft and summary are above the fold; compact actions and downloads on read tab", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -73,6 +73,15 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
+    const docShell = screen.getByTestId("recipient-document-shell");
+    expect(within(docShell).getByText(/Body/i)).toBeTruthy();
+    expect(screen.queryByTestId("recipient-open-draft-preview")).toBeNull();
+
+    const summary = screen.getByTestId("recipient-summary-card");
+    expect(within(summary).getByText("Type")).toBeTruthy();
+    expect(within(summary).getByText("Services")).toBeTruthy();
+    expect(within(summary).queryByText(/Agreement type/i)).toBeNull();
+
     const actionRoots = screen.getAllByTestId("recipient-party-review-actions");
     expect(actionRoots.length).toBeGreaterThanOrEqual(2);
 
@@ -81,39 +90,35 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
     expect(landingDesktop).toBeTruthy();
     expect(landingMobile).toBeTruthy();
 
-    expect(screen.getByTestId("recipient-summary-card")).toBeTruthy();
-
     for (const root of [landingDesktop!, landingMobile!]) {
-      expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.reviewAgreement })).toBeTruthy();
-      expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.requestChanges })).toBeTruthy();
-      expect(within(root).getByRole("button", { name: new RegExp(`^${recipientPartyReviewCopy.looksGood}`, "i") })).toBeTruthy();
-      expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.notParticipating })).toBeTruthy();
+      expect(within(root).queryByRole("button", { name: recipientPartyReviewCopy.reviewAgreement })).toBeNull();
+      expect(within(root).getByTestId("recipient-document-first-looks-good")).toBeTruthy();
+      expect(within(root).getByTestId("recipient-document-first-request-changes")).toBeTruthy();
+      expect(within(root).getByTestId("recipient-document-first-download")).toBeTruthy();
+      expect(within(root).getByTestId("recipient-document-first-not-participating")).toBeTruthy();
     }
 
-    await userEvent.click(within(landingDesktop!).getByRole("button", { name: recipientPartyReviewCopy.reviewAgreement }));
+    expect(screen.getByTestId("recipient-want-a-copy-card")).toBeTruthy();
+
+    await userEvent.click(within(landingDesktop!).getByTestId("recipient-document-first-download"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-party-review-actions").getAttribute("data-placement")).toBe("document-read");
     });
 
-    expect(screen.getByTestId("recipient-open-draft-preview")).toBeTruthy();
+    expect(screen.queryByTestId("recipient-open-draft-preview")).toBeNull();
 
     const docActions = screen.getByTestId("recipient-party-review-actions");
     expect(docActions.getAttribute("data-placement")).toBe("document-read");
+    expect(within(docActions).queryByTestId("recipient-decision-menu")).toBeNull();
     expect(screen.getByTestId("recipient-want-a-copy-card")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Download draft PDF$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Download draft text$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Copy draft text/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
-    expect(within(docActions).getByText(recipientPartyReviewCopy.decisionMenuSubcopy)).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.reviewAgain })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: new RegExp(recipientPartyReviewCopy.sendBackRevised, "i") })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: new RegExp(recipientPartyReviewCopy.askQuickChange, "i") })).toBeTruthy();
-    expect(within(docActions).getByTestId("recipient-download-original-cta")).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: new RegExp(`^${recipientPartyReviewCopy.looksGood}`, "i") })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: /not participating/i })).toBeTruthy();
 
-    await userEvent.click(within(docActions).getByTestId("recipient-ask-quick-change"));
+    await userEvent.click(within(docActions).getByTestId("recipient-document-first-request-changes"));
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     expect(await screen.findByTestId("recipient-revision-voice-field")).toBeTruthy();
   });
 
@@ -154,8 +159,8 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
     const landingDesktop = screen
       .getAllByTestId("recipient-party-review-actions")
       .find((el) => el.getAttribute("data-placement") === "landing")!;
-    await userEvent.click(within(landingDesktop).getByRole("button", { name: recipientPartyReviewCopy.requestChanges }));
-    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
+    await userEvent.click(within(landingDesktop).getByTestId("recipient-document-first-request-changes"));
+    await userEvent.click((await screen.findAllByTestId("recipient-compose-card-small-tweak"))[0]!);
     expect((await screen.findAllByTestId("recipient-revision-voice-field")).length).toBeGreaterThan(0);
   });
 });

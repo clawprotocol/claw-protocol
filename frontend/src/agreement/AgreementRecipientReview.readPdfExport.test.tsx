@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 import { RECIPIENT_WANT_COPY_HEADING } from "./portableReviewCopy";
@@ -41,7 +40,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows Want a copy strip with PDF, text, and copy after Review agreement", async () => {
+  it("shows Want a copy strip with PDF, text, and copy on the recipient surface", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
       if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
@@ -62,8 +61,6 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-want-a-copy-card")).toBeTruthy();

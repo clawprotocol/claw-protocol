@@ -84,11 +84,9 @@ import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge"
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
 import { recipientExportBasenameFromTitle, recipientTextDownloadFilename } from "./recipientExportFilenames";
 import {
-  RECIPIENT_LANDING_INTRO_ONE_LINE,
   RECIPIENT_PUBLIC_HERO_SUBTITLE,
   RECIPIENT_PUBLIC_HERO_TITLE,
   RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES,
-  RECIPIENT_REVIEW_TRUST_SECURE_ESIGN,
   RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE,
   RECIPIENT_SIGN_ONE_DONE_HEADLINE,
   RECIPIENT_SIGN_RECORD_SUBLINE,
@@ -220,17 +218,11 @@ function humanizeRecipientActionError(raw: string | undefined, fallback: string)
 }
 
 function recipientTrustCueStrip() {
-  const cues = [RECIPIENT_REVIEW_TRUST_SECURE_ESIGN, RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES];
   return (
-    <ul className="mt-3 flex flex-wrap gap-2" aria-label="Trust cues">
-      {cues.map((t) => (
-        <li
-          key={t}
-          className="rounded-full border border-slate-700/80 bg-slate-950/35 px-2.5 py-1 text-[10px] font-medium text-slate-300"
-        >
-          {t}
-        </li>
-      ))}
+    <ul className="mt-2 flex flex-wrap gap-2" aria-label="Trust cues">
+      <li className="rounded-full border border-slate-700/80 bg-slate-950/35 px-2.5 py-1 text-[10px] font-medium text-slate-300">
+        {RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES}
+      </li>
     </ul>
   );
 }
@@ -239,7 +231,8 @@ function recipientAgreementSummaryCard(props: {
   agreementType: string;
   partiesLine: string;
   sharedBy: string;
-  statusLabel: string;
+  statusLabel?: string;
+  compact?: boolean;
 }) {
   const row = (label: string, value: string) => (
     <div className="min-w-0">
@@ -248,6 +241,33 @@ function recipientAgreementSummaryCard(props: {
     </div>
   );
 
+  if (props.compact) {
+    return (
+      <div
+        className="mt-3 rounded-lg border border-slate-800/60 bg-slate-950/25 px-3 py-2.5"
+        data-testid="recipient-summary-card"
+      >
+        <dl className="grid gap-2.5 text-xs text-slate-200 sm:grid-cols-3 sm:gap-x-4">
+          <div className="min-w-0">
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Type</dt>
+            <dd className="mt-0.5 font-medium leading-snug">{props.agreementType}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Shared by</dt>
+            <dd className="mt-0.5 font-medium leading-snug">{props.sharedBy}</dd>
+          </div>
+          <div className="min-w-0 sm:col-span-1">
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Parties</dt>
+            <dd className="mt-0.5 font-medium leading-snug">{props.partiesLine}</dd>
+          </div>
+        </dl>
+        {props.statusLabel ? (
+          <div className="mt-2 border-t border-slate-800/60 pt-2">{row("Status", props.statusLabel)}</div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       className="mt-4 rounded-xl border border-slate-800/60 bg-slate-950/25 px-4 py-3.5"
@@ -255,36 +275,16 @@ function recipientAgreementSummaryCard(props: {
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-8">
         <div className="min-w-0 space-y-3">
-          {row("Agreement type", props.agreementType)}
+          {row("Type", props.agreementType)}
           {row("Parties", props.partiesLine)}
         </div>
         <div className="min-w-0 space-y-3">
           {row("Shared by", props.sharedBy)}
-          {row("Status", props.statusLabel)}
+          {props.statusLabel ? row("Status", props.statusLabel) : null}
         </div>
       </div>
     </div>
   );
-}
-
-function recipientSummaryStatusLabel(input: {
-  viewerLike: boolean;
-  agreementFullyExecuted: boolean;
-  mySignatureDone: boolean;
-  signingReadyActive: boolean;
-  hasPendingSuggestion: boolean;
-  recipientApprovedInAudit: boolean;
-  approvedAck: boolean;
-  bundle: AgreementVersionBundle | null;
-}): string {
-  if (input.viewerLike) return "View only";
-  if (input.agreementFullyExecuted) return "Fully executed";
-  if (input.mySignatureDone) return "Signed";
-  if (input.signingReadyActive) return "Ready for signature";
-  if (input.hasPendingSuggestion) return "Edits sent";
-  if (input.recipientApprovedInAudit || input.approvedAck) return "Approved";
-  if (input.bundle?.reviewSentAt) return "Waiting for review";
-  return "Waiting for review";
 }
 
 function formatPartiesLine(parties: AgreementDraft["parties"], maxNames = 4): string {
@@ -295,6 +295,16 @@ function formatPartiesLine(parties: AgreementDraft["parties"], maxNames = 4): st
   const shown = names.slice(0, maxNames);
   const extra = names.length > maxNames ? ` +${names.length - maxNames}` : "";
   return `${shown.join(" · ")}${extra}`;
+}
+
+/** Short “Type” line for metadata — never the full agreement body (preview shows that). */
+function recipientMetadataTypeLine(draft: AgreementDraft): string {
+  const title = (draft.title || "").trim();
+  if (title) return title;
+  const purpose = (draft.purpose || "").trim();
+  if (!purpose) return "Agreement";
+  if (purposeLooksLikeFullAgreementTextForRender(purpose)) return "Agreement";
+  return purpose.length > 120 ? `${purpose.slice(0, 120)}…` : purpose;
 }
 
 export type AgreementRecipientEntry =
@@ -398,8 +408,6 @@ export function AgreementRecipientReview({
   const [previewing, setPreviewing] = useState(false);
   const [flowPhase, setFlowPhase] = useState<"landing" | "active" | "declined">("landing");
   const [workspaceTab, setWorkspaceTab] = useState<"read" | "revise">("read");
-  /** Full agreement HTML is hidden until the reviewer opens it (read tab). */
-  const [recipientDocExpanded, setRecipientDocExpanded] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approvedAck, setApprovedAck] = useState(false);
   const [bundle, setBundle] = useState<AgreementVersionBundle | null>(null);
@@ -1137,16 +1145,6 @@ export function AgreementRecipientReview({
   );
 
   useEffect(() => {
-    setRecipientDocExpanded(false);
-  }, [agreementId]);
-
-  useEffect(() => {
-    if (workspaceTab === "read") {
-      setRecipientDocExpanded(false);
-    }
-  }, [workspaceTab]);
-
-  useEffect(() => {
     void refresh();
   }, [refresh]);
 
@@ -1854,7 +1852,7 @@ export function AgreementRecipientReview({
     const showCelebrate = signDone && (fullyExecutedAtSign || agreementFullyExecuted);
     const senderNameSign = (draft.parties?.[0]?.name || "").trim() || "the sender";
     const inviterLineSign = (inviterDisplayNameOverride || "").trim() || senderNameSign;
-    const agreementTypeSign = (draft.purpose || "").trim() || (draft.title || "").trim() || "Agreement";
+    const agreementTypeSign = recipientMetadataTypeLine(draft);
     const partiesLineSign = formatPartiesLine(draft.parties);
     const signingCeremonyStatusLabel = signDone
       ? "Signed"
@@ -1940,6 +1938,7 @@ export function AgreementRecipientReview({
               partiesLine: partiesLineSign,
               sharedBy: inviterLineSign,
               statusLabel: signingCeremonyStatusLabel,
+              compact: true,
             })}
           </div>
         </header>
@@ -2106,7 +2105,7 @@ export function AgreementRecipientReview({
       recipientLinkRole === "signer" && !signingBlockedByProposalQueue && lockVid.length > 0;
     const senderNameLocked = (draft.parties?.[0]?.name || "").trim() || "the sender";
     const inviterLineLocked = (inviterDisplayNameOverride || "").trim() || senderNameLocked;
-    const agreementTypeLocked = (draft.purpose || "").trim() || (draft.title || "").trim() || "Agreement";
+    const agreementTypeLocked = recipientMetadataTypeLine(draft);
     const partiesLineLocked = formatPartiesLine(draft.parties);
     const signingHref = agreementSigningPath(agreementId, lockVid, undefined, participantPid || undefined);
 
@@ -2114,52 +2113,48 @@ export function AgreementRecipientReview({
       <div
         className={`vs01-agreement-review-inner space-y-6 ${canSignerProceed ? "pb-28 sm:pb-6" : ""}`}
       >
-        <div
-          className="rounded-lg border border-sky-800/40 bg-sky-950/30 px-4 py-3 text-sm text-sky-50"
-          role="status"
-        >
-          <div className="font-semibold">Final version ready for signature</div>
-          <p className="mt-1 text-xs text-sky-100/90">
-            The sender set this text as the final signing version. Suggested edits are closed on this link — open
-            signing when you’re ready.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-4">
-          <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
+          <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold tracking-tight text-slate-100">{RECIPIENT_PUBLIC_HERO_TITLE}</h1>
             <p className="mt-1 max-w-xl text-sm text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
             {recipientTrustCueStrip()}
-            {recipientAgreementSummaryCard({
-              agreementType: agreementTypeLocked,
-              partiesLine: partiesLineLocked,
-              sharedBy: inviterLineLocked,
-              statusLabel: recipientSummaryStatusLabel({
-                viewerLike: false,
-                agreementFullyExecuted,
-                mySignatureDone,
-                signingReadyActive: true,
-                hasPendingSuggestion,
-                recipientApprovedInAudit,
-                approvedAck,
-                bundle,
-              }),
-            })}
           </div>
           {onClose ? (
-            <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact" onClick={onClose}>
+            <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
               Close
             </button>
           ) : null}
         </div>
-        <div className="rounded-lg border border-slate-700 bg-white p-6 text-slate-900 shadow-sm sm:p-8">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
-          <div
-            className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900"
-                dangerouslySetInnerHTML={{
-                  __html: scrubAgreementHtml(lockedReviewBodyHtml) || "<p>No preview yet.</p>",
-                }}
-          />
+
+        <div
+          className="rounded-xl border border-slate-700/80 bg-white text-slate-900 shadow-sm"
+          data-testid="recipient-document-shell"
+          aria-label="Agreement draft"
+        >
+          <div className="p-5 sm:p-7">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
+            <div
+              className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900"
+              dangerouslySetInnerHTML={{
+                __html: scrubAgreementHtml(lockedReviewBodyHtml) || "<p>No preview yet.</p>",
+              }}
+            />
+          </div>
         </div>
+
+        {recipientAgreementSummaryCard({
+          agreementType: agreementTypeLocked,
+          partiesLine: partiesLineLocked,
+          sharedBy: inviterLineLocked,
+          compact: true,
+        })}
+
+        <p
+          className="inline-flex flex-wrap items-center gap-2 rounded-full border border-sky-800/40 bg-sky-950/25 px-3 py-1 text-[11px] font-medium text-sky-100/95"
+          role="status"
+        >
+          Final version ready for signature — suggested edits are closed on this link.
+        </p>
         {recipientLinkRole === "signer" ? (
           canSignerProceed ? (
             <>
@@ -2191,7 +2186,6 @@ export function AgreementRecipientReview({
   if (entry.kind === "review" && flowPhase === "landing") {
     const senderName = (draft.parties?.[0]?.name || "").trim() || "the sender";
     const inviterLine = (inviterDisplayNameOverride || "").trim() || senderName;
-    const title = (draft.title || "").trim() || "Agreement";
     const signingReadyHub = Boolean(bundle && isSigningLockActive(bundle));
     const lockedVid = bundle?.signingLock?.lockedVersionId || "";
     const canSignFromHub =
@@ -2199,18 +2193,31 @@ export function AgreementRecipientReview({
       signingReadyHub &&
       Boolean(lockedVid) &&
       !signingBlockedByProposalQueue;
-    const agreementType = (draft.purpose || "").trim() || title;
+    const agreementType = recipientMetadataTypeLine(draft);
     const partiesLine = formatPartiesLine(draft.parties);
-    const summaryStatusLanding = recipientSummaryStatusLabel({
-      viewerLike,
-      agreementFullyExecuted,
-      mySignatureDone,
-      signingReadyActive: signingReadyHub,
-      hasPendingSuggestion,
-      recipientApprovedInAudit,
-      approvedAck,
-      bundle,
-    });
+    const landingWantCopySlot =
+      !viewerLike && draft ? (
+        <div
+          ref={recipientOriginalDownloadsRef}
+          data-testid="recipient-download-original-anchor"
+          className="min-w-0 max-w-full"
+        >
+          <RecipientWantACopyStrip
+            agreementId={agreementId}
+            agreementTitle={draft.title}
+            readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+            scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+            plainDraftText={directCompareDefault}
+          />
+        </div>
+      ) : null;
+    const landingDownloadOriginal = () => {
+      setFlowPhase("active");
+      setWorkspaceTab("read");
+      window.requestAnimationFrame(() => {
+        recipientOriginalDownloadsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    };
     return (
       <div className="vs01-agreement-review-inner space-y-4 px-5 pb-36 pt-6 sm:space-y-5 sm:px-6 sm:pb-8 sm:pt-8">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2219,19 +2226,12 @@ export function AgreementRecipientReview({
               {RECIPIENT_PUBLIC_HERO_TITLE}
             </h1>
             <p className="mt-1 max-w-lg text-sm leading-relaxed text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-300">{RECIPIENT_LANDING_INTRO_ONE_LINE}</p>
             {viewerLike ? (
               <p className="mt-2 text-xs text-slate-500">
                 This link is view-only — you can read but can&apos;t suggest edits.
               </p>
             ) : null}
             {recipientTrustCueStrip()}
-            {recipientAgreementSummaryCard({
-              agreementType,
-              partiesLine,
-              sharedBy: inviterLine,
-              statusLabel: summaryStatusLanding,
-            })}
           </div>
           {onClose ? (
             <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
@@ -2240,10 +2240,32 @@ export function AgreementRecipientReview({
           ) : null}
         </div>
 
+        <section
+          className="rounded-xl border border-slate-700/80 bg-white text-slate-900 shadow-sm"
+          data-testid="recipient-document-shell"
+          aria-label="Agreement draft"
+        >
+          <div className="p-5 sm:p-7">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
+            <div
+              className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900"
+              dangerouslySetInnerHTML={{ __html: scrubAgreementHtml(renderedHtmlDisplay) || "<p>No preview yet.</p>" }}
+            />
+          </div>
+        </section>
+
+        {recipientAgreementSummaryCard({
+          agreementType,
+          partiesLine,
+          sharedBy: inviterLine,
+          compact: true,
+        })}
+
         <div className="hidden sm:block">
           <RecipientPartyReviewActions
             placement="landing"
             viewerLike={viewerLike}
+            documentFirstLayout={!viewerLike}
             canSignFromHub={canSignFromHub}
             primarySigningHref={
               canSignFromHub
@@ -2267,6 +2289,7 @@ export function AgreementRecipientReview({
               window.setTimeout(() => void acceptCurrentDraft(), 0);
             }}
             onNotParticipating={() => setFlowPhase("declined")}
+            onDownloadOriginal={!viewerLike ? landingDownloadOriginal : undefined}
           />
         </div>
 
@@ -2274,6 +2297,7 @@ export function AgreementRecipientReview({
           <RecipientPartyReviewActions
             placement="landing-mobile"
             viewerLike={viewerLike}
+            documentFirstLayout={!viewerLike}
             canSignFromHub={canSignFromHub}
             primarySigningHref={
               canSignFromHub
@@ -2297,8 +2321,11 @@ export function AgreementRecipientReview({
               window.setTimeout(() => void acceptCurrentDraft(), 0);
             }}
             onNotParticipating={() => setFlowPhase("declined")}
+            onDownloadOriginal={!viewerLike ? landingDownloadOriginal : undefined}
           />
         </div>
+
+        {landingWantCopySlot}
       </div>
     );
   }
@@ -2332,6 +2359,11 @@ export function AgreementRecipientReview({
     signingReadyActive &&
     Boolean(lockedSignVid) &&
     !signingBlockedByProposalQueue;
+
+  const activeSummaryInviter =
+    (inviterDisplayNameOverride || "").trim() || (draft!.parties?.[0]?.name || "").trim() || "the sender";
+  const activeSummaryType = recipientMetadataTypeLine(draft!);
+  const activeSummaryParties = formatPartiesLine(draft!.parties);
 
   const statusBanner = (() => {
     if (agreementFullyExecuted) {
@@ -2386,11 +2418,7 @@ export function AgreementRecipientReview({
         detail: "Read the document below, then suggest changes or accept when you are comfortable.",
       };
     }
-    return {
-      wrap: "border-slate-700 bg-slate-900/50 text-slate-200",
-      title: "Draft under review",
-      detail: "Changes can still be requested before signing.",
-    };
+    return null;
   })();
 
   const suggestControlsDisabled =
@@ -2405,13 +2433,15 @@ export function AgreementRecipientReview({
         recipientPreview && !recipientSuggestedEditsSentAck ? "pb-32" : "pb-24"
       }`}
     >
-      <div
-        className={`rounded-lg border px-4 py-3 text-sm leading-snug ${statusBanner.wrap}`}
-        role="status"
-      >
-        <div className="font-semibold">{statusBanner.title}</div>
-        <p className="mt-1 text-xs opacity-95">{statusBanner.detail}</p>
-      </div>
+      {statusBanner ? (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm leading-snug ${statusBanner.wrap}`}
+          role="status"
+        >
+          <div className="font-semibold">{statusBanner.title}</div>
+          <p className="mt-1 text-xs opacity-95">{statusBanner.detail}</p>
+        </div>
+      ) : null}
 
       {entry.kind === "review" && recipientSuggestedEditsSentAck ? (
         <div
@@ -2430,7 +2460,6 @@ export function AgreementRecipientReview({
               data-testid="recipient-suggested-edits-back-to-agreement"
               onClick={() => {
                 setWorkspaceTab("read");
-                setRecipientDocExpanded(true);
                 window.requestAnimationFrame(() => {
                   document
                     .querySelector('[data-testid="recipient-document-shell"]')
@@ -2505,6 +2534,7 @@ export function AgreementRecipientReview({
           <p className="mt-1 max-w-xl text-sm text-slate-400">
             {workspaceTab === "read" ? RECIPIENT_PUBLIC_HERO_SUBTITLE : "Suggest updates, preview, then send them to the owner."}
           </p>
+          {workspaceTab === "read" ? recipientTrustCueStrip() : null}
         </div>
         {onClose ? (
           <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
@@ -2513,57 +2543,35 @@ export function AgreementRecipientReview({
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 sm:text-[13px]">
-        <ProofBadge state={recipientProofBadge} title="Agreement status (LawDog)" />
-        <span className="rounded-md border border-slate-700 bg-slate-950/50 px-2 py-0.5 font-medium text-slate-300">
-          {versionLabelHub}
-        </span>
-        <span className="text-slate-500">·</span>
-        <span>{(draft.title || "").trim() || "Agreement"}</span>
-      </div>
-
       <section
         className="rounded-xl border border-slate-700/80 bg-white text-slate-900 shadow-sm"
         data-testid="recipient-document-shell"
         aria-label="Agreement draft"
       >
-        {!recipientDocExpanded ? (
-          <div className="flex flex-col items-center justify-center gap-3 px-5 py-10 sm:py-12">
-            <p className="text-center text-sm text-slate-500">Draft is ready when you want to read the full text.</p>
-            <button
-              type="button"
-              data-testid="recipient-open-draft-preview"
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-white"
-              onClick={() => {
-                setRecipientDocExpanded(true);
-                window.requestAnimationFrame(() => recipientReadDocAnchorRef.current?.focus({ preventScroll: true }));
-              }}
-            >
-              Preview document
-            </button>
-          </div>
-        ) : (
-          <div className="p-5 sm:p-7">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
-              <button
-                type="button"
-                className="text-xs font-medium text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
-                data-testid="recipient-collapse-draft-preview"
-                onClick={() => setRecipientDocExpanded(false)}
-              >
-                Hide document
-              </button>
-            </div>
-            <div
-              ref={recipientReadDocAnchorRef}
-              tabIndex={-1}
-              className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
-              dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
-            />
-          </div>
-        )}
+        <div className="p-5 sm:p-7">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
+          <div
+            ref={recipientReadDocAnchorRef}
+            tabIndex={-1}
+            className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+            dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
+          />
+        </div>
       </section>
+
+      {recipientAgreementSummaryCard({
+        agreementType: activeSummaryType,
+        partiesLine: activeSummaryParties,
+        sharedBy: activeSummaryInviter,
+        compact: true,
+      })}
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 sm:text-[13px]">
+        <ProofBadge state={recipientProofBadge} title="Agreement status (LawDog)" />
+        <span className="rounded-md border border-slate-700 bg-slate-950/50 px-2 py-0.5 font-medium text-slate-300">
+          {versionLabelHub}
+        </span>
+      </div>
 
       <p className="text-center text-[10px] text-slate-600 sm:text-left">
         Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
@@ -2574,8 +2582,9 @@ export function AgreementRecipientReview({
           <RecipientPartyReviewActions
             placement="document-read"
             viewerLike={viewerLike}
+            documentFirstLayout={!viewerLike}
             canSignFromHub={false}
-            promoteLooksGoodVisually
+            promoteLooksGoodVisually={false}
             looksGoodLoading={approving}
             looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
             requestChangesDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
@@ -2596,27 +2605,10 @@ export function AgreementRecipientReview({
                 </div>
               ) : null
             }
-            reviseEntrySplit={entry.kind === "review" && !viewerLike}
-            onSendBackRevised={() => {
-              setComposePathCardsVisible(false);
-              setWorkspaceTab("revise");
-              setWorkflowMode("revised");
-              setRevisedIntakePhase("pick-method");
-              setError(null);
-              scrollAndFocusSuggestPanel();
-            }}
-            onAskQuickChange={() => {
-              setComposePathCardsVisible(false);
-              setWorkspaceTab("revise");
-              setWorkflowMode("quick");
-              setError(null);
-              scrollAndFocusSuggestPanel();
-            }}
             onDownloadOriginal={() => {
               recipientOriginalDownloadsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
             onReviewPrimary={() => {
-              setRecipientDocExpanded(true);
               window.requestAnimationFrame(() => {
                 document
                   .querySelector('[data-testid="recipient-document-shell"]')

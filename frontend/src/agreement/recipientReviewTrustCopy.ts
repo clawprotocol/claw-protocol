@@ -5,13 +5,12 @@
 
 /** Shell + landing hero (Vs01 header + in-card title). */
 export const RECIPIENT_PUBLIC_HERO_TITLE = "Review agreement";
-export const RECIPIENT_PUBLIC_HERO_SUBTITLE = "Read it, request edits, or approve it.";
-/** Single intro line under the hero title on the recipient landing card. */
-export const RECIPIENT_LANDING_INTRO_ONE_LINE =
-  "Request edits or approve the draft. Nothing changes until accepted.";
+export const RECIPIENT_PUBLIC_HERO_SUBTITLE =
+  "Read the draft. Nothing changes until you choose what to send.";
+/** @deprecated Prefer {@link RECIPIENT_PUBLIC_HERO_SUBTITLE} only (no duplicate line under title). */
+export const RECIPIENT_LANDING_INTRO_ONE_LINE = RECIPIENT_PUBLIC_HERO_SUBTITLE;
 
-export const RECIPIENT_REVIEW_TRUST_SECURE_ESIGN = "Secure e-signing";
-export const RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES = "Nothing changes until accepted";
+export const RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES = "Nothing changes until accepted.";
 
 /** After all signers complete (recipient ceremony view). */
 export const RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE =

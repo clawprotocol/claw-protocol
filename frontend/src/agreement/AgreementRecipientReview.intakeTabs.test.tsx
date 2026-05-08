@@ -74,11 +74,11 @@ describe("AgreementRecipientReview revise workflow routing", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
+    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
+      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
 
     await waitFor(() => {
       expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
@@ -115,11 +115,11 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
+    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
+      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
     await userEvent.click(
       within(
         screen.getAllByRole("tablist", {
@@ -158,11 +158,11 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
+    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
+      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
     await userEvent.click(screen.getAllByTestId("recipient-workflow-quick")[0]!);
     await userEvent.click(screen.getAllByTestId("recipient-switch-to-revised-draft-link")[0]!);
 
@@ -199,11 +199,11 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
+    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
+      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
 
     await userEvent.click(screen.getAllByTestId("recipient-workflow-quick")[0]!);
     await userEvent.type(screen.getAllByTestId("recipient-revision-voice-field")[0]!, "Make payment Net 30.");
@@ -238,11 +238,11 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
+    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
+      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
 
     const revisedPanel = screen.getAllByTestId("recipient-revised-version-panel")[0]!;
     const scoped = within(revisedPanel);
@@ -281,11 +281,11 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
+    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
+      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
     await userEvent.click(screen.getAllByTestId("recipient-workflow-quick")[0]!);
 
     const big = "THIS AGREEMENT\n\n".repeat(200);
@@ -338,11 +338,11 @@ describe("AgreementRecipientReview revise workflow routing", () => {
       await waitFor(() => {
         expect(scoped.queryByText(/Loading agreement/i)).toBeNull();
       });
-      await userEvent.click(scoped.getAllByRole("button", { name: /Review agreement/i })[0]!);
+      await userEvent.click(scoped.getAllByTestId("recipient-document-first-request-changes")[0]!);
       await waitFor(() => {
-        expect(scoped.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
+        expect(scoped.getByTestId("recipient-compose-path-cards")).toBeTruthy();
       });
-      await userEvent.click(scoped.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+      await userEvent.click(scoped.getByTestId("recipient-compose-card-bigger-rewrite"));
       await userEvent.click(scoped.getAllByTestId("recipient-intake-mode-paste-revised")[0]!);
 
       const ta = scoped.getAllByTestId("recipient-revised-draft-paste")[0]! as HTMLTextAreaElement;

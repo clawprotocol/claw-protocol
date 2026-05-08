@@ -290,16 +290,12 @@ test.describe("paid LawDog review-link path (hydrate + mint + proposal)", () => 
     await installPaidReviewLinkRoutes(recipientPage, state);
     await recipientPage.goto(counterpartyReviewUrl, { waitUntil: "domcontentloaded" });
 
-    const requestChangesLanding = recipientPage.getByRole("button", { name: "Request changes" });
-    if (await requestChangesLanding.isVisible().catch(() => false)) {
-      await requestChangesLanding.first().click();
-    } else {
-      const reviewCta = recipientPage.getByRole("button", { name: "Review agreement" });
-      await expect(reviewCta.first()).toBeVisible({ timeout: 30_000 });
-      await reviewCta.first().click();
-      await expect(recipientPage.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
-      await recipientPage.getByRole("button", { name: "Request changes" }).click();
-    }
+    await expect(recipientPage.getByTestId("recipient-document-first-request-changes").first()).toBeVisible({
+      timeout: 30_000,
+    });
+    await recipientPage.getByTestId("recipient-document-first-request-changes").first().click();
+    await expect(recipientPage.getByTestId("recipient-compose-card-small-tweak")).toBeVisible({ timeout: 20_000 });
+    await recipientPage.getByTestId("recipient-compose-card-small-tweak").click();
 
     await recipientPage.getByTestId("recipient-workflow-quick").click();
     await expect(recipientPage.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 20_000 });

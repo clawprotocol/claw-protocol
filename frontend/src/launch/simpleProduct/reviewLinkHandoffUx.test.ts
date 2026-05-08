@@ -38,9 +38,9 @@ describe("Review link handoff UX (LawDog)", () => {
     const s = readFileSync(p, "utf8");
     const party = readFileSync(join(__dirname, "../../agreement/recipientReviewPartyActions.tsx"), "utf8");
     expect(s).toContain("RECIPIENT_PUBLIC_HERO_TITLE");
-    expect(s).toContain("RECIPIENT_LANDING_INTRO_ONE_LINE");
+    expect(s).toContain("RECIPIENT_PUBLIC_HERO_SUBTITLE");
     expect(s).toContain("recipient-summary-card");
-    expect(s).toContain("recipient-open-draft-preview");
+    expect(s).toContain("recipient-document-shell");
     expect(s).toContain("RecipientPartyReviewActions");
     expect(party).toContain("Send back a revised version");
     expect(party).toContain("Looks good");

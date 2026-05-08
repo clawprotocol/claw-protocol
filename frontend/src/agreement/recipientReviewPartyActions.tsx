@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { RECIPIENT_PUBLIC_HERO_SUBTITLE } from "./recipientReviewTrustCopy";
 
 /**
  * Single source of truth for recipient party-review CTAs (landing + document read).
@@ -28,20 +29,21 @@ export const recipientPartyReviewCopy = {
   /** @deprecated */
   notParticipatingHelper: "Step away from this review.",
   assuranceLine: "Nothing changes until the sender accepts.",
-  nextStepSummary: "Read the draft, then pick what fits — nothing changes until the sender accepts.",
+  nextStepSummary: RECIPIENT_PUBLIC_HERO_SUBTITLE,
   /** @deprecated */
   doneReadingPrompt: "Done reading? Choose what happens next.",
   /** Friendly decision menu */
   decisionMenuHeading: "What would you like to do?",
-  decisionMenuSubcopy: "Nothing changes until the sender accepts.",
+  decisionMenuSubcopy: "Nothing changes until accepted.",
+  requestChangesCardSub: "Suggest edits before signing.",
   looksGoodCardTitle: "Looks good",
   looksGoodCardSub: "I’m ready to move forward.",
   smallTweakCardTitle: "Ask for a small tweak",
   smallTweakCardSub: "A sentence or two, like payment timing or wording.",
   biggerRewriteCardTitle: "Send back a revised version",
   biggerRewriteCardSub: "Upload, paste, or edit a full draft. LawDog will redline it.",
-  downloadCopyCardTitle: "Download draft",
-  downloadCopyCardSub: "Save a PDF or text copy.",
+  downloadCopyCardTitle: "Download copy",
+  downloadCopyCardSub: "Save a copy for review.",
   stepAwayCardTitle: "I’m not participating",
   stepAwayCardSub: "No changes will be sent.",
 } as const;
@@ -72,6 +74,8 @@ type RecipientPartyReviewActionsProps = {
   children?: ReactNode;
   /** Shown after the review primary control, before the decision menu (e.g. draft downloads). */
   afterReviewSlot?: ReactNode;
+  /** Document-first: four choices after the draft; no “Review agreement” gate or split revise menu. */
+  documentFirstLayout?: boolean;
 };
 
 const decisionCardQuiet =
@@ -104,6 +108,7 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
     onDownloadOriginal,
     children,
     afterReviewSlot,
+    documentFirstLayout,
   } = props;
 
   const useSplitReviseEntry =
@@ -126,6 +131,80 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
     "inline-flex w-full items-center justify-center rounded-xl border border-slate-600 bg-slate-900/60 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800/80";
   const landingRequestSecondaryClass =
     "w-full rounded-xl border border-slate-600/80 bg-transparent px-4 py-3 text-center text-sm font-semibold text-slate-100 transition-colors hover:bg-slate-900/40 disabled:opacity-45 sm:text-left";
+
+  if (documentFirstLayout && !viewerLike) {
+    return (
+      <div
+        className={`flex flex-col ${isLandingPlacement ? "gap-3" : "gap-3"}`}
+        data-testid="recipient-party-review-actions"
+        data-placement={placement}
+      >
+        {canSignFromHub && primarySigningHref ? (
+          <a
+            className={isLandingPlacement ? landingPrimarySignClass : defaultReviewControlClass}
+            href={primarySigningHref}
+          >
+            {recipientPartyReviewCopy.reviewAndSign}
+          </a>
+        ) : null}
+
+        <button
+          type="button"
+          data-testid="recipient-document-first-looks-good"
+          className={decisionCardGreen}
+          disabled={looksDisabled}
+          onClick={onLooksGood}
+        >
+          <span className="block text-base font-semibold text-emerald-50">
+            {recipientPartyReviewCopy.looksGoodCardTitle}
+          </span>
+          <span className="mt-0.5 block text-xs font-normal text-emerald-100/85">
+            {recipientPartyReviewCopy.looksGoodCardSub}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="recipient-document-first-request-changes"
+          className={decisionCardQuiet}
+          disabled={requestChangesDisabled}
+          onClick={onRequestChanges}
+        >
+          <span className="block text-base font-semibold text-slate-100">{recipientPartyReviewCopy.requestChanges}</span>
+          <span className="mt-0.5 block text-xs font-normal text-slate-400">
+            {recipientPartyReviewCopy.requestChangesCardSub}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="recipient-document-first-download"
+          className={decisionCardQuiet}
+          disabled={requestChangesDisabled || !onDownloadOriginal}
+          onClick={() => onDownloadOriginal?.()}
+        >
+          <span className="block text-base font-semibold text-slate-100">
+            {recipientPartyReviewCopy.downloadCopyCardTitle}
+          </span>
+          <span className="mt-0.5 block text-xs font-normal text-slate-400">
+            {recipientPartyReviewCopy.downloadCopyCardSub}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="recipient-document-first-not-participating"
+          className={decisionCardLow}
+          onClick={onNotParticipating}
+        >
+          <span className="block font-medium text-slate-400">{recipientPartyReviewCopy.notParticipating}</span>
+        </button>
+
+        {afterReviewSlot ? <div className="min-w-0 max-w-full">{afterReviewSlot}</div> : null}
+        {children}
+      </div>
+    );
+  }
 
   if (viewerLike) {
     return (

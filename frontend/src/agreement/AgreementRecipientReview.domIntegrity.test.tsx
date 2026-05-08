@@ -124,11 +124,11 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
+    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-ask-quick-change")).toBeTruthy();
+      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
     });
-    await userEvent.click(screen.getByTestId("recipient-ask-quick-change"));
+    await userEvent.click(screen.getByTestId("recipient-compose-card-small-tweak"));
 
     const voice = screen.getByTestId("recipient-revision-voice-field");
     await userEvent.type(voice, "Switch to Net 30 for payment timing.");

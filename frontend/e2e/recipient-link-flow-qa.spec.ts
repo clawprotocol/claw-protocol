@@ -356,16 +356,10 @@ test.describe("recipient + link flow QA", () => {
     await installIsolatedAgreementsApi(page, state);
 
     await page.goto(`/agreements/${id}/review`, { waitUntil: "domcontentloaded" });
-    const requestChangesLanding = page.getByRole("button", { name: "Request changes" });
-    if (await requestChangesLanding.isVisible().catch(() => false)) {
-      await requestChangesLanding.first().click();
-    } else {
-      const reviewCta = page.getByRole("button", { name: "Review agreement" });
-      await expect(reviewCta.first()).toBeVisible({ timeout: 30_000 });
-      await reviewCta.first().click();
-      await expect(page.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
-      await page.getByRole("button", { name: "Request changes" }).click();
-    }
+    await expect(page.getByTestId("recipient-document-first-request-changes").first()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("recipient-document-first-request-changes").first().click();
+    await expect(page.getByTestId("recipient-compose-card-small-tweak")).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("recipient-compose-card-small-tweak").click();
     await page.getByTestId("recipient-workflow-quick").click();
     await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 20_000 });
     const ta = page.getByTestId("recipient-revision-voice-field");
@@ -463,16 +457,10 @@ test.describe("recipient + link flow QA", () => {
     });
 
     await page.goto(`/agreements/${id}/review`, { waitUntil: "domcontentloaded" });
-    const requestChangesLanding = page.getByRole("button", { name: "Request changes" });
-    if (await requestChangesLanding.isVisible().catch(() => false)) {
-      await requestChangesLanding.first().click();
-    } else {
-      const reviewCta = page.getByRole("button", { name: "Review agreement" });
-      await expect(reviewCta.first()).toBeVisible({ timeout: 30_000 });
-      await reviewCta.first().click();
-      await expect(page.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
-      await page.getByRole("button", { name: "Request changes" }).click();
-    }
+    await expect(page.getByTestId("recipient-document-first-request-changes").first()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("recipient-document-first-request-changes").first().click();
+    await expect(page.getByTestId("recipient-compose-card-small-tweak")).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("recipient-compose-card-small-tweak").click();
     await page.getByTestId("recipient-workflow-quick").click();
     await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 20_000 });
 
