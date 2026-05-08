@@ -6,7 +6,12 @@ import {
   RECIPIENT_COPY_EXPORT_PREVIEW_LINE,
   RECIPIENT_COPY_EXPORT_SECTION_HELPER,
   RECIPIENT_COPY_EXPORT_SECTION_TITLE,
+  RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK,
   RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
+  RECIPIENT_WANT_COPY_BODY,
+  RECIPIENT_WANT_COPY_COMPARE_HELPER,
+  RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
+  RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
   RECIPIENT_WANT_COPY_HEADING,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
@@ -57,5 +62,22 @@ describe("recipient portable review CTA labels", () => {
     expect(RECIPIENT_BTN_REVIEW_CHANGES).toBe("Compare drafts");
     expect(RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL).toBe("Upload revised draft");
     expect(RECIPIENT_WANT_COPY_HEADING).toBe("Review somewhere else?");
+  });
+});
+
+describe("recipient want-a-copy portable copy", () => {
+  it("uses outside-review loopback strings aligned with trust posture", () => {
+    expect(RECIPIENT_WANT_COPY_BODY).toBe(
+      "Download the draft, edit it with your lawyer or AI tools, then upload the revised version back into LawDog.",
+    );
+    expect(RECIPIENT_WANT_COPY_COMPARE_HELPER).toBe(
+      "LawDog compares it with the original before anything is sent.",
+    );
+    expect(RECIPIENT_WANT_COPY_DROPZONE_PRIMARY).toBe("Drag a revised draft here");
+    expect(RECIPIENT_WANT_COPY_DROPZONE_SECONDARY).toBe("PDF, TXT, or Markdown. DOCX coming next.");
+    expect(RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK).toBe(
+      "We couldn't extract readable text from this file. Try a selectable-text PDF, TXT, or Markdown file.",
+    );
+    expect(RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK.toLowerCase()).not.toContain("docx");
   });
 });

@@ -7,10 +7,11 @@ import { AccessProvider } from "../access/AccessContext";
 import {
   RECIPIENT_WANT_COPY_BODY,
   RECIPIENT_WANT_COPY_COMPARE_HELPER,
+  RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
+  RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
   RECIPIENT_WANT_COPY_HEADING,
   RECIPIENT_WANT_COPY_LOOPBACK_CUE,
   RECIPIENT_WANT_COPY_UPLOAD_CTA,
-  RECIPIENT_WANT_COPY_UPLOAD_FORMAT_HELPER,
 } from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
@@ -79,7 +80,8 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     expect(screen.getByText(RECIPIENT_WANT_COPY_COMPARE_HELPER)).toBeTruthy();
     expect(screen.getByText(RECIPIENT_WANT_COPY_LOOPBACK_CUE)).toBeTruthy();
     expect(screen.getByRole("button", { name: RECIPIENT_WANT_COPY_UPLOAD_CTA })).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_UPLOAD_FORMAT_HELPER)).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_PRIMARY)).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_SECONDARY)).toBeTruthy();
     expect(screen.getByTestId("recipient-download-draft-pdf")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download draft PDF/i })).toBeTruthy();
     expect(screen.getByTestId("recipient-download-draft-text")).toBeTruthy();
@@ -136,5 +138,11 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
       },
       { timeout: 10_000 },
     );
+
+    await waitFor(() => {
+      const compareBtn = screen.getByTestId("recipient-compare-versions-button") as HTMLButtonElement;
+      expect(compareBtn.disabled).toBe(false);
+      expect(compareBtn.textContent).toMatch(/Compare drafts/i);
+    });
   }, 12_000);
 });
