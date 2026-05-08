@@ -46,6 +46,12 @@ export const RECIPIENT_COPY_EXPORT_PREVIEW_LINE =
 export const RECIPIENT_DRAFT_IMPORT_READ_ERROR =
   "Couldn't read that file. Try plain text for now.";
 
+/** Visible “review elsewhere” card in Request changes (not only inside accordion). */
+export const RECIPIENT_REVIEW_ELSEWHERE_TITLE = "Prefer another editor?";
+export const RECIPIENT_REVIEW_ELSEWHERE_BODY =
+  "Download or copy the draft, edit it with your lawyer or AI tool, then import or paste it back.";
+export const RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL = "Import edited .txt / .md";
+
 /** Owner workspace: same portable flow, but apply/discard is local. */
 export const OWNER_PORTABLE_REVIEW_SUB =
   "Copy the current draft, revise in your preferred tool, then bring back suggested edits. LawDog will organize the differences. Your saved draft does not change until you preview and apply, or you discard the preview.";

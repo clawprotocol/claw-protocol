@@ -79,7 +79,7 @@ import {
 import type { NegotiationRiskTier } from "./negotiationRisk";
 import { useAccess } from "../access/AccessContext";
 import { useAutosizeTextarea } from "../hooks/useAutosizeTextarea";
-import { useRecipientDraftTextareaMaxPx } from "../hooks/useRecipientDraftTextareaMaxPx";
+import { useRecipientDraftTextareaSizing } from "../hooks/useRecipientDraftTextareaMaxPx";
 import { ClawTrustFooter } from "../components/claw/ClawTrustFooter";
 import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge";
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
@@ -106,6 +106,9 @@ import {
   RECIPIENT_COPY_EXPORT_SECTION_HELPER,
   RECIPIENT_COPY_EXPORT_SECTION_TITLE,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
+  RECIPIENT_REVIEW_ELSEWHERE_BODY,
+  RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL,
+  RECIPIENT_REVIEW_ELSEWHERE_TITLE,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
 import {
@@ -393,11 +396,11 @@ export function AgreementRecipientReview({
   const externalPasteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const draftImportFileInputRef = useRef<HTMLInputElement | null>(null);
   const proRedlineSuggestTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const draftTextareaMaxPx = useRecipientDraftTextareaMaxPx();
+  const { minPx: draftTextareaMinPx, maxPx: draftTextareaMaxPx } = useRecipientDraftTextareaSizing();
   const describeAutosizeMaxPx = Math.min(480, draftTextareaMaxPx);
   const pasteNoteAutosizeMaxPx = Math.min(360, draftTextareaMaxPx);
   useAutosizeTextarea(externalPasteTextareaRef, externalAiPaste, {
-    minPx: 120,
+    minPx: draftTextareaMinPx,
     maxPx: draftTextareaMaxPx,
   });
   useAutosizeTextarea(proRedlineSuggestTextareaRef, proRedlineSuggestText, { minPx: 112, maxPx: 440 });
@@ -418,6 +421,7 @@ export function AgreementRecipientReview({
       try {
         const text = String(reader.result ?? "");
         setExternalAiPaste(text);
+        setUniversalIntakeMode("paste");
         setRecipientPreview(null);
         setRecipientRevisePreviewError(null);
         window.requestAnimationFrame(() => {
@@ -1057,6 +1061,38 @@ export function AgreementRecipientReview({
     (html: string) => substitutePartyPlaceholdersInUserFacingText(html || "", draftSanitizeContext),
     [draftSanitizeContext],
   );
+
+  const copyRecipientDraftPlainToClipboard = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(htmlToPlainText(renderedHtmlDisplay || renderedHtml || ""));
+      setCopyDraftFlash(true);
+      window.setTimeout(() => setCopyDraftFlash(false), 1800);
+    } catch {
+      setError("Could not copy to clipboard.");
+    }
+  }, [renderedHtmlDisplay, renderedHtml]);
+
+  const downloadRecipientDraftPlainText = useCallback(() => {
+    try {
+      const plain = htmlToPlainText(renderedHtmlDisplay || renderedHtml || "");
+      if (!plain.trim()) {
+        setError("No draft text to download yet.");
+        return;
+      }
+      const blob = new Blob([plain], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${recipientExportBasenameFromTitle(draft?.title, agreementId)}.txt`;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch {
+      setError("Could not prepare text download.");
+    }
+  }, [renderedHtmlDisplay, renderedHtml, draft?.title, agreementId]);
 
   useEffect(() => {
     void refresh();
@@ -2238,6 +2274,9 @@ export function AgreementRecipientReview({
   const suggestControlsDisabled =
     saving || previewing || hasPendingSuggestion || recipientSuggestedEditsSentAck;
 
+  const recipientDraftBodyTextareaClass =
+    "w-full min-h-[280px] max-w-full resize-y overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 sm:min-h-[420px]";
+
   return (
     <div
       className={`vs01-agreement-review-inner space-y-6 sm:pb-8 ${
@@ -2620,16 +2659,24 @@ export function AgreementRecipientReview({
                 <DirectComparePanel defaultBefore={directCompareDefault} />
               ) : (
                 <>
+              <input
+                ref={draftImportFileInputRef}
+                type="file"
+                className="sr-only"
+                accept=".txt,.text,.md,text/plain"
+                data-testid="recipient-import-draft-file-input"
+                onChange={onDraftImportFileSelected}
+              />
               <div className="space-y-2 rounded-md border border-slate-700/60 bg-slate-950/35 p-3">
                 <h3 className="text-base font-semibold text-slate-100">Request changes</h3>
                 <p className="text-xs leading-relaxed text-slate-400 sm:text-[13px]">
-                  Ask for edits or paste your own. Nothing changes until the sender accepts.
+                  Ask for edits or send your own version.
+                </p>
+                <p className="text-xs leading-relaxed text-slate-400 sm:text-[13px]">
+                  Nothing changes until the sender accepts.
                 </p>
                 <p className="text-[11px] font-medium text-slate-400 sm:text-xs">
                   Suggestions are not signatures.
-                </p>
-                <p className="text-[10px] leading-snug text-slate-500">
-                  Take your time. No surprise edits — you&apos;re just suggesting changes.
                 </p>
               </div>
 
@@ -2694,6 +2741,60 @@ export function AgreementRecipientReview({
                 </button>
               </div>
 
+              {entry.kind === "review" && !recipientPreview ? (
+                <div
+                  data-testid="recipient-review-elsewhere-card"
+                  className="space-y-3 rounded-lg border border-sky-900/35 bg-slate-950/55 p-3 sm:p-4"
+                >
+                  <div>
+                    <h4 className="text-sm font-semibold text-sky-100">{RECIPIENT_REVIEW_ELSEWHERE_TITLE}</h4>
+                    <p className="mt-1.5 text-xs leading-relaxed text-slate-400 sm:text-[13px]">
+                      {RECIPIENT_REVIEW_ELSEWHERE_BODY}
+                    </p>
+                  </div>
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    {draft ? (
+                      <RecipientAgreementReadPdfExport
+                        bare
+                        agreementId={agreementId}
+                        agreementTitle={draft?.title}
+                        readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+                        scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+                        pdfDownloadButtonLabel="Download draft PDF"
+                        pdfDownloadButtonTestId="recipient-review-elsewhere-download-pdf"
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      data-testid="recipient-review-elsewhere-download-text"
+                      className="w-full min-w-0 break-words rounded-md border border-slate-600 bg-slate-900/80 px-3 py-2 text-left text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50 sm:w-auto"
+                      disabled={suggestControlsDisabled}
+                      onClick={() => downloadRecipientDraftPlainText()}
+                    >
+                      Download draft text
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="recipient-review-elsewhere-copy-text"
+                      className="w-full min-w-0 break-words rounded-md border border-slate-600 bg-slate-900/80 px-3 py-2 text-left text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50 sm:w-auto"
+                      disabled={suggestControlsDisabled}
+                      onClick={() => void copyRecipientDraftPlainToClipboard()}
+                    >
+                      Copy draft text
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="recipient-review-elsewhere-import"
+                      className="w-full min-w-0 break-words rounded-md border border-emerald-900/45 bg-emerald-950/30 px-3 py-2 text-left text-xs font-semibold text-emerald-100 hover:bg-emerald-950/45 disabled:opacity-50 sm:w-auto"
+                      disabled={suggestControlsDisabled}
+                      onClick={() => draftImportFileInputRef.current?.click()}
+                    >
+                      {RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {universalIntakeMode === "plain" ? (
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-200" htmlFor={revisionPlainFieldId}>
@@ -2720,30 +2821,9 @@ export function AgreementRecipientReview({
                 </div>
               ) : universalIntakeMode === "paste" ? (
                 <div className="space-y-2">
-                  <div className="flex flex-wrap items-end justify-between gap-2">
-                    <label className="text-sm font-semibold text-slate-200" htmlFor={externalPasteFieldId}>
-                      {PORTABLE_REVIEW_PASTE_LABEL}
-                    </label>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <input
-                        ref={draftImportFileInputRef}
-                        type="file"
-                        className="sr-only"
-                        accept=".txt,.text,.md,text/plain"
-                        data-testid="recipient-import-draft-file-input"
-                        onChange={onDraftImportFileSelected}
-                      />
-                      <button
-                        type="button"
-                        data-testid="recipient-import-draft-file"
-                        className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
-                        disabled={suggestControlsDisabled}
-                        onClick={() => draftImportFileInputRef.current?.click()}
-                      >
-                        Import .txt / .md
-                      </button>
-                    </div>
-                  </div>
+                  <label className="text-sm font-semibold text-slate-200" htmlFor={externalPasteFieldId}>
+                    {PORTABLE_REVIEW_PASTE_LABEL}
+                  </label>
                   {draftImportError ? (
                     <p
                       role="alert"
@@ -2756,11 +2836,25 @@ export function AgreementRecipientReview({
                   <p className="text-xs leading-snug text-slate-400 sm:text-[13px]">
                     We&apos;ll compare with the current draft before anything is sent.
                   </p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-[11px] font-medium text-slate-500 sm:text-xs">
+                      {RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL}
+                    </p>
+                    <button
+                      type="button"
+                      data-testid="recipient-paste-import-prominent"
+                      className="w-full shrink-0 rounded-md border border-emerald-900/45 bg-emerald-950/30 px-3 py-2 text-center text-xs font-semibold text-emerald-100 hover:bg-emerald-950/45 disabled:opacity-50 sm:w-auto sm:min-w-[12rem]"
+                      disabled={suggestControlsDisabled}
+                      onClick={() => draftImportFileInputRef.current?.click()}
+                    >
+                      {RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL}
+                    </button>
+                  </div>
                   <textarea
                     id={externalPasteFieldId}
                     ref={externalPasteTextareaRef}
                     data-testid="recipient-revised-draft-paste"
-                    className="w-full min-h-[8rem] max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                    className={recipientDraftBodyTextareaClass}
                     style={{ maxHeight: draftTextareaMaxPx }}
                     placeholder={PORTABLE_REVIEW_PASTE_PLACEHOLDER}
                     value={externalAiPaste}
@@ -2806,11 +2900,25 @@ export function AgreementRecipientReview({
                     <h4 className="text-sm font-semibold text-slate-200">{EDIT_DRAFT_TITLE}</h4>
                     <p className="mt-1 text-xs leading-snug text-slate-400 sm:text-[13px]">{EDIT_DRAFT_HELPER}</p>
                   </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-[11px] font-medium text-slate-500 sm:text-xs">
+                      {RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL}
+                    </p>
+                    <button
+                      type="button"
+                      data-testid="recipient-edit-import-prominent"
+                      className="w-full shrink-0 rounded-md border border-emerald-900/45 bg-emerald-950/30 px-3 py-2 text-center text-xs font-semibold text-emerald-100 hover:bg-emerald-950/45 disabled:opacity-50 sm:w-auto sm:min-w-[12rem]"
+                      disabled={suggestControlsDisabled}
+                      onClick={() => draftImportFileInputRef.current?.click()}
+                    >
+                      {RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL}
+                    </button>
+                  </div>
                   <textarea
                     id={editDraftFieldId}
                     ref={externalPasteTextareaRef}
                     data-testid="recipient-edit-draft-textarea"
-                    className="w-full min-h-[8rem] max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                    className={recipientDraftBodyTextareaClass}
                     style={{ maxHeight: draftTextareaMaxPx }}
                     aria-label={EDIT_DRAFT_TITLE}
                     placeholder="Edit the agreement text here…"
@@ -2862,19 +2970,7 @@ export function AgreementRecipientReview({
                       <button
                         type="button"
                         className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
-                        onClick={() => {
-                          void (async () => {
-                            try {
-                              await navigator.clipboard.writeText(
-                                htmlToPlainText(renderedHtmlDisplay || renderedHtml || ""),
-                              );
-                              setCopyDraftFlash(true);
-                              window.setTimeout(() => setCopyDraftFlash(false), 1800);
-                            } catch {
-                              setError("Could not copy to clipboard.");
-                            }
-                          })();
-                        }}
+                        onClick={() => void copyRecipientDraftPlainToClipboard()}
                       >
                         Copy full draft
                       </button>
@@ -2930,27 +3026,7 @@ export function AgreementRecipientReview({
                         type="button"
                         data-testid="recipient-download-draft-text"
                         className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
-                        onClick={() => {
-                          try {
-                            const plain = htmlToPlainText(renderedHtmlDisplay || renderedHtml || "");
-                            if (!plain.trim()) {
-                              setError("No draft text to download yet.");
-                              return;
-                            }
-                            const blob = new Blob([plain], { type: "text/plain;charset=utf-8" });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a");
-                            a.href = url;
-                            a.download = `${recipientExportBasenameFromTitle(draft?.title, agreementId)}.txt`;
-                            a.rel = "noopener";
-                            document.body.appendChild(a);
-                            a.click();
-                            a.remove();
-                            window.setTimeout(() => URL.revokeObjectURL(url), 4000);
-                          } catch {
-                            setError("Could not prepare text download.");
-                          }
-                        }}
+                        onClick={() => downloadRecipientDraftPlainText()}
                       >
                         Download text
                       </button>

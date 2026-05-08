@@ -49,7 +49,8 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain("Ask for edits or paste your own. Nothing changes until the sender accepts.");
+    expect(s).toContain("Ask for edits or send your own version.");
+    expect(s).toContain("Nothing changes until the sender accepts.");
     expect(s).toContain("Suggestions are not signatures.");
     expect(s).toContain("Preview suggestions");
     expect(s).toContain("Compare text");

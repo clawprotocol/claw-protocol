@@ -21,6 +21,8 @@ type Props = {
   bare?: boolean;
   /** Accessible label for the PDF button. */
   pdfDownloadButtonLabel?: string;
+  /** Optional `data-testid` on the download button (defaults by `bare`). */
+  pdfDownloadButtonTestId?: string;
 };
 
 /**
@@ -33,6 +35,7 @@ export function RecipientAgreementReadPdfExport({
   agreementTitle = null,
   bare = false,
   pdfDownloadButtonLabel = "Download PDF",
+  pdfDownloadButtonTestId,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -150,7 +153,9 @@ export function RecipientAgreementReadPdfExport({
         disabled={busy || !hasBody}
         aria-busy={busy}
         className={buttonClass}
-        data-testid={bare ? "recipient-request-copy-export-pdf" : "recipient-read-download-pdf"}
+        data-testid={
+          pdfDownloadButtonTestId ?? (bare ? "recipient-request-copy-export-pdf" : "recipient-read-download-pdf")
+        }
         onClick={() => {
           safeSet(() => setExportError(null));
           void onDownload();

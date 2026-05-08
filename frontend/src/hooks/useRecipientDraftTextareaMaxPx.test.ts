@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { computeRecipientDraftTextareaMaxPx } from "./useRecipientDraftTextareaMaxPx";
+import {
+  computeRecipientDraftTextareaMaxPx,
+  computeRecipientDraftTextareaMinPx,
+} from "./useRecipientDraftTextareaMaxPx";
 
 function mockWindow(innerHeight: number, mobile: boolean) {
   return {
@@ -21,15 +24,26 @@ describe("computeRecipientDraftTextareaMaxPx", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses ~70vh on desktop capped at 720", () => {
+  it("uses 80vh on desktop capped at 900px", () => {
     const w = mockWindow(1000, false);
-    expect(computeRecipientDraftTextareaMaxPx(w)).toBe(700);
-    const w2 = mockWindow(1200, false);
-    expect(computeRecipientDraftTextareaMaxPx(w2)).toBe(720);
+    expect(computeRecipientDraftTextareaMaxPx(w)).toBe(800);
+    const w2 = mockWindow(2000, false);
+    expect(computeRecipientDraftTextareaMaxPx(w2)).toBe(900);
   });
 
-  it("uses ~55vh on mobile and still caps at 720", () => {
+  it("uses 65vh on mobile capped at 900px", () => {
     const w = mockWindow(800, true);
-    expect(computeRecipientDraftTextareaMaxPx(w)).toBe(440);
+    expect(computeRecipientDraftTextareaMaxPx(w)).toBe(520);
+  });
+});
+
+describe("computeRecipientDraftTextareaMinPx", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns 420 desktop and 280 mobile", () => {
+    expect(computeRecipientDraftTextareaMinPx(mockWindow(500, false))).toBe(420);
+    expect(computeRecipientDraftTextareaMinPx(mockWindow(500, true))).toBe(280);
   });
 });
