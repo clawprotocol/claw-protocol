@@ -50,9 +50,9 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
     expect(s).toContain(
-      "Write what you want changed or paste a revised draft. LawDog will show a preview before anything is sent.",
+      "Describe what you want changed or paste an edited draft. Preview before anything is sent — nothing",
     );
-    expect(s).toContain("Nothing changes unless the owner accepts.");
+    expect(s).toContain("Sending suggestions does not sign the agreement.");
     expect(s).toContain("Preview suggestions");
     expect(s).toContain("Compare text");
     expect(s).toContain("{MODE_SUGGEST_PLAIN_ENGLISH}");

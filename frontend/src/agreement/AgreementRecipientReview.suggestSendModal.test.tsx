@@ -117,7 +117,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     expect(legend.textContent).toContain("Send suggestions for review");
 
     expect(within(panel).getByTestId("recipient-suggested-changes-send-reassurance").textContent).toContain(
-      "Nothing is signed.",
+      "Sending suggestions does not sign",
     );
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));

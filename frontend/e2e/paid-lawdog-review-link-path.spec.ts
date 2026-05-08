@@ -301,7 +301,7 @@ test.describe("paid LawDog review-link path (hydrate + mint + proposal)", () => 
       await recipientPage.getByRole("button", { name: "Request changes" }).click();
     }
 
-    await expect(recipientPage.getByText("Write request", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(recipientPage.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 20_000 });
     const ta = recipientPage.getByTestId("recipient-revision-voice-field");
     await ta.fill("Change final delivery deadline to 45 days after the effective date.");
     await recipientPage.getByRole("button", { name: "Preview changes" }).click();

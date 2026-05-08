@@ -28,7 +28,10 @@ export function buildRecipientRevisionText(
 export const PORTABLE_REVIEW_HEADER = "Review in your preferred tool";
 export const PORTABLE_REVIEW_SUB =
   "Copy the current draft, revise elsewhere if you like, then bring back suggested edits. LawDog will organize the differences. Nothing in the owner’s draft changes until you send and they confirm — use Preview to check first.";
-export const PORTABLE_REVIEW_PASTE_LABEL = "Paste your revised version";
+/** Shown inside Request changes → Copy / export (outside-review workflow). */
+export const RECIPIENT_OUTSIDE_REVIEW_WORKFLOW =
+  "Want to review elsewhere? Copy or download the draft, edit it with your lawyer or AI tool, then paste the revised text back here.";
+export const PORTABLE_REVIEW_PASTE_LABEL = "Paste edited agreement or sections";
 export const PORTABLE_REVIEW_PASTE_PLACEHOLDER =
   "Paste the full agreement text or the sections you changed. Plain text is fine.";
 export const PORTABLE_REVIEW_OCR_FOOTNOTE =
@@ -36,10 +39,9 @@ export const PORTABLE_REVIEW_OCR_FOOTNOTE =
 
 /** Recipient “Request changes” panel — copy/export disclosure (agreement-focused, no share/marketing framing). */
 export const RECIPIENT_COPY_EXPORT_SECTION_TITLE = "Copy / export";
-export const RECIPIENT_COPY_EXPORT_SECTION_HELPER =
-  "Copy the draft if you want to review it elsewhere, then paste revised language back here.";
+export const RECIPIENT_COPY_EXPORT_SECTION_HELPER = RECIPIENT_OUTSIDE_REVIEW_WORKFLOW;
 export const RECIPIENT_COPY_EXPORT_PREVIEW_LINE =
-  "When you are ready, use Preview changes — nothing sends until then.";
+  "Preview changes before sending. Nothing sends until you choose to — sending suggestions does not sign the agreement.";
 
 /** Owner workspace: same portable flow, but apply/discard is local. */
 export const OWNER_PORTABLE_REVIEW_SUB =

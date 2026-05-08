@@ -38,7 +38,7 @@ describe("AgreementRecipientReview request intake modes", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows Write request and Paste revised draft tabs; paste shows primary textarea", async () => {
+  it("shows Describe changes and Paste edited draft tabs; paste shows primary textarea", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
       if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
@@ -69,8 +69,9 @@ describe("AgreementRecipientReview request intake modes", () => {
 
     expect(screen.getByTestId("recipient-intake-mode-write-request")).toBeTruthy();
     expect(screen.getByTestId("recipient-intake-mode-paste-revised")).toBeTruthy();
-    expect(screen.getByText("Write request")).toBeTruthy();
-    expect(screen.getByText("Paste revised draft")).toBeTruthy();
+    expect(screen.getByText("Describe changes")).toBeTruthy();
+    expect(screen.getByText("Paste edited draft")).toBeTruthy();
+    expect(screen.getByText("Describe what you want changed")).toBeTruthy();
 
     await userEvent.click(screen.getByTestId("recipient-intake-mode-paste-revised"));
     expect(screen.getByTestId("recipient-revised-draft-paste")).toBeTruthy();
@@ -78,6 +79,8 @@ describe("AgreementRecipientReview request intake modes", () => {
     expect(screen.getByText(/LawDog will compare it with the current draft/i)).toBeTruthy();
 
     await userEvent.click(screen.getByText("Copy / export"));
+    expect(await screen.findByText(/Want to review elsewhere/i)).toBeTruthy();
+    expect(screen.getByTestId("recipient-preview-changes-confidence-hint")).toBeTruthy();
     expect(await screen.findByTestId("recipient-request-copy-export-pdf")).toBeTruthy();
     expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(0);
   });

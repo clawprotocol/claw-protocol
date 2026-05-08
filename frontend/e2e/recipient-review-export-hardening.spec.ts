@@ -139,7 +139,7 @@ async function openRecipientReviewReviseTab(page: Page, agreementId: string) {
     await expect(page.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
     await page.getByRole("button", { name: "Request changes" }).first().click();
   }
-  await expect(page.getByText("Write request", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 20_000 });
 }
 
 test.describe("recipient review export hardening", () => {
@@ -193,14 +193,14 @@ test.describe("recipient review export hardening", () => {
         await page.getByRole("button", { name: "← Back to agreement" }).click({ timeout: 5000 }).catch(() => {});
         await expect(page.getByTestId("recipient-read-download-agreement")).toBeVisible({ timeout: 10_000 });
         await page.getByRole("button", { name: "Request changes" }).first().click();
-        await expect(page.getByText("Write request", { exact: true })).toBeVisible({ timeout: 15_000 });
+        await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 15_000 });
       }
     }
 
     const onRevise = await page.getByRole("button", { name: "← Back to agreement" }).isVisible().catch(() => false);
     if (!onRevise) {
       await page.getByRole("button", { name: "Request changes" }).first().click();
-      await expect(page.getByText("Write request", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 15_000 });
     }
     while (await page.getByRole("button", { name: "Dismiss preview" }).isVisible().catch(() => false)) {
       await page.getByRole("button", { name: "Dismiss preview" }).first().click();
