@@ -38,7 +38,7 @@ describe("Review link handoff UX (LawDog)", () => {
     const s = readFileSync(p, "utf8");
     const party = readFileSync(join(__dirname, "../../agreement/recipientReviewPartyActions.tsx"), "utf8");
     expect(s).toContain("Review this agreement");
-    expect(s).toContain("Request changes before anyone signs.");
+    expect(s).toContain("Ask for edits before anyone signs.");
     expect(s).toContain("Your suggestions do not change the original until the owner accepts them.");
     expect(s).toContain("recipientReviewPartyActions");
     expect(party).toContain("Request changes");
@@ -49,10 +49,8 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain(
-      "Describe what you want changed or paste an edited draft. Preview before anything is sent — nothing",
-    );
-    expect(s).toContain("Sending suggestions does not sign the agreement.");
+    expect(s).toContain("Ask for edits or paste your own. Nothing changes until the sender accepts.");
+    expect(s).toContain("Suggestions are not signatures.");
     expect(s).toContain("Preview suggestions");
     expect(s).toContain("Compare text");
     expect(s).toContain("{MODE_SUGGEST_PLAIN_ENGLISH}");

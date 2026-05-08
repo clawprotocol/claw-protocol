@@ -108,7 +108,7 @@ describe("AgreementRecipientReview redline chrome", () => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
     });
 
-    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/\d+\s+insertion/i);
+    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/\d+\s+addition/i);
     const legalRoot = screen.getByTestId("recipient-legal-redline-document");
     expect(legalRoot.textContent).not.toMatch(/&quot;/);
     expect(legalRoot.textContent).not.toMatch(/&amp;/);

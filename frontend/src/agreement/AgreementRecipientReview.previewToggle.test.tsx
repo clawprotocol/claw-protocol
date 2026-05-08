@@ -118,9 +118,9 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
     expect(legalDocRoot.textContent).toMatch(/Net|thirty/i);
 
-    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/\d+\s+insertion/i);
+    expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/\d+\s+addition/i);
     expect(screen.getByTestId("recipient-redline-chip-deletions").textContent).toMatch(/\d+\s+deletion/i);
-    expect(screen.getByTestId("recipient-redline-chip-sections").textContent).toMatch(/\d+\s+changed section/i);
+    expect(screen.getByTestId("recipient-redline-chip-sections").textContent).toMatch(/\d+\s+section(s)? changed/i);
   });
 
   it("at narrow width the single suggested-changes surface remains available", async () => {

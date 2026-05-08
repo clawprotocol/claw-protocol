@@ -144,7 +144,7 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
       const exportRegion = screen.getByTestId("recipient-preview-versions-export");
       await userEvent.click(within(exportRegion).getByTestId("recipient-preview-download-original-pdf"));
       const panel = screen.getByTestId("recipient-suggested-changes-panel");
-      await userEvent.click(within(panel).getByRole("button", { name: "Dismiss preview" }));
+      await userEvent.click(within(panel).getByRole("button", { name: "Keep reviewing" }));
 
       expect(duplicateDomIds(container)).toEqual([]);
       expect(brokenAriaLabelledBy(doc, container)).toEqual([]);

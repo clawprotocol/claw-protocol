@@ -370,9 +370,9 @@ test.describe("recipient + link flow QA", () => {
     const ta = page.getByTestId("recipient-revision-voice-field");
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
     await page.getByRole("button", { name: "Preview changes" }).click();
-    await expect(page.getByText("Send suggestions for review").first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Send suggestions" }).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("recipient-preview-summary-heading")).toBeVisible();
-    await page.getByRole("button", { name: "Send suggestions for review" }).first().click();
+    await page.getByRole("button", { name: "Send suggestions" }).first().click();
     await expect(page.getByTestId("recipient-send-suggested-edits-modal")).toBeVisible({ timeout: 10_000 });
     await page.getByTestId("recipient-send-suggested-edits-confirm").click();
     await expect(page.getByTestId("recipient-suggested-edits-sent-ack")).toBeVisible({
@@ -477,7 +477,7 @@ test.describe("recipient + link flow QA", () => {
     const ta = page.getByTestId("recipient-revision-voice-field");
     await ta.fill("Net 30 and pause work after 15 days late");
     await page.getByRole("button", { name: "Preview changes" }).click();
-    await expect(page.getByText("Send suggestions for review").first()).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByRole("button", { name: "Send suggestions" }).first()).toBeVisible({ timeout: 25_000 });
 
     await expect(page.getByTestId("recipient-suggested-changes-panel")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Suggested changes" })).toBeVisible();
@@ -490,7 +490,7 @@ test.describe("recipient + link flow QA", () => {
     const callout = page.getByTestId("recipient-redline-not-reflected-callout");
     await expect(callout).toBeVisible();
     await expect(page.getByTestId("recipient-intent-coverage-list")).toBeVisible();
-    await expect(callout).toContainText(/Your requested changes/i);
+    await expect(callout).toContainText(/In this preview/i);
     await expect(callout).not.toContainText(/Could not add:/i);
     await expect(legalDoc.locator("section[data-block-kind]")).toHaveCount(4);
     await expect(legalDoc.getByTestId("recipient-redline-changed-block").first()).toBeVisible();
@@ -503,8 +503,8 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByTestId("recipient-tab-redline")).toHaveCount(0);
     await expect(page.getByTestId("recipient-side-by-side-block-grid")).toHaveCount(0);
 
-    await expect(page.getByRole("button", { name: "Send suggestions for review" }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "Dismiss preview" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send suggestions" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Keep reviewing" }).first()).toBeVisible();
   });
 
   test("3) Owner: incoming suggestion + material change summary; apply; draft updates", async ({ page }) => {

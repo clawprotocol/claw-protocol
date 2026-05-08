@@ -17,7 +17,8 @@ export const recipientPartyReviewCopy = {
   looksGoodHelper: "Continue when the draft works for you.",
   notParticipatingHelper: "Step away from this review.",
   assuranceLine: "Nothing changes unless the sender accepts.",
-  nextStepSummary: "Read the agreement, ask for changes, export for outside review, or mark ready when you are done.",
+  nextStepSummary:
+    "Read the agreement, request changes, save a copy to review elsewhere, or mark ready when you are done.",
   /** Shown above the action stack after the recipient has read to the bottom of the agreement. */
   doneReadingPrompt: "Done reading? Choose what happens next.",
 } as const;

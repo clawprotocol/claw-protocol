@@ -186,8 +186,8 @@ test.describe("recipient review export hardening", () => {
     for (let i = 0; i < 14; i++) {
       await page.getByRole("button", { name: "Preview changes" }).click();
       await page.getByTestId("recipient-preview-download-original-pdf").click({ timeout: 8000 }).catch(() => {});
-      if (await page.getByRole("button", { name: "Dismiss preview" }).isVisible().catch(() => false)) {
-        await page.getByRole("button", { name: "Dismiss preview" }).first().click();
+      if (await page.getByRole("button", { name: "Keep reviewing" }).isVisible().catch(() => false)) {
+        await page.getByRole("button", { name: "Keep reviewing" }).first().click();
       }
       if (i % 3 === 0) {
         await page.getByRole("button", { name: "← Back to agreement" }).click({ timeout: 5000 }).catch(() => {});
@@ -202,8 +202,8 @@ test.describe("recipient review export hardening", () => {
       await page.getByRole("button", { name: "Request changes" }).first().click();
       await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 15_000 });
     }
-    while (await page.getByRole("button", { name: "Dismiss preview" }).isVisible().catch(() => false)) {
-      await page.getByRole("button", { name: "Dismiss preview" }).first().click();
+    while (await page.getByRole("button", { name: "Keep reviewing" }).isVisible().catch(() => false)) {
+      await page.getByRole("button", { name: "Keep reviewing" }).first().click();
     }
 
     await expect(page.getByTestId("recipient-preview-versions-export")).toHaveCount(0);

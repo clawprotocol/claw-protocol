@@ -15,10 +15,15 @@ export const BANNED_HOSTILE_REVIEW_TOKENS = [
 /** Section heading in recipient request-changes flow (replaces legacy “Bring back suggested edits”). */
 export const BRING_BACK_SUGGESTED_EDITS_TITLE = "Request changes";
 export const UNIVERSAL_REVIEW_INTRO =
-  "Describe edits, paste revised sections, or bring back a full edited draft. LawDog organizes differences for the sender — preview before anything is sent.";
+  "Read the draft, tweak it, preview a redline, then send suggestions. Nothing changes until the sender accepts.";
 
 export const MODE_SUGGEST_PLAIN_ENGLISH = "Describe changes";
-export const MODE_PASTE_REVISED_DRAFT = "Paste edited draft";
+export const MODE_PASTE_REVISED_DRAFT = "Paste draft";
+export const MODE_EDIT_DRAFT = "Edit draft";
+export const EDIT_DRAFT_TITLE = "Edit draft";
+export const EDIT_DRAFT_HELPER =
+  "Make edits here. We'll show a redline before anything is sent.";
+export const EDIT_DRAFT_PREVIEW_HINT = "Preview your edits";
 export const MODE_UPLOAD_FILE = "Upload file";
 export const UPLOAD_FILE_COMPARISON_COMING_SOON = "Upload comparison coming soon.";
 
@@ -32,7 +37,7 @@ export const REVIEWER_NOT_AUTOMATIC_LINE = "Nothing here changes the agreement a
 export const MATERIAL_CHANGE_SUMMARY_LABEL = "Material change summary";
 
 export const OWNER_INCOMING_SUGGESTED_EDITS_HEADING = "Suggested edits";
-export const PLAIN_ENGLISH_FIELD_LABEL = "Describe what you want changed";
+export const PLAIN_ENGLISH_FIELD_LABEL = "What should change?";
 export const PASTE_OPTIONAL_NOTE_LABEL = "Optional message to sender";
 
 import {
@@ -47,6 +52,7 @@ import {
   RECIPIENT_COPY_EXPORT_PREVIEW_LINE,
   RECIPIENT_COPY_EXPORT_SECTION_HELPER,
   RECIPIENT_COPY_EXPORT_SECTION_TITLE,
+  RECIPIENT_DRAFT_IMPORT_READ_ERROR,
   RECIPIENT_OUTSIDE_REVIEW_WORKFLOW,
 } from "./portableReviewCopy";
 
@@ -60,6 +66,10 @@ export function allReviewIntakeQaStringScanSet(): string[] {
     UNIVERSAL_REVIEW_INTRO,
     MODE_SUGGEST_PLAIN_ENGLISH,
     MODE_PASTE_REVISED_DRAFT,
+    MODE_EDIT_DRAFT,
+    EDIT_DRAFT_TITLE,
+    EDIT_DRAFT_HELPER,
+    EDIT_DRAFT_PREVIEW_HINT,
     MODE_UPLOAD_FILE,
     UPLOAD_FILE_COMPARISON_COMING_SOON,
     NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE,
@@ -75,6 +85,7 @@ export function allReviewIntakeQaStringScanSet(): string[] {
     RECIPIENT_COPY_EXPORT_SECTION_HELPER,
     RECIPIENT_COPY_EXPORT_PREVIEW_LINE,
     RECIPIENT_OUTSIDE_REVIEW_WORKFLOW,
+    RECIPIENT_DRAFT_IMPORT_READ_ERROR,
     PORTABLE_REVIEW_PASTE_LABEL,
     PORTABLE_REVIEW_PASTE_PLACEHOLDER,
     PORTABLE_REVIEW_OCR_FOOTNOTE,

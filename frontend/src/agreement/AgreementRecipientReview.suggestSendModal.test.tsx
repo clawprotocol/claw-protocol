@@ -113,23 +113,23 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     expect(legend.textContent).toContain("added");
     expect(legend.textContent).toContain("Red");
     expect(legend.textContent).toContain("removed");
-    expect(legend.textContent).toContain("suggestions only");
-    expect(legend.textContent).toContain("Send suggestions for review");
+    expect(legend.textContent).toMatch(/suggestions only/i);
+    expect(legend.textContent).toContain("Send suggestions");
 
     expect(within(panel).getByTestId("recipient-suggested-changes-send-reassurance").textContent).toContain(
-      "Sending suggestions does not sign",
+      "Suggestions are not signatures",
     );
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Send suggestions for review?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Send suggestions?" })).toBeTruthy();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
-      "These changes will be sent to the agreement owner.",
+      "These go to the agreement owner.",
     );
     expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
-      "Nothing is signed",
+      "LawDog is software, not a law firm.",
     );
 
     await userEvent.click(screen.getByTestId("recipient-send-suggested-edits-modal-dismiss"));
@@ -138,13 +138,15 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
-    await userEvent.click(screen.getByRole("button", { name: "Send suggestions" }));
+    await userEvent.click(screen.getByTestId("recipient-send-suggested-edits-confirm"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-suggested-edits-sent-ack")).toBeTruthy();
     });
     expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain("Suggestions sent");
-    expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain("Nothing has been signed");
+    expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain(
+      "Suggestions are not signatures",
+    );
     expect(screen.queryByTestId("recipient-suggested-changes-panel")).toBeNull();
 
     await userEvent.click(screen.getByTestId("recipient-suggested-edits-suggest-another"));

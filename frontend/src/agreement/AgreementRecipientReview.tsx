@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import type { AgreementDraft } from "./agreementTypes";
 import {
   clearPendingRecipientNotice,
@@ -79,6 +79,7 @@ import {
 import type { NegotiationRiskTier } from "./negotiationRisk";
 import { useAccess } from "../access/AccessContext";
 import { useAutosizeTextarea } from "../hooks/useAutosizeTextarea";
+import { useRecipientDraftTextareaMaxPx } from "../hooks/useRecipientDraftTextareaMaxPx";
 import { ClawTrustFooter } from "../components/claw/ClawTrustFooter";
 import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge";
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
@@ -104,9 +105,14 @@ import {
   RECIPIENT_COPY_EXPORT_PREVIEW_LINE,
   RECIPIENT_COPY_EXPORT_SECTION_HELPER,
   RECIPIENT_COPY_EXPORT_SECTION_TITLE,
+  RECIPIENT_DRAFT_IMPORT_READ_ERROR,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
 import {
+  EDIT_DRAFT_HELPER,
+  EDIT_DRAFT_PREVIEW_HINT,
+  EDIT_DRAFT_TITLE,
+  MODE_EDIT_DRAFT,
   MODE_PASTE_REVISED_DRAFT,
   MODE_SUGGEST_PLAIN_ENGLISH,
   PASTE_OPTIONAL_NOTE_LABEL,
@@ -117,6 +123,14 @@ import { RecipientPartyReviewActions, recipientPartyReviewCopy } from "./recipie
 import { RecipientPreviewVersionsExport } from "./recipientPreviewVersionExport";
 
 const API_BASE = resolveApiBase();
+
+function redlineSummaryChipLabel(count: number, singular: string, plural: string): string {
+  return count === 1 ? `1 ${singular}` : `${count} ${plural}`;
+}
+
+function sectionChangeChipLabel(count: number): string {
+  return count === 1 ? "1 section changed" : `${count} sections changed`;
+}
 
 function recipientIntentAppliedExplanation(category: RecipientInstructionIntentCategory): string {
   switch (category) {
@@ -344,7 +358,8 @@ export function AgreementRecipientReview({
     useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
   const [reviseTextMode, setReviseTextMode] = useState<"assisted" | "direct">("assisted");
-  const [universalIntakeMode, setUniversalIntakeMode] = useState<"plain" | "paste">("plain");
+  const [universalIntakeMode, setUniversalIntakeMode] = useState<"plain" | "paste" | "edit">("plain");
+  const [draftImportError, setDraftImportError] = useState<string | null>(null);
   const [proRedlineSuggestText, setProRedlineSuggestText] = useState("");
   const [proRedlineSuggestBusy, setProRedlineSuggestBusy] = useState(false);
   const [proRedlineSuggestErr, setProRedlineSuggestErr] = useState<string | null>(null);
@@ -374,11 +389,50 @@ export function AgreementRecipientReview({
   const revisionPlainFieldId = `recipient-revision-plain-${intakeFieldIdSuffix}`;
   const revisionPasteNoteFieldId = `recipient-revision-paste-note-${intakeFieldIdSuffix}`;
   const externalPasteFieldId = `recipient-external-paste-${intakeFieldIdSuffix}`;
+  const editDraftFieldId = `recipient-edit-draft-${intakeFieldIdSuffix}`;
   const externalPasteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const draftImportFileInputRef = useRef<HTMLInputElement | null>(null);
   const proRedlineSuggestTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  useAutosizeTextarea(externalPasteTextareaRef, externalAiPaste, { minPx: 120, maxPx: 440 });
+  const draftTextareaMaxPx = useRecipientDraftTextareaMaxPx();
+  const describeAutosizeMaxPx = Math.min(480, draftTextareaMaxPx);
+  const pasteNoteAutosizeMaxPx = Math.min(360, draftTextareaMaxPx);
+  useAutosizeTextarea(externalPasteTextareaRef, externalAiPaste, {
+    minPx: 120,
+    maxPx: draftTextareaMaxPx,
+  });
   useAutosizeTextarea(proRedlineSuggestTextareaRef, proRedlineSuggestText, { minPx: 112, maxPx: 440 });
   const access = useAccess();
+
+  const onDraftImportFileSelected = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (!name.endsWith(".txt") && !name.endsWith(".md")) {
+      setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+      return;
+    }
+    setDraftImportError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result ?? "");
+        setExternalAiPaste(text);
+        setRecipientPreview(null);
+        setRecipientRevisePreviewError(null);
+        window.requestAnimationFrame(() => {
+          const ta = externalPasteTextareaRef.current;
+          if (!ta) return;
+          ta.scrollTop = 0;
+          ta.focus({ preventScroll: true });
+        });
+      } catch {
+        setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+      }
+    };
+    reader.onerror = () => setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+    reader.readAsText(file);
+  }, []);
 
   const scrollAndFocusSuggestPanel = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -389,7 +443,7 @@ export function AgreementRecipientReview({
         }
         const first =
           root?.querySelector<HTMLElement>(
-            '[data-testid="recipient-revision-voice-field"], [data-testid="recipient-revised-draft-paste"], #pro-redline-recipient-suggest',
+            '[data-testid="recipient-revision-voice-field"], [data-testid="recipient-revised-draft-paste"], [data-testid="recipient-edit-draft-textarea"], #pro-redline-recipient-suggest',
           ) ?? null;
         first?.focus({ preventScroll: true });
       }, 16);
@@ -996,6 +1050,8 @@ export function AgreementRecipientReview({
     () => htmlToPlainText(renderedHtmlDisplay || ""),
     [renderedHtmlDisplay],
   );
+  const directCompareDefaultRef = useRef(directCompareDefault);
+  directCompareDefaultRef.current = directCompareDefault;
 
   const scrubAgreementHtml = useCallback(
     (html: string) => substitutePartyPlaceholdersInUserFacingText(html || "", draftSanitizeContext),
@@ -1017,7 +1073,7 @@ export function AgreementRecipientReview({
     Boolean(revisionPayload.text) &&
     !previewing &&
     !saving &&
-    !(universalIntakeMode === "paste" && !externalAiPaste.trim());
+    !((universalIntakeMode === "paste" || universalIntakeMode === "edit") && !externalAiPaste.trim());
 
   async function previewChanges() {
     if (needsPersonalizedLink) {
@@ -1326,7 +1382,7 @@ export function AgreementRecipientReview({
           Suggested changes
         </h2>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-          Review the proposed edits before sending. Nothing changes unless the sender accepts.
+          Nothing changes until the sender accepts. {PRODUCT_NOT_LAW_FIRM}
         </p>
         {participantPid ? (
           <p className="mt-2 text-[10px] leading-snug text-slate-500">
@@ -1349,22 +1405,27 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-chip-insertions"
                 className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
               >
-                {legalRedlineDocumentVm.stats.insertCount} insertion
-                {legalRedlineDocumentVm.stats.insertCount === 1 ? "" : "s"}
+                {redlineSummaryChipLabel(
+                  legalRedlineDocumentVm.stats.insertCount,
+                  "addition",
+                  "additions",
+                )}
               </span>
               <span
                 data-testid="recipient-redline-chip-deletions"
                 className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
               >
-                {legalRedlineDocumentVm.stats.deleteCount} deletion
-                {legalRedlineDocumentVm.stats.deleteCount === 1 ? "" : "s"}
+                {redlineSummaryChipLabel(
+                  legalRedlineDocumentVm.stats.deleteCount,
+                  "deletion",
+                  "deletions",
+                )}
               </span>
               <span
                 data-testid="recipient-redline-chip-sections"
                 className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
               >
-                {legalRedlineDocumentVm.stats.changedBlockCount} changed section
-                {legalRedlineDocumentVm.stats.changedBlockCount === 1 ? "" : "s"}
+                {sectionChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
               </span>
               {recipientIntentGapCount > 0 ? (
                 <span
@@ -1378,22 +1439,21 @@ export function AgreementRecipientReview({
 
             {showRecipientIntentCoverageCallout ? (
               <div
-                className="mt-3 rounded-md border border-slate-600/45 bg-slate-900/50 px-3 py-2.5 text-sm leading-snug text-slate-100"
+                className="mt-3 rounded-md border border-slate-700/45 bg-slate-950/40 px-3 py-2.5 text-sm leading-snug text-slate-100"
                 data-testid="recipient-redline-not-reflected-callout"
                 role="status"
               >
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Your requested changes
-                </p>
                 {recipientRedlinePlainTexts?.instructionContextSummary ? (
                   <p
-                    className="mb-2.5 text-[11px] leading-snug text-slate-500"
+                    className="mb-2 text-[11px] leading-snug text-slate-500"
                     data-testid="recipient-instruction-context-summary"
                   >
-                    {recipientRedlinePlainTexts?.instructionContextSummary}
+                    Reviewer context: {recipientRedlinePlainTexts.instructionContextSummary}
                   </p>
                 ) : null}
                 {recipientInstructionIntentSplit.primary.length > 0 ? (
+                <>
+                <p className="mb-2 text-xs font-semibold text-slate-300">In this preview</p>
                 <ul className="space-y-2" data-testid="recipient-intent-coverage-list">
                   {recipientInstructionIntentSplit.primary.map((it) => {
                     const anchor = recipientRedlineAnchorForIntentCategory(it.category);
@@ -1458,6 +1518,7 @@ export function AgreementRecipientReview({
                     );
                   })}
                 </ul>
+                </>
                 ) : null}
                 {recipientInstructionIntentSplit.unclear.length > 0 ? (
                   <details
@@ -1465,7 +1526,7 @@ export function AgreementRecipientReview({
                     data-testid="recipient-intent-review-notes-details"
                   >
                     <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
-                      Review notes for sender ({recipientInstructionIntentSplit.unclear.length})
+                      Notes for sender ({recipientInstructionIntentSplit.unclear.length})
                     </summary>
                     <ul className="mt-2 space-y-2 border-t border-slate-800/50 pt-2">
                       {recipientInstructionIntentSplit.unclear.map((it) => (
@@ -1516,10 +1577,9 @@ export function AgreementRecipientReview({
               data-testid="recipient-suggested-changes-what-this-means"
             >
               <span className="font-medium text-emerald-200/90">Green</span> = added.{" "}
-              <span className="font-medium text-rose-200/90">Red</span> = removed. These are suggestions only — nothing
-              changes unless the sender accepts. Use{" "}
-              <span className="font-medium text-slate-200">Send suggestions for review</span> to send them to the sender
-              for review. Sending suggestions does not sign the agreement.
+              <span className="font-medium text-rose-200/90">Red</span> = removed. Suggestions only — use{" "}
+              <span className="font-medium text-slate-200">Send suggestions</span> when you&apos;re ready. Suggestions
+              are not signatures.
             </p>
 
             {recipientRedlinePlainTexts && recipientPreview ? (
@@ -1542,7 +1602,7 @@ export function AgreementRecipientReview({
               />
             ) : null}
 
-            <div className="mt-4 rounded-lg border border-slate-600/50 bg-slate-200/20 p-2 sm:p-3">
+            <div className="mt-4 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
               <div
                 ref={suggestedChangesDocScrollRef}
                 className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
@@ -1565,8 +1625,7 @@ export function AgreementRecipientReview({
           className="mt-4 text-[11px] leading-relaxed text-slate-400"
           data-testid="recipient-suggested-changes-send-reassurance"
         >
-          Nothing changes unless the sender accepts. Preview changes before sending. Sending suggestions does not sign
-          the agreement.
+          Nothing changes until the sender accepts. Suggestions are not signatures.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <button
@@ -1576,7 +1635,7 @@ export function AgreementRecipientReview({
             disabled={saving || !previewDiff.canSubmit}
             onClick={() => openSendSuggestedEditsModal()}
           >
-            Send suggestions for review
+            Send suggestions
           </button>
           <button
             type="button"
@@ -1584,7 +1643,7 @@ export function AgreementRecipientReview({
             disabled={saving || previewing}
             onClick={() => discardPreview()}
           >
-            Dismiss preview
+            Keep reviewing
           </button>
         </div>
       </div>
@@ -1990,7 +2049,7 @@ export function AgreementRecipientReview({
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300">
               {isPaidReviewerSurface
-                ? "Request changes before anyone signs."
+                ? "Ask for edits before anyone signs."
                 : "Read the terms, request changes, or sign securely on your phone — nothing is final until you confirm."}
             </p>
             {isPaidReviewerSurface ? (
@@ -2201,7 +2260,7 @@ export function AgreementRecipientReview({
         >
           <h2 className="text-base font-semibold text-emerald-100">Suggestions sent</h2>
           <p className="mt-2 text-sm leading-relaxed text-emerald-50/95">
-            The owner can review your suggested changes. Nothing has been signed.
+            The owner can review your suggested changes. Suggestions are not signatures.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -2296,8 +2355,7 @@ export function AgreementRecipientReview({
                 Review this agreement
               </h1>
               <p className="mt-1 text-sm leading-relaxed text-slate-400">
-                Request changes before signing. {recipientPartyReviewCopy.assuranceLine} Preview changes before sending.
-                Sending suggestions does not sign the agreement.
+                Request changes before signing. {recipientPartyReviewCopy.assuranceLine} Suggestions are not signatures.
               </p>
             </>
           ) : (
@@ -2565,11 +2623,13 @@ export function AgreementRecipientReview({
               <div className="space-y-2 rounded-md border border-slate-700/60 bg-slate-950/35 p-3">
                 <h3 className="text-base font-semibold text-slate-100">Request changes</h3>
                 <p className="text-xs leading-relaxed text-slate-400 sm:text-[13px]">
-                  Describe what you want changed or paste an edited draft. Preview before anything is sent — nothing
-                  changes unless the sender accepts.
+                  Ask for edits or paste your own. Nothing changes until the sender accepts.
                 </p>
                 <p className="text-[11px] font-medium text-slate-400 sm:text-xs">
-                  Sending suggestions does not sign the agreement.
+                  Suggestions are not signatures.
+                </p>
+                <p className="text-[10px] leading-snug text-slate-500">
+                  Take your time. No surprise edits — you&apos;re just suggesting changes.
                 </p>
               </div>
 
@@ -2585,6 +2645,7 @@ export function AgreementRecipientReview({
                   onClick={() => {
                     setUniversalIntakeMode("plain");
                     setExternalAiPaste("");
+                    setDraftImportError(null);
                     setRecipientPreview(null);
                     setRecipientRevisePreviewError(null);
                     setError(null);
@@ -2602,12 +2663,34 @@ export function AgreementRecipientReview({
                   }`}
                   onClick={() => {
                     setUniversalIntakeMode("paste");
+                    setDraftImportError(null);
                     setRecipientPreview(null);
                     setRecipientRevisePreviewError(null);
                     setError(null);
                   }}
                 >
                   {MODE_PASTE_REVISED_DRAFT}
+                </button>
+                <button
+                  type="button"
+                  data-testid="recipient-intake-mode-edit-draft"
+                  className={`rounded-md px-3 py-2 text-xs font-medium sm:text-[13px] ${
+                    universalIntakeMode === "edit"
+                      ? "border border-slate-500 bg-slate-800/90 text-slate-100"
+                      : "text-slate-500 hover:text-slate-200"
+                  }`}
+                  onClick={() => {
+                    setDraftImportError(null);
+                    if (universalIntakeMode !== "edit") {
+                      setExternalAiPaste(directCompareDefaultRef.current);
+                    }
+                    setUniversalIntakeMode("edit");
+                    setRecipientPreview(null);
+                    setRecipientRevisePreviewError(null);
+                    setError(null);
+                  }}
+                >
+                  {MODE_EDIT_DRAFT}
                 </button>
               </div>
 
@@ -2619,7 +2702,7 @@ export function AgreementRecipientReview({
                   <VoiceAugmentedTextArea
                     id={revisionPlainFieldId}
                     data-testid="recipient-revision-voice-field"
-                    className="w-full min-h-0 resize-none rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
+                    className="w-full min-h-0 max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
                     placeholder="Be specific about what should change…"
                     value={instruction}
                     onValueChange={(v) => {
@@ -2632,23 +2715,105 @@ export function AgreementRecipientReview({
                     voiceSubtleIdle={false}
                     onVoiceError={(m) => setError(recipientVoiceErrorMessage(m))}
                     autosize
-                    autosizeMaxPx={440}
+                    autosizeMaxPx={describeAutosizeMaxPx}
                   />
                 </div>
-              ) : (
+              ) : universalIntakeMode === "paste" ? (
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-200" htmlFor={externalPasteFieldId}>
-                    {PORTABLE_REVIEW_PASTE_LABEL}
-                  </label>
+                  <div className="flex flex-wrap items-end justify-between gap-2">
+                    <label className="text-sm font-semibold text-slate-200" htmlFor={externalPasteFieldId}>
+                      {PORTABLE_REVIEW_PASTE_LABEL}
+                    </label>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <input
+                        ref={draftImportFileInputRef}
+                        type="file"
+                        className="sr-only"
+                        accept=".txt,.text,.md,text/plain"
+                        data-testid="recipient-import-draft-file-input"
+                        onChange={onDraftImportFileSelected}
+                      />
+                      <button
+                        type="button"
+                        data-testid="recipient-import-draft-file"
+                        className="rounded-md border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                        disabled={suggestControlsDisabled}
+                        onClick={() => draftImportFileInputRef.current?.click()}
+                      >
+                        Import .txt / .md
+                      </button>
+                    </div>
+                  </div>
+                  {draftImportError ? (
+                    <p
+                      role="alert"
+                      data-testid="recipient-draft-import-error"
+                      className="text-xs leading-snug text-amber-200/95"
+                    >
+                      {draftImportError}
+                    </p>
+                  ) : null}
                   <p className="text-xs leading-snug text-slate-400 sm:text-[13px]">
-                    LawDog will compare it with the current draft before anything is sent.
+                    We&apos;ll compare with the current draft before anything is sent.
                   </p>
                   <textarea
                     id={externalPasteFieldId}
                     ref={externalPasteTextareaRef}
                     data-testid="recipient-revised-draft-paste"
-                    className="w-full min-h-[8rem] resize-none rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                    className="w-full min-h-[8rem] max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                    style={{ maxHeight: draftTextareaMaxPx }}
                     placeholder={PORTABLE_REVIEW_PASTE_PLACEHOLDER}
+                    value={externalAiPaste}
+                    disabled={suggestControlsDisabled}
+                    onPaste={() => {
+                      window.requestAnimationFrame(() => {
+                        const ta = externalPasteTextareaRef.current;
+                        if (ta) ta.scrollTop = 0;
+                      });
+                    }}
+                    onChange={(e) => {
+                      setExternalAiPaste(e.target.value);
+                      setDraftImportError(null);
+                      setRecipientPreview(null);
+                      setRecipientRevisePreviewError(null);
+                    }}
+                  />
+                  <label className="text-sm font-semibold text-slate-200" htmlFor={revisionPasteNoteFieldId}>
+                    {PASTE_OPTIONAL_NOTE_LABEL}
+                  </label>
+                  <VoiceAugmentedTextArea
+                    id={revisionPasteNoteFieldId}
+                    data-testid="recipient-revision-voice-field-paste-note"
+                    className="w-full min-h-0 max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
+                    placeholder="E.g. focus on payment timing first. (optional)"
+                    value={instruction}
+                    onValueChange={(v) => {
+                      setInstruction(v);
+                      setRecipientPreview(null);
+                      setRecipientRevisePreviewError(null);
+                    }}
+                    disabled={suggestControlsDisabled}
+                    surface="dark"
+                    voiceSubtleIdle={false}
+                    onVoiceError={(m) => setError(recipientVoiceErrorMessage(m))}
+                    autosize
+                    autosizeMaxPx={pasteNoteAutosizeMaxPx}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-200">{EDIT_DRAFT_TITLE}</h4>
+                    <p className="mt-1 text-xs leading-snug text-slate-400 sm:text-[13px]">{EDIT_DRAFT_HELPER}</p>
+                  </div>
+                  <textarea
+                    id={editDraftFieldId}
+                    ref={externalPasteTextareaRef}
+                    data-testid="recipient-edit-draft-textarea"
+                    className="w-full min-h-[8rem] max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                    style={{ maxHeight: draftTextareaMaxPx }}
+                    aria-label={EDIT_DRAFT_TITLE}
+                    placeholder="Edit the agreement text here…"
                     value={externalAiPaste}
                     disabled={suggestControlsDisabled}
                     onChange={(e) => {
@@ -2663,7 +2828,7 @@ export function AgreementRecipientReview({
                   <VoiceAugmentedTextArea
                     id={revisionPasteNoteFieldId}
                     data-testid="recipient-revision-voice-field-paste-note"
-                    className="w-full min-h-0 resize-none rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
+                    className="w-full min-h-0 max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
                     placeholder="E.g. focus on payment timing first. (optional)"
                     value={instruction}
                     onValueChange={(v) => {
@@ -2676,7 +2841,7 @@ export function AgreementRecipientReview({
                     voiceSubtleIdle={false}
                     onVoiceError={(m) => setError(recipientVoiceErrorMessage(m))}
                     autosize
-                    autosizeMaxPx={360}
+                    autosizeMaxPx={pasteNoteAutosizeMaxPx}
                   />
                 </div>
               )}
@@ -2864,9 +3029,9 @@ export function AgreementRecipientReview({
                 </div>
               ) : null}
 
-              {universalIntakeMode === "paste" && !externalAiPaste.trim() ? (
+              {(universalIntakeMode === "paste" || universalIntakeMode === "edit") && !externalAiPaste.trim() ? (
                 <p className="text-xs leading-snug text-slate-500" data-testid="recipient-paste-empty-hint">
-                  Paste edited agreement or sections above, or switch to Describe changes.
+                  Add text above or switch to Describe changes.
                 </p>
               ) : null}
               <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-start sm:gap-2">
@@ -2883,7 +3048,11 @@ export function AgreementRecipientReview({
                   className="max-w-full text-[10px] leading-snug text-slate-500 sm:max-w-md sm:pt-1"
                   data-testid="recipient-preview-changes-confidence-hint"
                 >
-                  Best for short change requests. For major edits, paste the edited section or full revised agreement.
+                  {universalIntakeMode === "edit"
+                    ? EDIT_DRAFT_PREVIEW_HINT
+                    : universalIntakeMode === "paste"
+                      ? "Import a file, paste, then preview."
+                      : "Small ask? Describe it. Big edit? Paste or edit the draft."}
                 </p>
               </div>
               {recipientRevisePreviewError ? (
@@ -2896,8 +3065,7 @@ export function AgreementRecipientReview({
                 </p>
               ) : null}
               <p className="text-[10px] leading-snug text-slate-500">
-                Use <span className="text-slate-400">Preview changes</span>, review <span className="text-slate-400">Suggested changes</span>, then{" "}
-                <span className="text-slate-400">Send suggestions for review</span>.
+                Preview changes, review the redline, then <span className="text-slate-400">Send suggestions</span>.
               </p>
 
               {comparePanel}
@@ -2925,7 +3093,7 @@ export function AgreementRecipientReview({
           aria-label="Send or discard suggested edits"
         >
           <p className="text-center text-[10px] leading-snug text-slate-400">
-            Nothing is signed. Sending shares suggestions for the owner to review first — not a signed agreement.
+            Suggestions are not signatures. Nothing changes until the sender accepts.
           </p>
           <button
             type="button"
@@ -2934,7 +3102,7 @@ export function AgreementRecipientReview({
             disabled={saving || !previewDiff?.canSubmit}
             onClick={() => openSendSuggestedEditsModal()}
           >
-            Send suggestions for review
+            Send suggestions
           </button>
           <button
             type="button"
@@ -2942,7 +3110,7 @@ export function AgreementRecipientReview({
             disabled={saving || previewing}
             onClick={() => discardPreview()}
           >
-            Dismiss preview
+            Keep reviewing
           </button>
         </div>
       ) : null}
@@ -2964,11 +3132,11 @@ export function AgreementRecipientReview({
             onMouseDown={(e) => e.stopPropagation()}
           >
             <h2 id="recipient-send-suggested-edits-modal-title" className="text-lg font-semibold text-slate-100">
-              Send suggestions for review?
+              Send suggestions?
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
-              These changes will be sent to the agreement owner. Nothing is signed, and the agreement will not change
-              unless the owner accepts.
+              These go to the agreement owner. Nothing changes until they accept. Suggestions are not signatures.{" "}
+              {PRODUCT_NOT_LAW_FIRM}
             </p>
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button

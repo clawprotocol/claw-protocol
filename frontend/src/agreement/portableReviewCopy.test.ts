@@ -43,6 +43,6 @@ describe("recipient request-changes copy / export disclosure", () => {
     for (const b of banned) {
       expect(u.includes(b.toUpperCase()), `unexpected “${b}” in disclosure`).toBe(false);
     }
-    expect(RECIPIENT_COPY_EXPORT_SECTION_TITLE).toBe("Copy / export");
+    expect(RECIPIENT_COPY_EXPORT_SECTION_TITLE).toBe("Save or review elsewhere");
   });
 });

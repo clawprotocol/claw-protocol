@@ -25,6 +25,7 @@ export function useAutosizeTextarea(
     const next = Math.min(Math.max(el.scrollHeight, minPx), maxPx);
     el.style.height = `${next}px`;
     el.style.overflowY = el.scrollHeight > maxPx ? "auto" : "hidden";
+    el.style.overflowX = "hidden";
     el.style.maxHeight = `${maxPx}px`;
   }, [value, minPx, maxPx, ref]);
 }
