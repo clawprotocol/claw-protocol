@@ -134,6 +134,17 @@ export const RECIPIENT_REVISED_UPLOAD_ANALYZING_CHECKLIST = [
 export const RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE = "Reviewer notes included";
 export const RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL = "Why these changes were suggested";
 
+/** Upload looked like commentary, not a full edited agreement — no redline until they bring a draft. */
+export const RECIPIENT_UPLOAD_NOTES_ONLY_CARD_TITLE = "Looks like notes, not a revised draft";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_CARD_BODY =
+  "LawDog found your reasoning, but not a full edited agreement to compare.";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_NOTES_PANEL_LABEL = "Reviewer notes found";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_HELPER =
+  "For redline, upload the full revised draft. Notes can ride along, but they should not replace the agreement.";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_UPLOAD = "Upload revised agreement";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_PASTE = "Paste revised agreement";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_QUICK = "Use these as a quick change request";
+
 /** Assisted compose + preview toolbars. */
 export const RECIPIENT_BTN_PREVIEW_CHANGES = "Preview changes";
 /** Primary compare CTA in revised-draft flow (calls assisted redline). */

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { splitReviewerNotesFromRevisedDraft } from "./recipientRevisedDraftReviewerNotes";
+import {
+  classifyRecipientRevisedDraftUpload,
+  splitReviewerNotesFromRevisedDraft,
+} from "./recipientRevisedDraftReviewerNotes";
 
 describe("splitReviewerNotesFromRevisedDraft", () => {
   it("returns full text as body when no reviewer heading", () => {
@@ -28,5 +31,47 @@ describe("splitReviewerNotesFromRevisedDraft", () => {
     const r = splitReviewerNotesFromRevisedDraft(raw);
     expect(r.reviewerNotes).toBeNull();
     expect(r.agreementBody).toBe(raw.trim());
+  });
+});
+
+describe("classifyRecipientRevisedDraftUpload", () => {
+  const orig = "x".repeat(800);
+
+  it("classifies commentary with Recommendation heading as review_notes_only", () => {
+    const uploaded = "Recommendation\n\nWe suggest Net 45 instead.";
+    const r = classifyRecipientRevisedDraftUpload(orig, uploaded);
+    expect(r.kind).toBe("review_notes_only");
+    expect(r.agreementText).toBe("");
+    expect(r.reviewerNotes).toContain("Recommendation");
+  });
+
+  it("classifies long filler body with trailing Reviewer Notes as mixed", () => {
+    const body = "z".repeat(2000);
+    const uploaded = `${body}\n\nReviewer Notes\nThanks.`;
+    const r = classifyRecipientRevisedDraftUpload(orig, uploaded);
+    expect(r.kind).toBe("mixed_notes_and_agreement");
+    expect(r.agreementText.length).toBeGreaterThanOrEqual(1900);
+    expect(r.reviewerNotes).toContain("Reviewer Notes");
+    expect(r.agreementText).not.toContain("Thanks.");
+  });
+
+  it("classifies substantial agreement-like text as full", () => {
+    const uploaded = [
+      "SERVICES AGREEMENT",
+      "",
+      "1. Parties. Alice and Bob agree to the terms below.",
+      "2. Term. One year from the Effective Date.",
+      "3. Payment. Net thirty (30) days.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+    ].join("\n");
+    const r = classifyRecipientRevisedDraftUpload(orig, uploaded);
+    expect(r.kind).toBe("full_revised_agreement");
+    expect(r.agreementText.length).toBeGreaterThan(100);
+  });
+
+  it("classifies very short non-heading paste as full (allow compare)", () => {
+    const r = classifyRecipientRevisedDraftUpload("Short original.", "Tiny edit.");
+    expect(r.kind).toBe("full_revised_agreement");
   });
 });

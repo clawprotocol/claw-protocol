@@ -140,7 +140,8 @@ import {
 } from "./portableReviewCopy";
 import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 import { RecipientRevisedDraftAnalyzingCard } from "./recipientRevisedDraftAnalyzingCard";
-import { splitReviewerNotesFromRevisedDraft } from "./recipientRevisedDraftReviewerNotes";
+import { RecipientReviewNotesOnlyCard } from "./RecipientReviewNotesOnlyCard";
+import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
 import { REVISED_UPLOAD_ANALYZING_MIN_MS } from "./recipientRevisedDraftUploadFlow";
 import { renderAgreementDraftHtmlLikeBackend, purposeLooksLikeFullAgreementTextForRender } from "./recipientAgreementDraftHtmlRender";
 import {
@@ -445,6 +446,7 @@ export function AgreementRecipientReview({
   const [revisedSubmode, setRevisedSubmode] = useState<"paste" | "edit">("paste");
   const [draftImportError, setDraftImportError] = useState<string | null>(null);
   const [revisedUploadAnalyzing, setRevisedUploadAnalyzing] = useState(false);
+  const [uploadNotesOnlyGate, setUploadNotesOnlyGate] = useState<{ notes: string } | null>(null);
   const [reviewerNotesAccordionOpen, setReviewerNotesAccordionOpen] = useState(false);
   const [proRedlineSuggestText, setProRedlineSuggestText] = useState("");
   const [proRedlineSuggestBusy, setProRedlineSuggestBusy] = useState(false);
@@ -550,6 +552,7 @@ export function AgreementRecipientReview({
     setRecipientRevisePreviewError(null);
     setDraftImportError(null);
     setRevisedUploadAnalyzing(false);
+    setUploadNotesOnlyGate(null);
     pendingImportRecipientPreviewRef.current = null;
     setError(null);
   }, [flowPhase]);
@@ -1439,19 +1442,35 @@ export function AgreementRecipientReview({
   previewWholeDocumentRevisionRef.current = previewWholeDocumentRevision;
 
   runImportedRevisedAutoCompareRef.current = async (fullText: string, scrollOpts) => {
+    if (!draft) return;
     const trimmed = fullText.trim();
     if (!trimmed) return;
-    setRevisedUploadAnalyzing(true);
-    setWorkflowMode("revised");
-    setRevisedSubmode("paste");
-    setRevisedIntakePhase("editing");
+    setUploadNotesOnlyGate(null);
     setRecipientPreview(null);
     setRecipientRevisePreviewError(null);
     setDraftImportError(null);
     setError(null);
     try {
       await Promise.resolve();
-      const { agreementBody, reviewerNotes } = splitReviewerNotesFromRevisedDraft(trimmed);
+      const originalPlain = (directCompareDefaultRef.current || draft.purpose || "").trim() || " ";
+      const classification = classifyRecipientRevisedDraftUpload(originalPlain, trimmed);
+
+      if (classification.kind === "review_notes_only") {
+        setWorkflowMode("revised");
+        setRevisedSubmode("paste");
+        setRevisedIntakePhase("editing");
+        setExternalAiPaste("");
+        setRevisedUploadAnalyzing(false);
+        setUploadNotesOnlyGate({ notes: classification.reviewerNotes ?? trimmed });
+        return;
+      }
+
+      setRevisedUploadAnalyzing(true);
+      setWorkflowMode("revised");
+      setRevisedSubmode("paste");
+      setRevisedIntakePhase("editing");
+      const agreementBody = classification.agreementText.trim();
+      const reviewerNotes = classification.reviewerNotes;
       const instCombined = [instruction.trim(), reviewerNotes || ""].filter(Boolean).join("\n\n");
       const minVisible = new Promise<void>((resolve) => {
         window.setTimeout(resolve, REVISED_UPLOAD_ANALYZING_MIN_MS);
@@ -1579,6 +1598,7 @@ export function AgreementRecipientReview({
       setExternalAiPaste("");
       setRecipientRevisePreviewError(null);
       setRecipientPreview(null);
+      setUploadNotesOnlyGate(null);
       setSuggestionUsed(false);
       setWorkspaceTab("read");
       await refresh();
@@ -1592,6 +1612,7 @@ export function AgreementRecipientReview({
   function discardPreview() {
     setRecipientPreview(null);
     pendingImportRecipientPreviewRef.current = null;
+    setUploadNotesOnlyGate(null);
     setRecipientRevisePreviewError(null);
     setRevisedUploadAnalyzing(false);
     window.requestAnimationFrame(() => {
@@ -2911,6 +2932,7 @@ export function AgreementRecipientReview({
               setRecipientPreview(null);
               setRecipientRevisePreviewError(null);
               setRevisedUploadAnalyzing(false);
+              setUploadNotesOnlyGate(null);
               pendingImportRecipientPreviewRef.current = null;
               setError(null);
               window.requestAnimationFrame(() => {
@@ -3005,6 +3027,7 @@ export function AgreementRecipientReview({
                       setDraftImportError(null);
                       setRecipientPreview(null);
                       setRecipientRevisePreviewError(null);
+                      setUploadNotesOnlyGate(null);
                       setError(null);
                       setRevisedIntakePhase(externalAiPaste.trim() ? "editing" : "pick-method");
                     }}
@@ -3026,6 +3049,7 @@ export function AgreementRecipientReview({
                       setRecipientPreview(null);
                       setRecipientRevisePreviewError(null);
                       setRevisedUploadAnalyzing(false);
+                      setUploadNotesOnlyGate(null);
                       setError(null);
                     }}
                   >
@@ -3165,14 +3189,14 @@ export function AgreementRecipientReview({
                     </div>
                   ) : (
                     <>
-                  {!revisedUploadAnalyzing && RECIPIENT_REVISED_PANEL_SUB.trim() ? (
+                  {!revisedUploadAnalyzing && !uploadNotesOnlyGate && RECIPIENT_REVISED_PANEL_SUB.trim() ? (
                     <div>
                       <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
                       <p className="mt-1 text-xs leading-snug text-slate-400">{RECIPIENT_REVISED_PANEL_SUB}</p>
                     </div>
                   ) : null}
 
-                  {!revisedUploadAnalyzing ? (
+                  {!revisedUploadAnalyzing && !uploadNotesOnlyGate ? (
                   <p
                     className="text-[10px] leading-snug text-slate-500"
                     data-testid="recipient-revised-workspace-notes-hint"
@@ -3181,7 +3205,48 @@ export function AgreementRecipientReview({
                   </p>
                   ) : null}
 
-                  {revisedUploadAnalyzing ? (
+                  {uploadNotesOnlyGate ? (
+                    <RecipientReviewNotesOnlyCard
+                      extractedNotes={uploadNotesOnlyGate.notes}
+                      onUploadRevisedAgreement={() => {
+                        setUploadNotesOnlyGate(null);
+                        setDraftImportError(null);
+                        draftImportFileInputRef.current?.click();
+                      }}
+                      onPasteRevisedAgreement={() => {
+                        setUploadNotesOnlyGate(null);
+                        setRevisedSubmode("paste");
+                        setRevisedIntakePhase("editing");
+                        setExternalAiPaste("");
+                        setDraftImportError(null);
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        window.requestAnimationFrame(() => {
+                          externalPasteTextareaRef.current?.focus({ preventScroll: true });
+                        });
+                      }}
+                      onUseAsQuickChange={() => {
+                        const n = uploadNotesOnlyGate.notes.trim().slice(0, RECIPIENT_MAX_INSTRUCTION_CHARS);
+                        setUploadNotesOnlyGate(null);
+                        setComposePathCardsVisible(false);
+                        setWorkflowMode("quick");
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        setInstruction(n);
+                        setExternalAiPaste("");
+                        setError(null);
+                        window.requestAnimationFrame(() => {
+                          window.setTimeout(() => {
+                            const root = recipientSuggestPanelRef.current;
+                            const el =
+                              root?.querySelector<HTMLElement>('[data-testid="recipient-revision-voice-field"]') ??
+                              null;
+                            el?.focus({ preventScroll: true });
+                          }, 32);
+                        });
+                      }}
+                    />
+                  ) : revisedUploadAnalyzing ? (
                     <RecipientRevisedDraftAnalyzingCard />
                   ) : revisedSubmode === "paste" ? (
                 <div className="space-y-2">
@@ -3334,6 +3399,7 @@ export function AgreementRecipientReview({
               revisedIntakePhase === "editing" &&
               (revisedSubmode === "paste" || revisedSubmode === "edit") &&
               !revisedUploadAnalyzing &&
+              !uploadNotesOnlyGate &&
               !externalAiPaste.trim() ? (
                 <p className="text-xs leading-snug text-slate-500" data-testid="recipient-paste-empty-hint">
                   Add your revised text, import a file, or try a small tweak instead.
