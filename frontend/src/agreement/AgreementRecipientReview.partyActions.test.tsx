@@ -98,7 +98,6 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
 
     const docActions = screen.getByTestId("recipient-party-review-actions");
     expect(docActions.getAttribute("data-placement")).toBe("document-read");
-    expect(within(docActions).getByText(recipientPartyReviewCopy.doneReadingPrompt)).toBeTruthy();
     expect(within(docActions).getByText(recipientPartyReviewCopy.assuranceLine)).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.reviewAgain })).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.sendBackRevised })).toBeTruthy();

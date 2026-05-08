@@ -187,8 +187,8 @@ test.describe("recipient review export hardening", () => {
     for (let i = 0; i < 14; i++) {
       await page.getByTestId("recipient-compare-versions-button").click();
       await page.getByTestId("recipient-preview-download-original-pdf").click({ timeout: 8000 }).catch(() => {});
-      if (await page.getByRole("button", { name: "Keep reviewing" }).isVisible().catch(() => false)) {
-        await page.getByRole("button", { name: "Keep reviewing" }).first().click();
+      if (await page.getByRole("button", { name: "Keep editing" }).isVisible().catch(() => false)) {
+        await page.getByRole("button", { name: "Keep editing" }).first().click();
       }
       if (i % 3 === 0) {
         await page.getByRole("button", { name: "← Back to agreement" }).click({ timeout: 5000 }).catch(() => {});
@@ -205,8 +205,8 @@ test.describe("recipient review export hardening", () => {
       await page.getByTestId("recipient-workflow-quick").click();
       await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 15_000 });
     }
-    while (await page.getByRole("button", { name: "Keep reviewing" }).isVisible().catch(() => false)) {
-      await page.getByRole("button", { name: "Keep reviewing" }).first().click();
+    while (await page.getByRole("button", { name: "Keep editing" }).isVisible().catch(() => false)) {
+      await page.getByRole("button", { name: "Keep editing" }).first().click();
     }
 
     await expect(page.getByTestId("recipient-preview-versions-export")).toHaveCount(0);

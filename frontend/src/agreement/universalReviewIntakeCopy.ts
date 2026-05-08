@@ -29,7 +29,7 @@ export const UPLOAD_FILE_COMPARISON_COMING_SOON = "Upload comparison coming soon
 
 /** Shown under the universal intro in recipient review (legacy scan set / tests). */
 export const NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE =
-  "Nothing changes unless the sender accepts.";
+  "Nothing changes until the sender accepts.";
 
 export const REVIEWER_OWNER_ACCEPTS_LINE = "The owner reviews and accepts changes.";
 export const REVIEWER_NOT_AUTOMATIC_LINE = "Nothing here changes the agreement automatically.";

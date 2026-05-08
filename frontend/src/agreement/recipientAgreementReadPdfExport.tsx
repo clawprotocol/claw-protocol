@@ -23,6 +23,8 @@ type Props = {
   pdfDownloadButtonLabel?: string;
   /** Optional `data-testid` on the download button (defaults by `bare`). */
   pdfDownloadButtonTestId?: string;
+  /** Omit helper line under the button (e.g. when parent already showed trust copy). */
+  suppressBareDisclosure?: boolean;
 };
 
 /**
@@ -36,6 +38,7 @@ export function RecipientAgreementReadPdfExport({
   bare = false,
   pdfDownloadButtonLabel = "Download PDF",
   pdfDownloadButtonTestId,
+  suppressBareDisclosure = false,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -137,17 +140,19 @@ export function RecipientAgreementReadPdfExport({
       <p className="sr-only" aria-live="polite">
         {a11yStatus}
       </p>
-      <p className={helperClass}>
-        {bare ? (
-          <>
-            Same draft as above. <span className="text-slate-600">{NOT_LEGAL_ADVICE}</span>
-          </>
-        ) : (
-          <>
-            Save a copy before you decide. <span className="text-slate-500">{NOT_LEGAL_ADVICE}</span>
-          </>
-        )}
-      </p>
+      {bare && suppressBareDisclosure ? null : (
+        <p className={helperClass}>
+          {bare ? (
+            <>
+              Same draft as above. <span className="text-slate-600">{NOT_LEGAL_ADVICE}</span>
+            </>
+          ) : (
+            <>
+              Save a copy before you decide. <span className="text-slate-500">{NOT_LEGAL_ADVICE}</span>
+            </>
+          )}
+        </p>
+      )}
       <button
         type="button"
         disabled={busy || !hasBody}

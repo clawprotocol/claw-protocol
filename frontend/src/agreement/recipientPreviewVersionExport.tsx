@@ -53,12 +53,19 @@ type Props = {
   plainSource: RecipientPreviewVersionPlainSource;
   legalRedlineVm: LegalRedlineDocumentViewModel;
   pdfReadContext: RecipientPreviewPdfReadContext | null;
+  /** Screen-reader / programmatic only — parent shows a matching “Download redline” control. */
+  detachRedlinePdfButton?: boolean;
 };
 
 /**
  * Original / proposed / redline PDFs and copy helpers. PDF actions stay visible (not hidden in a collapsed disclosure).
  */
-export function RecipientPreviewVersionsExport({ plainSource, legalRedlineVm, pdfReadContext }: Props) {
+export function RecipientPreviewVersionsExport({
+  plainSource,
+  legalRedlineVm,
+  pdfReadContext,
+  detachRedlinePdfButton = false,
+}: Props) {
   const [copyAck, setCopyAck] = useState<"original" | "proposed" | "redline" | null>(null);
   const [pdfErrors, setPdfErrors] = useState<Partial<Record<RecipientPreviewPdfExportKind, string | null>>>({});
   const [copyFlowError, setCopyFlowError] = useState<string | null>(null);
@@ -281,7 +288,7 @@ export function RecipientPreviewVersionsExport({ plainSource, legalRedlineVm, pd
           type="button"
           disabled={!pdfReady || pdfBusy === "redline"}
           aria-busy={pdfBusy === "redline"}
-          className={`${pdfBtnBase} min-[400px]:col-span-2`}
+          className={`${pdfBtnBase} min-[400px]:col-span-2${detachRedlinePdfButton ? " sr-only" : ""}`}
           data-testid="recipient-preview-download-redline-pdf"
           onClick={() => {
             safeSet(() => setPdfErrors((p) => ({ ...p, redline: null })));

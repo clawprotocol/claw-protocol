@@ -114,12 +114,8 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     expect(legend.textContent).toContain("added");
     expect(legend.textContent).toContain("Red");
     expect(legend.textContent).toContain("removed");
-    expect(legend.textContent).toMatch(/suggestions only/i);
-    expect(legend.textContent).toContain("Send revision");
-
-    expect(within(panel).getByTestId("recipient-suggested-changes-send-reassurance").textContent).toContain(
-      "Revisions do not change the original until accepted",
-    );
+    expect(legend.textContent).not.toMatch(/suggestions only/i);
+    expect(legend.textContent).not.toContain("Suggestions only");
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 

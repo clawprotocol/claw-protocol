@@ -23,7 +23,7 @@ export const recipientPartyReviewCopy = {
   askQuickChangeHelper: "Short instructions only — best for small edits.",
   looksGoodHelper: "Continue when the draft works for you.",
   notParticipatingHelper: "Step away from this review.",
-  assuranceLine: "Nothing changes unless the sender accepts.",
+  assuranceLine: "Nothing changes until the sender accepts.",
   nextStepSummary:
     "Read the agreement, send back a revised version or a quick change, download a copy, or mark ready when you are done.",
   /** Shown above the action stack after the recipient has read to the bottom of the agreement. */
@@ -63,12 +63,6 @@ const btnSecondary = `${btnBase} border border-slate-600 bg-slate-900/70 text-sl
 const btnQuiet = `${btnBase} border border-slate-700/80 bg-transparent text-slate-200 hover:bg-slate-900/50`;
 const btnDecline =
   "inline-flex w-full items-center justify-center rounded-lg px-4 py-3 text-sm font-medium text-slate-400 underline decoration-slate-700 underline-offset-2 hover:bg-slate-900/35 hover:text-slate-200";
-
-function HelperUnder({ text, placement }: { text: string; placement: RecipientPartyReviewActionsPlacement }) {
-  const isMobile = placement === "landing-mobile";
-  if (isMobile) return null;
-  return <p className="mt-1 max-w-xl text-xs leading-snug text-slate-400 sm:text-sm">{text}</p>;
-}
 
 /**
  * Four-choice party review stack (or two-choice view-only).
@@ -129,14 +123,12 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
             {recipientPartyReviewCopy.reviewAgreement}
           </button>
         )}
-        <HelperUnder text={recipientPartyReviewCopy.reviewHelper} placement={placement} />
         <p className="text-center text-xs leading-snug text-slate-400 sm:text-left">
           View-only — suggesting edits isn&apos;t available on this link.
         </p>
         <button type="button" className={btnDecline} onClick={onNotParticipating}>
           {recipientPartyReviewCopy.notParticipating}
         </button>
-        <HelperUnder text={recipientPartyReviewCopy.notParticipatingHelper} placement={placement} />
         {children}
       </div>
     );
@@ -149,13 +141,10 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
       data-placement={placement}
     >
       {!viewerLike && placement === "document-read" ? (
-        <div className="space-y-2">
-          <p className="text-sm font-medium leading-snug text-slate-100">{recipientPartyReviewCopy.doneReadingPrompt}</p>
-          <p className="text-xs leading-snug text-slate-400 sm:text-sm">{recipientPartyReviewCopy.assuranceLine}</p>
-        </div>
+        <p className="text-xs leading-snug text-slate-400 sm:text-sm">{recipientPartyReviewCopy.assuranceLine}</p>
       ) : null}
       {!viewerLike && placement !== "document-read" ? (
-        <p className="text-center text-sm leading-snug text-slate-300 sm:text-left">{recipientPartyReviewCopy.assuranceLine}</p>
+        <p className="text-center text-xs leading-snug text-slate-400 sm:text-left">{recipientPartyReviewCopy.assuranceLine}</p>
       ) : null}
 
       {canSignFromHub && primarySigningHref ? (
@@ -167,8 +156,6 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
           {reviewLabel}
         </button>
       )}
-      <HelperUnder text={recipientPartyReviewCopy.reviewHelper} placement={placement} />
-
       {useSplitReviseEntry ? (
         <>
           <button
@@ -180,7 +167,6 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
           >
             {recipientPartyReviewCopy.sendBackRevised}
           </button>
-          <HelperUnder text={recipientPartyReviewCopy.sendBackRevisedHelper} placement={placement} />
           <button
             type="button"
             data-testid="recipient-ask-quick-change"
@@ -190,7 +176,6 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
           >
             {recipientPartyReviewCopy.askQuickChange}
           </button>
-          <HelperUnder text={recipientPartyReviewCopy.askQuickChangeHelper} placement={placement} />
           <button
             type="button"
             data-testid="recipient-download-original-cta"
@@ -211,19 +196,16 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
           >
             {recipientPartyReviewCopy.requestChanges}
           </button>
-          <HelperUnder text={recipientPartyReviewCopy.requestChangesHelper} placement={placement} />
         </>
       )}
 
       <button type="button" className={looksClass} disabled={looksDisabled} onClick={onLooksGood}>
         {looksGoodLoading ? "Saving…" : recipientPartyReviewCopy.looksGood}
       </button>
-      <HelperUnder text={recipientPartyReviewCopy.looksGoodHelper} placement={placement} />
 
       <button type="button" className={btnDecline} onClick={onNotParticipating}>
         {recipientPartyReviewCopy.notParticipating}
       </button>
-      <HelperUnder text={recipientPartyReviewCopy.notParticipatingHelper} placement={placement} />
 
       {children}
     </div>

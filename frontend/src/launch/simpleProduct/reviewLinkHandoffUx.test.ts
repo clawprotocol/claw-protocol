@@ -49,7 +49,7 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain("Read it, revise it, or mark it ready.");
+    expect(s).toContain("RECIPIENT_WORKSPACE_TRUST_LINE");
     expect(s).toContain("recipient-workflow-revised");
     expect(s).toContain("recipient-workflow-quick");
     expect(s).toContain("Compare & redline");

@@ -117,7 +117,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
 
     expect(within(panel).getByRole("button", { name: /Send revision$/i })).toBeTruthy();
-    expect(within(panel).getByRole("button", { name: /Keep reviewing/i })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: /Keep editing/i })).toBeTruthy();
   });
 });
 

@@ -506,7 +506,7 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByTestId("recipient-side-by-side-block-grid")).toHaveCount(0);
 
     await expect(page.getByRole("button", { name: "Send revision" }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "Keep reviewing" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Keep editing" }).first()).toBeVisible();
   });
 
   test("3) Owner: incoming suggestion + material change summary; apply; draft updates", async ({ page }) => {

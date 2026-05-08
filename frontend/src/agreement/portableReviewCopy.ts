@@ -46,15 +46,28 @@ export const RECIPIENT_COPY_EXPORT_PREVIEW_LINE =
 export const RECIPIENT_DRAFT_IMPORT_READ_ERROR =
   "Couldn't read that file. Try plain text for now.";
 
+/** Single trust line for recipient revise workspace (shown once at top). */
+export const RECIPIENT_WORKSPACE_TRUST_LINE = "Nothing changes until the sender accepts.";
+
 /** Primary workflow card — full-document compare + redline (recipient review). */
 export const RECIPIENT_SEND_BACK_REVISED_TITLE = "Send back a revised version";
 export const RECIPIENT_SEND_BACK_REVISED_HELPER =
   "Used AI, Word, Google Docs, or counsel? Upload or paste the revised draft and LawDog will compare it with the original.";
+/** Panel subcopy when revised-version mode is active (progressive disclosure). */
+export const RECIPIENT_REVISED_PANEL_SUB =
+  "Upload, paste, or edit your revised draft. LawDog will compare it.";
 
 /** Secondary workflow — instruction-only / small amendment pipeline. */
 export const RECIPIENT_QUICK_CHANGE_SECTION_TITLE = "Ask for a quick change";
 export const RECIPIENT_QUICK_CHANGE_SECTION_HELPER =
   "Best for small edits like dates, payment timing, scope, or venue.";
+/** Progressive-disclosure quick-change panel. */
+export const RECIPIENT_QUICK_PANEL_SUB = "Tell the sender what you want changed.";
+export const RECIPIENT_QUICK_REQUEST_LABEL = "Your request";
+export const RECIPIENT_QUICK_REQUEST_PLACEHOLDER =
+  "Example: Make payment Net 30 and add a 15-day late-payment pause.";
+/** Switch from quick-change to full-draft compare. */
+export const RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK = "Need to upload a revised draft instead?";
 
 /** Visible “work elsewhere” card (download-first professional workflow). */
 export const RECIPIENT_WORK_ELSEWHERE_TITLE = "Work somewhere else";
