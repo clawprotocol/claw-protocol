@@ -4,7 +4,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
-import { RECIPIENT_BTN_SEND_CHANGES, RECIPIENT_PREVIEW_TRUST_SUBCOPY } from "./portableReviewCopy";
+import {
+  RECIPIENT_BTN_SEND_CHANGES,
+  RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
+  RECIPIENT_PREVIEW_TRUST_SUBCOPY,
+} from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -109,6 +113,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
     expect(panel.textContent).not.toMatch(/\bCLAW\b/i);
+    expect(panel.textContent).toContain(RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY);
     expect(panel.textContent).toContain(RECIPIENT_PREVIEW_TRUST_SUBCOPY);
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));

@@ -120,6 +120,13 @@ import {
   RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
   RECIPIENT_EDIT_INSIDE_LAWDOG,
+  RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT,
+  RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED,
+  RECIPIENT_INTENT_REVIEW_BEFORE_SENDING,
+  RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
+  RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY,
+  RECIPIENT_PREVIEW_ITEMS_TO_PLACE,
+  RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
   RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL,
@@ -140,7 +147,12 @@ import {
 } from "./portableReviewCopy";
 import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 import { RecipientRevisedDraftAnalyzingCard } from "./recipientRevisedDraftAnalyzingCard";
+import { RecipientClauseSuggestionsSurface } from "./RecipientClauseSuggestionsSurface";
 import { RecipientReviewNotesOnlyCard } from "./RecipientReviewNotesOnlyCard";
+import {
+  buildClauseSuggestionCardsFromUploadText,
+  type RecipientClauseSuggestionCard,
+} from "./recipientClauseSuggestionsFromText";
 import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
 import { REVISED_UPLOAD_ANALYZING_MIN_MS } from "./recipientRevisedDraftUploadFlow";
 import { renderAgreementDraftHtmlLikeBackend, purposeLooksLikeFullAgreementTextForRender } from "./recipientAgreementDraftHtmlRender";
@@ -161,12 +173,17 @@ import { RecipientPreviewVersionsExport } from "./recipientPreviewVersionExport"
 
 const API_BASE = resolveApiBase();
 
+type RecipientPostUploadSurfaceState =
+  | null
+  | { surface: "notes_only"; notes: string }
+  | { surface: "clause_suggestions"; notes: string; items: RecipientClauseSuggestionCard[] };
+
 function redlineSummaryChipLabel(count: number, singular: string, plural: string): string {
   return count === 1 ? `1 ${singular}` : `${count} ${plural}`;
 }
 
-function sectionChangeChipLabel(count: number): string {
-  return count === 1 ? "1 section changed" : `${count} sections changed`;
+function wordingChangeChipLabel(count: number): string {
+  return count === 1 ? "1 wording change" : `${count} wording changes`;
 }
 
 function recipientIntentAppliedExplanation(category: RecipientInstructionIntentCategory): string {
@@ -176,7 +193,7 @@ function recipientIntentAppliedExplanation(category: RecipientInstructionIntentC
     case "suspend_pause_work":
       return "Adds a pause if payment is over 15 days late.";
     default:
-      return "Shown in the preview below.";
+      return "Shown in the compare below.";
   }
 }
 
@@ -446,7 +463,8 @@ export function AgreementRecipientReview({
   const [revisedSubmode, setRevisedSubmode] = useState<"paste" | "edit">("paste");
   const [draftImportError, setDraftImportError] = useState<string | null>(null);
   const [revisedUploadAnalyzing, setRevisedUploadAnalyzing] = useState(false);
-  const [uploadNotesOnlyGate, setUploadNotesOnlyGate] = useState<{ notes: string } | null>(null);
+  const [recipientPostUploadSurface, setRecipientPostUploadSurface] = useState<RecipientPostUploadSurfaceState>(null);
+  const [recipientIntentListExpanded, setRecipientIntentListExpanded] = useState(false);
   const [reviewerNotesAccordionOpen, setReviewerNotesAccordionOpen] = useState(false);
   const [proRedlineSuggestText, setProRedlineSuggestText] = useState("");
   const [proRedlineSuggestBusy, setProRedlineSuggestBusy] = useState(false);
@@ -552,7 +570,7 @@ export function AgreementRecipientReview({
     setRecipientRevisePreviewError(null);
     setDraftImportError(null);
     setRevisedUploadAnalyzing(false);
-    setUploadNotesOnlyGate(null);
+    setRecipientPostUploadSurface(null);
     pendingImportRecipientPreviewRef.current = null;
     setError(null);
   }, [flowPhase]);
@@ -564,6 +582,10 @@ export function AgreementRecipientReview({
   useEffect(() => {
     setReviewerNotesAccordionOpen(false);
   }, [recipientPreview?.separatedReviewerNotesForUi]);
+
+  useEffect(() => {
+    setRecipientIntentListExpanded(false);
+  }, [recipientPreview?.revisionText]);
 
   useEffect(() => {
     reviewerViewLoggedRef.current = false;
@@ -893,6 +915,11 @@ export function AgreementRecipientReview({
     recipientInstructionIntentSplit.primary.length,
     recipientInstructionIntentSplit.unclear.length,
   ]);
+
+  const primaryIntentRowsForCompare = useMemo(() => {
+    const p = recipientInstructionIntentSplit.primary;
+    return recipientIntentListExpanded ? p : p.slice(0, 5);
+  }, [recipientIntentListExpanded, recipientInstructionIntentSplit.primary]);
 
   const [narrowRedlineHighlightAnchor, setNarrowRedlineHighlightAnchor] = useState<string | null>(null);
   const suggestedChangesDocScrollRef = useRef<HTMLDivElement>(null);
@@ -1445,7 +1472,7 @@ export function AgreementRecipientReview({
     if (!draft) return;
     const trimmed = fullText.trim();
     if (!trimmed) return;
-    setUploadNotesOnlyGate(null);
+    setRecipientPostUploadSurface(null);
     setRecipientPreview(null);
     setRecipientRevisePreviewError(null);
     setDraftImportError(null);
@@ -1461,7 +1488,22 @@ export function AgreementRecipientReview({
         setRevisedIntakePhase("editing");
         setExternalAiPaste("");
         setRevisedUploadAnalyzing(false);
-        setUploadNotesOnlyGate({ notes: classification.reviewerNotes ?? trimmed });
+        setRecipientPostUploadSurface({ surface: "notes_only", notes: classification.reviewerNotes ?? trimmed });
+        return;
+      }
+
+      if (classification.kind === "clause_suggestions") {
+        setWorkflowMode("revised");
+        setRevisedSubmode("paste");
+        setRevisedIntakePhase("editing");
+        setExternalAiPaste("");
+        setRevisedUploadAnalyzing(false);
+        const noteText = classification.reviewerNotes ?? trimmed;
+        setRecipientPostUploadSurface({
+          surface: "clause_suggestions",
+          notes: noteText,
+          items: buildClauseSuggestionCardsFromUploadText(noteText),
+        });
         return;
       }
 
@@ -1598,7 +1640,7 @@ export function AgreementRecipientReview({
       setExternalAiPaste("");
       setRecipientRevisePreviewError(null);
       setRecipientPreview(null);
-      setUploadNotesOnlyGate(null);
+      setRecipientPostUploadSurface(null);
       setSuggestionUsed(false);
       setWorkspaceTab("read");
       await refresh();
@@ -1612,7 +1654,7 @@ export function AgreementRecipientReview({
   function discardPreview() {
     setRecipientPreview(null);
     pendingImportRecipientPreviewRef.current = null;
-    setUploadNotesOnlyGate(null);
+    setRecipientPostUploadSurface(null);
     setRecipientRevisePreviewError(null);
     setRevisedUploadAnalyzing(false);
     window.requestAnimationFrame(() => {
@@ -1696,7 +1738,8 @@ export function AgreementRecipientReview({
         >
           {RECIPIENT_PREVIEW_SUMMARY_HEADLINE}
         </h2>
-        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{RECIPIENT_PREVIEW_TRUST_SUBCOPY}</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY}</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_PREVIEW_TRUST_SUBCOPY}</p>
         <p className="sr-only">{PRODUCT_NOT_LAW_FIRM}</p>
         {recipientPreview.separatedReviewerNotesForUi ? (
           <div
@@ -1758,32 +1801,36 @@ export function AgreementRecipientReview({
               >
                 {redlineSummaryChipLabel(
                   legalRedlineDocumentVm.stats.deleteCount,
-                  "deletion",
-                  "deletions",
+                  "removal",
+                  "removals",
                 )}
               </span>
               <span
                 data-testid="recipient-redline-chip-sections"
                 className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
               >
-                {sectionChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
+                {wordingChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
               </span>
               {recipientIntentGapCount > 0 ? (
                 <span
                   data-testid="recipient-redline-chip-not-reflected"
                   className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-100"
                 >
-                  {recipientIntentGapCount} request{recipientIntentGapCount === 1 ? "" : "s"} to review
+                  {recipientIntentGapCount} {recipientIntentGapCount === 1 ? "item" : "items"} —{" "}
+                  {RECIPIENT_PREVIEW_ITEMS_TO_PLACE}
                 </span>
               ) : null}
             </div>
 
             {showRecipientIntentCoverageCallout ? (
-              <div
+              <details
                 className="mt-3 rounded-md border border-slate-700/45 bg-slate-950/40 px-3 py-2.5 text-sm leading-snug text-slate-100"
                 data-testid="recipient-redline-not-reflected-callout"
-                role="status"
               >
+                <summary className="cursor-pointer list-none text-xs font-semibold text-slate-300 marker:content-none hover:text-slate-100 [&::-webkit-details-marker]:hidden">
+                  {RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY}
+                </summary>
+                <div className="mt-2 border-t border-slate-800/50 pt-2" role="status">
                 {recipientRedlinePlainTexts?.instructionContextSummary ? (
                   <p
                     className="mb-2 text-[11px] leading-snug text-slate-500"
@@ -1794,9 +1841,9 @@ export function AgreementRecipientReview({
                 ) : null}
                 {recipientInstructionIntentSplit.primary.length > 0 ? (
                 <>
-                <p className="mb-2 text-xs font-semibold text-slate-300">In this preview</p>
+                <p className="mb-2 text-xs font-semibold text-slate-300">In this compare</p>
                 <ul className="space-y-2" data-testid="recipient-intent-coverage-list">
-                  {recipientInstructionIntentSplit.primary.map((it) => {
+                  {primaryIntentRowsForCompare.map((it) => {
                     const anchor = recipientRedlineAnchorForIntentCategory(it.category);
                     const anchorKey =
                       anchor === "payment_timing" || anchor === "pause_suspend_work" ? anchor : null;
@@ -1848,7 +1895,7 @@ export function AgreementRecipientReview({
                       ) : (
                         <>
                           <p className="text-[13px] leading-snug text-amber-100/95">
-                            Not reflected in preview: {it.normalizedIntent}
+                            {RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED}: {it.normalizedIntent}
                           </p>
                           {it.reason ? (
                             <p className="mt-1 text-[11px] leading-snug text-amber-200/80">{it.reason}</p>
@@ -1859,6 +1906,18 @@ export function AgreementRecipientReview({
                     );
                   })}
                 </ul>
+                {recipientInstructionIntentSplit.primary.length > 5 ? (
+                  <button
+                    type="button"
+                    className="mt-2 text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
+                    data-testid="recipient-intent-list-expand"
+                    onClick={() => setRecipientIntentListExpanded((v) => !v)}
+                  >
+                    {recipientIntentListExpanded
+                      ? "Show fewer"
+                      : `Show all (${recipientInstructionIntentSplit.primary.length})`}
+                  </button>
+                ) : null}
                 </>
                 ) : null}
                 {recipientInstructionIntentSplit.unclear.length > 0 ? (
@@ -1879,14 +1938,15 @@ export function AgreementRecipientReview({
                     </ul>
                   </details>
                 ) : null}
-              </div>
+                </div>
+              </details>
             ) : previewDiff.instructionCaptureWarning ? (
               <p
                 className="mt-3 rounded-md border border-amber-600/55 bg-amber-950/35 px-3 py-2.5 text-sm leading-snug text-amber-50"
                 data-testid="recipient-redline-not-reflected-callout"
                 role="status"
               >
-                Not reflected:{" "}
+                {RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED}:{" "}
                 {extractPauseRequestPhrase(recipientPreview.revisionText ?? "") ?? "pause work for late payment"}.
               </p>
             ) : null}
@@ -1898,9 +1958,10 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-narrow-unsafe-payment-callout"
                 role="status"
               >
-                Could not safely place these payment edits in the matched payment section of the document shown
-                below. Your note still goes to the owner. Requested timing:{" "}
-                {extractPaymentPlacementCalloutSnippet(String(recipientPreview.proposedDraft.payment_terms ?? ""))}.
+                We could not place these payment edits in the matched payment section of the compare below. Your note
+                still goes to the owner. Requested timing:{" "}
+                {extractPaymentPlacementCalloutSnippet(String(recipientPreview.proposedDraft.payment_terms ?? ""))}.{" "}
+                {RECIPIENT_INTENT_REVIEW_BEFORE_SENDING}
               </p>
             ) : recipientRedlinePlainTexts?.paymentTermsInlinePlacementFailed ? (
               <p
@@ -1908,30 +1969,40 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-placement-callout"
                 role="status"
               >
-                Requested edit not placed inline — we could not match a payment section in the shown document text.
-                Your note still goes to the owner.
+                {RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT} — we could not match a payment section in the compare. Your
+                note still goes to the owner.
               </p>
             ) : null}
 
             {recipientRedlinePlainTexts && recipientPreview ? (
-              <RecipientPreviewVersionsExport
-                plainSource={{
-                  currentPlain: recipientRedlinePlainTexts.currentPlain,
-                  proposedPlain: recipientRedlinePlainTexts.proposedPlain,
-                }}
-                legalRedlineVm={legalRedlineDocumentVm}
-                detachRedlinePdfButton
-                pdfReadContext={{
-                  agreementId,
-                  readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
-                  scrubbedOriginalHtml: scrubAgreementHtml(recipientPreview.baselineHtml),
-                  scrubbedProposedHtml: scrubAgreementHtml(recipientPreview.proposedHtml),
-                  exportBasename: recipientExportBasenameFromTitle(draft?.title, agreementId),
-                  reviewerDisplayName: proposerDisplayNameForApi,
-                  reviewerEmail: reviewerEmailForExport,
-                  agreementTitleDisplay: draft?.title ?? null,
-                }}
-              />
+              <details
+                className="mt-2 rounded-md border border-slate-700/40 bg-slate-950/25"
+                data-testid="recipient-preview-export-details"
+              >
+                <summary className="cursor-pointer list-none px-2 py-2 text-[11px] font-semibold text-slate-400 marker:content-none hover:text-slate-200 sm:text-xs [&::-webkit-details-marker]:hidden">
+                  {RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY}
+                </summary>
+                <div className="border-t border-slate-800/40 px-1 pb-1 pt-0">
+                  <RecipientPreviewVersionsExport
+                    plainSource={{
+                      currentPlain: recipientRedlinePlainTexts.currentPlain,
+                      proposedPlain: recipientRedlinePlainTexts.proposedPlain,
+                    }}
+                    legalRedlineVm={legalRedlineDocumentVm}
+                    detachRedlinePdfButton
+                    pdfReadContext={{
+                      agreementId,
+                      readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
+                      scrubbedOriginalHtml: scrubAgreementHtml(recipientPreview.baselineHtml),
+                      scrubbedProposedHtml: scrubAgreementHtml(recipientPreview.proposedHtml),
+                      exportBasename: recipientExportBasenameFromTitle(draft?.title, agreementId),
+                      reviewerDisplayName: proposerDisplayNameForApi,
+                      reviewerEmail: reviewerEmailForExport,
+                      agreementTitleDisplay: draft?.title ?? null,
+                    }}
+                  />
+                </div>
+              </details>
             ) : null}
 
             <div className="mt-4 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
@@ -1950,7 +2021,9 @@ export function AgreementRecipientReview({
             </div>
           </>
         ) : (
-          <p className="mt-3 text-sm text-amber-100/90">Preview comparison is unavailable. You can still dismiss or edit your note.</p>
+          <p className="mt-3 text-sm text-amber-100/90">
+            Compare is unavailable. You can still dismiss or edit your note. {RECIPIENT_INTENT_REVIEW_BEFORE_SENDING}
+          </p>
         )}
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -2932,7 +3005,7 @@ export function AgreementRecipientReview({
               setRecipientPreview(null);
               setRecipientRevisePreviewError(null);
               setRevisedUploadAnalyzing(false);
-              setUploadNotesOnlyGate(null);
+              setRecipientPostUploadSurface(null);
               pendingImportRecipientPreviewRef.current = null;
               setError(null);
               window.requestAnimationFrame(() => {
@@ -3027,7 +3100,7 @@ export function AgreementRecipientReview({
                       setDraftImportError(null);
                       setRecipientPreview(null);
                       setRecipientRevisePreviewError(null);
-                      setUploadNotesOnlyGate(null);
+                      setRecipientPostUploadSurface(null);
                       setError(null);
                       setRevisedIntakePhase(externalAiPaste.trim() ? "editing" : "pick-method");
                     }}
@@ -3049,7 +3122,7 @@ export function AgreementRecipientReview({
                       setRecipientPreview(null);
                       setRecipientRevisePreviewError(null);
                       setRevisedUploadAnalyzing(false);
-                      setUploadNotesOnlyGate(null);
+                      setRecipientPostUploadSurface(null);
                       setError(null);
                     }}
                   >
@@ -3189,14 +3262,14 @@ export function AgreementRecipientReview({
                     </div>
                   ) : (
                     <>
-                  {!revisedUploadAnalyzing && !uploadNotesOnlyGate && RECIPIENT_REVISED_PANEL_SUB.trim() ? (
+                  {!revisedUploadAnalyzing && !recipientPostUploadSurface && RECIPIENT_REVISED_PANEL_SUB.trim() ? (
                     <div>
                       <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
                       <p className="mt-1 text-xs leading-snug text-slate-400">{RECIPIENT_REVISED_PANEL_SUB}</p>
                     </div>
                   ) : null}
 
-                  {!revisedUploadAnalyzing && !uploadNotesOnlyGate ? (
+                  {!revisedUploadAnalyzing && !recipientPostUploadSurface ? (
                   <p
                     className="text-[10px] leading-snug text-slate-500"
                     data-testid="recipient-revised-workspace-notes-hint"
@@ -3205,29 +3278,12 @@ export function AgreementRecipientReview({
                   </p>
                   ) : null}
 
-                  {uploadNotesOnlyGate ? (
+                  {recipientPostUploadSurface?.surface === "notes_only" ? (
                     <RecipientReviewNotesOnlyCard
-                      extractedNotes={uploadNotesOnlyGate.notes}
-                      onUploadRevisedAgreement={() => {
-                        setUploadNotesOnlyGate(null);
-                        setDraftImportError(null);
-                        draftImportFileInputRef.current?.click();
-                      }}
-                      onPasteRevisedAgreement={() => {
-                        setUploadNotesOnlyGate(null);
-                        setRevisedSubmode("paste");
-                        setRevisedIntakePhase("editing");
-                        setExternalAiPaste("");
-                        setDraftImportError(null);
-                        setRecipientPreview(null);
-                        setRecipientRevisePreviewError(null);
-                        window.requestAnimationFrame(() => {
-                          externalPasteTextareaRef.current?.focus({ preventScroll: true });
-                        });
-                      }}
-                      onUseAsQuickChange={() => {
-                        const n = uploadNotesOnlyGate.notes.trim().slice(0, RECIPIENT_MAX_INSTRUCTION_CHARS);
-                        setUploadNotesOnlyGate(null);
+                      extractedNotes={recipientPostUploadSurface.notes}
+                      onSendNotesToSender={() => {
+                        const n = recipientPostUploadSurface.notes.trim().slice(0, RECIPIENT_MAX_INSTRUCTION_CHARS);
+                        setRecipientPostUploadSurface(null);
                         setComposePathCardsVisible(false);
                         setWorkflowMode("quick");
                         setRecipientPreview(null);
@@ -3242,6 +3298,100 @@ export function AgreementRecipientReview({
                               root?.querySelector<HTMLElement>('[data-testid="recipient-revision-voice-field"]') ??
                               null;
                             el?.focus({ preventScroll: true });
+                          }, 32);
+                        });
+                      }}
+                      onTurnIntoClauseSuggestions={() => {
+                        const n = recipientPostUploadSurface.notes;
+                        setRecipientPostUploadSurface({
+                          surface: "clause_suggestions",
+                          notes: n,
+                          items: buildClauseSuggestionCardsFromUploadText(n),
+                        });
+                      }}
+                      onUploadRevisedAgreement={() => {
+                        setRecipientPostUploadSurface(null);
+                        setDraftImportError(null);
+                        draftImportFileInputRef.current?.click();
+                      }}
+                      onPasteRevisedAgreement={() => {
+                        setRecipientPostUploadSurface(null);
+                        setRevisedSubmode("paste");
+                        setRevisedIntakePhase("editing");
+                        setExternalAiPaste("");
+                        setDraftImportError(null);
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        window.requestAnimationFrame(() => {
+                          externalPasteTextareaRef.current?.focus({ preventScroll: true });
+                        });
+                      }}
+                    />
+                  ) : recipientPostUploadSurface?.surface === "clause_suggestions" ? (
+                    <RecipientClauseSuggestionsSurface
+                      items={recipientPostUploadSurface.items}
+                      rawText={recipientPostUploadSurface.notes}
+                      onSendSuggestionsOnly={() => {
+                        const surf = recipientPostUploadSurface;
+                        if (surf?.surface !== "clause_suggestions") return;
+                        const summary = surf.items.map((it) => `- ${it.title}`).join("\n");
+                        const n = `${summary}\n\n${surf.notes.trim()}`.slice(0, RECIPIENT_MAX_INSTRUCTION_CHARS);
+                        setRecipientPostUploadSurface(null);
+                        setComposePathCardsVisible(false);
+                        setWorkflowMode("quick");
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        setInstruction(n);
+                        setExternalAiPaste("");
+                        setError(null);
+                        window.requestAnimationFrame(() => {
+                          window.setTimeout(() => {
+                            const root = recipientSuggestPanelRef.current;
+                            const el =
+                              root?.querySelector<HTMLElement>('[data-testid="recipient-revision-voice-field"]') ??
+                              null;
+                            el?.focus({ preventScroll: true });
+                          }, 32);
+                        });
+                      }}
+                      onUploadFullRevisedDraft={() => {
+                        setRecipientPostUploadSurface(null);
+                        setDraftImportError(null);
+                        draftImportFileInputRef.current?.click();
+                      }}
+                      onPasteRevisedAgreement={() => {
+                        setRecipientPostUploadSurface(null);
+                        setRevisedSubmode("paste");
+                        setRevisedIntakePhase("editing");
+                        setExternalAiPaste("");
+                        setDraftImportError(null);
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        window.requestAnimationFrame(() => {
+                          externalPasteTextareaRef.current?.focus({ preventScroll: true });
+                        });
+                      }}
+                      onApplySuggestionsToDraft={() => {
+                        const surf = recipientPostUploadSurface;
+                        if (surf?.surface !== "clause_suggestions") return;
+                        const summary = surf.items
+                          .map((it) => `- ${it.title}\n  ${it.meaning}`)
+                          .join("\n\n")
+                          .slice(0, RECIPIENT_MAX_INSTRUCTION_CHARS);
+                        setRecipientPostUploadSurface(null);
+                        setDraftImportError(null);
+                        if (revisedSubmode !== "edit") {
+                          setExternalAiPaste(directCompareDefaultRef.current);
+                        }
+                        setRevisedSubmode("edit");
+                        setRevisedIntakePhase("editing");
+                        setInstruction(summary);
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        setError(null);
+                        window.requestAnimationFrame(() => {
+                          window.setTimeout(() => {
+                            document.getElementById(editDraftFieldId)?.focus({ preventScroll: true });
                           }, 32);
                         });
                       }}
@@ -3399,7 +3549,7 @@ export function AgreementRecipientReview({
               revisedIntakePhase === "editing" &&
               (revisedSubmode === "paste" || revisedSubmode === "edit") &&
               !revisedUploadAnalyzing &&
-              !uploadNotesOnlyGate &&
+              !recipientPostUploadSurface &&
               !externalAiPaste.trim() ? (
                 <p className="text-xs leading-snug text-slate-500" data-testid="recipient-paste-empty-hint">
                   Add your revised text, import a file, or try a small tweak instead.

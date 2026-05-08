@@ -229,8 +229,10 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     expect(insertJoined).toMatch(/fifteen \(15\)/i);
 
     expect(screen.getByTestId("recipient-redline-chip-insertions").textContent).toMatch(/^[12]\s+addition(s)?$/i);
-    expect(screen.getByTestId("recipient-redline-chip-deletions").textContent).toMatch(/^0\s+deletions$|^1\s+deletion$/i);
-    expect(screen.getByTestId("recipient-redline-chip-sections").textContent).toMatch(/^1\s+section changed$/i);
+    expect(screen.getByTestId("recipient-redline-chip-deletions").textContent).toMatch(/^0\s+removals$|^1\s+removal$/i);
+    expect(screen.getByTestId("recipient-redline-chip-sections").textContent).toMatch(
+      /^1\s+wording change$|^\d+\s+wording changes$/i,
+    );
 
     expect(screen.queryByTestId("recipient-redline-chip-not-reflected")).toBeNull();
 
@@ -244,7 +246,7 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
     expect(screen.getByTestId("recipient-intent-coverage-list")).toBeTruthy();
-    expect(callout.textContent).toMatch(/In this preview/i);
+    expect(callout.textContent).toMatch(/In this compare/i);
     expect(callout.textContent).not.toMatch(/Could not add:/i);
     const list = screen.getByTestId("recipient-intent-coverage-list");
     expect(within(list).getAllByRole("button", { name: /Net 30 payment timing/i })).toHaveLength(1);
@@ -487,7 +489,7 @@ describe("AgreementRecipientReview narrow payment redline QA (party/signature/fo
     expect(parseInt(secChip, 10)).toBeLessThanOrEqual(1);
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
-    expect(callout.textContent).toMatch(/In this preview/i);
+    expect(callout.textContent).toMatch(/In this compare/i);
     expect(callout.textContent).not.toMatch(/Could not add:/i);
     expect(insText).toMatch(/pause work until all overdue/i);
   });

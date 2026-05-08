@@ -116,18 +116,20 @@ export const RECIPIENT_EDIT_INSIDE_LAWDOG = "Edit inside LawDog";
 export const RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF = "Download original PDF";
 export const RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT = "Download original text";
 
-/** Preview / redline summary. */
-export const RECIPIENT_PREVIEW_SUMMARY_HEADLINE = "Review suggested changes";
+/** Preview / redline summary (true agreement compare). */
+export const RECIPIENT_PREVIEW_SUMMARY_HEADLINE = "Review proposed agreement changes";
 export const RECIPIENT_PREVIEW_TRUST_SUBCOPY = RECIPIENT_WORKSPACE_TRUST_LINE;
+/** Shown under the compare headline — send vs accept clarity. */
+export const RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY =
+  "Nothing is sent until you click Send. The sender still accepts before the draft changes.";
 
 /** Transitional copy after choosing an uploaded revised draft (PDF / TXT / Markdown). */
 export const RECIPIENT_REVISED_UPLOAD_ANALYZING_TITLE = "Analyzing revised draft…";
-export const RECIPIENT_REVISED_UPLOAD_ANALYZING_SUB =
-  "Comparing it with the original agreement.";
+export const RECIPIENT_REVISED_UPLOAD_ANALYZING_SUB = "Preparing a compare with the agreement you received.";
 export const RECIPIENT_REVISED_UPLOAD_ANALYZING_CHECKLIST = [
   "Reading your revised draft",
-  "Detecting suggested changes",
-  "Preparing comparison",
+  "Finding proposed changes",
+  "Preparing compare",
 ] as const;
 
 /** When heuristic split found commentary meant for the sender (not part of the agreement body). */
@@ -135,15 +137,47 @@ export const RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE = "Reviewer notes included"
 export const RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL = "Why these changes were suggested";
 
 /** Upload looked like commentary, not a full edited agreement — no redline until they bring a draft. */
-export const RECIPIENT_UPLOAD_NOTES_ONLY_CARD_TITLE = "Looks like notes, not a revised draft";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_CARD_TITLE = "Reviewer notes found";
 export const RECIPIENT_UPLOAD_NOTES_ONLY_CARD_BODY =
-  "LawDog found your reasoning, but not a full edited agreement to compare.";
-export const RECIPIENT_UPLOAD_NOTES_ONLY_NOTES_PANEL_LABEL = "Reviewer notes found";
+  "This looks like review comments, not a rewritten agreement. LawDog kept it separate so your compare stays clean.";
+/** Collapsed panel — full extracted text. */
+export const RECIPIENT_UPLOAD_NOTES_ONLY_VIEW_FULL_NOTES = "View full notes";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_SUGGESTED_FOCUS_HEADING = "Suggested focus";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_SUGGESTED_FOCUS_BULLETS = [
+  "Payment timing",
+  "Scope boundaries",
+  "Delivery delays",
+  "Third-party services",
+  "Ownership / reusable tools",
+] as const;
 export const RECIPIENT_UPLOAD_NOTES_ONLY_HELPER =
-  "For redline, upload the full revised draft. Notes can ride along, but they should not replace the agreement.";
+  "Upload or paste a full revised draft when you are ready to compare. Your notes stay separate until then.";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_SEND_NOTES = "Send notes to sender";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_TURN_SUGGESTIONS = "Turn into clause suggestions";
 export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_UPLOAD = "Upload revised agreement";
 export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_PASTE = "Paste revised agreement";
 export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_QUICK = "Use these as a quick change request";
+export const RECIPIENT_UPLOAD_NOTES_ONLY_DOWNLOAD_NOTES = "Download reviewer notes";
+
+/** Compare panel — intent coverage (plain language). */
+export const RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED = "Not automatically inserted";
+export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "Needs manual placement";
+export const RECIPIENT_INTENT_REVIEW_BEFORE_SENDING = "Review before sending";
+export const RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY = "Downloads";
+export const RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY = "Suggestion details";
+export const RECIPIENT_PREVIEW_ITEMS_TO_PLACE = "May need placement";
+
+/** Clause-suggestions surface (structured list upload). */
+export const RECIPIENT_CLAUSE_SUGGESTIONS_TITLE = "Suggested protections";
+export const RECIPIENT_CLAUSE_SUGGESTIONS_SUB =
+  "These read as clause-style suggestions, not a full rewritten agreement. Compare opens after you upload or paste a revised draft.";
+export const RECIPIENT_CLAUSE_SUGGESTION_STATUS_READY = "Ready to send";
+export const RECIPIENT_CLAUSE_SUGGESTION_STATUS_NEEDS_PLACEMENT = "Needs placement";
+export const RECIPIENT_CLAUSE_SUGGESTIONS_CTA_SEND = "Send suggestions only";
+export const RECIPIENT_CLAUSE_SUGGESTIONS_CTA_APPLY = "Apply suggestions to draft";
+export const RECIPIENT_CLAUSE_SUGGESTIONS_CTA_UPLOAD = "Upload full revised draft";
+export const RECIPIENT_CLAUSE_SUGGESTIONS_CTA_PASTE = "Paste revised agreement";
+export const RECIPIENT_CLAUSE_SUGGESTIONS_DOWNLOAD = "Download suggestions";
 
 /** Assisted compose + preview toolbars. */
 export const RECIPIENT_BTN_PREVIEW_CHANGES = "Preview changes";

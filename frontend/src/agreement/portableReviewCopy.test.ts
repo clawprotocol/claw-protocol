@@ -7,6 +7,10 @@ import {
   RECIPIENT_COPY_EXPORT_SECTION_HELPER,
   RECIPIENT_COPY_EXPORT_SECTION_TITLE,
   RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK,
+  RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
+  RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
+  RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED,
+  RECIPIENT_UPLOAD_NOTES_ONLY_CARD_TITLE,
   RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
   RECIPIENT_WANT_COPY_BODY,
   RECIPIENT_REVISED_WORKSPACE_NOTES_HINT,
@@ -83,5 +87,22 @@ describe("recipient want-a-copy portable copy", () => {
       "We couldn't extract readable text from this file. Try a selectable-text PDF, TXT, or Markdown file.",
     );
     expect(RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK.toLowerCase()).not.toContain("docx");
+  });
+});
+
+describe("recipient compare / notes copy (signer-facing)", () => {
+  const banned = ["corpus", "route", "detected", "sections changed", "not reflected", "diagnostic"] as const;
+
+  it("avoids jargon in key compare and notes strings", () => {
+    const block = [
+      RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
+      RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
+      RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED,
+      RECIPIENT_UPLOAD_NOTES_ONLY_CARD_TITLE,
+    ].join("\n");
+    const u = block.toLowerCase();
+    for (const b of banned) {
+      expect(u.includes(b), `unexpected “${b}” in signer copy`).toBe(false);
+    }
   });
 });

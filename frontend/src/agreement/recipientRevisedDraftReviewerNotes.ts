@@ -83,6 +83,16 @@ export function scoreAgreementLikeStructure(text: string): number {
   return s;
 }
 
+/** Two or more markdown-style bullet lines (clause-style asks, not numbered agreement articles). */
+export function hasStructuredAsks(text: string): boolean {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let bullets = 0;
+  for (const line of lines) {
+    if (/^\s*[-*•]\s+\S/.test(line)) bullets++;
+  }
+  return bullets >= 2;
+}
+
 function hasCommentaryTone(text: string): boolean {
   return /\b(i\s+recommend|i\s+propose|we\s+suggest|my\s+concern|rationale\s*:|reviewer\s+perspective)\b/i.test(
     text.slice(0, 50_000),
@@ -124,6 +134,7 @@ export function splitReviewerNotesFromRevisedDraft(raw: string): SplitReviewerNo
 export type RecipientRevisedUploadKind =
   | "full_revised_agreement"
   | "review_notes_only"
+  | "clause_suggestions"
   | "mixed_notes_and_agreement";
 
 export type ClassifyRecipientRevisedDraftUploadResult = {
@@ -237,6 +248,23 @@ export function classifyRecipientRevisedDraftUpload(
     headingHits >= 1 ||
     hasCommentaryTone(uploaded) ||
     (weak && shortVsOriginal && primaryLen >= 120 && primaryLen < Math.max(3500, Math.floor(origLen * 0.55)));
+
+  if (
+    hasStructuredAsks(uploaded) &&
+    weak &&
+    fullScore < 3 &&
+    primaryLen >= 120 &&
+    primaryLen <= 8000 &&
+    primaryLen < Math.max(7500, Math.floor(origLen * 0.95))
+  ) {
+    return {
+      kind: "clause_suggestions",
+      agreementText: "",
+      reviewerNotes: uploaded,
+      confidence: "medium",
+      reason: "Multiple list-style recommendations without full agreement text.",
+    };
+  }
 
   if (noteLike && weak && primaryLen < Math.max(4500, Math.floor(origLen * 0.85))) {
     if (primaryLen <= 100 && headingHits === 0 && !hasCommentaryTone(uploaded)) {

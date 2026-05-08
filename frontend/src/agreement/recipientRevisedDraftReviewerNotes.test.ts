@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyRecipientRevisedDraftUpload,
+  hasStructuredAsks,
   splitReviewerNotesFromRevisedDraft,
 } from "./recipientRevisedDraftReviewerNotes";
 
@@ -73,5 +74,19 @@ describe("classifyRecipientRevisedDraftUpload", () => {
   it("classifies very short non-heading paste as full (allow compare)", () => {
     const r = classifyRecipientRevisedDraftUpload("Short original.", "Tiny edit.");
     expect(r.kind).toBe("full_revised_agreement");
+  });
+
+  it("classifies multi-bullet recommendations as clause_suggestions", () => {
+    const uploaded = [
+      "Please consider the following:",
+      "",
+      "- Payment timing: Net 45 instead of Net 30",
+      "- Scope boundaries: separate bug fixes from new features",
+      "- Client delay protection: extend deadlines when the client is late",
+    ].join("\n");
+    const r = classifyRecipientRevisedDraftUpload(orig, uploaded);
+    expect(r.kind).toBe("clause_suggestions");
+    expect(r.agreementText).toBe("");
+    expect(hasStructuredAsks(uploaded)).toBe(true);
   });
 });

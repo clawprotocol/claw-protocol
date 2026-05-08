@@ -470,7 +470,7 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByRole("button", { name: "Send changes" }).first()).toBeVisible({ timeout: 25_000 });
 
     await expect(page.getByTestId("recipient-suggested-changes-panel")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Review suggested changes" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review proposed agreement changes" })).toBeVisible();
     await expect(page.getByTestId("recipient-suggested-changes-document")).toBeVisible();
     const legalDoc = page.getByTestId("recipient-legal-redline-document");
     await expect(legalDoc).toBeVisible();
@@ -479,8 +479,9 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByTestId("recipient-redline-chip-not-reflected")).toHaveCount(0);
     const callout = page.getByTestId("recipient-redline-not-reflected-callout");
     await expect(callout).toBeVisible();
+    await callout.locator("summary").click();
     await expect(page.getByTestId("recipient-intent-coverage-list")).toBeVisible();
-    await expect(callout).toContainText(/In this preview/i);
+    await expect(callout).toContainText(/In this compare/i);
     await expect(callout).not.toContainText(/Could not add:/i);
     await expect(legalDoc.locator("section[data-block-kind]")).toHaveCount(4);
     await expect(legalDoc.getByTestId("recipient-redline-changed-block").first()).toBeVisible();
