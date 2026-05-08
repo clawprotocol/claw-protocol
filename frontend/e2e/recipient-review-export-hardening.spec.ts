@@ -139,7 +139,8 @@ async function openRecipientReviewReviseTab(page: Page, agreementId: string) {
     await expect(page.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
     await page.getByRole("button", { name: "Request changes" }).first().click();
   }
-  await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("recipient-workflow-quick").click();
+  await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 20_000 });
 }
 
 test.describe("recipient review export hardening", () => {
@@ -184,7 +185,7 @@ test.describe("recipient review export hardening", () => {
     await ta.fill("E2E stress: Net 30 and clarify payment.");
 
     for (let i = 0; i < 14; i++) {
-      await page.getByRole("button", { name: "Preview changes" }).click();
+      await page.getByTestId("recipient-compare-versions-button").click();
       await page.getByTestId("recipient-preview-download-original-pdf").click({ timeout: 8000 }).catch(() => {});
       if (await page.getByRole("button", { name: "Keep reviewing" }).isVisible().catch(() => false)) {
         await page.getByRole("button", { name: "Keep reviewing" }).first().click();
@@ -193,21 +194,23 @@ test.describe("recipient review export hardening", () => {
         await page.getByRole("button", { name: "← Back to agreement" }).click({ timeout: 5000 }).catch(() => {});
         await expect(page.getByTestId("recipient-read-download-agreement")).toBeVisible({ timeout: 10_000 });
         await page.getByRole("button", { name: "Request changes" }).first().click();
-        await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 15_000 });
+        await page.getByTestId("recipient-workflow-quick").click();
+        await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 15_000 });
       }
     }
 
     const onRevise = await page.getByRole("button", { name: "← Back to agreement" }).isVisible().catch(() => false);
     if (!onRevise) {
       await page.getByRole("button", { name: "Request changes" }).first().click();
-      await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await page.getByTestId("recipient-workflow-quick").click();
+      await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 15_000 });
     }
     while (await page.getByRole("button", { name: "Keep reviewing" }).isVisible().catch(() => false)) {
       await page.getByRole("button", { name: "Keep reviewing" }).first().click();
     }
 
     await expect(page.getByTestId("recipient-preview-versions-export")).toHaveCount(0);
-    await page.getByRole("button", { name: "Preview changes" }).click();
+    await page.getByTestId("recipient-compare-versions-button").click();
     await expect(page.getByTestId("recipient-preview-versions-export")).toHaveCount(1);
     await expect(page.getByTestId("recipient-read-download-agreement")).toHaveCount(0);
 
@@ -271,7 +274,7 @@ test.describe("recipient review export hardening", () => {
 
     await openRecipientReviewReviseTab(page, id);
     await page.getByTestId("recipient-revision-voice-field").fill("E2E retry: Net 30.");
-    await page.getByRole("button", { name: "Preview changes" }).click();
+    await page.getByTestId("recipient-compare-versions-button").click();
     await expect(page.getByTestId("recipient-preview-versions-export")).toBeVisible({ timeout: 25_000 });
 
     const proposed = page.getByTestId("recipient-preview-download-proposed-pdf");
@@ -321,7 +324,7 @@ test.describe("recipient review export hardening", () => {
       await installRecipientPreviewPdfOk(page);
       await openRecipientReviewReviseTab(page, id);
       await page.getByTestId("recipient-revision-voice-field").fill("E2E mobile layout: Net 30.");
-      await page.getByRole("button", { name: "Preview changes" }).click();
+      await page.getByTestId("recipient-compare-versions-button").click();
       const exportBox = page.getByTestId("recipient-preview-versions-export");
       await expect(exportBox).toBeVisible({ timeout: 25_000 });
       const overflows = await exportBox.evaluate((el) => el.scrollWidth > el.clientWidth + 2);

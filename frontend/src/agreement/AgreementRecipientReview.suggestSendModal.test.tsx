@@ -96,10 +96,11 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
@@ -114,17 +115,17 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     expect(legend.textContent).toContain("Red");
     expect(legend.textContent).toContain("removed");
     expect(legend.textContent).toMatch(/suggestions only/i);
-    expect(legend.textContent).toContain("Send suggestions");
+    expect(legend.textContent).toContain("Send revision");
 
     expect(within(panel).getByTestId("recipient-suggested-changes-send-reassurance").textContent).toContain(
-      "Suggestions are not signatures",
+      "Revisions do not change the original until accepted",
     );
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Send suggestions?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Send revision?" })).toBeTruthy();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
       "These go to the agreement owner.",
     );
@@ -145,7 +146,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
     expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain("Suggestions sent");
     expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain(
-      "Suggestions are not signatures",
+      "Revisions do not change the original until accepted",
     );
     expect(screen.queryByTestId("recipient-suggested-changes-panel")).toBeNull();
 
@@ -157,7 +158,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
 
     await userEvent.clear(await screen.findByTestId("recipient-revision-voice-field"));
     await userEvent.type(screen.getByTestId("recipient-revision-voice-field"), "Change payment to Net 30.");
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
     });

@@ -301,12 +301,13 @@ test.describe("paid LawDog review-link path (hydrate + mint + proposal)", () => 
       await recipientPage.getByRole("button", { name: "Request changes" }).click();
     }
 
-    await expect(recipientPage.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await recipientPage.getByTestId("recipient-workflow-quick").click();
+    await expect(recipientPage.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 20_000 });
     const ta = recipientPage.getByTestId("recipient-revision-voice-field");
     await ta.fill("Change final delivery deadline to 45 days after the effective date.");
-    await recipientPage.getByRole("button", { name: "Preview changes" }).click();
-    await expect(recipientPage.getByRole("button", { name: "Send suggestions" }).first()).toBeVisible({ timeout: 20_000 });
-    await recipientPage.getByRole("button", { name: "Send suggestions" }).first().click();
+    await recipientPage.getByTestId("recipient-compare-versions-button").click();
+    await expect(recipientPage.getByRole("button", { name: "Send revision" }).first()).toBeVisible({ timeout: 20_000 });
+    await recipientPage.getByRole("button", { name: "Send revision" }).first().click();
     await expect(recipientPage.getByTestId("recipient-send-suggested-edits-modal")).toBeVisible({ timeout: 10_000 });
     await recipientPage.getByTestId("recipient-send-suggested-edits-confirm").click();
     await expect(recipientPage.getByTestId("recipient-suggested-edits-sent-ack")).toBeVisible({

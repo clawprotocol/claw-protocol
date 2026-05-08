@@ -106,18 +106,29 @@ import {
   RECIPIENT_COPY_EXPORT_SECTION_HELPER,
   RECIPIENT_COPY_EXPORT_SECTION_TITLE,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
-  RECIPIENT_REVIEW_ELSEWHERE_BODY,
+  RECIPIENT_QUICK_CHANGE_SECTION_HELPER,
+  RECIPIENT_QUICK_CHANGE_SECTION_TITLE,
   RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL,
-  RECIPIENT_REVIEW_ELSEWHERE_TITLE,
+  RECIPIENT_SEND_BACK_REVISED_HELPER,
+  RECIPIENT_SEND_BACK_REVISED_TITLE,
+  RECIPIENT_WORK_ELSEWHERE_BODY,
+  RECIPIENT_WORK_ELSEWHERE_TITLE,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
+import { renderAgreementDraftHtmlLikeBackend, purposeLooksLikeFullAgreementTextForRender } from "./recipientAgreementDraftHtmlRender";
+import {
+  RECIPIENT_COMPARE_FAILED_FALLBACK,
+  RECIPIENT_FULL_DOC_SWITCH_HINT,
+  RECIPIENT_MAX_INSTRUCTION_CHARS,
+  RECIPIENT_QUICK_CHANGE_TOO_LARGE_HINT,
+  looksLikeFullRevisedAgreementDraft,
+} from "./recipientRevisionRouting";
 import {
   EDIT_DRAFT_HELPER,
   EDIT_DRAFT_PREVIEW_HINT,
   EDIT_DRAFT_TITLE,
   MODE_EDIT_DRAFT,
   MODE_PASTE_REVISED_DRAFT,
-  MODE_SUGGEST_PLAIN_ENGLISH,
   PASTE_OPTIONAL_NOTE_LABEL,
   PLAIN_ENGLISH_FIELD_LABEL,
 } from "./universalReviewIntakeCopy";
@@ -163,6 +174,9 @@ function recipientIntentAppliedRowHeading(it: RecipientInstructionIntent): strin
 
 function mapDraftAssistBlockedMessage(serverMsg: string): string {
   const l = serverMsg.toLowerCase();
+  if (l.includes("input too large")) {
+    return RECIPIENT_QUICK_CHANGE_TOO_LARGE_HINT;
+  }
   if (
     l.includes("airlock") ||
     l.includes("external_ai") ||
@@ -278,6 +292,7 @@ type RecipientPreview = {
   hasExternal: boolean;
   postureAtPreview: NegotiationPosture;
   suggestionUsedAtPreview: boolean;
+  routingKind: "quick_change" | "whole_document";
 };
 
 /** Stable copy for tests and recipient Pro redline submit success. */
@@ -286,7 +301,7 @@ export const PRO_REDLINE_REVIEWER_SUGGEST_SUCCESS_COPY =
 
 /** Shown when revise preview fails due to browser/network fetch issues (e.g. `ERR_NETWORK_CHANGED`). */
 export const RECIPIENT_REVISE_PREVIEW_CONNECTION_ERROR =
-  "Connection hiccup — your note is still here. Please try Preview changes again.";
+  "Connection hiccup — your note is still here. Please try again.";
 
 function recipientRevisePreviewNetworkishFailure(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : typeof e === "string" ? e : String(e ?? "");
@@ -361,7 +376,8 @@ export function AgreementRecipientReview({
     useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
   const [reviseTextMode, setReviseTextMode] = useState<"assisted" | "direct">("assisted");
-  const [universalIntakeMode, setUniversalIntakeMode] = useState<"plain" | "paste" | "edit">("plain");
+  const [workflowMode, setWorkflowMode] = useState<"revised" | "quick">("revised");
+  const [revisedSubmode, setRevisedSubmode] = useState<"paste" | "edit">("paste");
   const [draftImportError, setDraftImportError] = useState<string | null>(null);
   const [proRedlineSuggestText, setProRedlineSuggestText] = useState("");
   const [proRedlineSuggestBusy, setProRedlineSuggestBusy] = useState(false);
@@ -382,6 +398,7 @@ export function AgreementRecipientReview({
   /** Scroll target when reviewer opens “Request changes”. */
   const recipientSuggestPanelRef = useRef<HTMLDivElement>(null);
   const previewChangesButtonRef = useRef<HTMLButtonElement>(null);
+  const recipientOriginalDownloadsRef = useRef<HTMLDivElement>(null);
   const previewSummaryHeadingRef = useRef<HTMLHeadingElement>(null);
   const recipientReadDocAnchorRef = useRef<HTMLDivElement>(null);
   /** Stable per agreement (not `useId`) so React StrictMode / tests never see duplicate label targets. */
@@ -421,7 +438,8 @@ export function AgreementRecipientReview({
       try {
         const text = String(reader.result ?? "");
         setExternalAiPaste(text);
-        setUniversalIntakeMode("paste");
+        setWorkflowMode("revised");
+        setRevisedSubmode("paste");
         setRecipientPreview(null);
         setRecipientRevisePreviewError(null);
         window.requestAnimationFrame(() => {
@@ -1099,19 +1117,26 @@ export function AgreementRecipientReview({
   }, [refresh]);
 
   const revisionPayload = useMemo(() => {
-    if (universalIntakeMode === "plain") {
+    if (workflowMode === "quick") {
       return buildRecipientRevisionText(instruction.trim(), "");
     }
     return buildRecipientRevisionText(instruction.trim(), externalAiPaste.trim());
-  }, [universalIntakeMode, instruction, externalAiPaste]);
+  }, [workflowMode, instruction, externalAiPaste]);
+
+  const quickChangeLooksLikeFullDraft =
+    workflowMode === "quick" && looksLikeFullRevisedAgreementDraft(instruction.trim());
 
   const canPreview =
     Boolean(revisionPayload.text) &&
     !previewing &&
     !saving &&
-    !((universalIntakeMode === "paste" || universalIntakeMode === "edit") && !externalAiPaste.trim());
+    (workflowMode === "revised"
+      ? Boolean(externalAiPaste.trim())
+      : Boolean(instruction.trim()) &&
+        !quickChangeLooksLikeFullDraft &&
+        instruction.trim().length <= RECIPIENT_MAX_INSTRUCTION_CHARS);
 
-  async function previewChanges() {
+  async function previewQuickChange() {
     if (needsPersonalizedLink) {
       setError("Use the personal review link from the sender (it includes your participant id).");
       return;
@@ -1120,8 +1145,16 @@ export function AgreementRecipientReview({
       setError("Review is closed on this agreement — you can still read the document.");
       return;
     }
-    const { text, hasExternal } = revisionPayload;
-    if (!text || !draft || previewing) return;
+    const { text, hasExternal } = buildRecipientRevisionText(instruction.trim(), "");
+    if (!text.trim() || !draft || previewing) return;
+    if (looksLikeFullRevisedAgreementDraft(text)) {
+      setError(RECIPIENT_FULL_DOC_SWITCH_HINT);
+      return;
+    }
+    if (text.length > RECIPIENT_MAX_INSTRUCTION_CHARS) {
+      setError(RECIPIENT_QUICK_CHANGE_TOO_LARGE_HINT);
+      return;
+    }
     const revGate = access.check("revision_preview");
     if (!revGate.allowed) {
       setError(revGate.message || "Revision preview limit reached.");
@@ -1223,6 +1256,7 @@ export function AgreementRecipientReview({
         hasExternal,
         postureAtPreview: recipientPosture,
         suggestionUsedAtPreview: suggestionUsed,
+        routingKind: "quick_change",
       });
       access.recordUsage("revision_previews");
     } catch (e: unknown) {
@@ -1233,6 +1267,83 @@ export function AgreementRecipientReview({
     } finally {
       setPreviewing(false);
     }
+  }
+
+  async function previewWholeDocumentRevision() {
+    if (needsPersonalizedLink) {
+      setError("Use the personal review link from the sender (it includes your participant id).");
+      return;
+    }
+    if (bundle && isSigningLockActive(bundle)) {
+      setError("Review is closed on this agreement — you can still read the document.");
+      return;
+    }
+    const paste = externalAiPaste.trim();
+    if (!paste || !draft || previewing) return;
+    const revGate = access.check("revision_preview");
+    if (!revGate.allowed) {
+      setError(revGate.message || "Revision preview limit reached.");
+      return;
+    }
+    setPreviewing(true);
+    setError(null);
+    setRecipientRevisePreviewError(null);
+    try {
+      const baselineDraft = cloneDraftForRecipientPreview(draft);
+      const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
+      let baselineHtml = renderedHtml;
+      try {
+        const rr = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`, {
+          method: "POST",
+          headers: readHeaders,
+        });
+        if (rr.ok) {
+          const rrBody = await rr.text();
+          const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
+          const fresh = String(rp?.rendered_html ?? "").trim();
+          if (fresh.length > 0) baselineHtml = fresh;
+        }
+      } catch {
+        /* keep last renderedHtml from state */
+      }
+      const proposedDraft = cloneDraftForRecipientPreview(draft);
+      proposedDraft.purpose = paste;
+      const proposedHtml = renderAgreementDraftHtmlLikeBackend(proposedDraft);
+      const revisionText = buildRecipientRevisionText("", paste).text;
+      const integrity = assessRecipientPreviewDiff(baselineDraft, proposedDraft, baselineHtml, proposedHtml, {
+        recipientInstructionPlain: revisionText.trim(),
+      });
+      if (integrity.isCompleteNoOp) {
+        setRecipientRevisePreviewError(null);
+        setError(RECIPIENT_COMPARE_FAILED_FALLBACK);
+        setRecipientPreview(null);
+        return;
+      }
+      setRecipientRevisePreviewError(null);
+      setRecipientPreview({
+        baselineDraft,
+        baselineHtml,
+        proposedDraft,
+        proposedHtml,
+        revisionText,
+        hasExternal: true,
+        postureAtPreview: recipientPosture,
+        suggestionUsedAtPreview: suggestionUsed,
+        routingKind: "whole_document",
+      });
+      access.recordUsage("revision_previews");
+    } catch (e: unknown) {
+      recipientReviewDevWarn("[recipient-whole-doc-preview] failed", e);
+      setRecipientRevisePreviewError(recipientRevisePreviewUserFacingError(e));
+      setRecipientPreview(null);
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function runRecipientComparePreview() {
+    if (workflowMode === "quick") await previewQuickChange();
+    else await previewWholeDocumentRevision();
   }
 
   function openSendSuggestedEditsModal() {
@@ -1415,10 +1526,10 @@ export function AgreementRecipientReview({
           className="text-base font-semibold tracking-tight text-slate-100"
           data-testid="recipient-preview-summary-heading"
         >
-          Suggested changes
+          Review redline
         </h2>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-          Nothing changes until the sender accepts. {PRODUCT_NOT_LAW_FIRM}
+          Green is added. Red is removed. Nothing changes until the sender accepts. {PRODUCT_NOT_LAW_FIRM}
         </p>
         {participantPid ? (
           <p className="mt-2 text-[10px] leading-snug text-slate-500">
@@ -1614,8 +1725,8 @@ export function AgreementRecipientReview({
             >
               <span className="font-medium text-emerald-200/90">Green</span> = added.{" "}
               <span className="font-medium text-rose-200/90">Red</span> = removed. Suggestions only — use{" "}
-              <span className="font-medium text-slate-200">Send suggestions</span> when you&apos;re ready. Suggestions
-              are not signatures.
+              <span className="font-medium text-slate-200">Send revision</span> when you&apos;re ready. Revisions do not
+              change the original until accepted.
             </p>
 
             {recipientRedlinePlainTexts && recipientPreview ? (
@@ -1661,7 +1772,7 @@ export function AgreementRecipientReview({
           className="mt-4 text-[11px] leading-relaxed text-slate-400"
           data-testid="recipient-suggested-changes-send-reassurance"
         >
-          Nothing changes until the sender accepts. Suggestions are not signatures.
+          Nothing changes until the sender accepts. Revisions do not change the original until accepted.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <button
@@ -1671,7 +1782,7 @@ export function AgreementRecipientReview({
             disabled={saving || !previewDiff.canSubmit}
             onClick={() => openSendSuggestedEditsModal()}
           >
-            Send suggestions
+            Send revision
           </button>
           <button
             type="button"
@@ -2299,7 +2410,7 @@ export function AgreementRecipientReview({
         >
           <h2 className="text-base font-semibold text-emerald-100">Suggestions sent</h2>
           <p className="mt-2 text-sm leading-relaxed text-emerald-50/95">
-            The owner can review your suggested changes. Suggestions are not signatures.
+            The owner can review your revision. Revisions do not change the original until accepted.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -2394,7 +2505,7 @@ export function AgreementRecipientReview({
                 Review this agreement
               </h1>
               <p className="mt-1 text-sm leading-relaxed text-slate-400">
-                Request changes before signing. {recipientPartyReviewCopy.assuranceLine} Suggestions are not signatures.
+                Read it, revise it, or mark it ready. Nothing changes until the sender accepts.
               </p>
             </>
           ) : (
@@ -2447,6 +2558,22 @@ export function AgreementRecipientReview({
             looksGoodLoading={approving}
             looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
             requestChangesDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+            reviseEntrySplit={entry.kind === "review" && !viewerLike}
+            onSendBackRevised={() => {
+              setWorkspaceTab("revise");
+              setWorkflowMode("revised");
+              setError(null);
+              scrollAndFocusSuggestPanel();
+            }}
+            onAskQuickChange={() => {
+              setWorkspaceTab("revise");
+              setWorkflowMode("quick");
+              setError(null);
+              scrollAndFocusSuggestPanel();
+            }}
+            onDownloadOriginal={() => {
+              recipientOriginalDownloadsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
             onReviewPrimary={() => {
               window.requestAnimationFrame(() => {
                 document.querySelector(".prose")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2476,12 +2603,14 @@ export function AgreementRecipientReview({
             ) : null}
           </RecipientPartyReviewActions>
           {!viewerLike && entry.kind === "review" ? (
-            <RecipientAgreementReadPdfExport
-              agreementId={agreementId}
-              agreementTitle={draft?.title}
-              readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-              scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
-            />
+            <div ref={recipientOriginalDownloadsRef} data-testid="recipient-download-original-anchor" className="scroll-mt-8">
+              <RecipientAgreementReadPdfExport
+                agreementId={agreementId}
+                agreementTitle={draft?.title}
+                readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+                scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+              />
+            </div>
           ) : null}
         </>
       ) : null}
@@ -2636,7 +2765,7 @@ export function AgreementRecipientReview({
                     setError(null);
                   }}
                 >
-                  Preview suggestions
+                  Compare & redline
                 </button>
                 <button
                   type="button"
@@ -2652,7 +2781,7 @@ export function AgreementRecipientReview({
                     setError(null);
                   }}
                 >
-                  Compare text
+                  Two-text compare
                 </button>
               </div>
               {reviseTextMode === "direct" ? (
@@ -2668,29 +2797,45 @@ export function AgreementRecipientReview({
                 onChange={onDraftImportFileSelected}
               />
               <div className="space-y-2 rounded-md border border-slate-700/60 bg-slate-950/35 p-3">
-                <h3 className="text-base font-semibold text-slate-100">Request changes</h3>
+                <h3 className="text-base font-semibold text-slate-100">Review & send revision</h3>
                 <p className="text-xs leading-relaxed text-slate-400 sm:text-[13px]">
-                  Ask for edits or send your own version.
-                </p>
-                <p className="text-xs leading-relaxed text-slate-400 sm:text-[13px]">
-                  Nothing changes until the sender accepts.
+                  Read it, revise it, or mark it ready. Nothing changes until the sender accepts.
                 </p>
                 <p className="text-[11px] font-medium text-slate-400 sm:text-xs">
-                  Suggestions are not signatures.
+                  Revisions do not change the original until accepted.
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="How to suggest changes">
+              <div className="grid gap-2 sm:grid-cols-2" role="tablist" aria-label="Revision workflow">
                 <button
                   type="button"
-                  data-testid="recipient-intake-mode-write-request"
-                  className={`rounded-md px-3 py-2 text-xs font-medium sm:text-[13px] ${
-                    universalIntakeMode === "plain"
-                      ? "border border-slate-500 bg-slate-800/90 text-slate-100"
-                      : "text-slate-500 hover:text-slate-200"
+                  data-testid="recipient-workflow-revised"
+                  className={`rounded-lg border px-3 py-3 text-left text-xs sm:text-[13px] ${
+                    workflowMode === "revised"
+                      ? "border-sky-500/80 bg-slate-900/80 text-slate-100"
+                      : "border-slate-700 bg-slate-950/40 text-slate-400 hover:border-slate-600"
                   }`}
                   onClick={() => {
-                    setUniversalIntakeMode("plain");
+                    setWorkflowMode("revised");
+                    setDraftImportError(null);
+                    setRecipientPreview(null);
+                    setRecipientRevisePreviewError(null);
+                    setError(null);
+                  }}
+                >
+                  <span className="block font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</span>
+                  <span className="mt-1 block font-normal leading-snug">{RECIPIENT_SEND_BACK_REVISED_HELPER}</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="recipient-workflow-quick"
+                  className={`rounded-lg border px-3 py-3 text-left text-xs sm:text-[13px] ${
+                    workflowMode === "quick"
+                      ? "border-sky-500/80 bg-slate-900/80 text-slate-100"
+                      : "border-slate-700 bg-slate-950/40 text-slate-400 hover:border-slate-600"
+                  }`}
+                  onClick={() => {
+                    setWorkflowMode("quick");
                     setExternalAiPaste("");
                     setDraftImportError(null);
                     setRecipientPreview(null);
@@ -2698,58 +2843,20 @@ export function AgreementRecipientReview({
                     setError(null);
                   }}
                 >
-                  {MODE_SUGGEST_PLAIN_ENGLISH}
-                </button>
-                <button
-                  type="button"
-                  data-testid="recipient-intake-mode-paste-revised"
-                  className={`rounded-md px-3 py-2 text-xs font-medium sm:text-[13px] ${
-                    universalIntakeMode === "paste"
-                      ? "border border-slate-500 bg-slate-800/90 text-slate-100"
-                      : "text-slate-500 hover:text-slate-200"
-                  }`}
-                  onClick={() => {
-                    setUniversalIntakeMode("paste");
-                    setDraftImportError(null);
-                    setRecipientPreview(null);
-                    setRecipientRevisePreviewError(null);
-                    setError(null);
-                  }}
-                >
-                  {MODE_PASTE_REVISED_DRAFT}
-                </button>
-                <button
-                  type="button"
-                  data-testid="recipient-intake-mode-edit-draft"
-                  className={`rounded-md px-3 py-2 text-xs font-medium sm:text-[13px] ${
-                    universalIntakeMode === "edit"
-                      ? "border border-slate-500 bg-slate-800/90 text-slate-100"
-                      : "text-slate-500 hover:text-slate-200"
-                  }`}
-                  onClick={() => {
-                    setDraftImportError(null);
-                    if (universalIntakeMode !== "edit") {
-                      setExternalAiPaste(directCompareDefaultRef.current);
-                    }
-                    setUniversalIntakeMode("edit");
-                    setRecipientPreview(null);
-                    setRecipientRevisePreviewError(null);
-                    setError(null);
-                  }}
-                >
-                  {MODE_EDIT_DRAFT}
+                  <span className="block font-semibold text-slate-100">{RECIPIENT_QUICK_CHANGE_SECTION_TITLE}</span>
+                  <span className="mt-1 block font-normal leading-snug">{RECIPIENT_QUICK_CHANGE_SECTION_HELPER}</span>
                 </button>
               </div>
 
-              {entry.kind === "review" && !recipientPreview ? (
+              {workflowMode === "revised" && entry.kind === "review" && !recipientPreview ? (
                 <div
                   data-testid="recipient-review-elsewhere-card"
                   className="space-y-3 rounded-lg border border-sky-900/35 bg-slate-950/55 p-3 sm:p-4"
                 >
                   <div>
-                    <h4 className="text-sm font-semibold text-sky-100">{RECIPIENT_REVIEW_ELSEWHERE_TITLE}</h4>
+                    <h4 className="text-sm font-semibold text-sky-100">{RECIPIENT_WORK_ELSEWHERE_TITLE}</h4>
                     <p className="mt-1.5 text-xs leading-relaxed text-slate-400 sm:text-[13px]">
-                      {RECIPIENT_REVIEW_ELSEWHERE_BODY}
+                      {RECIPIENT_WORK_ELSEWHERE_BODY}
                     </p>
                   </div>
                   <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -2760,7 +2867,7 @@ export function AgreementRecipientReview({
                         agreementTitle={draft?.title}
                         readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
                         scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
-                        pdfDownloadButtonLabel="Download draft PDF"
+                        pdfDownloadButtonLabel="Download PDF"
                         pdfDownloadButtonTestId="recipient-review-elsewhere-download-pdf"
                       />
                     ) : null}
@@ -2771,7 +2878,7 @@ export function AgreementRecipientReview({
                       disabled={suggestControlsDisabled}
                       onClick={() => downloadRecipientDraftPlainText()}
                     >
-                      Download draft text
+                      Download text
                     </button>
                     <button
                       type="button"
@@ -2780,23 +2887,118 @@ export function AgreementRecipientReview({
                       disabled={suggestControlsDisabled}
                       onClick={() => void copyRecipientDraftPlainToClipboard()}
                     >
-                      Copy draft text
+                      Copy text
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {workflowMode === "revised" ? (
+                <>
+                  <div
+                    className="flex flex-wrap gap-2 border-b border-slate-800/70 pb-3"
+                    data-testid="recipient-revised-prominent-actions"
+                  >
+                    {draft ? (
+                      <RecipientAgreementReadPdfExport
+                        bare
+                        agreementId={agreementId}
+                        agreementTitle={draft?.title}
+                        readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+                        scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+                        pdfDownloadButtonLabel="Download original PDF"
+                        pdfDownloadButtonTestId="recipient-download-original-pdf"
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      data-testid="recipient-download-original-text"
+                      className="rounded-md border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                      disabled={suggestControlsDisabled}
+                      onClick={() => downloadRecipientDraftPlainText()}
+                    >
+                      Download original text
                     </button>
                     <button
                       type="button"
-                      data-testid="recipient-review-elsewhere-import"
-                      className="w-full min-w-0 break-words rounded-md border border-emerald-900/45 bg-emerald-950/30 px-3 py-2 text-left text-xs font-semibold text-emerald-100 hover:bg-emerald-950/45 disabled:opacity-50 sm:w-auto"
+                      data-testid="recipient-upload-revised-file"
+                      className="rounded-md border border-emerald-900/45 bg-emerald-950/30 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-950/45 disabled:opacity-50"
                       disabled={suggestControlsDisabled}
                       onClick={() => draftImportFileInputRef.current?.click()}
                     >
                       {RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL}
                     </button>
                   </div>
-                </div>
+                  <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Revised draft editor">
+                    <button
+                      type="button"
+                      data-testid="recipient-intake-mode-paste-revised"
+                      className={`rounded-md px-3 py-2 text-xs font-medium sm:text-[13px] ${
+                        revisedSubmode === "paste"
+                          ? "border border-slate-500 bg-slate-800/90 text-slate-100"
+                          : "text-slate-500 hover:text-slate-200"
+                      }`}
+                      onClick={() => {
+                        setRevisedSubmode("paste");
+                        setDraftImportError(null);
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        setError(null);
+                      }}
+                    >
+                      {MODE_PASTE_REVISED_DRAFT}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="recipient-intake-mode-edit-draft"
+                      className={`rounded-md px-3 py-2 text-xs font-medium sm:text-[13px] ${
+                        revisedSubmode === "edit"
+                          ? "border border-slate-500 bg-slate-800/90 text-slate-100"
+                          : "text-slate-500 hover:text-slate-200"
+                      }`}
+                      onClick={() => {
+                        setDraftImportError(null);
+                        if (revisedSubmode !== "edit") {
+                          setExternalAiPaste(directCompareDefaultRef.current);
+                        }
+                        setRevisedSubmode("edit");
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        setError(null);
+                      }}
+                    >
+                      {MODE_EDIT_DRAFT}
+                    </button>
+                  </div>
+                </>
               ) : null}
 
-              {universalIntakeMode === "plain" ? (
+              {workflowMode === "quick" ? (
                 <div className="space-y-2">
+                  {quickChangeLooksLikeFullDraft ? (
+                    <div
+                      className="rounded-md border border-amber-800/50 bg-amber-950/25 px-3 py-2 text-xs leading-snug text-amber-100"
+                      data-testid="recipient-quick-change-full-doc-hint"
+                      role="status"
+                    >
+                      <p>{RECIPIENT_FULL_DOC_SWITCH_HINT}</p>
+                      <button
+                        type="button"
+                        className="mt-2 rounded-md border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-[11px] font-semibold text-amber-50 hover:bg-amber-950/55"
+                        data-testid="recipient-switch-to-revised-workflow"
+                        onClick={() => {
+                          setWorkflowMode("revised");
+                          setExternalAiPaste(instruction.trim());
+                          setInstruction("");
+                          setRecipientPreview(null);
+                          setRecipientRevisePreviewError(null);
+                          setError(null);
+                        }}
+                      >
+                        Switch to {RECIPIENT_SEND_BACK_REVISED_TITLE}
+                      </button>
+                    </div>
+                  ) : null}
                   <label className="text-sm font-semibold text-slate-200" htmlFor={revisionPlainFieldId}>
                     {PLAIN_ENGLISH_FIELD_LABEL}
                   </label>
@@ -2819,7 +3021,7 @@ export function AgreementRecipientReview({
                     autosizeMaxPx={describeAutosizeMaxPx}
                   />
                 </div>
-              ) : universalIntakeMode === "paste" ? (
+              ) : revisedSubmode === "paste" ? (
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-200" htmlFor={externalPasteFieldId}>
                     {PORTABLE_REVIEW_PASTE_LABEL}
@@ -2836,6 +3038,16 @@ export function AgreementRecipientReview({
                   <p className="text-xs leading-snug text-slate-400 sm:text-[13px]">
                     We&apos;ll compare with the current draft before anything is sent.
                   </p>
+                  {externalAiPaste.trim() &&
+                  (purposeLooksLikeFullAgreementTextForRender(externalAiPaste) ||
+                    looksLikeFullRevisedAgreementDraft(externalAiPaste)) ? (
+                    <p
+                      className="text-xs leading-snug text-sky-200/95"
+                      data-testid="recipient-agreement-like-revised-hint"
+                    >
+                      Looks like a revised agreement. LawDog will compare it with the original and generate a redline.
+                    </p>
+                  ) : null}
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-[11px] font-medium text-slate-500 sm:text-xs">
                       {RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL}
@@ -3046,32 +3258,34 @@ export function AgreementRecipientReview({
                 </div>
               </details>
 
-              <details className="rounded-md border border-slate-800/70 bg-slate-950/20 px-2 py-1.5">
-                <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
-                  Negotiation tone (optional)
-                </summary>
-                <div className="mt-2 space-y-2 border-t border-slate-800/50 pt-2">
-                  <label className="text-[11px] font-medium text-slate-400" htmlFor="recipient-posture">
-                    Tone for your suggestions
-                  </label>
-                  <select
-                    id="recipient-posture"
-                    className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-                    value={recipientPosture}
-                    disabled={suggestControlsDisabled}
-                    onChange={(e) => setRecipientPosture(e.target.value as NegotiationPosture)}
-                  >
-                    {NEGOTIATION_POSTURE_OPTIONS.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] leading-snug text-slate-500">
-                    Optional framing for your note — default is cooperative.
-                  </p>
-                </div>
-              </details>
+              {workflowMode === "quick" ? (
+                <details className="rounded-md border border-slate-800/70 bg-slate-950/20 px-2 py-1.5">
+                  <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
+                    Negotiation tone (optional)
+                  </summary>
+                  <div className="mt-2 space-y-2 border-t border-slate-800/50 pt-2">
+                    <label className="text-[11px] font-medium text-slate-400" htmlFor="recipient-posture">
+                      Tone for your suggestions
+                    </label>
+                    <select
+                      id="recipient-posture"
+                      className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                      value={recipientPosture}
+                      disabled={suggestControlsDisabled}
+                      onChange={(e) => setRecipientPosture(e.target.value as NegotiationPosture)}
+                    >
+                      {NEGOTIATION_POSTURE_OPTIONS.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] leading-snug text-slate-500">
+                      Optional framing for your note — default is cooperative.
+                    </p>
+                  </div>
+                </details>
+              ) : null}
 
               {showSuggestionBlock ? (
                 <div className="space-y-1">
@@ -3105,30 +3319,35 @@ export function AgreementRecipientReview({
                 </div>
               ) : null}
 
-              {(universalIntakeMode === "paste" || universalIntakeMode === "edit") && !externalAiPaste.trim() ? (
+              {workflowMode === "revised" && (revisedSubmode === "paste" || revisedSubmode === "edit") && !externalAiPaste.trim() ? (
                 <p className="text-xs leading-snug text-slate-500" data-testid="recipient-paste-empty-hint">
-                  Add text above or switch to Describe changes.
+                  Add revised text above, import a file, or switch to Quick change.
                 </p>
               ) : null}
               <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-start sm:gap-2">
                 <button
                   ref={previewChangesButtonRef}
                   type="button"
+                  data-testid="recipient-compare-versions-button"
                   className="btn max-w-full rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
                   disabled={!canPreview || hasPendingSuggestion || recipientSuggestedEditsSentAck}
-                  onClick={() => void previewChanges()}
+                  onClick={() => void runRecipientComparePreview()}
                 >
-                  {previewing ? "Working…" : "Preview changes"}
+                  {previewing
+                    ? "Working…"
+                    : workflowMode === "quick"
+                      ? "Preview change"
+                      : "Compare versions"}
                 </button>
                 <p
                   className="max-w-full text-[10px] leading-snug text-slate-500 sm:max-w-md sm:pt-1"
                   data-testid="recipient-preview-changes-confidence-hint"
                 >
-                  {universalIntakeMode === "edit"
-                    ? EDIT_DRAFT_PREVIEW_HINT
-                    : universalIntakeMode === "paste"
-                      ? "Import a file, paste, then preview."
-                      : "Small ask? Describe it. Big edit? Paste or edit the draft."}
+                  {workflowMode === "quick"
+                    ? "LawDog applies your instruction to the draft fields, then shows a redline."
+                    : revisedSubmode === "edit"
+                      ? EDIT_DRAFT_PREVIEW_HINT
+                      : "Import, paste, or edit the full revised draft, then compare versions."}
                 </p>
               </div>
               {recipientRevisePreviewError ? (
@@ -3141,7 +3360,7 @@ export function AgreementRecipientReview({
                 </p>
               ) : null}
               <p className="text-[10px] leading-snug text-slate-500">
-                Preview changes, review the redline, then <span className="text-slate-400">Send suggestions</span>.
+                Compare versions, review the redline, then <span className="text-slate-400">Send revision</span>.
               </p>
 
               {comparePanel}
@@ -3169,7 +3388,7 @@ export function AgreementRecipientReview({
           aria-label="Send or discard suggested edits"
         >
           <p className="text-center text-[10px] leading-snug text-slate-400">
-            Suggestions are not signatures. Nothing changes until the sender accepts.
+            Revisions do not change the original until accepted. Nothing changes until the sender accepts.
           </p>
           <button
             type="button"
@@ -3178,7 +3397,7 @@ export function AgreementRecipientReview({
             disabled={saving || !previewDiff?.canSubmit}
             onClick={() => openSendSuggestedEditsModal()}
           >
-            Send suggestions
+            Send revision
           </button>
           <button
             type="button"
@@ -3208,11 +3427,11 @@ export function AgreementRecipientReview({
             onMouseDown={(e) => e.stopPropagation()}
           >
             <h2 id="recipient-send-suggested-edits-modal-title" className="text-lg font-semibold text-slate-100">
-              Send suggestions?
+              Send revision?
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
-              These go to the agreement owner. Nothing changes until they accept. Suggestions are not signatures.{" "}
-              {PRODUCT_NOT_LAW_FIRM}
+              These go to the agreement owner. Nothing changes until they accept. Revisions do not change the original
+              until accepted. {PRODUCT_NOT_LAW_FIRM}
             </p>
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
@@ -3231,7 +3450,7 @@ export function AgreementRecipientReview({
                 disabled={saving}
                 onClick={() => void performRecipientSuggestedEditsSubmit()}
               >
-                {saving ? "Sending…" : "Send suggestions"}
+                {saving ? "Sending…" : "Send revision"}
               </button>
             </div>
           </div>

@@ -99,13 +99,15 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
     const docActions = screen.getByTestId("recipient-party-review-actions");
     expect(docActions.getAttribute("data-placement")).toBe("document-read");
     expect(within(docActions).getByText(recipientPartyReviewCopy.doneReadingPrompt)).toBeTruthy();
-    expect(within(docActions).getByText(recipientPartyReviewCopy.requestChangesHelper)).toBeTruthy();
+    expect(within(docActions).getByText(recipientPartyReviewCopy.assuranceLine)).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.reviewAgain })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.requestChanges })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.sendBackRevised })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.askQuickChange })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.downloadOriginal })).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.looksGood })).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.notParticipating })).toBeTruthy();
 
-    await userEvent.click(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.requestChanges }));
+    await userEvent.click(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.askQuickChange }));
     expect(await screen.findByTestId("recipient-revision-voice-field")).toBeTruthy();
   });
 
@@ -147,6 +149,7 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
       .getAllByTestId("recipient-party-review-actions")
       .find((el) => el.getAttribute("data-placement") === "landing")!;
     await userEvent.click(within(landingDesktop).getByRole("button", { name: recipientPartyReviewCopy.requestChanges }));
+    await userEvent.click((await screen.findAllByTestId("recipient-workflow-quick"))[0]!);
     expect((await screen.findAllByTestId("recipient-revision-voice-field")).length).toBeGreaterThan(0);
   });
 });

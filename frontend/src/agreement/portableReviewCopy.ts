@@ -41,16 +41,30 @@ export const PORTABLE_REVIEW_OCR_FOOTNOTE =
 export const RECIPIENT_COPY_EXPORT_SECTION_TITLE = "Save or review elsewhere";
 export const RECIPIENT_COPY_EXPORT_SECTION_HELPER = RECIPIENT_OUTSIDE_REVIEW_WORKFLOW;
 export const RECIPIENT_COPY_EXPORT_PREVIEW_LINE =
-  "Preview before sending. Suggestions are not signatures.";
+  "Preview before sending. Revisions do not change the original until accepted.";
 
 export const RECIPIENT_DRAFT_IMPORT_READ_ERROR =
   "Couldn't read that file. Try plain text for now.";
 
-/** Visible “review elsewhere” card in Request changes (not only inside accordion). */
-export const RECIPIENT_REVIEW_ELSEWHERE_TITLE = "Prefer another editor?";
-export const RECIPIENT_REVIEW_ELSEWHERE_BODY =
-  "Download or copy the draft, edit it with your lawyer or AI tool, then import or paste it back.";
-export const RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL = "Import edited .txt / .md";
+/** Primary workflow card — full-document compare + redline (recipient review). */
+export const RECIPIENT_SEND_BACK_REVISED_TITLE = "Send back a revised version";
+export const RECIPIENT_SEND_BACK_REVISED_HELPER =
+  "Used AI, Word, Google Docs, or counsel? Upload or paste the revised draft and LawDog will compare it with the original.";
+
+/** Secondary workflow — instruction-only / small amendment pipeline. */
+export const RECIPIENT_QUICK_CHANGE_SECTION_TITLE = "Ask for a quick change";
+export const RECIPIENT_QUICK_CHANGE_SECTION_HELPER =
+  "Best for small edits like dates, payment timing, scope, or venue.";
+
+/** Visible “work elsewhere” card (download-first professional workflow). */
+export const RECIPIENT_WORK_ELSEWHERE_TITLE = "Work somewhere else";
+export const RECIPIENT_WORK_ELSEWHERE_BODY =
+  "Download the original, edit it with your lawyer or AI tool, then upload the revised version.";
+/** @deprecated Use RECIPIENT_WORK_ELSEWHERE_* */
+export const RECIPIENT_REVIEW_ELSEWHERE_TITLE = RECIPIENT_WORK_ELSEWHERE_TITLE;
+/** @deprecated Use RECIPIENT_WORK_ELSEWHERE_* */
+export const RECIPIENT_REVIEW_ELSEWHERE_BODY = RECIPIENT_WORK_ELSEWHERE_BODY;
+export const RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL = "Upload revised .txt / .md";
 
 /** Owner workspace: same portable flow, but apply/discard is local. */
 export const OWNER_PORTABLE_REVIEW_SUB =

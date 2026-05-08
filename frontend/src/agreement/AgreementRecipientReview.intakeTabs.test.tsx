@@ -34,7 +34,7 @@ function makeDraft(id: string) {
   };
 }
 
-describe("AgreementRecipientReview request intake modes", () => {
+describe("AgreementRecipientReview revise workflow routing", () => {
   beforeEach(() => {
     localStorage.clear();
   });
@@ -43,8 +43,8 @@ describe("AgreementRecipientReview request intake modes", () => {
     localStorage.clear();
   });
 
-  it("shows Describe, Paste draft, and Edit draft tabs; paste shows primary textarea and import", async () => {
-    const agreementId = "ag_intake_tabs";
+  it("shows primary revised-version workflow card and work-elsewhere copy", async () => {
+    const agreementId = "ag_workflow_cards";
     const draft = makeDraft(agreementId);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
@@ -69,59 +69,36 @@ describe("AgreementRecipientReview request intake modes", () => {
 
     await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Request changes/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
     });
+    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-
-    expect(screen.getAllByTestId("recipient-review-elsewhere-card").length).toBeGreaterThan(0);
-    expect(screen.getByText("Prefer another editor?")).toBeTruthy();
-    expect(
-      screen.getByText(/Download or copy the draft, edit it with your lawyer or AI tool/i),
-    ).toBeTruthy();
-    expect(screen.getAllByTestId("recipient-review-elsewhere-import").length).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("recipient-review-elsewhere-download-pdf").length).toBeGreaterThan(0);
-
-    expect(screen.getAllByTestId("recipient-intake-mode-write-request").length).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("recipient-intake-mode-paste-revised").length).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("recipient-intake-mode-edit-draft").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Describe changes").length).toBeGreaterThan(0);
-    expect(screen.getByText("Paste draft")).toBeTruthy();
-    expect(screen.getByText("Edit draft")).toBeTruthy();
-    expect(screen.getByText("What should change?")).toBeTruthy();
-    expect(screen.getByText(/Ask for edits or send your own version/i)).toBeTruthy();
-    expect(screen.getByText("Nothing changes until the sender accepts.")).toBeTruthy();
-    expect(screen.getAllByText("Suggestions are not signatures.").length).toBeGreaterThan(0);
-
-    await userEvent.click(screen.getAllByTestId("recipient-intake-mode-paste-revised")[0]!);
-    expect(screen.getAllByTestId("recipient-revised-draft-paste")[0]!).toBeTruthy();
-    expect(screen.getAllByTestId("recipient-paste-import-prominent").length).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("recipient-paste-empty-hint")[0]!).toBeTruthy();
-    expect(screen.getByText(/We'll compare with the current draft/i)).toBeTruthy();
-
-    const pasteTa = screen.getAllByTestId("recipient-revised-draft-paste")[0] as HTMLTextAreaElement;
-    expect(pasteTa.className).toMatch(/min-h-\[280px\]/);
-    expect(pasteTa.className).toMatch(/sm:min-h-\[420px\]/);
-    expect(pasteTa.className).toMatch(/resize-y/);
-    expect(pasteTa.className).toMatch(/overflow-x-hidden/);
-
-    await userEvent.click(screen.getByText("Save or review elsewhere"));
-    expect(await screen.findByText(/Copy or download, edit elsewhere/i)).toBeTruthy();
-    expect(screen.getAllByTestId("recipient-preview-changes-confidence-hint")[0]!).toBeTruthy();
-    expect(await screen.findByTestId("recipient-request-copy-export-pdf")).toBeTruthy();
-    expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(0);
+    await waitFor(() => {
+      expect(screen.getAllByTestId("recipient-workflow-revised").length).toBeGreaterThan(0);
+    });
+    expect(screen.getByTestId("recipient-workflow-revised")).toBeTruthy();
+    expect(screen.getByTestId("recipient-workflow-quick")).toBeTruthy();
+    expect(screen.getByText(/Used AI, Word, Google Docs, or counsel/i)).toBeTruthy();
+    expect(screen.getByText("Work somewhere else")).toBeTruthy();
+    expect(screen.getByText(/Download the original, edit it with your lawyer or AI tool/i)).toBeTruthy();
   });
 
-  it("Edit draft tab shows inline editor after click", async () => {
-    const agreementId = "ag_intake_edit_only";
+  it("quick change uses instruction API; compare button is Preview change", async () => {
+    const agreementId = "ag_quick_instr";
     const draft = makeDraft(agreementId);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
-      if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
+      if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render") && !url.includes("/revise")) {
         return jsonResponse({ draft });
       }
       if (url.includes("/render")) {
-        return jsonResponse({ rendered_html: "<p>Alpha beta</p>" });
+        return jsonResponse({ rendered_html: "<p>Body</p>" });
+      }
+      if (url.includes("/revise")) {
+        return jsonResponse({
+          draft: { ...draft, purpose: "Consulting. Net 45." },
+          rendered_html: "<p>Updated</p>",
+        });
       }
       return new Response("not found", { status: 404 });
     });
@@ -137,31 +114,30 @@ describe("AgreementRecipientReview request intake modes", () => {
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Request changes/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(screen.getAllByTestId("recipient-intake-mode-edit-draft")[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+
+    await userEvent.click(screen.getByTestId("recipient-workflow-quick"));
+    await userEvent.type(screen.getByTestId("recipient-revision-voice-field"), "Make payment Net 30.");
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
+
     await waitFor(() => {
-      expect(screen.getAllByTestId("recipient-edit-draft-textarea").length).toBeGreaterThan(0);
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/revise"))).toBe(true);
     });
-    const el = screen.getAllByTestId("recipient-edit-draft-textarea")[0] as HTMLTextAreaElement;
-    expect(el.value.length).toBeGreaterThan(0);
-    expect(el.className).toMatch(/min-h-\[280px\]/);
-    expect(el.className).toMatch(/sm:min-h-\[420px\]/);
-    expect(el.className).toMatch(/resize-y/);
-    expect(el.className).toMatch(/overflow-x-hidden/);
+    expect(screen.getByTestId("recipient-compare-versions-button").textContent).toMatch(/Preview change/i);
   });
 
-  it("importing a .txt file populates the paste field", async () => {
-    const agreementId = "ag_intake_import_txt";
+  it("whole-document paste compare does not call /revise", async () => {
+    const agreementId = "ag_whole_doc";
     const draft = makeDraft(agreementId);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
       if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
         return jsonResponse({ draft });
       }
       if (url.includes("/render")) {
-        return jsonResponse({ rendered_html: "<p>x</p>" });
+        return jsonResponse({ rendered_html: "<p>Body</p>" });
       }
       return new Response("not found", { status: 404 });
     });
@@ -177,24 +153,23 @@ describe("AgreementRecipientReview request intake modes", () => {
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Request changes/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(screen.getAllByTestId("recipient-intake-mode-paste-revised")[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
 
-    const file = new File(["imported line one"], "draft.md", { type: "text/markdown" });
-    const input = screen.getAllByTestId("recipient-import-draft-file-input")[0]!;
-    await userEvent.upload(input, file);
+    await userEvent.click(screen.getByTestId("recipient-intake-mode-paste-revised"));
+    const paste = "x".repeat(2500);
+    fireEvent.change(screen.getByTestId("recipient-revised-draft-paste"), { target: { value: paste } });
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
-      expect((screen.getAllByTestId("recipient-revised-draft-paste")[0] as HTMLTextAreaElement).value).toBe(
-        "imported line one",
-      );
+      expect(screen.getByTestId("recipient-suggested-changes-panel")).toBeTruthy();
     });
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/revise"))).toBe(false);
   });
 
-  it("shows friendly error for unsupported import extension", async () => {
-    const agreementId = "ag_intake_import_bad";
+  it("quick change full-agreement paste shows switch hint", async () => {
+    const agreementId = "ag_quick_hint";
     const draft = makeDraft(agreementId);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
@@ -218,61 +193,20 @@ describe("AgreementRecipientReview request intake modes", () => {
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Request changes/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(screen.getAllByTestId("recipient-intake-mode-paste-revised")[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-workflow-quick"));
 
-    const file = new File(["%PDF"], "x.doc", { type: "application/msword" });
-    const input = screen.getAllByTestId("recipient-import-draft-file-input")[0]!;
-    fireEvent.change(input, { target: { files: [file] } });
+    const big = "THIS AGREEMENT\n\n".repeat(200);
+    fireEvent.change(screen.getByTestId("recipient-revision-voice-field"), { target: { value: big } });
 
-    await waitFor(() => {
-      expect(screen.getAllByTestId("recipient-draft-import-error").length).toBeGreaterThan(0);
-    });
-    expect(screen.getAllByTestId("recipient-draft-import-error")[0]?.textContent ?? "").toMatch(
-      /Couldn't read that file/i,
-    );
+    expect(screen.getByTestId("recipient-quick-change-full-doc-hint")).toBeTruthy();
+    expect((screen.getByTestId("recipient-compare-versions-button") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("paste textarea maxHeight stays within recipient draft cap (≤900px)", async () => {
-    const agreementId = "ag_intake_max_h";
-    const draft = makeDraft(agreementId);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : String(input);
-      if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
-        return jsonResponse({ draft });
-      }
-      if (url.includes("/render")) {
-        return jsonResponse({ rendered_html: "<p>x</p>" });
-      }
-      return new Response("not found", { status: 404 });
-    });
-
-    render(
-      <AccessProvider>
-        <AgreementRecipientReview agreementId={agreementId} recipientAccessToken="tok_t" />
-      </AccessProvider>,
-    );
-
-    await waitFor(() => {
-      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
-    });
-    await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
-    await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /Request changes/i }).length).toBeGreaterThan(0);
-    });
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(screen.getAllByTestId("recipient-intake-mode-paste-revised")[0]!);
-
-    const ta = screen.getAllByTestId("recipient-revised-draft-paste")[0] as HTMLTextAreaElement;
-    const max = Number.parseInt(ta.style.maxHeight.replace("px", ""), 10);
-    expect(max).toBeGreaterThanOrEqual(280);
-    expect(max).toBeLessThanOrEqual(900);
-  });
-
-  it("mobile viewport uses 65vh cap and keeps paste textarea overflow-x hidden", async () => {
-    const agreementId = "ag_intake_mobile_cap";
+  it("paste textarea sizing and mobile overflow", async () => {
+    const agreementId = "ag_sizing";
     const draft = makeDraft(agreementId);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
@@ -312,9 +246,9 @@ describe("AgreementRecipientReview request intake modes", () => {
       });
       await userEvent.click(scoped.getAllByRole("button", { name: /Review agreement/i })[0]!);
       await waitFor(() => {
-        expect(scoped.getAllByRole("button", { name: /Request changes/i }).length).toBeGreaterThan(0);
+        expect(scoped.getAllByRole("button", { name: /Send back a revised version/i }).length).toBeGreaterThan(0);
       });
-      await userEvent.click(scoped.getAllByRole("button", { name: /Request changes/i })[0]!);
+      await userEvent.click(scoped.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
       await userEvent.click(scoped.getByTestId("recipient-intake-mode-paste-revised"));
 
       const ta = scoped.getByTestId("recipient-revised-draft-paste") as HTMLTextAreaElement;
@@ -324,50 +258,5 @@ describe("AgreementRecipientReview request intake modes", () => {
     } finally {
       vi.unstubAllGlobals();
     }
-  });
-
-  it("import from review-elsewhere card while on Describe switches to Paste and fills draft", async () => {
-    const agreementId = "ag_intake_elsewhere_import";
-    const draft = makeDraft(agreementId);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : String(input);
-      if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
-        return jsonResponse({ draft });
-      }
-      if (url.includes("/render")) {
-        return jsonResponse({ rendered_html: "<p>x</p>" });
-      }
-      return new Response("not found", { status: 404 });
-    });
-
-    const { container } = render(
-      <AccessProvider>
-        <AgreementRecipientReview agreementId={agreementId} recipientAccessToken="tok_t" />
-      </AccessProvider>,
-    );
-    const scoped = within(container);
-
-    await waitFor(() => {
-      expect(scoped.queryByText(/Loading agreement/i)).toBeNull();
-    });
-    await userEvent.click(scoped.getAllByRole("button", { name: /Review agreement/i })[0]!);
-    await waitFor(() => {
-      expect(scoped.getAllByRole("button", { name: /Request changes/i }).length).toBeGreaterThan(0);
-    });
-    await userEvent.click(scoped.getAllByRole("button", { name: /Request changes/i })[0]!);
-
-    expect(scoped.getByText("What should change?")).toBeTruthy();
-
-    await userEvent.click(scoped.getByTestId("recipient-review-elsewhere-import"));
-    const file = new File(["from elsewhere import"], "notes.md", { type: "text/markdown" });
-    const input = scoped.getByTestId("recipient-import-draft-file-input");
-    await userEvent.upload(input, file);
-
-    await waitFor(() => {
-      expect((scoped.getByTestId("recipient-revised-draft-paste") as HTMLTextAreaElement).value).toBe(
-        "from elsewhere import",
-      );
-    });
-    expect(scoped.getByTestId("recipient-paste-import-prominent")).toBeTruthy();
   });
 });

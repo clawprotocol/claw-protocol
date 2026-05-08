@@ -93,10 +93,11 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
     const suggestButtons = screen.getAllByRole("button", { name: /Request changes/i });
     await userEvent.click(suggestButtons[0]!);
 
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, { target: { value: "Change payment terms to Net 30" } });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-suggested-changes-panel")).toBeTruthy();
@@ -169,9 +170,10 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, { target: { value: "Change payment terms to Net 30" } });
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
     await waitFor(
       () => {
         expect(screen.getByTestId("recipient-suggested-changes-document")).toBeTruthy();

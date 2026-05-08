@@ -91,10 +91,11 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
@@ -115,7 +116,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
 
-    expect(within(panel).getByRole("button", { name: /Send suggestions$/i })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: /Send revision$/i })).toBeTruthy();
     expect(within(panel).getByRole("button", { name: /Keep reviewing/i })).toBeTruthy();
   });
 });
@@ -199,11 +200,12 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Net 30 and pause work after 15 days late" },
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
@@ -333,11 +335,12 @@ describe("AgreementRecipientReview payment inline placement failure", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Contract update request only." },
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-placement-callout")).toBeTruthy();
@@ -428,11 +431,12 @@ describe("AgreementRecipientReview narrow payment redline QA (party/signature/fo
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Net 30 and pause work after 15 days late" },
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();

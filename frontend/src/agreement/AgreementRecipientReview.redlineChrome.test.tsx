@@ -99,10 +99,11 @@ describe("AgreementRecipientReview redline chrome", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment terms to Net 30");
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();

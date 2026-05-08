@@ -29,8 +29,8 @@ describe("universal review intake copy", () => {
     expect(BRING_BACK_SUGGESTED_EDITS_TITLE).toBe("Request changes");
     expect(UNIVERSAL_REVIEW_INTRO).toContain("Nothing changes until the sender accepts");
     expect(NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE).toBe("Nothing changes unless the sender accepts.");
-    expect(MODE_SUGGEST_PLAIN_ENGLISH).toBe("Describe changes");
-    expect(MODE_PASTE_REVISED_DRAFT).toBe("Paste draft");
+    expect(MODE_SUGGEST_PLAIN_ENGLISH).toBe("Quick change");
+    expect(MODE_PASTE_REVISED_DRAFT).toBe("Paste revised text");
     expect(MODE_UPLOAD_FILE).toBe("Upload file");
     expect(UPLOAD_FILE_COMPARISON_COMING_SOON).toBe("Upload comparison coming soon.");
   });

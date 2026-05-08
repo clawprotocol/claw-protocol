@@ -366,13 +366,14 @@ test.describe("recipient + link flow QA", () => {
       await expect(page.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
       await page.getByRole("button", { name: "Request changes" }).click();
     }
-    await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("recipient-workflow-quick").click();
+    await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 20_000 });
     const ta = page.getByTestId("recipient-revision-voice-field");
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
-    await page.getByRole("button", { name: "Preview changes" }).click();
-    await expect(page.getByRole("button", { name: "Send suggestions" }).first()).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("recipient-compare-versions-button").click();
+    await expect(page.getByRole("button", { name: "Send revision" }).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("recipient-preview-summary-heading")).toBeVisible();
-    await page.getByRole("button", { name: "Send suggestions" }).first().click();
+    await page.getByRole("button", { name: "Send revision" }).first().click();
     await expect(page.getByTestId("recipient-send-suggested-edits-modal")).toBeVisible({ timeout: 10_000 });
     await page.getByTestId("recipient-send-suggested-edits-confirm").click();
     await expect(page.getByTestId("recipient-suggested-edits-sent-ack")).toBeVisible({
@@ -472,15 +473,16 @@ test.describe("recipient + link flow QA", () => {
       await expect(page.getByRole("button", { name: "Request changes" })).toBeVisible({ timeout: 20_000 });
       await page.getByRole("button", { name: "Request changes" }).click();
     }
-    await expect(page.getByText("Describe changes", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("recipient-workflow-quick").click();
+    await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 20_000 });
 
     const ta = page.getByTestId("recipient-revision-voice-field");
     await ta.fill("Net 30 and pause work after 15 days late");
-    await page.getByRole("button", { name: "Preview changes" }).click();
-    await expect(page.getByRole("button", { name: "Send suggestions" }).first()).toBeVisible({ timeout: 25_000 });
+    await page.getByTestId("recipient-compare-versions-button").click();
+    await expect(page.getByRole("button", { name: "Send revision" }).first()).toBeVisible({ timeout: 25_000 });
 
     await expect(page.getByTestId("recipient-suggested-changes-panel")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Suggested changes" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review redline" })).toBeVisible();
     await expect(page.getByTestId("recipient-suggested-changes-document")).toBeVisible();
     const legalDoc = page.getByTestId("recipient-legal-redline-document");
     await expect(legalDoc).toBeVisible();
@@ -503,7 +505,7 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByTestId("recipient-tab-redline")).toHaveCount(0);
     await expect(page.getByTestId("recipient-side-by-side-block-grid")).toHaveCount(0);
 
-    await expect(page.getByRole("button", { name: "Send suggestions" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send revision" }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Keep reviewing" }).first()).toBeVisible();
   });
 

@@ -126,15 +126,15 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Request changes" })).toBeTruthy();
+      expect(screen.getByTestId("recipient-ask-quick-change")).toBeTruthy();
     });
-    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    await userEvent.click(screen.getByTestId("recipient-ask-quick-change"));
 
     const voice = screen.getByTestId("recipient-revision-voice-field");
     await userEvent.type(voice, "Switch to Net 30 for payment timing.");
 
     for (let i = 0; i < 6; i++) {
-      await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+      await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
       await waitFor(() => {
         expect(screen.getByTestId("recipient-preview-versions-export")).toBeTruthy();
       });

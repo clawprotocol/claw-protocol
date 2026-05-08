@@ -47,7 +47,7 @@ describe("AgreementRecipientReview revise preview failure", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows friendly inline error on revise fetch failure, keeps note, re-enables Preview, hides raw Failed to fetch", async () => {
+  it("shows friendly inline error on revise fetch failure, keeps note, re-enables compare, hides raw Failed to fetch", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -101,11 +101,12 @@ describe("AgreementRecipientReview revise preview failure", () => {
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
 
+    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     const note = "Change payment terms to Net 30";
     fireEvent.change(instruction, { target: { value: note } });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
 
     await waitFor(() => {
       const el = screen.getByTestId("recipient-revise-preview-error");
@@ -117,13 +118,13 @@ describe("AgreementRecipientReview revise preview failure", () => {
     expect(screen.queryByText(/Failed to fetch/i)).toBeNull();
 
     await waitFor(() => {
-      const b = screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!;
+      const b = screen.getByTestId("recipient-compare-versions-button");
       expect(b.getAttribute("disabled")).toBeNull();
     });
 
     expect(warnSpy).toHaveBeenCalled();
 
-    await userEvent.click(screen.getAllByRole("button", { name: /^Preview changes$/i })[0]!);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
     await waitFor(() => {
       expect(screen.getByTestId("recipient-redline-chip-insertions")).toBeTruthy();
     });

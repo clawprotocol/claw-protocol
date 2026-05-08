@@ -41,7 +41,7 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).toContain("Ask for edits before anyone signs.");
     expect(s).toContain("Your suggestions do not change the original until the owner accepts them.");
     expect(s).toContain("recipientReviewPartyActions");
-    expect(party).toContain("Request changes");
+    expect(party).toContain("Send back a revised version");
     expect(party).toContain("Looks good");
     expect(party).toContain("I'm not participating");
     expect(s).toContain("← Back to agreement");
@@ -49,13 +49,12 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain("Ask for edits or send your own version.");
-    expect(s).toContain("Nothing changes until the sender accepts.");
-    expect(s).toContain("Suggestions are not signatures.");
-    expect(s).toContain("Preview suggestions");
-    expect(s).toContain("Compare text");
-    expect(s).toContain("{MODE_SUGGEST_PLAIN_ENGLISH}");
-    expect(s).toContain("Suggested changes");
+    expect(s).toContain("Read it, revise it, or mark it ready.");
+    expect(s).toContain("recipient-workflow-revised");
+    expect(s).toContain("recipient-workflow-quick");
+    expect(s).toContain("Compare & redline");
+    expect(s).toContain("Two-text compare");
+    expect(s).toContain("Review redline");
     expect(s).toContain("recipient-suggested-changes-panel");
     expect(s).toContain("recipient-suggested-changes-document");
     expect(s).not.toContain("recipient-tab-redline");

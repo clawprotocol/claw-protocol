@@ -8,17 +8,24 @@ export const recipientPartyReviewCopy = {
   reviewAgreement: "Review agreement",
   reviewAgain: "Review again",
   reviewAndSign: "Review and sign",
-  /** Opens the same revise composer as the historical “Suggest changes” action. */
+  /** Opens the revise composer (legacy single entry). */
   requestChanges: "Request changes",
+  /** Primary professional workflow: full-document compare + redline. */
+  sendBackRevised: "Send back a revised version",
+  /** Lightweight instruction-only amend flow. */
+  askQuickChange: "Ask for a quick change",
+  downloadOriginal: "Download original",
   looksGood: "Looks good",
   notParticipating: "I'm not participating",
   reviewHelper: "Read before deciding.",
-  requestChangesHelper: "Ask for edits before anyone signs.",
+  requestChangesHelper: "Compare, redline, or send a revision — nothing changes until the sender accepts.",
+  sendBackRevisedHelper: "Upload or paste a full revised draft for compare and redline.",
+  askQuickChangeHelper: "Short instructions only — best for small edits.",
   looksGoodHelper: "Continue when the draft works for you.",
   notParticipatingHelper: "Step away from this review.",
   assuranceLine: "Nothing changes unless the sender accepts.",
   nextStepSummary:
-    "Read the agreement, request changes, save a copy to review elsewhere, or mark ready when you are done.",
+    "Read the agreement, send back a revised version or a quick change, download a copy, or mark ready when you are done.",
   /** Shown above the action stack after the recipient has read to the bottom of the agreement. */
   doneReadingPrompt: "Done reading? Choose what happens next.",
 } as const;
@@ -36,9 +43,15 @@ type RecipientPartyReviewActionsProps = {
   looksGoodDisabled?: boolean;
   requestChangesDisabled?: boolean;
   onReviewPrimary: () => void;
+  /** Used when {@link reviseEntrySplit} is false (legacy single “Request changes” button). */
   onRequestChanges: () => void;
   onLooksGood: () => void;
   onNotParticipating: () => void;
+  /** When true, replaces “Request changes” with send-back / quick-change / download-original. */
+  reviseEntrySplit?: boolean;
+  onSendBackRevised?: () => void;
+  onAskQuickChange?: () => void;
+  onDownloadOriginal?: () => void;
   /** Extra row after the four choices (e.g. Ready to sign). */
   children?: ReactNode;
 };
@@ -74,8 +87,15 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
     onRequestChanges,
     onLooksGood,
     onNotParticipating,
+    reviseEntrySplit,
+    onSendBackRevised,
+    onAskQuickChange,
+    onDownloadOriginal,
     children,
   } = props;
+
+  const useSplitReviseEntry =
+    Boolean(reviseEntrySplit && onSendBackRevised && onAskQuickChange && onDownloadOriginal);
 
   const reviewLabel =
     canSignFromHub
@@ -149,15 +169,51 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
       )}
       <HelperUnder text={recipientPartyReviewCopy.reviewHelper} placement={placement} />
 
-      <button
-        type="button"
-        className={requestChangesClass}
-        disabled={requestChangesDisabled}
-        onClick={onRequestChanges}
-      >
-        {recipientPartyReviewCopy.requestChanges}
-      </button>
-      <HelperUnder text={recipientPartyReviewCopy.requestChangesHelper} placement={placement} />
+      {useSplitReviseEntry ? (
+        <>
+          <button
+            type="button"
+            data-testid="recipient-send-back-revised"
+            className={btnPrimary}
+            disabled={requestChangesDisabled}
+            onClick={onSendBackRevised}
+          >
+            {recipientPartyReviewCopy.sendBackRevised}
+          </button>
+          <HelperUnder text={recipientPartyReviewCopy.sendBackRevisedHelper} placement={placement} />
+          <button
+            type="button"
+            data-testid="recipient-ask-quick-change"
+            className={requestChangesClass}
+            disabled={requestChangesDisabled}
+            onClick={onAskQuickChange}
+          >
+            {recipientPartyReviewCopy.askQuickChange}
+          </button>
+          <HelperUnder text={recipientPartyReviewCopy.askQuickChangeHelper} placement={placement} />
+          <button
+            type="button"
+            data-testid="recipient-download-original-cta"
+            className={btnQuiet}
+            disabled={requestChangesDisabled}
+            onClick={onDownloadOriginal}
+          >
+            {recipientPartyReviewCopy.downloadOriginal}
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            className={requestChangesClass}
+            disabled={requestChangesDisabled}
+            onClick={onRequestChanges}
+          >
+            {recipientPartyReviewCopy.requestChanges}
+          </button>
+          <HelperUnder text={recipientPartyReviewCopy.requestChangesHelper} placement={placement} />
+        </>
+      )}
 
       <button type="button" className={looksClass} disabled={looksDisabled} onClick={onLooksGood}>
         {looksGoodLoading ? "Saving…" : recipientPartyReviewCopy.looksGood}
