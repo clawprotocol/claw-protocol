@@ -55,15 +55,20 @@ export const RECIPIENT_WORKSPACE_TRUST_LINE = "Nothing changes until the sender 
 export const RECIPIENT_SAFETY_SUGGESTIONS_NOT_SIGNATURES = "Suggestions are not signatures.";
 export const RECIPIENT_WANT_COPY_HEADING = "Review somewhere else?";
 export const RECIPIENT_WANT_COPY_BODY =
-  "Download the draft, edit it with your lawyer or AI tools, then upload the revised version back into LawDog.";
-/** Shown on the want-a-copy card before upload (compare happens before anything is sent). */
-export const RECIPIENT_WANT_COPY_COMPARE_HELPER =
-  "LawDog compares it with the original before anything is sent.";
-/** Under the compare helper — reinforces safety before send. */
+  "Download the draft, edit it with your lawyer or AI tool, then upload the revised version back here.";
+/** Want-a-copy dropzone: warm tip about notes + compare-before-send (no legal advice). */
+export const RECIPIENT_WANT_COPY_UPLOAD_TIP =
+  'Tip: you can add a short "Why I changed this" note at the bottom of your revised draft. LawDog will compare the draft before anything is sent.';
+/** @deprecated Use {@link RECIPIENT_WANT_COPY_UPLOAD_TIP} (same string; kept for tests / scan sets). */
+export const RECIPIENT_WANT_COPY_COMPARE_HELPER = RECIPIENT_WANT_COPY_UPLOAD_TIP;
+/** Safety line under the dropzone — nothing sends until they review the comparison. */
 export const RECIPIENT_WANT_COPY_LOOPBACK_CUE = "Nothing sends until you review the comparison.";
 /** Dropzone primary line (want-a-copy card). */
-export const RECIPIENT_WANT_COPY_DROPZONE_PRIMARY = "Drag a revised draft here";
-export const RECIPIENT_WANT_COPY_DROPZONE_SECONDARY = "PDF, TXT, or Markdown. DOCX coming next.";
+export const RECIPIENT_WANT_COPY_DROPZONE_PRIMARY = "Drag your revised draft here";
+export const RECIPIENT_WANT_COPY_DROPZONE_SECONDARY = "PDF, TXT, or Markdown";
+/** Compact line near paste/upload/edit in the revised-draft workspace. */
+export const RECIPIENT_REVISED_WORKSPACE_NOTES_HINT =
+  "Add notes at the bottom if you want to explain your changes.";
 /** Primary upload on the want-a-copy card. */
 export const RECIPIENT_WANT_COPY_UPLOAD_CTA = "Upload revised draft";
 /** @deprecated Use {@link RECIPIENT_WANT_COPY_DROPZONE_SECONDARY}. */

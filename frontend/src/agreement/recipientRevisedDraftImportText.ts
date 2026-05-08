@@ -4,9 +4,12 @@ import {
 } from "./portableReviewCopy";
 import { loadPdfJsWithWorker } from "./recipientRevisedDraftPdfJs";
 
-/** File input `accept` for revised-draft import (strip + revise workspace). */
+/**
+ * Single `accept` value for every revised-draft file input (want-a-copy strip + revise workspace).
+ * Keep PDF + text/markdown only — including Word MIME types has been seen to grey out PDFs in macOS Finder/WebKit.
+ */
 export const REVISED_DRAFT_FILE_INPUT_ACCEPT =
-  ".pdf,.doc,.docx,.txt,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
+  ".pdf,application/pdf,.txt,text/plain,.md,text/markdown,text/x-markdown";
 
 function readFileAsTextFallback(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -51,7 +54,7 @@ async function extractPdfPlainText(file: File): Promise<string> {
 
 /**
  * Extracts plain text from a recipient revised-draft upload.
- * TXT/Markdown and PDF (selectable text) are supported. DOC/DOCX: import not wired yet — graceful error copy.
+ * TXT/Markdown and PDF (selectable text) are supported. Other types (e.g. dropped DOCX) get a graceful parse fallback.
  */
 export async function extractRevisedDraftPlainText(
   file: File,
@@ -64,7 +67,8 @@ export async function extractRevisedDraftPlainText(
     name.endsWith(".text") ||
     name.endsWith(".md") ||
     type === "text/plain" ||
-    type === "text/markdown";
+    type === "text/markdown" ||
+    type === "text/x-markdown";
   const isPdf = name.endsWith(".pdf") || type === "application/pdf";
   const isDocx =
     name.endsWith(".docx") ||

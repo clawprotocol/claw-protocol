@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { PRODUCT_NOT_LAW_FIRM } from "../compliance/disclosureCopy";
 import { RecipientAgreementReadPdfExport } from "./recipientAgreementReadPdfExport";
 import {
@@ -6,13 +6,15 @@ import {
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
   RECIPIENT_SAFETY_SUGGESTIONS_NOT_SIGNATURES,
   RECIPIENT_WANT_COPY_BODY,
-  RECIPIENT_WANT_COPY_COMPARE_HELPER,
+  RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
+  RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
   RECIPIENT_WANT_COPY_HEADING,
   RECIPIENT_WANT_COPY_LOOPBACK_CUE,
   RECIPIENT_WANT_COPY_UPLOAD_CTA,
-  RECIPIENT_WANT_COPY_UPLOAD_FORMAT_HELPER,
+  RECIPIENT_WANT_COPY_UPLOAD_TIP,
 } from "./portableReviewCopy";
 import { recipientExportBasenameFromTitle, recipientTextDownloadFilename } from "./recipientExportFilenames";
+import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 
 type Props = {
   agreementId: string;
@@ -40,6 +42,7 @@ export function RecipientWantACopyStrip({
   const [copyBusy, setCopyBusy] = useState(false);
   const [copyAck, setCopyAck] = useState(false);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const [dropzoneActive, setDropzoneActive] = useState(false);
   const wantCopyFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const canWireBringBack = Boolean(onPrepareRevisedImport && onImportedRevisedPlainText);
@@ -76,38 +79,35 @@ export function RecipientWantACopyStrip({
     }
   }, [copyBusy, plainDraftText]);
 
-  const onWantCopyFileSelected = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
+  const ingestRevisedFile = useCallback(
+    async (file: File) => {
+      if (!onImportedRevisedPlainText) return;
       setUploadErr(null);
-      if (!file || !onImportedRevisedPlainText) return;
-      const name = file.name.toLowerCase();
-      if (!name.endsWith(".txt") && !name.endsWith(".md")) {
-        setUploadErr(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+      const result = await extractRevisedDraftPlainText(file);
+      if (!result.ok) {
+        setUploadErr(result.error);
         return;
       }
-      void (async () => {
-        try {
-          const text =
-            typeof file.text === "function"
-              ? await file.text()
-              : await new Promise<string>((resolve, reject) => {
-                  const reader = new FileReader();
-                  reader.onload = () => resolve(String(reader.result ?? ""));
-                  reader.onerror = () => reject(new Error("read"));
-                  reader.readAsText(file);
-                });
-          onImportedRevisedPlainText(text);
-        } catch {
-          setUploadErr(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
-        }
-      })();
+      try {
+        onImportedRevisedPlainText(result.text);
+      } catch {
+        setUploadErr(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+      }
     },
     [onImportedRevisedPlainText],
   );
 
-  const onUploadRevisedClick = useCallback(() => {
+  const onWantCopyFileSelected = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      void ingestRevisedFile(file);
+    },
+    [ingestRevisedFile],
+  );
+
+  const openRevisedFilePicker = useCallback(() => {
     if (!canWireBringBack || importDisabled) return;
     setUploadErr(null);
     onPrepareRevisedImport?.();
@@ -117,6 +117,41 @@ export function RecipientWantACopyStrip({
       });
     });
   }, [canWireBringBack, importDisabled, onPrepareRevisedImport]);
+
+  const onDropzoneDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    if (!canWireBringBack || importDisabled) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }, [canWireBringBack, importDisabled]);
+
+  const onDropzoneDragEnter = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      if (!canWireBringBack || importDisabled) return;
+      e.preventDefault();
+      setDropzoneActive(true);
+    },
+    [canWireBringBack, importDisabled],
+  );
+
+  const onDropzoneDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDropzoneActive(false);
+    }
+  }, []);
+
+  const onDropzoneDrop = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      setDropzoneActive(false);
+      if (!canWireBringBack || importDisabled) return;
+      const file = e.dataTransfer.files?.[0];
+      if (!file) return;
+      onPrepareRevisedImport?.();
+      void ingestRevisedFile(file);
+    },
+    [canWireBringBack, importDisabled, ingestRevisedFile, onPrepareRevisedImport],
+  );
 
   const hasText = Boolean(plainDraftText.trim());
 
@@ -160,30 +195,57 @@ export function RecipientWantACopyStrip({
           </button>
         </div>
         {canWireBringBack ? (
-          <div className="border-t border-slate-800/60 pt-3">
+          <div className="w-full max-w-full border-t border-slate-800/60 pt-3">
             <input
               ref={wantCopyFileInputRef}
               type="file"
               className="sr-only"
-              accept=".txt,.text,.md,text/plain"
+              accept={REVISED_DRAFT_FILE_INPUT_ACCEPT}
               data-testid="recipient-want-copy-upload-revised-input"
               onChange={onWantCopyFileSelected}
             />
-            <button
-              type="button"
-              data-testid="recipient-want-copy-upload-revised"
-              disabled={importDisabled}
-              className="w-full min-w-0 max-w-full break-words rounded-lg bg-emerald-600 px-3 py-2.5 text-left text-xs font-semibold text-white shadow-sm shadow-emerald-950/30 transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto sm:min-w-[11rem]"
-              onClick={onUploadRevisedClick}
+            <div
+              role="group"
+              data-testid="recipient-want-copy-dropzone"
+              aria-label={`${RECIPIENT_WANT_COPY_DROPZONE_PRIMARY}. ${RECIPIENT_WANT_COPY_DROPZONE_SECONDARY}`}
+              onDragEnter={onDropzoneDragEnter}
+              onDragLeave={onDropzoneDragLeave}
+              onDragOver={onDropzoneDragOver}
+              onDrop={onDropzoneDrop}
+              onClick={() => {
+                if (importDisabled) return;
+                openRevisedFilePicker();
+              }}
+              className={`w-full max-w-full rounded-2xl border px-4 py-4 outline-none transition-colors ${
+                importDisabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"
+              } ${
+                dropzoneActive
+                  ? "border-emerald-400/55 bg-emerald-950/35"
+                  : "border-emerald-500/30 bg-emerald-950/[0.12]"
+              }`}
             >
-              {RECIPIENT_WANT_COPY_UPLOAD_CTA}
-            </button>
-            <p className="mt-1.5 text-[10px] leading-snug text-slate-500">{RECIPIENT_WANT_COPY_UPLOAD_FORMAT_HELPER}</p>
+              <p className="text-center text-[10px] leading-snug text-slate-500">{RECIPIENT_WANT_COPY_UPLOAD_TIP}</p>
+              <p className="mt-3 text-center text-sm font-medium text-slate-100">{RECIPIENT_WANT_COPY_DROPZONE_PRIMARY}</p>
+              <p className="mt-1 text-center text-[11px] text-slate-400">{RECIPIENT_WANT_COPY_DROPZONE_SECONDARY}</p>
+              <div className="mt-4 flex justify-center">
+                <button
+                  type="button"
+                  data-testid="recipient-want-copy-upload-revised"
+                  disabled={importDisabled}
+                  className="w-full max-w-md rounded-xl bg-emerald-600 px-4 py-2.5 text-center text-xs font-semibold text-white shadow-sm shadow-emerald-950/30 transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto sm:min-w-[12rem]"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    openRevisedFilePicker();
+                  }}
+                >
+                  {RECIPIENT_WANT_COPY_UPLOAD_CTA}
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
       </div>
-      <p className="mt-2 text-[10px] leading-snug text-slate-500">{RECIPIENT_WANT_COPY_COMPARE_HELPER}</p>
-      <p className="mt-1 text-[10px] leading-snug text-slate-500">{RECIPIENT_WANT_COPY_LOOPBACK_CUE}</p>
+      <p className="mt-2 text-[10px] leading-snug text-slate-500">{RECIPIENT_WANT_COPY_LOOPBACK_CUE}</p>
       {uploadErr ? (
         <p className="mt-1.5 text-[11px] text-rose-300/95" role="alert">
           {uploadErr}

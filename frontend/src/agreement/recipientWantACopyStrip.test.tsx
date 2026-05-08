@@ -5,10 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { RecipientWantACopyStrip } from "./recipientWantACopyStrip";
 import {
   RECIPIENT_WANT_COPY_BODY,
-  RECIPIENT_WANT_COPY_COMPARE_HELPER,
+  RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
+  RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
   RECIPIENT_WANT_COPY_HEADING,
   RECIPIENT_WANT_COPY_LOOPBACK_CUE,
-  RECIPIENT_WANT_COPY_UPLOAD_FORMAT_HELPER,
+  RECIPIENT_WANT_COPY_UPLOAD_TIP,
 } from "./portableReviewCopy";
 
 describe("RecipientWantACopyStrip", () => {
@@ -29,9 +30,11 @@ describe("RecipientWantACopyStrip", () => {
     );
     expect(screen.getByRole("heading", { name: RECIPIENT_WANT_COPY_HEADING })).toBeTruthy();
     expect(screen.getByText(RECIPIENT_WANT_COPY_BODY)).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_COMPARE_HELPER)).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_WANT_COPY_UPLOAD_TIP)).toBeTruthy();
     expect(screen.getByText(RECIPIENT_WANT_COPY_LOOPBACK_CUE)).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_UPLOAD_FORMAT_HELPER)).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_PRIMARY)).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_SECONDARY)).toBeTruthy();
+    expect(screen.getByTestId("recipient-want-copy-dropzone")).toBeTruthy();
     expect(screen.getByTestId("recipient-download-draft-pdf")).toBeTruthy();
     expect(screen.getByTestId("recipient-download-draft-text")).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-draft-text")).toBeTruthy();

@@ -6,13 +6,14 @@ import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 import {
   RECIPIENT_WANT_COPY_BODY,
-  RECIPIENT_WANT_COPY_COMPARE_HELPER,
   RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
   RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
   RECIPIENT_WANT_COPY_HEADING,
   RECIPIENT_WANT_COPY_LOOPBACK_CUE,
   RECIPIENT_WANT_COPY_UPLOAD_CTA,
+  RECIPIENT_WANT_COPY_UPLOAD_TIP,
 } from "./portableReviewCopy";
+import { REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -77,7 +78,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     });
     expect(screen.getByRole("heading", { name: RECIPIENT_WANT_COPY_HEADING })).toBeTruthy();
     expect(screen.getByText(RECIPIENT_WANT_COPY_BODY)).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_COMPARE_HELPER)).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_WANT_COPY_UPLOAD_TIP)).toBeTruthy();
     expect(screen.getByText(RECIPIENT_WANT_COPY_LOOPBACK_CUE)).toBeTruthy();
     expect(screen.getByRole("button", { name: RECIPIENT_WANT_COPY_UPLOAD_CTA })).toBeTruthy();
     expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_PRIMARY)).toBeTruthy();
@@ -87,6 +88,11 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     expect(screen.getByTestId("recipient-download-draft-text")).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-draft-text")).toBeTruthy();
     expect(screen.queryAllByTestId("recipient-download-draft-pdf")).toHaveLength(1);
+
+    const wantCopyInput = screen.getByTestId("recipient-want-copy-upload-revised-input");
+    expect(wantCopyInput.getAttribute("accept")).toBe(REVISED_DRAFT_FILE_INPUT_ACCEPT);
+    expect(wantCopyInput.getAttribute("accept")).toContain(".pdf");
+    expect(wantCopyInput.getAttribute("accept")).toContain("application/pdf");
 
     const block = screen.getByTestId("recipient-want-a-copy-card").textContent ?? "";
     const upper = block.toUpperCase();
@@ -127,6 +133,11 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     await waitFor(() => {
       expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy();
     });
+
+    const workspaceImport = screen.getByTestId("recipient-import-draft-file-input");
+    expect(workspaceImport.getAttribute("accept")).toBe(REVISED_DRAFT_FILE_INPUT_ACCEPT);
+    expect(workspaceImport.getAttribute("accept")).toContain(".pdf");
+    expect(workspaceImport.getAttribute("accept")).toContain("application/pdf");
 
     const file = new File(["Imported revised text"], "rev.txt", { type: "text/plain" });
     await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);

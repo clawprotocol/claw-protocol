@@ -126,6 +126,7 @@ import {
   RECIPIENT_QUICK_REQUEST_LABEL,
   RECIPIENT_QUICK_REQUEST_PLACEHOLDER,
   RECIPIENT_REVISED_PANEL_SUB,
+  RECIPIENT_REVISED_WORKSPACE_NOTES_HINT,
   RECIPIENT_SEND_BACK_REVISED_TITLE,
   RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY,
   RECIPIENT_SMALL_TWEAK_HELPER,
@@ -135,6 +136,7 @@ import {
   RECIPIENT_WORKSPACE_SUBCOPY,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
+import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 import { renderAgreementDraftHtmlLikeBackend, purposeLooksLikeFullAgreementTextForRender } from "./recipientAgreementDraftHtmlRender";
 import {
   RECIPIENT_COMPARE_FAILED_FALLBACK,
@@ -471,39 +473,42 @@ export function AgreementRecipientReview({
   useAutosizeTextarea(proRedlineSuggestTextareaRef, proRedlineSuggestText, { minPx: 112, maxPx: 440 });
   const access = useAccess();
 
-  const onDraftImportFileSelected = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    const name = file.name.toLowerCase();
-    if (!name.endsWith(".txt") && !name.endsWith(".md")) {
-      setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
-      return;
-    }
-    setDraftImportError(null);
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const text = String(reader.result ?? "");
-        setExternalAiPaste(text);
-        setWorkflowMode("revised");
-        setRevisedSubmode("paste");
-        setRevisedIntakePhase("editing");
-        setRecipientPreview(null);
-        setRecipientRevisePreviewError(null);
-        window.requestAnimationFrame(() => {
-          const ta = externalPasteTextareaRef.current;
-          if (!ta) return;
-          ta.scrollTop = 0;
-          ta.focus({ preventScroll: true });
-        });
-      } catch {
-        setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
-      }
-    };
-    reader.onerror = () => setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
-    reader.readAsText(file);
+  const applyImportedRevisedDraftText = useCallback((text: string) => {
+    setExternalAiPaste(text);
+    setWorkflowMode("revised");
+    setRevisedSubmode("paste");
+    setRevisedIntakePhase("editing");
+    setRecipientPreview(null);
+    setRecipientRevisePreviewError(null);
+    window.requestAnimationFrame(() => {
+      const ta = externalPasteTextareaRef.current;
+      if (!ta) return;
+      ta.scrollTop = 0;
+      ta.focus({ preventScroll: true });
+    });
   }, []);
+
+  const onDraftImportFileSelected = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      setDraftImportError(null);
+      void (async () => {
+        const result = await extractRevisedDraftPlainText(file);
+        if (!result.ok) {
+          setDraftImportError(result.error);
+          return;
+        }
+        try {
+          applyImportedRevisedDraftText(result.text);
+        } catch {
+          setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+        }
+      })();
+    },
+    [applyImportedRevisedDraftText],
+  );
 
   const scrollAndFocusSuggestPanel = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -520,6 +525,28 @@ export function AgreementRecipientReview({
       }, 16);
     });
   }, []);
+
+  const prepareOutsideReviewImportUi = useCallback(() => {
+    if (flowPhase === "landing") setFlowPhase("active");
+    setComposePathCardsVisible(false);
+    setWorkspaceTab("revise");
+    setWorkflowMode("revised");
+    setRevisedSubmode("paste");
+    setRevisedIntakePhase("pick-method");
+    setExternalAiPaste("");
+    setRecipientPreview(null);
+    setRecipientRevisePreviewError(null);
+    setDraftImportError(null);
+    setError(null);
+  }, [flowPhase]);
+
+  const onWantCopyRevisedImported = useCallback(
+    (text: string) => {
+      applyImportedRevisedDraftText(text);
+      scrollAndFocusSuggestPanel();
+    },
+    [applyImportedRevisedDraftText, scrollAndFocusSuggestPanel],
+  );
 
   useEffect(() => {
     reviewerViewLoggedRef.current = false;
@@ -2208,6 +2235,9 @@ export function AgreementRecipientReview({
             readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
             scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
             plainDraftText={directCompareDefault}
+            onPrepareRevisedImport={prepareOutsideReviewImportUi}
+            onImportedRevisedPlainText={onWantCopyRevisedImported}
+            revisedImportDisabled={saving || previewing || hasPendingSuggestion || recipientSuggestedEditsSentAck}
           />
         </div>
       ) : null;
@@ -2577,6 +2607,25 @@ export function AgreementRecipientReview({
         Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
       </p>
 
+      {entry.kind === "review" && !viewerLike && draft && !recipientPreview ? (
+        <div
+          ref={recipientOriginalDownloadsRef}
+          data-testid="recipient-download-original-anchor"
+          className="min-w-0 max-w-full"
+        >
+          <RecipientWantACopyStrip
+            agreementId={agreementId}
+            agreementTitle={draft.title}
+            readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+            scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+            plainDraftText={directCompareDefault}
+            onPrepareRevisedImport={prepareOutsideReviewImportUi}
+            onImportedRevisedPlainText={onWantCopyRevisedImported}
+            revisedImportDisabled={suggestControlsDisabled}
+          />
+        </div>
+      ) : null}
+
       {workspaceTab === "read" ? (
         <>
           <RecipientPartyReviewActions
@@ -2588,23 +2637,6 @@ export function AgreementRecipientReview({
             looksGoodLoading={approving}
             looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
             requestChangesDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
-            afterReviewSlot={
-              !viewerLike && entry.kind === "review" && draft ? (
-                <div
-                  ref={recipientOriginalDownloadsRef}
-                  data-testid="recipient-download-original-anchor"
-                  className="min-w-0 max-w-full"
-                >
-                  <RecipientWantACopyStrip
-                    agreementId={agreementId}
-                    agreementTitle={draft.title}
-                    readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-                    scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
-                    plainDraftText={directCompareDefault}
-                  />
-                </div>
-              ) : null
-            }
             onDownloadOriginal={() => {
               recipientOriginalDownloadsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
@@ -2781,7 +2813,7 @@ export function AgreementRecipientReview({
                 ref={draftImportFileInputRef}
                 type="file"
                 className="sr-only"
-                accept=".txt,.text,.md,text/plain"
+                accept={REVISED_DRAFT_FILE_INPUT_ACCEPT}
                 data-testid="recipient-import-draft-file-input"
                 onChange={onDraftImportFileSelected}
               />
@@ -3017,6 +3049,13 @@ export function AgreementRecipientReview({
                       <p className="mt-1 text-xs leading-snug text-slate-400">{RECIPIENT_REVISED_PANEL_SUB}</p>
                     </div>
                   ) : null}
+
+                  <p
+                    className="text-[10px] leading-snug text-slate-500"
+                    data-testid="recipient-revised-workspace-notes-hint"
+                  >
+                    {RECIPIENT_REVISED_WORKSPACE_NOTES_HINT}
+                  </p>
 
                   {revisedSubmode === "paste" ? (
                 <div className="space-y-2">

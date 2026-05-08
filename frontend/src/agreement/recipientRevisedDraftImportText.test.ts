@@ -1,7 +1,20 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it } from "vitest";
 import { RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK } from "./portableReviewCopy";
-import { extractRevisedDraftPlainText } from "./recipientRevisedDraftImportText";
+import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
+
+describe("REVISED_DRAFT_FILE_INPUT_ACCEPT", () => {
+  it("lists PDF and plain-text Markdown types for native file pickers", () => {
+    expect(REVISED_DRAFT_FILE_INPUT_ACCEPT).toContain(".pdf");
+    expect(REVISED_DRAFT_FILE_INPUT_ACCEPT).toContain("application/pdf");
+    expect(REVISED_DRAFT_FILE_INPUT_ACCEPT).toContain(".txt");
+    expect(REVISED_DRAFT_FILE_INPUT_ACCEPT).toContain("text/plain");
+    expect(REVISED_DRAFT_FILE_INPUT_ACCEPT).toContain(".md");
+    expect(REVISED_DRAFT_FILE_INPUT_ACCEPT).toContain("text/markdown");
+    expect(REVISED_DRAFT_FILE_INPUT_ACCEPT).toContain("text/x-markdown");
+    expect(REVISED_DRAFT_FILE_INPUT_ACCEPT.toLowerCase()).not.toContain("docx");
+  });
+});
 
 describe("extractRevisedDraftPlainText (plain files)", () => {
   it("returns text for .txt", async () => {

@@ -9,10 +9,11 @@ import {
   RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK,
   RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
   RECIPIENT_WANT_COPY_BODY,
-  RECIPIENT_WANT_COPY_COMPARE_HELPER,
+  RECIPIENT_REVISED_WORKSPACE_NOTES_HINT,
   RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
   RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
   RECIPIENT_WANT_COPY_HEADING,
+  RECIPIENT_WANT_COPY_UPLOAD_TIP,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
 
@@ -68,13 +69,16 @@ describe("recipient portable review CTA labels", () => {
 describe("recipient want-a-copy portable copy", () => {
   it("uses outside-review loopback strings aligned with trust posture", () => {
     expect(RECIPIENT_WANT_COPY_BODY).toBe(
-      "Download the draft, edit it with your lawyer or AI tools, then upload the revised version back into LawDog.",
+      "Download the draft, edit it with your lawyer or AI tool, then upload the revised version back here.",
     );
-    expect(RECIPIENT_WANT_COPY_COMPARE_HELPER).toBe(
-      "LawDog compares it with the original before anything is sent.",
+    expect(RECIPIENT_WANT_COPY_UPLOAD_TIP).toBe(
+      'Tip: you can add a short "Why I changed this" note at the bottom of your revised draft. LawDog will compare the draft before anything is sent.',
     );
-    expect(RECIPIENT_WANT_COPY_DROPZONE_PRIMARY).toBe("Drag a revised draft here");
-    expect(RECIPIENT_WANT_COPY_DROPZONE_SECONDARY).toBe("PDF, TXT, or Markdown. DOCX coming next.");
+    expect(RECIPIENT_WANT_COPY_DROPZONE_PRIMARY).toBe("Drag your revised draft here");
+    expect(RECIPIENT_WANT_COPY_DROPZONE_SECONDARY).toBe("PDF, TXT, or Markdown");
+    expect(RECIPIENT_REVISED_WORKSPACE_NOTES_HINT).toBe(
+      "Add notes at the bottom if you want to explain your changes.",
+    );
     expect(RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK).toBe(
       "We couldn't extract readable text from this file. Try a selectable-text PDF, TXT, or Markdown file.",
     );

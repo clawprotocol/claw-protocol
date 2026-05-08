@@ -11,6 +11,7 @@ import {
   RECIPIENT_SEND_BACK_REVISED_TITLE,
   RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY,
 } from "./portableReviewCopy";
+import { REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -244,9 +245,15 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     });
     await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
 
+    const importDraftInput = screen.getByTestId("recipient-import-draft-file-input");
+    expect(importDraftInput.getAttribute("accept")).toBe(REVISED_DRAFT_FILE_INPUT_ACCEPT);
+    expect(importDraftInput.getAttribute("accept")).toContain(".pdf");
+    expect(importDraftInput.getAttribute("accept")).toContain("application/pdf");
+
     const revisedPanel = screen.getAllByTestId("recipient-revised-version-panel")[0]!;
     const scoped = within(revisedPanel);
     await userEvent.click(scoped.getByTestId("recipient-intake-mode-paste-revised"));
+    expect(screen.getByTestId("recipient-revised-workspace-notes-hint")).toBeTruthy();
     const paste = "x".repeat(2500);
     fireEvent.change(scoped.getByTestId("recipient-revised-draft-paste"), { target: { value: paste } });
     expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Compare drafts/i);
