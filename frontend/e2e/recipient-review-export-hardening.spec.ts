@@ -187,12 +187,12 @@ test.describe("recipient review export hardening", () => {
     for (let i = 0; i < 14; i++) {
       await page.getByTestId("recipient-compare-versions-button").click();
       await page.getByTestId("recipient-preview-download-original-pdf").click({ timeout: 8000 }).catch(() => {});
-      if (await page.getByRole("button", { name: "Keep editing" }).isVisible().catch(() => false)) {
-        await page.getByRole("button", { name: "Keep editing" }).first().click();
+      if (await page.getByRole("button", { name: "Continue editing" }).isVisible().catch(() => false)) {
+        await page.getByRole("button", { name: "Continue editing" }).first().click();
       }
       if (i % 3 === 0) {
         await page.getByRole("button", { name: "← Back to agreement" }).click({ timeout: 5000 }).catch(() => {});
-        await expect(page.getByTestId("recipient-read-download-agreement")).toBeVisible({ timeout: 10_000 });
+        await expect(page.getByTestId("recipient-want-a-copy-card")).toBeVisible({ timeout: 10_000 });
         await page.getByRole("button", { name: "Request changes" }).first().click();
         await page.getByTestId("recipient-workflow-quick").click();
         await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 15_000 });
@@ -205,16 +205,16 @@ test.describe("recipient review export hardening", () => {
       await page.getByTestId("recipient-workflow-quick").click();
       await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 15_000 });
     }
-    while (await page.getByRole("button", { name: "Keep editing" }).isVisible().catch(() => false)) {
-      await page.getByRole("button", { name: "Keep editing" }).first().click();
+    while (await page.getByRole("button", { name: "Continue editing" }).isVisible().catch(() => false)) {
+      await page.getByRole("button", { name: "Continue editing" }).first().click();
     }
 
     await expect(page.getByTestId("recipient-preview-versions-export")).toHaveCount(0);
     await page.getByTestId("recipient-compare-versions-button").click();
     await expect(page.getByTestId("recipient-preview-versions-export")).toHaveCount(1);
-    await expect(page.getByTestId("recipient-read-download-agreement")).toHaveCount(0);
+    await expect(page.getByTestId("recipient-want-a-copy-card")).toHaveCount(0);
 
-    const readBlocks = await page.getByTestId("recipient-read-download-agreement").count();
+    const readBlocks = await page.getByTestId("recipient-want-a-copy-card").count();
     const previewBlocks = await page.getByTestId("recipient-preview-versions-export").count();
     expect(readBlocks + previewBlocks).toBe(1);
 

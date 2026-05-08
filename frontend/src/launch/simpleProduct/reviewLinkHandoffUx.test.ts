@@ -49,12 +49,13 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain("RECIPIENT_WORKSPACE_TRUST_LINE");
+    expect(s).toContain("RECIPIENT_PREVIEW_TRUST_SUBCOPY");
     expect(s).toContain("recipient-workflow-revised");
     expect(s).toContain("recipient-workflow-quick");
-    expect(s).toContain("Compare & redline");
-    expect(s).toContain("Two-text compare");
-    expect(s).toContain("Review redline");
+    expect(s).toContain("RecipientWantACopyStrip");
+    const wantCopy = readFileSync(join(__dirname, "../../agreement/recipientWantACopyStrip.tsx"), "utf8");
+    expect(wantCopy).toContain("recipient-download-draft-pdf");
+    expect(s).not.toContain("Manual compare");
     expect(s).toContain("recipient-suggested-changes-panel");
     expect(s).toContain("recipient-suggested-changes-document");
     expect(s).not.toContain("recipient-tab-redline");

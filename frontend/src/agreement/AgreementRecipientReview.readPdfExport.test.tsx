@@ -4,6 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
+import { RECIPIENT_WANT_COPY_HEADING } from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -35,12 +36,12 @@ const draft = {
 
 const bannedInBlock = ["CLAW", "social", "tweet", "twitter", "facebook", "linkedin"] as const;
 
-describe("AgreementRecipientReview read-tab PDF export", () => {
+describe("AgreementRecipientReview read-tab draft exports", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("shows visible Download agreement block with PDF control after Review agreement", async () => {
+  it("shows Want a copy strip with PDF, text, and copy after Review agreement", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
       if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
@@ -65,15 +66,16 @@ describe("AgreementRecipientReview read-tab PDF export", () => {
     await userEvent.click(screen.getAllByRole("button", { name: /Review agreement/i })[0]!);
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-read-download-agreement")).toBeTruthy();
+      expect(screen.getByTestId("recipient-want-a-copy-card")).toBeTruthy();
     });
-    expect(screen.getByRole("heading", { name: /Download agreement/i })).toBeTruthy();
-    expect(screen.getByText(/Save a copy before you decide/i)).toBeTruthy();
-    expect(screen.getByTestId("recipient-read-download-pdf")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Download PDF/i })).toBeTruthy();
-    expect(screen.queryAllByTestId("recipient-read-download-pdf")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: RECIPIENT_WANT_COPY_HEADING })).toBeTruthy();
+    expect(screen.getByTestId("recipient-download-draft-pdf")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download draft PDF/i })).toBeTruthy();
+    expect(screen.getByTestId("recipient-download-draft-text")).toBeTruthy();
+    expect(screen.getByTestId("recipient-copy-draft-text")).toBeTruthy();
+    expect(screen.queryAllByTestId("recipient-download-draft-pdf")).toHaveLength(1);
 
-    const block = screen.getByTestId("recipient-read-download-agreement").textContent ?? "";
+    const block = screen.getByTestId("recipient-want-a-copy-card").textContent ?? "";
     const upper = block.toUpperCase();
     for (const b of bannedInBlock) {
       expect(upper.includes(b.toUpperCase()), `unexpected “${b}” in export block`).toBe(false);

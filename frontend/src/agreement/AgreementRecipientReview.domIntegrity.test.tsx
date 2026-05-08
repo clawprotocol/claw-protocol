@@ -139,7 +139,7 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
         expect(screen.getByTestId("recipient-preview-versions-export")).toBeTruthy();
       });
       expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(1);
-      expect(screen.queryAllByTestId("recipient-read-download-agreement")).toHaveLength(0);
+      expect(screen.queryAllByTestId("recipient-want-a-copy-card")).toHaveLength(0);
 
       const exportRegion = screen.getByTestId("recipient-preview-versions-export");
       await userEvent.click(within(exportRegion).getByTestId("recipient-preview-download-original-pdf"));
@@ -152,9 +152,9 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "← Back to agreement" }));
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-read-download-agreement")).toBeTruthy();
+      expect(screen.getByTestId("recipient-want-a-copy-card")).toBeTruthy();
     });
-    expect(screen.queryAllByTestId("recipient-read-download-agreement")).toHaveLength(1);
+    expect(screen.queryAllByTestId("recipient-want-a-copy-card")).toHaveLength(1);
     expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(0);
     expect(duplicateDomIds(container)).toEqual([]);
   });

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   PORTABLE_REVIEW_EXTERNAL_PASTE_PREAMBLE,
+  RECIPIENT_BTN_REVIEW_CHANGES,
+  RECIPIENT_CARD_BIGGER_REWRITE_TITLE,
   RECIPIENT_COPY_EXPORT_PREVIEW_LINE,
   RECIPIENT_COPY_EXPORT_SECTION_HELPER,
   RECIPIENT_COPY_EXPORT_SECTION_TITLE,
+  RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
+  RECIPIENT_WANT_COPY_HEADING,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
 
@@ -44,5 +48,14 @@ describe("recipient request-changes copy / export disclosure", () => {
       expect(u.includes(b.toUpperCase()), `unexpected “${b}” in disclosure`).toBe(false);
     }
     expect(RECIPIENT_COPY_EXPORT_SECTION_TITLE).toBe("Save or review elsewhere");
+  });
+});
+
+describe("recipient portable review CTA labels", () => {
+  it("uses revised-draft and compare wording without manual compare in primary CTAs", () => {
+    expect(RECIPIENT_CARD_BIGGER_REWRITE_TITLE).toBe("Revised draft");
+    expect(RECIPIENT_BTN_REVIEW_CHANGES).toBe("Compare drafts");
+    expect(RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL).toBe("Upload revised .txt / .md");
+    expect(RECIPIENT_WANT_COPY_HEADING).toBe("Want a copy?");
   });
 });

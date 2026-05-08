@@ -371,9 +371,9 @@ test.describe("recipient + link flow QA", () => {
     const ta = page.getByTestId("recipient-revision-voice-field");
     await ta.fill("E2E: use Net 30 and clarify payment per preview.");
     await page.getByTestId("recipient-compare-versions-button").click();
-    await expect(page.getByRole("button", { name: "Send revision" }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Send changes" }).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("recipient-preview-summary-heading")).toBeVisible();
-    await page.getByRole("button", { name: "Send revision" }).first().click();
+    await page.getByRole("button", { name: "Send changes" }).first().click();
     await expect(page.getByTestId("recipient-send-suggested-edits-modal")).toBeVisible({ timeout: 10_000 });
     await page.getByTestId("recipient-send-suggested-edits-confirm").click();
     await expect(page.getByTestId("recipient-suggested-edits-sent-ack")).toBeVisible({
@@ -479,10 +479,10 @@ test.describe("recipient + link flow QA", () => {
     const ta = page.getByTestId("recipient-revision-voice-field");
     await ta.fill("Net 30 and pause work after 15 days late");
     await page.getByTestId("recipient-compare-versions-button").click();
-    await expect(page.getByRole("button", { name: "Send revision" }).first()).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByRole("button", { name: "Send changes" }).first()).toBeVisible({ timeout: 25_000 });
 
     await expect(page.getByTestId("recipient-suggested-changes-panel")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Review redline" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review suggested changes" })).toBeVisible();
     await expect(page.getByTestId("recipient-suggested-changes-document")).toBeVisible();
     const legalDoc = page.getByTestId("recipient-legal-redline-document");
     await expect(legalDoc).toBeVisible();
@@ -505,8 +505,8 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByTestId("recipient-tab-redline")).toHaveCount(0);
     await expect(page.getByTestId("recipient-side-by-side-block-grid")).toHaveCount(0);
 
-    await expect(page.getByRole("button", { name: "Send revision" }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "Keep editing" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send changes" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue editing" }).first()).toBeVisible();
   });
 
   test("3) Owner: incoming suggestion + material change summary; apply; draft updates", async ({ page }) => {

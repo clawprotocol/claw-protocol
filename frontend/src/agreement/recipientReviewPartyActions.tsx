@@ -14,7 +14,6 @@ export const recipientPartyReviewCopy = {
   sendBackRevised: "Send back a revised version",
   /** Decision menu — small tweak path. */
   askQuickChange: "Ask for a small tweak",
-  downloadOriginal: "Download a copy",
   looksGood: "Looks good",
   notParticipating: "I'm not participating",
   reviewHelper: "Read before deciding.",
@@ -29,21 +28,20 @@ export const recipientPartyReviewCopy = {
   /** @deprecated */
   notParticipatingHelper: "Step away from this review.",
   assuranceLine: "Nothing changes until the sender accepts.",
-  nextStepSummary:
-    "Read the agreement, then choose how you’d like to respond — nothing changes until the sender accepts.",
+  nextStepSummary: "Read the draft, then pick what fits — nothing changes until the sender accepts.",
   /** @deprecated */
   doneReadingPrompt: "Done reading? Choose what happens next.",
   /** Friendly decision menu */
   decisionMenuHeading: "What would you like to do?",
-  decisionMenuSubcopy: "Nothing changes unless the sender accepts.",
+  decisionMenuSubcopy: "Nothing changes until the sender accepts.",
   looksGoodCardTitle: "Looks good",
   looksGoodCardSub: "I’m ready to move forward.",
   smallTweakCardTitle: "Ask for a small tweak",
-  smallTweakCardSub: "Request a few edits before signing.",
+  smallTweakCardSub: "A sentence or two, like payment timing or wording.",
   biggerRewriteCardTitle: "Send back a revised version",
-  biggerRewriteCardSub: "Upload or paste an edited draft.",
-  downloadCopyCardTitle: "Download a copy",
-  downloadCopyCardSub: "Review it with your lawyer, team, or AI tool.",
+  biggerRewriteCardSub: "Upload, paste, or edit a full draft. LawDog will redline it.",
+  downloadCopyCardTitle: "Download draft",
+  downloadCopyCardSub: "Save a PDF or text copy.",
   stepAwayCardTitle: "I’m not participating",
   stepAwayCardSub: "No changes will be sent.",
 } as const;
@@ -72,6 +70,8 @@ type RecipientPartyReviewActionsProps = {
   onDownloadOriginal?: () => void;
   /** Extra row after the four choices (e.g. Ready to sign). */
   children?: ReactNode;
+  /** Shown after the review primary control, before the decision menu (e.g. draft downloads). */
+  afterReviewSlot?: ReactNode;
 };
 
 const decisionCardQuiet =
@@ -103,6 +103,7 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
     onAskQuickChange,
     onDownloadOriginal,
     children,
+    afterReviewSlot,
   } = props;
 
   const useSplitReviseEntry =
@@ -173,6 +174,8 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
           {reviewLabel}
         </button>
       )}
+
+      {afterReviewSlot ? <div className="min-w-0 max-w-full">{afterReviewSlot}</div> : null}
 
       {useSplitReviseEntry ? (
         <div className="space-y-3" data-testid="recipient-decision-menu">

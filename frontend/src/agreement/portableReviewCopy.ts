@@ -48,6 +48,11 @@ export const RECIPIENT_DRAFT_IMPORT_READ_ERROR =
 
 /** Trust line for previews / decision menus (compose surface avoids repeating it). */
 export const RECIPIENT_WORKSPACE_TRUST_LINE = "Nothing changes until the sender accepts.";
+export const RECIPIENT_SAFETY_SUGGESTIONS_NOT_SIGNATURES = "Suggestions are not signatures.";
+export const RECIPIENT_WANT_COPY_HEADING = "Want a copy?";
+export const RECIPIENT_WANT_COPY_BODY =
+  "Save the draft, review it elsewhere, or drop it into your own AI/lawyer workflow.";
+export const RECIPIENT_COPY_ACK_COPIED = "Copied!";
 
 /** Top compose workspace (recipient revise tab). */
 export const RECIPIENT_WORKSPACE_HEADLINE = "Suggest changes before anything is signed.";
@@ -55,7 +60,7 @@ export const RECIPIENT_WORKSPACE_SUBCOPY = "Choose the easiest way to respond.";
 export const RECIPIENT_CARD_SMALL_TWEAK_TITLE = "Small tweak";
 export const RECIPIENT_CARD_SMALL_TWEAK_BODY = "Ask for a few edits without rewriting the document.";
 export const RECIPIENT_CARD_SMALL_TWEAK_CTA = "Request small changes";
-export const RECIPIENT_CARD_BIGGER_REWRITE_TITLE = "Bigger rewrite";
+export const RECIPIENT_CARD_BIGGER_REWRITE_TITLE = "Revised draft";
 export const RECIPIENT_CARD_BIGGER_REWRITE_BODY =
   "Upload or paste an edited version and LawDog will compare it.";
 export const RECIPIENT_CARD_BIGGER_REWRITE_CTA = "Upload revised draft";
@@ -64,7 +69,10 @@ export const RECIPIENT_CARD_BIGGER_REWRITE_CTA = "Upload revised draft";
 export const RECIPIENT_SEND_BACK_REVISED_TITLE = "Send back a revised version";
 export const RECIPIENT_SEND_BACK_REVISED_HELPER =
   "Upload or paste an edited draft. LawDog will compare it with what you received.";
-/** Bigger rewrite — step 1 (method only). */
+/** Revised-draft workspace — intro under headline (pick method + editing). */
+export const RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY =
+  "Upload, paste, or edit your version. LawDog will compare it with the original.";
+/** @deprecated Recipient UI uses send-back headline + {@link RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY}. */
 export const RECIPIENT_REVISE_METHOD_HEADLINE = "How do you want to revise it?";
 /** Panel subcopy after method chosen (often empty — progressive disclosure). */
 export const RECIPIENT_REVISED_PANEL_SUB = "";
@@ -81,9 +89,11 @@ export const RECIPIENT_QUICK_REQUEST_PLACEHOLDER =
   "Example: Change payment terms from Net 15 to Net 30.";
 export const RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK = "Need to upload a rewritten draft instead?";
 
-export const RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL = "Upload revised draft";
+export const RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL = "Upload revised .txt / .md";
 export const RECIPIENT_PASTE_REVISED_PRIMARY_LABEL = "Paste revised text";
 export const RECIPIENT_EDIT_INSIDE_LAWDOG = "Edit inside LawDog";
+export const RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF = "Download original PDF";
+export const RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT = "Download original text";
 
 /** Preview / redline summary. */
 export const RECIPIENT_PREVIEW_SUMMARY_HEADLINE = "Review suggested changes";
@@ -91,13 +101,15 @@ export const RECIPIENT_PREVIEW_TRUST_SUBCOPY = RECIPIENT_WORKSPACE_TRUST_LINE;
 
 /** Assisted compose + preview toolbars. */
 export const RECIPIENT_BTN_PREVIEW_CHANGES = "Preview changes";
-export const RECIPIENT_BTN_REVIEW_CHANGES = "Review changes";
+/** Primary compare CTA in revised-draft flow (calls assisted redline). */
+export const RECIPIENT_BTN_REVIEW_CHANGES = "Compare drafts";
+/** @deprecated No longer shown as a tab; kept for tests referencing assisted label history. */
+export const RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL = "Suggest changes";
 export const RECIPIENT_BTN_SEND_CHANGES = "Send changes";
 export const RECIPIENT_BTN_CONTINUE_EDITING = "Continue editing";
 export const RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF = "Download redline PDF";
 
-/** Assisted vs manual compare. */
-export const RECIPIENT_ASSISTED_MODE_LABEL = RECIPIENT_BTN_REVIEW_CHANGES;
+/** @deprecated Manual compare removed from recipient review UI (panel may still exist for tooling). */
 export const RECIPIENT_DIRECT_COMPARE_LABEL = "Manual compare";
 
 /** Visible “work elsewhere” card (download-first professional workflow). */

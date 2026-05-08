@@ -23,7 +23,7 @@ export const MODE_EDIT_DRAFT = "Edit directly";
 export const EDIT_DRAFT_TITLE = "Edit draft";
 export const EDIT_DRAFT_HELPER =
   "Make edits here. We'll show a redline before anything is sent.";
-export const EDIT_DRAFT_PREVIEW_HINT = "Review changes after editing";
+export const EDIT_DRAFT_PREVIEW_HINT = "Compare drafts after editing";
 export const MODE_UPLOAD_FILE = "Upload file";
 export const UPLOAD_FILE_COMPARISON_COMING_SOON = "Upload comparison coming soon.";
 

@@ -82,7 +82,7 @@ import { useRecipientDraftTextareaSizing } from "../hooks/useRecipientDraftTexta
 import { ClawTrustFooter } from "../components/claw/ClawTrustFooter";
 import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge";
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
-import { recipientExportBasenameFromTitle } from "./recipientExportFilenames";
+import { recipientExportBasenameFromTitle, recipientTextDownloadFilename } from "./recipientExportFilenames";
 import {
   RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE,
   RECIPIENT_SIGN_ONE_DONE_HEADLINE,
@@ -96,7 +96,7 @@ import { trackAgreementFunnelEvent } from "../tracking/agreementFunnelAnalytics"
 import { recipientAgreementReadHeaders } from "./recipientAccessApi";
 import { postProRedlineReviewerSuggestion } from "./proRedlineReviewApi";
 import { isPaidProAgreementAuthoritative } from "../components/agreements/paidProAgreementAuthority";
-import { DirectComparePanel } from "./DirectComparePanel";
+import { RecipientWantACopyStrip } from "./recipientWantACopyStrip";
 import { cloneDraftForRecipientPreview } from "./recipientPreviewBaseline";
 import {
   PORTABLE_REVIEW_PASTE_LABEL,
@@ -112,8 +112,9 @@ import {
   RECIPIENT_CARD_SMALL_TWEAK_BODY,
   RECIPIENT_CARD_SMALL_TWEAK_CTA,
   RECIPIENT_CARD_SMALL_TWEAK_TITLE,
-  RECIPIENT_ASSISTED_MODE_LABEL,
-  RECIPIENT_DIRECT_COMPARE_LABEL,
+  RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL,
+  RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF,
+  RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
   RECIPIENT_EDIT_INSIDE_LAWDOG,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
@@ -121,9 +122,9 @@ import {
   RECIPIENT_PASTE_REVISED_PRIMARY_LABEL,
   RECIPIENT_QUICK_REQUEST_LABEL,
   RECIPIENT_QUICK_REQUEST_PLACEHOLDER,
-  RECIPIENT_REVISE_METHOD_HEADLINE,
   RECIPIENT_REVISED_PANEL_SUB,
   RECIPIENT_SEND_BACK_REVISED_TITLE,
+  RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY,
   RECIPIENT_SMALL_TWEAK_HELPER,
   RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK,
   RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
@@ -383,11 +384,10 @@ export function AgreementRecipientReview({
   const recipientRedlineSourceLogKeyRef = useRef<string>("");
   const [recipientPosture] = useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
-  const [reviseTextMode, setReviseTextMode] = useState<"assisted" | "direct">("assisted");
   const [workflowMode, setWorkflowMode] = useState<"revised" | "quick">("revised");
   /** Landing cards before compose tools (legacy “Request changes” only). */
   const [composePathCardsVisible, setComposePathCardsVisible] = useState(false);
-  /** Bigger rewrite: pick upload/paste vs editor surface. */
+  /** Revised draft: pick upload/paste vs editor surface. */
   const [revisedIntakePhase, setRevisedIntakePhase] = useState<"pick-method" | "editing">("editing");
   const [revisedSubmode, setRevisedSubmode] = useState<"paste" | "edit">("paste");
   const [draftImportError, setDraftImportError] = useState<string | null>(null);
@@ -1087,6 +1087,21 @@ export function AgreementRecipientReview({
   );
   const directCompareDefaultRef = useRef(directCompareDefault);
   directCompareDefaultRef.current = directCompareDefault;
+
+  const downloadOriginalDraftText = useCallback(() => {
+    const body = htmlToPlainText(renderedHtmlDisplay || "").trim();
+    if (!body) return;
+    const base = recipientExportBasenameFromTitle(draft?.title, agreementId);
+    const exportedAt = new Date();
+    const name = recipientTextDownloadFilename(base, "original", { exportedAt });
+    const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [agreementId, draft, renderedHtmlDisplay]);
 
   const scrubAgreementHtml = useCallback(
     (html: string) => substitutePartyPlaceholdersInUserFacingText(html || "", draftSanitizeContext),
@@ -2534,6 +2549,23 @@ export function AgreementRecipientReview({
             looksGoodLoading={approving}
             looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
             requestChangesDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+            afterReviewSlot={
+              !viewerLike && entry.kind === "review" && draft ? (
+                <div
+                  ref={recipientOriginalDownloadsRef}
+                  data-testid="recipient-download-original-anchor"
+                  className="min-w-0 max-w-full"
+                >
+                  <RecipientWantACopyStrip
+                    agreementId={agreementId}
+                    agreementTitle={draft.title}
+                    readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+                    scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+                    plainDraftText={directCompareDefault}
+                  />
+                </div>
+              ) : null
+            }
             reviseEntrySplit={entry.kind === "review" && !viewerLike}
             onSendBackRevised={() => {
               setComposePathCardsVisible(false);
@@ -2582,16 +2614,6 @@ export function AgreementRecipientReview({
               </span>
             ) : null}
           </RecipientPartyReviewActions>
-          {!viewerLike && entry.kind === "review" ? (
-            <div ref={recipientOriginalDownloadsRef} data-testid="recipient-download-original-anchor" className="scroll-mt-8">
-              <RecipientAgreementReadPdfExport
-                agreementId={agreementId}
-                agreementTitle={draft?.title}
-                readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-                scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
-              />
-            </div>
-          ) : null}
         </>
       ) : null}
 
@@ -2730,44 +2752,6 @@ export function AgreementRecipientReview({
             </div>
           ) : (
             <div className="space-y-5 rounded-xl border border-slate-800/50 bg-slate-950/20 p-5">
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className={`rounded-full px-3 py-1.5 text-[11px] font-medium ${
-                    reviseTextMode === "assisted"
-                      ? "bg-slate-800 text-slate-100"
-                      : "text-slate-500 hover:text-slate-200"
-                  }`}
-                  onClick={() => {
-                    setReviseTextMode("assisted");
-                    setRecipientPreview(null);
-                    setRecipientRevisePreviewError(null);
-                    setError(null);
-                  }}
-                >
-                  {RECIPIENT_ASSISTED_MODE_LABEL}
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-full px-3 py-1.5 text-[11px] font-medium ${
-                    reviseTextMode === "direct"
-                      ? "bg-slate-800 text-slate-100"
-                      : "text-slate-500 hover:text-slate-200"
-                  }`}
-                  onClick={() => {
-                    setReviseTextMode("direct");
-                    setRecipientPreview(null);
-                    setRecipientRevisePreviewError(null);
-                    setError(null);
-                  }}
-                >
-                  {RECIPIENT_DIRECT_COMPARE_LABEL}
-                </button>
-              </div>
-              {reviseTextMode === "direct" ? (
-                <DirectComparePanel defaultBefore={directCompareDefault} />
-              ) : (
-                <>
               <input
                 ref={draftImportFileInputRef}
                 type="file"
@@ -2827,7 +2811,7 @@ export function AgreementRecipientReview({
                 <div
                   className="flex max-w-lg gap-1 rounded-xl border border-slate-700/60 bg-slate-950/40 p-1"
                   role="tablist"
-                  aria-label="How you respond"
+                  aria-label={`${RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL} / ${RECIPIENT_CARD_SMALL_TWEAK_TITLE}`}
                   data-testid="recipient-compose-tablist"
                 >
                   <button
@@ -2949,7 +2933,12 @@ export function AgreementRecipientReview({
                 >
                   {revisedIntakePhase === "pick-method" ? (
                     <div className="space-y-3">
-                      <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_REVISE_METHOD_HEADLINE}</h3>
+                      <div>
+                        <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
+                        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                          {RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY}
+                        </p>
+                      </div>
                       <button
                         type="button"
                         data-testid="recipient-upload-revised-file"
@@ -3175,16 +3164,27 @@ export function AgreementRecipientReview({
                       : RECIPIENT_BTN_REVIEW_CHANGES}
                 </button>
                 {workflowMode === "revised" && revisedIntakePhase === "editing" && draft && !recipientPreview ? (
-                  <RecipientAgreementReadPdfExport
-                    bare
-                    suppressBareDisclosure
-                    agreementId={agreementId}
-                    agreementTitle={draft?.title}
-                    readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-                    scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
-                    pdfDownloadButtonLabel="Download original"
-                    pdfDownloadButtonTestId="recipient-download-original-pdf"
-                  />
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch">
+                    <RecipientAgreementReadPdfExport
+                      bare
+                      suppressBareDisclosure
+                      agreementId={agreementId}
+                      agreementTitle={draft?.title}
+                      readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+                      scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+                      pdfDownloadButtonLabel={RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF}
+                      pdfDownloadButtonTestId="recipient-download-original-pdf"
+                    />
+                    <button
+                      type="button"
+                      data-testid="recipient-download-original-text-revise"
+                      className="min-w-0 max-w-full break-words rounded-md border border-slate-600/70 bg-slate-900/50 px-2.5 py-1.5 text-left text-[11px] font-semibold text-slate-200 hover:bg-slate-900/75 disabled:cursor-not-allowed disabled:opacity-45 sm:self-center sm:text-xs"
+                      disabled={!htmlToPlainText(renderedHtmlDisplay || "").trim()}
+                      onClick={downloadOriginalDraftText}
+                    >
+                      {RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT}
+                    </button>
+                  </div>
                 ) : null}
               </div>
               {recipientRevisePreviewError ? (
@@ -3198,8 +3198,6 @@ export function AgreementRecipientReview({
               ) : null}
 
               {comparePanel}
-                </>
-              )}
                 </>
               )}
             </div>

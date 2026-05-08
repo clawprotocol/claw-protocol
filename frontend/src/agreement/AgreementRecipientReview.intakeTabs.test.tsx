@@ -5,7 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 import { computeRecipientDraftTextareaMaxPx } from "../hooks/useRecipientDraftTextareaMaxPx";
-import { RECIPIENT_REVISE_METHOD_HEADLINE } from "./portableReviewCopy";
+import {
+  RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL,
+  RECIPIENT_CARD_SMALL_TWEAK_TITLE,
+  RECIPIENT_SEND_BACK_REVISED_TITLE,
+  RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY,
+} from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -79,9 +84,12 @@ describe("AgreementRecipientReview revise workflow routing", () => {
       expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
     });
     expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
-    expect(screen.getByRole("tablist", { name: "How you respond" })).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_REVISE_METHOD_HEADLINE)).toBeTruthy();
-
+    expect(
+      screen.getByRole("tablist", { name: `${RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL} / ${RECIPIENT_CARD_SMALL_TWEAK_TITLE}` }),
+    ).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_SEND_BACK_REVISED_TITLE)).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
   });
 
   it("quick-change mode hides revised-version panel and upload controls", async () => {
@@ -113,7 +121,11 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
     await userEvent.click(
-      within(screen.getAllByRole("tablist", { name: "How you respond" })[0]!).getByRole("button", { name: /Small tweak/i }),
+      within(
+        screen.getAllByRole("tablist", {
+          name: `${RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL} / ${RECIPIENT_CARD_SMALL_TWEAK_TITLE}`,
+        })[0]!,
+      ).getByRole("button", { name: /Small tweak/i }),
     );
 
     await waitFor(() => {
@@ -237,6 +249,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await userEvent.click(scoped.getByTestId("recipient-intake-mode-paste-revised"));
     const paste = "x".repeat(2500);
     fireEvent.change(scoped.getByTestId("recipient-revised-draft-paste"), { target: { value: paste } });
+    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Compare drafts/i);
     await userEvent.click(screen.getAllByTestId("recipient-compare-versions-button")[0]!);
 
     await waitFor(() => {

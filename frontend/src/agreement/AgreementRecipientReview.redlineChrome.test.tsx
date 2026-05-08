@@ -119,6 +119,7 @@ describe("AgreementRecipientReview redline chrome", () => {
     const exportRoot = screen.getByTestId("recipient-preview-versions-export");
     expect(exportRoot.textContent).not.toMatch(/\bCLAW\b/i);
     expect(screen.queryAllByTestId("recipient-read-download-pdf")).toHaveLength(0);
+    expect(screen.queryAllByTestId("recipient-download-draft-pdf")).toHaveLength(0);
     expect(screen.queryAllByTestId("recipient-request-copy-export-pdf")).toHaveLength(0);
     expect(screen.getByRole("heading", { name: /Export review versions/i })).toBeTruthy();
     expect(screen.getByText(/Save the original, proposed version, or redline before sending/i)).toBeTruthy();
