@@ -72,7 +72,6 @@ import { substitutePartyPlaceholdersInUserFacingText } from "./partyPlaceholderD
 import { findOpenRecipientProposals } from "./recipientProposal";
 import {
   DEFAULT_NEGOTIATION_POSTURE,
-  NEGOTIATION_POSTURE_OPTIONS,
   recipientPostureInstructionPreamble,
   type NegotiationPosture,
 } from "./negotiationPostures";
@@ -102,16 +101,34 @@ import { cloneDraftForRecipientPreview } from "./recipientPreviewBaseline";
 import {
   PORTABLE_REVIEW_PASTE_LABEL,
   PORTABLE_REVIEW_PASTE_PLACEHOLDER,
+  RECIPIENT_BTN_CONTINUE_EDITING,
+  RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF,
+  RECIPIENT_BTN_PREVIEW_CHANGES,
+  RECIPIENT_BTN_REVIEW_CHANGES,
+  RECIPIENT_BTN_SEND_CHANGES,
+  RECIPIENT_CARD_BIGGER_REWRITE_BODY,
+  RECIPIENT_CARD_BIGGER_REWRITE_CTA,
+  RECIPIENT_CARD_BIGGER_REWRITE_TITLE,
+  RECIPIENT_CARD_SMALL_TWEAK_BODY,
+  RECIPIENT_CARD_SMALL_TWEAK_CTA,
+  RECIPIENT_CARD_SMALL_TWEAK_TITLE,
+  RECIPIENT_ASSISTED_MODE_LABEL,
+  RECIPIENT_DIRECT_COMPARE_LABEL,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
-  RECIPIENT_QUICK_CHANGE_SECTION_TITLE,
-  RECIPIENT_QUICK_PANEL_SUB,
+  RECIPIENT_EDIT_INSIDE_LAWDOG,
+  RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
+  RECIPIENT_PREVIEW_TRUST_SUBCOPY,
+  RECIPIENT_PASTE_REVISED_PRIMARY_LABEL,
   RECIPIENT_QUICK_REQUEST_LABEL,
   RECIPIENT_QUICK_REQUEST_PLACEHOLDER,
+  RECIPIENT_REVISE_METHOD_HEADLINE,
   RECIPIENT_REVISED_PANEL_SUB,
-  RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL,
   RECIPIENT_SEND_BACK_REVISED_TITLE,
+  RECIPIENT_SMALL_TWEAK_HELPER,
   RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK,
-  RECIPIENT_WORKSPACE_TRUST_LINE,
+  RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
+  RECIPIENT_WORKSPACE_HEADLINE,
+  RECIPIENT_WORKSPACE_SUBCOPY,
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
 import { renderAgreementDraftHtmlLikeBackend, purposeLooksLikeFullAgreementTextForRender } from "./recipientAgreementDraftHtmlRender";
@@ -358,18 +375,20 @@ export function AgreementRecipientReview({
   const [approvedAck, setApprovedAck] = useState(false);
   const [bundle, setBundle] = useState<AgreementVersionBundle | null>(null);
   const [externalAiPaste, setExternalAiPaste] = useState("");
-  const [copyDraftFlash, setCopyDraftFlash] = useState(false);
   const [recipientPreview, setRecipientPreview] = useState<RecipientPreview | null>(null);
   const [sendSuggestedEditsModalOpen, setSendSuggestedEditsModalOpen] = useState(false);
   const [recipientSuggestedEditsSentAck, setRecipientSuggestedEditsSentAck] = useState(false);
   const [recipientRevisePreviewError, setRecipientRevisePreviewError] = useState<string | null>(null);
   const recipientRedlineViewModelLogKeyRef = useRef<string>("");
   const recipientRedlineSourceLogKeyRef = useRef<string>("");
-  const [recipientPosture, setRecipientPosture] =
-    useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
+  const [recipientPosture] = useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
   const [reviseTextMode, setReviseTextMode] = useState<"assisted" | "direct">("assisted");
   const [workflowMode, setWorkflowMode] = useState<"revised" | "quick">("revised");
+  /** Landing cards before compose tools (legacy “Request changes” only). */
+  const [composePathCardsVisible, setComposePathCardsVisible] = useState(false);
+  /** Bigger rewrite: pick upload/paste vs editor surface. */
+  const [revisedIntakePhase, setRevisedIntakePhase] = useState<"pick-method" | "editing">("editing");
   const [revisedSubmode, setRevisedSubmode] = useState<"paste" | "edit">("paste");
   const [draftImportError, setDraftImportError] = useState<string | null>(null);
   const [proRedlineSuggestText, setProRedlineSuggestText] = useState("");
@@ -433,6 +452,7 @@ export function AgreementRecipientReview({
         setExternalAiPaste(text);
         setWorkflowMode("revised");
         setRevisedSubmode("paste");
+        setRevisedIntakePhase("editing");
         setRecipientPreview(null);
         setRecipientRevisePreviewError(null);
         window.requestAnimationFrame(() => {
@@ -1073,16 +1093,6 @@ export function AgreementRecipientReview({
     [draftSanitizeContext],
   );
 
-  const copyRecipientDraftPlainToClipboard = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(htmlToPlainText(renderedHtmlDisplay || renderedHtml || ""));
-      setCopyDraftFlash(true);
-      window.setTimeout(() => setCopyDraftFlash(false), 1800);
-    } catch {
-      setError("Could not copy to clipboard.");
-    }
-  }, [renderedHtmlDisplay, renderedHtml]);
-
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -1497,9 +1507,9 @@ export function AgreementRecipientReview({
           className="text-base font-semibold tracking-tight text-slate-100"
           data-testid="recipient-preview-summary-heading"
         >
-          Review redline
+          {RECIPIENT_PREVIEW_SUMMARY_HEADLINE}
         </h2>
-        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">Green added. Red removed.</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{RECIPIENT_PREVIEW_TRUST_SUBCOPY}</p>
         <p className="sr-only">{PRODUCT_NOT_LAW_FIRM}</p>
         {participantPid ? (
           <p className="mt-2 text-[10px] leading-snug text-slate-500">
@@ -1689,14 +1699,6 @@ export function AgreementRecipientReview({
               </p>
             ) : null}
 
-            <p
-              className="mt-3 text-[11px] leading-snug text-slate-400"
-              data-testid="recipient-suggested-changes-what-this-means"
-            >
-              <span className="font-medium text-emerald-200/90">Green</span> added.{" "}
-              <span className="font-medium text-rose-200/90">Red</span> removed.
-            </p>
-
             {recipientRedlinePlainTexts && recipientPreview ? (
               <RecipientPreviewVersionsExport
                 plainSource={{
@@ -1745,7 +1747,7 @@ export function AgreementRecipientReview({
             disabled={saving || !previewDiff.canSubmit}
             onClick={() => openSendSuggestedEditsModal()}
           >
-            Send revision
+            {RECIPIENT_BTN_SEND_CHANGES}
           </button>
           <button
             type="button"
@@ -1753,7 +1755,7 @@ export function AgreementRecipientReview({
             disabled={saving || previewing}
             onClick={() => discardPreview()}
           >
-            Keep editing
+            {RECIPIENT_BTN_CONTINUE_EDITING}
           </button>
           <button
             type="button"
@@ -1764,7 +1766,7 @@ export function AgreementRecipientReview({
               document.querySelector<HTMLButtonElement>('[data-testid="recipient-preview-download-redline-pdf"]')?.click();
             }}
           >
-            Download redline
+            {RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF}
           </button>
         </div>
       </div>
@@ -2222,6 +2224,7 @@ export function AgreementRecipientReview({
             onReviewPrimary={() => setFlowPhase("active")}
             onRequestChanges={() => {
               setFlowPhase("active");
+              setComposePathCardsVisible(true);
               setWorkspaceTab("revise");
               scrollAndFocusSuggestPanel();
             }}
@@ -2251,6 +2254,7 @@ export function AgreementRecipientReview({
             onReviewPrimary={() => setFlowPhase("active")}
             onRequestChanges={() => {
               setFlowPhase("active");
+              setComposePathCardsVisible(true);
               setWorkspaceTab("revise");
               scrollAndFocusSuggestPanel();
             }}
@@ -2406,6 +2410,7 @@ export function AgreementRecipientReview({
               data-testid="recipient-suggested-edits-suggest-another"
               onClick={() => {
                 setRecipientSuggestedEditsSentAck(false);
+                setComposePathCardsVisible(false);
                 setWorkspaceTab("revise");
                 setError(null);
                 scrollAndFocusSuggestPanel();
@@ -2531,12 +2536,15 @@ export function AgreementRecipientReview({
             requestChangesDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
             reviseEntrySplit={entry.kind === "review" && !viewerLike}
             onSendBackRevised={() => {
+              setComposePathCardsVisible(false);
               setWorkspaceTab("revise");
               setWorkflowMode("revised");
+              setRevisedIntakePhase("pick-method");
               setError(null);
               scrollAndFocusSuggestPanel();
             }}
             onAskQuickChange={() => {
+              setComposePathCardsVisible(false);
               setWorkspaceTab("revise");
               setWorkflowMode("quick");
               setError(null);
@@ -2551,6 +2559,7 @@ export function AgreementRecipientReview({
               });
             }}
             onRequestChanges={() => {
+              setComposePathCardsVisible(true);
               setWorkspaceTab("revise");
               setError(null);
               scrollAndFocusSuggestPanel();
@@ -2720,13 +2729,13 @@ export function AgreementRecipientReview({
               </p>
             </div>
           ) : (
-            <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-              <div className="mb-1 flex flex-wrap gap-1.5">
+            <div className="space-y-5 rounded-xl border border-slate-800/50 bg-slate-950/20 p-5">
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium ${
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-medium ${
                     reviseTextMode === "assisted"
-                      ? "border border-slate-500 bg-slate-800/90 text-slate-100"
+                      ? "bg-slate-800 text-slate-100"
                       : "text-slate-500 hover:text-slate-200"
                   }`}
                   onClick={() => {
@@ -2736,13 +2745,13 @@ export function AgreementRecipientReview({
                     setError(null);
                   }}
                 >
-                  Compare & redline
+                  {RECIPIENT_ASSISTED_MODE_LABEL}
                 </button>
                 <button
                   type="button"
-                  className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium ${
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-medium ${
                     reviseTextMode === "direct"
-                      ? "border border-slate-500 bg-slate-800/90 text-slate-100"
+                      ? "bg-slate-800 text-slate-100"
                       : "text-slate-500 hover:text-slate-200"
                   }`}
                   onClick={() => {
@@ -2752,7 +2761,7 @@ export function AgreementRecipientReview({
                     setError(null);
                   }}
                 >
-                  Two-text compare
+                  {RECIPIENT_DIRECT_COMPARE_LABEL}
                 </button>
               </div>
               {reviseTextMode === "direct" ? (
@@ -2767,18 +2776,64 @@ export function AgreementRecipientReview({
                 data-testid="recipient-import-draft-file-input"
                 onChange={onDraftImportFileSelected}
               />
-              <p className="text-xs leading-snug text-slate-400">{RECIPIENT_WORKSPACE_TRUST_LINE}</p>
 
+              {composePathCardsVisible && !recipientPreview ? (
+                <section className="space-y-4" data-testid="recipient-compose-path-cards">
+                  <div>
+                    <h2 className="text-lg font-semibold tracking-tight text-slate-50">{RECIPIENT_WORKSPACE_HEADLINE}</h2>
+                    <p className="mt-1.5 text-sm leading-relaxed text-slate-400">{RECIPIENT_WORKSPACE_SUBCOPY}</p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      data-testid="recipient-compose-card-small-tweak"
+                      className="flex min-h-[120px] flex-col rounded-xl border border-slate-700/50 bg-slate-900/35 p-4 text-left transition-colors hover:bg-slate-900/55"
+                      onClick={() => {
+                        setComposePathCardsVisible(false);
+                        setWorkflowMode("quick");
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        setError(null);
+                      }}
+                    >
+                      <span className="text-base font-semibold text-slate-100">{RECIPIENT_CARD_SMALL_TWEAK_TITLE}</span>
+                      <span className="mt-2 flex-1 text-sm leading-snug text-slate-400">{RECIPIENT_CARD_SMALL_TWEAK_BODY}</span>
+                      <span className="mt-3 text-sm font-semibold text-sky-400/95">{RECIPIENT_CARD_SMALL_TWEAK_CTA}</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="recipient-compose-card-bigger-rewrite"
+                      className="flex min-h-[120px] flex-col rounded-xl border border-slate-700/50 bg-slate-900/35 p-4 text-left transition-colors hover:bg-slate-900/55"
+                      onClick={() => {
+                        setComposePathCardsVisible(false);
+                        setWorkflowMode("revised");
+                        setRevisedIntakePhase("pick-method");
+                        setExternalAiPaste("");
+                        setDraftImportError(null);
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        setError(null);
+                      }}
+                    >
+                      <span className="text-base font-semibold text-slate-100">{RECIPIENT_CARD_BIGGER_REWRITE_TITLE}</span>
+                      <span className="mt-2 flex-1 text-sm leading-snug text-slate-400">{RECIPIENT_CARD_BIGGER_REWRITE_BODY}</span>
+                      <span className="mt-3 text-sm font-semibold text-sky-400/95">{RECIPIENT_CARD_BIGGER_REWRITE_CTA}</span>
+                    </button>
+                  </div>
+                </section>
+              ) : (
+                <>
               {!recipientPreview ? (
                 <div
-                  className="flex max-w-lg gap-1 rounded-lg border border-slate-700/80 bg-slate-950/60 p-1"
+                  className="flex max-w-lg gap-1 rounded-xl border border-slate-700/60 bg-slate-950/40 p-1"
                   role="tablist"
-                  aria-label="Revision mode"
+                  aria-label="How you respond"
+                  data-testid="recipient-compose-tablist"
                 >
                   <button
                     type="button"
                     data-testid="recipient-workflow-revised"
-                    className={`min-h-[44px] flex-1 rounded-md px-3 py-2 text-center text-xs font-semibold transition-colors ${
+                    className={`min-h-[44px] flex-1 rounded-lg px-3 py-2 text-center text-xs font-semibold transition-colors ${
                       workflowMode === "revised"
                         ? "bg-slate-800 text-slate-100"
                         : "text-slate-500 hover:bg-slate-900/80 hover:text-slate-200"
@@ -2789,14 +2844,15 @@ export function AgreementRecipientReview({
                       setRecipientPreview(null);
                       setRecipientRevisePreviewError(null);
                       setError(null);
+                      setRevisedIntakePhase(externalAiPaste.trim() ? "editing" : "pick-method");
                     }}
                   >
-                    Revised draft
+                    {RECIPIENT_CARD_BIGGER_REWRITE_TITLE}
                   </button>
                   <button
                     type="button"
                     data-testid="recipient-workflow-quick"
-                    className={`min-h-[44px] flex-1 rounded-md px-3 py-2 text-center text-xs font-semibold transition-colors ${
+                    className={`min-h-[44px] flex-1 rounded-lg px-3 py-2 text-center text-xs font-semibold transition-colors ${
                       workflowMode === "quick"
                         ? "bg-slate-800 text-slate-100"
                         : "text-slate-500 hover:bg-slate-900/80 hover:text-slate-200"
@@ -2810,7 +2866,7 @@ export function AgreementRecipientReview({
                       setError(null);
                     }}
                   >
-                    Quick change
+                    {RECIPIENT_CARD_SMALL_TWEAK_TITLE}
                   </button>
                 </div>
               ) : null}
@@ -2818,15 +2874,12 @@ export function AgreementRecipientReview({
               {workflowMode === "quick" && !recipientPreview ? (
                 <div
                   data-testid="recipient-quick-change-panel"
-                  className="space-y-3 rounded-lg border border-slate-700/50 bg-slate-950/40 p-3"
+                  className="space-y-3 rounded-xl border border-slate-700/45 bg-slate-950/30 p-4"
                 >
-                  <div>
-                    <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_QUICK_CHANGE_SECTION_TITLE}</h3>
-                    <p className="mt-1 text-xs leading-snug text-slate-400">{RECIPIENT_QUICK_PANEL_SUB}</p>
-                  </div>
+                  <p className="text-xs leading-relaxed text-slate-400">{RECIPIENT_SMALL_TWEAK_HELPER}</p>
                   {quickChangeLooksLikeFullDraft ? (
                     <div
-                      className="rounded-md border border-amber-800/50 bg-amber-950/25 px-3 py-2 text-xs leading-snug text-amber-100"
+                      className="rounded-lg border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-xs leading-snug text-amber-100"
                       data-testid="recipient-quick-change-full-doc-hint"
                       role="status"
                     >
@@ -2837,6 +2890,7 @@ export function AgreementRecipientReview({
                         data-testid="recipient-switch-to-revised-workflow"
                         onClick={() => {
                           setWorkflowMode("revised");
+                          setRevisedIntakePhase("editing");
                           setExternalAiPaste(instruction.trim());
                           setInstruction("");
                           setRecipientPreview(null);
@@ -2854,6 +2908,7 @@ export function AgreementRecipientReview({
                       className="text-left text-xs font-medium text-sky-400/95 underline decoration-sky-800/50 underline-offset-2 hover:text-sky-200"
                       onClick={() => {
                         setWorkflowMode("revised");
+                        setRevisedIntakePhase("pick-method");
                         setDraftImportError(null);
                         setRecipientPreview(null);
                         setRecipientRevisePreviewError(null);
@@ -2884,117 +2939,70 @@ export function AgreementRecipientReview({
                     autosize
                     autosizeMaxPx={describeAutosizeMaxPx}
                   />
-                  <details className="rounded-md border border-slate-800/70 bg-slate-950/20 px-2 py-1.5">
-                    <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
-                      Negotiation tone (optional)
-                    </summary>
-                    <div className="mt-2 space-y-2 border-t border-slate-800/50 pt-2">
-                      <label className="text-[11px] font-medium text-slate-400" htmlFor="recipient-posture">
-                        Tone for your suggestions
-                      </label>
-                      <select
-                        id="recipient-posture"
-                        className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-                        value={recipientPosture}
-                        disabled={suggestControlsDisabled}
-                        onChange={(e) => setRecipientPosture(e.target.value as NegotiationPosture)}
-                      >
-                        {NEGOTIATION_POSTURE_OPTIONS.map((o) => (
-                          <option key={o.id} value={o.id}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </details>
                 </div>
               ) : null}
 
               {workflowMode === "revised" && !recipientPreview ? (
                 <div
                   data-testid="recipient-revised-version-panel"
-                  className="space-y-3 rounded-lg border border-slate-700/50 bg-slate-950/40 p-3"
+                  className="space-y-4 rounded-xl border border-slate-700/45 bg-slate-950/30 p-4"
                 >
-                  <div>
-                    <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
-                    <p className="mt-1 text-xs leading-snug text-slate-400">{RECIPIENT_REVISED_PANEL_SUB}</p>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      data-testid="recipient-upload-revised-file"
-                      className="rounded-md border border-emerald-900/45 bg-emerald-950/30 px-3 py-2.5 text-center text-xs font-semibold text-emerald-100 hover:bg-emerald-950/45 disabled:opacity-50"
-                      disabled={suggestControlsDisabled}
-                      onClick={() => draftImportFileInputRef.current?.click()}
-                    >
-                      {RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL}
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="recipient-intake-mode-paste-revised"
-                      className={`rounded-md px-3 py-2.5 text-center text-xs font-semibold ${
-                        revisedSubmode === "paste"
-                          ? "border border-slate-500 bg-slate-800/90 text-slate-100"
-                          : "border border-slate-700 bg-slate-950/50 text-slate-300 hover:bg-slate-900/70"
-                      }`}
-                      disabled={suggestControlsDisabled}
-                      onClick={() => {
-                        setRevisedSubmode("paste");
-                        setDraftImportError(null);
-                        setRecipientPreview(null);
-                        setRecipientRevisePreviewError(null);
-                        setError(null);
-                      }}
-                    >
-                      Paste revised text
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="recipient-intake-mode-edit-draft"
-                      className={`sm:col-span-2 rounded-md px-3 py-2.5 text-center text-xs font-semibold ${
-                        revisedSubmode === "edit"
-                          ? "border border-slate-500 bg-slate-800/90 text-slate-100"
-                          : "border border-slate-700 bg-slate-950/50 text-slate-300 hover:bg-slate-900/70"
-                      }`}
-                      disabled={suggestControlsDisabled}
-                      onClick={() => {
-                        setDraftImportError(null);
-                        if (revisedSubmode !== "edit") {
-                          setExternalAiPaste(directCompareDefaultRef.current);
-                        }
-                        setRevisedSubmode("edit");
-                        setRecipientPreview(null);
-                        setRecipientRevisePreviewError(null);
-                        setError(null);
-                      }}
-                    >
-                      Edit directly
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-3">
-                    {draft ? (
-                      <RecipientAgreementReadPdfExport
-                        bare
-                        suppressBareDisclosure
-                        agreementId={agreementId}
-                        agreementTitle={draft?.title}
-                        readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-                        scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
-                        pdfDownloadButtonLabel="Download original"
-                        pdfDownloadButtonTestId="recipient-download-original-pdf"
-                      />
-                    ) : null}
-                    <button
-                      type="button"
-                      data-testid="recipient-copy-original-text"
-                      className="rounded-md border border-slate-600 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-                      disabled={suggestControlsDisabled}
-                      onClick={() => void copyRecipientDraftPlainToClipboard()}
-                    >
-                      Copy original text
-                    </button>
-                    {copyDraftFlash ? <span className="text-[10px] text-emerald-400">Copied</span> : null}
-                  </div>
+                  {revisedIntakePhase === "pick-method" ? (
+                    <div className="space-y-3">
+                      <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_REVISE_METHOD_HEADLINE}</h3>
+                      <button
+                        type="button"
+                        data-testid="recipient-upload-revised-file"
+                        className="min-h-[48px] w-full rounded-xl border border-emerald-900/35 bg-emerald-950/25 px-4 py-3 text-center text-sm font-semibold text-emerald-50 hover:bg-emerald-950/40 disabled:opacity-50"
+                        disabled={suggestControlsDisabled}
+                        onClick={() => draftImportFileInputRef.current?.click()}
+                      >
+                        {RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="recipient-intake-mode-paste-revised"
+                        className="min-h-[48px] w-full rounded-xl border border-slate-600 bg-slate-900/50 px-4 py-3 text-center text-sm font-semibold text-slate-100 hover:bg-slate-900/70 disabled:opacity-50"
+                        disabled={suggestControlsDisabled}
+                        onClick={() => {
+                          setRevisedSubmode("paste");
+                          setRevisedIntakePhase("editing");
+                          setDraftImportError(null);
+                          setRecipientPreview(null);
+                          setRecipientRevisePreviewError(null);
+                          setError(null);
+                        }}
+                      >
+                        {RECIPIENT_PASTE_REVISED_PRIMARY_LABEL}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="recipient-intake-mode-edit-draft"
+                        className="w-full pt-1 text-center text-xs font-medium text-sky-400/95 underline decoration-sky-800/50 underline-offset-2 hover:text-sky-200"
+                        disabled={suggestControlsDisabled}
+                        onClick={() => {
+                          setDraftImportError(null);
+                          if (revisedSubmode !== "edit") {
+                            setExternalAiPaste(directCompareDefaultRef.current);
+                          }
+                          setRevisedSubmode("edit");
+                          setRevisedIntakePhase("editing");
+                          setRecipientPreview(null);
+                          setRecipientRevisePreviewError(null);
+                          setError(null);
+                        }}
+                      >
+                        {RECIPIENT_EDIT_INSIDE_LAWDOG}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                  {RECIPIENT_REVISED_PANEL_SUB.trim() ? (
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
+                      <p className="mt-1 text-xs leading-snug text-slate-400">{RECIPIENT_REVISED_PANEL_SUB}</p>
+                    </div>
+                  ) : null}
 
                   {revisedSubmode === "paste" ? (
                 <div className="space-y-2">
@@ -3106,6 +3114,8 @@ export function AgreementRecipientReview({
                   />
                 </div>
               )}
+                    </>
+                  )}
                 </div>
               ) : null}
 
@@ -3141,12 +3151,15 @@ export function AgreementRecipientReview({
                 </div>
               ) : null}
 
-              {workflowMode === "revised" && (revisedSubmode === "paste" || revisedSubmode === "edit") && !externalAiPaste.trim() ? (
+              {workflowMode === "revised" &&
+              revisedIntakePhase === "editing" &&
+              (revisedSubmode === "paste" || revisedSubmode === "edit") &&
+              !externalAiPaste.trim() ? (
                 <p className="text-xs leading-snug text-slate-500" data-testid="recipient-paste-empty-hint">
-                  Add revised text above, import a file, or switch to Quick change.
+                  Add your revised text, import a file, or try a small tweak instead.
                 </p>
               ) : null}
-              <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-start sm:gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                 <button
                   ref={previewChangesButtonRef}
                   type="button"
@@ -3158,9 +3171,21 @@ export function AgreementRecipientReview({
                   {previewing
                     ? "Working…"
                     : workflowMode === "quick"
-                      ? "Preview change"
-                      : "Compare versions"}
+                      ? RECIPIENT_BTN_PREVIEW_CHANGES
+                      : RECIPIENT_BTN_REVIEW_CHANGES}
                 </button>
+                {workflowMode === "revised" && revisedIntakePhase === "editing" && draft && !recipientPreview ? (
+                  <RecipientAgreementReadPdfExport
+                    bare
+                    suppressBareDisclosure
+                    agreementId={agreementId}
+                    agreementTitle={draft?.title}
+                    readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+                    scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+                    pdfDownloadButtonLabel="Download original"
+                    pdfDownloadButtonTestId="recipient-download-original-pdf"
+                  />
+                ) : null}
               </div>
               {recipientRevisePreviewError ? (
                 <p
@@ -3173,6 +3198,8 @@ export function AgreementRecipientReview({
               ) : null}
 
               {comparePanel}
+                </>
+              )}
                 </>
               )}
             </div>
@@ -3203,7 +3230,7 @@ export function AgreementRecipientReview({
             disabled={saving || !previewDiff?.canSubmit}
             onClick={() => openSendSuggestedEditsModal()}
           >
-            Send revision
+            {RECIPIENT_BTN_SEND_CHANGES}
           </button>
           <button
             type="button"
@@ -3211,7 +3238,7 @@ export function AgreementRecipientReview({
             disabled={saving || previewing}
             onClick={() => discardPreview()}
           >
-            Keep editing
+            {RECIPIENT_BTN_CONTINUE_EDITING}
           </button>
           <button
             type="button"
@@ -3222,7 +3249,7 @@ export function AgreementRecipientReview({
               document.querySelector<HTMLButtonElement>('[data-testid="recipient-preview-download-redline-pdf"]')?.click();
             }}
           >
-            Download redline
+            {RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF}
           </button>
         </div>
       ) : null}
@@ -3244,11 +3271,10 @@ export function AgreementRecipientReview({
             onMouseDown={(e) => e.stopPropagation()}
           >
             <h2 id="recipient-send-suggested-edits-modal-title" className="text-lg font-semibold text-slate-100">
-              Send revision?
+              {RECIPIENT_BTN_SEND_CHANGES}?
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
-              These go to the agreement owner. Nothing changes until they accept. Revisions do not change the original
-              until accepted. {PRODUCT_NOT_LAW_FIRM}
+              These go to the agreement owner. Nothing changes until they accept. {PRODUCT_NOT_LAW_FIRM}
             </p>
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
@@ -3258,7 +3284,7 @@ export function AgreementRecipientReview({
                 disabled={saving}
                 onClick={() => setSendSuggestedEditsModalOpen(false)}
               >
-                Keep editing
+                {RECIPIENT_BTN_CONTINUE_EDITING}
               </button>
               <button
                 type="button"
@@ -3267,7 +3293,7 @@ export function AgreementRecipientReview({
                 disabled={saving}
                 onClick={() => void performRecipientSuggestedEditsSubmit()}
               >
-                {saving ? "Sending…" : "Send revision"}
+                {saving ? "Sending…" : RECIPIENT_BTN_SEND_CHANGES}
               </button>
             </div>
           </div>

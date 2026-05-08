@@ -28,8 +28,8 @@ describe("universal review intake copy", () => {
   it("exposes the intended section title and three review paths", () => {
     expect(BRING_BACK_SUGGESTED_EDITS_TITLE).toBe("Request changes");
     expect(UNIVERSAL_REVIEW_INTRO).toContain("Nothing changes until the sender accepts");
-    expect(NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE).toBe("Nothing changes until the sender accepts.");
-    expect(MODE_SUGGEST_PLAIN_ENGLISH).toBe("Quick change");
+    expect(NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE).toBe("Nothing changes unless the sender accepts.");
+    expect(MODE_SUGGEST_PLAIN_ENGLISH).toBe("Small tweak");
     expect(MODE_PASTE_REVISED_DRAFT).toBe("Paste revised text");
     expect(MODE_UPLOAD_FILE).toBe("Upload file");
     expect(UPLOAD_FILE_COMPARISON_COMING_SOON).toBe("Upload comparison coming soon.");

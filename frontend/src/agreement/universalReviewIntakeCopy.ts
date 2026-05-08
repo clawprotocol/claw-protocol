@@ -17,19 +17,19 @@ export const BRING_BACK_SUGGESTED_EDITS_TITLE = "Request changes";
 export const UNIVERSAL_REVIEW_INTRO =
   "Read the draft, tweak it, preview a redline, then send suggestions. Nothing changes until the sender accepts.";
 
-export const MODE_SUGGEST_PLAIN_ENGLISH = "Quick change";
+export const MODE_SUGGEST_PLAIN_ENGLISH = "Small tweak";
 export const MODE_PASTE_REVISED_DRAFT = "Paste revised text";
 export const MODE_EDIT_DRAFT = "Edit directly";
 export const EDIT_DRAFT_TITLE = "Edit draft";
 export const EDIT_DRAFT_HELPER =
   "Make edits here. We'll show a redline before anything is sent.";
-export const EDIT_DRAFT_PREVIEW_HINT = "Compare versions after editing";
+export const EDIT_DRAFT_PREVIEW_HINT = "Review changes after editing";
 export const MODE_UPLOAD_FILE = "Upload file";
 export const UPLOAD_FILE_COMPARISON_COMING_SOON = "Upload comparison coming soon.";
 
 /** Shown under the universal intro in recipient review (legacy scan set / tests). */
 export const NOTHING_CHANGES_UNTIL_OWNER_ACCEPTS_LINE =
-  "Nothing changes until the sender accepts.";
+  "Nothing changes unless the sender accepts.";
 
 export const REVIEWER_OWNER_ACCEPTS_LINE = "The owner reviews and accepts changes.";
 export const REVIEWER_NOT_AUTOMATIC_LINE = "Nothing here changes the agreement automatically.";

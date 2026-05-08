@@ -84,11 +84,9 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
     for (const root of [landingDesktop!, landingMobile!]) {
       expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.reviewAgreement })).toBeTruthy();
       expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.requestChanges })).toBeTruthy();
-      expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.looksGood })).toBeTruthy();
+      expect(within(root).getByRole("button", { name: new RegExp(`^${recipientPartyReviewCopy.looksGood}`, "i") })).toBeTruthy();
       expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.notParticipating })).toBeTruthy();
     }
-
-    expect(screen.getAllByText(recipientPartyReviewCopy.assuranceLine).length).toBeGreaterThanOrEqual(1);
 
     await userEvent.click(within(landingDesktop!).getByRole("button", { name: recipientPartyReviewCopy.reviewAgreement }));
 
@@ -98,15 +96,15 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
 
     const docActions = screen.getByTestId("recipient-party-review-actions");
     expect(docActions.getAttribute("data-placement")).toBe("document-read");
-    expect(within(docActions).getByText(recipientPartyReviewCopy.assuranceLine)).toBeTruthy();
+    expect(within(docActions).getByText(recipientPartyReviewCopy.decisionMenuSubcopy)).toBeTruthy();
     expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.reviewAgain })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.sendBackRevised })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.askQuickChange })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.downloadOriginal })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.looksGood })).toBeTruthy();
-    expect(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.notParticipating })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: new RegExp(recipientPartyReviewCopy.sendBackRevised, "i") })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: new RegExp(recipientPartyReviewCopy.askQuickChange, "i") })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: new RegExp(recipientPartyReviewCopy.downloadOriginal, "i") })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: new RegExp(`^${recipientPartyReviewCopy.looksGood}`, "i") })).toBeTruthy();
+    expect(within(docActions).getByRole("button", { name: /not participating/i })).toBeTruthy();
 
-    await userEvent.click(within(docActions).getByRole("button", { name: recipientPartyReviewCopy.askQuickChange }));
+    await userEvent.click(within(docActions).getByTestId("recipient-ask-quick-change"));
     expect(await screen.findByTestId("recipient-revision-voice-field")).toBeTruthy();
   });
 
@@ -148,7 +146,7 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
       .getAllByTestId("recipient-party-review-actions")
       .find((el) => el.getAttribute("data-placement") === "landing")!;
     await userEvent.click(within(landingDesktop).getByRole("button", { name: recipientPartyReviewCopy.requestChanges }));
-    await userEvent.click((await screen.findAllByTestId("recipient-workflow-quick"))[0]!);
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     expect((await screen.findAllByTestId("recipient-revision-voice-field")).length).toBeGreaterThan(0);
   });
 });

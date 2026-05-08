@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
+import { RECIPIENT_BTN_SEND_CHANGES, RECIPIENT_PREVIEW_TRUST_SUBCOPY } from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -96,7 +97,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");
@@ -108,20 +109,13 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
     expect(panel.textContent).not.toMatch(/\bCLAW\b/i);
-
-    const legend = within(panel).getByTestId("recipient-suggested-changes-what-this-means");
-    expect(legend.textContent).toContain("Green");
-    expect(legend.textContent).toContain("added");
-    expect(legend.textContent).toContain("Red");
-    expect(legend.textContent).toContain("removed");
-    expect(legend.textContent).not.toMatch(/suggestions only/i);
-    expect(legend.textContent).not.toContain("Suggestions only");
+    expect(panel.textContent).toContain(RECIPIENT_PREVIEW_TRUST_SUBCOPY);
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Send revision?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: new RegExp(`${RECIPIENT_BTN_SEND_CHANGES}\\?`, "i") })).toBeTruthy();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
       "These go to the agreement owner.",
     );

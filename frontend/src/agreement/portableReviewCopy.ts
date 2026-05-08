@@ -46,28 +46,59 @@ export const RECIPIENT_COPY_EXPORT_PREVIEW_LINE =
 export const RECIPIENT_DRAFT_IMPORT_READ_ERROR =
   "Couldn't read that file. Try plain text for now.";
 
-/** Single trust line for recipient revise workspace (shown once at top). */
+/** Trust line for previews / decision menus (compose surface avoids repeating it). */
 export const RECIPIENT_WORKSPACE_TRUST_LINE = "Nothing changes until the sender accepts.";
 
-/** Primary workflow card — full-document compare + redline (recipient review). */
+/** Top compose workspace (recipient revise tab). */
+export const RECIPIENT_WORKSPACE_HEADLINE = "Suggest changes before anything is signed.";
+export const RECIPIENT_WORKSPACE_SUBCOPY = "Choose the easiest way to respond.";
+export const RECIPIENT_CARD_SMALL_TWEAK_TITLE = "Small tweak";
+export const RECIPIENT_CARD_SMALL_TWEAK_BODY = "Ask for a few edits without rewriting the document.";
+export const RECIPIENT_CARD_SMALL_TWEAK_CTA = "Request small changes";
+export const RECIPIENT_CARD_BIGGER_REWRITE_TITLE = "Bigger rewrite";
+export const RECIPIENT_CARD_BIGGER_REWRITE_BODY =
+  "Upload or paste an edited version and LawDog will compare it.";
+export const RECIPIENT_CARD_BIGGER_REWRITE_CTA = "Upload revised draft";
+
+/** Primary workflow — full-document compare + redline (recipient review). */
 export const RECIPIENT_SEND_BACK_REVISED_TITLE = "Send back a revised version";
 export const RECIPIENT_SEND_BACK_REVISED_HELPER =
-  "Used AI, Word, Google Docs, or counsel? Upload or paste the revised draft and LawDog will compare it with the original.";
-/** Panel subcopy when revised-version mode is active (progressive disclosure). */
-export const RECIPIENT_REVISED_PANEL_SUB =
-  "Upload, paste, or edit your revised draft. LawDog will compare it.";
+  "Upload or paste an edited draft. LawDog will compare it with what you received.";
+/** Bigger rewrite — step 1 (method only). */
+export const RECIPIENT_REVISE_METHOD_HEADLINE = "How do you want to revise it?";
+/** Panel subcopy after method chosen (often empty — progressive disclosure). */
+export const RECIPIENT_REVISED_PANEL_SUB = "";
 
-/** Secondary workflow — instruction-only / small amendment pipeline. */
-export const RECIPIENT_QUICK_CHANGE_SECTION_TITLE = "Ask for a quick change";
+/** Small tweak — instruction-only pipeline (mirrors legacy universal intake labels). */
+export const RECIPIENT_QUICK_CHANGE_SECTION_TITLE = RECIPIENT_CARD_SMALL_TWEAK_TITLE;
 export const RECIPIENT_QUICK_CHANGE_SECTION_HELPER =
-  "Best for small edits like dates, payment timing, scope, or venue.";
-/** Progressive-disclosure quick-change panel. */
-export const RECIPIENT_QUICK_PANEL_SUB = "Tell the sender what you want changed.";
+  "Best for payment timing, dates, wording, or scope edits.";
+/** @deprecated Small-tweak panel uses RECIPIENT_SMALL_TWEAK_HELPER only. */
+export const RECIPIENT_QUICK_PANEL_SUB = "";
+export const RECIPIENT_SMALL_TWEAK_HELPER = RECIPIENT_QUICK_CHANGE_SECTION_HELPER;
 export const RECIPIENT_QUICK_REQUEST_LABEL = "Your request";
 export const RECIPIENT_QUICK_REQUEST_PLACEHOLDER =
-  "Example: Make payment Net 30 and add a 15-day late-payment pause.";
-/** Switch from quick-change to full-draft compare. */
-export const RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK = "Need to upload a revised draft instead?";
+  "Example: Change payment terms from Net 15 to Net 30.";
+export const RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK = "Need to upload a rewritten draft instead?";
+
+export const RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL = "Upload revised draft";
+export const RECIPIENT_PASTE_REVISED_PRIMARY_LABEL = "Paste revised text";
+export const RECIPIENT_EDIT_INSIDE_LAWDOG = "Edit inside LawDog";
+
+/** Preview / redline summary. */
+export const RECIPIENT_PREVIEW_SUMMARY_HEADLINE = "Review suggested changes";
+export const RECIPIENT_PREVIEW_TRUST_SUBCOPY = RECIPIENT_WORKSPACE_TRUST_LINE;
+
+/** Assisted compose + preview toolbars. */
+export const RECIPIENT_BTN_PREVIEW_CHANGES = "Preview changes";
+export const RECIPIENT_BTN_REVIEW_CHANGES = "Review changes";
+export const RECIPIENT_BTN_SEND_CHANGES = "Send changes";
+export const RECIPIENT_BTN_CONTINUE_EDITING = "Continue editing";
+export const RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF = "Download redline PDF";
+
+/** Assisted vs manual compare. */
+export const RECIPIENT_ASSISTED_MODE_LABEL = RECIPIENT_BTN_REVIEW_CHANGES;
+export const RECIPIENT_DIRECT_COMPARE_LABEL = "Manual compare";
 
 /** Visible “work elsewhere” card (download-first professional workflow). */
 export const RECIPIENT_WORK_ELSEWHERE_TITLE = "Work somewhere else";
@@ -77,6 +108,7 @@ export const RECIPIENT_WORK_ELSEWHERE_BODY =
 export const RECIPIENT_REVIEW_ELSEWHERE_TITLE = RECIPIENT_WORK_ELSEWHERE_TITLE;
 /** @deprecated Use RECIPIENT_WORK_ELSEWHERE_* */
 export const RECIPIENT_REVIEW_ELSEWHERE_BODY = RECIPIENT_WORK_ELSEWHERE_BODY;
+/** File import — plain text / Markdown. */
 export const RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL = "Upload revised .txt / .md";
 
 /** Owner workspace: same portable flow, but apply/discard is local. */

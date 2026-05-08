@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 import { computeRecipientDraftTextareaMaxPx } from "../hooks/useRecipientDraftTextareaMaxPx";
-import { RECIPIENT_WORKSPACE_TRUST_LINE } from "./portableReviewCopy";
+import { RECIPIENT_REVISE_METHOD_HEADLINE } from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -79,8 +79,8 @@ describe("AgreementRecipientReview revise workflow routing", () => {
       expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
     });
     expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
-    expect(screen.getByRole("tablist", { name: "Revision mode" })).toBeTruthy();
-    expect(screen.getAllByText(RECIPIENT_WORKSPACE_TRUST_LINE).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("tablist", { name: "How you respond" })).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_REVISE_METHOD_HEADLINE)).toBeTruthy();
 
   });
 
@@ -113,7 +113,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     });
     await userEvent.click(screen.getAllByRole("button", { name: /Send back a revised version/i })[0]!);
     await userEvent.click(
-      within(screen.getAllByRole("tablist", { name: "Revision mode" })[0]!).getByRole("button", { name: /Quick change/i }),
+      within(screen.getAllByRole("tablist", { name: "How you respond" })[0]!).getByRole("button", { name: /Small tweak/i }),
     );
 
     await waitFor(() => {
@@ -158,7 +158,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
   });
 
-  it("quick change uses instruction API; compare button is Preview change", async () => {
+  it("quick change uses instruction API; compare button is Preview changes", async () => {
     const agreementId = "ag_quick_instr";
     const draft = makeDraft(agreementId);
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
@@ -200,7 +200,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/revise"))).toBe(true);
     });
-    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Preview change/i);
+    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Preview changes/i);
   });
 
   it("whole-document paste compare does not call /revise", async () => {
@@ -282,7 +282,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
       expect(screen.getAllByTestId("recipient-quick-change-full-doc-hint")[0]).toBeTruthy();
     });
     const previewBtn = screen.getByTestId("recipient-compare-versions-button") as HTMLButtonElement;
-    expect(previewBtn.textContent).toMatch(/Preview change/i);
+    expect(previewBtn.textContent).toMatch(/Preview changes/i);
     expect(previewBtn.disabled).toBe(true);
   });
 

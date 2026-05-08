@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
+import { RECIPIENT_PREVIEW_SUMMARY_HEADLINE, RECIPIENT_PREVIEW_TRUST_SUBCOPY } from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -91,7 +92,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");
@@ -109,15 +110,18 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     expect(ins).not.toMatch(/^0\s+additions?$/i);
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
-    expect(within(panel).getByTestId("recipient-suggested-changes-what-this-means")).toBeTruthy();
+    expect(within(panel).getByTestId("recipient-preview-summary-heading").textContent).toBe(
+      RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
+    );
+    expect(within(panel).getByText(RECIPIENT_PREVIEW_TRUST_SUBCOPY)).toBeTruthy();
 
     const legalRoot = screen.getByTestId("recipient-legal-redline-document");
     const insertEl = legalRoot.querySelector('[data-redline="insert"]');
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);
 
-    expect(within(panel).getByRole("button", { name: /Send revision$/i })).toBeTruthy();
-    expect(within(panel).getByRole("button", { name: /Keep editing/i })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: /Send changes$/i })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: /Continue editing/i })).toBeTruthy();
   });
 });
 
@@ -200,7 +204,7 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Net 30 and pause work after 15 days late" },
@@ -335,7 +339,7 @@ describe("AgreementRecipientReview payment inline placement failure", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Contract update request only." },
@@ -431,7 +435,7 @@ describe("AgreementRecipientReview narrow payment redline QA (party/signature/fo
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, {
       target: { value: "Net 30 and pause work after 15 days late" },

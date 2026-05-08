@@ -99,7 +99,7 @@ describe("AgreementRecipientReview redline chrome", () => {
     });
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment terms to Net 30");
@@ -127,7 +127,7 @@ describe("AgreementRecipientReview redline chrome", () => {
     expect(screen.getByTestId("recipient-copy-redline-summary")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download original PDF/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download proposed PDF/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Download redline PDF/i })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Download redline PDF/i }).length).toBeGreaterThanOrEqual(1);
     expect((screen.getByTestId("recipient-preview-download-original-pdf") as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId("recipient-preview-download-proposed-pdf") as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId("recipient-preview-download-redline-pdf") as HTMLButtonElement).disabled).toBe(false);

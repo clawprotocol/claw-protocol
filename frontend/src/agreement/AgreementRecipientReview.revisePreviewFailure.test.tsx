@@ -101,7 +101,7 @@ describe("AgreementRecipientReview revise preview failure", () => {
 
     await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
 
-    await userEvent.click(await screen.findByTestId("recipient-workflow-quick"));
+    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     const note = "Change payment terms to Net 30";
     fireEvent.change(instruction, { target: { value: note } });
