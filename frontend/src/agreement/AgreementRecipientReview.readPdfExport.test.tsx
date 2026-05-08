@@ -1,10 +1,12 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 import {
+  RECIPIENT_BTN_CONTINUE_EDITING,
+  RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE,
   RECIPIENT_WANT_COPY_BODY,
   RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
   RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
@@ -102,7 +104,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     expect(block.toLowerCase()).not.toMatch(/\bpost\b/);
   });
 
-  it("want-copy upload opens revised paste with imported text (full recipient surface)", async () => {
+  it("want-copy upload runs auto-compare and lands on suggested-changes panel (full recipient surface)", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -142,18 +144,73 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     const file = new File(["Imported revised text"], "rev.txt", { type: "text/plain" });
     await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
 
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-revised-upload-analyzing")).toBeTruthy();
+    });
+
     await waitFor(
       () => {
-        const ta = screen.getByTestId("recipient-revised-draft-paste") as HTMLTextAreaElement;
-        expect(ta.value).toBe("Imported revised text");
+        expect(screen.getByTestId("recipient-suggested-changes-panel")).toBeTruthy();
       },
-      { timeout: 10_000 },
+      { timeout: 15_000 },
+    );
+
+    await user.click(
+      within(screen.getByTestId("recipient-suggested-changes-panel")).getByRole("button", {
+        name: RECIPIENT_BTN_CONTINUE_EDITING,
+      }),
+    );
+    await waitFor(() => {
+      const ta = screen.getByTestId("recipient-revised-draft-paste") as HTMLTextAreaElement;
+      expect(ta.value).toBe("Imported revised text");
+    });
+  }, 25_000);
+
+  it("want-copy upload separates Reviewer Notes and shows callout on compare panel", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
+        return jsonResponse({ draft });
+      }
+      if (url.includes("/render")) {
+        return jsonResponse({ rendered_html: "<p>Agreement body</p>" });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview agreementId={agreementId} recipientAccessToken="tok_r" />
+      </AccessProvider>,
     );
 
     await waitFor(() => {
-      const compareBtn = screen.getByTestId("recipient-compare-versions-button") as HTMLButtonElement;
-      expect(compareBtn.disabled).toBe(false);
-      expect(compareBtn.textContent).toMatch(/Compare drafts/i);
+      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-  }, 12_000);
+
+    await user.click(screen.getByTestId("recipient-want-copy-upload-revised"));
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy();
+    });
+
+    const agreementLike = "y".repeat(2000);
+    const file = new File([`${agreementLike}\n\nReviewer Notes\nPrefer Net 45.`], "rev.txt", { type: "text/plain" });
+    await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("recipient-suggested-changes-panel")).toBeTruthy();
+      },
+      { timeout: 15_000 },
+    );
+
+    expect(screen.getByText(RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE)).toBeTruthy();
+    await user.click(screen.getByTestId("recipient-reviewer-notes-accordion-toggle"));
+    expect(screen.getByTestId("recipient-reviewer-notes-accordion-body").textContent).toMatch(/Prefer Net 45/i);
+  }, 25_000);
 });

@@ -122,6 +122,8 @@ import {
   RECIPIENT_EDIT_INSIDE_LAWDOG,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
+  RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL,
+  RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE,
   RECIPIENT_PASTE_REVISED_PRIMARY_LABEL,
   RECIPIENT_QUICK_REQUEST_LABEL,
   RECIPIENT_QUICK_REQUEST_PLACEHOLDER,
@@ -137,6 +139,9 @@ import {
   buildRecipientRevisionText,
 } from "./portableReviewCopy";
 import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
+import { RecipientRevisedDraftAnalyzingCard } from "./recipientRevisedDraftAnalyzingCard";
+import { splitReviewerNotesFromRevisedDraft } from "./recipientRevisedDraftReviewerNotes";
+import { REVISED_UPLOAD_ANALYZING_MIN_MS } from "./recipientRevisedDraftUploadFlow";
 import { renderAgreementDraftHtmlLikeBackend, purposeLooksLikeFullAgreementTextForRender } from "./recipientAgreementDraftHtmlRender";
 import {
   RECIPIENT_COMPARE_FAILED_FALLBACK,
@@ -343,6 +348,16 @@ type RecipientPreview = {
   postureAtPreview: NegotiationPosture;
   suggestionUsedAtPreview: boolean;
   routingKind: "quick_change" | "whole_document";
+  /** Heuristic split: commentary for the sender, excluded from agreement body compare. */
+  separatedReviewerNotesForUi?: string;
+};
+
+type RecipientWholeDocPreviewOpts = {
+  bodyPlain?: string;
+  instructionPlain?: string;
+  separatedReviewerNotesForUi?: string | null;
+  /** Upload path: parent shows analyzing UI; do not toggle the generic previewing spinner. */
+  importPipeline?: boolean;
 };
 
 /** Stable copy for tests and recipient Pro redline submit success. */
@@ -429,6 +444,8 @@ export function AgreementRecipientReview({
   const [revisedIntakePhase, setRevisedIntakePhase] = useState<"pick-method" | "editing">("editing");
   const [revisedSubmode, setRevisedSubmode] = useState<"paste" | "edit">("paste");
   const [draftImportError, setDraftImportError] = useState<string | null>(null);
+  const [revisedUploadAnalyzing, setRevisedUploadAnalyzing] = useState(false);
+  const [reviewerNotesAccordionOpen, setReviewerNotesAccordionOpen] = useState(false);
   const [proRedlineSuggestText, setProRedlineSuggestText] = useState("");
   const [proRedlineSuggestBusy, setProRedlineSuggestBusy] = useState(false);
   const [proRedlineSuggestErr, setProRedlineSuggestErr] = useState<string | null>(null);
@@ -473,20 +490,15 @@ export function AgreementRecipientReview({
   useAutosizeTextarea(proRedlineSuggestTextareaRef, proRedlineSuggestText, { minPx: 112, maxPx: 440 });
   const access = useAccess();
 
-  const applyImportedRevisedDraftText = useCallback((text: string) => {
-    setExternalAiPaste(text);
-    setWorkflowMode("revised");
-    setRevisedSubmode("paste");
-    setRevisedIntakePhase("editing");
-    setRecipientPreview(null);
-    setRecipientRevisePreviewError(null);
-    window.requestAnimationFrame(() => {
-      const ta = externalPasteTextareaRef.current;
-      if (!ta) return;
-      ta.scrollTop = 0;
-      ta.focus({ preventScroll: true });
-    });
-  }, []);
+  /** Latest whole-doc preview runner (assigned after function is defined each render). */
+  const previewWholeDocumentRevisionRef = useRef<
+    ((opts?: RecipientWholeDocPreviewOpts) => Promise<boolean>) | null
+  >(null);
+  /** Import flow: preview is computed but committed after the analyzing minimum delay. */
+  const pendingImportRecipientPreviewRef = useRef<RecipientPreview | null>(null);
+  const runImportedRevisedAutoCompareRef = useRef<
+    ((fullText: string, opts?: { scrollToSummary?: boolean }) => Promise<void>) | null
+  >(null);
 
   const onDraftImportFileSelected = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -501,13 +513,13 @@ export function AgreementRecipientReview({
           return;
         }
         try {
-          applyImportedRevisedDraftText(result.text);
+          await runImportedRevisedAutoCompareRef.current?.(result.text, { scrollToSummary: false });
         } catch {
           setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
         }
       })();
     },
-    [applyImportedRevisedDraftText],
+    [],
   );
 
   const scrollAndFocusSuggestPanel = useCallback(() => {
@@ -537,16 +549,18 @@ export function AgreementRecipientReview({
     setRecipientPreview(null);
     setRecipientRevisePreviewError(null);
     setDraftImportError(null);
+    setRevisedUploadAnalyzing(false);
+    pendingImportRecipientPreviewRef.current = null;
     setError(null);
   }, [flowPhase]);
 
-  const onWantCopyRevisedImported = useCallback(
-    (text: string) => {
-      applyImportedRevisedDraftText(text);
-      scrollAndFocusSuggestPanel();
-    },
-    [applyImportedRevisedDraftText, scrollAndFocusSuggestPanel],
-  );
+  const onWantCopyRevisedImported = useCallback((text: string) => {
+    void runImportedRevisedAutoCompareRef.current?.(text, { scrollToSummary: true });
+  }, []);
+
+  useEffect(() => {
+    setReviewerNotesAccordionOpen(false);
+  }, [recipientPreview?.separatedReviewerNotesForUi]);
 
   useEffect(() => {
     reviewerViewLoggedRef.current = false;
@@ -1189,6 +1203,7 @@ export function AgreementRecipientReview({
     Boolean(revisionPayload.text) &&
     !previewing &&
     !saving &&
+    !revisedUploadAnalyzing &&
     (workflowMode === "revised"
       ? Boolean(externalAiPaste.trim())
       : Boolean(instruction.trim()) &&
@@ -1328,23 +1343,26 @@ export function AgreementRecipientReview({
     }
   }
 
-  async function previewWholeDocumentRevision() {
+  async function previewWholeDocumentRevision(opts?: RecipientWholeDocPreviewOpts): Promise<boolean> {
     if (needsPersonalizedLink) {
       setError("Use the personal review link from the sender (it includes your participant id).");
-      return;
+      return false;
     }
     if (bundle && isSigningLockActive(bundle)) {
       setError("Review is closed on this agreement — you can still read the document.");
-      return;
+      return false;
     }
-    const paste = externalAiPaste.trim();
-    if (!paste || !draft || previewing) return;
+    const paste = (opts?.bodyPlain ?? externalAiPaste).trim();
+    const instCombined = (opts?.instructionPlain ?? instruction).trim();
+    if (!paste || !draft) return false;
+    if (!opts?.importPipeline && previewing) return false;
     const revGate = access.check("revision_preview");
     if (!revGate.allowed) {
       setError(revGate.message || "Revision preview limit reached.");
-      return;
+      return false;
     }
-    setPreviewing(true);
+    const showGenericPreviewSpinner = !opts?.importPipeline;
+    if (showGenericPreviewSpinner) setPreviewing(true);
     setError(null);
     setRecipientRevisePreviewError(null);
     try {
@@ -1368,7 +1386,7 @@ export function AgreementRecipientReview({
       const proposedDraft = cloneDraftForRecipientPreview(draft);
       proposedDraft.purpose = paste;
       const proposedHtml = renderAgreementDraftHtmlLikeBackend(proposedDraft);
-      const revisionText = buildRecipientRevisionText("", paste).text;
+      const revisionText = buildRecipientRevisionText(instCombined, paste).text;
       const integrity = assessRecipientPreviewDiff(baselineDraft, proposedDraft, baselineHtml, proposedHtml, {
         recipientInstructionPlain: revisionText.trim(),
       });
@@ -1376,10 +1394,19 @@ export function AgreementRecipientReview({
         setRecipientRevisePreviewError(null);
         setError(RECIPIENT_COMPARE_FAILED_FALLBACK);
         setRecipientPreview(null);
-        return;
+        pendingImportRecipientPreviewRef.current = null;
+        return false;
       }
+      if (opts?.bodyPlain !== undefined) {
+        setExternalAiPaste(paste);
+        if (opts.instructionPlain !== undefined) setInstruction(opts.instructionPlain);
+      }
+      const notesUi =
+        opts?.separatedReviewerNotesForUi && opts.separatedReviewerNotesForUi.trim()
+          ? opts.separatedReviewerNotesForUi.trim()
+          : undefined;
       setRecipientRevisePreviewError(null);
-      setRecipientPreview({
+      const previewPayload: RecipientPreview = {
         baselineDraft,
         baselineHtml,
         proposedDraft,
@@ -1389,16 +1416,75 @@ export function AgreementRecipientReview({
         postureAtPreview: recipientPosture,
         suggestionUsedAtPreview: suggestionUsed,
         routingKind: "whole_document",
-      });
+        ...(notesUi ? { separatedReviewerNotesForUi: notesUi } : {}),
+      };
+      if (opts?.importPipeline) {
+        pendingImportRecipientPreviewRef.current = previewPayload;
+      } else {
+        setRecipientPreview(previewPayload);
+      }
       access.recordUsage("revision_previews");
+      return true;
     } catch (e: unknown) {
       recipientReviewDevWarn("[recipient-whole-doc-preview] failed", e);
       setRecipientRevisePreviewError(recipientRevisePreviewUserFacingError(e));
       setRecipientPreview(null);
+      pendingImportRecipientPreviewRef.current = null;
+      return false;
     } finally {
-      setPreviewing(false);
+      if (showGenericPreviewSpinner) setPreviewing(false);
     }
   }
+
+  previewWholeDocumentRevisionRef.current = previewWholeDocumentRevision;
+
+  runImportedRevisedAutoCompareRef.current = async (fullText: string, scrollOpts) => {
+    const trimmed = fullText.trim();
+    if (!trimmed) return;
+    setRevisedUploadAnalyzing(true);
+    setWorkflowMode("revised");
+    setRevisedSubmode("paste");
+    setRevisedIntakePhase("editing");
+    setRecipientPreview(null);
+    setRecipientRevisePreviewError(null);
+    setDraftImportError(null);
+    setError(null);
+    try {
+      await Promise.resolve();
+      const { agreementBody, reviewerNotes } = splitReviewerNotesFromRevisedDraft(trimmed);
+      const instCombined = [instruction.trim(), reviewerNotes || ""].filter(Boolean).join("\n\n");
+      const minVisible = new Promise<void>((resolve) => {
+        window.setTimeout(resolve, REVISED_UPLOAD_ANALYZING_MIN_MS);
+      });
+      const previewPromise =
+        previewWholeDocumentRevisionRef.current?.({
+          bodyPlain: agreementBody,
+          instructionPlain: instCombined,
+          separatedReviewerNotesForUi: reviewerNotes,
+          importPipeline: true,
+        }) ?? Promise.resolve(false);
+      const [previewOkRaw] = await Promise.all([previewPromise, minVisible]);
+      const previewOk = previewOkRaw === true;
+      if (previewOk && pendingImportRecipientPreviewRef.current) {
+        setRecipientPreview(pendingImportRecipientPreviewRef.current);
+        pendingImportRecipientPreviewRef.current = null;
+      } else if (!previewOk) {
+        pendingImportRecipientPreviewRef.current = null;
+      }
+      if (scrollOpts?.scrollToSummary && previewOk) {
+        window.requestAnimationFrame(() => {
+          window.setTimeout(() => {
+            previewSummaryHeadingRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            previewSummaryHeadingRef.current?.focus({ preventScroll: true });
+          }, 80);
+        });
+      }
+    } catch {
+      setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+    } finally {
+      setRevisedUploadAnalyzing(false);
+    }
+  };
 
   async function runRecipientComparePreview() {
     if (workflowMode === "quick") await previewQuickChange();
@@ -1505,7 +1591,9 @@ export function AgreementRecipientReview({
 
   function discardPreview() {
     setRecipientPreview(null);
+    pendingImportRecipientPreviewRef.current = null;
     setRecipientRevisePreviewError(null);
+    setRevisedUploadAnalyzing(false);
     window.requestAnimationFrame(() => {
       previewChangesButtonRef.current?.focus({ preventScroll: true });
     });
@@ -1589,6 +1677,33 @@ export function AgreementRecipientReview({
         </h2>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{RECIPIENT_PREVIEW_TRUST_SUBCOPY}</p>
         <p className="sr-only">{PRODUCT_NOT_LAW_FIRM}</p>
+        {recipientPreview.separatedReviewerNotesForUi ? (
+          <div
+            className="mt-3 rounded-lg border border-emerald-900/30 bg-emerald-950/20 px-3 py-2.5"
+            data-testid="recipient-reviewer-notes-callout"
+          >
+            <p className="text-[11px] font-semibold tracking-wide text-emerald-100/95">
+              {RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE}
+            </p>
+            <button
+              type="button"
+              data-testid="recipient-reviewer-notes-accordion-toggle"
+              className="mt-1.5 w-full rounded-md border border-emerald-800/35 bg-emerald-950/25 px-2 py-1.5 text-left text-xs font-medium text-emerald-50/95 hover:bg-emerald-950/40"
+              aria-expanded={reviewerNotesAccordionOpen}
+              onClick={() => setReviewerNotesAccordionOpen((v) => !v)}
+            >
+              {RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL}
+            </button>
+            {reviewerNotesAccordionOpen ? (
+              <pre
+                className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-slate-800/60 bg-slate-950/50 p-2 text-[11px] leading-relaxed text-slate-300"
+                data-testid="recipient-reviewer-notes-accordion-body"
+              >
+                {recipientPreview.separatedReviewerNotesForUi}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
         {participantPid ? (
           <p className="mt-2 text-[10px] leading-snug text-slate-500">
             Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
@@ -2452,7 +2567,11 @@ export function AgreementRecipientReview({
   })();
 
   const suggestControlsDisabled =
-    saving || previewing || hasPendingSuggestion || recipientSuggestedEditsSentAck;
+    saving ||
+    previewing ||
+    revisedUploadAnalyzing ||
+    hasPendingSuggestion ||
+    recipientSuggestedEditsSentAck;
 
   const recipientDraftBodyTextareaClass =
     "w-full min-h-[280px] max-w-full resize-y overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 sm:min-h-[420px]";
@@ -2791,6 +2910,8 @@ export function AgreementRecipientReview({
               setWorkspaceTab("read");
               setRecipientPreview(null);
               setRecipientRevisePreviewError(null);
+              setRevisedUploadAnalyzing(false);
+              pendingImportRecipientPreviewRef.current = null;
               setError(null);
               window.requestAnimationFrame(() => {
                 recipientReadDocAnchorRef.current?.focus({ preventScroll: true });
@@ -2904,6 +3025,7 @@ export function AgreementRecipientReview({
                       setDraftImportError(null);
                       setRecipientPreview(null);
                       setRecipientRevisePreviewError(null);
+                      setRevisedUploadAnalyzing(false);
                       setError(null);
                     }}
                   >
@@ -3043,21 +3165,25 @@ export function AgreementRecipientReview({
                     </div>
                   ) : (
                     <>
-                  {RECIPIENT_REVISED_PANEL_SUB.trim() ? (
+                  {!revisedUploadAnalyzing && RECIPIENT_REVISED_PANEL_SUB.trim() ? (
                     <div>
                       <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
                       <p className="mt-1 text-xs leading-snug text-slate-400">{RECIPIENT_REVISED_PANEL_SUB}</p>
                     </div>
                   ) : null}
 
+                  {!revisedUploadAnalyzing ? (
                   <p
                     className="text-[10px] leading-snug text-slate-500"
                     data-testid="recipient-revised-workspace-notes-hint"
                   >
                     {RECIPIENT_REVISED_WORKSPACE_NOTES_HINT}
                   </p>
+                  ) : null}
 
-                  {revisedSubmode === "paste" ? (
+                  {revisedUploadAnalyzing ? (
+                    <RecipientRevisedDraftAnalyzingCard />
+                  ) : revisedSubmode === "paste" ? (
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-200" htmlFor={externalPasteFieldId}>
                     {PORTABLE_REVIEW_PASTE_LABEL}
@@ -3207,6 +3333,7 @@ export function AgreementRecipientReview({
               {workflowMode === "revised" &&
               revisedIntakePhase === "editing" &&
               (revisedSubmode === "paste" || revisedSubmode === "edit") &&
+              !revisedUploadAnalyzing &&
               !externalAiPaste.trim() ? (
                 <p className="text-xs leading-snug text-slate-500" data-testid="recipient-paste-empty-hint">
                   Add your revised text, import a file, or try a small tweak instead.

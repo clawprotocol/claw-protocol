@@ -120,6 +120,20 @@ export const RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT = "Download original text";
 export const RECIPIENT_PREVIEW_SUMMARY_HEADLINE = "Review suggested changes";
 export const RECIPIENT_PREVIEW_TRUST_SUBCOPY = RECIPIENT_WORKSPACE_TRUST_LINE;
 
+/** Transitional copy after choosing an uploaded revised draft (PDF / TXT / Markdown). */
+export const RECIPIENT_REVISED_UPLOAD_ANALYZING_TITLE = "Analyzing revised draft…";
+export const RECIPIENT_REVISED_UPLOAD_ANALYZING_SUB =
+  "Comparing it with the original agreement.";
+export const RECIPIENT_REVISED_UPLOAD_ANALYZING_CHECKLIST = [
+  "Reading your revised draft",
+  "Detecting suggested changes",
+  "Preparing comparison",
+] as const;
+
+/** When heuristic split found commentary meant for the sender (not part of the agreement body). */
+export const RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE = "Reviewer notes included";
+export const RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL = "Why these changes were suggested";
+
 /** Assisted compose + preview toolbars. */
 export const RECIPIENT_BTN_PREVIEW_CHANGES = "Preview changes";
 /** Primary compare CTA in revised-draft flow (calls assisted redline). */
