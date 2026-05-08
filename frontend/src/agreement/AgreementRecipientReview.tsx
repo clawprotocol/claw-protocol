@@ -84,6 +84,11 @@ import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge"
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
 import { recipientExportBasenameFromTitle, recipientTextDownloadFilename } from "./recipientExportFilenames";
 import {
+  RECIPIENT_LANDING_INTRO_ONE_LINE,
+  RECIPIENT_PUBLIC_HERO_SUBTITLE,
+  RECIPIENT_PUBLIC_HERO_TITLE,
+  RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES,
+  RECIPIENT_REVIEW_TRUST_SECURE_ESIGN,
   RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE,
   RECIPIENT_SIGN_ONE_DONE_HEADLINE,
   RECIPIENT_SIGN_RECORD_SUBLINE,
@@ -145,7 +150,7 @@ import {
   PASTE_OPTIONAL_NOTE_LABEL,
 } from "./universalReviewIntakeCopy";
 import { RecipientAgreementReadPdfExport } from "./recipientAgreementReadPdfExport";
-import { RecipientPartyReviewActions, recipientPartyReviewCopy } from "./recipientReviewPartyActions";
+import { RecipientPartyReviewActions } from "./recipientReviewPartyActions";
 import { RecipientPreviewVersionsExport } from "./recipientPreviewVersionExport";
 
 const API_BASE = resolveApiBase();
@@ -215,11 +220,7 @@ function humanizeRecipientActionError(raw: string | undefined, fallback: string)
 }
 
 function recipientTrustCueStrip() {
-  const cues = [
-    "Mobile-friendly",
-    "Secure e-signing",
-    "Nothing changes until both sides confirm",
-  ];
+  const cues = [RECIPIENT_REVIEW_TRUST_SECURE_ESIGN, RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES];
   return (
     <ul className="mt-3 flex flex-wrap gap-2" aria-label="Trust cues">
       {cues.map((t) => (
@@ -236,29 +237,54 @@ function recipientTrustCueStrip() {
 
 function recipientAgreementSummaryCard(props: {
   agreementType: string;
-  sender: string;
   partiesLine: string;
-  nextStep: string;
+  sharedBy: string;
+  statusLabel: string;
 }) {
   const row = (label: string, value: string) => (
     <div className="min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-0.5 truncate text-xs text-slate-200" title={value}>
-        {value}
-      </div>
+      <div className="mt-0.5 text-xs leading-snug text-slate-200">{value}</div>
     </div>
   );
 
   return (
-    <div className="mt-4 rounded-lg border border-slate-700/70 bg-slate-950/35 px-3 py-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {row("Agreement type", props.agreementType)}
-        {row("Sender", props.sender)}
-        {row("Parties", props.partiesLine)}
-        {row("Next step", props.nextStep)}
+    <div
+      className="mt-4 rounded-xl border border-slate-800/60 bg-slate-950/25 px-4 py-3.5"
+      data-testid="recipient-summary-card"
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-8">
+        <div className="min-w-0 space-y-3">
+          {row("Agreement type", props.agreementType)}
+          {row("Parties", props.partiesLine)}
+        </div>
+        <div className="min-w-0 space-y-3">
+          {row("Shared by", props.sharedBy)}
+          {row("Status", props.statusLabel)}
+        </div>
       </div>
     </div>
   );
+}
+
+function recipientSummaryStatusLabel(input: {
+  viewerLike: boolean;
+  agreementFullyExecuted: boolean;
+  mySignatureDone: boolean;
+  signingReadyActive: boolean;
+  hasPendingSuggestion: boolean;
+  recipientApprovedInAudit: boolean;
+  approvedAck: boolean;
+  bundle: AgreementVersionBundle | null;
+}): string {
+  if (input.viewerLike) return "View only";
+  if (input.agreementFullyExecuted) return "Fully executed";
+  if (input.mySignatureDone) return "Signed";
+  if (input.signingReadyActive) return "Ready for signature";
+  if (input.hasPendingSuggestion) return "Edits sent";
+  if (input.recipientApprovedInAudit || input.approvedAck) return "Approved";
+  if (input.bundle?.reviewSentAt) return "Waiting for review";
+  return "Waiting for review";
 }
 
 function formatPartiesLine(parties: AgreementDraft["parties"], maxNames = 4): string {
@@ -268,7 +294,7 @@ function formatPartiesLine(parties: AgreementDraft["parties"], maxNames = 4): st
   if (names.length === 0) return "—";
   const shown = names.slice(0, maxNames);
   const extra = names.length > maxNames ? ` +${names.length - maxNames}` : "";
-  return `${shown.join(", ")}${extra}`;
+  return `${shown.join(" · ")}${extra}`;
 }
 
 export type AgreementRecipientEntry =
@@ -372,6 +398,8 @@ export function AgreementRecipientReview({
   const [previewing, setPreviewing] = useState(false);
   const [flowPhase, setFlowPhase] = useState<"landing" | "active" | "declined">("landing");
   const [workspaceTab, setWorkspaceTab] = useState<"read" | "revise">("read");
+  /** Full agreement HTML is hidden until the reviewer opens it (read tab). */
+  const [recipientDocExpanded, setRecipientDocExpanded] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approvedAck, setApprovedAck] = useState(false);
   const [bundle, setBundle] = useState<AgreementVersionBundle | null>(null);
@@ -1109,6 +1137,16 @@ export function AgreementRecipientReview({
   );
 
   useEffect(() => {
+    setRecipientDocExpanded(false);
+  }, [agreementId]);
+
+  useEffect(() => {
+    if (workspaceTab === "read") {
+      setRecipientDocExpanded(false);
+    }
+  }, [workspaceTab]);
+
+  useEffect(() => {
     void refresh();
   }, [refresh]);
 
@@ -1818,13 +1856,13 @@ export function AgreementRecipientReview({
     const inviterLineSign = (inviterDisplayNameOverride || "").trim() || senderNameSign;
     const agreementTypeSign = (draft.purpose || "").trim() || (draft.title || "").trim() || "Agreement";
     const partiesLineSign = formatPartiesLine(draft.parties);
-    const nextStepSign = signDone
-      ? "Your signature is recorded."
+    const signingCeremonyStatusLabel = signDone
+      ? "Signed"
       : ceremonyPhase === "signing"
-        ? "Recording your signature…"
+        ? "Signing…"
         : ceremonyPhase !== "ready"
-          ? "Finishing setup…"
-          : "Read the agreement, then sign when you’re ready.";
+          ? "Preparing"
+          : "Ready to sign";
 
     async function handleRecordSignature() {
       if (!draft) return;
@@ -1881,14 +1919,10 @@ export function AgreementRecipientReview({
           <div className="mx-auto max-w-3xl">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Agreement review</p>
-                <h1 className="mt-1 text-lg font-semibold tracking-tight text-white sm:text-xl">
-                  You&apos;ve been invited to review and sign an agreement
+                <h1 className="text-lg font-semibold tracking-tight text-white sm:text-xl">
+                  {RECIPIENT_PUBLIC_HERO_TITLE}
                 </h1>
-                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
-                  Please review the final terms below. When ready, sign securely on your phone. Nothing is final until
-                  you confirm.
-                </p>
+                <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
                 {recipientTrustCueStrip()}
               </div>
               {onClose ? (
@@ -1903,9 +1937,9 @@ export function AgreementRecipientReview({
             </div>
             {recipientAgreementSummaryCard({
               agreementType: agreementTypeSign,
-              sender: inviterLineSign,
               partiesLine: partiesLineSign,
-              nextStep: nextStepSign,
+              sharedBy: inviterLineSign,
+              statusLabel: signingCeremonyStatusLabel,
             })}
           </div>
         </header>
@@ -2074,12 +2108,6 @@ export function AgreementRecipientReview({
     const inviterLineLocked = (inviterDisplayNameOverride || "").trim() || senderNameLocked;
     const agreementTypeLocked = (draft.purpose || "").trim() || (draft.title || "").trim() || "Agreement";
     const partiesLineLocked = formatPartiesLine(draft.parties);
-    const nextStepLocked =
-      recipientLinkRole === "signer"
-        ? canSignerProceed
-          ? "Open signing when you’ve read the final version."
-          : "Resolve any open change requests with the sender before signing."
-        : "No signature needed from you on this link — read the final version for your records.";
     const signingHref = agreementSigningPath(agreementId, lockVid, undefined, participantPid || undefined);
 
     return (
@@ -2097,15 +2125,24 @@ export function AgreementRecipientReview({
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-4">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement review</p>
-            <p className="text-sm text-slate-300">Final version ready for signature (read-only)</p>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold tracking-tight text-slate-100">{RECIPIENT_PUBLIC_HERO_TITLE}</h1>
+            <p className="mt-1 max-w-xl text-sm text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
             {recipientTrustCueStrip()}
             {recipientAgreementSummaryCard({
               agreementType: agreementTypeLocked,
-              sender: inviterLineLocked,
               partiesLine: partiesLineLocked,
-              nextStep: nextStepLocked,
+              sharedBy: inviterLineLocked,
+              statusLabel: recipientSummaryStatusLabel({
+                viewerLike: false,
+                agreementFullyExecuted,
+                mySignatureDone,
+                signingReadyActive: true,
+                hasPendingSuggestion,
+                recipientApprovedInAudit,
+                approvedAck,
+                bundle,
+              }),
             })}
           </div>
           {onClose ? (
@@ -2164,56 +2201,37 @@ export function AgreementRecipientReview({
       !signingBlockedByProposalQueue;
     const agreementType = (draft.purpose || "").trim() || title;
     const partiesLine = formatPartiesLine(draft.parties);
-    const nextStepLanding = canSignFromHub
-      ? "Review the terms, then open signing when you’re ready."
-      : viewerLike
-        ? "Read the agreement — this link is view-only."
-        : signingReadyHub && recipientLinkRole === "signer" && signingBlockedByProposalQueue
-          ? "Resolve open change requests with the sender before signing."
-          : signingReadyHub
-            ? "Review the terms — signing opens when the sender finishes setup."
-            : recipientPartyReviewCopy.nextStepSummary;
-    const isPaidReviewerSurface =
-      entry.kind === "review" && recipientLinkRole === "reviewer" && !viewerLike;
+    const summaryStatusLanding = recipientSummaryStatusLabel({
+      viewerLike,
+      agreementFullyExecuted,
+      mySignatureDone,
+      signingReadyActive: signingReadyHub,
+      hasPendingSuggestion,
+      recipientApprovedInAudit,
+      approvedAck,
+      bundle,
+    });
     return (
-      <div className="vs01-agreement-review-inner space-y-5 p-6 pb-52 sm:pb-6">
+      <div className="vs01-agreement-review-inner space-y-4 px-5 pb-36 pt-6 sm:space-y-5 sm:px-6 sm:pb-8 sm:pt-8">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement review</p>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">
-              {isPaidReviewerSurface
-                ? "Review this agreement"
-                : "You've been invited to review an agreement"}
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-[1.65rem]">
+              {RECIPIENT_PUBLIC_HERO_TITLE}
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300">
-              {isPaidReviewerSurface
-                ? "Ask for edits before anyone signs."
-                : "Read the terms, request changes, or sign securely on your phone — nothing is final until you confirm."}
-            </p>
-            {isPaidReviewerSurface ? (
-              <p className="mt-2 max-w-2xl text-xs leading-relaxed text-slate-400">
-                Your suggestions do not change the original until the owner accepts them.
+            <p className="mt-1 max-w-lg text-sm leading-relaxed text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-300">{RECIPIENT_LANDING_INTRO_ONE_LINE}</p>
+            {viewerLike ? (
+              <p className="mt-2 text-xs text-slate-500">
+                This link is view-only — you can read but can&apos;t suggest edits.
               </p>
-            ) : (
-              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
-                {recipientPartyReviewCopy.assuranceLine}
-              </p>
-            )}
+            ) : null}
             {recipientTrustCueStrip()}
             {recipientAgreementSummaryCard({
               agreementType,
-              sender: inviterLine,
               partiesLine,
-              nextStep: nextStepLanding,
+              sharedBy: inviterLine,
+              statusLabel: summaryStatusLanding,
             })}
-            <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-              You&apos;re on the recipient link for this agreement — not the sender&apos;s private editing view.
-            </p>
-            {viewerLike ? (
-              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-                View-only access — you can read the agreement but can&apos;t suggest changes.
-              </p>
-            ) : null}
           </div>
           {onClose ? (
             <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
@@ -2412,8 +2430,11 @@ export function AgreementRecipientReview({
               data-testid="recipient-suggested-edits-back-to-agreement"
               onClick={() => {
                 setWorkspaceTab("read");
+                setRecipientDocExpanded(true);
                 window.requestAnimationFrame(() => {
-                  document.querySelector(".prose")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  document
+                    .querySelector('[data-testid="recipient-document-shell"]')
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
                 });
               }}
             >
@@ -2435,19 +2456,6 @@ export function AgreementRecipientReview({
             </button>
           </div>
         </div>
-      ) : null}
-
-      {entry.kind === "review" ? (
-        <p className="rounded-md border border-slate-800/70 bg-slate-950/35 px-3 py-2 text-[11px] leading-snug text-slate-500">
-          You&apos;re reviewing an agreement shared through LawDog.
-          <a
-            href="/"
-            className="ml-1 font-medium text-sky-500/90 underline-offset-2 hover:text-sky-400 hover:underline"
-          >
-            Create your own agreements
-          </a>
-          <span className="text-slate-600"> — only when it helps you.</span>
-        </p>
       ) : null}
 
       {needsPersonalizedLink ? (
@@ -2491,30 +2499,15 @@ export function AgreementRecipientReview({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-4">
-        <div>
-          {entry.kind === "review" && recipientLinkRole === "reviewer" && !viewerLike ? (
-            <>
-              <h1 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">
-                Review this agreement
-              </h1>
-            </>
-          ) : (
-            <>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 sm:text-[13px]">Review Agreement</p>
-              <p className="text-sm text-slate-300">
-                {workspaceTab === "read"
-                  ? recipientPartyReviewCopy.nextStepSummary
-                  : "Describe what you’d like different, preview, then send your revised draft to the owner."}
-              </p>
-            </>
-          )}
-          <p className="mt-1.5 text-[10px] text-slate-600">
-            Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-800/60 pb-3">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight text-slate-100 sm:text-xl">{RECIPIENT_PUBLIC_HERO_TITLE}</h1>
+          <p className="mt-1 max-w-xl text-sm text-slate-400">
+            {workspaceTab === "read" ? RECIPIENT_PUBLIC_HERO_SUBTITLE : "Suggest updates, preview, then send them to the owner."}
           </p>
         </div>
         {onClose ? (
-          <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact" onClick={onClose}>
+          <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
             Close
           </button>
         ) : null}
@@ -2529,15 +2522,52 @@ export function AgreementRecipientReview({
         <span>{(draft.title || "").trim() || "Agreement"}</span>
       </div>
 
-      <div className="rounded-lg border border-slate-700 bg-white p-6 text-slate-900 shadow-sm sm:p-8">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
-        <div
-          ref={recipientReadDocAnchorRef}
-          tabIndex={-1}
-          className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
-          dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
-        />
-      </div>
+      <section
+        className="rounded-xl border border-slate-700/80 bg-white text-slate-900 shadow-sm"
+        data-testid="recipient-document-shell"
+        aria-label="Agreement draft"
+      >
+        {!recipientDocExpanded ? (
+          <div className="flex flex-col items-center justify-center gap-3 px-5 py-10 sm:py-12">
+            <p className="text-center text-sm text-slate-500">Draft is ready when you want to read the full text.</p>
+            <button
+              type="button"
+              data-testid="recipient-open-draft-preview"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-white"
+              onClick={() => {
+                setRecipientDocExpanded(true);
+                window.requestAnimationFrame(() => recipientReadDocAnchorRef.current?.focus({ preventScroll: true }));
+              }}
+            >
+              Preview document
+            </button>
+          </div>
+        ) : (
+          <div className="p-5 sm:p-7">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
+              <button
+                type="button"
+                className="text-xs font-medium text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+                data-testid="recipient-collapse-draft-preview"
+                onClick={() => setRecipientDocExpanded(false)}
+              >
+                Hide document
+              </button>
+            </div>
+            <div
+              ref={recipientReadDocAnchorRef}
+              tabIndex={-1}
+              className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+              dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
+            />
+          </div>
+        )}
+      </section>
+
+      <p className="text-center text-[10px] text-slate-600 sm:text-left">
+        Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
+      </p>
 
       {workspaceTab === "read" ? (
         <>
@@ -2586,8 +2616,11 @@ export function AgreementRecipientReview({
               recipientOriginalDownloadsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
             onReviewPrimary={() => {
+              setRecipientDocExpanded(true);
               window.requestAnimationFrame(() => {
-                document.querySelector(".prose")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                document
+                  .querySelector('[data-testid="recipient-document-shell"]')
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
               });
             }}
             onRequestChanges={() => {

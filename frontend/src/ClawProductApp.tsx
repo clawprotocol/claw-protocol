@@ -29,6 +29,10 @@ import { IntegrationsPage } from "./launch/IntegrationsPage";
 import { AgreementPublicVerify } from "./agreement/AgreementPublicVerifyView";
 import { parseAgreementVerifyPath } from "./agreement/agreementPublicVerify";
 import {
+  RECIPIENT_PUBLIC_HERO_SUBTITLE,
+  RECIPIENT_PUBLIC_HERO_TITLE,
+} from "./agreement/recipientReviewTrustCopy";
+import {
   AgreementRecipientReview,
   parseAgreementReviewPath,
   parseAgreementSignPath,
@@ -83,8 +87,8 @@ const AGREEMENT_HERO: Vs01LayoutHero = {
 
 /** Public recipient agreement review (`/agreements/.../review`) — LawDog-only chrome, no CLAW eyebrow. */
 const RECIPIENT_REVIEW_HERO: Vs01LayoutHero = {
-  title: "Review workspace",
-  subtitle: "Read it, request edits, mark it ready, or step away — same choices top to bottom.",
+  title: RECIPIENT_PUBLIC_HERO_TITLE,
+  subtitle: RECIPIENT_PUBLIC_HERO_SUBTITLE,
 };
 
 const LAWDOG_FOOTER_EVIDENCE_SENTENCE =

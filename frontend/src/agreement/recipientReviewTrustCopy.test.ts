@@ -1,25 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
-  RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE,
-  RECIPIENT_SIGN_ONE_DONE_HEADLINE,
-  RECIPIENT_SIGN_RECORD_SUBLINE,
+  RECIPIENT_LANDING_INTRO_ONE_LINE,
+  RECIPIENT_PUBLIC_HERO_SUBTITLE,
+  RECIPIENT_PUBLIC_HERO_TITLE,
+  RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES,
+  RECIPIENT_REVIEW_TRUST_SECURE_ESIGN,
 } from "./recipientReviewTrustCopy";
 
-describe("recipientReviewTrustCopy", () => {
-  it("avoids protocol / chain jargon and CLAW branding", () => {
-    const blob = [
-      RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE,
-      RECIPIENT_SIGN_ONE_DONE_HEADLINE,
-      RECIPIENT_SIGN_RECORD_SUBLINE,
-    ].join(" ");
-    const u = blob.toUpperCase();
-    expect(u).not.toContain("CLAW");
-    expect(u).not.toContain("BLOCKCHAIN");
-    expect(u).not.toContain("ATTESTATION");
-    expect(u).not.toContain("ANCHORING");
-    expect(u).not.toContain("IMMUTABLE");
-    expect(u).not.toContain("CANONICAL");
-    expect(u).not.toContain("VERIFY");
-    expect(u).not.toContain("PROOF");
+describe("recipientReviewTrustCopy hero + trust chips", () => {
+  it("uses compact recipient-facing hero strings", () => {
+    expect(RECIPIENT_PUBLIC_HERO_TITLE).toBe("Review agreement");
+    expect(RECIPIENT_PUBLIC_HERO_SUBTITLE).toBe("Read it, request edits, or approve it.");
+    expect(RECIPIENT_LANDING_INTRO_ONE_LINE).toContain("Nothing changes until accepted");
+  });
+
+  it("limits trust strip to secure signing and acceptance line", () => {
+    expect(RECIPIENT_REVIEW_TRUST_SECURE_ESIGN).toBe("Secure e-signing");
+    expect(RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES).toBe("Nothing changes until accepted");
   });
 });

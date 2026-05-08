@@ -8,8 +8,8 @@ describe("Vs01Layout recipient-facing surface", () => {
     const { container } = render(
       <Vs01Layout
         hero={{
-          title: "Review workspace",
-          subtitle: "Read it, request edits, mark it ready, or step away — same choices top to bottom.",
+          title: "Review agreement",
+          subtitle: "Read it, request edits, or approve it.",
         }}
         footerEvidenceSentence="LawDog produces verifiable evidence records; verification is cryptographic and file-based."
         recipientPublicFooter={true}
@@ -19,7 +19,7 @@ describe("Vs01Layout recipient-facing surface", () => {
     );
 
     expect(container.textContent).not.toMatch(/\bCLAW\b/);
-    expect(screen.getByRole("heading", { name: "Review workspace" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Review agreement" })).toBeTruthy();
     expect(screen.queryByText("CLAW", { exact: true })).toBeNull();
     expect(screen.getAllByText("LawDog is software, not a law firm.").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Verification is cryptographic and file-based.").length).toBeGreaterThanOrEqual(1);

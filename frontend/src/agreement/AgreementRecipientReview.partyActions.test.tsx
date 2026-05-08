@@ -81,6 +81,8 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
     expect(landingDesktop).toBeTruthy();
     expect(landingMobile).toBeTruthy();
 
+    expect(screen.getByTestId("recipient-summary-card")).toBeTruthy();
+
     for (const root of [landingDesktop!, landingMobile!]) {
       expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.reviewAgreement })).toBeTruthy();
       expect(within(root).getByRole("button", { name: recipientPartyReviewCopy.requestChanges })).toBeTruthy();
@@ -93,6 +95,8 @@ describe("AgreementRecipientReview party actions (landing + document)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("recipient-party-review-actions").getAttribute("data-placement")).toBe("document-read");
     });
+
+    expect(screen.getByTestId("recipient-open-draft-preview")).toBeTruthy();
 
     const docActions = screen.getByTestId("recipient-party-review-actions");
     expect(docActions.getAttribute("data-placement")).toBe("document-read");

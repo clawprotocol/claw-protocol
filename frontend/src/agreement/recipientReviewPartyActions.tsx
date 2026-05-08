@@ -117,6 +117,15 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
         : recipientPartyReviewCopy.reviewAgreement;
 
   const looksDisabled = Boolean(looksGoodDisabled || looksGoodLoading);
+  const isLandingPlacement = placement === "landing" || placement === "landing-mobile";
+  const landingPrimaryReviewClass =
+    "inline-flex w-full items-center justify-center rounded-xl bg-sky-600 px-4 py-3.5 text-base font-semibold text-white shadow-sm shadow-sky-950/20 hover:bg-sky-500";
+  const landingPrimarySignClass =
+    "inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3.5 text-base font-semibold text-white shadow-sm shadow-emerald-950/25 hover:bg-emerald-500";
+  const defaultReviewControlClass =
+    "inline-flex w-full items-center justify-center rounded-xl border border-slate-600 bg-slate-900/60 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800/80";
+  const landingRequestSecondaryClass =
+    "w-full rounded-xl border border-slate-600/80 bg-transparent px-4 py-3 text-center text-sm font-semibold text-slate-100 transition-colors hover:bg-slate-900/40 disabled:opacity-45 sm:text-left";
 
   if (viewerLike) {
     return (
@@ -154,13 +163,13 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
 
   return (
     <div
-      className="flex flex-col gap-4"
+      className={`flex flex-col ${isLandingPlacement ? "gap-3" : "gap-4"}`}
       data-testid="recipient-party-review-actions"
       data-placement={placement}
     >
       {canSignFromHub && primarySigningHref ? (
         <a
-          className="inline-flex w-full items-center justify-center rounded-xl border border-slate-600 bg-slate-900/60 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800/80"
+          className={isLandingPlacement ? landingPrimarySignClass : defaultReviewControlClass}
           href={primarySigningHref}
         >
           {recipientPartyReviewCopy.reviewAndSign}
@@ -168,7 +177,7 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
       ) : (
         <button
           type="button"
-          className="inline-flex w-full items-center justify-center rounded-xl border border-slate-600 bg-slate-900/60 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800/80"
+          className={isLandingPlacement ? landingPrimaryReviewClass : defaultReviewControlClass}
           onClick={onReviewPrimary}
         >
           {reviewLabel}
@@ -258,7 +267,11 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
         <>
           <button
             type="button"
-            className={`${decisionCardQuiet} text-center font-semibold text-slate-100 sm:text-left`}
+            className={
+              isLandingPlacement
+                ? landingRequestSecondaryClass
+                : `${decisionCardQuiet} text-center font-semibold text-slate-100 sm:text-left`
+            }
             disabled={requestChangesDisabled}
             onClick={onRequestChanges}
           >
