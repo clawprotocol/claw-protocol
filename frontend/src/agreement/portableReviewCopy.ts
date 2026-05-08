@@ -49,9 +49,18 @@ export const RECIPIENT_DRAFT_IMPORT_READ_ERROR =
 /** Trust line for previews / decision menus (compose surface avoids repeating it). */
 export const RECIPIENT_WORKSPACE_TRUST_LINE = "Nothing changes until the sender accepts.";
 export const RECIPIENT_SAFETY_SUGGESTIONS_NOT_SIGNATURES = "Suggestions are not signatures.";
-export const RECIPIENT_WANT_COPY_HEADING = "Want a copy?";
+export const RECIPIENT_WANT_COPY_HEADING = "Review somewhere else?";
 export const RECIPIENT_WANT_COPY_BODY =
-  "Save the draft, review it elsewhere, or drop it into your own AI/lawyer workflow.";
+  "Download the draft, review it with your lawyer or AI tools, then upload the revised version back into LawDog.";
+/** Shown after export / upload on the recipient want-a-copy card. */
+export const RECIPIENT_WANT_COPY_COMPARE_HELPER =
+  "We'll compare the revised draft against the original before anything is sent.";
+/** Under the compare helper — reinforces safety before send. */
+export const RECIPIENT_WANT_COPY_LOOPBACK_CUE = "Nothing sends until you review the comparison.";
+/** Primary upload on the want-a-copy card (format note sits below the button). */
+export const RECIPIENT_WANT_COPY_UPLOAD_CTA = "Upload revised draft";
+/** Muted line directly under the card upload button. */
+export const RECIPIENT_WANT_COPY_UPLOAD_FORMAT_HELPER = "Supports .txt and .md files";
 export const RECIPIENT_COPY_ACK_COPIED = "Copied!";
 
 /** Top compose workspace (recipient revise tab). */
@@ -89,7 +98,7 @@ export const RECIPIENT_QUICK_REQUEST_PLACEHOLDER =
   "Example: Change payment terms from Net 15 to Net 30.";
 export const RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK = "Need to upload a rewritten draft instead?";
 
-export const RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL = "Upload revised .txt / .md";
+export const RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL = "Upload revised draft";
 export const RECIPIENT_PASTE_REVISED_PRIMARY_LABEL = "Paste revised text";
 export const RECIPIENT_EDIT_INSIDE_LAWDOG = "Edit inside LawDog";
 export const RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF = "Download original PDF";
@@ -121,7 +130,7 @@ export const RECIPIENT_REVIEW_ELSEWHERE_TITLE = RECIPIENT_WORK_ELSEWHERE_TITLE;
 /** @deprecated Use RECIPIENT_WORK_ELSEWHERE_* */
 export const RECIPIENT_REVIEW_ELSEWHERE_BODY = RECIPIENT_WORK_ELSEWHERE_BODY;
 /** File import — plain text / Markdown. */
-export const RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL = "Upload revised .txt / .md";
+export const RECIPIENT_REVIEW_ELSEWHERE_IMPORT_LABEL = RECIPIENT_WANT_COPY_UPLOAD_CTA;
 
 /** Owner workspace: same portable flow, but apply/discard is local. */
 export const OWNER_PORTABLE_REVIEW_SUB =

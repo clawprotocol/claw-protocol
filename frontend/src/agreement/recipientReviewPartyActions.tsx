@@ -35,7 +35,7 @@ export const recipientPartyReviewCopy = {
   /** Friendly decision menu */
   decisionMenuHeading: "What would you like to do?",
   decisionMenuSubcopy: "Nothing changes until accepted.",
-  requestChangesCardSub: "Suggest edits before signing.",
+  requestChangesCardSub: "Suggest edits directly inside LawDog.",
   looksGoodCardTitle: "Looks good",
   looksGoodCardSub: "I’m ready to move forward.",
   smallTweakCardTitle: "Ask for a small tweak",

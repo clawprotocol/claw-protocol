@@ -55,7 +55,7 @@ describe("recipient portable review CTA labels", () => {
   it("uses revised-draft and compare wording without manual compare in primary CTAs", () => {
     expect(RECIPIENT_CARD_BIGGER_REWRITE_TITLE).toBe("Revised draft");
     expect(RECIPIENT_BTN_REVIEW_CHANGES).toBe("Compare drafts");
-    expect(RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL).toBe("Upload revised .txt / .md");
-    expect(RECIPIENT_WANT_COPY_HEADING).toBe("Want a copy?");
+    expect(RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL).toBe("Upload revised draft");
+    expect(RECIPIENT_WANT_COPY_HEADING).toBe("Review somewhere else?");
   });
 });
