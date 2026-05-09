@@ -18,7 +18,6 @@ import {
 import {
   assessRecipientPreviewDiff,
   buildRecipientClauseCards,
-  extractPauseRequestPhrase,
   recipientPreviewNoOpMessage,
 } from "./recipientPreviewDiffModel";
 import { RecipientLegalRedlineDocument } from "./RecipientLegalRedlineDocument";
@@ -120,15 +119,19 @@ import {
   RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
   RECIPIENT_EDIT_INSIDE_LAWDOG,
+  RECIPIENT_AUDIT_MODE_SUBCOPY,
+  RECIPIENT_AUDIT_MODE_SUMMARY,
+  RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE,
+  RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING,
+  RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY,
+  RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY,
   RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT,
-  RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED,
   RECIPIENT_INTENT_REVIEW_BEFORE_SENDING,
   RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
   RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY,
   RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE,
   RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT,
   RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY,
-  RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
   RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD,
@@ -166,7 +169,10 @@ import {
   groupFriendlyChipsForHumanReview,
   humanReviewMeaningfulCount,
 } from "./recipientHumanReviewSummaryModel";
+import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
+import { RecipientFocusedWordingDialog } from "./RecipientFocusedWordingDialog";
 import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
+import { buildRecommendedSenderFocusLines } from "./recipientBusinessReviewCardsModel";
 import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
 import { collapseRecipientRedlineDuplicateInsertBlocks } from "./recipientRedlineDisplayDedupe";
 import { REVISED_UPLOAD_ANALYZING_MIN_MS } from "./recipientRevisedDraftUploadFlow";
@@ -208,7 +214,7 @@ function recipientIntentAppliedExplanation(category: RecipientInstructionIntentC
     case "suspend_pause_work":
       return "Adds a pause if payment is over 15 days late.";
     default:
-      return "Shown in the compare below.";
+      return "Reflected in your proposed draft.";
   }
 }
 
@@ -936,15 +942,9 @@ export function AgreementRecipientReview({
 
   const showRecipientIntentCoverageCallout = useMemo(() => {
     return (
-      Boolean(recipientRedlinePlainTexts?.instructionContextSummary) ||
-      recipientInstructionIntentSplit.primary.length > 0 ||
-      recipientInstructionIntentSplit.unclear.length > 0
+      recipientInstructionIntentSplit.primary.length > 0 || recipientInstructionIntentSplit.unclear.length > 0
     );
-  }, [
-    recipientRedlinePlainTexts?.instructionContextSummary,
-    recipientInstructionIntentSplit.primary.length,
-    recipientInstructionIntentSplit.unclear.length,
-  ]);
+  }, [recipientInstructionIntentSplit.primary.length, recipientInstructionIntentSplit.unclear.length]);
 
   const primaryIntentRowsForCompare = useMemo(() => {
     const p = recipientInstructionIntentSplit.primary;
@@ -953,6 +953,12 @@ export function AgreementRecipientReview({
 
   const [narrowRedlineHighlightAnchor, setNarrowRedlineHighlightAnchor] = useState<string | null>(null);
   const suggestedChangesDocScrollRef = useRef<HTMLDivElement>(null);
+  const auditDetailsRef = useRef<HTMLDetailsElement>(null);
+  const [businessReviewFocusedWording, setBusinessReviewFocusedWording] = useState<{
+    sectionTitle: string;
+    oldText: string;
+    newText: string;
+  } | null>(null);
 
   const legalRedlineDocumentBaseVm = useMemo(() => {
     if (!recipientRedlinePlainTexts) return null;
@@ -978,6 +984,11 @@ export function AgreementRecipientReview({
     return buildRecipientFriendlyRedlineChips(recipientPreview.revisionText ?? "", fields);
   }, [recipientPreview, previewDiff]);
 
+  const recipientBusinessRecommendedFocus = useMemo(
+    () => buildRecommendedSenderFocusLines(recipientFriendlyRedlineChips),
+    [recipientFriendlyRedlineChips],
+  );
+
   const narrowIntentAnchorPresence = useMemo(() => {
     const absent = { payment_timing: false, pause_suspend_work: false };
     if (!legalRedlineDocumentBaseVm || !recipientRedlinePlainTexts?.narrowRecipientTargetedRedline) return absent;
@@ -994,6 +1005,8 @@ export function AgreementRecipientReview({
   }, [legalRedlineDocumentBaseVm, recipientRedlinePlainTexts?.narrowRecipientTargetedRedline]);
 
   const scrollToNarrowRedlineAnchor = useCallback((anchor: string) => {
+    const det = auditDetailsRef.current;
+    if (det) det.open = true;
     const shell = suggestedChangesDocScrollRef.current;
     const el =
       (shell?.querySelector(`[data-recipient-redline-anchor="${anchor}"]`) as HTMLElement | null) ??
@@ -1896,92 +1909,137 @@ export function AgreementRecipientReview({
             importantBullets={humanReviewGrouped.important.map(friendlyChipToReviewBullet)}
             clarificationBullets={humanReviewGrouped.clarifications.map(friendlyChipToReviewBullet)}
             negativeAssurances={humanReviewNegativeLines}
+            recommendedFocusLines={recipientBusinessRecommendedFocus}
             confidenceHeadline={compareConfidence.headline}
             confidenceBody={compareConfidence.body}
           />
         ) : null}
 
+        {legalRedlineDocumentVm && recipientFriendlyRedlineChips.length > 0 ? (
+          <RecipientBusinessReviewCards
+            chips={recipientFriendlyRedlineChips}
+            legalVm={legalRedlineDocumentVm}
+            onViewExactWording={(p) => setBusinessReviewFocusedWording(p)}
+          />
+        ) : null}
+
+        {legalRedlineDocumentVm && compareConfidence && compareConfidence.level !== "high" ? (
+          <p className="mt-3 text-[11px] leading-relaxed text-slate-500" data-testid="recipient-business-review-readability-note">
+            {RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY}{" "}
+            {legalRedlineDocumentVm.fallbackReason ? `${RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY} ` : null}
+            Full redline details are available in {RECIPIENT_AUDIT_MODE_SUMMARY}.
+          </p>
+        ) : null}
+
         {legalRedlineDocumentVm ? (
           <>
-            <h3
-              className="mt-5 text-sm font-semibold tracking-tight text-slate-200"
-              data-testid="recipient-human-redline-subhead"
-            >
-              {RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD}
-            </h3>
-            {participantPid ? (
-              <p className="mt-1 text-[10px] leading-snug text-slate-500">
-                Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
-              </p>
-            ) : null}
-
-            <div className="mt-3 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
-              <div
-                ref={suggestedChangesDocScrollRef}
-                className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
-                data-testid="recipient-suggested-changes-document"
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-testid="recipient-open-send-suggested-edits-modal"
+                className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                disabled={saving || !previewDiff.canSubmit}
+                onClick={() => openSendSuggestedEditsModal()}
               >
-                <RecipientLegalRedlineDocument
-                  document={legalRedlineDocumentVm}
-                  variant="suggested"
-                  hideUnchangedBlocks
-                  collapseDenseMicroDiff
-                  recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
-                  highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
-                />
-              </div>
+                {RECIPIENT_BTN_SEND_CHANGES}
+              </button>
+              <button
+                type="button"
+                className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
+                disabled={saving || previewing}
+                onClick={() => discardPreview()}
+              >
+                {RECIPIENT_BTN_CONTINUE_EDITING}
+              </button>
             </div>
 
-            <details className="mt-3 rounded-md border border-slate-700/50 bg-slate-950/35 px-2 py-1.5">
-              <summary className="cursor-pointer list-none text-[11px] font-semibold text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
-                {RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY}
+            <details
+              ref={auditDetailsRef}
+              className="mt-4 rounded-md border border-slate-700/50 bg-slate-950/35 px-2 py-1.5"
+              data-testid="recipient-audit-mode-details"
+            >
+              <summary className="cursor-pointer list-none text-[12px] font-semibold text-slate-300 marker:content-none hover:text-slate-100 [&::-webkit-details-marker]:hidden">
+                {RECIPIENT_AUDIT_MODE_SUMMARY}
               </summary>
               <div className="mt-2 border-t border-slate-800/50 pt-2">
+                <p className="mb-2 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_AUDIT_MODE_SUBCOPY}</p>
                 {legalRedlineDocumentVm.fallbackReason ? (
-                  <p className="mb-2 text-[11px] leading-relaxed text-slate-400">
-                    A large section is summarized as a single change for readability.
+                  <p className="mb-2 text-[11px] leading-relaxed text-slate-400">{RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY}</p>
+                ) : null}
+                <div
+                  className="flex flex-wrap gap-2"
+                  data-testid="recipient-suggested-changes-summary-chips"
+                  aria-label="Audit mode counts"
+                >
+                  <span
+                    data-testid="recipient-redline-chip-insertions"
+                    className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                  >
+                    {redlineSummaryChipLabel(
+                      legalRedlineDocumentVm.stats.insertCount,
+                      "addition",
+                      "additions",
+                    )}
+                  </span>
+                  <span
+                    data-testid="recipient-redline-chip-deletions"
+                    className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                  >
+                    {redlineSummaryChipLabel(
+                      legalRedlineDocumentVm.stats.deleteCount,
+                      "removal",
+                      "removals",
+                    )}
+                  </span>
+                  <span
+                    data-testid="recipient-redline-chip-sections"
+                    className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                  >
+                    {wordingChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
+                  </span>
+                  {recipientIntentGapCount > 0 ? (
+                    <span
+                      data-testid="recipient-redline-chip-not-reflected"
+                      className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-100"
+                    >
+                      {recipientPreviewGapChipLabel(recipientIntentGapCount)}
+                    </span>
+                  ) : null}
+                </div>
+                <h3
+                  className="mt-4 text-sm font-semibold tracking-tight text-slate-200"
+                  data-testid="recipient-human-redline-subhead"
+                >
+                  {RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD}
+                </h3>
+                {participantPid ? (
+                  <p className="mt-1 text-[10px] leading-snug text-slate-500">
+                    Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
                   </p>
                 ) : null}
-              <div
-                className="flex flex-wrap gap-2"
-                data-testid="recipient-suggested-changes-summary-chips"
-                aria-label="Technical comparison counts"
-              >
-                <span
-                  data-testid="recipient-redline-chip-insertions"
-                  className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
-                >
-                  {redlineSummaryChipLabel(
-                    legalRedlineDocumentVm.stats.insertCount,
-                    "addition",
-                    "additions",
-                  )}
-                </span>
-                <span
-                  data-testid="recipient-redline-chip-deletions"
-                  className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
-                >
-                  {redlineSummaryChipLabel(
-                    legalRedlineDocumentVm.stats.deleteCount,
-                    "removal",
-                    "removals",
-                  )}
-                </span>
-                <span
-                  data-testid="recipient-redline-chip-sections"
-                  className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
-                >
-                  {wordingChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
-                </span>
-                {recipientIntentGapCount > 0 ? (
-                  <span
-                    data-testid="recipient-redline-chip-not-reflected"
-                    className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-100"
+                <div className="mt-3 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
+                  <div
+                    ref={suggestedChangesDocScrollRef}
+                    className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
+                    data-testid="recipient-suggested-changes-document"
                   >
-                    {recipientPreviewGapChipLabel(recipientIntentGapCount)}
-                  </span>
-                ) : null}
-              </div>
+                    <RecipientLegalRedlineDocument
+                      document={legalRedlineDocumentVm}
+                      variant="suggested"
+                      hideUnchangedBlocks
+                      collapseDenseMicroDiff
+                      recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
+                      highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
+                      onDenseBlockViewExactWording={(w) =>
+                        setBusinessReviewFocusedWording({
+                          sectionTitle: w.sectionLabel,
+                          oldText: w.oldText,
+                          newText: w.newText,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
               </div>
             </details>
 
@@ -1994,17 +2052,9 @@ export function AgreementRecipientReview({
                   {RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY}
                 </summary>
                 <div className="mt-2 border-t border-slate-800/50 pt-2" role="status">
-                {recipientRedlinePlainTexts?.instructionContextSummary ? (
-                  <p
-                    className="mb-2 text-[11px] leading-snug text-slate-500"
-                    data-testid="recipient-instruction-context-summary"
-                  >
-                    Reviewer context: {recipientRedlinePlainTexts.instructionContextSummary}
-                  </p>
-                ) : null}
                 {recipientInstructionIntentSplit.primary.length > 0 ? (
                 <>
-                <p className="mb-2 text-xs font-semibold text-slate-300">In this compare</p>
+                <p className="mb-2 text-xs font-semibold text-slate-300">{RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING}</p>
                 <ul className="space-y-2" data-testid="recipient-intent-coverage-list">
                   {primaryIntentRowsForCompare.map((it) => {
                     const anchor = recipientRedlineAnchorForIntentCategory(it.category);
@@ -2043,7 +2093,7 @@ export function AgreementRecipientReview({
                             >
                               <span className="block font-medium text-emerald-50/95">✓ {recipientIntentAppliedRowHeading(it)}</span>
                               <span className="mt-1 block text-[11px] font-normal text-emerald-100/95 underline decoration-emerald-400/90 decoration-1 underline-offset-2 hover:text-white hover:decoration-emerald-200">
-                                View in document
+                                Open Audit mode to locate
                               </span>
                             </button>
                           ) : (
@@ -2058,7 +2108,8 @@ export function AgreementRecipientReview({
                       ) : (
                         <>
                           <p className="text-[13px] leading-snug text-amber-100/95">
-                            {RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED}: {it.normalizedIntent}
+                            {RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE}{" "}
+                            <span className="font-medium text-amber-50/95">&quot;{it.normalizedIntent}&quot;</span>
                           </p>
                           {it.reason ? (
                             <p className="mt-1 text-[11px] leading-snug text-amber-200/80">{it.reason}</p>
@@ -2109,8 +2160,8 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-not-reflected-callout"
                 role="status"
               >
-                {RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED}:{" "}
-                {extractPauseRequestPhrase(recipientPreview.revisionText ?? "") ?? "pause work for late payment"}.
+                {RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE} Pause wording may still reach the sender.{" "}
+                {RECIPIENT_INTENT_REVIEW_BEFORE_SENDING}
               </p>
             ) : null}
 
@@ -2121,7 +2172,7 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-narrow-unsafe-payment-callout"
                 role="status"
               >
-                We could not place these payment edits in the matched payment section of the compare below. Your note
+                We could not place these payment edits in the matched payment section of the agreement text. Your note
                 still goes to the owner. Requested timing:{" "}
                 {extractPaymentPlacementCalloutSnippet(String(recipientPreview.proposedDraft.payment_terms ?? ""))}.{" "}
                 {RECIPIENT_INTENT_REVIEW_BEFORE_SENDING}
@@ -2132,8 +2183,8 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-placement-callout"
                 role="status"
               >
-                {RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT} — we could not match a payment section in the compare. Your
-                note still goes to the owner.
+                {RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT} — we could not match a payment section in the agreement text.
+                Your note still goes to the owner.
               </p>
             ) : null}
 
@@ -2193,6 +2244,14 @@ export function AgreementRecipientReview({
                 </div>
               </details>
             ) : null}
+
+            <RecipientFocusedWordingDialog
+              open={Boolean(businessReviewFocusedWording)}
+              sectionTitle={businessReviewFocusedWording?.sectionTitle ?? ""}
+              oldText={businessReviewFocusedWording?.oldText ?? ""}
+              newText={businessReviewFocusedWording?.newText ?? ""}
+              onClose={() => setBusinessReviewFocusedWording(null)}
+            />
           </>
         ) : (
           <p className="mt-3 text-sm text-amber-100/90">
@@ -2201,23 +2260,27 @@ export function AgreementRecipientReview({
         )}
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            data-testid="recipient-open-send-suggested-edits-modal"
-            className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-            disabled={saving || !previewDiff.canSubmit}
-            onClick={() => openSendSuggestedEditsModal()}
-          >
-            {RECIPIENT_BTN_SEND_CHANGES}
-          </button>
-          <button
-            type="button"
-            className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
-            disabled={saving || previewing}
-            onClick={() => discardPreview()}
-          >
-            {RECIPIENT_BTN_CONTINUE_EDITING}
-          </button>
+          {legalRedlineDocumentVm ? null : (
+            <>
+              <button
+                type="button"
+                data-testid="recipient-open-send-suggested-edits-modal"
+                className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                disabled={saving || !previewDiff.canSubmit}
+                onClick={() => openSendSuggestedEditsModal()}
+              >
+                {RECIPIENT_BTN_SEND_CHANGES}
+              </button>
+              <button
+                type="button"
+                className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
+                disabled={saving || previewing}
+                onClick={() => discardPreview()}
+              >
+                {RECIPIENT_BTN_CONTINUE_EDITING}
+              </button>
+            </>
+          )}
           <button
             type="button"
             data-testid="recipient-toolbar-download-redline-pdf"

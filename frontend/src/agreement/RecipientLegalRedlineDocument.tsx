@@ -1,6 +1,15 @@
 import type { ReactNode } from "react";
 import type { RedlineSegmentVM } from "./recipientPreviewDiffModel";
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel, LegalRedlineSegment } from "./legalRedlineBlocks";
+import {
+  extractFocusedWordingForBlock,
+  inferDenseSectionChangeBullets,
+  type FocusedWordingResult,
+} from "./recipientBusinessReviewCardsModel";
+import {
+  RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY,
+  RECIPIENT_BUSINESS_REVIEW_VIEW_EXACT_WORDING,
+} from "./portableReviewCopy";
 
 type Props = {
   /** @deprecated Prefer {@link document} for block-aware redline. */
@@ -16,6 +25,8 @@ type Props = {
   hideUnchangedBlocks?: boolean;
   /** Collapse very noisy micro-diffs into a short summary + optional details (human review mode). */
   collapseDenseMicroDiff?: boolean;
+  /** When set, dense collapsed blocks show “View exact wording” → focused OLD/NEW (not full-page redline). */
+  onDenseBlockViewExactWording?: (wording: FocusedWordingResult) => void;
 };
 
 function blockIsDenseMicroDiff(block: LegalRedlineBlock): boolean {
@@ -223,6 +234,7 @@ export function RecipientLegalRedlineDocument({
   highlightedRecipientAnchor,
   hideUnchangedBlocks = false,
   collapseDenseMicroDiff = false,
+  onDenseBlockViewExactWording,
 }: Props) {
   const shell =
     variant === "suggested"
@@ -255,6 +267,7 @@ export function RecipientLegalRedlineDocument({
             const dense =
               collapseDenseMicroDiff && variant === "suggested" && changed && blockIsDenseMicroDiff(block);
             const sectionLabel = (block.label || block.clauseNumber || block.heading || "Section").trim();
+            const denseBullets = dense ? inferDenseSectionChangeBullets(block) : [];
             return (
               <section
                 key={block.id}
@@ -269,9 +282,30 @@ export function RecipientLegalRedlineDocument({
                     <p className="text-[13px] font-semibold leading-snug text-slate-900">
                       {sectionLabel} substantially revised
                     </p>
-                    <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
-                      Detailed line comparison is grouped for readability.
-                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-600">{RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY}</p>
+                    {denseBullets.length > 0 ? (
+                      <div className="mt-2">
+                        <p className="text-[11px] font-semibold text-slate-800">Changes include:</p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] leading-relaxed text-slate-700">
+                          {denseBullets.map((b) => (
+                            <li key={b}>{b}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {onDenseBlockViewExactWording ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-left text-[11px] font-semibold text-sky-800 underline decoration-sky-400/70 underline-offset-2 hover:text-sky-950"
+                        data-testid="recipient-dense-block-view-exact-wording"
+                        onClick={() => {
+                          const w = extractFocusedWordingForBlock(block);
+                          if (w) onDenseBlockViewExactWording(w);
+                        }}
+                      >
+                        {RECIPIENT_BUSINESS_REVIEW_VIEW_EXACT_WORDING}
+                      </button>
+                    ) : null}
                     <details className="mt-2 rounded-md border border-slate-200/90 bg-white/80 px-2 py-1.5">
                       <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
                         View detailed comparison

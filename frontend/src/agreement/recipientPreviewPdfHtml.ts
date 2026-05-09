@@ -1,6 +1,12 @@
 import { escapeHtml } from "../components/agreements/premiumAgreementDocumentHtml";
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel, LegalRedlineSegment } from "./legalRedlineBlocks";
 import { mergeAdjacentRedlineSegmentsAllTypes } from "./legalRedlineBlocks";
+import {
+  RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING,
+  RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION,
+  RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE,
+  RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING,
+} from "./portableReviewCopy";
 import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
 
 export type RecipientPreviewPdfExportKind = "original" | "proposed" | "redline";
@@ -91,7 +97,9 @@ function buildHumanStructuredPdfLead(s: HumanReviewStructuredForPdf): string {
   let html = `<section style="${box}">`;
   html += `<p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a;line-height:1.45;">${esc(s.headlinePlain)}</p>`;
   if (s.importantBullets.length > 0) {
-    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Important changes</p>`;
+    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+      RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING,
+    )}</p>`;
     html += `<ul style="margin:0 0 14px;padding-left:18px;font-size:14px;color:#0f172a;line-height:1.62;">`;
     for (const b of s.importantBullets) {
       html += `<li style="margin:0 0 6px;">${esc(b)}</li>`;
@@ -107,11 +115,26 @@ function buildHumanStructuredPdfLead(s: HumanReviewStructuredForPdf): string {
     html += `</ul>`;
   }
   if (s.negativeAssuranceLines.length > 0) {
+    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+      RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION,
+    )}</p>`;
     html += `<ul style="margin:0 0 14px;padding-left:16px;font-size:12px;color:#64748b;line-height:1.55;">`;
     for (const line of s.negativeAssuranceLines) {
       html += `<li style="margin:0 0 4px;">${esc(line)}</li>`;
     }
     html += `</ul>`;
+  }
+  if ((s.recommendedFocusLines ?? []).length > 0) {
+    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+      RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING,
+    )}</p>`;
+    html += `<ol style="margin:0 0 10px;padding-left:20px;font-size:13px;color:#0f172a;line-height:1.55;">`;
+    const focusLines = s.recommendedFocusLines ?? [];
+    for (let i = 0; i < focusLines.length; i++) {
+      html += `<li style="margin:0 0 4px;">${esc(focusLines[i]!)}</li>`;
+    }
+    html += `</ol>`;
+    html += `<p style="margin:0 0 14px;font-size:12px;color:#475569;line-height:1.5;">${escapeHtml(RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE)}</p>`;
   }
   html += `<p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#0f172a;">${esc(s.confidenceHeadline)}</p>`;
   html += `<p style="margin:0 0 12px;font-size:12px;color:#475569;line-height:1.55;">${esc(s.confidenceBody)}</p>`;
@@ -222,7 +245,7 @@ export function buildRecipientRedlinePdfHtml(
   }
   const tech = (human?.technicalAppendixPlain ?? "").trim();
   if (tech) {
-    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">C. Technical comparison (reference)</h2><pre style="margin:0;font:12px/1.6 ui-sans-serif,system-ui;white-space:pre-wrap;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(tech)}</pre>`;
+    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">C. Audit reference</h2><pre style="margin:0;font:12px/1.6 ui-sans-serif,system-ui;white-space:pre-wrap;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(tech)}</pre>`;
   }
   return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px 28px;">${auditBlock}${lead}${sections}${appendix}</article>`;
 }

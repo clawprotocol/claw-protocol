@@ -160,13 +160,21 @@ export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_QUICK = "Use these as a quick chang
 export const RECIPIENT_UPLOAD_NOTES_ONLY_DOWNLOAD_NOTES = "Download reviewer notes";
 
 /** Compare panel — intent coverage (plain language). */
+/** @deprecated Recipient UI uses {@link RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE}. */
 export const RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED = "Not automatically inserted";
+/** Recipient Business Review — avoids “not inserted” machinery tone. */
+export const RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE = "Summarized for your message to the sender.";
 /** User-safe — avoid “placement” jargon; paired with explain sentence in UI. */
-export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "Compare could not anchor this in the document";
+export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "We could not match this in the agreement text";
 export const RECIPIENT_INTENT_REVIEW_BEFORE_SENDING = "Review before sending";
 export const RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY = "Downloads";
 export const RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY = "Suggestion details";
-export const RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY = "Technical comparison";
+/** Business Review Mode: raw redline + counts live here (default closed). */
+export const RECIPIENT_AUDIT_MODE_SUMMARY = "Audit mode";
+/** @deprecated Use {@link RECIPIENT_AUDIT_MODE_SUMMARY}. */
+export const RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY = RECIPIENT_AUDIT_MODE_SUMMARY;
+export const RECIPIENT_AUDIT_MODE_SUBCOPY =
+  "Full redline details are optional. Most reviewers decide from Business Review first.";
 /** @deprecated User-facing gap chip uses {@link recipientPreviewGapChipLabel} instead. */
 export const RECIPIENT_PREVIEW_ITEMS_TO_PLACE = "May need placement";
 
@@ -187,8 +195,21 @@ export const RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT =
 export const RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS =
   "Nothing is sent until the sender accepts.";
 
-/** Subheading above the human redline document. */
-export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Review redline";
+/** Subheading inside Audit mode above the tracked redline. */
+export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Full agreement markup";
+
+export const RECIPIENT_BUSINESS_REVIEW_VIEW_EXACT_WORDING = "View exact wording";
+export const RECIPIENT_BUSINESS_REVIEW_EXACT_WORDING_TITLE = "Exact wording";
+export const RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING = "Suggested edits";
+export const RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION = "No changes to";
+export const RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING = "Most important changes";
+export const RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING = "Recommended review focus";
+export const RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE =
+  "Most other edits appear clarifying or operational.";
+export const RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY =
+  "Some revisions were grouped for readability.";
+export const RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY =
+  "A few sections were substantially rewritten and are summarized above.";
 
 /** Collapsed panel for reviewer-only commentary. */
 export const RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY = "Reviewer notes — not part of agreement";

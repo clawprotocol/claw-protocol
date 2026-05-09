@@ -19,6 +19,7 @@ describe("buildRecipientCompareConfidence", () => {
     expect(r.body.toLowerCase()).toContain("matched");
     expect(r.body.toLowerCase()).not.toContain("anchor");
     expect(r.body.toLowerCase()).not.toContain("dedupe");
+    expect(r.body.toLowerCase()).not.toContain("confidently");
   });
 
   it("returns medium when import cleanup or grouping signals fire", () => {

@@ -4,6 +4,7 @@
  */
 
 import { RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS } from "./portableReviewCopy";
+import { buildRecommendedSenderFocusLines } from "./recipientBusinessReviewCardsModel";
 import type { RecipientCompareConfidence } from "./recipientCompareConfidence";
 
 export type HumanReviewChipBucket = "important" | "clarification";
@@ -103,6 +104,7 @@ export type HumanReviewStructuredForPdf = {
   importantBullets: string[];
   clarificationBullets: string[];
   negativeAssuranceLines: string[];
+  recommendedFocusLines: string[];
   confidenceHeadline: string;
   confidenceBody: string;
   nothingSentFootnote: string;
@@ -124,11 +126,13 @@ export function buildHumanReviewStructuredForPdf(params: {
   const headlinePlain = buildHumanReviewHeadline(params.reviewerHeadlineName, meaningful);
   const importantBullets = grouped.important.map(friendlyChipToReviewBullet);
   const clarificationBullets = grouped.clarifications.map(friendlyChipToReviewBullet);
+  const recommendedFocusLines = buildRecommendedSenderFocusLines(params.chips);
   return {
     headlinePlain,
     importantBullets,
     clarificationBullets,
     negativeAssuranceLines: buildHumanReviewNegativeAssurances(params.instructionPlain, params.changedFieldKeys),
+    recommendedFocusLines,
     confidenceHeadline: params.confidence.headline,
     confidenceBody: params.confidence.body,
     nothingSentFootnote: RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS,

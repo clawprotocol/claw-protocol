@@ -246,7 +246,7 @@ describe("AgreementRecipientReview whole-doc redline vs divergent revise HTML", 
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
     expect(screen.getByTestId("recipient-intent-coverage-list")).toBeTruthy();
-    expect(callout.textContent).toMatch(/In this compare/i);
+    expect(callout.textContent).toMatch(/Suggested edits/i);
     expect(callout.textContent).not.toMatch(/Could not add:/i);
     const list = screen.getByTestId("recipient-intent-coverage-list");
     expect(within(list).getAllByRole("button", { name: /Net 30 payment timing/i })).toHaveLength(1);
@@ -484,7 +484,7 @@ describe("AgreementRecipientReview narrow payment redline QA (party/signature/fo
     expect(parseInt(secChip, 10)).toBeLessThanOrEqual(1);
 
     const callout = screen.getByTestId("recipient-redline-not-reflected-callout");
-    expect(callout.textContent).toMatch(/In this compare/i);
+    expect(callout.textContent).toMatch(/Suggested edits/i);
     expect(callout.textContent).not.toMatch(/Could not add:/i);
     expect(insText).toMatch(/pause work until all overdue/i);
   });

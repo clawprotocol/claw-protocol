@@ -1,4 +1,8 @@
 import {
+  RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING,
+  RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION,
+  RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE,
+  RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING,
   RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT,
   RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS,
 } from "./portableReviewCopy";
@@ -11,12 +15,14 @@ export type RecipientHumanReviewSummaryProps = {
   importantBullets: readonly string[];
   clarificationBullets: readonly string[];
   negativeAssurances: readonly string[];
+  /** Numbered lines for sender review priority */
+  recommendedFocusLines: readonly string[];
   confidenceHeadline: string;
   confidenceBody: string;
 };
 
 /**
- * Signer-facing summary card shown before the redline body (human review mode).
+ * Signer-facing summary card shown before Business Review cards and Audit mode.
  */
 export function RecipientHumanReviewSummary({
   headline,
@@ -24,6 +30,7 @@ export function RecipientHumanReviewSummary({
   importantBullets,
   clarificationBullets,
   negativeAssurances,
+  recommendedFocusLines,
   confidenceHeadline,
   confidenceBody,
 }: RecipientHumanReviewSummaryProps) {
@@ -45,7 +52,9 @@ export function RecipientHumanReviewSummary({
 
       {importantBullets.length > 0 ? (
         <div className="mt-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Important changes</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            {RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING}
+          </p>
           <ul className="mt-1.5 list-disc space-y-1 pl-5 text-[13px] leading-relaxed text-slate-200">
             {importantBullets.map((b) => (
               <li key={b}>{b}</li>
@@ -66,11 +75,30 @@ export function RecipientHumanReviewSummary({
       ) : null}
 
       {negativeAssurances.length > 0 ? (
-        <ul className="mt-3 space-y-1 border-t border-slate-700/50 pt-3 text-[12px] leading-relaxed text-slate-400">
-          {negativeAssurances.map((line) => (
-            <li key={line}>— {line}</li>
-          ))}
-        </ul>
+        <div className="mt-3 border-t border-slate-700/50 pt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            {RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION}
+          </p>
+          <ul className="mt-1.5 space-y-1 text-[12px] leading-relaxed text-slate-400">
+            {negativeAssurances.map((line) => (
+              <li key={line}>— {line}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {recommendedFocusLines.length > 0 ? (
+        <div className="mt-3 border-t border-slate-700/50 pt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            {RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING}
+          </p>
+          <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-[13px] leading-relaxed text-slate-200">
+            {recommendedFocusLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ol>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE}</p>
+        </div>
       ) : null}
 
       <div className="mt-3 rounded-md border border-slate-700/40 bg-slate-950/50 px-3 py-2" data-testid="recipient-compare-confidence">

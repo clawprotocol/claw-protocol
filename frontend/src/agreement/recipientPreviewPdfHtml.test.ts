@@ -64,6 +64,7 @@ describe("buildRecipientRedlinePdfHtml", () => {
           importantBullets: ["payment timing updated"],
           clarificationBullets: [],
           negativeAssuranceLines: ["No governing law changes."],
+          recommendedFocusLines: [],
           confidenceHeadline: "Compare confidence: High",
           confidenceBody: "Major sections matched successfully.",
           nothingSentFootnote: "Nothing is sent until the sender accepts.",

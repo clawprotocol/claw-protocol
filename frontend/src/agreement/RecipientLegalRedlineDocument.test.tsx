@@ -1,12 +1,13 @@
 /** @vitest-environment jsdom */
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import {
   RecipientLegalRedlineDocument,
   splitSegmentTextToParagraphLines,
   lineLooksLikeSectionHeading,
 } from "./RecipientLegalRedlineDocument";
+import { RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY } from "./portableReviewCopy";
 
 describe("splitSegmentTextToParagraphLines", () => {
   it("splits double newlines into separate paragraph blocks", () => {
@@ -293,5 +294,63 @@ describe("RecipientLegalRedlineDocument", () => {
     const root = screen.getByTestId("recipient-legal-redline-document");
     expect(root.querySelector('[data-recipient-redline-anchor="payment_timing"]')).toBeTruthy();
     expect(root.querySelector('[data-recipient-redline-anchor="pause_suspend_work"]')).toBeTruthy();
+  });
+
+  it("collapses dense micro-diff into summary card with bullets and focused wording callback", () => {
+    const segments = Array.from({ length: 6 }, (_, i) =>
+      i % 2 === 0
+        ? ({ type: "delete" as const, text: `old${i} invoice payable ` })
+        : ({ type: "insert" as const, text: `new${i} net 30 fee ` }),
+    );
+    const document: LegalRedlineDocumentViewModel = {
+      blocks: [
+        {
+          id: "densePay",
+          kind: "paragraph",
+          label: "3. Payment",
+          segments,
+          insertCount: 3,
+          deleteCount: 3,
+          sameCount: 0,
+          hasInsert: true,
+          hasDelete: true,
+          hasChange: true,
+        },
+      ],
+      stats: {
+        blockCount: 1,
+        changedBlockCount: 1,
+        insertCount: 3,
+        deleteCount: 3,
+        sameCount: 0,
+        segmentCount: 6,
+        currentLen: 1,
+        proposedLen: 1,
+      },
+      hasChanges: true,
+    };
+    const onDense = vi.fn();
+    render(
+      <RecipientLegalRedlineDocument
+        document={document}
+        variant="suggested"
+        collapseDenseMicroDiff
+        onDenseBlockViewExactWording={onDense}
+      />,
+    );
+    const card = screen.getByTestId("recipient-human-section-revised-card");
+    expect(card.textContent).toContain("3. Payment substantially revised");
+    expect(card.textContent).toContain(RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY);
+    expect(card.textContent).toContain("Changes include:");
+    expect(card.textContent).toMatch(/revised payment timing/i);
+    expect(card.textContent).not.toContain("Detailed line comparison is grouped");
+
+    fireEvent.click(screen.getByTestId("recipient-dense-block-view-exact-wording"));
+    expect(onDense).toHaveBeenCalledTimes(1);
+    expect(onDense.mock.calls[0]![0]).toMatchObject({
+      sectionLabel: "3. Payment",
+    });
+    expect(String(onDense.mock.calls[0]![0].oldText)).toMatch(/old\d/);
+    expect(String(onDense.mock.calls[0]![0].newText)).toMatch(/new\d/);
   });
 });

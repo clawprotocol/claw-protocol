@@ -37,7 +37,7 @@ function bodyFor(level: RecipientCompareConfidenceLevel): string {
   if (level === "medium") {
     return "Some rewritten sections were grouped for readability.";
   }
-  return "Some edits could not be confidently shown inline in this view.";
+  return "Some sections are easier to read in summary. Open Audit mode if you want every insertion and deletion.";
 }
 
 /**
