@@ -54,6 +54,10 @@ export const RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK =
 export const RECIPIENT_DRAFT_IMPORT_PDF_LOW_TEXT =
   "Could not confidently extract enough text from this PDF. Try a text-based PDF export, TXT, Markdown, or paste the agreement.";
 
+/** Shown when a PDF had readable text but sanitizer stripped agreement-shaped body; we routed to notes/suggestions. */
+export const RECIPIENT_PDF_IMPORT_ROUTED_TO_SUGGESTIONS =
+  "This looks like review notes or clause suggestions, not a full revised agreement. You can send these as suggestions, apply them to the draft, or upload a full revised agreement.";
+
 /** Shown while reading the file and building the preview (workspace upload / import). */
 export const RECIPIENT_REVISED_IMPORT_PREPARING = "Preparing comparison…";
 

@@ -28,7 +28,11 @@ type Props = {
   onPrepareRevisedImport?: () => void;
   onImportedRevisedPlainText?: (
     text: string,
-    meta?: { importReviewerNotesTail?: string | null; importArtifactsRemoved?: string[] },
+    meta?: {
+      importReviewerNotesTail?: string | null;
+      importArtifactsRemoved?: string[];
+      pdfThinSanitizeUsedRaw?: boolean;
+    },
   ) => void;
   revisedImportDisabled?: boolean;
 };
@@ -96,6 +100,7 @@ export function RecipientWantACopyStrip({
         onImportedRevisedPlainText(result.text, {
           importReviewerNotesTail: result.importReviewerNotesTail ?? undefined,
           importArtifactsRemoved: result.importArtifactsRemoved,
+          pdfThinSanitizeUsedRaw: result.pdfThinSanitizeUsedRaw,
         });
       } catch (e) {
         recipientUploadError("want-copy-callback-exception", e, { name: file.name });

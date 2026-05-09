@@ -143,6 +143,7 @@ import {
   RECIPIENT_INTENT_REVIEW_BEFORE_SENDING,
   RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
   RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY,
+  RECIPIENT_PDF_IMPORT_ROUTED_TO_SUGGESTIONS,
   RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE,
   RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT,
   RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY,
@@ -566,11 +567,14 @@ export function AgreementRecipientReview({
           scrollToSummary?: boolean;
           importReviewerNotesTail?: string | null;
           importArtifactsRemoved?: string[];
+          /** PDF import: sanitizer stripped agreement body; raw text was passed for classification. */
+          pdfThinSanitizeUsedRaw?: boolean;
         },
       ) => Promise<void>)
     | null
   >(null);
   const [recipientImportSanitizeNote, setRecipientImportSanitizeNote] = useState<string | null>(null);
+  const [recipientPdfImportRoutedMessage, setRecipientPdfImportRoutedMessage] = useState<string | null>(null);
 
   const scrollAndFocusSuggestPanel = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -603,12 +607,17 @@ export function AgreementRecipientReview({
     setRecipientPostUploadSurface(null);
     pendingImportRecipientPreviewRef.current = null;
     setError(null);
+    setRecipientPdfImportRoutedMessage(null);
   }, [flowPhase]);
 
   const onWantCopyRevisedImported = useCallback(
     (
       text: string,
-      meta?: { importReviewerNotesTail?: string | null; importArtifactsRemoved?: string[] },
+      meta?: {
+        importReviewerNotesTail?: string | null;
+        importArtifactsRemoved?: string[];
+        pdfThinSanitizeUsedRaw?: boolean;
+      },
     ) => {
       void runImportedRevisedAutoCompareRef.current?.(text, { scrollToSummary: true, ...meta });
     },
@@ -618,6 +627,12 @@ export function AgreementRecipientReview({
   useEffect(() => {
     setRecipientIntentListExpanded(false);
   }, [recipientPreview?.revisionText]);
+
+  useEffect(() => {
+    if (!recipientPostUploadSurface) {
+      setRecipientPdfImportRoutedMessage(null);
+    }
+  }, [recipientPostUploadSurface]);
 
   useEffect(() => {
     reviewerViewLoggedRef.current = false;
@@ -1633,6 +1648,7 @@ export function AgreementRecipientReview({
     setRecipientRevisePreviewError(null);
     setDraftImportError(null);
     setError(null);
+    setRecipientPdfImportRoutedMessage(null);
     try {
       await Promise.resolve();
       const originalPlain = (directCompareDefaultRef.current || draft.purpose || "").trim() || " ";
@@ -1645,6 +1661,9 @@ export function AgreementRecipientReview({
         setExternalAiPaste("");
         setRevisedUploadAnalyzing(false);
         const notesOnly = [classification.reviewerNotes ?? trimmed, importTail].filter(Boolean).join("\n\n");
+        if (scrollOpts?.pdfThinSanitizeUsedRaw) {
+          setRecipientPdfImportRoutedMessage(RECIPIENT_PDF_IMPORT_ROUTED_TO_SUGGESTIONS);
+        }
         setRecipientPostUploadSurface({ surface: "notes_only", notes: notesOnly });
         return;
       }
@@ -1656,6 +1675,9 @@ export function AgreementRecipientReview({
         setExternalAiPaste("");
         setRevisedUploadAnalyzing(false);
         const noteText = [classification.reviewerNotes ?? trimmed, importTail].filter(Boolean).join("\n\n");
+        if (scrollOpts?.pdfThinSanitizeUsedRaw) {
+          setRecipientPdfImportRoutedMessage(RECIPIENT_PDF_IMPORT_ROUTED_TO_SUGGESTIONS);
+        }
         setRecipientPostUploadSurface({
           surface: "clause_suggestions",
           notes: noteText,
@@ -1721,6 +1743,7 @@ export function AgreementRecipientReview({
   const processRecipientRevisedDraftFile = useCallback(async (file: File) => {
     recipientUploadLogSelected({ name: file.name, type: file.type, size: file.size });
     setDraftImportError(null);
+    setRecipientPdfImportRoutedMessage(null);
     setRecipientRevisedDraftFileBusy(true);
     try {
       const result = await extractRevisedDraftPlainText(file);
@@ -1744,6 +1767,7 @@ export function AgreementRecipientReview({
         scrollToSummary: false,
         importReviewerNotesTail: result.importReviewerNotesTail ?? undefined,
         importArtifactsRemoved: result.importArtifactsRemoved,
+        pdfThinSanitizeUsedRaw: result.pdfThinSanitizeUsedRaw,
       });
       recipientUploadLogCompareSuccess({ textLen: result.text.trim().length });
     } catch (e) {
@@ -1878,6 +1902,7 @@ export function AgreementRecipientReview({
     setRecipientPreview(null);
     pendingImportRecipientPreviewRef.current = null;
     setRecipientPostUploadSurface(null);
+    setRecipientPdfImportRoutedMessage(null);
     setRecipientImportArtifactsCount(0);
     setRecipientImportSanitizeNote(null);
     setRecipientRevisePreviewError(null);
@@ -3615,6 +3640,16 @@ export function AgreementRecipientReview({
                   >
                     {RECIPIENT_REVISED_WORKSPACE_NOTES_HINT}
                   </p>
+                  ) : null}
+
+                  {recipientPdfImportRoutedMessage && recipientPostUploadSurface ? (
+                    <p
+                      role="status"
+                      data-testid="recipient-pdf-import-routed-banner"
+                      className="rounded-md border border-sky-800/45 bg-sky-950/30 px-3 py-2 text-xs leading-snug text-sky-100"
+                    >
+                      {recipientPdfImportRoutedMessage}
+                    </p>
                   ) : null}
 
                   {recipientPostUploadSurface?.surface === "notes_only" ? (
