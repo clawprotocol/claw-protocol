@@ -11,7 +11,12 @@ import {
   RECIPIENT_EXPORT_PDF_APPENDIX_REFERENCE,
   RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
+  RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS,
+  RECIPIENT_SEMANTIC_PRIOR_LABEL,
+  RECIPIENT_SEMANTIC_REDLINE_INTRO,
+  RECIPIENT_SEMANTIC_REVISED_LABEL,
 } from "./portableReviewCopy";
+import { blockPriorAndRevisedPlain, type RecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
 
 export type RecipientPreviewPdfExportKind = "original" | "proposed" | "redline";
@@ -191,6 +196,15 @@ function buildHumanStructuredPdfLead(s: HumanReviewStructuredForPdf): string {
     }
     html += `</ul>`;
   }
+  const ctxLines = (s.negotiationContextLines ?? []).map((l) => l.trim()).filter(Boolean).slice(0, 2);
+  if (ctxLines.length > 0) {
+    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Review context</p>`;
+    html += `<ul style="margin:0 0 14px;padding-left:16px;font-size:12px;color:#334155;line-height:1.55;">`;
+    for (const line of ctxLines) {
+      html += `<li style="margin:0 0 4px;">${esc(line)}</li>`;
+    }
+    html += `</ul>`;
+  }
   html += `<p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#0f172a;">${esc(s.confidenceHeadline)}</p>`;
   html += `<p style="margin:0 0 12px;font-size:12px;color:#475569;line-height:1.55;">${esc(s.confidenceBody)}</p>`;
   html += `<p style="margin:0;font-size:11px;color:#64748b;line-height:1.5;">${esc(s.nothingSentFootnote)}</p>`;
@@ -247,6 +261,40 @@ function renderBlockInlineFlow(block: LegalRedlineBlock, opts?: { suppressSectio
   return `<section style="${shellStyle}">${header}${html}</section>`;
 }
 
+function renderSemanticBeforeAfterPdfBlock(
+  block: LegalRedlineBlock,
+  opts?: { suppressSectionHeader?: boolean },
+): string {
+  const { prior, revised } = blockPriorAndRevisedPlain(block);
+  const label = (block.label || block.heading || block.clauseNumber || "").trim();
+  const header =
+    label && !opts?.suppressSectionHeader
+      ? `<header style="margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;"><p style="margin:0;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(
+          label,
+        )}</p></header>`
+      : "";
+  const box =
+    "flex:1 1 280px;min-width:0;margin:0;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;";
+  const pair = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin:0 0 12px;">
+    <div style="${box}">
+      <p style="margin:0 0 6px;font-size:10px;font-weight:600;color:#64748b;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(
+        RECIPIENT_SEMANTIC_PRIOR_LABEL,
+      )}</p>
+      <pre style="margin:0;font:13px/1.65 Georgia,serif;white-space:pre-wrap;color:#334155;">${escapeHtml(prior)}</pre>
+    </div>
+    <div style="${box.replace("#f8fafc", "#ecfdf5").replace("#e2e8f0", "#bbf7d0")}">
+      <p style="margin:0 0 6px;font-size:10px;font-weight:600;color:#065f46;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(
+        RECIPIENT_SEMANTIC_REVISED_LABEL,
+      )}</p>
+      <pre style="margin:0;font:13px/1.65 Georgia,serif;white-space:pre-wrap;color:#064e3b;">${escapeHtml(revised)}</pre>
+    </div>
+  </div>`;
+  const micro = `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;">${escapeHtml(
+    RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS,
+  )}</summary><div style="margin-top:10px;">${renderBlockInlineFlow(block, { suppressSectionHeader: true })}</div></details>`;
+  return `<section style="display:block;margin:0;padding:16px 0 18px 14px;border-left:3px solid #cbd5e1;">${header}${pair}${micro}</section>`;
+}
+
 /**
  * Inline-styled HTML for PyMuPDF Story / server PDF (no Tailwind — classes are stripped server-side).
  * Uses merged segments + paragraph flow (not per-token block slabs).
@@ -265,6 +313,8 @@ export type RecipientRedlinePdfHumanExtras = {
    * to avoid replaying duplicate agreement body in the PDF.
    */
   exportCompareConfidenceLevel?: RecipientCompareConfidenceLevel | null;
+  /** Matches UI semantic negotiation panels for heavy whole-document rewrites. */
+  semanticRedlinePresentation?: RecipientSemanticRedlinePresentation | null;
 };
 
 /** Heuristic: omit reviewer-notes appendix when text largely repeats agreement body already in the redline. */
@@ -301,6 +351,12 @@ export function buildRecipientRedlinePdfHtml(
   lead += `<h2 style="margin:0 0 14px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
     RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   )}</h2>`;
+  const sem = human?.semanticRedlinePresentation ?? null;
+  if (sem?.mode === "whole_section_replacement") {
+    lead += `<p style="margin:-6px 0 18px;font-size:12px;color:#475569;line-height:1.55;">${escapeHtml(
+      RECIPIENT_SEMANTIC_REDLINE_INTRO,
+    )}</p>`;
+  }
   const exportLevel = human?.exportCompareConfidenceLevel ?? "high";
   const tightenExport = exportLevel !== "high";
   const seenLabels = new Set<string>();
@@ -337,6 +393,10 @@ export function buildRecipientRedlinePdfHtml(
           return renderCollapsedExportSection();
         }
         return "";
+      }
+
+      if (sem?.blockStyle.get(b.id) === "before_after" && b.hasChange) {
+        return renderSemanticBeforeAfterPdfBlock(b, { suppressSectionHeader: suppress });
       }
 
       return renderBlockInlineFlow(b, { suppressSectionHeader: suppress });

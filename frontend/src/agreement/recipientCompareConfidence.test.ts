@@ -16,6 +16,8 @@ describe("buildRecipientCompareConfidence", () => {
     });
     expect(r.level).toBe("high");
     expect(r.headline).toContain("High");
+    expect(Array.isArray(r.reasonCodes)).toBe(true);
+    expect(Array.isArray(r.gentleContextLines)).toBe(true);
     expect(r.body.toLowerCase()).toMatch(/line up|cleanly/);
     expect(r.body.toLowerCase()).not.toContain("anchor");
     expect(r.body.toLowerCase()).not.toContain("dedupe");

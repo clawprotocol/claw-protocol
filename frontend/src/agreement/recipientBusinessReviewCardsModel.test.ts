@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import { buildLegalRedlineDocumentViewModel, type LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import {
   businessReviewCardCompactImpactLine,
   businessReviewCardForSemanticId,
   businessReviewCardTitleSubline,
   extractBusinessReviewCardPreviewExcerpt,
+  getPrimaryScrollTargetBlockIdForSemanticId,
 } from "./recipientBusinessReviewCardsModel";
 
 describe("extractBusinessReviewCardPreviewExcerpt", () => {
@@ -58,5 +59,18 @@ describe("businessReviewCardCompactImpactLine", () => {
     const line = businessReviewCardCompactImpactLine(card);
     expect(line.length).toBeGreaterThan(10);
     expect(line).toMatch(/Low|Medium|High/i);
+  });
+});
+
+describe("getPrimaryScrollTargetBlockIdForSemanticId", () => {
+  it("returns the payment block id, not a confidentiality-only block", () => {
+    const vm = buildLegalRedlineDocumentViewModel(
+      "7. Confidentiality\nKeep secrets.\n\n4. Payment\nDue on receipt.",
+      "7. Confidentiality\nKeep strictly private.\n\n4. Payment\nNet 30 from invoice.",
+    );
+    const id = getPrimaryScrollTargetBlockIdForSemanticId(vm, "payment_terms");
+    expect(id).toBeTruthy();
+    const block = vm.blocks.find((b) => b.id === id);
+    expect(block?.label?.toLowerCase() ?? "").toMatch(/payment/);
   });
 });

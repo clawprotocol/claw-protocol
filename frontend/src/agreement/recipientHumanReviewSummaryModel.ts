@@ -108,6 +108,8 @@ export type HumanReviewStructuredForPdf = {
   confidenceHeadline: string;
   confidenceBody: string;
   nothingSentFootnote: string;
+  /** Calm negotiation context (compare reason summaries), max ~2 lines. */
+  negotiationContextLines?: readonly string[];
 };
 
 /**
@@ -136,5 +138,6 @@ export function buildHumanReviewStructuredForPdf(params: {
     confidenceHeadline: params.confidence.headline,
     confidenceBody: params.confidence.body,
     nothingSentFootnote: RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS,
+    negotiationContextLines: params.confidence.gentleContextLines ?? [],
   };
 }

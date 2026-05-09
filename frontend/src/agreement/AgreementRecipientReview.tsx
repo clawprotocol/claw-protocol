@@ -184,6 +184,12 @@ import {
   type RecipientClauseSuggestionCard,
 } from "./recipientClauseSuggestionsFromText";
 import { buildRecipientCompareConfidence } from "./recipientCompareConfidence";
+import type { RecipientRevisionLineage } from "./recipientRevisionLineage";
+import { DEFAULT_RECIPIENT_REVISION_LINEAGE } from "./recipientRevisionLineage";
+import {
+  buildRecipientSemanticRedlinePresentation,
+  recipientSemanticAnchorForBlockId,
+} from "./recipientWholeDocSemanticRender";
 import { buildRecipientFriendlyRedlineChips } from "./recipientFriendlyRedlineSummary";
 import {
   buildHumanReviewHeadline,
@@ -198,7 +204,11 @@ import { buildIntentSemanticBucketRows } from "./recipientIntentSemanticBuckets"
 import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import { RecipientFocusedWordingDialog } from "./RecipientFocusedWordingDialog";
 import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
-import { buildRecommendedSenderFocusLines } from "./recipientBusinessReviewCardsModel";
+import {
+  buildRecommendedSenderFocusLines,
+  getPrimaryScrollTargetBlockIdForSemanticId,
+  type BusinessReviewSemanticId,
+} from "./recipientBusinessReviewCardsModel";
 import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
 import {
   collapseRecipientRedlineDuplicateInsertBlocks,
@@ -388,6 +398,8 @@ export type AgreementRecipientEntry =
 
 export type RecipientLinkRole = "signer" | "reviewer" | "counterparty";
 
+export type { RecipientRevisionLineage } from "./recipientRevisionLineage";
+
 type Props = {
   agreementId: string;
   /** Display name for version label (optional). */
@@ -403,6 +415,8 @@ type Props = {
   inviterDisplayNameOverride?: string;
   /** Minted link token for scoped draft GET/render (session also checked). */
   recipientAccessToken?: string;
+  /** Multi-round negotiation lineage (compare base / parent); defaults to first recipient round. */
+  revisionLineage?: RecipientRevisionLineage;
 };
 
 type RecipientPreview = {
@@ -483,6 +497,7 @@ export function AgreementRecipientReview({
   participantPartyId = "",
   inviterDisplayNameOverride = "",
   recipientAccessToken = "",
+  revisionLineage = DEFAULT_RECIPIENT_REVISION_LINEAGE,
 }: Props) {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState("");
@@ -971,6 +986,7 @@ export function AgreementRecipientReview({
   }, [recipientIntentListExpanded, recipientInstructionIntentSplit.primary]);
 
   const [narrowRedlineHighlightAnchor, setNarrowRedlineHighlightAnchor] = useState<string | null>(null);
+  const [highlightedSemanticAnchor, setHighlightedSemanticAnchor] = useState<string | null>(null);
   const suggestedChangesDocScrollRef = useRef<HTMLDivElement>(null);
   const auditDetailsRef = useRef<HTMLDetailsElement>(null);
   const [businessReviewFocusedWording, setBusinessReviewFocusedWording] = useState<{
@@ -1066,6 +1082,37 @@ export function AgreementRecipientReview({
     };
   }, [legalRedlineDocumentBaseVm, previewDiff, recipientIntentGapCount]);
 
+  const recipientSemanticPresentation = useMemo(() => {
+    if (!legalRedlineDocumentVm || recipientRedlinePlainTexts?.narrowRecipientTargetedRedline) return null;
+    return buildRecipientSemanticRedlinePresentation(legalRedlineDocumentVm);
+  }, [legalRedlineDocumentVm, recipientRedlinePlainTexts?.narrowRecipientTargetedRedline]);
+
+  const scrollToSemanticReviewInRedline = useCallback(
+    (semanticId: BusinessReviewSemanticId) => {
+      openFullLegalRedlineSection();
+      if (!legalRedlineDocumentVm) return;
+      const blockId = getPrimaryScrollTargetBlockIdForSemanticId(legalRedlineDocumentVm, semanticId);
+      const anchor = blockId ? recipientSemanticAnchorForBlockId(blockId) : null;
+      window.requestAnimationFrame(() => {
+        const shell = suggestedChangesDocScrollRef.current;
+        const byAnchor = anchor
+          ? (shell?.querySelector(`[data-recipient-semantic-anchor="${anchor}"]`) as HTMLElement | null)
+          : null;
+        const byBlock =
+          !byAnchor && blockId
+            ? (shell?.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null)
+            : null;
+        const el = byAnchor ?? byBlock;
+        if (el) {
+          el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          if (anchor) setHighlightedSemanticAnchor(anchor);
+          window.setTimeout(() => setHighlightedSemanticAnchor(null), 2600);
+        }
+      });
+    },
+    [legalRedlineDocumentVm, openFullLegalRedlineSection],
+  );
+
   const compareConfidence = useMemo(() => {
     if (!legalRedlineDocumentVm || !recipientRedlinePlainTexts || !previewDiff) return null;
     return buildRecipientCompareConfidence({
@@ -1078,6 +1125,7 @@ export function AgreementRecipientReview({
       changedBlockCount: legalRedlineDocumentVm.stats.changedBlockCount,
       insertCount: legalRedlineDocumentVm.stats.insertCount,
       deleteCount: legalRedlineDocumentVm.stats.deleteCount,
+      wholeDocumentSemanticReplacement: recipientSemanticPresentation?.mode === "whole_section_replacement",
     });
   }, [
     legalRedlineDocumentVm,
@@ -1085,6 +1133,7 @@ export function AgreementRecipientReview({
     previewDiff,
     recipientIntentGapCount,
     recipientImportArtifactsCount,
+    recipientSemanticPresentation?.mode,
   ]);
 
   const reviewerHeadlineName = useMemo(
@@ -2019,6 +2068,9 @@ export function AgreementRecipientReview({
       <div
         className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-4 shadow-sm"
         data-testid="recipient-suggested-changes-panel"
+        data-recipient-revision-round={revisionLineage.revisionRound}
+        data-recipient-compare-base-version-id={revisionLineage.compareBaseVersionId ?? ""}
+        data-recipient-parent-revision-id={revisionLineage.parentRevisionId ?? ""}
       >
         <h2
           ref={previewSummaryHeadingRef}
@@ -2049,6 +2101,7 @@ export function AgreementRecipientReview({
             recommendedFocusLines={recipientBusinessRecommendedFocus}
             confidenceHeadline={compareConfidence.headline}
             confidenceBody={compareConfidence.body}
+            negotiationContextLines={compareConfidence.gentleContextLines}
           />
         ) : null}
 
@@ -2065,6 +2118,7 @@ export function AgreementRecipientReview({
             legalVm={legalRedlineDocumentVm}
             onViewExactWording={(p) => setBusinessReviewFocusedWording(p)}
             onOpenFullRedline={openFullLegalRedlineSection}
+            onNavigateSemanticInRedline={scrollToSemanticReviewInRedline}
           />
         ) : null}
 
@@ -2172,6 +2226,8 @@ export function AgreementRecipientReview({
                       collapseDenseMicroDiff
                       recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
                       highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
+                      semanticPresentation={recipientSemanticPresentation}
+                      highlightedSemanticAnchor={highlightedSemanticAnchor}
                       onDenseBlockViewExactWording={(w) =>
                         setBusinessReviewFocusedWording({
                           sectionTitle: w.sectionLabel,
@@ -2375,6 +2431,7 @@ export function AgreementRecipientReview({
                     redlinePdfStructuredHumanReview={humanReviewStructuredPdf}
                     redlinePdfTechnicalAppendixPlain={redlinePdfTechnicalAppendixPlain}
                     redlinePdfCompareConfidenceLevel={compareConfidence?.level ?? null}
+                    redlinePdfSemanticPresentation={recipientSemanticPresentation}
                     pdfReadContext={{
                       agreementId,
                       readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),

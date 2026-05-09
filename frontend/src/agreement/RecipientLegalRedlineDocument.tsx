@@ -9,7 +9,17 @@ import {
 import {
   RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
+  RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS,
+  RECIPIENT_SEMANTIC_PRIOR_LABEL,
+  RECIPIENT_SEMANTIC_REDLINE_INTRO,
+  RECIPIENT_SEMANTIC_REVISED_LABEL,
+  recipientRedlineUnchangedSectionsHiddenLabel,
 } from "./portableReviewCopy";
+import type { RecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
+import {
+  blockPriorAndRevisedPlain,
+  recipientSemanticAnchorForBlock,
+} from "./recipientWholeDocSemanticRender";
 
 type Props = {
   /** @deprecated Prefer {@link document} for block-aware redline. */
@@ -27,6 +37,10 @@ type Props = {
   collapseDenseMicroDiff?: boolean;
   /** When set, dense collapsed blocks show “View exact wording” → focused OLD/NEW (not full-page redline). */
   onDenseBlockViewExactWording?: (wording: FocusedWordingResult) => void;
+  /** Whole-document negotiation layout (prior/revised panels); null keeps classic inline diff. */
+  semanticPresentation?: RecipientSemanticRedlinePresentation | null;
+  /** Transient highlight for {@link recipientSemanticAnchorForBlock}. */
+  highlightedSemanticAnchor?: string | null;
 };
 
 function blockIsDenseMicroDiff(block: LegalRedlineBlock): boolean {
@@ -235,6 +249,8 @@ export function RecipientLegalRedlineDocument({
   hideUnchangedBlocks = false,
   collapseDenseMicroDiff = false,
   onDenseBlockViewExactWording,
+  semanticPresentation = null,
+  highlightedSemanticAnchor = null,
 }: Props) {
   const shell =
     variant === "suggested"
@@ -243,6 +259,15 @@ export function RecipientLegalRedlineDocument({
         ? "mx-auto w-full max-w-[42rem] rounded-lg border border-slate-300/90 bg-white px-6 py-8 shadow-md sm:px-10 sm:py-10"
         : "mx-auto w-full max-w-none rounded-md border border-slate-200 bg-white px-4 py-5 shadow-sm sm:px-5 sm:py-6";
 
+  const blocksForRender =
+    document && hideUnchangedBlocks && variant === "suggested"
+      ? document.blocks.filter((b) => b.hasChange)
+      : document?.blocks ?? [];
+  const hiddenUnchangedCount =
+    document && hideUnchangedBlocks && variant === "suggested"
+      ? Math.max(0, document.blocks.length - blocksForRender.length)
+      : 0;
+
   return (
     <article
       className={`recipient-legal-redline-document ${shell}`}
@@ -250,10 +275,23 @@ export function RecipientLegalRedlineDocument({
     >
       {document ? (
         <div className="space-y-0">
-          {(hideUnchangedBlocks && variant === "suggested"
-            ? document.blocks.filter((b) => b.hasChange)
-            : document.blocks
-          ).map((block) => {
+          {semanticPresentation?.mode === "whole_section_replacement" ? (
+            <p
+              className="mb-4 rounded-md border border-slate-200/90 bg-slate-50/90 px-3 py-2 text-[11px] leading-relaxed text-slate-700"
+              data-testid="recipient-semantic-redline-intro"
+            >
+              {RECIPIENT_SEMANTIC_REDLINE_INTRO}
+            </p>
+          ) : null}
+          {hiddenUnchangedCount > 0 ? (
+            <p
+              className="mb-3 text-[11px] leading-relaxed text-slate-600"
+              data-testid="recipient-redline-unchanged-hidden-note"
+            >
+              {recipientRedlineUnchangedSectionsHiddenLabel(hiddenUnchangedCount)}
+            </p>
+          ) : null}
+          {blocksForRender.map((block) => {
             const changed = block.hasChange;
             const blockChrome =
               variant === "suggested"
@@ -268,6 +306,14 @@ export function RecipientLegalRedlineDocument({
               collapseDenseMicroDiff && variant === "suggested" && changed && blockIsDenseMicroDiff(block);
             const sectionLabel = (block.label || block.clauseNumber || block.heading || "Section").trim();
             const denseBullets = dense ? inferDenseSectionChangeBullets(block) : [];
+            const semAnchor = semanticPresentation ? recipientSemanticAnchorForBlock(block) : null;
+            const semStyle = semanticPresentation?.blockStyle.get(block.id);
+            const semHighlight =
+              semAnchor && highlightedSemanticAnchor && semAnchor === highlightedSemanticAnchor
+                ? " ring-2 ring-amber-400/90 ring-offset-2 ring-offset-white transition-shadow duration-300"
+                : "";
+            const useBeforeAfter =
+              Boolean(semanticPresentation) && semStyle === "before_after" && variant === "suggested" && changed;
             return (
               <section
                 key={block.id}
@@ -275,9 +321,45 @@ export function RecipientLegalRedlineDocument({
                 data-block-kind={block.kind}
                 data-block-id={block.id}
                 data-clause-number={block.clauseNumber ?? ""}
-                className={blockChrome}
+                data-recipient-semantic-anchor={semAnchor ?? undefined}
+                className={`${blockChrome}${semHighlight}`}
               >
-                {dense ? (
+                {useBeforeAfter ? (
+                  <div className="space-y-3" data-testid="recipient-semantic-before-after-block">
+                    <p className="text-[12px] font-semibold leading-snug text-slate-900">{sectionLabel}</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-md border border-slate-200/90 bg-slate-50/90 p-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                          {RECIPIENT_SEMANTIC_PRIOR_LABEL}
+                        </p>
+                        <div className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-slate-800">
+                          {blockPriorAndRevisedPlain(block).prior}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-emerald-200/80 bg-emerald-50/50 p-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-900/80">
+                          {RECIPIENT_SEMANTIC_REVISED_LABEL}
+                        </p>
+                        <div className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-emerald-950">
+                          {blockPriorAndRevisedPlain(block).revised}
+                        </div>
+                      </div>
+                    </div>
+                    <details className="rounded-md border border-slate-200/90 bg-white/80 px-2 py-1.5">
+                      <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
+                        {RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS}
+                      </summary>
+                      <div className="mt-2 border-t border-slate-200/80 pt-2">
+                        <RecipientLegalRedlineBlockSegments
+                          segments={block.segments}
+                          keyPrefix={`${block.id}_semantic_micro`}
+                          recipientNarrowIntentAnchors={recipientNarrowIntentAnchors}
+                          highlightedRecipientAnchor={highlightedRecipientAnchor}
+                        />
+                      </div>
+                    </details>
+                  </div>
+                ) : dense ? (
                   <div data-testid="recipient-human-section-revised-card">
                     <p className="text-[13px] font-semibold leading-snug text-slate-900">
                       {sectionLabel} substantially revised

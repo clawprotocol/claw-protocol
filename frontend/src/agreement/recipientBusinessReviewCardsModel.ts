@@ -235,6 +235,30 @@ export function getFocusedWordingPickForSemanticId(vm: LegalRedlineDocumentViewM
   return { wording: raw, quality };
 }
 
+/** Block id for scroll / highlight — allows weak mappings so signers still land in the right neighborhood. */
+export function getPrimaryScrollTargetBlockIdForSemanticId(
+  vm: LegalRedlineDocumentViewModel,
+  id: BusinessReviewSemanticId,
+): string | null {
+  const scored: { block: LegalRedlineBlock; score: number; kw: number }[] = [];
+  for (const b of vm.blocks) {
+    if (!b.hasChange) continue;
+    const kw = scoreBlockForSemantic(b, id);
+    const mass = changeMass(b);
+    if (id !== "generic" && kw <= 0) continue;
+    const score = id !== "generic" ? kw + mass / 2000 : kw > 0 ? kw + mass / 2000 : mass / 1500;
+    scored.push({ block: b, score, kw });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored[0];
+  if (!top) return null;
+  if (id !== "generic" && top.kw <= 0) return null;
+  const raw = extractFocusedWordingForBlock(top.block);
+  if (!raw) return null;
+  if (!isMeaningfulWordingSide(raw.oldText) || !isMeaningfulWordingSide(raw.newText)) return null;
+  return top.block.id;
+}
+
 /**
  * Picks the best-matching changed block and returns deleted vs inserted text for focused view.
  * Returns null when no keyword-aligned block exists (callers should not open the modal).

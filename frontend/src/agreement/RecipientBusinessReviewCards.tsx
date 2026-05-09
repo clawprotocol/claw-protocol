@@ -1,4 +1,4 @@
-import { useCallback, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import {
   businessReviewCardForSemanticId,
@@ -14,6 +14,7 @@ import {
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT,
   RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING,
+  RECIPIENT_BUSINESS_REVIEW_WHY_DETAILS,
   RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE,
 } from "./portableReviewCopy";
 
@@ -23,17 +24,20 @@ export type RecipientBusinessReviewCardsProps = {
   onViewExactWording: (payload: { sectionTitle: string; oldText: string; newText: string }) => void;
   /** Opens the collapsed full legal redline section in the parent panel. */
   onOpenFullRedline?: () => void;
+  /** Scrolls to the best-matching block inside the opened redline (full-doc mode). */
+  onNavigateSemanticInRedline?: (semanticId: BusinessReviewSemanticId) => void;
 };
 
 /**
  * Section-style cards for Business Review Mode (before the full legal redline).
- * Desktop: hover/focus shows detail popover. Mobile: opens same content in a bottom sheet.
+ * Desktop: explicit "Details" toggle (click / keyboard / focus). Mobile: bottom sheet.
  */
 export function RecipientBusinessReviewCards({
   chips,
   legalVm,
   onViewExactWording,
   onOpenFullRedline,
+  onNavigateSemanticInRedline,
 }: RecipientBusinessReviewCardsProps) {
   const seen = new Set<string>();
   const rows: { chip: string; id: BusinessReviewSemanticId }[] = [];
@@ -46,6 +50,7 @@ export function RecipientBusinessReviewCards({
     rows.push({ chip: t, id: friendlyChipToSemanticId(t) });
   }
   const [mobileSheetId, setMobileSheetId] = useState<BusinessReviewSemanticId | null>(null);
+  const [expandedDesktopId, setExpandedDesktopId] = useState<BusinessReviewSemanticId | null>(null);
   const sheetTitleId = useId();
 
   const openPreviewSheet = useCallback((id: BusinessReviewSemanticId) => {
@@ -55,6 +60,15 @@ export function RecipientBusinessReviewCards({
   const closePreviewSheet = useCallback(() => {
     setMobileSheetId(null);
   }, []);
+
+  useEffect(() => {
+    if (!expandedDesktopId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpandedDesktopId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expandedDesktopId]);
 
   if (rows.length === 0) return null;
 
@@ -89,14 +103,10 @@ export function RecipientBusinessReviewCards({
         return (
           <article
             key={chip}
-            className="group relative rounded-lg border border-slate-600/50 bg-slate-950/45 px-3 py-2 shadow-sm"
+            className="relative rounded-lg border border-slate-600/50 bg-slate-950/45 px-3 py-2 shadow-sm"
             data-testid={`recipient-business-review-card-${card.id}`}
           >
-            <div
-              tabIndex={0}
-              className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60"
-              data-testid={`recipient-business-review-card-focus-root-${card.id}`}
-            >
+            <div className="rounded-md outline-none focus-within:ring-2 focus-within:ring-sky-500/40" data-testid={`recipient-business-review-card-focus-root-${card.id}`}>
               <h4 className="text-[13px] font-semibold text-slate-50">{card.title}</h4>
               <p
                 className="mt-0.5 text-[11px] leading-snug text-slate-400"
@@ -113,13 +123,23 @@ export function RecipientBusinessReviewCards({
                 </p>
               ) : null}
 
-              <div
-                role="tooltip"
+              <button
+                type="button"
+                className="mt-2 hidden w-full rounded-md border border-slate-700/55 bg-slate-900/40 px-2 py-1.5 text-left text-[11px] font-semibold text-sky-200 hover:bg-slate-900/70 md:block"
+                aria-expanded={expandedDesktopId === id}
                 data-testid={`recipient-business-review-card-popover-${card.id}`}
-                className="pointer-events-none invisible absolute left-0 right-0 top-full z-30 mt-1 hidden max-h-[min(70vh,22rem)] overflow-y-auto rounded-lg border border-slate-600/90 bg-slate-900/98 p-3 text-left opacity-0 shadow-xl ring-1 ring-slate-700/50 transition-opacity duration-150 sm:left-auto sm:right-0 sm:min-w-[18rem] sm:max-w-[22rem] md:block md:group-hover:visible md:group-hover:pointer-events-auto md:group-hover:opacity-100 md:group-focus-within:visible md:group-focus-within:pointer-events-auto md:group-focus-within:opacity-100"
+                onClick={() => setExpandedDesktopId((cur) => (cur === id ? null : id))}
               >
-                {detailBody}
-              </div>
+                {RECIPIENT_BUSINESS_REVIEW_WHY_DETAILS}
+              </button>
+              {expandedDesktopId === id ? (
+                <div
+                  className="mt-2 hidden max-h-[min(70vh,18rem)] overflow-y-auto rounded-md border border-slate-700/60 bg-slate-900/95 p-3 shadow-inner md:block"
+                  data-testid={`recipient-business-review-card-detail-panel-${card.id}`}
+                >
+                  {detailBody}
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-2 flex flex-col gap-0.5">
@@ -146,7 +166,10 @@ export function RecipientBusinessReviewCards({
                   type="button"
                   className="text-left text-[11px] font-semibold text-sky-300/90 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
                   data-testid="recipient-business-review-view-in-full-redline"
-                  onClick={() => onOpenFullRedline()}
+                  onClick={() => {
+                    onNavigateSemanticInRedline?.(id);
+                    onOpenFullRedline();
+                  }}
                 >
                   {RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE}
                 </button>

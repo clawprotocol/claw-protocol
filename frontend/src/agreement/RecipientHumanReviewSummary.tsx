@@ -19,6 +19,8 @@ export type RecipientHumanReviewSummaryProps = {
   recommendedFocusLines: readonly string[];
   confidenceHeadline: string;
   confidenceBody: string;
+  /** Optional calm lines from compare reason summaries (max ~2). */
+  negotiationContextLines?: readonly string[];
 };
 
 /**
@@ -33,6 +35,7 @@ export function RecipientHumanReviewSummary({
   recommendedFocusLines,
   confidenceHeadline,
   confidenceBody,
+  negotiationContextLines = [],
 }: RecipientHumanReviewSummaryProps) {
   return (
     <section
@@ -96,6 +99,17 @@ export function RecipientHumanReviewSummary({
           <ul className="mt-1.5 space-y-1 text-[12px] leading-relaxed text-slate-400">
             {negativeAssurances.map((line) => (
               <li key={line}>— {line}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {negotiationContextLines.length > 0 ? (
+        <div className="mt-3 border-t border-slate-700/50 pt-3" data-testid="recipient-negotiation-context">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Review context</p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-5 text-[12px] leading-relaxed text-slate-300">
+            {negotiationContextLines.map((line) => (
+              <li key={line}>{line}</li>
             ))}
           </ul>
         </div>

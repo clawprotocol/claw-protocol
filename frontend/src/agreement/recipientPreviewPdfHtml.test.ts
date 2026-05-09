@@ -5,7 +5,10 @@ import {
   RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
   RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
+  RECIPIENT_SEMANTIC_PRIOR_LABEL,
+  RECIPIENT_SEMANTIC_REVISED_LABEL,
 } from "./portableReviewCopy";
+import { buildRecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import {
   buildRecipientRedlinePdfHtml,
   notesLikelyDuplicateAgreementBodyForExport,
@@ -103,6 +106,20 @@ describe("buildRecipientRedlinePdfHtml", () => {
     const html = buildRecipientRedlinePdfHtml(vm);
     /** Should not explode into dozens of top-level block wrappers per micro-token */
     expect((html.match(/<\/p>/g) ?? []).length).toBeLessThan(80);
+  });
+
+  it("emits semantic prior/revised labels in PDF when semantic presentation uses before_after blocks", () => {
+    const cur =
+      "1. Payment\nFees due on receipt.\n\n2. Scope\nWebsite only.\n\n3. Term\nOne year.\n\n4. Confidentiality\nKeep secrets.";
+    const prop =
+      "1. Payment\nInvoices due within 10 calendar days. Developer may pause work for nonpayment.\n\n2. Scope\nWebsite and analytics milestones per exhibit A.\n\n3. Term\nOne year.\n\n4. Confidentiality\nKeep confidential information strictly private.";
+    const vm = buildLegalRedlineDocumentViewModel(cur, prop);
+    const sem = buildRecipientSemanticRedlinePresentation(vm);
+    const html = buildRecipientRedlinePdfHtml(vm, null, { semanticRedlinePresentation: sem });
+    if (sem.beforeAfterBlockIds.length > 0) {
+      expect(html).toContain(RECIPIENT_SEMANTIC_PRIOR_LABEL);
+      expect(html).toContain(RECIPIENT_SEMANTIC_REVISED_LABEL);
+    }
   });
 
   it("places structured human review before section A in the HTML stream", () => {

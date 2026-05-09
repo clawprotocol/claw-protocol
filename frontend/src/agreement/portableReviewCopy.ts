@@ -252,6 +252,13 @@ export const RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED =
   "Section substantially revised — see the summary above; full wording appears in the detailed redline below.";
 /** PDF body: after human summary / key revisions. */
 export const RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE = "Detailed agreement redline";
+/** Semantic negotiation panels (whole-section rewrite mode). */
+export const RECIPIENT_SEMANTIC_PRIOR_LABEL = "Prior wording";
+export const RECIPIENT_SEMANTIC_REVISED_LABEL = "Revised wording";
+export const RECIPIENT_SEMANTIC_REDLINE_INTRO =
+  "Where a section was heavily rewritten, prior and revised wording are shown for readability. Optional line-by-line markup remains inside each section.";
+export const RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS = "Optional line-by-line markup";
+export const RECIPIENT_BUSINESS_REVIEW_WHY_DETAILS = "Why this matters";
 /** PDF appendix: numeric reference only. */
 export const RECIPIENT_EXPORT_PDF_APPENDIX_REFERENCE = "Reference counts";
 /** PDF appendix heading for separated reviewer text. */
@@ -279,6 +286,13 @@ export const RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY = RECIPIENT_ADDITIONAL_EXTRA
 /** Shown when a noisy block is collapsed to avoid duplicate full-document inserts in the redline. */
 export const RECIPIENT_REDLINE_SECTION_COLLAPSED_NOTE =
   "Section updated — download the proposed PDF for the full revised wording in this area.";
+
+export function recipientRedlineUnchangedSectionsHiddenLabel(count: number): string {
+  const n = Math.max(1, Math.floor(count));
+  return n === 1
+    ? "1 unchanged section is hidden so you can focus on what changed."
+    : `${n} unchanged sections are hidden so you can focus on what changed.`;
+}
 
 /** Clause-suggestions surface (structured list upload). */
 export const RECIPIENT_CLAUSE_SUGGESTIONS_TITLE = "Suggested protections";

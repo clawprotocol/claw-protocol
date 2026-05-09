@@ -42,16 +42,17 @@ const paymentVm: LegalRedlineDocumentViewModel = {
 describe("RecipientBusinessReviewCards", () => {
   afterEach(() => cleanup());
 
-  it("renders preview CTA copy, hint, title subline, and popover detail copy for desktop inspection", () => {
+  it("renders preview CTA copy, hint, title subline, and expandable detail copy for desktop inspection", () => {
     const onView = vi.fn();
     render(
       <RecipientBusinessReviewCards chips={["Payment terms"]} legalVm={paymentVm} onViewExactWording={onView} />,
     );
     expect(screen.getByText(RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING)).toBeTruthy();
     expect(screen.getByText(RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT)).toBeTruthy();
-    const pop = screen.getByTestId("recipient-business-review-card-popover-payment_terms");
-    expect(within(pop).getByText(/Why this matters:/)).toBeTruthy();
-    expect(within(pop).getByText(/Clarifies when invoices/)).toBeTruthy();
+    fireEvent.click(screen.getByTestId("recipient-business-review-card-popover-payment_terms"));
+    const panel = screen.getByTestId("recipient-business-review-card-detail-panel-payment_terms");
+    expect(within(panel).getByText(/Why this matters:/)).toBeTruthy();
+    expect(within(panel).getByText(/Clarifies when invoices/)).toBeTruthy();
     expect(screen.getByTestId("recipient-business-review-card-subline-payment_terms").textContent?.length).toBeGreaterThan(
       8,
     );
