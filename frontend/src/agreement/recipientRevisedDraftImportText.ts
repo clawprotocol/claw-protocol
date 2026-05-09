@@ -2,6 +2,7 @@ import {
   RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
 } from "./portableReviewCopy";
+import { sanitizeRecipientImportedRevisionText } from "./recipientRevisedDraftExtractSanitize";
 import { loadPdfJsWithWorker } from "./recipientRevisedDraftPdfJs";
 
 /**
@@ -52,13 +53,23 @@ async function extractPdfPlainText(file: File): Promise<string> {
   }
 }
 
+export type ExtractRevisedDraftPlainTextOk = {
+  ok: true;
+  /** Agreement-shaped body after import sanitization (page artifacts stripped, reviewer tail split). */
+  text: string;
+  /** Reviewer commentary split from the agreement body during import (merged into compare notes UI). */
+  importReviewerNotesTail?: string | null;
+  /** Short labels for QA (e.g. stripped page headers). */
+  importArtifactsRemoved?: string[];
+};
+
+export type ExtractRevisedDraftPlainTextResult = ExtractRevisedDraftPlainTextOk | { ok: false; error: string };
+
 /**
  * Extracts plain text from a recipient revised-draft upload.
  * TXT/Markdown and PDF (selectable text) are supported. Other types (e.g. dropped DOCX) get a graceful parse fallback.
  */
-export async function extractRevisedDraftPlainText(
-  file: File,
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+export async function extractRevisedDraftPlainText(file: File): Promise<ExtractRevisedDraftPlainTextResult> {
   const name = file.name.toLowerCase();
   const type = (file.type || "").toLowerCase();
 
@@ -81,8 +92,14 @@ export async function extractRevisedDraftPlainText(
 
   if (isTxtMd) {
     try {
-      const text = await readPlainFileText(file);
-      return { ok: true, text };
+      const raw = await readPlainFileText(file);
+      const san = sanitizeRecipientImportedRevisionText(raw);
+      return {
+        ok: true,
+        text: san.agreementText,
+        importReviewerNotesTail: san.reviewerNotes,
+        importArtifactsRemoved: san.artifactsRemoved,
+      };
     } catch {
       return { ok: false, error: RECIPIENT_DRAFT_IMPORT_READ_ERROR };
     }
@@ -90,11 +107,17 @@ export async function extractRevisedDraftPlainText(
 
   if (isPdf) {
     try {
-      const text = await extractPdfPlainText(file);
-      if (!text.trim()) {
+      const raw = await extractPdfPlainText(file);
+      if (!raw.trim()) {
         return { ok: false, error: RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK };
       }
-      return { ok: true, text };
+      const san = sanitizeRecipientImportedRevisionText(raw);
+      return {
+        ok: true,
+        text: san.agreementText,
+        importReviewerNotesTail: san.reviewerNotes,
+        importArtifactsRemoved: san.artifactsRemoved,
+      };
     } catch {
       return { ok: false, error: RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK };
     }

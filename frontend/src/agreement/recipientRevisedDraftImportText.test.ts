@@ -20,7 +20,7 @@ describe("extractRevisedDraftPlainText (plain files)", () => {
   it("returns text for .txt", async () => {
     const file = new File(["hello"], "rev.txt", { type: "text/plain" });
     const r = await extractRevisedDraftPlainText(file);
-    expect(r).toEqual({ ok: true, text: "hello" });
+    expect(r).toMatchObject({ ok: true, text: "hello" });
   });
 
   it("returns text for .md", async () => {

@@ -475,6 +475,7 @@ test.describe("recipient + link flow QA", () => {
     const legalDoc = page.getByTestId("recipient-legal-redline-document");
     await expect(legalDoc).toBeVisible();
     await expect(legalDoc).toHaveText(/\S{8,}/);
+    await page.getByText("Technical comparison").click();
     await expect(page.getByTestId("recipient-redline-chip-insertions")).toBeVisible();
     await expect(page.getByTestId("recipient-redline-chip-not-reflected")).toHaveCount(0);
     const callout = page.getByTestId("recipient-redline-not-reflected-callout");
@@ -483,7 +484,7 @@ test.describe("recipient + link flow QA", () => {
     await expect(page.getByTestId("recipient-intent-coverage-list")).toBeVisible();
     await expect(callout).toContainText(/In this compare/i);
     await expect(callout).not.toContainText(/Could not add:/i);
-    await expect(legalDoc.locator("section[data-block-kind]")).toHaveCount(4);
+    await expect(legalDoc.locator("section[data-block-kind]").filter({ has: page.locator('[data-redline="insert"]') })).not.toHaveCount(0);
     await expect(legalDoc.getByTestId("recipient-redline-changed-block").first()).toBeVisible();
     const docSurface = page.getByTestId("recipient-suggested-changes-document");
     await expect(docSurface.locator('[data-redline="insert"]').first()).toBeVisible({ timeout: 12_000 });

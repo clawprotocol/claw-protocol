@@ -12,6 +12,8 @@ type Props = {
   recipientNarrowIntentAnchors?: boolean;
   /** Brief highlight ring for the anchor matching an intent-status click. */
   highlightedRecipientAnchor?: string | null;
+  /** When true with {@link document}, only blocks with material changes render (human review mode). */
+  hideUnchangedBlocks?: boolean;
 };
 
 type AnySeg = LegalRedlineSegment | RedlineSegmentVM;
@@ -209,6 +211,7 @@ export function RecipientLegalRedlineDocument({
   variant = "page",
   recipientNarrowIntentAnchors,
   highlightedRecipientAnchor,
+  hideUnchangedBlocks = false,
 }: Props) {
   const shell =
     variant === "suggested"
@@ -224,7 +227,10 @@ export function RecipientLegalRedlineDocument({
     >
       {document ? (
         <div className="space-y-0">
-          {document.blocks.map((block) => {
+          {(hideUnchangedBlocks && variant === "suggested"
+            ? document.blocks.filter((b) => b.hasChange)
+            : document.blocks
+          ).map((block) => {
             const changed = block.hasChange;
             const blockChrome =
               variant === "suggested"

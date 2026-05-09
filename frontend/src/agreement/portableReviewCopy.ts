@@ -165,14 +165,33 @@ export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "Needs manual placement";
 export const RECIPIENT_INTENT_REVIEW_BEFORE_SENDING = "Review before sending";
 export const RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY = "Downloads";
 export const RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY = "Suggestion details";
+export const RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY = "Technical comparison";
+/** @deprecated User-facing gap chip uses {@link recipientPreviewGapChipLabel} instead. */
 export const RECIPIENT_PREVIEW_ITEMS_TO_PLACE = "May need placement";
+
+/** User-safe label for many instruction intents not shown inline in the compare. */
+export function recipientPreviewGapChipLabel(count: number): string {
+  if (count <= 0) return "";
+  if (count >= 15) return "Complex revisions grouped by section";
+  if (count === 1) return "1 proposed edit";
+  return `${count} proposed edits`;
+}
+
+export const RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE =
+  "Some formatting from the uploaded file was cleaned before comparison.";
+export const RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT =
+  "Reviewer notes are separate from the agreement.";
+
+/** Shown when a noisy block is collapsed to avoid duplicate full-document inserts in the redline. */
+export const RECIPIENT_REDLINE_SECTION_COLLAPSED_NOTE =
+  "Section updated — download the proposed PDF for the full revised wording in this area.";
 
 /** Clause-suggestions surface (structured list upload). */
 export const RECIPIENT_CLAUSE_SUGGESTIONS_TITLE = "Suggested protections";
 export const RECIPIENT_CLAUSE_SUGGESTIONS_SUB =
   "These read as clause-style suggestions, not a full rewritten agreement. Compare opens after you upload or paste a revised draft.";
 export const RECIPIENT_CLAUSE_SUGGESTION_STATUS_READY = "Ready to send";
-export const RECIPIENT_CLAUSE_SUGGESTION_STATUS_NEEDS_PLACEMENT = "Needs placement";
+export const RECIPIENT_CLAUSE_SUGGESTION_STATUS_NEEDS_PLACEMENT = "Follow up with sender";
 export const RECIPIENT_CLAUSE_SUGGESTIONS_CTA_SEND = "Send suggestions only";
 export const RECIPIENT_CLAUSE_SUGGESTIONS_CTA_APPLY = "Apply suggestions to draft";
 export const RECIPIENT_CLAUSE_SUGGESTIONS_CTA_UPLOAD = "Upload full revised draft";

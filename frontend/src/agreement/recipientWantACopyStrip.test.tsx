@@ -60,7 +60,7 @@ describe("RecipientWantACopyStrip", () => {
     const file = new File(["Revised line from file"], "changes.txt", { type: "text/plain" });
     await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
     await waitFor(() => {
-      expect(onImported).toHaveBeenCalledWith("Revised line from file");
+      expect(onImported).toHaveBeenCalledWith("Revised line from file", expect.anything());
     });
   });
 });

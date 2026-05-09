@@ -113,7 +113,11 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
     expect(screen.getByTestId("recipient-suggested-changes-document")).toBeTruthy();
     const legalDocRoot = screen.getByTestId("recipient-legal-redline-document");
     expect(legalDocRoot).toBeTruthy();
-    expect(legalDocRoot.querySelectorAll('[data-testid="recipient-legal-redline-block"]').length).toBeGreaterThan(1);
+    expect(
+      legalDocRoot.querySelectorAll(
+        '[data-testid="recipient-legal-redline-block"],[data-testid="recipient-redline-changed-block"]',
+      ).length,
+    ).toBeGreaterThan(0);
     const insertEl = legalDocRoot.querySelector('[data-redline="insert"]');
     expect(insertEl).toBeTruthy();
     expect(insertEl?.textContent).toMatch(/Net\s*30/i);

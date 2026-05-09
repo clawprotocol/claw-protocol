@@ -9,6 +9,7 @@ import {
   RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
+  recipientPreviewGapChipLabel,
   RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED,
   RECIPIENT_UPLOAD_NOTES_ONLY_CARD_TITLE,
   RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
@@ -104,5 +105,12 @@ describe("recipient compare / notes copy (signer-facing)", () => {
     for (const b of banned) {
       expect(u.includes(b), `unexpected “${b}” in signer copy`).toBe(false);
     }
+  });
+
+  it("uses signer-safe gap chip labels without placement wording", () => {
+    expect(recipientPreviewGapChipLabel(1)).toBe("1 proposed edit");
+    expect(recipientPreviewGapChipLabel(8)).toBe("8 proposed edits");
+    expect(recipientPreviewGapChipLabel(20)).toBe("Complex revisions grouped by section");
+    expect(recipientPreviewGapChipLabel(20).toLowerCase()).not.toContain("placement");
   });
 });

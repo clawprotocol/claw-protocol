@@ -131,16 +131,35 @@ function renderBlockInlineFlow(block: LegalRedlineBlock): string {
  * Inline-styled HTML for PyMuPDF Story / server PDF (no Tailwind — classes are stripped server-side).
  * Uses merged segments + paragraph flow (not per-token block slabs).
  */
+export type RecipientRedlinePdfHumanExtras = {
+  /** Escaped HTML bullets or paragraphs (already safe), or plain text wrapped in <p>. */
+  summaryHtml?: string | null;
+  /** Plain text — escaped for appendix. */
+  reviewerNotesPlain?: string | null;
+};
+
 export function buildRecipientRedlinePdfHtml(
   vm: LegalRedlineDocumentViewModel,
   audit?: RecipientRedlinePdfAuditMeta | null,
+  human?: RecipientRedlinePdfHumanExtras | null,
 ): string {
   const auditBlock = audit ? buildAuditHeader({ ...audit, generatedAt: audit.generatedAt }) : "";
+  let lead = "";
+  const sum = (human?.summaryHtml ?? "").trim();
+  if (sum) {
+    lead += `<section style="margin:0 0 22px;padding:14px 16px;background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;"><p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Summary</p><div style="font-size:14px;color:#0f172a;line-height:1.68;">${sum}</div></section>`;
+  }
+  lead += `<h2 style="margin:0 0 14px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">A. Proposed agreement redline</h2>`;
   const sections = vm.blocks.map((b) => renderBlockInlineFlow(b)).join("");
   if (!sections.trim()) {
-    return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px;">${auditBlock}<p style="margin:0;font:15px/1.65 Georgia,serif;color:#64748b;">No redline content.</p></article>`;
+    return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px;">${auditBlock}${lead}<p style="margin:0;font:15px/1.65 Georgia,serif;color:#64748b;">No redline content.</p></article>`;
   }
-  return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px 28px;">${auditBlock}${sections}</article>`;
+  let appendix = "";
+  const notes = (human?.reviewerNotesPlain ?? "").trim();
+  if (notes) {
+    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">B. Reviewer notes — not part of agreement</h2><pre style="margin:0;font:13px/1.65 ui-sans-serif,system-ui;white-space:pre-wrap;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(notes)}</pre>`;
+  }
+  return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px 28px;">${auditBlock}${lead}${sections}${appendix}</article>`;
 }
 
 export function sanitizeHtmlForRecipientPdfExport(html: string): string {

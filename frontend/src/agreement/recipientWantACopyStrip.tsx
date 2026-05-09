@@ -25,7 +25,10 @@ type Props = {
   plainDraftText: string;
   /** When set with {@link onImportedRevisedPlainText}, shows primary upload and wires the outside-review → bring-back loop. */
   onPrepareRevisedImport?: () => void;
-  onImportedRevisedPlainText?: (text: string) => void;
+  onImportedRevisedPlainText?: (
+    text: string,
+    meta?: { importReviewerNotesTail?: string | null; importArtifactsRemoved?: string[] },
+  ) => void;
   revisedImportDisabled?: boolean;
 };
 
@@ -89,7 +92,10 @@ export function RecipientWantACopyStrip({
         return;
       }
       try {
-        onImportedRevisedPlainText(result.text);
+        onImportedRevisedPlainText(result.text, {
+          importReviewerNotesTail: result.importReviewerNotesTail ?? undefined,
+          importArtifactsRemoved: result.importArtifactsRemoved,
+        });
       } catch {
         setUploadErr(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
       }

@@ -813,6 +813,15 @@ export function buildRecipientLegalRedlinePlainTexts(
       usePatch = true;
     } else if (vmFull && !partiesChanged && patchableChangedRows.length === changedKeys.length) {
       usePatch = true;
+    } else if (
+      vmFull &&
+      !partiesChanged &&
+      vmFull.stats.changedBlockCount >= 18 &&
+      vmFull.stats.insertCount >= 40 &&
+      patchableChangedRows.length > 0
+    ) {
+      /** Very noisy full-doc alignment (common with PDF extraction) — prefer field-shaped patch pair for redline. */
+      usePatch = true;
     }
   }
 

@@ -125,8 +125,10 @@ import {
   RECIPIENT_INTENT_REVIEW_BEFORE_SENDING,
   RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
   RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY,
-  RECIPIENT_PREVIEW_ITEMS_TO_PLACE,
+  RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE,
+  RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT,
   RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY,
+  RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
   RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL,
@@ -144,6 +146,7 @@ import {
   RECIPIENT_WORKSPACE_HEADLINE,
   RECIPIENT_WORKSPACE_SUBCOPY,
   buildRecipientRevisionText,
+  recipientPreviewGapChipLabel,
 } from "./portableReviewCopy";
 import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 import { RecipientRevisedDraftAnalyzingCard } from "./recipientRevisedDraftAnalyzingCard";
@@ -153,7 +156,9 @@ import {
   buildClauseSuggestionCardsFromUploadText,
   type RecipientClauseSuggestionCard,
 } from "./recipientClauseSuggestionsFromText";
+import { buildRecipientFriendlyRedlineChips } from "./recipientFriendlyRedlineSummary";
 import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
+import { collapseRecipientRedlineDuplicateInsertBlocks } from "./recipientRedlineDisplayDedupe";
 import { REVISED_UPLOAD_ANALYZING_MIN_MS } from "./recipientRevisedDraftUploadFlow";
 import { renderAgreementDraftHtmlLikeBackend, purposeLooksLikeFullAgreementTextForRender } from "./recipientAgreementDraftHtmlRender";
 import {
@@ -517,8 +522,17 @@ export function AgreementRecipientReview({
   /** Import flow: preview is computed but committed after the analyzing minimum delay. */
   const pendingImportRecipientPreviewRef = useRef<RecipientPreview | null>(null);
   const runImportedRevisedAutoCompareRef = useRef<
-    ((fullText: string, opts?: { scrollToSummary?: boolean }) => Promise<void>) | null
+    | ((
+        fullText: string,
+        opts?: {
+          scrollToSummary?: boolean;
+          importReviewerNotesTail?: string | null;
+          importArtifactsRemoved?: string[];
+        },
+      ) => Promise<void>)
+    | null
   >(null);
+  const [recipientImportSanitizeNote, setRecipientImportSanitizeNote] = useState<string | null>(null);
 
   const onDraftImportFileSelected = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -533,7 +547,11 @@ export function AgreementRecipientReview({
           return;
         }
         try {
-          await runImportedRevisedAutoCompareRef.current?.(result.text, { scrollToSummary: false });
+          await runImportedRevisedAutoCompareRef.current?.(result.text, {
+            scrollToSummary: false,
+            importReviewerNotesTail: result.importReviewerNotesTail ?? undefined,
+            importArtifactsRemoved: result.importArtifactsRemoved,
+          });
         } catch {
           setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
         }
@@ -575,9 +593,15 @@ export function AgreementRecipientReview({
     setError(null);
   }, [flowPhase]);
 
-  const onWantCopyRevisedImported = useCallback((text: string) => {
-    void runImportedRevisedAutoCompareRef.current?.(text, { scrollToSummary: true });
-  }, []);
+  const onWantCopyRevisedImported = useCallback(
+    (
+      text: string,
+      meta?: { importReviewerNotesTail?: string | null; importArtifactsRemoved?: string[] },
+    ) => {
+      void runImportedRevisedAutoCompareRef.current?.(text, { scrollToSummary: true, ...meta });
+    },
+    [],
+  );
 
   useEffect(() => {
     setReviewerNotesAccordionOpen(false);
@@ -930,11 +954,23 @@ export function AgreementRecipientReview({
       recipientRedlinePlainTexts.currentPlain,
       recipientRedlinePlainTexts.proposedPlain,
     );
+    if (
+      recipientRedlinePlainTexts.sourceMode === "baseline_vs_revise_html" &&
+      !recipientRedlinePlainTexts.narrowRecipientTargetedRedline
+    ) {
+      vm = collapseRecipientRedlineDuplicateInsertBlocks(vm, recipientRedlinePlainTexts.proposedPlain);
+    }
     if (recipientRedlinePlainTexts.narrowRecipientTargetedRedline) {
       vm = filterNarrowRecipientPaymentRedlineNoise(vm, { narrowPaymentInstruction: true });
     }
     return vm;
   }, [recipientRedlinePlainTexts]);
+
+  const recipientFriendlyRedlineChips = useMemo(() => {
+    if (!recipientPreview || !previewDiff) return [] as string[];
+    const fields = previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).map((r) => r.field);
+    return buildRecipientFriendlyRedlineChips(recipientPreview.revisionText ?? "", fields);
+  }, [recipientPreview, previewDiff]);
 
   const narrowIntentAnchorPresence = useMemo(() => {
     const absent = { payment_timing: false, pause_suspend_work: false };
@@ -1472,6 +1508,10 @@ export function AgreementRecipientReview({
     if (!draft) return;
     const trimmed = fullText.trim();
     if (!trimmed) return;
+    setRecipientImportSanitizeNote(
+      scrollOpts?.importArtifactsRemoved?.length ? RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE : null,
+    );
+    const importTail = scrollOpts?.importReviewerNotesTail?.trim() ?? "";
     setRecipientPostUploadSurface(null);
     setRecipientPreview(null);
     setRecipientRevisePreviewError(null);
@@ -1488,7 +1528,8 @@ export function AgreementRecipientReview({
         setRevisedIntakePhase("editing");
         setExternalAiPaste("");
         setRevisedUploadAnalyzing(false);
-        setRecipientPostUploadSurface({ surface: "notes_only", notes: classification.reviewerNotes ?? trimmed });
+        const notesOnly = [classification.reviewerNotes ?? trimmed, importTail].filter(Boolean).join("\n\n");
+        setRecipientPostUploadSurface({ surface: "notes_only", notes: notesOnly });
         return;
       }
 
@@ -1498,7 +1539,7 @@ export function AgreementRecipientReview({
         setRevisedIntakePhase("editing");
         setExternalAiPaste("");
         setRevisedUploadAnalyzing(false);
-        const noteText = classification.reviewerNotes ?? trimmed;
+        const noteText = [classification.reviewerNotes ?? trimmed, importTail].filter(Boolean).join("\n\n");
         setRecipientPostUploadSurface({
           surface: "clause_suggestions",
           notes: noteText,
@@ -1512,7 +1553,7 @@ export function AgreementRecipientReview({
       setRevisedSubmode("paste");
       setRevisedIntakePhase("editing");
       const agreementBody = classification.agreementText.trim();
-      const reviewerNotes = classification.reviewerNotes;
+      const reviewerNotes = [classification.reviewerNotes, importTail].filter(Boolean).join("\n\n") || null;
       const instCombined = [instruction.trim(), reviewerNotes || ""].filter(Boolean).join("\n\n");
       const minVisible = new Promise<void>((resolve) => {
         window.setTimeout(resolve, REVISED_UPLOAD_ANALYZING_MIN_MS);
@@ -1521,7 +1562,7 @@ export function AgreementRecipientReview({
         previewWholeDocumentRevisionRef.current?.({
           bodyPlain: agreementBody,
           instructionPlain: instCombined,
-          separatedReviewerNotesForUi: reviewerNotes,
+          separatedReviewerNotesForUi: reviewerNotes ?? undefined,
           importPipeline: true,
         }) ?? Promise.resolve(false);
       const [previewOkRaw] = await Promise.all([previewPromise, minVisible]);
@@ -1655,6 +1696,7 @@ export function AgreementRecipientReview({
     setRecipientPreview(null);
     pendingImportRecipientPreviewRef.current = null;
     setRecipientPostUploadSurface(null);
+    setRecipientImportSanitizeNote(null);
     setRecipientRevisePreviewError(null);
     setRevisedUploadAnalyzing(false);
     window.requestAnimationFrame(() => {
@@ -1741,6 +1783,14 @@ export function AgreementRecipientReview({
         <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY}</p>
         <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_PREVIEW_TRUST_SUBCOPY}</p>
         <p className="sr-only">{PRODUCT_NOT_LAW_FIRM}</p>
+        {recipientImportSanitizeNote ? (
+          <p
+            className="mt-2 text-[11px] leading-relaxed text-slate-500"
+            data-testid="recipient-import-sanitize-note"
+          >
+            {recipientImportSanitizeNote}
+          </p>
+        ) : null}
         {recipientPreview.separatedReviewerNotesForUi ? (
           <div
             className="mt-3 rounded-lg border border-emerald-900/30 bg-emerald-950/20 px-3 py-2.5"
@@ -1749,6 +1799,7 @@ export function AgreementRecipientReview({
             <p className="text-[11px] font-semibold tracking-wide text-emerald-100/95">
               {RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE}
             </p>
+            <p className="mt-1 text-[10px] leading-snug text-emerald-200/80">{RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT}</p>
             <button
               type="button"
               data-testid="recipient-reviewer-notes-accordion-toggle"
@@ -1780,47 +1831,68 @@ export function AgreementRecipientReview({
               <p className="mb-2 mt-3 text-sm leading-snug text-amber-100/95">{legalRedlineDocumentVm.fallbackReason}</p>
             ) : null}
 
-            <div
-              className="mt-3 flex flex-wrap gap-2"
-              data-testid="recipient-suggested-changes-summary-chips"
-              aria-label="Summary of suggested edits"
-            >
-              <span
-                data-testid="recipient-redline-chip-insertions"
-                className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+            {recipientFriendlyRedlineChips.length > 0 ? (
+              <div
+                className="mt-3 flex flex-wrap gap-2"
+                data-testid="recipient-friendly-redline-chips"
+                aria-label="High-level summary of changes"
               >
-                {redlineSummaryChipLabel(
-                  legalRedlineDocumentVm.stats.insertCount,
-                  "addition",
-                  "additions",
-                )}
-              </span>
-              <span
-                data-testid="recipient-redline-chip-deletions"
-                className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                {recipientFriendlyRedlineChips.map((label) => (
+                  <span
+                    key={label}
+                    className="inline-flex items-center rounded-full border border-sky-800/45 bg-sky-950/30 px-2.5 py-0.5 text-[11px] font-medium text-sky-100"
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            <details className="mt-3 rounded-md border border-slate-700/50 bg-slate-950/35 px-2 py-1.5">
+              <summary className="cursor-pointer list-none text-[11px] font-semibold text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
+                {RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY}
+              </summary>
+              <div
+                className="mt-2 flex flex-wrap gap-2 border-t border-slate-800/50 pt-2"
+                data-testid="recipient-suggested-changes-summary-chips"
+                aria-label="Technical comparison counts"
               >
-                {redlineSummaryChipLabel(
-                  legalRedlineDocumentVm.stats.deleteCount,
-                  "removal",
-                  "removals",
-                )}
-              </span>
-              <span
-                data-testid="recipient-redline-chip-sections"
-                className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
-              >
-                {wordingChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
-              </span>
-              {recipientIntentGapCount > 0 ? (
                 <span
-                  data-testid="recipient-redline-chip-not-reflected"
-                  className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-100"
+                  data-testid="recipient-redline-chip-insertions"
+                  className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
                 >
-                  {recipientIntentGapCount} {recipientIntentGapCount === 1 ? "item" : "items"} —{" "}
-                  {RECIPIENT_PREVIEW_ITEMS_TO_PLACE}
+                  {redlineSummaryChipLabel(
+                    legalRedlineDocumentVm.stats.insertCount,
+                    "addition",
+                    "additions",
+                  )}
                 </span>
-              ) : null}
-            </div>
+                <span
+                  data-testid="recipient-redline-chip-deletions"
+                  className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                >
+                  {redlineSummaryChipLabel(
+                    legalRedlineDocumentVm.stats.deleteCount,
+                    "removal",
+                    "removals",
+                  )}
+                </span>
+                <span
+                  data-testid="recipient-redline-chip-sections"
+                  className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                >
+                  {wordingChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
+                </span>
+                {recipientIntentGapCount > 0 ? (
+                  <span
+                    data-testid="recipient-redline-chip-not-reflected"
+                    className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-100"
+                  >
+                    {recipientPreviewGapChipLabel(recipientIntentGapCount)}
+                  </span>
+                ) : null}
+              </div>
+            </details>
 
             {showRecipientIntentCoverageCallout ? (
               <details
@@ -1990,6 +2062,9 @@ export function AgreementRecipientReview({
                     }}
                     legalRedlineVm={legalRedlineDocumentVm}
                     detachRedlinePdfButton
+                    redlinePdfSummarySentence={recipientRedlinePlainTexts.instructionContextSummary ?? null}
+                    redlinePdfSummaryBullets={recipientFriendlyRedlineChips}
+                    redlinePdfReviewerNotesPlain={recipientPreview.separatedReviewerNotesForUi ?? null}
                     pdfReadContext={{
                       agreementId,
                       readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
@@ -2014,6 +2089,7 @@ export function AgreementRecipientReview({
                 <RecipientLegalRedlineDocument
                   document={legalRedlineDocumentVm}
                   variant="suggested"
+                  hideUnchangedBlocks
                   recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
                   highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
                 />

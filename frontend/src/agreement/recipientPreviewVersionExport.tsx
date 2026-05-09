@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { escapeHtml } from "../components/agreements/premiumAgreementDocumentHtml";
 import { NOT_LEGAL_ADVICE } from "../compliance/disclosureCopy";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import { recipientReviewerSlugFromDisplayName, recipientTextDownloadFilename } from "./recipientExportFilenames";
@@ -10,6 +11,7 @@ import {
 import {
   buildRecipientRedlinePdfHtml,
   type RecipientPreviewPdfExportKind,
+  type RecipientRedlinePdfHumanExtras,
   wrapRecipientVersionPdfHtml,
 } from "./recipientPreviewPdfHtml";
 
@@ -55,16 +57,38 @@ type Props = {
   pdfReadContext: RecipientPreviewPdfReadContext | null;
   /** Screen-reader / programmatic only — parent shows a matching “Download redline” control. */
   detachRedlinePdfButton?: boolean;
+  /** Optional human-readable redline PDF summary (not the machine diff). */
+  redlinePdfSummarySentence?: string | null;
+  redlinePdfSummaryBullets?: readonly string[];
+  redlinePdfReviewerNotesPlain?: string | null;
 };
 
 /**
  * Original / proposed / redline PDFs and copy helpers. PDF actions stay visible (not hidden in a collapsed disclosure).
  */
+function buildRedlinePdfSummaryHtml(sentence: string | null | undefined, bullets: readonly string[] | undefined): string {
+  const parts: string[] = [];
+  const s = (sentence ?? "").trim();
+  if (s) {
+    parts.push(`<p style="margin:0 0 10px;">${escapeHtml(s)}</p>`);
+  }
+  const bs = bullets?.filter((b) => b.trim()) ?? [];
+  if (bs.length > 0) {
+    parts.push(
+      `<ul style="margin:0;padding-left:18px;">${bs.map((b) => `<li style="margin:0 0 6px;">${escapeHtml(b.trim())}</li>`).join("")}</ul>`,
+    );
+  }
+  return parts.join("");
+}
+
 export function RecipientPreviewVersionsExport({
   plainSource,
   legalRedlineVm,
   pdfReadContext,
   detachRedlinePdfButton = false,
+  redlinePdfSummarySentence = null,
+  redlinePdfSummaryBullets,
+  redlinePdfReviewerNotesPlain = null,
 }: Props) {
   const [copyAck, setCopyAck] = useState<"original" | "proposed" | "redline" | null>(null);
   const [pdfErrors, setPdfErrors] = useState<Partial<Record<RecipientPreviewPdfExportKind, string | null>>>({});
@@ -81,6 +105,14 @@ export function RecipientPreviewVersionsExport({
 
   pdfReadContextRef.current = pdfReadContext;
   legalRedlineVmRef.current = legalRedlineVm;
+
+  const redlinePdfHumanExtras = useMemo(
+    (): RecipientRedlinePdfHumanExtras => ({
+      summaryHtml: buildRedlinePdfSummaryHtml(redlinePdfSummarySentence, redlinePdfSummaryBullets ?? []) || null,
+      reviewerNotesPlain: redlinePdfReviewerNotesPlain?.trim() || null,
+    }),
+    [redlinePdfSummarySentence, redlinePdfSummaryBullets, redlinePdfReviewerNotesPlain],
+  );
 
   const redlinePlain = useCallback(() => legalRedlineDocumentVmToPlainSummary(legalRedlineVmRef.current), []);
 
@@ -169,13 +201,17 @@ export function RecipientPreviewVersionsExport({
           ? wrapRecipientVersionPdfHtml(ctx.scrubbedOriginalHtml)
           : kind === "proposed"
             ? wrapRecipientVersionPdfHtml(ctx.scrubbedProposedHtml)
-            : buildRecipientRedlinePdfHtml(vm, {
-                agreementId: ctx.agreementId,
-                agreementTitle: ctx.agreementTitleDisplay ?? null,
-                reviewerDisplayName: ctx.reviewerDisplayName ?? null,
-                reviewerEmail: ctx.reviewerEmail ?? null,
-                generatedAt: exportedAt,
-              });
+            : buildRecipientRedlinePdfHtml(
+                vm,
+                {
+                  agreementId: ctx.agreementId,
+                  agreementTitle: ctx.agreementTitleDisplay ?? null,
+                  reviewerDisplayName: ctx.reviewerDisplayName ?? null,
+                  reviewerEmail: ctx.reviewerEmail ?? null,
+                  generatedAt: exportedAt,
+                },
+                redlinePdfHumanExtras,
+              );
       if (!html.trim()) {
         safeSet(() => setPdfErrors((p) => ({ ...p, [kind]: "Nothing to export yet." })));
         schedulePdfErrorClear(kind);
@@ -218,7 +254,7 @@ export function RecipientPreviewVersionsExport({
         window.setTimeout(() => safeSet(() => setA11yStatus("")), 900);
       }
     },
-    [pdfBusy, safeSet, schedulePdfErrorClear],
+    [pdfBusy, redlinePdfHumanExtras, safeSet, schedulePdfErrorClear],
   );
 
   const linkBtn =

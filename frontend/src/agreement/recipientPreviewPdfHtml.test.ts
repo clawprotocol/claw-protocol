@@ -47,6 +47,28 @@ describe("buildRecipientRedlinePdfHtml", () => {
     expect((html.match(/<\/p>/g) ?? []).length).toBeLessThan(80);
   });
 
+  it("includes human summary and reviewer appendix when extras provided", () => {
+    const vm = buildLegalRedlineDocumentViewModel("Fee is due on receipt.", "Fee is Net 30.");
+    const html = buildRecipientRedlinePdfHtml(
+      vm,
+      {
+        agreementId: "ag_x",
+        agreementTitle: "T",
+        reviewerDisplayName: "Sarah Collins",
+        reviewerEmail: null,
+        generatedAt: auditTs,
+      },
+      {
+        summaryHtml: "<p>Focused edits to payment timing.</p><ul><li>Payment terms updated</li></ul>",
+        reviewerNotesPlain: "Please confirm by Friday.",
+      },
+    );
+    expect(html).toContain("Summary");
+    expect(html).toContain("A. Proposed agreement redline");
+    expect(html).toContain("B. Reviewer notes");
+    expect(html).toContain("Please confirm by Friday.");
+  });
+
   it("includes audit metadata when provided", () => {
     const vm = buildLegalRedlineDocumentViewModel("a", "b");
     const html = buildRecipientRedlinePdfHtml(vm, {
