@@ -1,6 +1,7 @@
 import {
   type LegalRedlineBlock,
   type LegalRedlineDocumentViewModel,
+  type LegalRedlineSegment,
   mergeAdjacentRedlineSegmentsAllTypes,
   normalizeNewlinesForLegalRedline,
   recomputeLegalRedlineBlock,
@@ -51,6 +52,105 @@ function collapseBlockToSectionUpdated(b: LegalRedlineBlock, label: string): Leg
  * Collapses blocks whose inserted text largely repeats content already shown in earlier
  * insert-heavy blocks (common when PDF extraction duplicates headers or alignment mis-pairs).
  */
+function nonSameChangeMass(b: LegalRedlineBlock): number {
+  return b.segments
+    .filter((s) => s.type !== "same")
+    .reduce((a, s) => a + String(s.text).replace(/\s+/g, " ").trim().length, 0);
+}
+
+/** Sub-clause / list continuations and other tiny compare tails (not standalone substantive revisions). */
+function looksLikeListOrSubclauseFragment(b: LegalRedlineBlock): boolean {
+  const raw = (b.proposedText || b.currentText || "").trim();
+  const fromSegs = b.segments
+    .filter((s) => s.type !== "same")
+    .map((s) => String(s.text).trim())
+    .join(" ");
+  const head = (raw || fromSegs).split("\n")[0]?.trim() ?? "";
+  const probe = head || (b.label || b.heading || "").trim();
+  if (/^\([a-z]\)\s+/i.test(probe)) return true;
+  if (/^\([ivx]{1,4}\)\s+/i.test(probe)) return true;
+  if (/^\d+\.\d+[\.)]\s/.test(probe) && raw.length < 160) return true;
+  return false;
+}
+
+function isLowSignalFragmentBlock(b: LegalRedlineBlock): boolean {
+  if (!b.hasChange) return false;
+  const m = nonSameChangeMass(b);
+  if (m === 0) return false;
+
+  const numberedClause = Boolean(b.clauseNumber && b.kind === "clause");
+  if (numberedClause) {
+    if (m > 60) return false;
+    return looksLikeListOrSubclauseFragment(b);
+  }
+
+  if (m <= 22) return true;
+  if (
+    m <= 60 &&
+    (looksLikeListOrSubclauseFragment(b) ||
+      b.kind === "bullet" ||
+      b.kind === "heading" ||
+      b.kind === "footer" ||
+      b.kind === "signature")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function combineAdjacentBlocks(first: LegalRedlineBlock, second: LegalRedlineBlock): LegalRedlineBlock {
+  const spacer: LegalRedlineSegment = { type: "same", text: "\n\n" };
+  const mergedSegs = mergeAdjacentRedlineSegmentsAllTypes([...first.segments, spacer, ...second.segments]);
+  const currentText = [first.currentText?.trim(), second.currentText?.trim()].filter(Boolean).join("\n\n");
+  const proposedText = [first.proposedText?.trim(), second.proposedText?.trim()].filter(Boolean).join("\n\n");
+  const label = (first.label || first.heading || second.label || second.heading || "Section").trim();
+  return recomputeLegalRedlineBlock(
+    {
+      ...first,
+      id: `${first.id}__${second.id}`,
+      label,
+      heading: first.heading || second.heading,
+      clauseNumber: first.clauseNumber ?? second.clauseNumber,
+      currentText: currentText || undefined,
+      proposedText: proposedText || undefined,
+      kind: first.kind,
+    },
+    mergedSegs,
+  );
+}
+
+/**
+ * Merges tiny / list-fragment changed blocks into adjacent sections so Business Review and exports
+ * do not surface parser-scale “revisions” as first-class edits.
+ */
+export function mergeRecipientRedlineLowSignalFragments(vm: LegalRedlineDocumentViewModel): LegalRedlineDocumentViewModel {
+  const { blocks } = vm;
+  if (blocks.length < 2) return vm;
+
+  const out: LegalRedlineBlock[] = [];
+  let i = 0;
+  while (i < blocks.length) {
+    const b = blocks[i]!;
+    if (isLowSignalFragmentBlock(b) && i + 1 < blocks.length) {
+      out.push(combineAdjacentBlocks(b, blocks[i + 1]!));
+      i += 2;
+      continue;
+    }
+    if (isLowSignalFragmentBlock(b) && out.length > 0) {
+      out[out.length - 1] = combineAdjacentBlocks(out[out.length - 1]!, b);
+      i++;
+      continue;
+    }
+    out.push(b);
+    i++;
+  }
+
+  if (out.length === blocks.length) return vm;
+  const stats = recomputeStats(out, vm.stats.currentLen, vm.stats.proposedLen);
+  const hasChanges = out.some((blk) => blk.hasChange);
+  return { ...vm, blocks: out, stats, hasChanges };
+}
+
 export function collapseRecipientRedlineDuplicateInsertBlocks(
   vm: LegalRedlineDocumentViewModel,
   proposedPlain: string,

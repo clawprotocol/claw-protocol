@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import { buildLegalRedlineDocumentViewModel, mergeAdjacentRedlineSegmentsAllTypes } from "./legalRedlineBlocks";
-import { RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED } from "./portableReviewCopy";
+import {
+  RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
+  RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
+  RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
+} from "./portableReviewCopy";
 import {
   buildRecipientRedlinePdfHtml,
   sanitizeHtmlForRecipientPdfExport,
@@ -98,7 +102,7 @@ describe("buildRecipientRedlinePdfHtml", () => {
       },
     );
     const idxHuman = html.indexOf("Pat proposed 2 meaningful revisions");
-    const idxA = html.indexOf("A. Proposed agreement redline");
+    const idxA = html.indexOf(RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE);
     expect(idxHuman).toBeGreaterThan(-1);
     expect(idxA).toBeGreaterThan(-1);
     expect(idxHuman).toBeLessThan(idxA);
@@ -169,9 +173,22 @@ describe("buildRecipientRedlinePdfHtml", () => {
       },
     );
     expect(html).toContain("Summary");
-    expect(html).toContain("A. Proposed agreement redline");
-    expect(html).toContain("B. Reviewer notes");
+    expect(html).toContain(RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE);
+    expect(html).toContain(RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING);
     expect(html).toContain("Please confirm by Friday.");
+  });
+
+  it("does not use internal audit reference wording in optional appendix titles", () => {
+    const vm = buildLegalRedlineDocumentViewModel("a", "b");
+    const html = buildRecipientRedlinePdfHtml(
+      vm,
+      null,
+      {
+        technicalAppendixPlain: "For reference: 1 additions.",
+      },
+    );
+    expect(html).not.toMatch(/audit reference/i);
+    expect(html).toMatch(/reference counts/i);
   });
 
   it("includes audit metadata when provided", () => {

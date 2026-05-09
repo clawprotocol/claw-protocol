@@ -183,21 +183,23 @@ export const RECIPIENT_UPLOAD_NOTES_ONLY_CTA_QUICK = "Use these as a quick chang
 export const RECIPIENT_UPLOAD_NOTES_ONLY_DOWNLOAD_NOTES = "Download reviewer notes";
 
 /** Compare panel — intent coverage (plain language). */
-/** @deprecated Recipient UI uses {@link RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE}. */
-export const RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED = "Not automatically inserted";
-/** Recipient Business Review — avoids “not inserted” machinery tone. */
-export const RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE = "Summarized for your message to the sender.";
-/** User-safe — avoid “placement” jargon; paired with explain sentence in UI. */
-export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "We could not match this in the agreement text";
+/** @deprecated Prefer {@link RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE}. */
+export const RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED =
+  "Open the full legal redline below when you want line-by-line placement context.";
+/** Recipient Business Review — calm, no compare-engine phrasing. */
+export const RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE =
+  "This appears with your other revisions in the summary — open the full legal redline below to read it in the draft.";
+/** User-safe — avoids “match failure” tone. */
+export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "This wording is not shown anchored to a single clause in the text below";
 export const RECIPIENT_INTENT_REVIEW_BEFORE_SENDING = "Review before sending";
 export const RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY = "Downloads";
 export const RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY = "Suggestion details";
-/** Business Review Mode: raw redline + counts live here (default closed). */
-export const RECIPIENT_AUDIT_MODE_SUMMARY = "Audit mode";
+/** Collapsible section: line-level agreement markup (default closed). */
+export const RECIPIENT_AUDIT_MODE_SUMMARY = "Full legal redline";
 /** @deprecated Use {@link RECIPIENT_AUDIT_MODE_SUMMARY}. */
 export const RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY = RECIPIENT_AUDIT_MODE_SUMMARY;
 export const RECIPIENT_AUDIT_MODE_SUBCOPY =
-  "Full redline details are optional. Most reviewers decide from Business Review first.";
+  "Optional line-by-line markup. Most reviewers decide from the summary and key revisions first.";
 /** @deprecated User-facing gap chip uses {@link recipientPreviewGapChipLabel} instead. */
 export const RECIPIENT_PREVIEW_ITEMS_TO_PLACE = "May need placement";
 
@@ -214,12 +216,23 @@ export const RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE =
 export const RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT =
   "Reviewer notes are separate from the agreement.";
 
+/** PDF “audit reference” strip — counts only; no parser/compare jargon. */
+export function recipientRedlineTechnicalAppendixSummaryLine(opts: {
+  insertCount: number;
+  deleteCount: number;
+  changedBlockCount: number;
+  segmentCount: number;
+}): string {
+  const { insertCount, deleteCount, changedBlockCount, segmentCount } = opts;
+  return `For reference: ${insertCount} additions, ${deleteCount} removals, ${changedBlockCount} sections with revisions, and ${segmentCount} tracked spans (counts only — use the detailed redline in this PDF for line-level review).`;
+}
+
 /** Human review card — nothing leaves the recipient until the sender accepts. */
 export const RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS =
   "Nothing is sent until the sender accepts.";
 
-/** Subheading inside Audit mode above the tracked redline. */
-export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Full agreement markup";
+/** Subheading above the tracked redline (inside full legal redline). */
+export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Agreement text with revisions";
 
 /** Primary CTA on Business Review cards and dense section shortcuts. */
 export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING = "Preview wording";
@@ -231,20 +244,30 @@ export const RECIPIENT_BUSINESS_REVIEW_EXACT_WORDING_TITLE = "Exact wording";
 
 /** Redline PDF export: collapsed block when alignment is noisy (avoid duplicate body replay). */
 export const RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED =
-  "Section substantially revised — see the summary above and Audit details for full markup.";
+  "Section substantially revised — see the summary above; full wording appears in the detailed redline below.";
+/** PDF body: after human summary / key revisions. */
+export const RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE = "Detailed agreement redline";
+/** PDF appendix: numeric reference only. */
+export const RECIPIENT_EXPORT_PDF_APPENDIX_REFERENCE = "Reference counts";
+/** PDF appendix heading for separated reviewer text. */
+export const RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING =
+  "Additional extracted review notes — not part of agreement";
+/** Collapsed disclosure for insert/delete/section counts inside full legal redline. */
+export const RECIPIENT_DETAILED_EDIT_METRICS_SUMMARY = "Detailed edit metrics";
+/** In-panel summary for optional extracted reviewer commentary (collapsed by default). */
+export const RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES = "Additional extracted review notes";
 export const RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING = "Suggested edits";
 export const RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION = "No changes to";
-export const RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING = "Most important changes";
-export const RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING = "Recommended review focus";
+export const RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING = "Key revisions";
+export const RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING = "Review focus";
 export const RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE =
   "Most other edits appear clarifying or operational.";
-export const RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY =
-  "Some revisions were grouped for readability.";
+export const RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY = "Some revisions are shown together for clarity.";
 export const RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY =
   "A few sections were substantially rewritten and are summarized above.";
 
-/** Collapsed panel for reviewer-only commentary. */
-export const RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY = "Reviewer notes — not part of agreement";
+/** Collapsed panel for reviewer-only commentary (alias of {@link RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES}). */
+export const RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY = RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES;
 
 /** Shown when a noisy block is collapsed to avoid duplicate full-document inserts in the redline. */
 export const RECIPIENT_REDLINE_SECTION_COLLAPSED_NOTE =

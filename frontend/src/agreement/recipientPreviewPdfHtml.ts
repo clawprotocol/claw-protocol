@@ -7,6 +7,9 @@ import {
   RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION,
   RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE,
   RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING,
+  RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
+  RECIPIENT_EXPORT_PDF_APPENDIX_REFERENCE,
+  RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
 } from "./portableReviewCopy";
 import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
@@ -148,6 +151,18 @@ function buildHumanStructuredPdfLead(s: HumanReviewStructuredForPdf): string {
     "margin:0 0 22px;padding:16px 18px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;";
   let html = `<section style="${box}">`;
   html += `<p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a;line-height:1.45;">${esc(s.headlinePlain)}</p>`;
+  if ((s.recommendedFocusLines ?? []).length > 0) {
+    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+      RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING,
+    )}</p>`;
+    html += `<ol style="margin:0 0 10px;padding-left:20px;font-size:13px;color:#0f172a;line-height:1.55;">`;
+    const focusLines = s.recommendedFocusLines ?? [];
+    for (let i = 0; i < focusLines.length; i++) {
+      html += `<li style="margin:0 0 4px;">${esc(focusLines[i]!)}</li>`;
+    }
+    html += `</ol>`;
+    html += `<p style="margin:0 0 14px;font-size:12px;color:#475569;line-height:1.5;">${escapeHtml(RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE)}</p>`;
+  }
   if (s.importantBullets.length > 0) {
     html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
       RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING,
@@ -175,18 +190,6 @@ function buildHumanStructuredPdfLead(s: HumanReviewStructuredForPdf): string {
       html += `<li style="margin:0 0 4px;">${esc(line)}</li>`;
     }
     html += `</ul>`;
-  }
-  if ((s.recommendedFocusLines ?? []).length > 0) {
-    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
-      RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING,
-    )}</p>`;
-    html += `<ol style="margin:0 0 10px;padding-left:20px;font-size:13px;color:#0f172a;line-height:1.55;">`;
-    const focusLines = s.recommendedFocusLines ?? [];
-    for (let i = 0; i < focusLines.length; i++) {
-      html += `<li style="margin:0 0 4px;">${esc(focusLines[i]!)}</li>`;
-    }
-    html += `</ol>`;
-    html += `<p style="margin:0 0 14px;font-size:12px;color:#475569;line-height:1.5;">${escapeHtml(RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE)}</p>`;
   }
   html += `<p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#0f172a;">${esc(s.confidenceHeadline)}</p>`;
   html += `<p style="margin:0 0 12px;font-size:12px;color:#475569;line-height:1.55;">${esc(s.confidenceBody)}</p>`;
@@ -280,7 +283,9 @@ export function buildRecipientRedlinePdfHtml(
       lead += `<section style="margin:0 0 22px;padding:14px 16px;background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;"><p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Summary</p><div style="font-size:14px;color:#0f172a;line-height:1.68;">${sum}</div></section>`;
     }
   }
-  lead += `<h2 style="margin:0 0 14px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">A. Proposed agreement redline</h2>`;
+  lead += `<h2 style="margin:0 0 14px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+    RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
+  )}</h2>`;
   const exportLevel = human?.exportCompareConfidenceLevel ?? "high";
   const tightenExport = exportLevel !== "high";
   const seenLabels = new Set<string>();
@@ -328,11 +333,15 @@ export function buildRecipientRedlinePdfHtml(
   let appendix = "";
   const notes = (human?.reviewerNotesPlain ?? "").trim();
   if (notes) {
-    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">B. Reviewer notes — not part of agreement</h2><pre style="margin:0;font:13px/1.65 ui-sans-serif,system-ui;white-space:pre-wrap;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(notes)}</pre>`;
+    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+      RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
+    )}</h2><pre style="margin:0;font:13px/1.65 ui-sans-serif,system-ui;white-space:pre-wrap;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(notes)}</pre>`;
   }
   const tech = (human?.technicalAppendixPlain ?? "").trim();
   if (tech) {
-    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">C. Audit reference</h2><pre style="margin:0;font:12px/1.6 ui-sans-serif,system-ui;white-space:pre-wrap;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(tech)}</pre>`;
+    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+      RECIPIENT_EXPORT_PDF_APPENDIX_REFERENCE,
+    )}</h2><pre style="margin:0;font:12px/1.6 ui-sans-serif,system-ui;white-space:pre-wrap;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(tech)}</pre>`;
   }
   return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px 28px;">${auditBlock}${lead}${sections}${appendix}</article>`;
 }

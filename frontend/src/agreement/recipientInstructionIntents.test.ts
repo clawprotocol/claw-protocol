@@ -132,7 +132,7 @@ describe("recipient instruction intents", () => {
     });
     const pay = out.find((i) => i.category === "payment_timing");
     expect(pay?.status).toBe("failed");
-    expect(pay?.reason).toMatch(/grouped for readability/i);
+    expect(pay?.reason).toMatch(/related revisions|full legal redline/i);
   });
 
   it("F: two applied when payment timing and confidentiality both reflected", () => {

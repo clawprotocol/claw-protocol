@@ -22,7 +22,7 @@ export type RecipientHumanReviewSummaryProps = {
 };
 
 /**
- * Signer-facing summary card shown before Business Review cards and Audit mode.
+ * Signer-facing summary card — primary decision surface before the full legal redline.
  */
 export function RecipientHumanReviewSummary({
   headline,
@@ -36,7 +36,7 @@ export function RecipientHumanReviewSummary({
 }: RecipientHumanReviewSummaryProps) {
   return (
     <section
-      className="mt-4 rounded-lg border border-slate-600/45 bg-slate-950/40 px-4 py-3.5 shadow-sm"
+      className="mt-4 rounded-lg border border-slate-600/45 bg-slate-950/40 px-4 py-3 shadow-sm"
       data-testid="recipient-human-review-summary"
       aria-label="Summary of proposed changes"
     >
@@ -48,6 +48,20 @@ export function RecipientHumanReviewSummary({
         >
           {keyUpdatesLabel}
         </p>
+      ) : null}
+
+      {recommendedFocusLines.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            {RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING}
+          </p>
+          <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-[13px] leading-relaxed text-slate-200">
+            {recommendedFocusLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ol>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE}</p>
+        </div>
       ) : null}
 
       {importantBullets.length > 0 ? (
@@ -87,26 +101,14 @@ export function RecipientHumanReviewSummary({
         </div>
       ) : null}
 
-      {recommendedFocusLines.length > 0 ? (
-        <div className="mt-3 border-t border-slate-700/50 pt-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-            {RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING}
-          </p>
-          <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-[13px] leading-relaxed text-slate-200">
-            {recommendedFocusLines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ol>
-          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE}</p>
-        </div>
-      ) : null}
-
       <div className="mt-3 rounded-md border border-slate-700/40 bg-slate-950/50 px-3 py-2" data-testid="recipient-compare-confidence">
         <p className="text-[12px] font-semibold text-slate-200">{confidenceHeadline}</p>
         <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{confidenceBody}</p>
       </div>
 
-      <p className="mt-3 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS}</p>
+      <p className="mt-3 text-[11px] leading-relaxed text-slate-500" data-testid="recipient-nothing-sent-footnote">
+        {RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS}
+      </p>
       <p className="sr-only">{RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT}</p>
     </section>
   );

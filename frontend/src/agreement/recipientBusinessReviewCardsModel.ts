@@ -203,6 +203,13 @@ export function businessReviewCardTitleSubline(card: BusinessReviewCardModel): s
   return `${s.slice(0, 87).trim()}…`;
 }
 
+/** Single-line risk band + commercial consequence (compact card body). */
+export function businessReviewCardCompactImpactLine(card: BusinessReviewCardModel): string {
+  const r = card.riskImpact.replace(/\s+/g, " ").trim();
+  const e = card.businessEffect.replace(/\s+/g, " ").trim();
+  return `${r} ${e}`.replace(/\s+/g, " ").trim();
+}
+
 const EXCERPT_REVIEWER_ARTIFACT = /\b(reviewer\s+notes|notes\s+to\s+sender|message\s+to\s+)\b/i;
 
 /** Short same-line excerpt for hover/sheet (agreement diff only; skips placeholder-only rows). */

@@ -16,7 +16,7 @@ describe("buildRecipientCompareConfidence", () => {
     });
     expect(r.level).toBe("high");
     expect(r.headline).toContain("High");
-    expect(r.body.toLowerCase()).toContain("matched");
+    expect(r.body.toLowerCase()).toMatch(/line up|confidence|cleanly/);
     expect(r.body.toLowerCase()).not.toContain("anchor");
     expect(r.body.toLowerCase()).not.toContain("dedupe");
     expect(r.body.toLowerCase()).not.toContain("confidently");
@@ -36,7 +36,7 @@ describe("buildRecipientCompareConfidence", () => {
     });
     expect(r.level).toBe("medium");
     expect(r.headline).toContain("Medium");
-    expect(r.body).toMatch(/grouped for readability/i);
+    expect(r.body).toMatch(/together for clarity|full legal redline/i);
   });
 
   it("returns low when placement fails or many gaps with noise", () => {
@@ -53,6 +53,6 @@ describe("buildRecipientCompareConfidence", () => {
     });
     expect(r.level).toBe("low");
     expect(r.headline).toMatch(/needs review/i);
-    expect(r.body.toLowerCase()).toContain("grouped for readability");
+    expect(r.body.toLowerCase()).toMatch(/group|easier review|full legal redline/);
   });
 });

@@ -136,6 +136,7 @@ import {
   RECIPIENT_AUDIT_MODE_SUBCOPY,
   RECIPIENT_AUDIT_MODE_SUMMARY,
   RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE,
+  recipientRedlineTechnicalAppendixSummaryLine,
   RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING,
   RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY,
   RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY,
@@ -150,6 +151,8 @@ import {
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
   RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD,
+  RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES,
+  RECIPIENT_DETAILED_EDIT_METRICS_SUMMARY,
   RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY,
   RECIPIENT_PASTE_REVISED_PRIMARY_LABEL,
   RECIPIENT_QUICK_REQUEST_LABEL,
@@ -195,7 +198,10 @@ import { RecipientFocusedWordingDialog } from "./RecipientFocusedWordingDialog";
 import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
 import { buildRecommendedSenderFocusLines } from "./recipientBusinessReviewCardsModel";
 import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
-import { collapseRecipientRedlineDuplicateInsertBlocks } from "./recipientRedlineDisplayDedupe";
+import {
+  collapseRecipientRedlineDuplicateInsertBlocks,
+  mergeRecipientRedlineLowSignalFragments,
+} from "./recipientRedlineDisplayDedupe";
 import { REVISED_UPLOAD_ANALYZING_MIN_MS } from "./recipientRevisedDraftUploadFlow";
 import { renderAgreementDraftHtmlLikeBackend, purposeLooksLikeFullAgreementTextForRender } from "./recipientAgreementDraftHtmlRender";
 import {
@@ -983,6 +989,9 @@ export function AgreementRecipientReview({
     ) {
       vm = collapseRecipientRedlineDuplicateInsertBlocks(vm, recipientRedlinePlainTexts.proposedPlain);
     }
+    if (!recipientRedlinePlainTexts.narrowRecipientTargetedRedline) {
+      vm = mergeRecipientRedlineLowSignalFragments(vm);
+    }
     if (recipientRedlinePlainTexts.narrowRecipientTargetedRedline) {
       vm = filterNarrowRecipientPaymentRedlineNoise(vm, { narrowPaymentInstruction: true });
     }
@@ -1093,7 +1102,12 @@ export function AgreementRecipientReview({
     if (compareConfidence.level === "high" && !legalRedlineDocumentVm.fallbackReason?.trim()) return null;
     const { insertCount, deleteCount, changedBlockCount, segmentCount } = legalRedlineDocumentVm.stats;
     const parts = [
-      `For reference: ${insertCount} additions, ${deleteCount} removals, ${changedBlockCount} areas with tracked changes, ${segmentCount} compared fragments.`,
+      recipientRedlineTechnicalAppendixSummaryLine({
+        insertCount,
+        deleteCount,
+        changedBlockCount,
+        segmentCount,
+      }),
     ];
     if (legalRedlineDocumentVm.fallbackReason?.trim()) {
       parts.push("A large section is summarized as a single change for readability.");
@@ -1127,6 +1141,15 @@ export function AgreementRecipientReview({
       previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).map((r) => r.field),
     );
   }, [recipientPreview, previewDiff]);
+
+  const separatedNotesForUiTrimmed = recipientPreview?.separatedReviewerNotesForUi?.trim() ?? "";
+  const showSeparatedReviewerNotesPanel = useMemo(() => {
+    if (!separatedNotesForUiTrimmed) return false;
+    if (!compareConfidence) return true;
+    if (compareConfidence.level !== "high") return true;
+    /** Hide only token footers on high-confidence reads; keep anything with a sentence of substance. */
+    return separatedNotesForUiTrimmed.length >= 12;
+  }, [separatedNotesForUiTrimmed, compareConfidence]);
 
   useLayoutEffect(() => {
     if (!recipientPreview || recipientSuggestedEditsSentAck) return;
@@ -2024,7 +2047,7 @@ export function AgreementRecipientReview({
           <p className="mt-3 text-[11px] leading-relaxed text-slate-500" data-testid="recipient-business-review-readability-note">
             {RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY}{" "}
             {legalRedlineDocumentVm.fallbackReason ? `${RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY} ` : null}
-            Full redline details are available in {RECIPIENT_AUDIT_MODE_SUMMARY}.
+            Line-by-line text is available in {RECIPIENT_AUDIT_MODE_SUMMARY}.
           </p>
         ) : null}
 
@@ -2063,46 +2086,51 @@ export function AgreementRecipientReview({
                 {legalRedlineDocumentVm.fallbackReason ? (
                   <p className="mb-2 text-[11px] leading-relaxed text-slate-400">{RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY}</p>
                 ) : null}
-                <div
-                  className="flex flex-wrap gap-2"
-                  data-testid="recipient-suggested-changes-summary-chips"
-                  aria-label="Audit mode counts"
-                >
-                  <span
-                    data-testid="recipient-redline-chip-insertions"
-                    className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                <details className="mt-1 rounded-md border border-slate-800/60 bg-slate-950/25 px-2 py-1">
+                  <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none hover:text-slate-300 [&::-webkit-details-marker]:hidden">
+                    {RECIPIENT_DETAILED_EDIT_METRICS_SUMMARY}
+                  </summary>
+                  <div
+                    className="mt-2 flex flex-wrap gap-2 border-t border-slate-800/50 pt-2"
+                    data-testid="recipient-suggested-changes-summary-chips"
+                    aria-label="Detailed edit metrics"
                   >
-                    {redlineSummaryChipLabel(
-                      legalRedlineDocumentVm.stats.insertCount,
-                      "addition",
-                      "additions",
-                    )}
-                  </span>
-                  <span
-                    data-testid="recipient-redline-chip-deletions"
-                    className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
-                  >
-                    {redlineSummaryChipLabel(
-                      legalRedlineDocumentVm.stats.deleteCount,
-                      "removal",
-                      "removals",
-                    )}
-                  </span>
-                  <span
-                    data-testid="recipient-redline-chip-sections"
-                    className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
-                  >
-                    {wordingChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
-                  </span>
-                  {recipientIntentGapCount > 0 ? (
                     <span
-                      data-testid="recipient-redline-chip-not-reflected"
-                      className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-100"
+                      data-testid="recipient-redline-chip-insertions"
+                      className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
                     >
-                      {recipientPreviewGapChipLabel(recipientIntentGapCount)}
+                      {redlineSummaryChipLabel(
+                        legalRedlineDocumentVm.stats.insertCount,
+                        "addition",
+                        "additions",
+                      )}
                     </span>
-                  ) : null}
-                </div>
+                    <span
+                      data-testid="recipient-redline-chip-deletions"
+                      className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                    >
+                      {redlineSummaryChipLabel(
+                        legalRedlineDocumentVm.stats.deleteCount,
+                        "removal",
+                        "removals",
+                      )}
+                    </span>
+                    <span
+                      data-testid="recipient-redline-chip-sections"
+                      className="inline-flex items-center rounded-full border border-slate-600/80 bg-slate-950/50 px-2.5 py-0.5 text-[11px] font-medium text-slate-200"
+                    >
+                      {wordingChangeChipLabel(legalRedlineDocumentVm.stats.changedBlockCount)}
+                    </span>
+                    {recipientIntentGapCount > 0 ? (
+                      <span
+                        data-testid="recipient-redline-chip-not-reflected"
+                        className="inline-flex items-center rounded-full border border-amber-600/60 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-100"
+                      >
+                        {recipientPreviewGapChipLabel(recipientIntentGapCount)}
+                      </span>
+                    ) : null}
+                  </div>
+                </details>
                 <h3
                   className="mt-4 text-sm font-semibold tracking-tight text-slate-200"
                   data-testid="recipient-human-redline-subhead"
@@ -2190,7 +2218,7 @@ export function AgreementRecipientReview({
                             >
                               <span className="block font-medium text-emerald-50/95">✓ {recipientIntentAppliedRowHeading(it)}</span>
                               <span className="mt-1 block text-[11px] font-normal text-emerald-100/95 underline decoration-emerald-400/90 decoration-1 underline-offset-2 hover:text-white hover:decoration-emerald-200">
-                                Open Audit mode to locate
+                                Open full legal redline to locate
                               </span>
                             </button>
                           ) : (
@@ -2237,7 +2265,7 @@ export function AgreementRecipientReview({
                     data-testid="recipient-intent-review-notes-details"
                   >
                     <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
-                      Notes for sender ({recipientInstructionIntentSplit.unclear.length})
+                      {RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES} ({recipientInstructionIntentSplit.unclear.length})
                     </summary>
                     <ul className="mt-2 space-y-2 border-t border-slate-800/50 pt-2">
                       {recipientInstructionIntentSplit.unclear.map((it) => (
@@ -2257,7 +2285,7 @@ export function AgreementRecipientReview({
                 data-testid="recipient-redline-not-reflected-callout"
                 role="status"
               >
-                {RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE} Pause wording may still reach the sender.{" "}
+                Pause wording may still reach the sender as you drafted it.{" "}
                 {RECIPIENT_INTENT_REVIEW_BEFORE_SENDING}
               </p>
             ) : null}
@@ -2283,27 +2311,6 @@ export function AgreementRecipientReview({
                 {RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT} — we could not match a payment section in the agreement text.
                 Your note still goes to the owner.
               </p>
-            ) : null}
-
-            {recipientPreview.separatedReviewerNotesForUi ? (
-              <details
-                className="mt-4 rounded-md border border-emerald-900/35 bg-emerald-950/15 px-3 py-2"
-                data-testid="recipient-reviewer-notes-panel"
-              >
-                <summary
-                  className="cursor-pointer list-none text-xs font-semibold text-emerald-100 marker:content-none hover:text-emerald-50 [&::-webkit-details-marker]:hidden"
-                  data-testid="recipient-reviewer-notes-panel-summary"
-                >
-                  {RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY}
-                </summary>
-                <p className="mt-2 text-[10px] leading-snug text-emerald-200/85">{RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT}</p>
-                <pre
-                  className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-slate-800/60 bg-slate-950/50 p-2 text-[11px] leading-relaxed text-slate-300"
-                  data-testid="recipient-reviewer-notes-panel-body"
-                >
-                  {recipientPreview.separatedReviewerNotesForUi}
-                </pre>
-              </details>
             ) : null}
 
             {recipientRedlinePlainTexts && recipientPreview ? (
@@ -2340,6 +2347,27 @@ export function AgreementRecipientReview({
                     }}
                   />
                 </div>
+              </details>
+            ) : null}
+
+            {showSeparatedReviewerNotesPanel ? (
+              <details
+                className="mt-3 rounded-md border border-slate-700/50 bg-slate-950/30 px-2.5 py-1.5"
+                data-testid="recipient-reviewer-notes-panel"
+              >
+                <summary
+                  className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none hover:text-slate-300 [&::-webkit-details-marker]:hidden"
+                  data-testid="recipient-reviewer-notes-panel-summary"
+                >
+                  {RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY}
+                </summary>
+                <p className="mt-2 text-[10px] leading-snug text-slate-500">{RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT}</p>
+                <pre
+                  className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-slate-800/60 bg-slate-950/60 p-2 font-sans text-[11px] leading-relaxed text-slate-400"
+                  data-testid="recipient-reviewer-notes-panel-body"
+                >
+                  {recipientPreview.separatedReviewerNotesForUi}
+                </pre>
               </details>
             ) : null}
 

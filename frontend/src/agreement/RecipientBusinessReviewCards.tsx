@@ -1,6 +1,7 @@
 import { useCallback, useId, useState } from "react";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import {
+  businessReviewCardCompactImpactLine,
   businessReviewCardForSemanticId,
   businessReviewCardTitleSubline,
   extractBusinessReviewCardPreviewExcerpt,
@@ -21,7 +22,7 @@ export type RecipientBusinessReviewCardsProps = {
 };
 
 /**
- * Section-style cards for Business Review Mode (before Audit mode redline).
+ * Section-style cards for Business Review Mode (before the full legal redline).
  * Desktop: hover/focus shows detail popover. Mobile: opens same content in a bottom sheet.
  */
 export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWording }: RecipientBusinessReviewCardsProps) {
@@ -49,25 +50,20 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
   if (rows.length === 0) return null;
 
   return (
-    <div className="mt-4 space-y-3" data-testid="recipient-business-review-cards">
+    <div className="mt-4 space-y-2.5" data-testid="recipient-business-review-cards">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
         {RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING}
       </p>
       {rows.map(({ chip, id }) => {
         const card = businessReviewCardForSemanticId(id, chip);
         const subline = businessReviewCardTitleSubline(card);
+        const impactLine = businessReviewCardCompactImpactLine(card);
         const excerpt = extractBusinessReviewCardPreviewExcerpt(legalVm, id);
         const detailBody = (
           <div className="space-y-2 text-left text-[11px] leading-snug text-slate-200">
-            <p>
-              <span className="font-semibold text-slate-300">What changed:</span> {card.title}
-            </p>
-            <p>
-              <span className="font-semibold text-slate-300">Why this matters:</span> {card.whyMatters}
-            </p>
-            <p>
-              <span className="font-semibold text-slate-300">Risk:</span> {card.riskImpact}{" "}
-              <span className="font-semibold text-slate-300">Business effect:</span> {card.businessEffect}
+            <p>{card.whyMatters}</p>
+            <p className="text-slate-400">
+              <span className="font-medium text-slate-300">Risk & commercial:</span> {impactLine}
             </p>
             {excerpt ? (
               <p className="rounded border border-slate-700/60 bg-slate-900/80 px-2 py-1.5 font-mono text-[10px] text-slate-300">
@@ -80,7 +76,7 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
         return (
           <article
             key={chip}
-            className="group relative rounded-lg border border-slate-600/50 bg-slate-950/45 px-3 py-2.5 shadow-sm"
+            className="group relative rounded-lg border border-slate-600/50 bg-slate-950/45 px-3 py-2 shadow-sm"
             data-testid={`recipient-business-review-card-${card.id}`}
           >
             <div
@@ -89,23 +85,15 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
               data-testid={`recipient-business-review-card-focus-root-${card.id}`}
             >
               <h4 className="text-[13px] font-semibold text-slate-50">{card.title}</h4>
-              <p className="mt-0.5 text-[11px] leading-snug text-slate-400" data-testid={`recipient-business-review-card-subline-${card.id}`}>
+              <p
+                className="mt-0.5 text-[11px] leading-snug text-slate-400"
+                data-testid={`recipient-business-review-card-subline-${card.id}`}
+              >
                 {subline}
               </p>
-              <dl className="mt-2 space-y-1.5 text-[11px] leading-snug text-slate-300">
-                <div>
-                  <dt className="font-medium text-slate-400">Why this matters</dt>
-                  <dd>{card.whyMatters}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-slate-400">Risk impact</dt>
-                  <dd>{card.riskImpact}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-slate-400">Business effect</dt>
-                  <dd>{card.businessEffect}</dd>
-                </div>
-              </dl>
+              <p className="mt-1.5 text-[11px] leading-snug text-slate-500" data-testid={`recipient-business-review-card-impact-${card.id}`}>
+                {impactLine}
+              </p>
 
               {/* Desktop / tablet: hover + keyboard focus popover */}
               <div
@@ -117,7 +105,7 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
               </div>
             </div>
 
-            <div className="mt-2.5 flex flex-col gap-0.5">
+            <div className="mt-2 flex flex-col gap-0.5">
               <button
                 type="button"
                 className="text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/60 underline-offset-2 hover:text-sky-200"
@@ -182,17 +170,12 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
               if (!row) return null;
               const c = businessReviewCardForSemanticId(row.id, row.chip);
               const ex = extractBusinessReviewCardPreviewExcerpt(legalVm, row.id);
+              const imp = businessReviewCardCompactImpactLine(c);
               return (
                 <div className="space-y-2 text-[11px] leading-snug text-slate-200">
-                  <p>
-                    <span className="font-semibold text-slate-300">What changed:</span> {c.title}
-                  </p>
-                  <p>
-                    <span className="font-semibold text-slate-300">Why this matters:</span> {c.whyMatters}
-                  </p>
-                  <p>
-                    <span className="font-semibold text-slate-300">Risk:</span> {c.riskImpact}{" "}
-                    <span className="font-semibold text-slate-300">Business effect:</span> {c.businessEffect}
+                  <p>{c.whyMatters}</p>
+                  <p className="text-slate-400">
+                    <span className="font-medium text-slate-300">Risk & commercial:</span> {imp}
                   </p>
                   {ex ? (
                     <p className="rounded border border-slate-700/60 bg-slate-900/80 px-2 py-1.5 font-mono text-[10px] text-slate-300">

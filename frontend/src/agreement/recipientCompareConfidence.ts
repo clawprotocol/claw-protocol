@@ -32,12 +32,12 @@ function headlineFor(level: RecipientCompareConfidenceLevel): string {
 
 function bodyFor(level: RecipientCompareConfidenceLevel): string {
   if (level === "high") {
-    return "Major sections matched successfully.";
+    return "High-confidence read — versions line up cleanly for a standard review.";
   }
   if (level === "medium") {
-    return "Some sections were grouped for readability.";
+    return "Some revisions are shown together for clarity. Full legal redline available below.";
   }
-  return "Some sections were grouped for readability.";
+  return "Related revisions are grouped for easier review. Full legal redline available below.";
 }
 
 /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import {
+  businessReviewCardCompactImpactLine,
   businessReviewCardForSemanticId,
   businessReviewCardTitleSubline,
   extractBusinessReviewCardPreviewExcerpt,
@@ -48,5 +49,14 @@ describe("businessReviewCardTitleSubline", () => {
     const sub = businessReviewCardTitleSubline(card);
     expect(sub.endsWith(".")).toBe(true);
     expect(sub.length).toBeLessThanOrEqual(card.whyMatters.length);
+  });
+});
+
+describe("businessReviewCardCompactImpactLine", () => {
+  it("joins risk band and commercial effect in one line", () => {
+    const card = businessReviewCardForSemanticId("payment_terms", "Payment");
+    const line = businessReviewCardCompactImpactLine(card);
+    expect(line.length).toBeGreaterThan(10);
+    expect(line).toMatch(/Low|Medium|High/i);
   });
 });

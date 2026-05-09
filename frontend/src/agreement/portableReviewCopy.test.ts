@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   PORTABLE_REVIEW_EXTERNAL_PASTE_PREAMBLE,
+  RECIPIENT_AUDIT_MODE_SUMMARY,
   RECIPIENT_BTN_REVIEW_CHANGES,
+  RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING,
   RECIPIENT_CARD_BIGGER_REWRITE_TITLE,
   RECIPIENT_COPY_EXPORT_PREVIEW_LINE,
   RECIPIENT_COPY_EXPORT_SECTION_HELPER,
@@ -11,6 +13,7 @@ import {
   RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
   recipientPreviewGapChipLabel,
   RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE,
+  recipientRedlineTechnicalAppendixSummaryLine,
   RECIPIENT_UPLOAD_NOTES_ONLY_CARD_TITLE,
   RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
   RECIPIENT_WANT_COPY_BODY,
@@ -91,6 +94,17 @@ describe("recipient want-a-copy portable copy", () => {
   });
 });
 
+describe("recipient trust / hierarchy copy", () => {
+  it("labels key revisions for calmer hierarchy", () => {
+    expect(RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING).toBe("Key revisions");
+  });
+
+  it("uses Full legal redline label instead of internal audit wording", () => {
+    expect(RECIPIENT_AUDIT_MODE_SUMMARY).toBe("Full legal redline");
+    expect(RECIPIENT_AUDIT_MODE_SUMMARY.toLowerCase()).not.toContain("audit");
+  });
+});
+
 describe("recipient compare / notes copy (signer-facing)", () => {
   const banned = ["corpus", "route", "detected", "sections changed", "not reflected", "diagnostic"] as const;
 
@@ -112,5 +126,16 @@ describe("recipient compare / notes copy (signer-facing)", () => {
     expect(recipientPreviewGapChipLabel(8)).toBe("8 proposed edits");
     expect(recipientPreviewGapChipLabel(20)).toBe("Complex revisions grouped by section");
     expect(recipientPreviewGapChipLabel(20).toLowerCase()).not.toContain("placement");
+  });
+
+  it("technical appendix summary avoids parser-style “fragments” wording", () => {
+    const s = recipientRedlineTechnicalAppendixSummaryLine({
+      insertCount: 2,
+      deleteCount: 1,
+      changedBlockCount: 3,
+      segmentCount: 40,
+    });
+    expect(s.toLowerCase()).not.toContain("fragment");
+    expect(s).toMatch(/tracked spans/i);
   });
 });
