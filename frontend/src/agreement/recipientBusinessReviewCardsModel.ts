@@ -194,6 +194,34 @@ export function inferDenseSectionChangeBullets(block: LegalRedlineBlock): string
   return [...new Set(out)].slice(0, 5);
 }
 
+/** One scannable line under the card title (first sentence of why it matters). */
+export function businessReviewCardTitleSubline(card: BusinessReviewCardModel): string {
+  const s = card.whyMatters.trim();
+  const cut = s.indexOf(". ");
+  if (cut > 8 && cut < 88) return s.slice(0, cut + 1).trim();
+  if (s.length <= 90) return s;
+  return `${s.slice(0, 87).trim()}…`;
+}
+
+const EXCERPT_REVIEWER_ARTIFACT = /\b(reviewer\s+notes|notes\s+to\s+sender|message\s+to\s+)\b/i;
+
+/** Short same-line excerpt for hover/sheet (agreement diff only; skips placeholder-only rows). */
+export function extractBusinessReviewCardPreviewExcerpt(
+  vm: LegalRedlineDocumentViewModel,
+  id: BusinessReviewSemanticId,
+  maxLen = 140,
+): string | null {
+  const w = extractFocusedWordingForSemanticId(vm, id);
+  if (!w) return null;
+  let snippet = [w.oldText, w.newText]
+    .filter((t) => t && !/^\(no (prior|new) wording\b/i.test(t))
+    .join(" · ");
+  snippet = snippet.replace(/\s+/g, " ").trim();
+  if (!snippet || EXCERPT_REVIEWER_ARTIFACT.test(snippet)) return null;
+  if (snippet.length <= maxLen) return snippet;
+  return `${snippet.slice(0, maxLen - 1).trim()}…`;
+}
+
 export function buildRecommendedSenderFocusLines(chips: readonly string[]): string[] {
   const priority: BusinessReviewSemanticId[] = [
     "ownership",

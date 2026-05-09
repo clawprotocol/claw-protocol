@@ -35,9 +35,9 @@ function bodyFor(level: RecipientCompareConfidenceLevel): string {
     return "Major sections matched successfully.";
   }
   if (level === "medium") {
-    return "Some rewritten sections were grouped for readability.";
+    return "Some sections were grouped for readability.";
   }
-  return "Some sections are easier to read in summary. Open Audit mode if you want every insertion and deletion.";
+  return "Some sections were grouped for readability.";
 }
 
 /**

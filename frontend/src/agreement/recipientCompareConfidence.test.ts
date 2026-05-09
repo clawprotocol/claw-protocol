@@ -53,5 +53,6 @@ describe("buildRecipientCompareConfidence", () => {
     });
     expect(r.level).toBe("low");
     expect(r.headline).toMatch(/needs review/i);
+    expect(r.body.toLowerCase()).toContain("grouped for readability");
   });
 });

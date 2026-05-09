@@ -221,8 +221,17 @@ export const RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS =
 /** Subheading inside Audit mode above the tracked redline. */
 export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Full agreement markup";
 
-export const RECIPIENT_BUSINESS_REVIEW_VIEW_EXACT_WORDING = "View exact wording";
+/** Primary CTA on Business Review cards and dense section shortcuts. */
+export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING = "Preview wording";
+/** Secondary line under preview CTA (desktop + mobile). */
+export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT = "Opens exact before/after text.";
+/** @deprecated Use {@link RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}. */
+export const RECIPIENT_BUSINESS_REVIEW_VIEW_EXACT_WORDING = RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING;
 export const RECIPIENT_BUSINESS_REVIEW_EXACT_WORDING_TITLE = "Exact wording";
+
+/** Redline PDF export: collapsed block when alignment is noisy (avoid duplicate body replay). */
+export const RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED =
+  "Section substantially revised — see the summary above and Audit details for full markup.";
 export const RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING = "Suggested edits";
 export const RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION = "No changes to";
 export const RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING = "Most important changes";

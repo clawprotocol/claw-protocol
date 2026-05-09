@@ -8,7 +8,7 @@ import {
 } from "./recipientBusinessReviewCardsModel";
 import {
   RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY,
-  RECIPIENT_BUSINESS_REVIEW_VIEW_EXACT_WORDING,
+  RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
 } from "./portableReviewCopy";
 
 type Props = {
@@ -303,7 +303,7 @@ export function RecipientLegalRedlineDocument({
                           if (w) onDenseBlockViewExactWording(w);
                         }}
                       >
-                        {RECIPIENT_BUSINESS_REVIEW_VIEW_EXACT_WORDING}
+                        {RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}
                       </button>
                     ) : null}
                     <details className="mt-2 rounded-md border border-slate-200/90 bg-white/80 px-2 py-1.5">

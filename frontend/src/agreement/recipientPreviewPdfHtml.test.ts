@@ -1,11 +1,37 @@
 import { describe, expect, it } from "vitest";
-import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import type { LegalRedlineBlock, LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import { buildLegalRedlineDocumentViewModel, mergeAdjacentRedlineSegmentsAllTypes } from "./legalRedlineBlocks";
+import { RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED } from "./portableReviewCopy";
 import {
   buildRecipientRedlinePdfHtml,
   sanitizeHtmlForRecipientPdfExport,
   wrapRecipientVersionPdfHtml,
 } from "./recipientPreviewPdfHtml";
+
+function statsForBlocks(blocks: LegalRedlineBlock[]): LegalRedlineDocumentViewModel["stats"] {
+  let insertCount = 0;
+  let deleteCount = 0;
+  let sameCount = 0;
+  let segmentCount = 0;
+  let changedBlockCount = 0;
+  for (const b of blocks) {
+    insertCount += b.insertCount;
+    deleteCount += b.deleteCount;
+    sameCount += b.sameCount;
+    segmentCount += b.segments.length;
+    if (b.hasChange) changedBlockCount++;
+  }
+  return {
+    blockCount: blocks.length,
+    changedBlockCount,
+    insertCount,
+    deleteCount,
+    sameCount,
+    segmentCount,
+    currentLen: 800,
+    proposedLen: 800,
+  };
+}
 
 describe("mergeAdjacentRedlineSegmentsAllTypes", () => {
   it("merges consecutive insert and delete chains", () => {
@@ -183,6 +209,80 @@ describe("buildRecipientRedlinePdfHtml", () => {
       hasChanges: false,
     });
     expect(html).toContain("No redline content.");
+  });
+
+  it("Sarah Collins–style export: does not replay duplicate title, draft label, or signature boilerplate", () => {
+    const body =
+      "WEB DEVELOPMENT AGREEMENT\n\nDraft Agreement (non-binding template)\n\n1. Parties. Client Anthem Blanchard and Developer Sarah Collins.\n\n" +
+      "IN WITNESS WHEREOF, the parties have executed this Agreement as of the date first written above.\n\n" +
+      "_________________________\nSarah Collins, Developer";
+    const block = (id: string, label: string): LegalRedlineBlock => ({
+      id,
+      kind: "paragraph",
+      label,
+      segments: [{ type: "same", text: body }],
+      insertCount: 0,
+      deleteCount: 0,
+      sameCount: 1,
+      hasInsert: false,
+      hasDelete: false,
+      hasChange: false,
+    });
+    const blocks = [block("dup-a", "Preamble"), block("dup-b", "Repeated preamble")];
+    const vm: LegalRedlineDocumentViewModel = {
+      blocks,
+      stats: statsForBlocks(blocks),
+      hasChanges: false,
+    };
+    const html = buildRecipientRedlinePdfHtml(vm, null, { exportCompareConfidenceLevel: "high" });
+    expect((html.match(/WEB DEVELOPMENT AGREEMENT/g) ?? []).length).toBe(1);
+    expect((html.match(/Draft Agreement \(non-binding template\)/g) ?? []).length).toBe(1);
+    expect((html.match(/IN WITNESS WHEREOF/gi) ?? []).length).toBe(1);
+    expect((html.match(/Sarah Collins, Developer/g) ?? []).length).toBe(1);
+  });
+
+  it("low compare confidence collapses the first dense changed block to a signer-safe summary line", () => {
+    const denseSegs = [
+      ...Array.from({ length: 7 }, (_, i) => ({ type: "delete" as const, text: `oldbit${i} ` })),
+      ...Array.from({ length: 7 }, (_, i) => ({ type: "insert" as const, text: `newbit${i} ` })),
+    ];
+    const blocks: LegalRedlineBlock[] = [
+      {
+        id: "dense-1",
+        kind: "clause",
+        label: "2. Fees and Payment",
+        segments: denseSegs,
+        insertCount: 7,
+        deleteCount: 7,
+        sameCount: 0,
+        hasInsert: true,
+        hasDelete: true,
+        hasChange: true,
+      },
+      {
+        id: "dense-2",
+        kind: "clause",
+        label: "3. Other",
+        segments: [
+          { type: "delete", text: "x" },
+          { type: "insert", text: "y" },
+        ],
+        insertCount: 1,
+        deleteCount: 1,
+        sameCount: 0,
+        hasInsert: true,
+        hasDelete: true,
+        hasChange: true,
+      },
+    ];
+    const vm: LegalRedlineDocumentViewModel = {
+      blocks,
+      stats: statsForBlocks(blocks),
+      hasChanges: true,
+    };
+    const html = buildRecipientRedlinePdfHtml(vm, null, { exportCompareConfidenceLevel: "low" });
+    expect(html).toContain(RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED);
+    expect(html.split(RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED).length - 1).toBe(1);
   });
 
   it("starts a new PDF paragraph when a segment contains \\n\\n", () => {

@@ -2327,6 +2327,7 @@ export function AgreementRecipientReview({
                     redlinePdfReviewerNotesPlain={recipientPreview.separatedReviewerNotesForUi ?? null}
                     redlinePdfStructuredHumanReview={humanReviewStructuredPdf}
                     redlinePdfTechnicalAppendixPlain={redlinePdfTechnicalAppendixPlain}
+                    redlinePdfCompareConfidenceLevel={compareConfidence?.level ?? null}
                     pdfReadContext={{
                       agreementId,
                       readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),

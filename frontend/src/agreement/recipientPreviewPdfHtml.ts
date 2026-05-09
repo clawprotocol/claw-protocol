@@ -1,11 +1,13 @@
 import { escapeHtml } from "../components/agreements/premiumAgreementDocumentHtml";
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel, LegalRedlineSegment } from "./legalRedlineBlocks";
 import { mergeAdjacentRedlineSegmentsAllTypes } from "./legalRedlineBlocks";
+import type { RecipientCompareConfidenceLevel } from "./recipientCompareConfidence";
 import {
   RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING,
   RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION,
   RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE,
   RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING,
+  RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
 } from "./portableReviewCopy";
 import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
 
@@ -88,6 +90,56 @@ function buildAuditHeader(meta: RecipientRedlinePdfAuditMeta): string {
 
 function normPdfBlockLabelKey(label: string): string {
   return label.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/** Normalize block text for export dedupe (whitespace, punctuation noise, numbering). */
+export function normalizeRedlineFingerprintForExport(raw: string): string {
+  const t = raw.replace(/\r\n/g, "\n").toLowerCase();
+  return t
+    .replace(/[\u2018\u2019\u201c\u201d]/g, "'")
+    .replace(/[^a-z0-9\s]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^\s*\d+(?:\.\d+)*[\.)]\s*/gm, "")
+    .trim();
+}
+
+function normalizeFingerprintSafe(raw: string): string {
+  return normalizeRedlineFingerprintForExport(raw);
+}
+
+function blockPlainTextForFingerprint(block: LegalRedlineBlock): string {
+  const merged = mergeAdjacentRedlineSegmentsAllTypes(block.segments);
+  return merged.map((s) => s.text).join("\n");
+}
+
+function blockIsDenseForExportCollapse(block: LegalRedlineBlock): boolean {
+  if (!block.hasChange) return false;
+  const changes = block.segments.filter((s) => s.type !== "same");
+  if (changes.length >= 12) return true;
+  if (changes.length >= 6 && changes.every((s) => String(s.text).length <= 56)) return true;
+  return false;
+}
+
+const BOILERPLATE_FINGERPRINT_SUBSTRINGS = [
+  "draft agreement",
+  "non binding template",
+  "web development agreement",
+  "in witness whereof",
+  "created with lawdog",
+  "draft for review",
+];
+
+function looksLikeBoilerplateFingerprint(norm: string): boolean {
+  if (norm.length < 24) return false;
+  return BOILERPLATE_FINGERPRINT_SUBSTRINGS.some((s) => norm.includes(s));
+}
+
+function renderCollapsedExportSection(): string {
+  const shellStyle =
+    "display:block;margin:0;padding:14px 0 16px 14px;border-left:3px solid #e2e8f0;background:#f8fafc;";
+  return `<section style="${shellStyle}"><p style="${P_STYLE}"><span style="${SPAN_SAME}">${escapeHtml(
+    RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
+  )}</span></p></section>`;
 }
 
 function buildHumanStructuredPdfLead(s: HumanReviewStructuredForPdf): string {
@@ -205,6 +257,11 @@ export type RecipientRedlinePdfHumanExtras = {
   structuredHumanReview?: HumanReviewStructuredForPdf | null;
   /** Optional short reference appendix (counts / reference only). */
   technicalAppendixPlain?: string | null;
+  /**
+   * When not `high`, export applies stronger dedupe and may collapse very noisy changed blocks
+   * to avoid replaying duplicate agreement body in the PDF.
+   */
+  exportCompareConfidenceLevel?: RecipientCompareConfidenceLevel | null;
 };
 
 export function buildRecipientRedlinePdfHtml(
@@ -224,7 +281,12 @@ export function buildRecipientRedlinePdfHtml(
     }
   }
   lead += `<h2 style="margin:0 0 14px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">A. Proposed agreement redline</h2>`;
+  const exportLevel = human?.exportCompareConfidenceLevel ?? "high";
+  const tightenExport = exportLevel !== "high";
   const seenLabels = new Set<string>();
+  const seenContentFp = new Set<string>();
+  const seenBoilerFp = new Set<string>();
+  let denseCollapsedOnce = false;
   const sections = vm.blocks
     .map((b) => {
       const label = (b.label || b.heading || b.clauseNumber || "").trim();
@@ -232,6 +294,31 @@ export function buildRecipientRedlinePdfHtml(
       let suppress = false;
       if (label && seenLabels.has(key)) suppress = true;
       else if (label) seenLabels.add(key);
+
+      const plainFp = blockPlainTextForFingerprint(b);
+      const normFp = normalizeFingerprintSafe(plainFp);
+      if (normFp.length >= 40) {
+        if (seenContentFp.has(normFp)) {
+          return "";
+        }
+        seenContentFp.add(normFp);
+      }
+      /** Always drop repeated title/footer boilerplate fingerprints (independent of compare confidence). */
+      if (looksLikeBoilerplateFingerprint(normFp)) {
+        if (seenBoilerFp.has(normFp)) {
+          return "";
+        }
+        seenBoilerFp.add(normFp);
+      }
+
+      if (tightenExport && exportLevel === "low" && b.hasChange && blockIsDenseForExportCollapse(b)) {
+        if (!denseCollapsedOnce) {
+          denseCollapsedOnce = true;
+          return renderCollapsedExportSection();
+        }
+        return "";
+      }
+
       return renderBlockInlineFlow(b, { suppressSectionHeader: suppress });
     })
     .join("");

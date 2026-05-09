@@ -9,6 +9,7 @@ import {
   downloadRecipientPreviewPdf,
   humanizeRecipientPdfExportErrorMessage,
 } from "./recipientPreviewPdfDownload";
+import type { RecipientCompareConfidenceLevel } from "./recipientCompareConfidence";
 import {
   buildRecipientRedlinePdfHtml,
   type RecipientPreviewPdfExportKind,
@@ -65,6 +66,8 @@ type Props = {
   /** Structured human-first page for redline PDF (overrides legacy summary when set). */
   redlinePdfStructuredHumanReview?: HumanReviewStructuredForPdf | null;
   redlinePdfTechnicalAppendixPlain?: string | null;
+  /** Drives export-side dedupe / collapse when not `high`. */
+  redlinePdfCompareConfidenceLevel?: RecipientCompareConfidenceLevel | null;
 };
 
 /**
@@ -95,6 +98,7 @@ export function RecipientPreviewVersionsExport({
   redlinePdfReviewerNotesPlain = null,
   redlinePdfStructuredHumanReview = null,
   redlinePdfTechnicalAppendixPlain = null,
+  redlinePdfCompareConfidenceLevel = null,
 }: Props) {
   const [copyAck, setCopyAck] = useState<"original" | "proposed" | "redline" | null>(null);
   const [pdfErrors, setPdfErrors] = useState<Partial<Record<RecipientPreviewPdfExportKind, string | null>>>({});
@@ -122,6 +126,7 @@ export function RecipientPreviewVersionsExport({
           : buildRedlinePdfSummaryHtml(redlinePdfSummarySentence, redlinePdfSummaryBullets ?? []) || null,
       reviewerNotesPlain: redlinePdfReviewerNotesPlain?.trim() || null,
       technicalAppendixPlain: redlinePdfTechnicalAppendixPlain?.trim() || null,
+      exportCompareConfidenceLevel: redlinePdfCompareConfidenceLevel ?? null,
     };
   }, [
     redlinePdfStructuredHumanReview,
@@ -129,6 +134,7 @@ export function RecipientPreviewVersionsExport({
     redlinePdfSummaryBullets,
     redlinePdfReviewerNotesPlain,
     redlinePdfTechnicalAppendixPlain,
+    redlinePdfCompareConfidenceLevel,
   ]);
 
   const redlinePlain = useCallback(() => legalRedlineDocumentVmToPlainSummary(legalRedlineVmRef.current), []);

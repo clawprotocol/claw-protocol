@@ -40,7 +40,8 @@ export type RecipientInstructionIntent = {
 };
 
 const REASON_UNCLEAR = "This request was unclear.";
-const REASON_NO_SECTION = "No matching section was found.";
+/** Signer-safe — avoid engine phrasing in recipient UI. */
+const REASON_NO_SECTION = "Grouped for readability — open Audit mode to align this with the draft.";
 const REASON_PAYMENT_SAFE = "Could not safely place this change in the payment section.";
 const REASON_BOILERPLATE = "This change may affect signatures or legal boilerplate.";
 const REASON_CONFLICT = "This request conflicts with existing terms.";
