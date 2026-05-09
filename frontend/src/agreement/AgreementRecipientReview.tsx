@@ -137,9 +137,8 @@ import {
   RECIPIENT_AUDIT_MODE_SUMMARY,
   RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE,
   recipientRedlineTechnicalAppendixSummaryLine,
-  RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING,
-  RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY,
   RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY,
+  RECIPIENT_INTENT_RAW_DETAIL_HEADING,
   RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT,
   RECIPIENT_INTENT_REVIEW_BEFORE_SENDING,
   RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
@@ -149,6 +148,7 @@ import {
   RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT,
   RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
+  RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
   RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD,
   RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES,
@@ -193,6 +193,8 @@ import {
   groupFriendlyChipsForHumanReview,
   humanReviewMeaningfulCount,
 } from "./recipientHumanReviewSummaryModel";
+import { filterChipsForBusinessReviewPresentation } from "./recipientFriendlyChipsPresentation";
+import { buildIntentSemanticBucketRows } from "./recipientIntentSemanticBuckets";
 import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import { RecipientFocusedWordingDialog } from "./RecipientFocusedWordingDialog";
 import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
@@ -1008,6 +1010,21 @@ export function AgreementRecipientReview({
     () => buildRecommendedSenderFocusLines(recipientFriendlyRedlineChips),
     [recipientFriendlyRedlineChips],
   );
+
+  const presentationFriendlyRedlineChips = useMemo(
+    () => filterChipsForBusinessReviewPresentation(recipientFriendlyRedlineChips),
+    [recipientFriendlyRedlineChips],
+  );
+
+  const intentSemanticBucketRows = useMemo(
+    () => buildIntentSemanticBucketRows(recipientInstructionIntentSplit.primary),
+    [recipientInstructionIntentSplit.primary],
+  );
+
+  const openFullLegalRedlineSection = useCallback(() => {
+    const det = auditDetailsRef.current;
+    if (det) det.open = true;
+  }, []);
 
   const narrowIntentAnchorPresence = useMemo(() => {
     const absent = { payment_timing: false, pause_suspend_work: false };
@@ -2035,20 +2052,20 @@ export function AgreementRecipientReview({
           />
         ) : null}
 
-        {legalRedlineDocumentVm && recipientFriendlyRedlineChips.length > 0 ? (
-          <RecipientBusinessReviewCards
-            chips={recipientFriendlyRedlineChips}
-            legalVm={legalRedlineDocumentVm}
-            onViewExactWording={(p) => setBusinessReviewFocusedWording(p)}
-          />
-        ) : null}
-
         {legalRedlineDocumentVm && compareConfidence && compareConfidence.level !== "high" ? (
           <p className="mt-3 text-[11px] leading-relaxed text-slate-500" data-testid="recipient-business-review-readability-note">
-            {RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY}{" "}
             {legalRedlineDocumentVm.fallbackReason ? `${RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY} ` : null}
-            Line-by-line text is available in {RECIPIENT_AUDIT_MODE_SUMMARY}.
+            {RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE}
           </p>
+        ) : null}
+
+        {legalRedlineDocumentVm && presentationFriendlyRedlineChips.length > 0 ? (
+          <RecipientBusinessReviewCards
+            chips={presentationFriendlyRedlineChips}
+            legalVm={legalRedlineDocumentVm}
+            onViewExactWording={(p) => setBusinessReviewFocusedWording(p)}
+            onOpenFullRedline={openFullLegalRedlineSection}
+          />
         ) : null}
 
         {legalRedlineDocumentVm ? (
@@ -2084,7 +2101,7 @@ export function AgreementRecipientReview({
               <div className="mt-2 border-t border-slate-800/50 pt-2">
                 <p className="mb-2 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_AUDIT_MODE_SUBCOPY}</p>
                 {legalRedlineDocumentVm.fallbackReason ? (
-                  <p className="mb-2 text-[11px] leading-relaxed text-slate-400">{RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY}</p>
+                  <p className="mb-2 text-[11px] leading-relaxed text-slate-400">{RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY}</p>
                 ) : null}
                 <details className="mt-1 rounded-md border border-slate-800/60 bg-slate-950/25 px-2 py-1">
                   <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none hover:text-slate-300 [&::-webkit-details-marker]:hidden">
@@ -2179,84 +2196,107 @@ export function AgreementRecipientReview({
                 <div className="mt-2 border-t border-slate-800/50 pt-2" role="status">
                 {recipientInstructionIntentSplit.primary.length > 0 ? (
                 <>
-                <p className="mb-2 text-xs font-semibold text-slate-300">{RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING}</p>
-                <ul className="space-y-2" data-testid="recipient-intent-coverage-list">
-                  {primaryIntentRowsForCompare.map((it) => {
-                    const anchor = recipientRedlineAnchorForIntentCategory(it.category);
-                    const anchorKey =
-                      anchor === "payment_timing" || anchor === "pause_suspend_work" ? anchor : null;
-                    const canScrollToRedline =
-                      it.status === "applied" &&
-                      ((anchorKey === "payment_timing" && narrowIntentAnchorPresence.payment_timing) ||
-                        (anchorKey === "pause_suspend_work" && narrowIntentAnchorPresence.pause_suspend_work));
-                    const statusTestId = recipientIntentStatusTestId(it.category);
-                    const onKeyNavigate = (e: KeyboardEvent) => {
-                      if (!canScrollToRedline || !anchorKey) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        scrollToNarrowRedlineAnchor(anchorKey);
-                      }
-                    };
-                    return (
-                    <li
-                      key={it.id}
-                      data-testid={statusTestId}
-                      className={`rounded-md border px-2.5 py-2 ${
-                        it.status === "applied"
-                          ? "border-emerald-800/35 bg-emerald-950/20"
-                          : "border-amber-800/25 bg-amber-950/15"
-                      }`}
-                    >
-                      {it.status === "applied" ? (
-                        <>
-                          {canScrollToRedline && anchorKey ? (
-                            <button
-                              type="button"
-                              className="w-full cursor-pointer rounded-sm text-left text-[13px] leading-snug text-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
-                              onClick={() => scrollToNarrowRedlineAnchor(anchorKey)}
-                              onKeyDown={onKeyNavigate}
-                            >
-                              <span className="block font-medium text-emerald-50/95">✓ {recipientIntentAppliedRowHeading(it)}</span>
-                              <span className="mt-1 block text-[11px] font-normal text-emerald-100/95 underline decoration-emerald-400/90 decoration-1 underline-offset-2 hover:text-white hover:decoration-emerald-200">
-                                Open full legal redline to locate
-                              </span>
-                            </button>
-                          ) : (
-                            <p className="text-[13px] leading-snug text-emerald-100/95">
-                              ✓ {recipientIntentAppliedRowHeading(it)}
-                            </p>
-                          )}
-                          <p className="mt-1.5 text-[11px] leading-snug text-emerald-200/85">
-                            {recipientIntentAppliedExplanation(it.category)}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-[13px] leading-snug text-amber-100/95">
-                            {RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE}{" "}
-                            <span className="font-medium text-amber-50/95">&quot;{it.normalizedIntent}&quot;</span>
-                          </p>
-                          {it.reason ? (
-                            <p className="mt-1 text-[11px] leading-snug text-amber-200/80">{it.reason}</p>
-                          ) : null}
-                        </>
-                      )}
+                <ul className="space-y-1.5" data-testid="recipient-intent-semantic-bucket-list">
+                  {intentSemanticBucketRows.map((row) => (
+                    <li key={row.key} className="text-[12px] leading-snug text-slate-300">
+                      <span className="font-medium text-slate-200">{row.label}:</span>{" "}
+                      {row.applied > 0 ? (
+                        <span className="text-emerald-200/90">{row.applied} reflected in draft</span>
+                      ) : null}
+                      {row.applied > 0 && row.pending > 0 ? <span className="text-slate-500"> · </span> : null}
+                      {row.pending > 0 ? (
+                        <span className="text-slate-400">{row.pending} summarized above</span>
+                      ) : null}
+                      {row.failed > 0 ? (
+                        <span className="text-slate-500">
+                          {row.applied > 0 || row.pending > 0 ? " · " : null}
+                          {row.failed} noted for sender
+                        </span>
+                      ) : null}
                     </li>
-                    );
-                  })}
+                  ))}
                 </ul>
-                {recipientInstructionIntentSplit.primary.length > 5 ? (
-                  <button
-                    type="button"
-                    className="mt-2 text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
-                    data-testid="recipient-intent-list-expand"
-                    onClick={() => setRecipientIntentListExpanded((v) => !v)}
-                  >
-                    {recipientIntentListExpanded
-                      ? "Show fewer"
-                      : `Show all (${recipientInstructionIntentSplit.primary.length})`}
-                  </button>
-                ) : null}
+                <details className="mt-3 rounded-md border border-slate-800/60 bg-slate-950/25 px-2 py-1.5">
+                  <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none hover:text-slate-300 [&::-webkit-details-marker]:hidden">
+                    {RECIPIENT_INTENT_RAW_DETAIL_HEADING}
+                  </summary>
+                  <ul className="mt-2 space-y-2 border-t border-slate-800/50 pt-2" data-testid="recipient-intent-coverage-list">
+                    {primaryIntentRowsForCompare.map((it) => {
+                      const anchor = recipientRedlineAnchorForIntentCategory(it.category);
+                      const anchorKey =
+                        anchor === "payment_timing" || anchor === "pause_suspend_work" ? anchor : null;
+                      const canScrollToRedline =
+                        it.status === "applied" &&
+                        ((anchorKey === "payment_timing" && narrowIntentAnchorPresence.payment_timing) ||
+                          (anchorKey === "pause_suspend_work" && narrowIntentAnchorPresence.pause_suspend_work));
+                      const statusTestId = recipientIntentStatusTestId(it.category);
+                      const onKeyNavigate = (e: KeyboardEvent) => {
+                        if (!canScrollToRedline || !anchorKey) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          scrollToNarrowRedlineAnchor(anchorKey);
+                        }
+                      };
+                      return (
+                        <li
+                          key={it.id}
+                          data-testid={statusTestId}
+                          className={`rounded-md border px-2.5 py-2 ${
+                            it.status === "applied"
+                              ? "border-emerald-800/35 bg-emerald-950/20"
+                              : "border-amber-800/25 bg-amber-950/15"
+                          }`}
+                        >
+                          {it.status === "applied" ? (
+                            <>
+                              {canScrollToRedline && anchorKey ? (
+                                <button
+                                  type="button"
+                                  className="w-full cursor-pointer rounded-sm text-left text-[13px] leading-snug text-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+                                  onClick={() => scrollToNarrowRedlineAnchor(anchorKey)}
+                                  onKeyDown={onKeyNavigate}
+                                >
+                                  <span className="block font-medium text-emerald-50/95">✓ {recipientIntentAppliedRowHeading(it)}</span>
+                                  <span className="mt-1 block text-[11px] font-normal text-emerald-100/95 underline decoration-emerald-400/90 decoration-1 underline-offset-2 hover:text-white hover:decoration-emerald-200">
+                                    {RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE}
+                                  </span>
+                                </button>
+                              ) : (
+                                <p className="text-[13px] leading-snug text-emerald-100/95">
+                                  ✓ {recipientIntentAppliedRowHeading(it)}
+                                </p>
+                              )}
+                              <p className="mt-1.5 text-[11px] leading-snug text-emerald-200/85">
+                                {recipientIntentAppliedExplanation(it.category)}
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-[13px] leading-snug text-amber-100/95">
+                                <span className="font-medium text-amber-50/95">&quot;{it.normalizedIntent}&quot;</span>
+                              </p>
+                              {it.reason ? (
+                                <p className="mt-1 text-[11px] leading-snug text-amber-200/80">{it.reason}</p>
+                              ) : null}
+                            </>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {recipientInstructionIntentSplit.primary.length > 5 ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
+                      data-testid="recipient-intent-list-expand"
+                      onClick={() => setRecipientIntentListExpanded((v) => !v)}
+                    >
+                      {recipientIntentListExpanded
+                        ? "Show fewer"
+                        : `Show all (${recipientInstructionIntentSplit.primary.length})`}
+                    </button>
+                  ) : null}
+                </details>
                 </>
                 ) : null}
                 {recipientInstructionIntentSplit.unclear.length > 0 ? (

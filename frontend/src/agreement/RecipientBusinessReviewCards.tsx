@@ -1,31 +1,40 @@
 import { useCallback, useId, useState } from "react";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import {
-  businessReviewCardCompactImpactLine,
   businessReviewCardForSemanticId,
   businessReviewCardTitleSubline,
   extractBusinessReviewCardPreviewExcerpt,
-  extractFocusedWordingForSemanticId,
+  extractStrongFocusedWordingForSemanticId,
   friendlyChipToSemanticId,
+  getFocusedWordingPickForSemanticId,
   type BusinessReviewSemanticId,
 } from "./recipientBusinessReviewCardsModel";
 import {
+  RECIPIENT_BUSINESS_REVIEW_CARD_WEAK_WORLING_LINE,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT,
   RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING,
+  RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE,
 } from "./portableReviewCopy";
 
 export type RecipientBusinessReviewCardsProps = {
   chips: readonly string[];
   legalVm: LegalRedlineDocumentViewModel;
   onViewExactWording: (payload: { sectionTitle: string; oldText: string; newText: string }) => void;
+  /** Opens the collapsed full legal redline section in the parent panel. */
+  onOpenFullRedline?: () => void;
 };
 
 /**
  * Section-style cards for Business Review Mode (before the full legal redline).
  * Desktop: hover/focus shows detail popover. Mobile: opens same content in a bottom sheet.
  */
-export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWording }: RecipientBusinessReviewCardsProps) {
+export function RecipientBusinessReviewCards({
+  chips,
+  legalVm,
+  onViewExactWording,
+  onOpenFullRedline,
+}: RecipientBusinessReviewCardsProps) {
   const seen = new Set<string>();
   const rows: { chip: string; id: BusinessReviewSemanticId }[] = [];
   for (const c of chips) {
@@ -57,13 +66,17 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
       {rows.map(({ chip, id }) => {
         const card = businessReviewCardForSemanticId(id, chip);
         const subline = businessReviewCardTitleSubline(card);
-        const impactLine = businessReviewCardCompactImpactLine(card);
+        const pick = getFocusedWordingPickForSemanticId(legalVm, id);
+        const strongWording = extractStrongFocusedWordingForSemanticId(legalVm, id);
         const excerpt = extractBusinessReviewCardPreviewExcerpt(legalVm, id);
+        const showPreviewCta = Boolean(strongWording);
         const detailBody = (
           <div className="space-y-2 text-left text-[11px] leading-snug text-slate-200">
-            <p>{card.whyMatters}</p>
+            <p>
+              <span className="font-medium text-slate-300">Why this matters:</span> {card.whyMatters}
+            </p>
             <p className="text-slate-400">
-              <span className="font-medium text-slate-300">Risk & commercial:</span> {impactLine}
+              <span className="font-medium text-slate-300">Commercial:</span> {card.businessEffect}
             </p>
             {excerpt ? (
               <p className="rounded border border-slate-700/60 bg-slate-900/80 px-2 py-1.5 font-mono text-[10px] text-slate-300">
@@ -91,11 +104,15 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
               >
                 {subline}
               </p>
-              <p className="mt-1.5 text-[11px] leading-snug text-slate-500" data-testid={`recipient-business-review-card-impact-${card.id}`}>
-                {impactLine}
+              <p className="mt-1 text-[11px] text-slate-500" data-testid={`recipient-business-review-card-risk-${card.id}`}>
+                Risk: {card.riskImpact}
               </p>
+              {pick.quality === "weak" && pick.wording ? (
+                <p className="mt-1.5 text-[10px] leading-snug text-slate-500" data-testid={`recipient-business-review-card-weak-mapping-${card.id}`}>
+                  {RECIPIENT_BUSINESS_REVIEW_CARD_WEAK_WORLING_LINE}
+                </p>
+              ) : null}
 
-              {/* Desktop / tablet: hover + keyboard focus popover */}
               <div
                 role="tooltip"
                 data-testid={`recipient-business-review-card-popover-${card.id}`}
@@ -106,26 +123,36 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
             </div>
 
             <div className="mt-2 flex flex-col gap-0.5">
-              <button
-                type="button"
-                className="text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/60 underline-offset-2 hover:text-sky-200"
-                data-testid="recipient-business-review-view-wording"
-                onClick={() => {
-                  const w = extractFocusedWordingForSemanticId(legalVm, id);
-                  if (!w) return;
-                  onViewExactWording({
-                    sectionTitle: `${card.title} — ${w.sectionLabel}`,
-                    oldText: w.oldText,
-                    newText: w.newText,
-                  });
-                }}
-              >
-                {RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}
-              </button>
-              <span className="text-[10px] leading-snug text-slate-500">{RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT}</span>
+              {showPreviewCta && strongWording ? (
+                <>
+                  <button
+                    type="button"
+                    className="text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/60 underline-offset-2 hover:text-sky-200"
+                    data-testid="recipient-business-review-view-wording"
+                    onClick={() => {
+                      onViewExactWording({
+                        sectionTitle: `${card.title} — ${strongWording.sectionLabel}`,
+                        oldText: strongWording.oldText,
+                        newText: strongWording.newText,
+                      });
+                    }}
+                  >
+                    {RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}
+                  </button>
+                  <span className="text-[10px] leading-snug text-slate-500">{RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT}</span>
+                </>
+              ) : onOpenFullRedline ? (
+                <button
+                  type="button"
+                  className="text-left text-[11px] font-semibold text-sky-300/90 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
+                  data-testid="recipient-business-review-view-in-full-redline"
+                  onClick={() => onOpenFullRedline()}
+                >
+                  {RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE}
+                </button>
+              ) : null}
             </div>
 
-            {/* Mobile / coarse pointer: compact sheet */}
             <button
               type="button"
               className="mt-2 w-full rounded-md border border-slate-700/60 bg-slate-900/50 py-2 text-center text-[11px] font-semibold text-sky-200 hover:bg-slate-900/80 md:hidden"
@@ -170,12 +197,16 @@ export function RecipientBusinessReviewCards({ chips, legalVm, onViewExactWordin
               if (!row) return null;
               const c = businessReviewCardForSemanticId(row.id, row.chip);
               const ex = extractBusinessReviewCardPreviewExcerpt(legalVm, row.id);
-              const imp = businessReviewCardCompactImpactLine(c);
               return (
                 <div className="space-y-2 text-[11px] leading-snug text-slate-200">
-                  <p>{c.whyMatters}</p>
+                  <p>
+                    <span className="font-medium text-slate-300">Why this matters:</span> {c.whyMatters}
+                  </p>
                   <p className="text-slate-400">
-                    <span className="font-medium text-slate-300">Risk & commercial:</span> {imp}
+                    <span className="font-medium text-slate-300">Risk:</span> {c.riskImpact}
+                  </p>
+                  <p className="text-slate-400">
+                    <span className="font-medium text-slate-300">Commercial:</span> {c.businessEffect}
                   </p>
                   {ex ? (
                     <p className="rounded border border-slate-700/60 bg-slate-900/80 px-2 py-1.5 font-mono text-[10px] text-slate-300">

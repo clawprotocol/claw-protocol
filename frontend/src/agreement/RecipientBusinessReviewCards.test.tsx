@@ -50,7 +50,7 @@ describe("RecipientBusinessReviewCards", () => {
     expect(screen.getByText(RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING)).toBeTruthy();
     expect(screen.getByText(RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT)).toBeTruthy();
     const pop = screen.getByTestId("recipient-business-review-card-popover-payment_terms");
-    expect(within(pop).getByText(/Risk & commercial:/)).toBeTruthy();
+    expect(within(pop).getByText(/Why this matters:/)).toBeTruthy();
     expect(within(pop).getByText(/Clarifies when invoices/)).toBeTruthy();
     expect(screen.getByTestId("recipient-business-review-card-subline-payment_terms").textContent?.length).toBeGreaterThan(
       8,
@@ -63,7 +63,7 @@ describe("RecipientBusinessReviewCards", () => {
     );
     fireEvent.click(screen.getByTestId("recipient-business-review-card-mobile-preview-payment_terms"));
     const sheet = screen.getByTestId("recipient-business-review-card-mobile-sheet");
-    expect(within(sheet).getByText(/Risk & commercial:/)).toBeTruthy();
+    expect(within(sheet).getByText(/Why this matters:/)).toBeTruthy();
     fireEvent.click(screen.getByTestId("recipient-business-review-card-mobile-sheet-backdrop"));
     expect(screen.queryByTestId("recipient-business-review-card-mobile-sheet")).toBeNull();
   });

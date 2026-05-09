@@ -124,7 +124,7 @@ describe("recipient compare / notes copy (signer-facing)", () => {
   it("uses signer-safe gap chip labels without placement wording", () => {
     expect(recipientPreviewGapChipLabel(1)).toBe("1 proposed edit");
     expect(recipientPreviewGapChipLabel(8)).toBe("8 proposed edits");
-    expect(recipientPreviewGapChipLabel(20)).toBe("Complex revisions grouped by section");
+    expect(recipientPreviewGapChipLabel(20)).toBe("Several related updates summarized together");
     expect(recipientPreviewGapChipLabel(20).toLowerCase()).not.toContain("placement");
   });
 

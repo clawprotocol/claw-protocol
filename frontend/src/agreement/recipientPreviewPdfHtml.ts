@@ -267,6 +267,21 @@ export type RecipientRedlinePdfHumanExtras = {
   exportCompareConfidenceLevel?: RecipientCompareConfidenceLevel | null;
 };
 
+/** Heuristic: omit reviewer-notes appendix when text largely repeats agreement body already in the redline. */
+export function notesLikelyDuplicateAgreementBodyForExport(notes: string, vm: LegalRedlineDocumentViewModel): boolean {
+  /** Include both sides so pasted notes that match the prior draft still match when the redline is proposed-forward. */
+  const body = vm.blocks
+    .map((b) => `${b.currentText ?? ""}\n${b.proposedText ?? ""}`)
+    .join("\n\n")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  const nt = notes.replace(/\s+/g, " ").trim().toLowerCase();
+  if (nt.length < 280 || body.length < 400) return false;
+  const probe = nt.slice(0, Math.min(900, nt.length));
+  return body.includes(probe.slice(0, 400));
+}
+
 export function buildRecipientRedlinePdfHtml(
   vm: LegalRedlineDocumentViewModel,
   audit?: RecipientRedlinePdfAuditMeta | null,
@@ -332,7 +347,7 @@ export function buildRecipientRedlinePdfHtml(
   }
   let appendix = "";
   const notes = (human?.reviewerNotesPlain ?? "").trim();
-  if (notes) {
+  if (notes && !notesLikelyDuplicateAgreementBodyForExport(notes, vm)) {
     appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
       RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
     )}</h2><pre style="margin:0;font:13px/1.65 ui-sans-serif,system-ui;white-space:pre-wrap;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(notes)}</pre>`;

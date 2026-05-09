@@ -26,7 +26,7 @@ export type BusinessReviewCardModel = {
 
 const KEYWORD_SCORES: Partial<Record<BusinessReviewSemanticId, RegExp>> = {
   payment_terms: /\b(net|payment|invoice|invoices|payable|fee|fees|compensation|late|overdue|pause|suspend|undisputed)\b/i,
-  scope: /\b(scope|deliverable|milestone|boundary|feature|work\s+order|change\s+order)\b/i,
+  scope: /\b(scope|deliverables?|milestone|boundary|feature|work\s+order|change\s+order)\b/i,
   ownership: /\b(own|ownership|intellectual\s+property|ip\b|work\s+product|background|license)\b/i,
   third_party: /\b(third[\s-]?party|subcontract|vendor|saas|dependency|liability)\b/i,
   acceptance: /\b(acceptance|signoff|uat|defect|warranty|remedy)\b/i,
@@ -117,10 +117,33 @@ export function businessReviewCardForSemanticId(id: BusinessReviewSemanticId, ti
   }
 }
 
+function blockHaystack(block: LegalRedlineBlock): string {
+  return block.segments.map((s) => s.text).join(" ");
+}
+
 function scoreBlockForSemantic(block: LegalRedlineBlock, id: BusinessReviewSemanticId): number {
   if (!block.hasChange) return 0;
+  const hay = blockHaystack(block);
+  const low = hay.toLowerCase();
+  /** Avoid mapping payment / ownership cards to confidentiality-only noise. */
+  if (id === "payment_terms") {
+    if (/\b(confidentiality|confidential|non-?disclosure|nda)\b/i.test(hay) && !/\b(invoice|invoices|net\s*\d|payment|payable|compensation|fee|fees|late|overdue|undisputed|pause|suspend)\b/i.test(low)) {
+      return 0;
+    }
+  }
+  if (id === "ownership") {
+    const hasOwnershipSignal =
+      /\b(ownership|intellectual\s+property|work\s+product|background|assign|license\s+to)\b/i.test(low) || /\bip\b/i.test(low);
+    if (/\b(confidentiality|confidential|non-?disclosure)\b/i.test(hay) && !hasOwnershipSignal) {
+      return 0;
+    }
+  }
+  if (id === "scope") {
+    if (/\b(confidential|nda|non-?disclosure)\b/i.test(hay) && !/\b(scope|deliverables?|milestone|boundary|work\s+order|services)\b/i.test(low)) {
+      return 0;
+    }
+  }
   const re = KEYWORD_SCORES[id];
-  const hay = block.segments.map((s) => s.text).join(" ");
   if (!re) return 0;
   return re.test(hay) ? 10 + hay.length / 1000 : 0;
 }
@@ -136,6 +159,17 @@ export type FocusedWordingResult = {
   oldText: string;
   newText: string;
 };
+
+const PLACEHOLDER_OLD = /^\(no prior wording in this excerpt\)\s*$/i;
+const PLACEHOLDER_NEW = /^\(no new wording in this excerpt\)\s*$/i;
+
+/** True when a side is usable in the exact-wording modal (not empty / not placeholder). */
+export function isMeaningfulWordingSide(text: string, minLen = 10): boolean {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (t.length < minLen) return false;
+  if (PLACEHOLDER_OLD.test(t) || PLACEHOLDER_NEW.test(t)) return false;
+  return true;
+}
 
 /** Deleted vs inserted text for a single changed block (focused OLD/NEW dialog). */
 export function extractFocusedWordingForBlock(block: LegalRedlineBlock): FocusedWordingResult | null {
@@ -157,23 +191,71 @@ export function extractFocusedWordingForBlock(block: LegalRedlineBlock): Focused
   };
 }
 
+export type FocusedWordingPickQuality = "none" | "weak" | "strong";
+
+export type FocusedWordingPick = {
+  wording: FocusedWordingResult | null;
+  quality: FocusedWordingPickQuality;
+};
+
+/**
+ * Best block for a semantic card + whether mapping is strong enough for the exact-wording modal.
+ * Non-generic ids never fall back to unrelated high-mass blocks (keyword match required).
+ */
+export function getFocusedWordingPickForSemanticId(vm: LegalRedlineDocumentViewModel, id: BusinessReviewSemanticId): FocusedWordingPick {
+  const scored: { block: LegalRedlineBlock; score: number; kw: number }[] = [];
+  for (const b of vm.blocks) {
+    if (!b.hasChange) continue;
+    const kw = scoreBlockForSemantic(b, id);
+    const mass = changeMass(b);
+    if (id !== "generic" && kw <= 0) continue;
+    const score = id !== "generic" ? kw + mass / 2000 : kw > 0 ? kw + mass / 2000 : mass / 1500;
+    scored.push({ block: b, score, kw });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored[0];
+  if (!top) return { wording: null, quality: "none" };
+  if (id !== "generic" && top.kw <= 0) return { wording: null, quality: "none" };
+
+  const raw = extractFocusedWordingForBlock(top.block);
+  if (!raw) return { wording: null, quality: "none" };
+  const oldOk = isMeaningfulWordingSide(raw.oldText);
+  const newOk = isMeaningfulWordingSide(raw.newText);
+  if (!oldOk || !newOk) return { wording: null, quality: "none" };
+
+  const second = scored[1]?.score ?? 0;
+  const margin = top.score - second;
+  let quality: FocusedWordingPickQuality = "weak";
+  if (id !== "generic") {
+    quality = margin >= 0.35 && top.kw >= 10 ? "strong" : "weak";
+  } else {
+    quality = changeMass(top.block) >= 48 && margin >= 0.2 ? "strong" : "weak";
+  }
+
+  return { wording: raw, quality };
+}
+
 /**
  * Picks the best-matching changed block and returns deleted vs inserted text for focused view.
+ * Returns null when no keyword-aligned block exists (callers should not open the modal).
  */
 export function extractFocusedWordingForSemanticId(
   vm: LegalRedlineDocumentViewModel,
   id: BusinessReviewSemanticId,
 ): FocusedWordingResult | null {
-  let best: { block: LegalRedlineBlock; score: number } | null = null;
-  for (const b of vm.blocks) {
-    if (!b.hasChange) continue;
-    const kw = scoreBlockForSemantic(b, id);
-    const mass = changeMass(b);
-    const score = kw > 0 ? kw + mass / 100 : mass;
-    if (!best || score > best.score) best = { block: b, score };
-  }
-  if (!best) return null;
-  return extractFocusedWordingForBlock(best.block);
+  const { wording, quality } = getFocusedWordingPickForSemanticId(vm, id);
+  if (quality === "none" || !wording) return null;
+  return wording;
+}
+
+/** Only use for modal / “Preview wording” when mapping is reliable. */
+export function extractStrongFocusedWordingForSemanticId(
+  vm: LegalRedlineDocumentViewModel,
+  id: BusinessReviewSemanticId,
+): FocusedWordingResult | null {
+  const { wording, quality } = getFocusedWordingPickForSemanticId(vm, id);
+  if (quality !== "strong" || !wording) return null;
+  return wording;
 }
 
 /** Short numbered lines for “Recommended review focus”. */
@@ -186,7 +268,7 @@ export function inferDenseSectionChangeBullets(block: LegalRedlineBlock): string
   const out: string[] = [];
   if (/\bnet\s*\d|invoice|payable|payment|compensation|fee\b/.test(t)) out.push("revised payment timing");
   if (/pause|suspend|overdue|undisputed|late payment|days late/.test(t)) out.push("pause or protection tied to late payment");
-  if (/scope|deliverable|milestone|boundary/.test(t)) out.push("scope or delivery boundaries");
+  if (/scope|deliverables?|milestone|boundary/.test(t)) out.push("scope or delivery boundaries");
   if (/accept|signoff|uat|defect|warranty/.test(t)) out.push("acceptance or quality mechanics");
   if (/third|vendor|subcontract|saas|dependency/.test(t)) out.push("third-party or dependency risk");
   if (/own|intellectual property|ip\b|work product|background/.test(t)) out.push("ownership or IP");
@@ -218,7 +300,7 @@ export function extractBusinessReviewCardPreviewExcerpt(
   id: BusinessReviewSemanticId,
   maxLen = 140,
 ): string | null {
-  const w = extractFocusedWordingForSemanticId(vm, id);
+  const w = extractStrongFocusedWordingForSemanticId(vm, id);
   if (!w) return null;
   let snippet = [w.oldText, w.newText]
     .filter((t) => t && !/^\(no (prior|new) wording\b/i.test(t))

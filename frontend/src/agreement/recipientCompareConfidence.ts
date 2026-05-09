@@ -35,9 +35,9 @@ function bodyFor(level: RecipientCompareConfidenceLevel): string {
     return "High-confidence read — versions line up cleanly for a standard review.";
   }
   if (level === "medium") {
-    return "Some revisions are shown together for clarity. Full legal redline available below.";
+    return "Take a moment to spot-check material sections. Related wording is summarized above.";
   }
-  return "Related revisions are grouped for easier review. Full legal redline available below.";
+  return "Take a moment to spot-check material sections. Related wording is summarized above.";
 }
 
 /**

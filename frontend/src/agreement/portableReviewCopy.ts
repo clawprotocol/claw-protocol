@@ -185,10 +185,15 @@ export const RECIPIENT_UPLOAD_NOTES_ONLY_DOWNLOAD_NOTES = "Download reviewer not
 /** Compare panel — intent coverage (plain language). */
 /** @deprecated Prefer {@link RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE}. */
 export const RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED =
-  "Open the full legal redline below when you want line-by-line placement context.";
-/** Recipient Business Review — calm, no compare-engine phrasing. */
+  "Related wording was grouped into the summary above.";
+/** Shown for instruction rows that are not expanded (no compare-engine phrasing). */
 export const RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE =
-  "This appears with your other revisions in the summary — open the full legal redline below to read it in the draft.";
+  "Related wording was grouped into the summary above.";
+/** When exact clause mapping is weak — card face + optional CTA to full redline. */
+export const RECIPIENT_BUSINESS_REVIEW_CARD_WEAK_WORLING_LINE =
+  "This section was substantially revised. Review the full legal redline for line-by-line wording.";
+/** Opens the collapsed full legal redline section (no modal). */
+export const RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE = "View in full legal redline";
 /** User-safe — avoids “match failure” tone. */
 export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "This wording is not shown anchored to a single clause in the text below";
 export const RECIPIENT_INTENT_REVIEW_BEFORE_SENDING = "Review before sending";
@@ -206,7 +211,7 @@ export const RECIPIENT_PREVIEW_ITEMS_TO_PLACE = "May need placement";
 /** User-safe label for many instruction intents not shown inline in the compare. */
 export function recipientPreviewGapChipLabel(count: number): string {
   if (count <= 0) return "";
-  if (count >= 15) return "Complex revisions grouped by section";
+  if (count >= 15) return "Several related updates summarized together";
   if (count === 1) return "1 proposed edit";
   return `${count} proposed edits`;
 }
@@ -256,7 +261,9 @@ export const RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING =
 export const RECIPIENT_DETAILED_EDIT_METRICS_SUMMARY = "Detailed edit metrics";
 /** In-panel summary for optional extracted reviewer commentary (collapsed by default). */
 export const RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES = "Additional extracted review notes";
-export const RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING = "Suggested edits";
+/** Optional raw instruction / intent lines (collapsed by default). */
+export const RECIPIENT_INTENT_RAW_DETAIL_HEADING = "Request detail (optional)";
+export const RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING = "Key revisions to review";
 export const RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION = "No changes to";
 export const RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING = "Key revisions";
 export const RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING = "Review focus";

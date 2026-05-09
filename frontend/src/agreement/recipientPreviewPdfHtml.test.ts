@@ -8,6 +8,7 @@ import {
 } from "./portableReviewCopy";
 import {
   buildRecipientRedlinePdfHtml,
+  notesLikelyDuplicateAgreementBodyForExport,
   sanitizeHtmlForRecipientPdfExport,
   wrapRecipientVersionPdfHtml,
 } from "./recipientPreviewPdfHtml";
@@ -36,6 +37,33 @@ function statsForBlocks(blocks: LegalRedlineBlock[]): LegalRedlineDocumentViewMo
     proposedLen: 800,
   };
 }
+
+describe("notesLikelyDuplicateAgreementBodyForExport", () => {
+  it("returns false for short notes or thin agreement body", () => {
+    const vm = buildLegalRedlineDocumentViewModel("Short.", "Short revised.");
+    expect(notesLikelyDuplicateAgreementBodyForExport("x".repeat(300), vm)).toBe(false);
+  });
+
+  it("returns true when a long note largely repeats agreement body already in the redline", () => {
+    const longClause =
+      "This Master Services Agreement ('Agreement') is entered into as of the Effective Date between Client and Vendor. " +
+      "Vendor will perform the professional services described in one or more statements of work. " +
+      "Fees are due Net 30 from invoice date unless otherwise stated in the applicable SOW. " +
+      "Either party may terminate for convenience with thirty days written notice. " +
+      "Confidential Information means non-public information disclosed by a party. " +
+      "Vendor retains ownership of pre-existing materials and assigns deliverables as specified. " +
+      "The parties agree to mediate disputes in New York County before litigation. " +
+      "Change orders require written approval from both parties and attach to this Agreement as exhibits. " +
+      "Neither party is liable for indirect or consequential damages except for breaches of confidentiality or payment obligations.";
+    const vm = buildLegalRedlineDocumentViewModel(longClause, longClause.replace("Net 30", "Net 45"));
+    const notes =
+      longClause +
+      " Additional margin note: confirm the payment timing aligns with procurement.";
+    expect(notesLikelyDuplicateAgreementBodyForExport(notes, vm)).toBe(true);
+    const html = buildRecipientRedlinePdfHtml(vm, null, { reviewerNotesPlain: notes });
+    expect(html).not.toContain(RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING);
+  });
+});
 
 describe("mergeAdjacentRedlineSegmentsAllTypes", () => {
   it("merges consecutive insert and delete chains", () => {
