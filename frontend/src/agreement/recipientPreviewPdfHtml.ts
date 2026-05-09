@@ -1,6 +1,7 @@
 import { escapeHtml } from "../components/agreements/premiumAgreementDocumentHtml";
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel, LegalRedlineSegment } from "./legalRedlineBlocks";
 import { mergeAdjacentRedlineSegmentsAllTypes } from "./legalRedlineBlocks";
+import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
 
 export type RecipientPreviewPdfExportKind = "original" | "proposed" | "redline";
 
@@ -79,18 +80,59 @@ function buildAuditHeader(meta: RecipientRedlinePdfAuditMeta): string {
   return `<header style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin:0 0 22px;background:#f8fafc;">${lines.join("")}</header>`;
 }
 
+function normPdfBlockLabelKey(label: string): string {
+  return label.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function buildHumanStructuredPdfLead(s: HumanReviewStructuredForPdf): string {
+  const esc = escapeHtml;
+  const box =
+    "margin:0 0 22px;padding:16px 18px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;";
+  let html = `<section style="${box}">`;
+  html += `<p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#0f172a;line-height:1.45;">${esc(s.headlinePlain)}</p>`;
+  if (s.importantBullets.length > 0) {
+    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Important changes</p>`;
+    html += `<ul style="margin:0 0 14px;padding-left:18px;font-size:14px;color:#0f172a;line-height:1.62;">`;
+    for (const b of s.importantBullets) {
+      html += `<li style="margin:0 0 6px;">${esc(b)}</li>`;
+    }
+    html += `</ul>`;
+  }
+  if (s.clarificationBullets.length > 0) {
+    html += `<p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Clarifications</p>`;
+    html += `<ul style="margin:0 0 14px;padding-left:18px;font-size:14px;color:#334155;line-height:1.62;">`;
+    for (const b of s.clarificationBullets) {
+      html += `<li style="margin:0 0 6px;">${esc(b)}</li>`;
+    }
+    html += `</ul>`;
+  }
+  if (s.negativeAssuranceLines.length > 0) {
+    html += `<ul style="margin:0 0 14px;padding-left:16px;font-size:12px;color:#64748b;line-height:1.55;">`;
+    for (const line of s.negativeAssuranceLines) {
+      html += `<li style="margin:0 0 4px;">${esc(line)}</li>`;
+    }
+    html += `</ul>`;
+  }
+  html += `<p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#0f172a;">${esc(s.confidenceHeadline)}</p>`;
+  html += `<p style="margin:0 0 12px;font-size:12px;color:#475569;line-height:1.55;">${esc(s.confidenceBody)}</p>`;
+  html += `<p style="margin:0;font-size:11px;color:#64748b;line-height:1.5;">${esc(s.nothingSentFootnote)}</p>`;
+  html += `</section>`;
+  return html;
+}
+
 /**
  * Renders one block as flowing paragraphs: consecutive insert/delete/same segments merge first,
  * then inline spans share `<p>` until a `\n\n` paragraph break (fixes token-slab / orphan-word PDF noise).
  */
-function renderBlockInlineFlow(block: LegalRedlineBlock): string {
+function renderBlockInlineFlow(block: LegalRedlineBlock, opts?: { suppressSectionHeader?: boolean }): string {
   const merged = mergeAdjacentRedlineSegmentsAllTypes(block.segments);
   const label = (block.label || block.heading || block.clauseNumber || "").trim();
-  const header = label
-    ? `<header style="margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;"><p style="margin:0;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(
-        label,
-      )}</p></header>`
-    : "";
+  const header =
+    label && !opts?.suppressSectionHeader
+      ? `<header style="margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;"><p style="margin:0;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(
+          label,
+        )}</p></header>`
+      : "";
   const shellStyle = block.hasChange
     ? "display:block;margin:0;padding:16px 0 18px 14px;border-left:3px solid #cbd5e1;"
     : "display:block;margin:0;padding:16px 0 18px;border-left:3px solid transparent;";
@@ -136,6 +178,10 @@ export type RecipientRedlinePdfHumanExtras = {
   summaryHtml?: string | null;
   /** Plain text — escaped for appendix. */
   reviewerNotesPlain?: string | null;
+  /** First-page human review (preferred over legacy {@link summaryHtml}). */
+  structuredHumanReview?: HumanReviewStructuredForPdf | null;
+  /** Optional short reference appendix (counts / reference only). */
+  technicalAppendixPlain?: string | null;
 };
 
 export function buildRecipientRedlinePdfHtml(
@@ -145,12 +191,27 @@ export function buildRecipientRedlinePdfHtml(
 ): string {
   const auditBlock = audit ? buildAuditHeader({ ...audit, generatedAt: audit.generatedAt }) : "";
   let lead = "";
-  const sum = (human?.summaryHtml ?? "").trim();
-  if (sum) {
-    lead += `<section style="margin:0 0 22px;padding:14px 16px;background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;"><p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Summary</p><div style="font-size:14px;color:#0f172a;line-height:1.68;">${sum}</div></section>`;
+  const struct = human?.structuredHumanReview;
+  if (struct && (struct.headlinePlain.trim() || struct.importantBullets.length > 0 || struct.clarificationBullets.length > 0)) {
+    lead += buildHumanStructuredPdfLead(struct);
+  } else {
+    const sum = (human?.summaryHtml ?? "").trim();
+    if (sum) {
+      lead += `<section style="margin:0 0 22px;padding:14px 16px;background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;"><p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Summary</p><div style="font-size:14px;color:#0f172a;line-height:1.68;">${sum}</div></section>`;
+    }
   }
   lead += `<h2 style="margin:0 0 14px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">A. Proposed agreement redline</h2>`;
-  const sections = vm.blocks.map((b) => renderBlockInlineFlow(b)).join("");
+  const seenLabels = new Set<string>();
+  const sections = vm.blocks
+    .map((b) => {
+      const label = (b.label || b.heading || b.clauseNumber || "").trim();
+      const key = normPdfBlockLabelKey(label);
+      let suppress = false;
+      if (label && seenLabels.has(key)) suppress = true;
+      else if (label) seenLabels.add(key);
+      return renderBlockInlineFlow(b, { suppressSectionHeader: suppress });
+    })
+    .join("");
   if (!sections.trim()) {
     return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px;">${auditBlock}${lead}<p style="margin:0;font:15px/1.65 Georgia,serif;color:#64748b;">No redline content.</p></article>`;
   }
@@ -158,6 +219,10 @@ export function buildRecipientRedlinePdfHtml(
   const notes = (human?.reviewerNotesPlain ?? "").trim();
   if (notes) {
     appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">B. Reviewer notes — not part of agreement</h2><pre style="margin:0;font:13px/1.65 ui-sans-serif,system-ui;white-space:pre-wrap;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(notes)}</pre>`;
+  }
+  const tech = (human?.technicalAppendixPlain ?? "").trim();
+  if (tech) {
+    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">C. Technical comparison (reference)</h2><pre style="margin:0;font:12px/1.6 ui-sans-serif,system-ui;white-space:pre-wrap;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(tech)}</pre>`;
   }
   return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px 28px;">${auditBlock}${lead}${sections}${appendix}</article>`;
 }

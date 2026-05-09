@@ -24,6 +24,44 @@ export type SanitizeRecipientImportedRevisionResult = {
   artifactsRemoved: string[];
 };
 
+/** Paragraphs that are reviewer / QA commentary, not operative agreement text. */
+const INLINE_REVIEWER_PARA_RES: RegExp[] = [
+  /^\s*REVIEWER\s+NOTES\b/i,
+  /\bREVIEWER\s+PERSPECTIVE\b/i,
+  /Suggested\s+UX\s+expectation\b/i,
+  /\bLawDog\s+QA\b/i,
+  /^\s*Reasoning\s*:/i,
+  /^\s*NOTES\s+FOR\s+SENDER\b/i,
+  /\bSARAH\s+COLLINS\s+REVIEWER\b/i,
+];
+
+/**
+ * Removes reviewer-style paragraphs from the agreement body and merges them into notes.
+ */
+function extractInlineReviewerParagraphs(body: string, artifacts: string[]): { agreementText: string; pulled: string[] } {
+  const paras = body.split(/\n\n+/);
+  const kept: string[] = [];
+  const pulled: string[] = [];
+  for (const p of paras) {
+    const t = p.trim();
+    if (!t) continue;
+    let isReviewer = false;
+    for (const r of INLINE_REVIEWER_PARA_RES) {
+      if (r.test(t)) {
+        isReviewer = true;
+        break;
+      }
+    }
+    if (isReviewer) {
+      pulled.push(t);
+      artifacts.push("Reviewer commentary (kept out of agreement compare)");
+    } else {
+      kept.push(p);
+    }
+  }
+  return { agreementText: kept.join("\n\n").trim(), pulled };
+}
+
 function stripLawDogFooterChunks(text: string, artifacts: string[]): string {
   if (!/\bcreated\s+with\s+lawdog\b/i.test(text)) return text;
   artifacts.push("LawDog footer / branding");
@@ -94,6 +132,12 @@ export function sanitizeRecipientImportedRevisionText(raw: string): SanitizeReci
   }
 
   body = stripPageArtifactLines(body, artifactsRemoved);
+  const inlinePull = extractInlineReviewerParagraphs(body, artifactsRemoved);
+  body = inlinePull.agreementText;
+  if (inlinePull.pulled.length > 0) {
+    const joined = inlinePull.pulled.join("\n\n");
+    reviewerNotes = reviewerNotes ? `${joined}\n\n${reviewerNotes}` : joined;
+  }
   body = dedupeRepeatedLeadingParagraphs(body, artifactsRemoved);
   body = stripLawDogFooterChunks(body, artifactsRemoved);
 

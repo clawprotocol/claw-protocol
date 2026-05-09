@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { escapeHtml } from "../components/agreements/premiumAgreementDocumentHtml";
 import { NOT_LEGAL_ADVICE } from "../compliance/disclosureCopy";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
 import { recipientReviewerSlugFromDisplayName, recipientTextDownloadFilename } from "./recipientExportFilenames";
 import {
   RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE,
@@ -61,6 +62,9 @@ type Props = {
   redlinePdfSummarySentence?: string | null;
   redlinePdfSummaryBullets?: readonly string[];
   redlinePdfReviewerNotesPlain?: string | null;
+  /** Structured human-first page for redline PDF (overrides legacy summary when set). */
+  redlinePdfStructuredHumanReview?: HumanReviewStructuredForPdf | null;
+  redlinePdfTechnicalAppendixPlain?: string | null;
 };
 
 /**
@@ -89,6 +93,8 @@ export function RecipientPreviewVersionsExport({
   redlinePdfSummarySentence = null,
   redlinePdfSummaryBullets,
   redlinePdfReviewerNotesPlain = null,
+  redlinePdfStructuredHumanReview = null,
+  redlinePdfTechnicalAppendixPlain = null,
 }: Props) {
   const [copyAck, setCopyAck] = useState<"original" | "proposed" | "redline" | null>(null);
   const [pdfErrors, setPdfErrors] = useState<Partial<Record<RecipientPreviewPdfExportKind, string | null>>>({});
@@ -106,13 +112,24 @@ export function RecipientPreviewVersionsExport({
   pdfReadContextRef.current = pdfReadContext;
   legalRedlineVmRef.current = legalRedlineVm;
 
-  const redlinePdfHumanExtras = useMemo(
-    (): RecipientRedlinePdfHumanExtras => ({
-      summaryHtml: buildRedlinePdfSummaryHtml(redlinePdfSummarySentence, redlinePdfSummaryBullets ?? []) || null,
+  const redlinePdfHumanExtras = useMemo((): RecipientRedlinePdfHumanExtras => {
+    const structured = redlinePdfStructuredHumanReview;
+    return {
+      structuredHumanReview: structured ?? null,
+      summaryHtml:
+        structured && (structured.headlinePlain.trim() || structured.importantBullets.length > 0)
+          ? null
+          : buildRedlinePdfSummaryHtml(redlinePdfSummarySentence, redlinePdfSummaryBullets ?? []) || null,
       reviewerNotesPlain: redlinePdfReviewerNotesPlain?.trim() || null,
-    }),
-    [redlinePdfSummarySentence, redlinePdfSummaryBullets, redlinePdfReviewerNotesPlain],
-  );
+      technicalAppendixPlain: redlinePdfTechnicalAppendixPlain?.trim() || null,
+    };
+  }, [
+    redlinePdfStructuredHumanReview,
+    redlinePdfSummarySentence,
+    redlinePdfSummaryBullets,
+    redlinePdfReviewerNotesPlain,
+    redlinePdfTechnicalAppendixPlain,
+  ]);
 
   const redlinePlain = useCallback(() => legalRedlineDocumentVmToPlainSummary(legalRedlineVmRef.current), []);
 

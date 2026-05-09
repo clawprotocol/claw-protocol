@@ -47,6 +47,84 @@ describe("buildRecipientRedlinePdfHtml", () => {
     expect((html.match(/<\/p>/g) ?? []).length).toBeLessThan(80);
   });
 
+  it("places structured human review before section A in the HTML stream", () => {
+    const vm = buildLegalRedlineDocumentViewModel("Fee is due on receipt.", "Fee is Net 30.");
+    const html = buildRecipientRedlinePdfHtml(
+      vm,
+      {
+        agreementId: "ag_x",
+        agreementTitle: "T",
+        reviewerDisplayName: "Pat",
+        reviewerEmail: null,
+        generatedAt: auditTs,
+      },
+      {
+        structuredHumanReview: {
+          headlinePlain: "Pat proposed 2 meaningful revisions.",
+          importantBullets: ["payment timing updated"],
+          clarificationBullets: [],
+          negativeAssuranceLines: ["No governing law changes."],
+          confidenceHeadline: "Compare confidence: High",
+          confidenceBody: "Major sections matched successfully.",
+          nothingSentFootnote: "Nothing is sent until the sender accepts.",
+        },
+      },
+    );
+    const idxHuman = html.indexOf("Pat proposed 2 meaningful revisions");
+    const idxA = html.indexOf("A. Proposed agreement redline");
+    expect(idxHuman).toBeGreaterThan(-1);
+    expect(idxA).toBeGreaterThan(-1);
+    expect(idxHuman).toBeLessThan(idxA);
+  });
+
+  it("suppresses duplicate block headers when the same label repeats", () => {
+    const vm: LegalRedlineDocumentViewModel = {
+      blocks: [
+        {
+          id: "t1",
+          kind: "title",
+          label: "Master Services Agreement",
+          segments: [{ type: "same", text: "Intro A." }],
+          insertCount: 0,
+          deleteCount: 0,
+          sameCount: 1,
+          hasInsert: false,
+          hasDelete: false,
+          hasChange: false,
+        },
+        {
+          id: "t2",
+          kind: "title",
+          label: "Master Services Agreement",
+          segments: [{ type: "insert", text: "Intro B." }],
+          insertCount: 1,
+          deleteCount: 0,
+          sameCount: 0,
+          hasInsert: true,
+          hasDelete: false,
+          hasChange: true,
+        },
+      ],
+      stats: {
+        blockCount: 2,
+        changedBlockCount: 1,
+        insertCount: 1,
+        deleteCount: 0,
+        sameCount: 1,
+        segmentCount: 2,
+        currentLen: 1,
+        proposedLen: 1,
+      },
+      hasChanges: true,
+    };
+    const html = buildRecipientRedlinePdfHtml(vm);
+    const upper = html.toUpperCase();
+    const first = upper.indexOf("MASTER SERVICES AGREEMENT");
+    const second = upper.indexOf("MASTER SERVICES AGREEMENT", first + 1);
+    /** Second block should not repeat the uppercase section header row */
+    expect(second).toBe(-1);
+  });
+
   it("includes human summary and reviewer appendix when extras provided", () => {
     const vm = buildLegalRedlineDocumentViewModel("Fee is due on receipt.", "Fee is Net 30.");
     const html = buildRecipientRedlinePdfHtml(

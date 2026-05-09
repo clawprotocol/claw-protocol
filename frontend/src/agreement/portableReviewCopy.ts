@@ -161,7 +161,8 @@ export const RECIPIENT_UPLOAD_NOTES_ONLY_DOWNLOAD_NOTES = "Download reviewer not
 
 /** Compare panel — intent coverage (plain language). */
 export const RECIPIENT_INTENT_NOT_AUTOMATICALLY_INSERTED = "Not automatically inserted";
-export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "Needs manual placement";
+/** User-safe — avoid “placement” jargon; paired with explain sentence in UI. */
+export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "Compare could not anchor this in the document";
 export const RECIPIENT_INTENT_REVIEW_BEFORE_SENDING = "Review before sending";
 export const RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY = "Downloads";
 export const RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY = "Suggestion details";
@@ -181,6 +182,16 @@ export const RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE =
   "Some formatting from the uploaded file was cleaned before comparison.";
 export const RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT =
   "Reviewer notes are separate from the agreement.";
+
+/** Human review card — nothing leaves the recipient until the sender accepts. */
+export const RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS =
+  "Nothing is sent until the sender accepts.";
+
+/** Subheading above the human redline document. */
+export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Review redline";
+
+/** Collapsed panel for reviewer-only commentary. */
+export const RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY = "Reviewer notes — not part of agreement";
 
 /** Shown when a noisy block is collapsed to avoid duplicate full-document inserts in the redline. */
 export const RECIPIENT_REDLINE_SECTION_COLLAPSED_NOTE =

@@ -33,6 +33,21 @@ describe("sanitizeRecipientImportedRevisionText", () => {
     expect(r.artifactsRemoved.length).toBeGreaterThan(0);
   });
 
+  it("pulls inline reviewer commentary paragraphs out of the agreement body", () => {
+    const raw = [
+      "1. Payment\nNet 30.",
+      "",
+      "Reasoning: sender should accept by Friday.",
+      "",
+      "2. Term\nOne year.",
+    ].join("\n\n");
+    const r = sanitizeRecipientImportedRevisionText(raw);
+    expect(r.agreementText).toContain("1. Payment");
+    expect(r.agreementText).toContain("2. Term");
+    expect(r.agreementText).not.toMatch(/Reasoning:/i);
+    expect(r.reviewerNotes).toMatch(/Reasoning:/i);
+  });
+
   it("dedupes identical leading paragraphs from PDF extraction", () => {
     const para = "Master Services Agreement between Client and Developer.";
     const raw = [para, "", para, "", para, "", "3. Fees\nNet 30."].join("\n\n");

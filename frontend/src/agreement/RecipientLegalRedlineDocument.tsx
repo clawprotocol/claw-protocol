@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { RedlineSegmentVM } from "./recipientPreviewDiffModel";
-import type { LegalRedlineDocumentViewModel, LegalRedlineSegment } from "./legalRedlineBlocks";
+import type { LegalRedlineBlock, LegalRedlineDocumentViewModel, LegalRedlineSegment } from "./legalRedlineBlocks";
 
 type Props = {
   /** @deprecated Prefer {@link document} for block-aware redline. */
@@ -14,7 +14,17 @@ type Props = {
   highlightedRecipientAnchor?: string | null;
   /** When true with {@link document}, only blocks with material changes render (human review mode). */
   hideUnchangedBlocks?: boolean;
+  /** Collapse very noisy micro-diffs into a short summary + optional details (human review mode). */
+  collapseDenseMicroDiff?: boolean;
 };
+
+function blockIsDenseMicroDiff(block: LegalRedlineBlock): boolean {
+  if (!block.hasChange) return false;
+  const changes = block.segments.filter((s) => s.type !== "same");
+  if (changes.length >= 12) return true;
+  if (changes.length >= 6 && changes.every((s) => String(s.text).length <= 56)) return true;
+  return false;
+}
 
 type AnySeg = LegalRedlineSegment | RedlineSegmentVM;
 
@@ -212,6 +222,7 @@ export function RecipientLegalRedlineDocument({
   recipientNarrowIntentAnchors,
   highlightedRecipientAnchor,
   hideUnchangedBlocks = false,
+  collapseDenseMicroDiff = false,
 }: Props) {
   const shell =
     variant === "suggested"
@@ -241,6 +252,9 @@ export function RecipientLegalRedlineDocument({
                       ? "border-l-4 border-l-amber-500 bg-amber-50/60 pl-4 pr-2 sm:pl-5"
                       : "border-l-4 border-l-transparent pl-4 pr-2 sm:pl-5",
                   ].join(" ");
+            const dense =
+              collapseDenseMicroDiff && variant === "suggested" && changed && blockIsDenseMicroDiff(block);
+            const sectionLabel = (block.label || block.clauseNumber || block.heading || "Section").trim();
             return (
               <section
                 key={block.id}
@@ -250,14 +264,38 @@ export function RecipientLegalRedlineDocument({
                 data-clause-number={block.clauseNumber ?? ""}
                 className={blockChrome}
               >
-                <div className="space-y-0">
-                  <RecipientLegalRedlineBlockSegments
-                    segments={block.segments}
-                    keyPrefix={block.id}
-                    recipientNarrowIntentAnchors={recipientNarrowIntentAnchors}
-                    highlightedRecipientAnchor={highlightedRecipientAnchor}
-                  />
-                </div>
+                {dense ? (
+                  <div data-testid="recipient-human-section-revised-card">
+                    <p className="text-[13px] font-semibold leading-snug text-slate-900">
+                      {sectionLabel} substantially revised
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
+                      Detailed line comparison is grouped for readability.
+                    </p>
+                    <details className="mt-2 rounded-md border border-slate-200/90 bg-white/80 px-2 py-1.5">
+                      <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
+                        View detailed comparison
+                      </summary>
+                      <div className="mt-2 border-t border-slate-200/80 pt-2">
+                        <RecipientLegalRedlineBlockSegments
+                          segments={block.segments}
+                          keyPrefix={`${block.id}_dense`}
+                          recipientNarrowIntentAnchors={recipientNarrowIntentAnchors}
+                          highlightedRecipientAnchor={highlightedRecipientAnchor}
+                        />
+                      </div>
+                    </details>
+                  </div>
+                ) : (
+                  <div className="space-y-0">
+                    <RecipientLegalRedlineBlockSegments
+                      segments={block.segments}
+                      keyPrefix={block.id}
+                      recipientNarrowIntentAnchors={recipientNarrowIntentAnchors}
+                      highlightedRecipientAnchor={highlightedRecipientAnchor}
+                    />
+                  </div>
+                )}
               </section>
             );
           })}

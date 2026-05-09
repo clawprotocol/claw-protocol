@@ -131,8 +131,8 @@ import {
   RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
-  RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL,
-  RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE,
+  RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD,
+  RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY,
   RECIPIENT_PASTE_REVISED_PRIMARY_LABEL,
   RECIPIENT_QUICK_REQUEST_LABEL,
   RECIPIENT_QUICK_REQUEST_PLACEHOLDER,
@@ -156,7 +156,17 @@ import {
   buildClauseSuggestionCardsFromUploadText,
   type RecipientClauseSuggestionCard,
 } from "./recipientClauseSuggestionsFromText";
+import { buildRecipientCompareConfidence } from "./recipientCompareConfidence";
 import { buildRecipientFriendlyRedlineChips } from "./recipientFriendlyRedlineSummary";
+import {
+  buildHumanReviewHeadline,
+  buildHumanReviewNegativeAssurances,
+  buildHumanReviewStructuredForPdf,
+  friendlyChipToReviewBullet,
+  groupFriendlyChipsForHumanReview,
+  humanReviewMeaningfulCount,
+} from "./recipientHumanReviewSummaryModel";
+import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
 import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
 import { collapseRecipientRedlineDuplicateInsertBlocks } from "./recipientRedlineDisplayDedupe";
 import { REVISED_UPLOAD_ANALYZING_MIN_MS } from "./recipientRevisedDraftUploadFlow";
@@ -470,7 +480,7 @@ export function AgreementRecipientReview({
   const [revisedUploadAnalyzing, setRevisedUploadAnalyzing] = useState(false);
   const [recipientPostUploadSurface, setRecipientPostUploadSurface] = useState<RecipientPostUploadSurfaceState>(null);
   const [recipientIntentListExpanded, setRecipientIntentListExpanded] = useState(false);
-  const [reviewerNotesAccordionOpen, setReviewerNotesAccordionOpen] = useState(false);
+  const [recipientImportArtifactsCount, setRecipientImportArtifactsCount] = useState(0);
   const [proRedlineSuggestText, setProRedlineSuggestText] = useState("");
   const [proRedlineSuggestBusy, setProRedlineSuggestBusy] = useState(false);
   const [proRedlineSuggestErr, setProRedlineSuggestErr] = useState<string | null>(null);
@@ -602,10 +612,6 @@ export function AgreementRecipientReview({
     },
     [],
   );
-
-  useEffect(() => {
-    setReviewerNotesAccordionOpen(false);
-  }, [recipientPreview?.separatedReviewerNotesForUi]);
 
   useEffect(() => {
     setRecipientIntentListExpanded(false);
@@ -1010,6 +1016,94 @@ export function AgreementRecipientReview({
     };
   }, [legalRedlineDocumentBaseVm, previewDiff, recipientIntentGapCount]);
 
+  const compareConfidence = useMemo(() => {
+    if (!legalRedlineDocumentVm || !recipientRedlinePlainTexts || !previewDiff) return null;
+    return buildRecipientCompareConfidence({
+      artifactsRemovedCount: recipientImportArtifactsCount,
+      paymentTermsInlinePlacementFailed: Boolean(recipientRedlinePlainTexts.paymentTermsInlinePlacementFailed),
+      recipientIntentGapCount,
+      usedNoisyReviseGuard: Boolean(recipientRedlinePlainTexts.usedNoisyReviseGuard),
+      hasLargeBlockFallbackReason: Boolean(legalRedlineDocumentVm.fallbackReason?.trim()),
+      segmentCount: legalRedlineDocumentVm.stats.segmentCount,
+      changedBlockCount: legalRedlineDocumentVm.stats.changedBlockCount,
+      insertCount: legalRedlineDocumentVm.stats.insertCount,
+      deleteCount: legalRedlineDocumentVm.stats.deleteCount,
+    });
+  }, [
+    legalRedlineDocumentVm,
+    recipientRedlinePlainTexts,
+    previewDiff,
+    recipientIntentGapCount,
+    recipientImportArtifactsCount,
+  ]);
+
+  const reviewerHeadlineName = useMemo(
+    () =>
+      participantPid.trim()
+        ? (proposerDisplayNameForApi || "").trim() || "The reviewer"
+        : "The reviewer",
+    [participantPid, proposerDisplayNameForApi],
+  );
+
+  const humanReviewStructuredPdf = useMemo(() => {
+    if (!legalRedlineDocumentVm || !compareConfidence || !recipientPreview || !previewDiff) return null;
+    return buildHumanReviewStructuredForPdf({
+      reviewerHeadlineName,
+      chips: recipientFriendlyRedlineChips,
+      changedBlockCount: legalRedlineDocumentVm.stats.changedBlockCount,
+      instructionPlain: recipientPreview.revisionText ?? "",
+      changedFieldKeys: previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).map((r) => r.field),
+      confidence: compareConfidence,
+    });
+  }, [
+    legalRedlineDocumentVm,
+    compareConfidence,
+    recipientPreview,
+    previewDiff,
+    recipientFriendlyRedlineChips,
+    reviewerHeadlineName,
+  ]);
+
+  const redlinePdfTechnicalAppendixPlain = useMemo(() => {
+    if (!legalRedlineDocumentVm || !compareConfidence) return null;
+    if (compareConfidence.level === "high" && !legalRedlineDocumentVm.fallbackReason?.trim()) return null;
+    const { insertCount, deleteCount, changedBlockCount, segmentCount } = legalRedlineDocumentVm.stats;
+    const parts = [
+      `For reference: ${insertCount} additions, ${deleteCount} removals, ${changedBlockCount} areas with tracked changes, ${segmentCount} compared fragments.`,
+    ];
+    if (legalRedlineDocumentVm.fallbackReason?.trim()) {
+      parts.push("A large section is summarized as a single change for readability.");
+    }
+    return parts.join(" ");
+  }, [legalRedlineDocumentVm, compareConfidence]);
+
+  const humanReviewGrouped = useMemo(
+    () => groupFriendlyChipsForHumanReview(recipientFriendlyRedlineChips),
+    [recipientFriendlyRedlineChips],
+  );
+
+  const humanReviewHeadlineText = useMemo(() => {
+    if (!legalRedlineDocumentVm) return "";
+    return buildHumanReviewHeadline(
+      reviewerHeadlineName,
+      humanReviewMeaningfulCount(recipientFriendlyRedlineChips, legalRedlineDocumentVm.stats.changedBlockCount),
+    );
+  }, [legalRedlineDocumentVm, reviewerHeadlineName, recipientFriendlyRedlineChips]);
+
+  const humanReviewKeyUpdatesLabel = useMemo(() => {
+    if (!legalRedlineDocumentVm || recipientFriendlyRedlineChips.length === 0) return null;
+    const n = humanReviewMeaningfulCount(recipientFriendlyRedlineChips, legalRedlineDocumentVm.stats.changedBlockCount);
+    return `${n} key updates`;
+  }, [legalRedlineDocumentVm, recipientFriendlyRedlineChips]);
+
+  const humanReviewNegativeLines = useMemo(() => {
+    if (!recipientPreview || !previewDiff) return [] as string[];
+    return buildHumanReviewNegativeAssurances(
+      recipientPreview.revisionText ?? "",
+      previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).map((r) => r.field),
+    );
+  }, [recipientPreview, previewDiff]);
+
   useLayoutEffect(() => {
     if (!recipientPreview || recipientSuggestedEditsSentAck) return;
     if (!previewDiff || previewDiff.isCompleteNoOp) return;
@@ -1387,6 +1481,7 @@ export function AgreementRecipientReview({
         return;
       }
       setRecipientRevisePreviewError(null);
+      setRecipientImportArtifactsCount(0);
       setRecipientPreview({
         baselineDraft,
         baselineHtml,
@@ -1429,6 +1524,7 @@ export function AgreementRecipientReview({
     }
     const showGenericPreviewSpinner = !opts?.importPipeline;
     if (showGenericPreviewSpinner) setPreviewing(true);
+    if (!opts?.importPipeline) setRecipientImportArtifactsCount(0);
     setError(null);
     setRecipientRevisePreviewError(null);
     try {
@@ -1508,6 +1604,7 @@ export function AgreementRecipientReview({
     if (!draft) return;
     const trimmed = fullText.trim();
     if (!trimmed) return;
+    setRecipientImportArtifactsCount(scrollOpts?.importArtifactsRemoved?.length ?? 0);
     setRecipientImportSanitizeNote(
       scrollOpts?.importArtifactsRemoved?.length ? RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE : null,
     );
@@ -1696,6 +1793,7 @@ export function AgreementRecipientReview({
     setRecipientPreview(null);
     pendingImportRecipientPreviewRef.current = null;
     setRecipientPostUploadSurface(null);
+    setRecipientImportArtifactsCount(0);
     setRecipientImportSanitizeNote(null);
     setRecipientRevisePreviewError(null);
     setRevisedUploadAnalyzing(false);
@@ -1791,69 +1889,61 @@ export function AgreementRecipientReview({
             {recipientImportSanitizeNote}
           </p>
         ) : null}
-        {recipientPreview.separatedReviewerNotesForUi ? (
-          <div
-            className="mt-3 rounded-lg border border-emerald-900/30 bg-emerald-950/20 px-3 py-2.5"
-            data-testid="recipient-reviewer-notes-callout"
-          >
-            <p className="text-[11px] font-semibold tracking-wide text-emerald-100/95">
-              {RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE}
-            </p>
-            <p className="mt-1 text-[10px] leading-snug text-emerald-200/80">{RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT}</p>
-            <button
-              type="button"
-              data-testid="recipient-reviewer-notes-accordion-toggle"
-              className="mt-1.5 w-full rounded-md border border-emerald-800/35 bg-emerald-950/25 px-2 py-1.5 text-left text-xs font-medium text-emerald-50/95 hover:bg-emerald-950/40"
-              aria-expanded={reviewerNotesAccordionOpen}
-              onClick={() => setReviewerNotesAccordionOpen((v) => !v)}
-            >
-              {RECIPIENT_REVIEWER_NOTES_ACCORDION_LABEL}
-            </button>
-            {reviewerNotesAccordionOpen ? (
-              <pre
-                className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-slate-800/60 bg-slate-950/50 p-2 text-[11px] leading-relaxed text-slate-300"
-                data-testid="recipient-reviewer-notes-accordion-body"
-              >
-                {recipientPreview.separatedReviewerNotesForUi}
-              </pre>
-            ) : null}
-          </div>
-        ) : null}
-        {participantPid ? (
-          <p className="mt-2 text-[10px] leading-snug text-slate-500">
-            Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
-          </p>
+        {legalRedlineDocumentVm && compareConfidence ? (
+          <RecipientHumanReviewSummary
+            headline={humanReviewHeadlineText}
+            keyUpdatesLabel={humanReviewKeyUpdatesLabel}
+            importantBullets={humanReviewGrouped.important.map(friendlyChipToReviewBullet)}
+            clarificationBullets={humanReviewGrouped.clarifications.map(friendlyChipToReviewBullet)}
+            negativeAssurances={humanReviewNegativeLines}
+            confidenceHeadline={compareConfidence.headline}
+            confidenceBody={compareConfidence.body}
+          />
         ) : null}
 
         {legalRedlineDocumentVm ? (
           <>
-            {legalRedlineDocumentVm.fallbackReason ? (
-              <p className="mb-2 mt-3 text-sm leading-snug text-amber-100/95">{legalRedlineDocumentVm.fallbackReason}</p>
+            <h3
+              className="mt-5 text-sm font-semibold tracking-tight text-slate-200"
+              data-testid="recipient-human-redline-subhead"
+            >
+              {RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD}
+            </h3>
+            {participantPid ? (
+              <p className="mt-1 text-[10px] leading-snug text-slate-500">
+                Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
+              </p>
             ) : null}
 
-            {recipientFriendlyRedlineChips.length > 0 ? (
+            <div className="mt-3 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
               <div
-                className="mt-3 flex flex-wrap gap-2"
-                data-testid="recipient-friendly-redline-chips"
-                aria-label="High-level summary of changes"
+                ref={suggestedChangesDocScrollRef}
+                className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
+                data-testid="recipient-suggested-changes-document"
               >
-                {recipientFriendlyRedlineChips.map((label) => (
-                  <span
-                    key={label}
-                    className="inline-flex items-center rounded-full border border-sky-800/45 bg-sky-950/30 px-2.5 py-0.5 text-[11px] font-medium text-sky-100"
-                  >
-                    {label}
-                  </span>
-                ))}
+                <RecipientLegalRedlineDocument
+                  document={legalRedlineDocumentVm}
+                  variant="suggested"
+                  hideUnchangedBlocks
+                  collapseDenseMicroDiff
+                  recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
+                  highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
+                />
               </div>
-            ) : null}
+            </div>
 
             <details className="mt-3 rounded-md border border-slate-700/50 bg-slate-950/35 px-2 py-1.5">
               <summary className="cursor-pointer list-none text-[11px] font-semibold text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
                 {RECIPIENT_PREVIEW_TECHNICAL_COMPARE_SUMMARY}
               </summary>
+              <div className="mt-2 border-t border-slate-800/50 pt-2">
+                {legalRedlineDocumentVm.fallbackReason ? (
+                  <p className="mb-2 text-[11px] leading-relaxed text-slate-400">
+                    A large section is summarized as a single change for readability.
+                  </p>
+                ) : null}
               <div
-                className="mt-2 flex flex-wrap gap-2 border-t border-slate-800/50 pt-2"
+                className="flex flex-wrap gap-2"
                 data-testid="recipient-suggested-changes-summary-chips"
                 aria-label="Technical comparison counts"
               >
@@ -1891,6 +1981,7 @@ export function AgreementRecipientReview({
                     {recipientPreviewGapChipLabel(recipientIntentGapCount)}
                   </span>
                 ) : null}
+              </div>
               </div>
             </details>
 
@@ -2046,6 +2137,27 @@ export function AgreementRecipientReview({
               </p>
             ) : null}
 
+            {recipientPreview.separatedReviewerNotesForUi ? (
+              <details
+                className="mt-4 rounded-md border border-emerald-900/35 bg-emerald-950/15 px-3 py-2"
+                data-testid="recipient-reviewer-notes-panel"
+              >
+                <summary
+                  className="cursor-pointer list-none text-xs font-semibold text-emerald-100 marker:content-none hover:text-emerald-50 [&::-webkit-details-marker]:hidden"
+                  data-testid="recipient-reviewer-notes-panel-summary"
+                >
+                  {RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY}
+                </summary>
+                <p className="mt-2 text-[10px] leading-snug text-emerald-200/85">{RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT}</p>
+                <pre
+                  className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-slate-800/60 bg-slate-950/50 p-2 text-[11px] leading-relaxed text-slate-300"
+                  data-testid="recipient-reviewer-notes-panel-body"
+                >
+                  {recipientPreview.separatedReviewerNotesForUi}
+                </pre>
+              </details>
+            ) : null}
+
             {recipientRedlinePlainTexts && recipientPreview ? (
               <details
                 className="mt-2 rounded-md border border-slate-700/40 bg-slate-950/25"
@@ -2065,6 +2177,8 @@ export function AgreementRecipientReview({
                     redlinePdfSummarySentence={recipientRedlinePlainTexts.instructionContextSummary ?? null}
                     redlinePdfSummaryBullets={recipientFriendlyRedlineChips}
                     redlinePdfReviewerNotesPlain={recipientPreview.separatedReviewerNotesForUi ?? null}
+                    redlinePdfStructuredHumanReview={humanReviewStructuredPdf}
+                    redlinePdfTechnicalAppendixPlain={redlinePdfTechnicalAppendixPlain}
                     pdfReadContext={{
                       agreementId,
                       readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
@@ -2079,22 +2193,6 @@ export function AgreementRecipientReview({
                 </div>
               </details>
             ) : null}
-
-            <div className="mt-4 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
-              <div
-                ref={suggestedChangesDocScrollRef}
-                className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
-                data-testid="recipient-suggested-changes-document"
-              >
-                <RecipientLegalRedlineDocument
-                  document={legalRedlineDocumentVm}
-                  variant="suggested"
-                  hideUnchangedBlocks
-                  recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
-                  highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
-                />
-              </div>
-            </div>
           </>
         ) : (
           <p className="mt-3 text-sm text-amber-100/90">

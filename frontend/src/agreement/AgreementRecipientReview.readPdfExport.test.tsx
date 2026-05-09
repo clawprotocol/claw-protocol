@@ -6,7 +6,6 @@ import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 import {
   RECIPIENT_BTN_CONTINUE_EDITING,
-  RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE,
   RECIPIENT_WANT_COPY_BODY,
   RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
   RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
@@ -209,8 +208,8 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
       { timeout: 15_000 },
     );
 
-    expect(screen.getByText(RECIPIENT_REVIEWER_NOTES_INCLUDED_BADGE)).toBeTruthy();
-    await user.click(screen.getByTestId("recipient-reviewer-notes-accordion-toggle"));
-    expect(screen.getByTestId("recipient-reviewer-notes-accordion-body").textContent).toMatch(/Prefer Net 45/i);
+    expect(screen.getByTestId("recipient-reviewer-notes-panel")).toBeTruthy();
+    await user.click(screen.getByTestId("recipient-reviewer-notes-panel-summary"));
+    expect(screen.getByTestId("recipient-reviewer-notes-panel-body").textContent).toMatch(/Prefer Net 45/i);
   }, 25_000);
 });

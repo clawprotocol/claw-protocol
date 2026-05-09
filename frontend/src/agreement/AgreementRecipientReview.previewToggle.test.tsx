@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
@@ -102,6 +102,13 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
     await waitFor(() => {
       expect(screen.getByTestId("recipient-suggested-changes-panel")).toBeTruthy();
     });
+
+    const panel = screen.getByTestId("recipient-suggested-changes-panel");
+    const humanSummary = within(panel).getByTestId("recipient-human-review-summary");
+    const docScroll = within(panel).getByTestId("recipient-suggested-changes-document");
+    expect(
+      humanSummary.compareDocumentPosition(docScroll) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();
     expect(screen.queryByTestId("recipient-tab-clean-proposed")).toBeNull();
