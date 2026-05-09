@@ -50,6 +50,25 @@ export const RECIPIENT_DRAFT_IMPORT_READ_ERROR =
 export const RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK =
   "We couldn't extract readable text from this file. Try a selectable-text PDF, TXT, or Markdown file.";
 
+/** After PDF extraction + sanitization, agreement body is too thin to compare (likely scanned PDF or noise). */
+export const RECIPIENT_DRAFT_IMPORT_PDF_LOW_TEXT =
+  "Could not confidently extract enough text from this PDF. Try a text-based PDF export, TXT, Markdown, or paste the agreement.";
+
+/** Shown while reading the file and building the preview (workspace upload / import). */
+export const RECIPIENT_REVISED_IMPORT_PREPARING = "Preparing comparison…";
+
+/** When `draft` is not yet available but the user already picked a file. */
+export const RECIPIENT_DRAFT_IMPORT_AGREEMENT_NOT_READY =
+  "The agreement is still loading. Wait a moment, then upload your revised draft again.";
+
+/** Defensive: compare runner ref missing (should not happen in production). */
+export const RECIPIENT_DRAFT_IMPORT_COMPARE_RUNNER_MISSING =
+  "Could not start comparison. Refresh the page and try again, or paste your revised text instead.";
+
+/** Extracted file had no usable agreement body after normalization. */
+export const RECIPIENT_DRAFT_IMPORT_EMPTY_BODY =
+  "That file had no usable agreement text to compare. Try a different file or paste the agreement.";
+
 /** Trust line for previews / decision menus (compose surface avoids repeating it). */
 export const RECIPIENT_WORKSPACE_TRUST_LINE = "Nothing changes until the sender accepts.";
 export const RECIPIENT_SAFETY_SUGGESTIONS_NOT_SIGNATURES = "Suggestions are not signatures.";

@@ -1,9 +1,14 @@
 import {
   RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK,
+  RECIPIENT_DRAFT_IMPORT_PDF_LOW_TEXT,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
 } from "./portableReviewCopy";
+import { recipientUploadError, recipientUploadLogParseStart, recipientUploadLogParseSuccess } from "./recipientDraftUploadLog";
 import { sanitizeRecipientImportedRevisionText } from "./recipientRevisedDraftExtractSanitize";
 import { loadPdfJsWithWorker } from "./recipientRevisedDraftPdfJs";
+
+/** Agreement body shorter than this after PDF import is treated as unusable for compare. */
+const PDF_IMPORT_MIN_AGREEMENT_CHARS = 48;
 
 /**
  * Single `accept` value for every revised-draft file input (want-a-copy strip + revise workspace).
@@ -92,33 +97,56 @@ export async function extractRevisedDraftPlainText(file: File): Promise<ExtractR
 
   if (isTxtMd) {
     try {
+      recipientUploadLogParseStart({ name: file.name, type: file.type });
       const raw = await readPlainFileText(file);
       const san = sanitizeRecipientImportedRevisionText(raw);
+      recipientUploadLogParseSuccess({
+        name: file.name,
+        bodyLen: san.agreementText.trim().length,
+      });
       return {
         ok: true,
         text: san.agreementText,
         importReviewerNotesTail: san.reviewerNotes,
         importArtifactsRemoved: san.artifactsRemoved,
       };
-    } catch {
+    } catch (e) {
+      recipientUploadError("txt-read-exception", e, { name: file.name });
       return { ok: false, error: RECIPIENT_DRAFT_IMPORT_READ_ERROR };
     }
   }
 
   if (isPdf) {
     try {
+      recipientUploadLogParseStart({ name: file.name, type: file.type });
       const raw = await extractPdfPlainText(file);
       if (!raw.trim()) {
+        recipientUploadError("pdf-empty-raw", "zero-length text layer", { name: file.name });
         return { ok: false, error: RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK };
       }
       const san = sanitizeRecipientImportedRevisionText(raw);
+      const body = san.agreementText.trim();
+      if (body.length < PDF_IMPORT_MIN_AGREEMENT_CHARS) {
+        recipientUploadError("pdf-thin-body", "sanitized agreement text too short", {
+          name: file.name,
+          rawLen: raw.trim().length,
+          bodyLen: body.length,
+        });
+        return { ok: false, error: RECIPIENT_DRAFT_IMPORT_PDF_LOW_TEXT };
+      }
+      recipientUploadLogParseSuccess({
+        name: file.name,
+        rawLen: raw.trim().length,
+        bodyLen: body.length,
+      });
       return {
         ok: true,
         text: san.agreementText,
         importReviewerNotesTail: san.reviewerNotes,
         importArtifactsRemoved: san.artifactsRemoved,
       };
-    } catch {
+    } catch (e) {
+      recipientUploadError("pdf-parse-exception", e, { name: file.name });
       return { ok: false, error: RECIPIENT_DRAFT_IMPORT_PARSE_FALLBACK };
     }
   }

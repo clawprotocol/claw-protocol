@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type KeyboardEvent,
+} from "react";
 import type { AgreementDraft } from "./agreementTypes";
 import {
   clearPendingRecipientNotice,
@@ -117,7 +127,11 @@ import {
   RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL,
   RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF,
   RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT,
+  RECIPIENT_DRAFT_IMPORT_AGREEMENT_NOT_READY,
+  RECIPIENT_DRAFT_IMPORT_COMPARE_RUNNER_MISSING,
+  RECIPIENT_DRAFT_IMPORT_EMPTY_BODY,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
+  RECIPIENT_REVISED_IMPORT_PREPARING,
   RECIPIENT_EDIT_INSIDE_LAWDOG,
   RECIPIENT_AUDIT_MODE_SUBCOPY,
   RECIPIENT_AUDIT_MODE_SUMMARY,
@@ -151,6 +165,12 @@ import {
   buildRecipientRevisionText,
   recipientPreviewGapChipLabel,
 } from "./portableReviewCopy";
+import {
+  recipientUploadError,
+  recipientUploadLogCompareStart,
+  recipientUploadLogCompareSuccess,
+  recipientUploadLogSelected,
+} from "./recipientDraftUploadLog";
 import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 import { RecipientRevisedDraftAnalyzingCard } from "./recipientRevisedDraftAnalyzingCard";
 import { RecipientClauseSuggestionsSurface } from "./RecipientClauseSuggestionsSurface";
@@ -484,6 +504,8 @@ export function AgreementRecipientReview({
   const [revisedSubmode, setRevisedSubmode] = useState<"paste" | "edit">("paste");
   const [draftImportError, setDraftImportError] = useState<string | null>(null);
   const [revisedUploadAnalyzing, setRevisedUploadAnalyzing] = useState(false);
+  /** True while reading the selected file (before import compare state machine shows analyzing card). */
+  const [recipientRevisedDraftFileBusy, setRecipientRevisedDraftFileBusy] = useState(false);
   const [recipientPostUploadSurface, setRecipientPostUploadSurface] = useState<RecipientPostUploadSurfaceState>(null);
   const [recipientIntentListExpanded, setRecipientIntentListExpanded] = useState(false);
   const [recipientImportArtifactsCount, setRecipientImportArtifactsCount] = useState(0);
@@ -549,32 +571,6 @@ export function AgreementRecipientReview({
     | null
   >(null);
   const [recipientImportSanitizeNote, setRecipientImportSanitizeNote] = useState<string | null>(null);
-
-  const onDraftImportFileSelected = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
-      if (!file) return;
-      setDraftImportError(null);
-      void (async () => {
-        const result = await extractRevisedDraftPlainText(file);
-        if (!result.ok) {
-          setDraftImportError(result.error);
-          return;
-        }
-        try {
-          await runImportedRevisedAutoCompareRef.current?.(result.text, {
-            scrollToSummary: false,
-            importReviewerNotesTail: result.importReviewerNotesTail ?? undefined,
-            importArtifactsRemoved: result.importArtifactsRemoved,
-          });
-        } catch {
-          setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
-        }
-      })();
-    },
-    [],
-  );
 
   const scrollAndFocusSuggestPanel = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -1614,9 +1610,19 @@ export function AgreementRecipientReview({
   previewWholeDocumentRevisionRef.current = previewWholeDocumentRevision;
 
   runImportedRevisedAutoCompareRef.current = async (fullText: string, scrollOpts) => {
-    if (!draft) return;
+    if (!draft) {
+      recipientUploadError("compare-no-draft", new Error("draft missing"), { agreementId });
+      setDraftImportError(RECIPIENT_DRAFT_IMPORT_AGREEMENT_NOT_READY);
+      setError(RECIPIENT_DRAFT_IMPORT_AGREEMENT_NOT_READY);
+      return;
+    }
     const trimmed = fullText.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      recipientUploadError("compare-empty-body", new Error("empty trimmed import text"), { agreementId });
+      setDraftImportError(RECIPIENT_DRAFT_IMPORT_EMPTY_BODY);
+      setError(RECIPIENT_DRAFT_IMPORT_EMPTY_BODY);
+      return;
+    }
     setRecipientImportArtifactsCount(scrollOpts?.importArtifactsRemoved?.length ?? 0);
     setRecipientImportSanitizeNote(
       scrollOpts?.importArtifactsRemoved?.length ? RECIPIENT_PREVIEW_IMPORT_FORMATTING_NOTE : null,
@@ -1668,13 +1674,22 @@ export function AgreementRecipientReview({
       const minVisible = new Promise<void>((resolve) => {
         window.setTimeout(resolve, REVISED_UPLOAD_ANALYZING_MIN_MS);
       });
-      const previewPromise =
-        previewWholeDocumentRevisionRef.current?.({
-          bodyPlain: agreementBody,
-          instructionPlain: instCombined,
-          separatedReviewerNotesForUi: reviewerNotes ?? undefined,
-          importPipeline: true,
-        }) ?? Promise.resolve(false);
+      const previewRunner = previewWholeDocumentRevisionRef.current;
+      if (!previewRunner) {
+        recipientUploadError("preview-ref-null", new Error("previewWholeDocumentRevisionRef missing"), {
+          agreementId,
+        });
+        setDraftImportError(RECIPIENT_DRAFT_IMPORT_COMPARE_RUNNER_MISSING);
+        setError(RECIPIENT_DRAFT_IMPORT_COMPARE_RUNNER_MISSING);
+        pendingImportRecipientPreviewRef.current = null;
+        return;
+      }
+      const previewPromise = previewRunner({
+        bodyPlain: agreementBody,
+        instructionPlain: instCombined,
+        separatedReviewerNotesForUi: reviewerNotes ?? undefined,
+        importPipeline: true,
+      });
       const [previewOkRaw] = await Promise.all([previewPromise, minVisible]);
       const previewOk = previewOkRaw === true;
       if (previewOk && pendingImportRecipientPreviewRef.current) {
@@ -1682,6 +1697,9 @@ export function AgreementRecipientReview({
         pendingImportRecipientPreviewRef.current = null;
       } else if (!previewOk) {
         pendingImportRecipientPreviewRef.current = null;
+        recipientUploadError("compare-preview-false", new Error("whole-doc preview returned false"), {
+          agreementId,
+        });
       }
       if (scrollOpts?.scrollToSummary && previewOk) {
         window.requestAnimationFrame(() => {
@@ -1691,12 +1709,66 @@ export function AgreementRecipientReview({
           }, 80);
         });
       }
-    } catch {
+    } catch (e) {
+      recipientUploadError("import-compare-exception", e, { agreementId });
       setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+      setError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
     } finally {
       setRevisedUploadAnalyzing(false);
     }
   };
+
+  const processRecipientRevisedDraftFile = useCallback(async (file: File) => {
+    recipientUploadLogSelected({ name: file.name, type: file.type, size: file.size });
+    setDraftImportError(null);
+    setRecipientRevisedDraftFileBusy(true);
+    try {
+      const result = await extractRevisedDraftPlainText(file);
+      if (!result.ok) {
+        recipientUploadError("extract-failed", result.error, { name: file.name });
+        setDraftImportError(result.error);
+        setError(result.error);
+        return;
+      }
+      const runner = runImportedRevisedAutoCompareRef.current;
+      if (!runner) {
+        recipientUploadError("compare-ref-null", new Error("runImportedRevisedAutoCompareRef missing"), {
+          name: file.name,
+        });
+        setDraftImportError(RECIPIENT_DRAFT_IMPORT_COMPARE_RUNNER_MISSING);
+        setError(RECIPIENT_DRAFT_IMPORT_COMPARE_RUNNER_MISSING);
+        return;
+      }
+      recipientUploadLogCompareStart({ textLen: result.text.trim().length });
+      await runner(result.text, {
+        scrollToSummary: false,
+        importReviewerNotesTail: result.importReviewerNotesTail ?? undefined,
+        importArtifactsRemoved: result.importArtifactsRemoved,
+      });
+      recipientUploadLogCompareSuccess({ textLen: result.text.trim().length });
+    } catch (e) {
+      recipientUploadError("workspace-import-exception", e, { name: file.name });
+      setDraftImportError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+      setError(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
+    } finally {
+      setRecipientRevisedDraftFileBusy(false);
+    }
+  }, []);
+
+  const onDraftImportFileSelected = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const input = e.target;
+      const file = input.files?.[0];
+      if (!file) {
+        input.value = "";
+        return;
+      }
+      void processRecipientRevisedDraftFile(file).finally(() => {
+        input.value = "";
+      });
+    },
+    [processRecipientRevisedDraftFile],
+  );
 
   async function runRecipientComparePreview() {
     if (workflowMode === "quick") await previewQuickChange();
@@ -2901,6 +2973,7 @@ export function AgreementRecipientReview({
     saving ||
     previewing ||
     revisedUploadAnalyzing ||
+    recipientRevisedDraftFileBusy ||
     hasPendingSuggestion ||
     recipientSuggestedEditsSentAck;
 
@@ -3443,6 +3516,17 @@ export function AgreementRecipientReview({
                 <div
                   data-testid="recipient-revised-version-panel"
                   className="space-y-4 rounded-xl border border-slate-700/45 bg-slate-950/30 p-4"
+                  onDragOver={(ev: DragEvent<HTMLDivElement>) => {
+                    if (suggestControlsDisabled) return;
+                    ev.preventDefault();
+                    ev.dataTransfer.dropEffect = "copy";
+                  }}
+                  onDrop={(ev: DragEvent<HTMLDivElement>) => {
+                    if (suggestControlsDisabled) return;
+                    ev.preventDefault();
+                    const f = ev.dataTransfer.files?.[0];
+                    if (f) void processRecipientRevisedDraftFile(f);
+                  }}
                 >
                   {revisedIntakePhase === "pick-method" ? (
                     <div className="space-y-3">
@@ -3452,6 +3536,24 @@ export function AgreementRecipientReview({
                           {RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY}
                         </p>
                       </div>
+                      {draftImportError ? (
+                        <p
+                          role="alert"
+                          data-testid="recipient-draft-import-error-pick-method"
+                          className="rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-snug text-amber-100"
+                        >
+                          {draftImportError}
+                        </p>
+                      ) : null}
+                      {recipientRevisedDraftFileBusy ? (
+                        <p
+                          role="status"
+                          data-testid="recipient-revised-import-preparing"
+                          className="text-xs font-medium text-slate-300"
+                        >
+                          {RECIPIENT_REVISED_IMPORT_PREPARING}
+                        </p>
+                      ) : null}
                       <button
                         type="button"
                         data-testid="recipient-upload-revised-file"

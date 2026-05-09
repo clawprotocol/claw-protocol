@@ -14,6 +14,7 @@ import {
   RECIPIENT_WANT_COPY_UPLOAD_TIP,
 } from "./portableReviewCopy";
 import { recipientExportBasenameFromTitle, recipientTextDownloadFilename } from "./recipientExportFilenames";
+import { recipientUploadError } from "./recipientDraftUploadLog";
 import { extractRevisedDraftPlainText, REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 
 type Props = {
@@ -96,7 +97,8 @@ export function RecipientWantACopyStrip({
           importReviewerNotesTail: result.importReviewerNotesTail ?? undefined,
           importArtifactsRemoved: result.importArtifactsRemoved,
         });
-      } catch {
+      } catch (e) {
+        recipientUploadError("want-copy-callback-exception", e, { name: file.name });
         setUploadErr(RECIPIENT_DRAFT_IMPORT_READ_ERROR);
       }
     },
