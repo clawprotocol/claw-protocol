@@ -177,6 +177,7 @@ import {
 } from "./portableReviewCopy";
 import {
   recipientUploadError,
+  recipientUploadLog,
   recipientUploadLogCompareStart,
   recipientUploadLogCompareSuccess,
   recipientUploadLogSelected,
@@ -236,6 +237,7 @@ import {
   notesLikelyDuplicateProposedPlain,
 } from "./recipientPreviewPdfHtml";
 import { stripCompareMarkupFromOriginalDraftHtml } from "./recipientOriginalDraftExportSanitize";
+import { recipientImportsMatchAuthoritativeBaseline } from "./recipientNoChangeCompareGuard";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
   buildRecipientRedlineStickyNavRows,
@@ -469,6 +471,8 @@ type RecipientPreview = {
   routingKind: "quick_change" | "whole_document";
   /** Heuristic split: commentary for the sender, excluded from agreement body compare. */
   separatedReviewerNotesForUi?: string;
+  /** PDF import normalized to the same text as the current render — skip false structural redline. */
+  importMatchesCurrentDraft?: boolean;
 };
 
 type RecipientWholeDocPreviewOpts = {
@@ -981,6 +985,8 @@ export function AgreementRecipientReview({
     );
   }, [recipientPreview]);
 
+  const recipientImportNoMaterialDiff = Boolean(recipientPreview?.importMatchesCurrentDraft);
+
   const recipientRedlinePlainTexts = useMemo(() => {
     if (!recipientPreview || !previewDiff) return null;
     return buildRecipientLegalRedlinePlainTexts(
@@ -1185,6 +1191,7 @@ export function AgreementRecipientReview({
   ]);
 
   const condensedCleanRevisionPdfBundle = useMemo(() => {
+    if (recipientImportNoMaterialDiff) return null;
     if (recipientPresentationMode !== "condensed_clean_revision" || !recipientRedlinePlainTexts || !legalRedlineDocumentVm) {
       return null;
     }
@@ -1202,12 +1209,18 @@ export function AgreementRecipientReview({
     recipientRedlineStrippedPlainPair,
     legalRedlineDocumentVm,
     condensedTopicCards,
+    recipientImportNoMaterialDiff,
   ]);
 
   const recipientSemanticPresentation = useMemo(() => {
+    if (recipientImportNoMaterialDiff) return null;
     if (!legalRedlineDocumentVm || recipientRedlinePlainTexts?.narrowRecipientTargetedRedline) return null;
     return buildRecipientSemanticRedlinePresentation(legalRedlineDocumentVm);
-  }, [legalRedlineDocumentVm, recipientRedlinePlainTexts?.narrowRecipientTargetedRedline]);
+  }, [
+    recipientImportNoMaterialDiff,
+    legalRedlineDocumentVm,
+    recipientRedlinePlainTexts?.narrowRecipientTargetedRedline,
+  ]);
 
   const scrollRecipientSemanticRelaxed = useCallback(
     async (semanticId: BusinessReviewSemanticId) => {
@@ -1356,6 +1369,7 @@ export function AgreementRecipientReview({
   );
 
   const humanReviewStructuredPdf = useMemo(() => {
+    if (recipientImportNoMaterialDiff) return null;
     if (!legalRedlineDocumentVm || !compareConfidence || !recipientPreview || !previewDiff) return null;
     const headlinePlainOverride =
       recipientPresentationMode === "condensed_clean_revision"
@@ -1387,9 +1401,11 @@ export function AgreementRecipientReview({
     reviewerHeadlineName,
     recipientPresentationMode,
     condensedTopicCards.length,
+    recipientImportNoMaterialDiff,
   ]);
 
   const redlinePdfTechnicalAppendixPlain = useMemo(() => {
+    if (recipientImportNoMaterialDiff) return null;
     if (!legalRedlineDocumentVm || !compareConfidence) return null;
     if (compareConfidence.level === "high" && !legalRedlineDocumentVm.fallbackReason?.trim()) return null;
     const { insertCount, deleteCount, changedBlockCount, segmentCount } = legalRedlineDocumentVm.stats;
@@ -1405,7 +1421,7 @@ export function AgreementRecipientReview({
       parts.push("A large section is summarized as a single change for readability.");
     }
     return parts.join(" ");
-  }, [legalRedlineDocumentVm, compareConfidence]);
+  }, [legalRedlineDocumentVm, compareConfidence, recipientImportNoMaterialDiff]);
 
   const humanReviewGrouped = useMemo(
     () => groupFriendlyChipsForHumanReview(recipientFriendlyRedlineChips),
@@ -1413,6 +1429,7 @@ export function AgreementRecipientReview({
   );
 
   const humanReviewHeadlineText = useMemo(() => {
+    if (recipientImportNoMaterialDiff) return "";
     if (!legalRedlineDocumentVm) return "";
     if (recipientPresentationMode === "condensed_clean_revision") {
       return buildHumanReviewHeadlineCondensedCleanRevision(
@@ -1432,6 +1449,7 @@ export function AgreementRecipientReview({
     recipientFriendlyRedlineChips,
     recipientPresentationMode,
     condensedTopicCards.length,
+    recipientImportNoMaterialDiff,
   ]);
 
   const humanReviewKeyUpdatesLabel = useMemo(() => {
@@ -1449,6 +1467,7 @@ export function AgreementRecipientReview({
   }, [recipientPreview, previewDiff]);
 
   const recipientReviewerNotesPlainForExport = useMemo(() => {
+    if (recipientPreview?.importMatchesCurrentDraft) return null;
     const raw = recipientPreview?.separatedReviewerNotesForUi?.trim() ?? "";
     if (!raw) return null;
     const proposedDeduped =
@@ -1466,6 +1485,7 @@ export function AgreementRecipientReview({
     recipientRedlineStrippedPlainPair?.proposedPlain,
     recipientRedlinePlainTexts?.proposedPlain,
     legalRedlineDocumentVm,
+    recipientPreview?.importMatchesCurrentDraft,
   ]);
 
   const showSeparatedReviewerNotesPanel = useMemo(() => {
@@ -2009,6 +2029,10 @@ export function AgreementRecipientReview({
     setDraftImportError(null);
     setError(null);
     setRecipientPdfImportRoutedMessage(null);
+    setBusinessReviewFocusedWording(null);
+    setHighlightedSemanticAnchor(null);
+    setNarrowRedlineHighlightAnchor(null);
+    setRecipientIntentListExpanded(false);
     try {
       await Promise.resolve();
       const originalPlain = (directCompareDefaultRef.current || draft.purpose || "").trim() || " ";
@@ -2046,11 +2070,65 @@ export function AgreementRecipientReview({
         return;
       }
 
-      setRevisedUploadAnalyzing(true);
       setWorkflowMode("revised");
       setRevisedSubmode("paste");
       setRevisedIntakePhase("editing");
       const agreementBody = classification.agreementText.trim();
+      let baselineHtmlLive = renderedHtml.trim();
+      try {
+        const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
+        const rr = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`, {
+          method: "POST",
+          headers: readHeaders,
+        });
+        if (rr.ok) {
+          const rrBody = await rr.text();
+          const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
+          const fresh = String(rp?.rendered_html ?? "").trim();
+          if (fresh.length > 0) baselineHtmlLive = fresh;
+        }
+      } catch {
+        /* keep renderedHtml from state */
+      }
+      if (
+        recipientImportsMatchAuthoritativeBaseline({
+          baselineRenderedHtml: baselineHtmlLive,
+          importedAgreementPlain: agreementBody,
+        })
+      ) {
+        recipientUploadLog("import-no-material-change", { agreementId, bodyLen: agreementBody.length });
+        const baselineDraft = cloneDraftForRecipientPreview(draft);
+        const proposedDraft = cloneDraftForRecipientPreview(draft);
+        setRecipientRevisePreviewError(null);
+        setRecipientPreview({
+          baselineDraft,
+          proposedDraft,
+          baselineHtml: baselineHtmlLive,
+          proposedHtml: baselineHtmlLive,
+          revisionText: "",
+          hasExternal: true,
+          postureAtPreview: recipientPosture,
+          suggestionUsedAtPreview: suggestionUsed,
+          routingKind: "whole_document",
+          importMatchesCurrentDraft: true,
+        });
+        setExternalAiPaste("");
+        pendingImportRecipientPreviewRef.current = null;
+        setRevisedUploadAnalyzing(false);
+        recipientUploadLogCompareSuccess({ textLen: agreementBody.trim().length, importNoMaterialChange: true });
+        if (scrollOpts?.scrollToSummary) {
+          window.requestAnimationFrame(() => {
+            window.setTimeout(() => {
+              document
+                .querySelector<HTMLElement>('[data-testid="recipient-import-no-change-panel"]')
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 80);
+          });
+        }
+        return;
+      }
+
+      setRevisedUploadAnalyzing(true);
       const reviewerNotes = [classification.reviewerNotes, importTail].filter(Boolean).join("\n\n") || null;
       const instCombined = [instruction.trim(), reviewerNotes || ""].filter(Boolean).join("\n\n");
       const minVisible = new Promise<void>((resolve) => {
@@ -2259,6 +2337,7 @@ export function AgreementRecipientReview({
   }
 
   function discardPreview() {
+    setBusinessReviewFocusedWording(null);
     setRecipientPreview(null);
     pendingImportRecipientPreviewRef.current = null;
     setRecipientPostUploadSurface(null);
@@ -2875,6 +2954,96 @@ export function AgreementRecipientReview({
             }}
           >
             {RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF}
+          </button>
+        </div>
+      </div>
+    ) : null;
+
+  const compareImportNoChangePanel =
+    recipientImportNoMaterialDiff &&
+    recipientPreview &&
+    previewDiff &&
+    recipientRedlinePlainTexts &&
+    legalRedlineDocumentVm &&
+    !recipientSuggestedEditsSentAck ? (
+      <div
+        className="rounded-lg border border-emerald-900/40 bg-slate-900/50 p-4 shadow-sm"
+        data-testid="recipient-import-no-change-panel"
+        role="status"
+      >
+        <h2 className="text-base font-semibold tracking-tight text-emerald-50">No changes detected</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-300">
+          The uploaded draft appears to match the current agreement after formatting cleanup.
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+          This matches the sender&apos;s current draft. You can upload a different file if you meant to propose edits.
+        </p>
+        {recipientImportSanitizeNote ? (
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-500" data-testid="recipient-import-no-change-sanitize-note">
+            {recipientImportSanitizeNote}
+          </p>
+        ) : null}
+        <details
+          open
+          className="mt-4 rounded-md border border-slate-700/40 bg-slate-950/25"
+          data-testid="recipient-import-no-change-export-details"
+        >
+          <summary className="cursor-pointer list-none px-2 py-2 text-[11px] font-semibold text-slate-400 marker:content-none hover:text-slate-200 sm:text-xs [&::-webkit-details-marker]:hidden">
+            {RECIPIENT_PREVIEW_EXPORT_DETAILS_SUMMARY}
+          </summary>
+          <div className="border-t border-slate-800/40 px-1 pb-1 pt-0">
+            <RecipientPreviewVersionsExport
+              plainSource={{
+                currentPlain: recipientRedlinePlainTexts.currentPlain,
+                proposedPlain: recipientRedlinePlainTexts.proposedPlain,
+              }}
+              legalRedlineVm={legalRedlineDocumentVm}
+              detachRedlinePdfButton
+              redlinePdfSummarySentence={null}
+              redlinePdfSummaryBullets={[]}
+              redlinePdfReviewerNotesPlain={null}
+              redlinePdfStructuredHumanReview={null}
+              redlinePdfTechnicalAppendixPlain={null}
+              redlinePdfCompareConfidenceLevel={null}
+              redlinePdfSemanticPresentation={null}
+              redlinePdfCondensedCleanRevision={null}
+              redlinePdfImportMaterialNoChange
+              pdfReadContext={{
+                agreementId,
+                readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
+                scrubbedOriginalHtml: scrubAgreementHtml(recipientPreview.baselineHtml),
+                scrubbedProposedHtml: scrubAgreementHtml(recipientPreview.proposedHtml),
+                exportBasename: recipientExportBasenameFromTitle(draft?.title, agreementId),
+                reviewerDisplayName: proposerDisplayNameForApi,
+                reviewerEmail: reviewerEmailForExport,
+                agreementTitleDisplay: draft?.title ?? null,
+              }}
+            />
+          </div>
+        </details>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
+            disabled={saving || previewing}
+            data-testid="recipient-import-no-change-continue-editing"
+            onClick={() => discardPreview()}
+          >
+            {RECIPIENT_BTN_CONTINUE_EDITING}
+          </button>
+          <button
+            type="button"
+            className="text-xs font-medium text-sky-300 underline decoration-sky-800/50 hover:text-sky-200"
+            data-testid="recipient-import-no-change-back-to-read"
+            onClick={() => {
+              setWorkspaceTab("read");
+              discardPreview();
+              window.requestAnimationFrame(() => {
+                recipientReadDocAnchorRef.current?.focus({ preventScroll: true });
+              });
+            }}
+          >
+            ← Back to agreement
           </button>
         </div>
       </div>
@@ -4466,6 +4635,7 @@ export function AgreementRecipientReview({
               ) : null}
 
               {comparePanel}
+              {compareImportNoChangePanel}
                 </>
               )}
             </div>

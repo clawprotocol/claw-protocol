@@ -9,8 +9,11 @@ import {
   RECIPIENT_SEMANTIC_REVISED_LABEL,
   RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
 } from "./portableReviewCopy";
+import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
 import { buildRecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import {
+  RECIPIENT_IMPORT_NO_CHANGE_REDACT_PDF_HEADLINE,
+  buildRecipientImportNoChangeRedlinePdfHtml,
   buildRecipientRedlinePdfHtml,
   notesLikelyDuplicateAgreementBodyForExport,
   notesShouldOmitExtractedAppendix,
@@ -437,5 +440,35 @@ describe("wrapRecipientVersionPdfHtml + sanitize", () => {
     expect(html).not.toMatch(/line-through/i);
     expect(html).not.toMatch(/Redline Review PDF/);
     expect(html).not.toMatch(/text-decoration:underline/i);
+  });
+});
+
+describe("import no-material-change redline PDF", () => {
+  it("buildRecipientImportNoChangeRedlinePdfHtml contains headline and omits revision metrics copy", () => {
+    const html = buildRecipientImportNoChangeRedlinePdfHtml(null);
+    expect(html).toContain(RECIPIENT_IMPORT_NO_CHANGE_REDACT_PDF_HEADLINE);
+    expect(html.toLowerCase()).not.toContain("meaningful revisions");
+    expect(html).not.toContain("Changed wording");
+    expect(html).not.toContain("Reference counts");
+  });
+
+  it("buildRecipientRedlinePdfHtml respects importMaterialNoChange on human extras", () => {
+    const vm = buildLegalRedlineDocumentViewModel("alpha beta", "gamma delta");
+    const staleHuman: HumanReviewStructuredForPdf = {
+      headlinePlain: "Sarah Collins proposed 6 meaningful revisions",
+      importantBullets: ["x"],
+      clarificationBullets: [],
+      negativeAssuranceLines: [],
+      recommendedFocusLines: [],
+      confidenceHeadline: "Compare confidence: High",
+      confidenceBody: "Body",
+      nothingSentFootnote: "Foot",
+    };
+    const html = buildRecipientRedlinePdfHtml(vm, null, {
+      importMaterialNoChange: true,
+      structuredHumanReview: staleHuman,
+    });
+    expect(html).toContain(RECIPIENT_IMPORT_NO_CHANGE_REDACT_PDF_HEADLINE);
+    expect(html).not.toContain("Sarah Collins proposed 6 meaningful revisions");
   });
 });

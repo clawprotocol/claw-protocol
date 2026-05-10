@@ -78,6 +78,8 @@ type Props = {
   redlinePdfSemanticPresentation?: RecipientSemanticRedlinePresentation | null;
   /** Condensed clean-revision export bundle (human-first PDF; omit in full redline mode). */
   redlinePdfCondensedCleanRevision?: RecipientRedlinePdfHumanExtras["condensedCleanRevisionPdf"];
+  /** Import matched current draft — redline PDF is a short “no changes” summary only. */
+  redlinePdfImportMaterialNoChange?: boolean;
 };
 
 /**
@@ -111,6 +113,7 @@ export function RecipientPreviewVersionsExport({
   redlinePdfCompareConfidenceLevel = null,
   redlinePdfSemanticPresentation = null,
   redlinePdfCondensedCleanRevision = null,
+  redlinePdfImportMaterialNoChange = false,
 }: Props) {
   const [copyAck, setCopyAck] = useState<"original" | "proposed" | "redline" | null>(null);
   const [pdfErrors, setPdfErrors] = useState<Partial<Record<RecipientPreviewPdfExportKind, string | null>>>({});
@@ -129,6 +132,9 @@ export function RecipientPreviewVersionsExport({
   legalRedlineVmRef.current = legalRedlineVm;
 
   const redlinePdfHumanExtras = useMemo((): RecipientRedlinePdfHumanExtras => {
+    if (redlinePdfImportMaterialNoChange) {
+      return { importMaterialNoChange: true };
+    }
     const structured = redlinePdfStructuredHumanReview;
     return {
       structuredHumanReview: structured ?? null,
@@ -143,6 +149,7 @@ export function RecipientPreviewVersionsExport({
       condensedCleanRevisionPdf: redlinePdfCondensedCleanRevision ?? null,
     };
   }, [
+    redlinePdfImportMaterialNoChange,
     redlinePdfStructuredHumanReview,
     redlinePdfSummarySentence,
     redlinePdfSummaryBullets,

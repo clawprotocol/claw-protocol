@@ -345,6 +345,11 @@ export type RecipientRedlinePdfHumanExtras = {
     /** Pre-escaped `<ul>` or fragment for “not restated” appendix. */
     notRestatedAppendixHtml: string;
   } | null;
+  /**
+   * When the uploaded draft matches the sender’s current agreement (import no-op), emit a short
+   * summary PDF instead of reusing any prior redline / human-review blocks.
+   */
+  importMaterialNoChange?: boolean;
 };
 
 /** Heuristic: omit reviewer-notes appendix when text largely repeats agreement body already in the redline. */
@@ -539,11 +544,28 @@ export function notesShouldOmitExtractedAppendix(
   return false;
 }
 
+export const RECIPIENT_IMPORT_NO_CHANGE_REDACT_PDF_HEADLINE = "No changes detected";
+
+/** Minimal redline PDF for import matches current draft — no diff sections or human-review metrics. */
+export function buildRecipientImportNoChangeRedlinePdfHtml(audit?: RecipientRedlinePdfAuditMeta | null): string {
+  const auditBlock = audit ? buildAuditHeader({ ...audit, generatedAt: audit.generatedAt }) : "";
+  const para = escapeHtml(
+    "The uploaded draft matches the sender's current agreement after routine PDF cleanup (headers, footers, and spacing). This export intentionally omits detailed redline sections.",
+  );
+  const body = `<section style="margin:0 0 18px;padding:16px 18px;background:#ecfdf5;border-radius:8px;border:1px solid #a7f3d0;"><p style="margin:0 0 8px;font-size:15px;font-weight:600;color:#065f46;">${escapeHtml(
+    RECIPIENT_IMPORT_NO_CHANGE_REDACT_PDF_HEADLINE,
+  )}</p><p style="margin:0;font-size:14px;line-height:1.65;color:#0f172a;">${para}</p></section>`;
+  return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px 28px;">${auditBlock}${body}</article>`;
+}
+
 export function buildRecipientRedlinePdfHtml(
   vm: LegalRedlineDocumentViewModel,
   audit?: RecipientRedlinePdfAuditMeta | null,
   human?: RecipientRedlinePdfHumanExtras | null,
 ): string {
+  if (human?.importMaterialNoChange) {
+    return buildRecipientImportNoChangeRedlinePdfHtml(audit ?? null);
+  }
   const cc = human?.condensedCleanRevisionPdf;
   if (cc && String(cc.cleanProposedPlain ?? "").trim() && human) {
     return buildCondensedCleanRevisionRedlinePdfArticle(vm, audit, human, cc);
