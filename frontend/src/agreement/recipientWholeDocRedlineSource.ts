@@ -97,6 +97,15 @@ export type RecipientRedlineTargetedPatchDiag = {
   finalChangedBlockCount: number | null;
 };
 
+export type BuildRecipientLegalRedlinePlainTextsOptions = {
+  /**
+   * Whole-document recipient preview stores the full revised agreement in `purpose` while
+   * `proposedHtml` is a field-template shell — use this plain text for structural redline/compare
+   * instead of {@link htmlToPlainTextForLegalRedline} on `proposedHtml` (avoids phantom mass deletions).
+   */
+  structuralProposedPlainOverride?: string | null;
+};
+
 export type BuildRecipientLegalRedlinePlainTextsResult = {
   currentPlain: string;
   proposedPlain: string;
@@ -761,6 +770,8 @@ function buildInstructionIntentOutcomes(
   return { outcomes, contextSummary: formatRecipientInstructionContextSummary(lanes) };
 }
 
+const STRUCTURAL_PURPOSE_MIN_CHARS = 100;
+
 export function buildRecipientLegalRedlinePlainTexts(
   baselineDraft: AgreementDraft,
   proposedDraft: AgreementDraft,
@@ -769,9 +780,38 @@ export function buildRecipientLegalRedlinePlainTexts(
   hasSnapshotDiff: boolean,
   instructionPlain: string,
   changedFields: readonly AgreementFieldChange[],
+  options?: BuildRecipientLegalRedlinePlainTextsOptions,
 ): BuildRecipientLegalRedlinePlainTextsResult {
   const cur = htmlToPlainTextForLegalRedline(baselineHtml || "");
-  const prop = htmlToPlainTextForLegalRedline(proposedHtml || "");
+  const propFromHtml = htmlToPlainTextForLegalRedline(proposedHtml || "");
+  const override = String(options?.structuralProposedPlainOverride ?? "").trim();
+
+  if (override.length >= STRUCTURAL_PURPOSE_MIN_CHARS) {
+    const propStructural = normalizeNewlinesForLegalRedline(override);
+    const intentBundle = hasSnapshotDiff
+      ? buildInstructionIntentOutcomes(
+          instructionPlain,
+          cur,
+          propStructural,
+          baselineDraft,
+          proposedDraft,
+          changedFields,
+          false,
+          false,
+          "baseline_vs_revise_html",
+        )
+      : undefined;
+    return {
+      currentPlain: cur,
+      proposedPlain: propStructural,
+      sourceMode: "baseline_vs_revise_html",
+      narrowRecipientTargetedRedline: false,
+      instructionIntentOutcomes: intentBundle?.outcomes,
+      instructionContextSummary: intentBundle?.contextSummary ?? null,
+    };
+  }
+
+  const prop = propFromHtml;
 
   if (!hasSnapshotDiff) {
     return {

@@ -129,6 +129,8 @@ function blockHaystack(block: LegalRedlineBlock): string {
 
 function scoreBlockForSemantic(block: LegalRedlineBlock, id: BusinessReviewSemanticId): number {
   if (!block.hasChange || !recipientBlockShowsRedline(block)) return 0;
+  /** Title blocks align poorly across template vs full-text compare — never map commercial cards here. */
+  if (block.kind === "title") return 0;
   const hay = blockHaystack(block);
   const low = hay.toLowerCase();
   /** Avoid mapping payment / ownership cards to confidentiality-only noise. */
@@ -285,11 +287,18 @@ export function getScrollTargetBlockIdForSemanticOrFallback(
   vm: LegalRedlineDocumentViewModel,
   id: BusinessReviewSemanticId,
 ): string | null {
-  return (
-    getPrimaryScrollTargetBlockIdForSemanticId(vm, id) ??
-    vm.blocks.find((b) => b.hasChange && recipientBlockShowsRedline(b))?.id ??
-    null
+  const primary = getPrimaryScrollTargetBlockIdForSemanticId(vm, id);
+  if (primary) return primary;
+  const bodyish = vm.blocks.find(
+    (b) =>
+      b.hasChange &&
+      recipientBlockShowsRedline(b) &&
+      b.kind !== "title" &&
+      (b.kind === "clause" || b.kind === "paragraph" || b.kind === "bullet" || b.kind === "heading"),
   );
+  if (bodyish) return bodyish.id;
+  const anyChanged = vm.blocks.find((b) => b.hasChange && recipientBlockShowsRedline(b));
+  return anyChanged?.id ?? null;
 }
 
 /** Prior/revised plain text for a relaxed scroll target (modal fallback / “open in full redline”). */
@@ -305,6 +314,8 @@ export function getClauseCompareFallbackForSemanticId(
   const oldText = String(prior).trim() || "—";
   const newText = String(revised).trim() || "—";
   if (oldText === "—" && newText === "—") return null;
+  if (!isMeaningfulWordingSide(oldText, 8) || !isMeaningfulWordingSide(newText, 8)) return null;
+  if (oldText === "—" || newText === "—") return null;
   const sectionLabel = (b.label || b.clauseNumber || b.heading || "Section").trim();
   return { blockId: bid, sectionLabel, oldText, newText };
 }

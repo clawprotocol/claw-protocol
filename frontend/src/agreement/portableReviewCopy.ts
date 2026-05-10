@@ -299,6 +299,9 @@ export const RECIPIENT_EXPORT_PDF_ADVANCED_MARKUP_APPENDIX_HEADING = "Advanced l
 export const RECIPIENT_EXPORT_PDF_NOT_RESTAT_APPENDIX_HEADING = "Original sections not directly restated";
 export const RECIPIENT_FOCUS_COMPARE_SCROLL_MISS_NOTE =
   "Could not jump to an exact clause in the redline. Showing the best matching revision.";
+/** Shown when prior/revised clause text cannot be shown reliably (avoid bogus title vs dash pairs). */
+export const RECIPIENT_FOCUS_COMPARE_MULTI_SECTION_SUMMARY =
+  "This topic was summarized from multiple changed sections. Open the advanced redline to review all related changes.";
 export const RECIPIENT_FOCUS_COMPARE_BEST_MATCH_HEADING = "Best matching section";
 export const RECIPIENT_FOCUS_COMPARE_BUSINESS_NOTE_LABEL = "Business note";
 /** Optional disclosure inside compare modal — raw text, not styled redline. */

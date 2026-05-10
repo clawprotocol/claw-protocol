@@ -2,12 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import {
   RECIPIENT_BUSINESS_REVIEW_EXACT_WORDING_TITLE,
   RECIPIENT_FOCUS_COMPARE_BUSINESS_NOTE_LABEL,
+  RECIPIENT_FOCUS_COMPARE_MULTI_SECTION_SUMMARY,
   RECIPIENT_FOCUS_COMPARE_OPEN_FULL_REDLINE,
   RECIPIENT_FOCUS_COMPARE_SCROLL_MISS_NOTE,
   RECIPIENT_FOCUS_COMPARE_SHOW_LEGAL_MARKUP,
   RECIPIENT_SEMANTIC_PRIOR_LABEL,
   RECIPIENT_SEMANTIC_REVISED_LABEL,
 } from "./portableReviewCopy";
+
+function recipientCompareModalSideOk(text: string, minLen: number): boolean {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (t.length < minLen) return false;
+  if (t === "—") return false;
+  if (/^\(no prior wording in this excerpt\)\s*$/i.test(t)) return false;
+  if (/^\(no new wording in this excerpt\)\s*$/i.test(t)) return false;
+  return true;
+}
 
 const REVISED_PREVIEW_MAX = 1000;
 const PRIOR_PREVIEW_MAX = 900;
@@ -65,6 +75,12 @@ export function RecipientFocusedWordingDialog({
     return { text: `${t.slice(0, PRIOR_PREVIEW_MAX).trim()}…`, truncated: true };
   }, [oldText, showFullPrior]);
 
+  /** Compare-fallback: require clause-sized excerpts so a lone document title cannot pair with “—”. */
+  const showPriorRevisedPanels =
+    !compare ||
+    (recipientCompareModalSideOk(oldText, 12) &&
+      recipientCompareModalSideOk(newText, 12));
+
   if (!open) return null;
   return (
     <div
@@ -106,42 +122,53 @@ export function RecipientFocusedWordingDialog({
           </button>
         </div>
         <div className="max-h-[min(78vh,640px)] space-y-4 overflow-y-auto px-5 py-4">
-          <section>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-200/90">
-              {compare ? RECIPIENT_SEMANTIC_PRIOR_LABEL : "Previous wording"}
+          {compare && !showPriorRevisedPanels ? (
+            <p
+              className="rounded-lg border border-slate-700/60 bg-slate-900/50 px-3 py-3 text-[13px] leading-relaxed text-slate-200"
+              data-testid="recipient-focused-wording-fallback-summary"
+            >
+              {RECIPIENT_FOCUS_COMPARE_MULTI_SECTION_SUMMARY}
             </p>
-            <pre className="mt-1.5 max-h-52 min-h-0 overflow-y-auto whitespace-pre-wrap rounded-lg border border-rose-900/40 bg-rose-950/30 p-3 text-[13px] leading-[1.75] text-rose-50">
-              {priorChunks.text}
-            </pre>
-            {priorChunks.truncated && !showFullPrior ? (
-              <button
-                type="button"
-                className="mt-2 text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
-                data-testid="recipient-focused-wording-show-full-prior"
-                onClick={() => setShowFullPrior(true)}
-              >
-                Show full original text
-              </button>
-            ) : null}
-          </section>
-          <section>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-200/90">
-              {compare ? RECIPIENT_SEMANTIC_REVISED_LABEL : "Revised wording"}
-            </p>
-            <pre className="mt-1.5 max-h-52 min-h-0 overflow-y-auto whitespace-pre-wrap rounded-lg border border-emerald-900/40 bg-emerald-950/25 p-3 text-[13px] leading-[1.75] text-emerald-50">
-              {revisedChunks.text}
-            </pre>
-            {revisedChunks.truncated && !showFullRevised ? (
-              <button
-                type="button"
-                className="mt-2 text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
-                data-testid="recipient-focused-wording-show-full-revised"
-                onClick={() => setShowFullRevised(true)}
-              >
-                Show full revised text
-              </button>
-            ) : null}
-          </section>
+          ) : (
+            <>
+              <section>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-200/90">
+                  {compare ? RECIPIENT_SEMANTIC_PRIOR_LABEL : "Previous wording"}
+                </p>
+                <pre className="mt-1.5 max-h-52 min-h-0 overflow-y-auto whitespace-pre-wrap rounded-lg border border-rose-900/40 bg-rose-950/30 p-3 text-[13px] leading-[1.75] text-rose-50">
+                  {priorChunks.text}
+                </pre>
+                {priorChunks.truncated && !showFullPrior ? (
+                  <button
+                    type="button"
+                    className="mt-2 text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
+                    data-testid="recipient-focused-wording-show-full-prior"
+                    onClick={() => setShowFullPrior(true)}
+                  >
+                    Show full original text
+                  </button>
+                ) : null}
+              </section>
+              <section>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-200/90">
+                  {compare ? RECIPIENT_SEMANTIC_REVISED_LABEL : "Revised wording"}
+                </p>
+                <pre className="mt-1.5 max-h-52 min-h-0 overflow-y-auto whitespace-pre-wrap rounded-lg border border-emerald-900/40 bg-emerald-950/25 p-3 text-[13px] leading-[1.75] text-emerald-50">
+                  {revisedChunks.text}
+                </pre>
+                {revisedChunks.truncated && !showFullRevised ? (
+                  <button
+                    type="button"
+                    className="mt-2 text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
+                    data-testid="recipient-focused-wording-show-full-revised"
+                    onClick={() => setShowFullRevised(true)}
+                  >
+                    Show full revised text
+                  </button>
+                ) : null}
+              </section>
+            </>
+          )}
           {compare ? (
             <details className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2">
               <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">

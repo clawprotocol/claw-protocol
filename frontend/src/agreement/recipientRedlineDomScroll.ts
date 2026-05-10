@@ -184,7 +184,12 @@ export type RecipientClauseScrollOutcome = {
 export async function scrollRecipientRedlineClausePanel(
   opts: ScrollRecipientRedlineClausePanelOptions,
 ): Promise<RecipientClauseScrollOutcome> {
-  const { root, detailsBoundary, semanticAnchorId, blockId, onHighlight, highlightClearMs } = opts;
+  const { detailsBoundary, semanticAnchorId, blockId, onHighlight, highlightClearMs } = opts;
+  const root =
+    opts.root ??
+    (typeof document !== "undefined"
+      ? (document.querySelector("[data-testid=\"recipient-redline-scrollport\"]") as HTMLElement | null)
+      : null);
   await new Promise<void>((r) => window.requestAnimationFrame(() => requestAnimationFrame(() => r())));
   let totalAttempts = 0;
   const tryScroll = async (

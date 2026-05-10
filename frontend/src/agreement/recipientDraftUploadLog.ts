@@ -43,3 +43,16 @@ export function recipientUploadError(stage: string, err: unknown, detail?: Recor
   // eslint-disable-next-line no-console
   console.error(`[recipient-upload-error] ${stage}`, err, detail ?? {});
 }
+
+/** Full legal redline open / scroll diagnostics (recipient review). */
+export function recipientRedlineNavLog(stage: string, detail?: Record<string, unknown>) {
+  const p = payload(detail);
+  const line = `[recipient-redline-${stage}]`;
+  if (p) {
+    // eslint-disable-next-line no-console
+    console.info(line, p);
+  } else {
+    // eslint-disable-next-line no-console
+    console.info(line);
+  }
+}

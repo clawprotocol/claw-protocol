@@ -324,6 +324,7 @@ export function RecipientLegalRedlineDocument({
               <section
                 key={block.id}
                 data-testid={changed ? "recipient-redline-changed-block" : "recipient-legal-redline-block"}
+                id={changed ? `recipient-redline-block-${block.id}` : undefined}
                 data-block-kind={block.kind}
                 data-block-id={block.id}
                 data-clause-number={block.clauseNumber ?? ""}

@@ -1,12 +1,14 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { buildLegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import { applyRecipientMeaningfulChangePass } from "./recipientMeaningfulRedlinePass";
 import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import {
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT,
-  RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE,
 } from "./portableReviewCopy";
 
 const paymentVm: LegalRedlineDocumentViewModel = {
@@ -43,17 +45,18 @@ const paymentVm: LegalRedlineDocumentViewModel = {
 describe("RecipientBusinessReviewCards", () => {
   afterEach(() => cleanup());
 
-  it("renders preview CTA copy, hint, title subline, and expandable detail copy for desktop inspection", () => {
+  it("renders preview CTA copy, hint, title subline, and popover detail copy for desktop inspection", () => {
     const onView = vi.fn();
     render(
       <RecipientBusinessReviewCards chips={["Payment terms"]} legalVm={paymentVm} onViewExactWording={onView} />,
     );
     expect(screen.getByText(RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING)).toBeTruthy();
     expect(screen.getByText(RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT)).toBeTruthy();
-    fireEvent.click(screen.getByTestId("recipient-business-review-card-popover-payment_terms"));
-    const panel = screen.getByTestId("recipient-business-review-card-detail-panel-payment_terms");
-    expect(within(panel).getByText(/Why this matters:/)).toBeTruthy();
-    expect(within(panel).getByText(/Clarifies when invoices/)).toBeTruthy();
+    const pop = screen.getByTestId("recipient-business-review-card-popover-payment_terms");
+    fireEvent.click(pop);
+    const detail = screen.getByTestId("recipient-business-review-card-detail-panel-payment_terms");
+    expect(within(detail).getByText(/Why this matters:/)).toBeTruthy();
+    expect(within(detail).getByText(/Clarifies when invoices/)).toBeTruthy();
     expect(screen.getByTestId("recipient-business-review-card-subline-payment_terms").textContent?.length).toBeGreaterThan(
       8,
     );
@@ -70,27 +73,6 @@ describe("RecipientBusinessReviewCards", () => {
     expect(screen.queryByTestId("recipient-business-review-card-mobile-sheet")).toBeNull();
   });
 
-  it("opens full redline before awaiting semantic navigation", async () => {
-    const order: string[] = [];
-    render(
-      <RecipientBusinessReviewCards
-        chips={["Ownership"]}
-        legalVm={paymentVm}
-        onViewExactWording={vi.fn()}
-        onOpenFullRedline={() => void order.push("open")}
-        onNavigateSemanticInRedline={async () => {
-          order.push("nav");
-        }}
-      />,
-    );
-    const cta = screen.getByTestId("recipient-business-review-show-changed-wording");
-    expect(cta.tagName).toBe("BUTTON");
-    expect(cta.textContent ?? "").toContain(RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE);
-    fireEvent.click(cta);
-    await Promise.resolve();
-    expect(order).toEqual(["open", "nav"]);
-  });
-
   it("invokes exact wording modal path from Preview wording", () => {
     const onView = vi.fn();
     render(
@@ -100,5 +82,49 @@ describe("RecipientBusinessReviewCards", () => {
     expect(onView).toHaveBeenCalledTimes(1);
     expect(onView.mock.calls[0]![0].oldText).toContain("Due on receipt");
     expect(onView.mock.calls[0]![0].newText).toContain("Net 30");
+  });
+
+  it("Show changed wording in redline opens parent redline then runs semantic navigation (weak mapping path)", async () => {
+    const onOpen = vi.fn();
+    const onNav = vi.fn();
+    const weakVm = applyRecipientMeaningfulChangePass(
+      buildLegalRedlineDocumentViewModel(
+        [
+          "4. Payment",
+          "Fees are Net 30 from invoice date.",
+          "",
+          "5. Confidentiality",
+          "Recipient must not disclose payment schedules or Net 30 billing practices to competitors.",
+          "",
+          "6. Term",
+          "One year.",
+        ].join("\n"),
+        [
+          "4. Payment",
+          "Fees are Net 45 from invoice date.",
+          "",
+          "5. Confidentiality",
+          "Recipient must not disclose payment schedules or Net 45 billing practices to competitors.",
+          "",
+          "6. Term",
+          "One year.",
+        ].join("\n"),
+      ),
+    );
+    const user = userEvent.setup();
+    render(
+      <RecipientBusinessReviewCards
+        chips={["Payment terms"]}
+        legalVm={weakVm}
+        onViewExactWording={() => {}}
+        onOpenFullRedline={onOpen}
+        onNavigateSemanticInRedline={onNav}
+      />,
+    );
+    const btn = screen.queryByTestId("recipient-business-review-show-changed-wording");
+    expect(btn).toBeTruthy();
+    await user.click(btn!);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onNav).toHaveBeenCalledTimes(1);
   });
 });

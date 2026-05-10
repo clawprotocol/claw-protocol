@@ -125,6 +125,70 @@ function stripPageArtifactLines(text: string, artifacts: string[]): string {
 /**
  * Splits trailing reviewer notes, strips common PDF artifacts, and trims LawDog boilerplate tails.
  */
+/** Extra PDF runners / export banners not covered by {@link PAGE_ARTIFACT_LINE_RES} (recovery pass). */
+const PDF_RECOVERY_LINE_RES: RegExp[] = [
+  /^\s*created\s+with\s+lawdog\b/i,
+  /^\s*revised\s+draft\s+for\s+review\b/i,
+  /^\s*illustrative\s+edited\s+version\s+prepared\b/i,
+  /^\s*draft\s+agreement\s*\(?\s*non-?binding\s+template\s*\)?\s*$/i,
+  /^\s*generated\s+by\s+lawdog\b/i,
+  /^\s*lawdog\s*[—\-]\s*revised\s+draft\b/i,
+];
+
+export type RecipientPdfRawBodyRecoveryResult = {
+  agreementText: string;
+  strippedHeaderCount: number;
+  strippedFooterCount: number;
+};
+
+/**
+ * When the PDF sanitizer yields an empty body but raw text is long, strip known export lines and re-run
+ * {@link sanitizeRecipientImportedRevisionText} so compare can use operative agreement text.
+ */
+export function recipientRecoverAgreementBodyFromPdfRawText(rawInput: string): RecipientPdfRawBodyRecoveryResult {
+  let strippedHeaderCount = 0;
+  let strippedFooterCount = 0;
+  const raw = String(rawInput ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const first = sanitizeRecipientImportedRevisionText(raw);
+  if (first.agreementText.trim().length >= 48) {
+    return { agreementText: first.agreementText, strippedHeaderCount: 0, strippedFooterCount: 0 };
+  }
+  const lines = raw.split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) {
+      out.push(line);
+      continue;
+    }
+    let drop = false;
+    for (const r of PDF_RECOVERY_LINE_RES) {
+      if (r.test(t)) {
+        drop = true;
+        if (/created|generated|illustrative|draft\s+agreement|lawdog/i.test(t)) strippedHeaderCount++;
+        else strippedFooterCount++;
+        break;
+      }
+    }
+    if (!drop) out.push(line);
+  }
+  const cleaned = out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const second = sanitizeRecipientImportedRevisionText(cleaned);
+  const body2 = second.agreementText.trim();
+  if (body2.length >= 48) {
+    return {
+      agreementText: second.agreementText,
+      strippedHeaderCount,
+      strippedFooterCount,
+    };
+  }
+  return {
+    agreementText: first.agreementText.trim() ? first.agreementText : second.agreementText,
+    strippedHeaderCount,
+    strippedFooterCount,
+  };
+}
+
 export function sanitizeRecipientImportedRevisionText(raw: string): SanitizeRecipientImportedRevisionResult {
   const artifactsRemoved: string[] = [];
   let body = String(raw ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");

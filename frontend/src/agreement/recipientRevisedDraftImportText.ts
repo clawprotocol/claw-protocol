@@ -9,7 +9,10 @@ import {
   recipientUploadLogParseStart,
   recipientUploadLogParseSuccess,
 } from "./recipientDraftUploadLog";
-import { sanitizeRecipientImportedRevisionText } from "./recipientRevisedDraftExtractSanitize";
+import {
+  recipientRecoverAgreementBodyFromPdfRawText,
+  sanitizeRecipientImportedRevisionText,
+} from "./recipientRevisedDraftExtractSanitize";
 import { loadPdfJsWithWorker } from "./recipientRevisedDraftPdfJs";
 
 /** Agreement body shorter than this after PDF sanitize may still be OK if raw extraction is long enough to classify. */
@@ -173,18 +176,34 @@ export async function extractRevisedDraftPlainText(file: File): Promise<ExtractR
           bodyLen: san.agreementText.trim().length,
         });
       }
+      let outText = routed.text;
+      let pdfThinSanitizeUsedRaw = routed.pdfThinSanitizeUsedRaw;
+      if (routed.kind === "use_raw_for_classification") {
+        const recovered = recipientRecoverAgreementBodyFromPdfRawText(raw);
+        const recLen = recovered.agreementText.trim().length;
+        recipientUploadLog("raw-fallback-sanitized", {
+          rawLen: raw.trim().length,
+          sanitizedLen: recLen,
+          strippedHeaderCount: recovered.strippedHeaderCount,
+          strippedFooterCount: recovered.strippedFooterCount,
+        });
+        if (recLen >= PDF_IMPORT_MIN_AGREEMENT_BODY_CHARS) {
+          outText = recovered.agreementText;
+          pdfThinSanitizeUsedRaw = false;
+        }
+      }
       recipientUploadLogParseSuccess({
         name: file.name,
         rawLen: raw.trim().length,
         bodyLen: san.agreementText.trim().length,
-        pdfThinSanitizeUsedRaw: routed.pdfThinSanitizeUsedRaw,
+        pdfThinSanitizeUsedRaw,
       });
       return {
         ok: true,
-        text: routed.text,
+        text: outText,
         importReviewerNotesTail: san.reviewerNotes,
         importArtifactsRemoved: san.artifactsRemoved,
-        pdfThinSanitizeUsedRaw: routed.pdfThinSanitizeUsedRaw,
+        pdfThinSanitizeUsedRaw,
       };
     } catch (e) {
       recipientUploadError("pdf-parse-exception", e, { name: file.name });

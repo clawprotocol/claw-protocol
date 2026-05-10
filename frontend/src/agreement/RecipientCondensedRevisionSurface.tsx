@@ -113,7 +113,7 @@ export const RecipientCondensedRevisionSurface = forwardRef<HTMLDivElement, Reci
             role="tab"
             aria-selected={selectedTab === "advanced"}
             className={tabBtn(selectedTab === "advanced")}
-            data-testid="recipient-condensed-tab-advanced"
+            data-testid="recipient-full-redline-advanced-tab"
             onClick={() => onTabChange("advanced")}
           >
             {RECIPIENT_CONDENSED_TAB_ADVANCED}
@@ -221,10 +221,15 @@ export const RecipientCondensedRevisionSurface = forwardRef<HTMLDivElement, Reci
             <p className="text-[11px] leading-snug text-slate-500">{RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION}</p>
             <div className="rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
               <div
-                ref={ref}
-                className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
+                className="flex max-h-[min(72vh,880px)] min-h-[40vh] flex-col rounded-md bg-slate-100/40"
                 data-testid="recipient-suggested-changes-document"
               >
+                <div
+                  ref={ref}
+                  data-redline-scrollport="1"
+                  className="min-h-0 flex-1 overflow-y-auto"
+                  data-testid="recipient-redline-scrollport"
+                >
                 <label className="mb-2 flex cursor-pointer items-center gap-2 px-1 text-[11px] text-slate-700">
                   <input
                     type="checkbox"
@@ -252,6 +257,7 @@ export const RecipientCondensedRevisionSurface = forwardRef<HTMLDivElement, Reci
                   highlightedSemanticAnchor={highlightedSemanticAnchor}
                   onDenseBlockViewExactWording={onDenseExactWording}
                 />
+                </div>
               </div>
             </div>
           </div>

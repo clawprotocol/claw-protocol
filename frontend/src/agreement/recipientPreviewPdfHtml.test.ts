@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import { buildLegalRedlineDocumentViewModel, mergeAdjacentRedlineSegmentsAllTypes } from "./legalRedlineBlocks";
 import {
+  RECIPIENT_EXPORT_PDF_ADVANCED_MARKUP_APPENDIX_HEADING,
   RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
+  RECIPIENT_EXPORT_PDF_CLEAN_PROPOSED_HEADING,
   RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
   RECIPIENT_SEMANTIC_PRIOR_LABEL,
   RECIPIENT_SEMANTIC_REVISED_LABEL,
   RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
 } from "./portableReviewCopy";
+import { applyRecipientMeaningfulChangePass } from "./recipientMeaningfulRedlinePass";
 import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
 import { buildRecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import {
@@ -472,5 +475,58 @@ describe("import no-material-change redline PDF", () => {
     expect(html).not.toContain("Sarah Collins proposed 6 meaningful revisions");
     expect(html.toLowerCase()).not.toContain("meaningful revisions");
     expect(html.toLowerCase()).not.toMatch(/line-through/);
+  });
+});
+
+describe("Sarah-style clean revised PDF export regression", () => {
+  it("condensed path lists clean proposed before collapsed advanced markup appendix", () => {
+    const baseline = [
+      "WEB DEVELOPMENT AGREEMENT",
+      "",
+      "Background and Purpose",
+      "Client wants a website.",
+      "",
+      "1. Services",
+      "Developer shall deliver milestones on schedule.",
+      "",
+      "2. Payment",
+      "Fees are Net 30 from invoice date.",
+    ].join("\n");
+    const revised = [
+      "WEB DEVELOPMENT AGREEMENT",
+      "",
+      "Background and Purpose",
+      "Client wants a website.",
+      "",
+      "1. Services",
+      "Developer shall deliver milestones within forty-five days including expanded deliverables.",
+      "",
+      "2. Payment",
+      "Fees are Net 45 from invoice date and work may pause for nonpayment after notice.",
+    ].join("\n");
+    const vm = applyRecipientMeaningfulChangePass(buildLegalRedlineDocumentViewModel(baseline, revised));
+    const html = buildRecipientRedlinePdfHtml(vm, null, {
+      condensedCleanRevisionPdf: {
+        cleanProposedPlain: revised,
+        topicSectionHtml: "<p>Topic</p>",
+        notRestatedAppendixHtml: "<ul><li>Services</li></ul>",
+      },
+      exportRedlineChangedSectionsOnly: true,
+    });
+    const cleanIdx = html.indexOf(RECIPIENT_EXPORT_PDF_CLEAN_PROPOSED_HEADING);
+    const advancedIdx = html.indexOf(RECIPIENT_EXPORT_PDF_ADVANCED_MARKUP_APPENDIX_HEADING);
+    expect(cleanIdx).toBeGreaterThanOrEqual(0);
+    expect(advancedIdx).toBeGreaterThan(cleanIdx);
+    expect(html).not.toMatch(/WEB\s+DEVELOPMENT\s+AGREEMENT\s+WEB\s+DEVELOPMENT\s+AGREEMENT/i);
+    expect(html).not.toMatch(/Background\s+and\s+Purpose\s+Background\s+and\s+Purpose/i);
+    expect(html).not.toMatch(/0\s+additions.*61\s+removals/i);
+  });
+
+  it("full redline PDF changed-only mode does not surface unchanged title as strikethrough delete", () => {
+    const baseline = "WEB DEVELOPMENT AGREEMENT\n\nBackground and Purpose\nContext.\n\n2. Payment\nNet 30.";
+    const revised = "WEB DEVELOPMENT AGREEMENT\n\nBackground and Purpose\nContext.\n\n2. Payment\nNet 45.";
+    const vm = applyRecipientMeaningfulChangePass(buildLegalRedlineDocumentViewModel(baseline, revised));
+    const html = buildRecipientRedlinePdfHtml(vm, null, { exportRedlineChangedSectionsOnly: true });
+    expect(html.toLowerCase()).not.toMatch(/line-through[^<]{0,200}web\s+development\s+agreement/i);
   });
 });

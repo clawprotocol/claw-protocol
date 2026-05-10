@@ -3,6 +3,7 @@
  */
 
 import { buildAgreementRedline, type RedlineSegment } from "../vs01/agreementRedline";
+import { isStructuralHeadingOnlyParsedPlain } from "./recipientStructuralHeadingOnly";
 
 export type LegalRedlineBlockKind =
   | "title"
@@ -356,6 +357,11 @@ function jaccardWordSimilarity(a: string, b: string): number {
 }
 
 function kindsCompatibleForAlignment(ca: ParsedPlainBlock, pb: ParsedPlainBlock): boolean {
+  const sa = isStructuralHeadingOnlyParsedPlain(ca);
+  const sb = isStructuralHeadingOnlyParsedPlain(pb);
+  if (sa && sb) return true;
+  if (sa && (pb.kind === "heading" || pb.kind === "title")) return true;
+  if (sb && (ca.kind === "heading" || ca.kind === "title")) return true;
   if (ca.kind === pb.kind) return true;
   if (
     (ca.kind === "paragraph" || ca.kind === "clause") &&
@@ -382,13 +388,19 @@ function matchScoreForUnnumberedDp(ca: ParsedPlainBlock, pb: ParsedPlainBlock): 
   const hk = normHeadingKey(ca.headingLine);
   const hp = normHeadingKey(pb.headingLine);
   const jac = jaccardWordSimilarity(ca.rawText, pb.rawText);
+  const sa = isStructuralHeadingOnlyParsedPlain(ca);
+  const sb = isStructuralHeadingOnlyParsedPlain(pb);
 
   if (!(hk && hp && hk === hp) && jac < 0.09) {
     return -2_000_000;
   }
 
   let score = 0;
-  if (hk && hp && hk === hp) {
+  if (sa && sb && hk && hp && hk === hp) {
+    score += 1020;
+  } else if (sa && sb && jac >= 0.18) {
+    score += 360;
+  } else if (hk && hp && hk === hp) {
     score += 950;
   } else if (
     hk &&

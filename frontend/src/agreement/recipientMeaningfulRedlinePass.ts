@@ -9,8 +9,8 @@ import {
   areClausesSemanticallyEquivalent,
   materialObligationExpansionLikely,
 } from "./recipientClauseEquivalence";
+import { isStructuralHeadingOnlyBlock } from "./recipientStructuralHeadingOnly";
 
-const HEAD_KINDS = new Set<LegalRedlineBlockKind>(["heading", "title"]);
 const BODY_KINDS = new Set<LegalRedlineBlockKind>(["clause", "paragraph", "bullet"]);
 
 export function recipientBlockShowsRedline(b: LegalRedlineBlock): boolean {
@@ -61,32 +61,39 @@ function classifyNonHeadingBlock(block: LegalRedlineBlock): LegalRedlineBlock {
   return { ...block, isMeaningfullyChanged: true };
 }
 
-function anyMeaningfulBodyBelow(blocks: readonly LegalRedlineBlock[], startIdx: number): boolean {
+/**
+ * True when a substantive (non–heading-only) body block below this heading materially changed.
+ * Structural heading-only paragraphs are skipped so “Background and Purpose” does not inherit a false positive.
+ */
+function anyMeaningfulNonStructuralBodyBelow(blocks: readonly LegalRedlineBlock[], startIdx: number): boolean {
   for (let j = startIdx + 1; j < blocks.length; j++) {
     const nb = blocks[j]!;
-    if (HEAD_KINDS.has(nb.kind)) break;
-    if (BODY_KINDS.has(nb.kind) && nb.isMeaningfullyChanged) return true;
+    if (nb.kind === "title") break;
+    if (isStructuralHeadingOnlyBlock(nb)) continue;
+    if (!BODY_KINDS.has(nb.kind)) continue;
+    if (nb.isMeaningfullyChanged) return true;
   }
   return false;
 }
 
-function classifyHeadingBlock(block: LegalRedlineBlock, blocks: readonly LegalRedlineBlock[], idx: number): LegalRedlineBlock {
+function classifyStructuralHeadingLikeBlock(
+  block: LegalRedlineBlock,
+  blocks: readonly LegalRedlineBlock[],
+  idx: number,
+): LegalRedlineBlock {
   if (!block.hasChange) {
     return { ...block, isMeaningfullyChanged: false };
   }
   const cur = plainFromSegmentsCurrent(block).trim();
   const prop = plainFromSegmentsProposed(block).trim();
-  const bodiesMeaningful = anyMeaningfulBodyBelow(blocks, idx);
+  const bodiesMeaningful = anyMeaningfulNonStructuralBodyBelow(blocks, idx);
 
   if (!bodiesMeaningful) {
     const canon = (prop || cur).trim() || "\u00a0";
     return collapseBlockToEquivalentSame(block, canon);
   }
 
-  if (
-    areClausesSemanticallyEquivalent(cur, prop) &&
-    !materialObligationExpansionLikely(cur, prop)
-  ) {
+  if (areClausesSemanticallyEquivalent(cur, prop) && !materialObligationExpansionLikely(cur, prop)) {
     return collapseBlockToEquivalentSame(block, (prop || cur).trim() || "\u00a0");
   }
   return { ...block, isMeaningfullyChanged: true };
@@ -99,10 +106,12 @@ function classifyHeadingBlock(block: LegalRedlineBlock, blocks: readonly LegalRe
 export function applyRecipientMeaningfulChangePass(vm: LegalRedlineDocumentViewModel): LegalRedlineDocumentViewModel {
   if (!vm.blocks.length) return vm;
 
-  let blocks: LegalRedlineBlock[] = vm.blocks.map((b) =>
-    HEAD_KINDS.has(b.kind) ? { ...b } : classifyNonHeadingBlock({ ...b }),
+  const structuralMask = vm.blocks.map((b) => isStructuralHeadingOnlyBlock(b));
+
+  let blocks: LegalRedlineBlock[] = vm.blocks.map((b, i) =>
+    structuralMask[i] ? { ...b } : classifyNonHeadingBlock({ ...b }),
   );
-  blocks = blocks.map((b, i) => (HEAD_KINDS.has(b.kind) ? classifyHeadingBlock(b, blocks, i) : b));
+  blocks = blocks.map((b, i) => (structuralMask[i] ? classifyStructuralHeadingLikeBlock(b, blocks, i) : blocks[i]!));
 
   return withReplacedLegalRedlineBlocks(vm, blocks);
 }

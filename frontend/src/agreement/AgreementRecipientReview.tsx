@@ -177,6 +177,7 @@ import {
   recipientPreviewGapChipLabel,
 } from "./portableReviewCopy";
 import {
+  recipientRedlineNavLog,
   recipientUploadError,
   recipientUploadLog,
   recipientUploadLogCompareStart,
@@ -991,6 +992,10 @@ export function AgreementRecipientReview({
 
   const recipientRedlinePlainTexts = useMemo(() => {
     if (!recipientPreview || !previewDiff) return null;
+    const structuralPaste =
+      recipientPreview.routingKind === "whole_document"
+        ? String(recipientPreview.proposedDraft.purpose ?? "").trim()
+        : "";
     return buildRecipientLegalRedlinePlainTexts(
       recipientPreview.baselineDraft,
       recipientPreview.proposedDraft,
@@ -999,6 +1004,7 @@ export function AgreementRecipientReview({
       previewDiff.hasSnapshotDiff,
       recipientPreview.revisionText ?? "",
       previewDiff.snapshotCompare.changedFields,
+      structuralPaste ? { structuralProposedPlainOverride: structuralPaste } : undefined,
     );
   }, [recipientPreview, previewDiff]);
 
@@ -1125,15 +1131,22 @@ export function AgreementRecipientReview({
   );
 
   const openFullLegalRedlineSection = useCallback(() => {
+    recipientRedlineNavLog("open-request", {
+      presentationMode: recipientPresentationMode,
+    });
     if (recipientPresentationMode === "condensed_clean_revision") {
       setCondensedReviewTab("advanced");
       window.requestAnimationFrame(() => {
-        suggestedChangesDocScrollRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        window.setTimeout(() => {
+          suggestedChangesDocScrollRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          recipientRedlineNavLog("opened", { path: "condensed_advanced_tab" });
+        }, 40);
       });
       return;
     }
     const det = auditDetailsRef.current;
     if (det) det.open = true;
+    recipientRedlineNavLog("opened", { path: "audit_details_full_redline" });
   }, [recipientPresentationMode]);
 
   const narrowIntentAnchorPresence = useMemo(() => {
@@ -1227,18 +1240,40 @@ export function AgreementRecipientReview({
   const scrollRecipientSemanticRelaxed = useCallback(
     async (semanticId: BusinessReviewSemanticId) => {
       if (!legalRedlineDocumentVm) return;
-      if (!suggestedChangesDocScrollRef.current) {
+      const resolveScrollRoot = (): HTMLElement | null =>
+        suggestedChangesDocScrollRef.current ??
+        (typeof document !== "undefined"
+          ? (document.querySelector("[data-testid=\"recipient-redline-scrollport\"]") as HTMLElement | null)
+          : null);
+      if (!resolveScrollRoot()) {
         await new Promise<void>((r) => window.requestAnimationFrame(() => requestAnimationFrame(() => r())));
       }
       const bid = getScrollTargetBlockIdForSemanticOrFallback(legalRedlineDocumentVm, semanticId);
       const sem = bid ? recipientSemanticAnchorForBlockId(bid) : null;
-      await scrollRecipientRedlineClausePanel({
-        root: suggestedChangesDocScrollRef.current,
-        detailsBoundary: suggestedChangesDocScrollRef.current,
+      const root = resolveScrollRoot();
+      const scrollTopBefore = root?.scrollTop ?? null;
+      recipientRedlineNavLog("target-scroll-start", {
+        semanticId,
+        blockId: bid,
+        matchedBy: sem ? "semantic" : bid ? "block" : "none",
+        scrollTopBefore,
+      });
+      const scrollResult = await scrollRecipientRedlineClausePanel({
+        root,
+        detailsBoundary: root,
         semanticAnchorId: sem,
         blockId: bid,
         onHighlight: (id) => setHighlightedSemanticAnchor(id),
         highlightClearMs: 2000,
+      });
+      const scrollTopAfter = resolveScrollRoot()?.scrollTop ?? null;
+      recipientRedlineNavLog(scrollResult.hit ? "target-scroll-success" : "target-scroll-failed", {
+        semanticId,
+        blockId: bid,
+        matchedBy: scrollResult.matchedBy,
+        attempts: scrollResult.attempts,
+        scrollTopBefore,
+        scrollTopAfter,
       });
     },
     [legalRedlineDocumentVm],
@@ -1247,9 +1282,12 @@ export function AgreementRecipientReview({
   const scrollToSemanticReviewInRedline = useCallback(
     async (semanticId: BusinessReviewSemanticId, meta?: { cardTitle?: string; chipLabel?: string }) => {
       openFullLegalRedlineSection();
-      if (recipientPresentationMode === "condensed_clean_revision") {
-        await new Promise<void>((r) => window.requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      }
+      await new Promise<void>((r) =>
+        window.setTimeout(
+          r,
+          recipientPresentationMode === "condensed_clean_revision" ? 60 : 120,
+        ),
+      );
       const vm = legalRedlineDocumentVm;
       const cardTitle = meta?.cardTitle ?? meta?.chipLabel ?? null;
       const clickTag =
@@ -1588,6 +1626,9 @@ export function AgreementRecipientReview({
         previewDiff.hasSnapshotDiff,
         recipientPreview.revisionText ?? "",
         previewDiff.snapshotCompare.changedFields,
+        recipientPreview.routingKind === "whole_document"
+          ? { structuralProposedPlainOverride: String(recipientPreview.proposedDraft.purpose ?? "").trim() }
+          : undefined,
       );
     const equalRawPlain =
       rawCur.replace(/\s+/g, " ").trim() === rawProp.replace(/\s+/g, " ").trim();
@@ -2670,12 +2711,20 @@ export function AgreementRecipientReview({
                         Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
                       </p>
                     ) : null}
-                    <div className="mt-3 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
+                    <div
+                      className="mt-3 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3"
+                      data-testid="recipient-full-redline-panel"
+                    >
                       <div
-                        ref={suggestedChangesDocScrollRef}
-                        className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
+                        className="flex max-h-[min(72vh,880px)] min-h-[40vh] flex-col rounded-md bg-slate-100/40"
                         data-testid="recipient-suggested-changes-document"
                       >
+                        <div
+                          ref={suggestedChangesDocScrollRef}
+                          data-redline-scrollport="1"
+                          className="min-h-0 flex-1 overflow-y-auto"
+                          data-testid="recipient-redline-scrollport"
+                        >
                         <label className="mb-2 flex cursor-pointer items-center gap-2 px-1 text-[11px] text-slate-700">
                           <input
                             type="checkbox"
@@ -2712,6 +2761,7 @@ export function AgreementRecipientReview({
                             })
                           }
                         />
+                        </div>
                       </div>
                     </div>
                   </>
@@ -2969,8 +3019,12 @@ export function AgreementRecipientReview({
                   ? () => {
                       const sid = businessReviewFocusedWording.semanticId;
                       setBusinessReviewFocusedWording(null);
+                      recipientRedlineNavLog("open-request", { semanticId: sid, source: "focused_wording_modal" });
                       openFullLegalRedlineSection();
-                      void scrollRecipientSemanticRelaxed(sid);
+                      void (async () => {
+                        await new Promise<void>((r) => window.setTimeout(r, 140));
+                        await scrollRecipientSemanticRelaxed(sid);
+                      })();
                     }
                   : undefined
               }

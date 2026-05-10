@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildLegalRedlineDocumentViewModel,
   filterNarrowRecipientPaymentRedlineNoise,
+  normalizeNewlinesForLegalRedline,
 } from "./legalRedlineBlocks";
 import {
   buildRecipientLegalRedlinePlainTexts,
@@ -228,5 +229,31 @@ describe("buildRecipientLegalRedlinePlainTexts", () => {
     expect(failed).toHaveLength(2);
     expect(failed.map((i) => i.category).sort()).toEqual(["payment_timing", "suspend_pause_work"].sort());
     expect(failed.every((i) => i.reason?.includes("payment") || i.reason?.includes("safely"))).toBe(true);
+  });
+
+  it("structural proposed plain override bypasses noisy field-patch and compares full revised text", () => {
+    const longBaselineHtml =
+      "<div><p>WEB DEVELOPMENT AGREEMENT</p><p>1. Services</p><p>Developer shall deliver milestones.</p>" +
+      "<p>2. Payment</p><p>Fees are Net 30.</p></div>";
+    const shellProposedHtml = "<p>Agreement fields (tracked for redline)</p>";
+    const current = minimalDraft({ purpose: "x".repeat(120), payment_terms: "Fees are Net 30." });
+    const proposed = minimalDraft({ purpose: "WEB DEVELOPMENT AGREEMENT\n\n1. Services\nDeveloper shall deliver milestones.\n\n2. Payment\nFees are Net 45.", payment_terms: "Fees are Net 45." });
+    const fields = changedFieldsBetween(current, proposed);
+    const paste = String(proposed.purpose);
+    const r = buildRecipientLegalRedlinePlainTexts(
+      current,
+      proposed,
+      longBaselineHtml,
+      shellProposedHtml,
+      true,
+      "instruction",
+      fields,
+      { structuralProposedPlainOverride: paste },
+    );
+    expect(r.sourceMode).toBe("baseline_vs_revise_html");
+    expect(normalizeNewlinesForLegalRedline(r.proposedPlain)).toBe(normalizeNewlinesForLegalRedline(paste));
+    const vm = buildLegalRedlineDocumentViewModel(r.currentPlain, r.proposedPlain);
+    expect(vm.stats.changedBlockCount).toBeLessThan(8);
+    expect(vm.stats.deleteCount).toBeLessThan(40);
   });
 });

@@ -31,6 +31,11 @@ function stripRepeatedHeadingPrefix(norm: string): string {
   return out.join(" ");
 }
 
+/** Collapse "foo foo" / "foo foo foo" repeats common when PDF headers stack (e.g. title twice). */
+function collapseAdjacentDuplicateWords(norm: string): string {
+  return norm.replace(/(\b[\w'-]{3,}\b)(?:\s+\1\b)+/gi, "$1");
+}
+
 /**
  * Normalize clause text for identity / equivalence (legal wording preserved; noise stripped).
  */
@@ -52,6 +57,7 @@ export function normalizeClauseForEquivalence(raw: string): string {
   t = t.replace(LEADING_ENUM_RE, "").trim();
   t = t.replace(/\s+/g, " ");
   t = stripRepeatedHeadingPrefix(t);
+  t = collapseAdjacentDuplicateWords(t);
   return t.trim();
 }
 
