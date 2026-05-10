@@ -191,7 +191,7 @@ export const RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE =
   "Related wording was grouped into the summary above.";
 /** When exact clause mapping is weak — card face + optional CTA to full redline. */
 export const RECIPIENT_BUSINESS_REVIEW_CARD_WEAK_WORLING_LINE =
-  "This section was substantially revised. Review the full legal redline for line-by-line wording.";
+  "This section was substantially revised. Open Full legal redline to see the exact changed wording.";
 /** Opens the collapsed full legal redline section (no modal). */
 export const RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE = "View in full legal redline";
 /** User-safe — avoids “match failure” tone. */
@@ -237,10 +237,28 @@ export const RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS =
   "Nothing is sent until the sender accepts.";
 
 /** Subheading above the tracked redline (inside full legal redline). */
-export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Agreement text with revisions";
+export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Changed sections";
+/** In-panel heading for clause-level panels (UI + PDF body). */
+export const RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING = "Changed sections";
+/** Closed disclosure wrapping raw insert/delete markup (UI + PDF). */
+export const RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP = "Show advanced legal markup";
+/** Optional line-by-line markup inside a clause prior/revised panel. */
+export const RECIPIENT_SHOW_LINE_BY_LINE_MARKUP = "Show line-by-line markup";
+/** Default-on filter for full legal redline scroll surface. */
+export const RECIPIENT_ONLY_CHANGED_SECTIONS = "Only changed sections";
+/** Optional: show full agreement structure when off. */
+export const RECIPIENT_SHOW_UNCHANGED_CONTEXT = "Show unchanged context";
+/** Sticky navigator label above review-area chips. */
+export function recipientRedlineReviewAreasLabel(count: number): string {
+  const n = Math.max(0, Math.floor(count));
+  if (n <= 0) return "Review areas";
+  return `${n} review ${n === 1 ? "area" : "areas"}`;
+}
 
 /** Primary CTA on Business Review cards and dense section shortcuts. */
-export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING = "Preview wording";
+export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING = "View changed wording";
+/** @deprecated Alias — use {@link RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}. */
+export const RECIPIENT_VIEW_CHANGED_WORDING = RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING;
 /** Secondary line under preview CTA (desktop + mobile). */
 export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT = "Opens exact before/after text.";
 /** @deprecated Use {@link RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}. */
@@ -250,8 +268,10 @@ export const RECIPIENT_BUSINESS_REVIEW_EXACT_WORDING_TITLE = "Exact wording";
 /** Redline PDF export: collapsed block when alignment is noisy (avoid duplicate body replay). */
 export const RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED =
   "Section substantially revised — see the summary above; full wording appears in the detailed redline below.";
-/** PDF body: after human summary / key revisions. */
-export const RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE = "Detailed agreement redline";
+/** PDF body: after human summary / key revisions — readable changed-clause section. */
+export const RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE = "Changed sections";
+/** @deprecated Use {@link RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE} (same string). */
+export const RECIPIENT_EXPORT_PDF_CHANGED_SECTIONS_HEADING = RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE;
 /** Semantic negotiation panels (whole-section rewrite mode). */
 export const RECIPIENT_SEMANTIC_PRIOR_LABEL = "Prior wording";
 export const RECIPIENT_SEMANTIC_REVISED_LABEL = "Revised wording";

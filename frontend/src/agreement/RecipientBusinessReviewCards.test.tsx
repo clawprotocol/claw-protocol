@@ -6,6 +6,7 @@ import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import {
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT,
+  RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE,
 } from "./portableReviewCopy";
 
 const paymentVm: LegalRedlineDocumentViewModel = {
@@ -67,6 +68,24 @@ describe("RecipientBusinessReviewCards", () => {
     expect(within(sheet).getByText(/Why this matters:/)).toBeTruthy();
     fireEvent.click(screen.getByTestId("recipient-business-review-card-mobile-sheet-backdrop"));
     expect(screen.queryByTestId("recipient-business-review-card-mobile-sheet")).toBeNull();
+  });
+
+  it("opens full redline before awaiting semantic navigation", async () => {
+    const order: string[] = [];
+    render(
+      <RecipientBusinessReviewCards
+        chips={["Ownership"]}
+        legalVm={paymentVm}
+        onViewExactWording={vi.fn()}
+        onOpenFullRedline={() => void order.push("open")}
+        onNavigateSemanticInRedline={async () => {
+          order.push("nav");
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByText(RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE));
+    await Promise.resolve();
+    expect(order).toEqual(["open", "nav"]);
   });
 
   it("invokes exact wording modal path from Preview wording", () => {

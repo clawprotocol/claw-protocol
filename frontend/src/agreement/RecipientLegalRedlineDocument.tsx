@@ -9,10 +9,11 @@ import {
 import {
   RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
-  RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS,
   RECIPIENT_SEMANTIC_PRIOR_LABEL,
   RECIPIENT_SEMANTIC_REDLINE_INTRO,
   RECIPIENT_SEMANTIC_REVISED_LABEL,
+  RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
+  RECIPIENT_SHOW_LINE_BY_LINE_MARKUP,
   recipientRedlineUnchangedSectionsHiddenLabel,
 } from "./portableReviewCopy";
 import type { RecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
@@ -306,7 +307,8 @@ export function RecipientLegalRedlineDocument({
               collapseDenseMicroDiff && variant === "suggested" && changed && blockIsDenseMicroDiff(block);
             const sectionLabel = (block.label || block.clauseNumber || block.heading || "Section").trim();
             const denseBullets = dense ? inferDenseSectionChangeBullets(block) : [];
-            const semAnchor = semanticPresentation ? recipientSemanticAnchorForBlock(block) : null;
+            const semAnchor =
+              document && variant === "suggested" ? recipientSemanticAnchorForBlock(block) : null;
             const semStyle = semanticPresentation?.blockStyle.get(block.id);
             const semHighlight =
               semAnchor && highlightedSemanticAnchor && semAnchor === highlightedSemanticAnchor
@@ -347,7 +349,7 @@ export function RecipientLegalRedlineDocument({
                     </div>
                     <details className="rounded-md border border-slate-200/90 bg-white/80 px-2 py-1.5">
                       <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
-                        {RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS}
+                        {RECIPIENT_SHOW_LINE_BY_LINE_MARKUP}
                       </summary>
                       <div className="mt-2 border-t border-slate-200/80 pt-2">
                         <RecipientLegalRedlineBlockSegments
@@ -390,12 +392,29 @@ export function RecipientLegalRedlineDocument({
                     ) : null}
                     <details className="mt-2 rounded-md border border-slate-200/90 bg-white/80 px-2 py-1.5">
                       <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
-                        View detailed comparison
+                        {RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP}
                       </summary>
                       <div className="mt-2 border-t border-slate-200/80 pt-2">
                         <RecipientLegalRedlineBlockSegments
                           segments={block.segments}
                           keyPrefix={`${block.id}_dense`}
+                          recipientNarrowIntentAnchors={recipientNarrowIntentAnchors}
+                          highlightedRecipientAnchor={highlightedRecipientAnchor}
+                        />
+                      </div>
+                    </details>
+                  </div>
+                ) : variant === "suggested" && changed ? (
+                  <div className="space-y-2" data-testid="recipient-redline-clause-inline-wrap">
+                    <p className="text-[12px] font-semibold leading-snug text-slate-900">{sectionLabel}</p>
+                    <details className="rounded-md border border-slate-200/90 bg-white/90 px-2 py-1.5">
+                      <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
+                        {RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP}
+                      </summary>
+                      <div className="mt-2 border-t border-slate-200/80 pt-2">
+                        <RecipientLegalRedlineBlockSegments
+                          segments={block.segments}
+                          keyPrefix={block.id}
                           recipientNarrowIntentAnchors={recipientNarrowIntentAnchors}
                           highlightedRecipientAnchor={highlightedRecipientAnchor}
                         />

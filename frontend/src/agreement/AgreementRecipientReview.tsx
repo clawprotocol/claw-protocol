@@ -150,7 +150,9 @@ import {
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
-  RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD,
+  RECIPIENT_ONLY_CHANGED_SECTIONS,
+  RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING,
+  RECIPIENT_SHOW_UNCHANGED_CONTEXT,
   RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES,
   RECIPIENT_DETAILED_EDIT_METRICS_SUMMARY,
   RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY,
@@ -204,9 +206,12 @@ import { buildIntentSemanticBucketRows } from "./recipientIntentSemanticBuckets"
 import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import { RecipientFocusedWordingDialog } from "./RecipientFocusedWordingDialog";
 import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
+import { RecipientRedlineStickyNavigator } from "./RecipientRedlineStickyNavigator";
+import { scrollRecipientRedlineClausePanel } from "./recipientRedlineDomScroll";
 import {
+  buildRecipientRedlineStickyNavRows,
   buildRecommendedSenderFocusLines,
-  getPrimaryScrollTargetBlockIdForSemanticId,
+  getScrollTargetBlockIdForSemanticOrFallback,
   type BusinessReviewSemanticId,
 } from "./recipientBusinessReviewCardsModel";
 import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
@@ -987,6 +992,7 @@ export function AgreementRecipientReview({
 
   const [narrowRedlineHighlightAnchor, setNarrowRedlineHighlightAnchor] = useState<string | null>(null);
   const [highlightedSemanticAnchor, setHighlightedSemanticAnchor] = useState<string | null>(null);
+  const [onlyChangedRedlineSections, setOnlyChangedRedlineSections] = useState(true);
   const suggestedChangesDocScrollRef = useRef<HTMLDivElement>(null);
   const auditDetailsRef = useRef<HTMLDetailsElement>(null);
   const [businessReviewFocusedWording, setBusinessReviewFocusedWording] = useState<{
@@ -1088,26 +1094,18 @@ export function AgreementRecipientReview({
   }, [legalRedlineDocumentVm, recipientRedlinePlainTexts?.narrowRecipientTargetedRedline]);
 
   const scrollToSemanticReviewInRedline = useCallback(
-    (semanticId: BusinessReviewSemanticId) => {
+    async (semanticId: BusinessReviewSemanticId) => {
       openFullLegalRedlineSection();
       if (!legalRedlineDocumentVm) return;
-      const blockId = getPrimaryScrollTargetBlockIdForSemanticId(legalRedlineDocumentVm, semanticId);
+      const blockId = getScrollTargetBlockIdForSemanticOrFallback(legalRedlineDocumentVm, semanticId);
       const anchor = blockId ? recipientSemanticAnchorForBlockId(blockId) : null;
-      window.requestAnimationFrame(() => {
-        const shell = suggestedChangesDocScrollRef.current;
-        const byAnchor = anchor
-          ? (shell?.querySelector(`[data-recipient-semantic-anchor="${anchor}"]`) as HTMLElement | null)
-          : null;
-        const byBlock =
-          !byAnchor && blockId
-            ? (shell?.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null)
-            : null;
-        const el = byAnchor ?? byBlock;
-        if (el) {
-          el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-          if (anchor) setHighlightedSemanticAnchor(anchor);
-          window.setTimeout(() => setHighlightedSemanticAnchor(null), 2600);
-        }
+      await scrollRecipientRedlineClausePanel({
+        root: suggestedChangesDocScrollRef.current,
+        detailsBoundary: suggestedChangesDocScrollRef.current,
+        semanticAnchorId: anchor,
+        blockId,
+        onHighlight: (id) => setHighlightedSemanticAnchor(id),
+        highlightClearMs: 2800,
       });
     },
     [legalRedlineDocumentVm, openFullLegalRedlineSection],
@@ -1125,7 +1123,9 @@ export function AgreementRecipientReview({
       changedBlockCount: legalRedlineDocumentVm.stats.changedBlockCount,
       insertCount: legalRedlineDocumentVm.stats.insertCount,
       deleteCount: legalRedlineDocumentVm.stats.deleteCount,
-      wholeDocumentSemanticReplacement: recipientSemanticPresentation?.mode === "whole_section_replacement",
+      wholeDocumentSemanticReplacement:
+        recipientSemanticPresentation?.mode === "whole_section_replacement" &&
+        !recipientSemanticPresentation?.shortRevisedVsLongBaseline,
     });
   }, [
     legalRedlineDocumentVm,
@@ -1134,6 +1134,7 @@ export function AgreementRecipientReview({
     recipientIntentGapCount,
     recipientImportArtifactsCount,
     recipientSemanticPresentation?.mode,
+    recipientSemanticPresentation?.shortRevisedVsLongBaseline,
   ]);
 
   const reviewerHeadlineName = useMemo(
@@ -2206,7 +2207,7 @@ export function AgreementRecipientReview({
                   className="mt-4 text-sm font-semibold tracking-tight text-slate-200"
                   data-testid="recipient-human-redline-subhead"
                 >
-                  {RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD}
+                  {RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING}
                 </h3>
                 {participantPid ? (
                   <p className="mt-1 text-[10px] leading-snug text-slate-500">
@@ -2219,10 +2220,29 @@ export function AgreementRecipientReview({
                     className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
                     data-testid="recipient-suggested-changes-document"
                   >
+                    <label className="mb-2 flex cursor-pointer items-center gap-2 px-1 text-[11px] text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 rounded border-slate-400 text-sky-700 focus:ring-sky-600"
+                        checked={onlyChangedRedlineSections}
+                        data-testid="recipient-redline-only-changed-toggle"
+                        onChange={(e) => setOnlyChangedRedlineSections(e.target.checked)}
+                      />
+                      <span>
+                        {RECIPIENT_ONLY_CHANGED_SECTIONS}
+                        {!onlyChangedRedlineSections ? (
+                          <span className="ml-1 text-slate-500">({RECIPIENT_SHOW_UNCHANGED_CONTEXT})</span>
+                        ) : null}
+                      </span>
+                    </label>
+                    <RecipientRedlineStickyNavigator
+                      rows={buildRecipientRedlineStickyNavRows(presentationFriendlyRedlineChips, legalRedlineDocumentVm)}
+                      onSelectSemantic={scrollToSemanticReviewInRedline}
+                    />
                     <RecipientLegalRedlineDocument
                       document={legalRedlineDocumentVm}
                       variant="suggested"
-                      hideUnchangedBlocks
+                      hideUnchangedBlocks={onlyChangedRedlineSections}
                       collapseDenseMicroDiff
                       recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
                       highlightedRecipientAnchor={narrowRedlineHighlightAnchor}

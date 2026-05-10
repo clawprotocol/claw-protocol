@@ -5,6 +5,10 @@
 
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 
+function recipientSemanticAnchorSlugForBlockId(blockId: string): string {
+  return `semantic-${String(blockId).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
 export type BusinessReviewSemanticId =
   | "payment_terms"
   | "scope"
@@ -143,6 +147,21 @@ function scoreBlockForSemantic(block: LegalRedlineBlock, id: BusinessReviewSeman
       return 0;
     }
   }
+  if (id === "third_party") {
+    if (/\b(confidentiality|confidential|nda)\b/i.test(hay) && !/\b(third|vendor|subcontract|saas|dependency|liability|subprocessor)\b/i.test(low)) {
+      return 0;
+    }
+  }
+  if (id === "acceptance") {
+    if (/\b(confidentiality|confidential|nda)\b/i.test(hay) && !/\b(acceptance|signoff|uat|defect|warranty|review)\b/i.test(low)) {
+      return 0;
+    }
+  }
+  if (id === "timeline_protections") {
+    if (/\b(confidentiality|confidential|nda)\b/i.test(hay) && !/\b(schedule|delay|pause|suspend|timeline|force\s+majeure|nonpayment)\b/i.test(low)) {
+      return 0;
+    }
+  }
   const re = KEYWORD_SCORES[id];
   if (!re) return 0;
   return re.test(hay) ? 10 + hay.length / 1000 : 0;
@@ -257,6 +276,45 @@ export function getPrimaryScrollTargetBlockIdForSemanticId(
   if (!raw) return null;
   if (!isMeaningfulWordingSide(raw.oldText) || !isMeaningfulWordingSide(raw.newText)) return null;
   return top.block.id;
+}
+
+/** Scroll target: semantic match, else first changed block so navigation never dead-ends. */
+export function getScrollTargetBlockIdForSemanticOrFallback(
+  vm: LegalRedlineDocumentViewModel,
+  id: BusinessReviewSemanticId,
+): string | null {
+  return getPrimaryScrollTargetBlockIdForSemanticId(vm, id) ?? vm.blocks.find((b) => b.hasChange)?.id ?? null;
+}
+
+export type RecipientRedlineStickyNavRow = {
+  key: string;
+  label: string;
+  semanticId: BusinessReviewSemanticId;
+  anchorId: string | null;
+};
+
+export function buildRecipientRedlineStickyNavRows(
+  chips: readonly string[],
+  vm: LegalRedlineDocumentViewModel,
+): RecipientRedlineStickyNavRow[] {
+  const seen = new Set<string>();
+  const out: RecipientRedlineStickyNavRow[] = [];
+  for (const c of chips) {
+    const t = c.trim();
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const id = friendlyChipToSemanticId(t);
+    const bid = getScrollTargetBlockIdForSemanticOrFallback(vm, id);
+    out.push({
+      key: k,
+      label: t,
+      semanticId: id,
+      anchorId: bid ? recipientSemanticAnchorSlugForBlockId(bid) : null,
+    });
+  }
+  return out.slice(0, 8);
 }
 
 /**

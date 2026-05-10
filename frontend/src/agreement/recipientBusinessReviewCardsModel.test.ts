@@ -6,6 +6,7 @@ import {
   businessReviewCardTitleSubline,
   extractBusinessReviewCardPreviewExcerpt,
   getPrimaryScrollTargetBlockIdForSemanticId,
+  getScrollTargetBlockIdForSemanticOrFallback,
 } from "./recipientBusinessReviewCardsModel";
 
 describe("extractBusinessReviewCardPreviewExcerpt", () => {
@@ -59,6 +60,15 @@ describe("businessReviewCardCompactImpactLine", () => {
     const line = businessReviewCardCompactImpactLine(card);
     expect(line.length).toBeGreaterThan(10);
     expect(line).toMatch(/Low|Medium|High/i);
+  });
+});
+
+describe("getScrollTargetBlockIdForSemanticOrFallback", () => {
+  it("falls back to the first changed block when semantic keyword match is absent", () => {
+    const vm = buildLegalRedlineDocumentViewModel("Only body text without payment keywords.", "Only revised body.");
+    const firstChanged = vm.blocks.find((b) => b.hasChange)?.id ?? null;
+    expect(firstChanged).toBeTruthy();
+    expect(getScrollTargetBlockIdForSemanticOrFallback(vm, "payment_terms")).toBe(firstChanged);
   });
 });
 

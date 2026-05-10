@@ -25,7 +25,7 @@ export type RecipientBusinessReviewCardsProps = {
   /** Opens the collapsed full legal redline section in the parent panel. */
   onOpenFullRedline?: () => void;
   /** Scrolls to the best-matching block inside the opened redline (full-doc mode). */
-  onNavigateSemanticInRedline?: (semanticId: BusinessReviewSemanticId) => void;
+  onNavigateSemanticInRedline?: (semanticId: BusinessReviewSemanticId) => void | Promise<void>;
 };
 
 /**
@@ -166,9 +166,9 @@ export function RecipientBusinessReviewCards({
                   type="button"
                   className="text-left text-[11px] font-semibold text-sky-300/90 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
                   data-testid="recipient-business-review-view-in-full-redline"
-                  onClick={() => {
-                    onNavigateSemanticInRedline?.(id);
-                    onOpenFullRedline();
+                  onClick={async () => {
+                    onOpenFullRedline?.();
+                    if (onNavigateSemanticInRedline) await onNavigateSemanticInRedline(id);
                   }}
                 >
                   {RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE}

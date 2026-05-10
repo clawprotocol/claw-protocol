@@ -7,6 +7,7 @@ import {
   RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
   RECIPIENT_SEMANTIC_PRIOR_LABEL,
   RECIPIENT_SEMANTIC_REVISED_LABEL,
+  RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
 } from "./portableReviewCopy";
 import { buildRecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import {
@@ -377,6 +378,20 @@ describe("buildRecipientRedlinePdfHtml", () => {
     };
     const html = buildRecipientRedlinePdfHtml(vm);
     expect(html).toMatch(/<\/p>\s*<p style=/);
+  });
+
+  it("wraps changed inline PDF sections in Show advanced legal markup", () => {
+    const vm = buildLegalRedlineDocumentViewModel("Fee is due on receipt.", "Fee is Net 30.");
+    const html = buildRecipientRedlinePdfHtml(vm);
+    expect(html).toContain(RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP);
+  });
+
+  it("default export lists changed blocks only so unchanged intro is not replayed", () => {
+    const cur = "STATIC INTRO WITHOUT KEYWORDS\n\n1. Payment\nDue on receipt.\n";
+    const prop = "STATIC INTRO WITHOUT KEYWORDS\n\n1. Payment\nNet 30.\n";
+    const vm = buildLegalRedlineDocumentViewModel(cur, prop);
+    const html = buildRecipientRedlinePdfHtml(vm, null, {});
+    expect((html.match(/STATIC INTRO WITHOUT KEYWORDS/g) ?? []).length).toBeLessThanOrEqual(1);
   });
 });
 

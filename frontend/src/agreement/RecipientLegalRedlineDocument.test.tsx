@@ -7,7 +7,10 @@ import {
   splitSegmentTextToParagraphLines,
   lineLooksLikeSectionHeading,
 } from "./RecipientLegalRedlineDocument";
-import { RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY } from "./portableReviewCopy";
+import {
+  RECIPIENT_BUSINESS_REVIEW_GROUPED_READABILITY,
+  RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
+} from "./portableReviewCopy";
 
 describe("splitSegmentTextToParagraphLines", () => {
   it("splits double newlines into separate paragraph blocks", () => {
@@ -193,6 +196,44 @@ describe("RecipientLegalRedlineDocument", () => {
     expect(el?.textContent).toContain("2. FEES");
     expect(el?.className).toMatch(/font-normal/);
     expect(el?.className).not.toMatch(/font-semibold/);
+  });
+
+  it("wraps suggested non-panel changes in a closed Show advanced legal markup disclosure", () => {
+    const document: LegalRedlineDocumentViewModel = {
+      blocks: [
+        {
+          id: "c32",
+          kind: "clause",
+          clauseNumber: "3.2",
+          segments: [
+            { type: "same", text: "Due " },
+            { type: "insert", text: "Net 30" },
+            { type: "same", text: "." },
+          ],
+          insertCount: 1,
+          deleteCount: 0,
+          sameCount: 2,
+          hasInsert: true,
+          hasDelete: false,
+          hasChange: true,
+          label: "3.2",
+        },
+      ],
+      stats: {
+        blockCount: 1,
+        changedBlockCount: 1,
+        insertCount: 1,
+        deleteCount: 0,
+        sameCount: 2,
+        segmentCount: 3,
+        currentLen: 10,
+        proposedLen: 12,
+      },
+      hasChanges: true,
+    };
+    render(<RecipientLegalRedlineDocument document={document} variant="suggested" />);
+    expect(screen.getByTestId("recipient-redline-clause-inline-wrap")).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP)).toBeTruthy();
   });
 
   it("renders block document model as multiple sections with insert markers", () => {

@@ -11,10 +11,11 @@ import {
   RECIPIENT_EXPORT_PDF_APPENDIX_REFERENCE,
   RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
-  RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS,
   RECIPIENT_SEMANTIC_PRIOR_LABEL,
   RECIPIENT_SEMANTIC_REDLINE_INTRO,
   RECIPIENT_SEMANTIC_REVISED_LABEL,
+  RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
+  RECIPIENT_SHOW_LINE_BY_LINE_MARKUP,
 } from "./portableReviewCopy";
 import { blockPriorAndRevisedPlain, type RecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
@@ -290,7 +291,7 @@ function renderSemanticBeforeAfterPdfBlock(
     </div>
   </div>`;
   const micro = `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;">${escapeHtml(
-    RECIPIENT_SEMANTIC_LINE_BY_LINE_DETAILS,
+    RECIPIENT_SHOW_LINE_BY_LINE_MARKUP,
   )}</summary><div style="margin-top:10px;">${renderBlockInlineFlow(block, { suppressSectionHeader: true })}</div></details>`;
   return `<section style="display:block;margin:0;padding:16px 0 18px 14px;border-left:3px solid #cbd5e1;">${header}${pair}${micro}</section>`;
 }
@@ -315,6 +316,11 @@ export type RecipientRedlinePdfHumanExtras = {
   exportCompareConfidenceLevel?: RecipientCompareConfidenceLevel | null;
   /** Matches UI semantic negotiation panels for heavy whole-document rewrites. */
   semanticRedlinePresentation?: RecipientSemanticRedlinePresentation | null;
+  /**
+   * When true (default), export body lists changed blocks only (matches “Only changed sections” in UI).
+   * Set false to include unchanged blocks (e.g. diagnostics).
+   */
+  exportRedlineChangedSectionsOnly?: boolean;
 };
 
 /** Heuristic: omit reviewer-notes appendix when text largely repeats agreement body already in the redline. */
@@ -352,18 +358,21 @@ export function buildRecipientRedlinePdfHtml(
     RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   )}</h2>`;
   const sem = human?.semanticRedlinePresentation ?? null;
-  if (sem?.mode === "whole_section_replacement") {
+  if (sem?.mode === "whole_section_replacement" && !sem.shortRevisedVsLongBaseline) {
     lead += `<p style="margin:-6px 0 18px;font-size:12px;color:#475569;line-height:1.55;">${escapeHtml(
       RECIPIENT_SEMANTIC_REDLINE_INTRO,
     )}</p>`;
   }
   const exportLevel = human?.exportCompareConfidenceLevel ?? "high";
   const tightenExport = exportLevel !== "high";
+  const wantsChangedOnly = human?.exportRedlineChangedSectionsOnly !== false;
+  const hasAnyChanged = vm.blocks.some((b) => b.hasChange);
+  const blocksForPdf = wantsChangedOnly && hasAnyChanged ? vm.blocks.filter((b) => b.hasChange) : vm.blocks;
   const seenLabels = new Set<string>();
   const seenContentFp = new Set<string>();
   const seenBoilerFp = new Set<string>();
   let denseCollapsedOnce = false;
-  const sections = vm.blocks
+  const sections = blocksForPdf
     .map((b) => {
       const label = (b.label || b.heading || b.clauseNumber || "").trim();
       const key = normPdfBlockLabelKey(label);
@@ -399,7 +408,13 @@ export function buildRecipientRedlinePdfHtml(
         return renderSemanticBeforeAfterPdfBlock(b, { suppressSectionHeader: suppress });
       }
 
-      return renderBlockInlineFlow(b, { suppressSectionHeader: suppress });
+      const flow = renderBlockInlineFlow(b, { suppressSectionHeader: suppress });
+      if (b.hasChange) {
+        return `<details style="display:block;margin:0 0 18px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;background:#ffffff;"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;">${escapeHtml(
+          RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
+        )}</summary><div style="margin-top:10px;">${flow}</div></details>`;
+      }
+      return flow;
     })
     .join("");
   if (!sections.trim()) {
