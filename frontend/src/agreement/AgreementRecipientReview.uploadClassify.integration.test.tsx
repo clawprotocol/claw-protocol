@@ -45,7 +45,7 @@ describe("AgreementRecipientReview upload classification", () => {
     vi.restoreAllMocks();
   });
 
-  it("notes-only upload shows gate card and does not add render calls for compare", async () => {
+  it("notes-only upload shows gate card and does not run compare preview (one baseline /render for classification)", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -91,10 +91,11 @@ describe("AgreementRecipientReview upload classification", () => {
 
     const newCalls = fetchSpy.mock.calls.slice(callsAfterLoad);
     const renderAfterUpload = newCalls.filter((c) => String(c[0]).includes("/render"));
-    expect(renderAfterUpload.length).toBe(0);
+    // Import path refreshes `/render` once for authoritative baseline before role classification.
+    expect(renderAfterUpload.length).toBe(1);
   }, 20_000);
 
-  it("structured bullet upload shows clause suggestions surface without compare render", async () => {
+  it("structured bullet upload shows clause suggestions surface without compare preview (one /render)", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -147,7 +148,7 @@ describe("AgreementRecipientReview upload classification", () => {
 
     const newCalls = fetchSpy.mock.calls.slice(callsAfterLoad);
     const renderAfterUpload = newCalls.filter((c) => String(c[0]).includes("/render"));
-    expect(renderAfterUpload.length).toBe(0);
+    expect(renderAfterUpload.length).toBe(1);
   }, 20_000);
 
   it("full revised upload still reaches suggested-changes panel", async () => {

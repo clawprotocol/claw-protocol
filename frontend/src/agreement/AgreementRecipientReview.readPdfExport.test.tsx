@@ -144,7 +144,22 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     expect(workspaceImport.getAttribute("accept")).toContain(".pdf");
     expect(workspaceImport.getAttribute("accept")).toContain("application/pdf");
 
-    const file = new File(["Imported revised text"], "rev.txt", { type: "text/plain" });
+    const importedRevisedBody = [
+      "Master Services Agreement (Revised)",
+      "1. Scope of Work",
+      "The Consultant shall perform the professional services described in the statement of work. The Client shall pay all undisputed invoiced amounts within thirty days.",
+      "2. Confidentiality",
+      "Each party must keep confidential all information marked confidential or reasonably understood as confidential.",
+      "3. Termination",
+      "Either party may terminate this agreement upon thirty days written notice. Payment for work completed through the termination date shall remain due.",
+      "4. Liability",
+      "Except for breaches of confidentiality or indemnity obligations, neither party shall be liable for consequential damages.",
+      "5. Intellectual Property",
+      "The Client shall own all deliverables upon full payment unless otherwise agreed.",
+      "6. General",
+      "This agreement shall be governed by the laws of the State of California.",
+    ].join("\n\n");
+    const file = new File([importedRevisedBody], "rev.txt", { type: "text/plain" });
     await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
 
     await waitFor(() => {
@@ -165,7 +180,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     );
     await waitFor(() => {
       const ta = screen.getByTestId("recipient-revised-draft-paste") as HTMLTextAreaElement;
-      expect(ta.value).toBe("Imported revised text");
+      expect(ta.value).toBe(importedRevisedBody);
     });
   }, 25_000);
 

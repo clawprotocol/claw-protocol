@@ -131,6 +131,7 @@ import {
   RECIPIENT_DRAFT_IMPORT_AGREEMENT_NOT_READY,
   RECIPIENT_DRAFT_IMPORT_COMPARE_RUNNER_MISSING,
   RECIPIENT_DRAFT_IMPORT_EMPTY_BODY,
+  RECIPIENT_DRAFT_IMPORT_PDF_LOW_TEXT,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
   RECIPIENT_REVISED_IMPORT_PREPARING,
   RECIPIENT_EDIT_INSIDE_LAWDOG,
@@ -248,7 +249,7 @@ import {
   type BusinessReviewSemanticId,
 } from "./recipientBusinessReviewCardsModel";
 import { applyRecipientMeaningfulChangePass } from "./recipientMeaningfulRedlinePass";
-import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
+import { classifyRecipientUploadedDraftRole } from "./recipientUploadedDraftRole";
 import {
   collapseRecipientRedlineDuplicateInsertBlocks,
   mergeRecipientRedlineLowSignalFragments,
@@ -633,6 +634,7 @@ export function AgreementRecipientReview({
           importArtifactsRemoved?: string[];
           /** PDF import: sanitizer stripped agreement body; raw text was passed for classification. */
           pdfThinSanitizeUsedRaw?: boolean;
+          sourceFileName?: string | null;
         },
       ) => Promise<void>)
     | null
@@ -2025,6 +2027,7 @@ export function AgreementRecipientReview({
     const importTail = scrollOpts?.importReviewerNotesTail?.trim() ?? "";
     setRecipientPostUploadSurface(null);
     setRecipientPreview(null);
+    pendingImportRecipientPreviewRef.current = null;
     setRecipientRevisePreviewError(null);
     setDraftImportError(null);
     setError(null);
@@ -2033,47 +2036,9 @@ export function AgreementRecipientReview({
     setHighlightedSemanticAnchor(null);
     setNarrowRedlineHighlightAnchor(null);
     setRecipientIntentListExpanded(false);
+    setCondensedReviewTab("clean");
     try {
       await Promise.resolve();
-      const originalPlain = (directCompareDefaultRef.current || draft.purpose || "").trim() || " ";
-      const classification = classifyRecipientRevisedDraftUpload(originalPlain, trimmed);
-
-      if (classification.kind === "review_notes_only") {
-        setWorkflowMode("revised");
-        setRevisedSubmode("paste");
-        setRevisedIntakePhase("editing");
-        setExternalAiPaste("");
-        setRevisedUploadAnalyzing(false);
-        const notesOnly = [classification.reviewerNotes ?? trimmed, importTail].filter(Boolean).join("\n\n");
-        if (scrollOpts?.pdfThinSanitizeUsedRaw) {
-          setRecipientPdfImportRoutedMessage(RECIPIENT_PDF_IMPORT_ROUTED_TO_SUGGESTIONS);
-        }
-        setRecipientPostUploadSurface({ surface: "notes_only", notes: notesOnly });
-        return;
-      }
-
-      if (classification.kind === "clause_suggestions") {
-        setWorkflowMode("revised");
-        setRevisedSubmode("paste");
-        setRevisedIntakePhase("editing");
-        setExternalAiPaste("");
-        setRevisedUploadAnalyzing(false);
-        const noteText = [classification.reviewerNotes ?? trimmed, importTail].filter(Boolean).join("\n\n");
-        if (scrollOpts?.pdfThinSanitizeUsedRaw) {
-          setRecipientPdfImportRoutedMessage(RECIPIENT_PDF_IMPORT_ROUTED_TO_SUGGESTIONS);
-        }
-        setRecipientPostUploadSurface({
-          surface: "clause_suggestions",
-          notes: noteText,
-          items: buildClauseSuggestionCardsFromUploadText(noteText),
-        });
-        return;
-      }
-
-      setWorkflowMode("revised");
-      setRevisedSubmode("paste");
-      setRevisedIntakePhase("editing");
-      const agreementBody = classification.agreementText.trim();
       let baselineHtmlLive = renderedHtml.trim();
       try {
         const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
@@ -2090,6 +2055,92 @@ export function AgreementRecipientReview({
       } catch {
         /* keep renderedHtml from state */
       }
+
+      const roleResult = classifyRecipientUploadedDraftRole({
+        baselineRenderedHtml: baselineHtmlLive,
+        uploadedSanitizedPlain: trimmed,
+        filename: scrollOpts?.sourceFileName ?? null,
+      });
+      recipientUploadLog("role-classified", {
+        role: roleResult.role,
+        rawLen: roleResult.rawLen,
+        bodyLen: roleResult.bodyLen,
+        reasons: roleResult.reasons,
+      });
+
+      if (roleResult.role === "INVALID_OR_TOO_LOW_SIGNAL") {
+        setWorkflowMode("revised");
+        setRevisedSubmode("paste");
+        setRevisedIntakePhase("editing");
+        setExternalAiPaste("");
+        setRevisedUploadAnalyzing(false);
+        setDraftImportError(RECIPIENT_DRAFT_IMPORT_PDF_LOW_TEXT);
+        setError(RECIPIENT_DRAFT_IMPORT_PDF_LOW_TEXT);
+        return;
+      }
+
+      if (roleResult.role === "REVIEW_NOTES_ONLY") {
+        setWorkflowMode("revised");
+        setRevisedSubmode("paste");
+        setRevisedIntakePhase("editing");
+        setExternalAiPaste("");
+        setRevisedUploadAnalyzing(false);
+        const noteBase = roleResult.reviewerNotesForUi ?? trimmed;
+        const noteText = [noteBase, importTail].filter(Boolean).join("\n\n");
+        if (scrollOpts?.pdfThinSanitizeUsedRaw) {
+          setRecipientPdfImportRoutedMessage(RECIPIENT_PDF_IMPORT_ROUTED_TO_SUGGESTIONS);
+        }
+        if (roleResult.preferClauseSuggestionSurface) {
+          setRecipientPostUploadSurface({
+            surface: "clause_suggestions",
+            notes: noteText,
+            items: buildClauseSuggestionCardsFromUploadText(noteText),
+          });
+        } else {
+          setRecipientPostUploadSurface({ surface: "notes_only", notes: noteText });
+        }
+        return;
+      }
+
+      setWorkflowMode("revised");
+      setRevisedSubmode("paste");
+      setRevisedIntakePhase("editing");
+      const classification = roleResult.legacyClassification;
+      const agreementBody = roleResult.agreementBodyForCompare.trim();
+
+      if (roleResult.role === "SAME_AS_CURRENT_DRAFT") {
+        recipientUploadLog("import-no-material-change", { agreementId, bodyLen: agreementBody.length });
+        const baselineDraft = cloneDraftForRecipientPreview(draft);
+        const proposedDraft = cloneDraftForRecipientPreview(draft);
+        setRecipientRevisePreviewError(null);
+        setRecipientPreview({
+          baselineDraft,
+          proposedDraft,
+          baselineHtml: baselineHtmlLive,
+          proposedHtml: baselineHtmlLive,
+          revisionText: "",
+          hasExternal: true,
+          postureAtPreview: recipientPosture,
+          suggestionUsedAtPreview: suggestionUsed,
+          routingKind: "whole_document",
+          importMatchesCurrentDraft: true,
+        });
+        setExternalAiPaste("");
+        pendingImportRecipientPreviewRef.current = null;
+        setRevisedUploadAnalyzing(false);
+        recipientUploadLogCompareSuccess({ textLen: agreementBody.trim().length, importNoMaterialChange: true });
+        if (scrollOpts?.scrollToSummary) {
+          window.requestAnimationFrame(() => {
+            window.setTimeout(() => {
+              document
+                .querySelector<HTMLElement>('[data-testid="recipient-import-no-change-panel"]')
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 80);
+          });
+        }
+        return;
+      }
+
       if (
         recipientImportsMatchAuthoritativeBaseline({
           baselineRenderedHtml: baselineHtmlLive,
@@ -2180,6 +2231,14 @@ export function AgreementRecipientReview({
 
   const processRecipientRevisedDraftFile = useCallback(async (file: File) => {
     recipientUploadLogSelected({ name: file.name, type: file.type, size: file.size });
+    setRecipientPostUploadSurface(null);
+    setRecipientPreview(null);
+    pendingImportRecipientPreviewRef.current = null;
+    setRecipientRevisePreviewError(null);
+    setBusinessReviewFocusedWording(null);
+    setHighlightedSemanticAnchor(null);
+    setNarrowRedlineHighlightAnchor(null);
+    setCondensedReviewTab("clean");
     setDraftImportError(null);
     setRecipientPdfImportRoutedMessage(null);
     setRecipientRevisedDraftFileBusy(true);
@@ -2206,6 +2265,7 @@ export function AgreementRecipientReview({
         importReviewerNotesTail: result.importReviewerNotesTail ?? undefined,
         importArtifactsRemoved: result.importArtifactsRemoved,
         pdfThinSanitizeUsedRaw: result.pdfThinSanitizeUsedRaw,
+        sourceFileName: file.name,
       });
       recipientUploadLogCompareSuccess({ textLen: result.text.trim().length });
     } catch (e) {
