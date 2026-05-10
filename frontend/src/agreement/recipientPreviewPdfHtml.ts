@@ -3,14 +3,20 @@ import type { LegalRedlineBlock, LegalRedlineDocumentViewModel, LegalRedlineSegm
 import { mergeAdjacentRedlineSegmentsAllTypes } from "./legalRedlineBlocks";
 import type { RecipientCompareConfidenceLevel } from "./recipientCompareConfidence";
 import {
+  RECIPIENT_ADVANCED_REDLINE_INTRO,
   RECIPIENT_BUSINESS_REVIEW_MOST_IMPORTANT_HEADING,
   RECIPIENT_BUSINESS_REVIEW_NO_CHANGES_SECTION,
   RECIPIENT_BUSINESS_REVIEW_OTHER_EDITS_LINE,
   RECIPIENT_BUSINESS_REVIEW_RECOMMENDED_FOCUS_HEADING,
+  RECIPIENT_EXPORT_PDF_ADVANCED_MARKUP_APPENDIX_HEADING,
   RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
   RECIPIENT_EXPORT_PDF_APPENDIX_REFERENCE,
+  RECIPIENT_EXPORT_PDF_CLEAN_PROPOSED_HEADING,
+  RECIPIENT_EXPORT_PDF_KEY_CHANGED_WORDING_HEADING,
+  RECIPIENT_EXPORT_PDF_NOT_RESTAT_APPENDIX_HEADING,
   RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED,
+  RECIPIENT_NOT_RESTAT_ORIGINAL_FOOTNOTE,
   RECIPIENT_SEMANTIC_PRIOR_LABEL,
   RECIPIENT_SEMANTIC_REDLINE_INTRO,
   RECIPIENT_SEMANTIC_REVISED_LABEL,
@@ -328,63 +334,36 @@ export type RecipientRedlinePdfHumanExtras = {
    * Set false to include unchanged blocks (e.g. diagnostics).
    */
   exportRedlineChangedSectionsOnly?: boolean;
+  /**
+   * Condensed clean-revision export: human summary first, then clean proposed text and topic HTML,
+   * with tracked markup in a collapsed appendix (does not read as “everything deleted”).
+   */
+  condensedCleanRevisionPdf?: {
+    cleanProposedPlain: string;
+    /** Pre-escaped HTML blocks for topic prior/revised cards. */
+    topicSectionHtml: string;
+    /** Pre-escaped `<ul>` or fragment for “not restated” appendix. */
+    notRestatedAppendixHtml: string;
+  } | null;
 };
 
 /** Heuristic: omit reviewer-notes appendix when text largely repeats agreement body already in the redline. */
-export function notesLikelyDuplicateAgreementBodyForExport(notes: string, vm: LegalRedlineDocumentViewModel): boolean {
-  /** Include both sides so pasted notes that match the prior draft still match when the redline is proposed-forward. */
-  const body = vm.blocks
-    .map((b) => `${b.currentText ?? ""}\n${b.proposedText ?? ""}`)
-    .join("\n\n")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-  const nt = notes.replace(/\s+/g, " ").trim().toLowerCase();
-  if (nt.length < 280 || body.length < 400) return false;
-  const probe = nt.slice(0, Math.min(900, nt.length));
-  return body.includes(probe.slice(0, 400));
-}
-
-export function buildRecipientRedlinePdfHtml(
+function buildRecipientRedlinePdfBlocksInnerHtml(
   vm: LegalRedlineDocumentViewModel,
-  audit?: RecipientRedlinePdfAuditMeta | null,
-  human?: RecipientRedlinePdfHumanExtras | null,
+  human: RecipientRedlinePdfHumanExtras | null | undefined,
 ): string {
-  const auditBlock = audit ? buildAuditHeader({ ...audit, generatedAt: audit.generatedAt }) : "";
-  let lead = "";
-  const struct = human?.structuredHumanReview;
-  if (struct && (struct.headlinePlain.trim() || struct.importantBullets.length > 0 || struct.clarificationBullets.length > 0)) {
-    lead += buildHumanStructuredPdfLead(struct);
-  } else {
-    const sum = (human?.summaryHtml ?? "").trim();
-    if (sum) {
-      lead += `<section style="margin:0 0 22px;padding:14px 16px;background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;"><p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Summary</p><div style="font-size:14px;color:#0f172a;line-height:1.68;">${sum}</div></section>`;
-    }
-  }
-  lead += `<h2 style="margin:0 0 14px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
-    RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
-  )}</h2>`;
-  const sem = human?.semanticRedlinePresentation ?? null;
-  if (
-    sem?.mode === "whole_section_replacement" &&
-    !sem.shortRevisedVsLongBaseline &&
-    recipientClauseMeaningfulMaterialRatio(vm) >= 0.6
-  ) {
-    lead += `<p style="margin:-6px 0 18px;font-size:12px;color:#475569;line-height:1.55;">${escapeHtml(
-      RECIPIENT_SEMANTIC_REDLINE_INTRO,
-    )}</p>`;
-  }
   const exportLevel = human?.exportCompareConfidenceLevel ?? "high";
   const tightenExport = exportLevel !== "high";
   const wantsChangedOnly = human?.exportRedlineChangedSectionsOnly !== false;
   const hasAnyMeaningful = vm.blocks.some((b) => recipientBlockShowsRedline(b));
   const blocksForPdf =
     wantsChangedOnly && hasAnyMeaningful ? vm.blocks.filter((b) => recipientBlockShowsRedline(b)) : vm.blocks;
+  const sem = human?.semanticRedlinePresentation ?? null;
   const seenLabels = new Set<string>();
   const seenContentFp = new Set<string>();
   const seenBoilerFp = new Set<string>();
   let denseCollapsedOnce = false;
-  const sections = blocksForPdf
+  return blocksForPdf
     .map((b) => {
       const label = (b.label || b.heading || b.clauseNumber || "").trim();
       const key = normPdfBlockLabelKey(label);
@@ -400,7 +379,6 @@ export function buildRecipientRedlinePdfHtml(
         }
         seenContentFp.add(normFp);
       }
-      /** Always drop repeated title/footer boilerplate fingerprints (independent of compare confidence). */
       if (looksLikeBoilerplateFingerprint(normFp)) {
         if (seenBoilerFp.has(normFp)) {
           return "";
@@ -435,6 +413,108 @@ export function buildRecipientRedlinePdfHtml(
       return flow;
     })
     .join("");
+}
+
+function buildCondensedCleanRevisionRedlinePdfArticle(
+  vm: LegalRedlineDocumentViewModel,
+  audit: RecipientRedlinePdfAuditMeta | null | undefined,
+  human: RecipientRedlinePdfHumanExtras,
+  cc: NonNullable<RecipientRedlinePdfHumanExtras["condensedCleanRevisionPdf"]>,
+): string {
+  const auditBlock = audit ? buildAuditHeader({ ...audit, generatedAt: audit.generatedAt }) : "";
+  let lead = "";
+  const struct = human.structuredHumanReview;
+  if (struct && (struct.headlinePlain.trim() || struct.importantBullets.length > 0 || struct.clarificationBullets.length > 0)) {
+    lead += buildHumanStructuredPdfLead(struct);
+  } else {
+    const sum = (human.summaryHtml ?? "").trim();
+    if (sum) {
+      lead += `<section style="margin:0 0 22px;padding:14px 16px;background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;"><p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Summary</p><div style="font-size:14px;color:#0f172a;line-height:1.68;">${sum}</div></section>`;
+    }
+  }
+  const sections = buildRecipientRedlinePdfBlocksInnerHtml(vm, human);
+  const advanced =
+    sections.trim().length > 0
+      ? `<details style="margin:24px 0;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#ffffff;"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:#0f172a;">${escapeHtml(
+          RECIPIENT_EXPORT_PDF_ADVANCED_MARKUP_APPENDIX_HEADING,
+        )}</summary><p style="margin:12px 0 16px;font-size:12px;color:#475569;line-height:1.58;">${escapeHtml(
+          RECIPIENT_ADVANCED_REDLINE_INTRO,
+        )}</p>${sections}</details>`
+      : "";
+  const clean = escapeHtml(cc.cleanProposedPlain);
+  const notRestated = `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+    RECIPIENT_EXPORT_PDF_NOT_RESTAT_APPENDIX_HEADING,
+  )}</h2><p style="margin:0 0 10px;font-size:12px;color:#475569;line-height:1.55;">${escapeHtml(
+    RECIPIENT_NOT_RESTAT_ORIGINAL_FOOTNOTE,
+  )}</p>${cc.notRestatedAppendixHtml}`;
+  let appendix = "";
+  const notes = (human.reviewerNotesPlain ?? "").trim();
+  if (notes && !notesLikelyDuplicateAgreementBodyForExport(notes, vm)) {
+    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+      RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
+    )}</h2><pre style="margin:0;font:13px/1.65 ui-sans-serif,system-ui;white-space:pre-wrap;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(notes)}</pre>`;
+  }
+  const tech = (human.technicalAppendixPlain ?? "").trim();
+  if (tech) {
+    appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+      RECIPIENT_EXPORT_PDF_APPENDIX_REFERENCE,
+    )}</h2><pre style="margin:0;font:12px/1.6 ui-sans-serif,system-ui;white-space:pre-wrap;color:#475569;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(tech)}</pre>`;
+  }
+  return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px 28px;">${auditBlock}${lead}<h2 style="margin:22px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+    RECIPIENT_EXPORT_PDF_CLEAN_PROPOSED_HEADING,
+  )}</h2><pre style="margin:0 0 22px;font:14px/1.72 Georgia,serif;white-space:pre-wrap;color:#0f172a;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;background:#fafafa;">${clean}</pre><h2 style="margin:0 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+    RECIPIENT_EXPORT_PDF_KEY_CHANGED_WORDING_HEADING,
+  )}</h2><div style="margin:0 0 8px;">${cc.topicSectionHtml}</div>${advanced}${notRestated}${appendix}</article>`;
+}
+
+export function notesLikelyDuplicateAgreementBodyForExport(notes: string, vm: LegalRedlineDocumentViewModel): boolean {
+  /** Include both sides so pasted notes that match the prior draft still match when the redline is proposed-forward. */
+  const body = vm.blocks
+    .map((b) => `${b.currentText ?? ""}\n${b.proposedText ?? ""}`)
+    .join("\n\n")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  const nt = notes.replace(/\s+/g, " ").trim().toLowerCase();
+  if (nt.length < 280 || body.length < 400) return false;
+  const probe = nt.slice(0, Math.min(900, nt.length));
+  return body.includes(probe.slice(0, 400));
+}
+
+export function buildRecipientRedlinePdfHtml(
+  vm: LegalRedlineDocumentViewModel,
+  audit?: RecipientRedlinePdfAuditMeta | null,
+  human?: RecipientRedlinePdfHumanExtras | null,
+): string {
+  const cc = human?.condensedCleanRevisionPdf;
+  if (cc && String(cc.cleanProposedPlain ?? "").trim() && human) {
+    return buildCondensedCleanRevisionRedlinePdfArticle(vm, audit, human, cc);
+  }
+  const auditBlock = audit ? buildAuditHeader({ ...audit, generatedAt: audit.generatedAt }) : "";
+  let lead = "";
+  const struct = human?.structuredHumanReview;
+  if (struct && (struct.headlinePlain.trim() || struct.importantBullets.length > 0 || struct.clarificationBullets.length > 0)) {
+    lead += buildHumanStructuredPdfLead(struct);
+  } else {
+    const sum = (human?.summaryHtml ?? "").trim();
+    if (sum) {
+      lead += `<section style="margin:0 0 22px;padding:14px 16px;background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;"><p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">Summary</p><div style="font-size:14px;color:#0f172a;line-height:1.68;">${sum}</div></section>`;
+    }
+  }
+  lead += `<h2 style="margin:0 0 14px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
+    RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
+  )}</h2>`;
+  const sem = human?.semanticRedlinePresentation ?? null;
+  if (
+    sem?.mode === "whole_section_replacement" &&
+    !sem.shortRevisedVsLongBaseline &&
+    recipientClauseMeaningfulMaterialRatio(vm) >= 0.6
+  ) {
+    lead += `<p style="margin:-6px 0 18px;font-size:12px;color:#475569;line-height:1.55;">${escapeHtml(
+      RECIPIENT_SEMANTIC_REDLINE_INTRO,
+    )}</p>`;
+  }
+  const sections = buildRecipientRedlinePdfBlocksInnerHtml(vm, human);
   if (!sections.trim()) {
     return `<article style="max-width:42rem;margin:0 auto;padding:12px 8px;">${auditBlock}${lead}<p style="margin:0;font:15px/1.65 Georgia,serif;color:#64748b;">No redline content.</p></article>`;
   }

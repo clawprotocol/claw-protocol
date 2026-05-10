@@ -122,10 +122,14 @@ export function buildHumanReviewStructuredForPdf(params: {
   instructionPlain: string;
   changedFieldKeys: readonly string[];
   confidence: RecipientCompareConfidence;
+  /** When set (e.g. condensed clean-revision mode), overrides the default meaningful-revisions headline. */
+  headlinePlainOverride?: string | null;
 }): HumanReviewStructuredForPdf {
   const grouped = groupFriendlyChipsForHumanReview(params.chips);
   const meaningful = humanReviewMeaningfulCount(params.chips, params.changedBlockCount);
-  const headlinePlain = buildHumanReviewHeadline(params.reviewerHeadlineName, meaningful);
+  const headlinePlain =
+    (params.headlinePlainOverride ?? "").trim() ||
+    buildHumanReviewHeadline(params.reviewerHeadlineName, meaningful);
   const importantBullets = grouped.important.map(friendlyChipToReviewBullet);
   const clarificationBullets = grouped.clarifications.map(friendlyChipToReviewBullet);
   const recommendedFocusLines = buildRecommendedSenderFocusLines(params.chips);

@@ -71,6 +71,8 @@ type Props = {
   redlinePdfCompareConfidenceLevel?: RecipientCompareConfidenceLevel | null;
   /** Aligns PDF detailed redline with UI semantic prior/revised panels when set. */
   redlinePdfSemanticPresentation?: RecipientSemanticRedlinePresentation | null;
+  /** Condensed clean-revision export bundle (human-first PDF; omit in full redline mode). */
+  redlinePdfCondensedCleanRevision?: RecipientRedlinePdfHumanExtras["condensedCleanRevisionPdf"];
 };
 
 /**
@@ -103,6 +105,7 @@ export function RecipientPreviewVersionsExport({
   redlinePdfTechnicalAppendixPlain = null,
   redlinePdfCompareConfidenceLevel = null,
   redlinePdfSemanticPresentation = null,
+  redlinePdfCondensedCleanRevision = null,
 }: Props) {
   const [copyAck, setCopyAck] = useState<"original" | "proposed" | "redline" | null>(null);
   const [pdfErrors, setPdfErrors] = useState<Partial<Record<RecipientPreviewPdfExportKind, string | null>>>({});
@@ -132,6 +135,7 @@ export function RecipientPreviewVersionsExport({
       technicalAppendixPlain: redlinePdfTechnicalAppendixPlain?.trim() || null,
       exportCompareConfidenceLevel: redlinePdfCompareConfidenceLevel ?? null,
       semanticRedlinePresentation: redlinePdfSemanticPresentation ?? null,
+      condensedCleanRevisionPdf: redlinePdfCondensedCleanRevision ?? null,
     };
   }, [
     redlinePdfStructuredHumanReview,
@@ -141,6 +145,7 @@ export function RecipientPreviewVersionsExport({
     redlinePdfTechnicalAppendixPlain,
     redlinePdfCompareConfidenceLevel,
     redlinePdfSemanticPresentation,
+    redlinePdfCondensedCleanRevision,
   ]);
 
   const redlinePlain = useCallback(() => legalRedlineDocumentVmToPlainSummary(legalRedlineVmRef.current), []);

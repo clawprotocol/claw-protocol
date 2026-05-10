@@ -135,6 +135,7 @@ import {
   RECIPIENT_EDIT_INSIDE_LAWDOG,
   RECIPIENT_AUDIT_MODE_SUBCOPY,
   RECIPIENT_AUDIT_MODE_SUMMARY,
+  RECIPIENT_CONDENSED_EXPORT_METRICS_DETAILS_SUMMARY,
   RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE,
   recipientRedlineTechnicalAppendixSummaryLine,
   RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY,
@@ -202,6 +203,20 @@ import {
   groupFriendlyChipsForHumanReview,
   humanReviewMeaningfulCount,
 } from "./recipientHumanReviewSummaryModel";
+import {
+  buildHumanReviewHeadlineCondensedCleanRevision,
+  detectRecipientReviewPresentationMode,
+  type RecipientReviewPresentationMode,
+} from "./recipientReviewPresentationMode";
+import {
+  buildCondensedTopicReviewCards,
+  buildCondensedTopicReviewCardsPdfHtml,
+} from "./recipientCondensedTopicReviewModel";
+import {
+  buildNotRestatedOriginalSectionsAppendixHtml,
+  RECIPIENT_NOT_RESTAT_ORIGINAL_SECTION_LABELS,
+} from "./recipientCondensedDraftSemanticMap";
+import { RecipientCondensedRevisionSurface, type CondensedRevisionTab } from "./RecipientCondensedRevisionSurface";
 import { filterChipsForBusinessReviewPresentation } from "./recipientFriendlyChipsPresentation";
 import { buildIntentSemanticBucketRows } from "./recipientIntentSemanticBuckets";
 import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
@@ -218,6 +233,7 @@ import { stripClausePreambleFromRevisedPair } from "./recipientRevisionPreambleS
 import {
   buildRecipientRedlineStickyNavRows,
   buildRecommendedSenderFocusLines,
+  businessReviewCardForSemanticId,
   getClauseCompareFallbackForSemanticId,
   getScrollTargetBlockIdForSemanticOrFallback,
   type BusinessReviewSemanticId,
@@ -1015,12 +1031,14 @@ export function AgreementRecipientReview({
         variant: "compare_fallback";
         sectionTitle: string;
         sectionSubline?: string;
+        businessNote?: string;
         oldText: string;
         newText: string;
         semanticId: BusinessReviewSemanticId;
       }
     | null
   >(null);
+  const [condensedReviewTab, setCondensedReviewTab] = useState<CondensedRevisionTab>("clean");
 
   const recipientRedlineStrippedPlainPair = useMemo(() => {
     if (!recipientRedlinePlainTexts) return null;
@@ -1029,6 +1047,21 @@ export function AgreementRecipientReview({
       recipientRedlinePlainTexts.proposedPlain,
     );
   }, [recipientRedlinePlainTexts]);
+
+  const recipientPresentationMode = useMemo((): RecipientReviewPresentationMode => {
+    if (!recipientRedlinePlainTexts) return "full_clause_redline";
+    return detectRecipientReviewPresentationMode({
+      currentPlain: recipientRedlinePlainTexts.currentPlain,
+      proposedPlain: recipientRedlinePlainTexts.proposedPlain,
+      narrowRecipientTargetedRedline: Boolean(recipientRedlinePlainTexts.narrowRecipientTargetedRedline),
+    });
+  }, [recipientRedlinePlainTexts]);
+
+  useEffect(() => {
+    if (recipientPresentationMode === "condensed_clean_revision") {
+      setCondensedReviewTab("clean");
+    }
+  }, [recipientPresentationMode, recipientPreview?.proposedDraft.updated_at]);
 
   const legalRedlineDocumentBaseVm = useMemo(() => {
     if (!recipientRedlinePlainTexts || !recipientRedlineStrippedPlainPair) return null;
@@ -1076,9 +1109,16 @@ export function AgreementRecipientReview({
   );
 
   const openFullLegalRedlineSection = useCallback(() => {
+    if (recipientPresentationMode === "condensed_clean_revision") {
+      setCondensedReviewTab("advanced");
+      window.requestAnimationFrame(() => {
+        suggestedChangesDocScrollRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+      return;
+    }
     const det = auditDetailsRef.current;
     if (det) det.open = true;
-  }, []);
+  }, [recipientPresentationMode]);
 
   const narrowIntentAnchorPresence = useMemo(() => {
     const absent = { payment_timing: false, pause_suspend_work: false };
@@ -1120,6 +1160,42 @@ export function AgreementRecipientReview({
     };
   }, [legalRedlineDocumentBaseVm, previewDiff, recipientIntentGapCount]);
 
+  const condensedTopicCards = useMemo(() => {
+    if (recipientPresentationMode !== "condensed_clean_revision" || !legalRedlineDocumentVm || !recipientRedlinePlainTexts) {
+      return [] as ReturnType<typeof buildCondensedTopicReviewCards>;
+    }
+    return buildCondensedTopicReviewCards(
+      legalRedlineDocumentVm,
+      recipientRedlinePlainTexts.currentPlain,
+      recipientFriendlyRedlineChips,
+    );
+  }, [
+    recipientPresentationMode,
+    legalRedlineDocumentVm,
+    recipientRedlinePlainTexts,
+    recipientFriendlyRedlineChips,
+  ]);
+
+  const condensedCleanRevisionPdfBundle = useMemo(() => {
+    if (recipientPresentationMode !== "condensed_clean_revision" || !recipientRedlinePlainTexts || !legalRedlineDocumentVm) {
+      return null;
+    }
+    const clean =
+      recipientRedlineStrippedPlainPair?.proposedPlain?.trim() ||
+      recipientRedlinePlainTexts.proposedPlain.trim();
+    return {
+      cleanProposedPlain: clean,
+      topicSectionHtml: buildCondensedTopicReviewCardsPdfHtml(condensedTopicCards),
+      notRestatedAppendixHtml: buildNotRestatedOriginalSectionsAppendixHtml(RECIPIENT_NOT_RESTAT_ORIGINAL_SECTION_LABELS),
+    };
+  }, [
+    recipientPresentationMode,
+    recipientRedlinePlainTexts,
+    recipientRedlineStrippedPlainPair,
+    legalRedlineDocumentVm,
+    condensedTopicCards,
+  ]);
+
   const recipientSemanticPresentation = useMemo(() => {
     if (!legalRedlineDocumentVm || recipientRedlinePlainTexts?.narrowRecipientTargetedRedline) return null;
     return buildRecipientSemanticRedlinePresentation(legalRedlineDocumentVm);
@@ -1128,6 +1204,9 @@ export function AgreementRecipientReview({
   const scrollRecipientSemanticRelaxed = useCallback(
     async (semanticId: BusinessReviewSemanticId) => {
       if (!legalRedlineDocumentVm) return;
+      if (!suggestedChangesDocScrollRef.current) {
+        await new Promise<void>((r) => window.requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      }
       const bid = getScrollTargetBlockIdForSemanticOrFallback(legalRedlineDocumentVm, semanticId);
       const sem = bid ? recipientSemanticAnchorForBlockId(bid) : null;
       await scrollRecipientRedlineClausePanel({
@@ -1145,6 +1224,9 @@ export function AgreementRecipientReview({
   const scrollToSemanticReviewInRedline = useCallback(
     async (semanticId: BusinessReviewSemanticId, meta?: { cardTitle?: string; chipLabel?: string }) => {
       openFullLegalRedlineSection();
+      if (recipientPresentationMode === "condensed_clean_revision") {
+        await new Promise<void>((r) => window.requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      }
       const vm = legalRedlineDocumentVm;
       const cardTitle = meta?.cardTitle ?? meta?.chipLabel ?? null;
       const clickTag =
@@ -1172,10 +1254,12 @@ export function AgreementRecipientReview({
       if (!semanticAnchorId && !blockId) {
         const fb = getClauseCompareFallbackForSemanticId(vm, semanticId);
         if (fb) {
+          const card = businessReviewCardForSemanticId(semanticId, cardTitle ?? fb.sectionLabel ?? "Change");
           setBusinessReviewFocusedWording({
             variant: "compare_fallback",
             sectionTitle: (cardTitle ?? fb.sectionLabel) || "Changed clause",
             sectionSubline: fb.sectionLabel,
+            businessNote: card.whyMatters,
             oldText: fb.oldText,
             newText: fb.newText,
             semanticId,
@@ -1203,10 +1287,12 @@ export function AgreementRecipientReview({
         });
         const fb = getClauseCompareFallbackForSemanticId(vm, semanticId);
         if (fb) {
+          const card = businessReviewCardForSemanticId(semanticId, cardTitle ?? fb.sectionLabel ?? "Change");
           setBusinessReviewFocusedWording({
             variant: "compare_fallback",
             sectionTitle: (cardTitle ?? fb.sectionLabel) || "Changed clause",
             sectionSubline: fb.sectionLabel,
+            businessNote: card.whyMatters,
             oldText: fb.oldText,
             newText: fb.newText,
             semanticId,
@@ -1224,7 +1310,7 @@ export function AgreementRecipientReview({
         targetElementExists: true,
       });
     },
-    [legalRedlineDocumentVm, openFullLegalRedlineSection],
+    [legalRedlineDocumentVm, openFullLegalRedlineSection, recipientPresentationMode],
   );
 
   const compareConfidence = useMemo(() => {
@@ -1263,6 +1349,18 @@ export function AgreementRecipientReview({
 
   const humanReviewStructuredPdf = useMemo(() => {
     if (!legalRedlineDocumentVm || !compareConfidence || !recipientPreview || !previewDiff) return null;
+    const headlinePlainOverride =
+      recipientPresentationMode === "condensed_clean_revision"
+        ? buildHumanReviewHeadlineCondensedCleanRevision(
+            reviewerHeadlineName,
+            condensedTopicCards.length > 0
+              ? condensedTopicCards.length
+              : humanReviewMeaningfulCount(
+                  recipientFriendlyRedlineChips,
+                  legalRedlineDocumentVm.stats.changedBlockCount,
+                ),
+          )
+        : null;
     return buildHumanReviewStructuredForPdf({
       reviewerHeadlineName,
       chips: recipientFriendlyRedlineChips,
@@ -1270,6 +1368,7 @@ export function AgreementRecipientReview({
       instructionPlain: recipientPreview.revisionText ?? "",
       changedFieldKeys: previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).map((r) => r.field),
       confidence: compareConfidence,
+      headlinePlainOverride,
     });
   }, [
     legalRedlineDocumentVm,
@@ -1278,6 +1377,8 @@ export function AgreementRecipientReview({
     previewDiff,
     recipientFriendlyRedlineChips,
     reviewerHeadlineName,
+    recipientPresentationMode,
+    condensedTopicCards.length,
   ]);
 
   const redlinePdfTechnicalAppendixPlain = useMemo(() => {
@@ -1305,11 +1406,25 @@ export function AgreementRecipientReview({
 
   const humanReviewHeadlineText = useMemo(() => {
     if (!legalRedlineDocumentVm) return "";
+    if (recipientPresentationMode === "condensed_clean_revision") {
+      return buildHumanReviewHeadlineCondensedCleanRevision(
+        reviewerHeadlineName,
+        condensedTopicCards.length > 0
+          ? condensedTopicCards.length
+          : humanReviewMeaningfulCount(recipientFriendlyRedlineChips, legalRedlineDocumentVm.stats.changedBlockCount),
+      );
+    }
     return buildHumanReviewHeadline(
       reviewerHeadlineName,
       humanReviewMeaningfulCount(recipientFriendlyRedlineChips, legalRedlineDocumentVm.stats.changedBlockCount),
     );
-  }, [legalRedlineDocumentVm, reviewerHeadlineName, recipientFriendlyRedlineChips]);
+  }, [
+    legalRedlineDocumentVm,
+    reviewerHeadlineName,
+    recipientFriendlyRedlineChips,
+    recipientPresentationMode,
+    condensedTopicCards.length,
+  ]);
 
   const humanReviewKeyUpdatesLabel = useMemo(() => {
     if (!legalRedlineDocumentVm || recipientFriendlyRedlineChips.length === 0) return null;
@@ -2239,6 +2354,35 @@ export function AgreementRecipientReview({
           />
         ) : null}
 
+        {recipientPresentationMode === "condensed_clean_revision" && legalRedlineDocumentVm && recipientRedlinePlainTexts ? (
+          <RecipientCondensedRevisionSurface
+            ref={suggestedChangesDocScrollRef}
+            proposedPlainClean={
+              recipientRedlineStrippedPlainPair?.proposedPlain ?? recipientRedlinePlainTexts.proposedPlain
+            }
+            topicCards={condensedTopicCards}
+            notRestatedLabels={RECIPIENT_NOT_RESTAT_ORIGINAL_SECTION_LABELS}
+            legalVm={legalRedlineDocumentVm}
+            onlyChangedRedlineSections={onlyChangedRedlineSections}
+            onOnlyChangedChange={setOnlyChangedRedlineSections}
+            recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts.narrowRecipientTargetedRedline)}
+            narrowRedlineHighlightAnchor={narrowRedlineHighlightAnchor}
+            semanticPresentation={recipientSemanticPresentation}
+            highlightedSemanticAnchor={highlightedSemanticAnchor}
+            stickyNavRows={buildRecipientRedlineStickyNavRows(presentationFriendlyRedlineChips, legalRedlineDocumentVm)}
+            onStickySelect={(id, m) => void scrollToSemanticReviewInRedline(id, m)}
+            onDenseExactWording={(w) =>
+              setBusinessReviewFocusedWording({
+                sectionTitle: w.sectionLabel,
+                oldText: w.oldText,
+                newText: w.newText,
+              })
+            }
+            selectedTab={condensedReviewTab}
+            onTabChange={setCondensedReviewTab}
+          />
+        ) : null}
+
         {legalRedlineDocumentVm ? (
           <>
             <div className="mt-5 flex flex-wrap gap-2">
@@ -2267,7 +2411,9 @@ export function AgreementRecipientReview({
               data-testid="recipient-audit-mode-details"
             >
               <summary className="cursor-pointer list-none text-[12px] font-semibold text-slate-300 marker:content-none hover:text-slate-100 [&::-webkit-details-marker]:hidden">
-                {RECIPIENT_AUDIT_MODE_SUMMARY}
+                {recipientPresentationMode === "condensed_clean_revision"
+                  ? RECIPIENT_CONDENSED_EXPORT_METRICS_DETAILS_SUMMARY
+                  : RECIPIENT_AUDIT_MODE_SUMMARY}
               </summary>
               <div className="mt-2 border-t border-slate-800/50 pt-2">
                 <p className="mb-2 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_AUDIT_MODE_SUBCOPY}</p>
@@ -2319,64 +2465,71 @@ export function AgreementRecipientReview({
                     ) : null}
                   </div>
                 </details>
-                <h3
-                  className="mt-4 text-sm font-semibold tracking-tight text-slate-200"
-                  data-testid="recipient-human-redline-subhead"
-                >
-                  {RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING}
-                </h3>
-                <p className="mt-1 text-[11px] leading-snug text-slate-500" data-testid="recipient-redline-changed-wording-instruction">
-                  {RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION}
-                </p>
-                {participantPid ? (
-                  <p className="mt-1 text-[10px] leading-snug text-slate-500">
-                    Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
-                  </p>
+                {recipientPresentationMode !== "condensed_clean_revision" ? (
+                  <>
+                    <h3
+                      className="mt-4 text-sm font-semibold tracking-tight text-slate-200"
+                      data-testid="recipient-human-redline-subhead"
+                    >
+                      {RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING}
+                    </h3>
+                    <p
+                      className="mt-1 text-[11px] leading-snug text-slate-500"
+                      data-testid="recipient-redline-changed-wording-instruction"
+                    >
+                      {RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION}
+                    </p>
+                    {participantPid ? (
+                      <p className="mt-1 text-[10px] leading-snug text-slate-500">
+                        Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
+                      </p>
+                    ) : null}
+                    <div className="mt-3 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
+                      <div
+                        ref={suggestedChangesDocScrollRef}
+                        className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
+                        data-testid="recipient-suggested-changes-document"
+                      >
+                        <label className="mb-2 flex cursor-pointer items-center gap-2 px-1 text-[11px] text-slate-700">
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 rounded border-slate-400 text-sky-700 focus:ring-sky-600"
+                            checked={onlyChangedRedlineSections}
+                            data-testid="recipient-redline-only-changed-toggle"
+                            onChange={(e) => setOnlyChangedRedlineSections(e.target.checked)}
+                          />
+                          <span>
+                            {RECIPIENT_ONLY_CHANGED_SECTIONS}
+                            {!onlyChangedRedlineSections ? (
+                              <span className="ml-1 text-slate-500">({RECIPIENT_SHOW_UNCHANGED_CONTEXT})</span>
+                            ) : null}
+                          </span>
+                        </label>
+                        <RecipientRedlineStickyNavigator
+                          rows={buildRecipientRedlineStickyNavRows(presentationFriendlyRedlineChips, legalRedlineDocumentVm)}
+                          onSelectSemantic={(id, m) => void scrollToSemanticReviewInRedline(id, m)}
+                        />
+                        <RecipientLegalRedlineDocument
+                          document={legalRedlineDocumentVm}
+                          variant="suggested"
+                          hideUnchangedBlocks={onlyChangedRedlineSections}
+                          collapseDenseMicroDiff
+                          recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
+                          highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
+                          semanticPresentation={recipientSemanticPresentation}
+                          highlightedSemanticAnchor={highlightedSemanticAnchor}
+                          onDenseBlockViewExactWording={(w) =>
+                            setBusinessReviewFocusedWording({
+                              sectionTitle: w.sectionLabel,
+                              oldText: w.oldText,
+                              newText: w.newText,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </>
                 ) : null}
-                <div className="mt-3 rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">
-                  <div
-                    ref={suggestedChangesDocScrollRef}
-                    className="max-h-[min(72vh,880px)] min-h-[40vh] overflow-y-auto rounded-md bg-slate-100/40"
-                    data-testid="recipient-suggested-changes-document"
-                  >
-                    <label className="mb-2 flex cursor-pointer items-center gap-2 px-1 text-[11px] text-slate-700">
-                      <input
-                        type="checkbox"
-                        className="h-3.5 w-3.5 rounded border-slate-400 text-sky-700 focus:ring-sky-600"
-                        checked={onlyChangedRedlineSections}
-                        data-testid="recipient-redline-only-changed-toggle"
-                        onChange={(e) => setOnlyChangedRedlineSections(e.target.checked)}
-                      />
-                      <span>
-                        {RECIPIENT_ONLY_CHANGED_SECTIONS}
-                        {!onlyChangedRedlineSections ? (
-                          <span className="ml-1 text-slate-500">({RECIPIENT_SHOW_UNCHANGED_CONTEXT})</span>
-                        ) : null}
-                      </span>
-                    </label>
-                    <RecipientRedlineStickyNavigator
-                      rows={buildRecipientRedlineStickyNavRows(presentationFriendlyRedlineChips, legalRedlineDocumentVm)}
-                      onSelectSemantic={(id, m) => void scrollToSemanticReviewInRedline(id, m)}
-                    />
-                    <RecipientLegalRedlineDocument
-                      document={legalRedlineDocumentVm}
-                      variant="suggested"
-                      hideUnchangedBlocks={onlyChangedRedlineSections}
-                      collapseDenseMicroDiff
-                      recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts?.narrowRecipientTargetedRedline)}
-                      highlightedRecipientAnchor={narrowRedlineHighlightAnchor}
-                      semanticPresentation={recipientSemanticPresentation}
-                      highlightedSemanticAnchor={highlightedSemanticAnchor}
-                      onDenseBlockViewExactWording={(w) =>
-                        setBusinessReviewFocusedWording({
-                          sectionTitle: w.sectionLabel,
-                          oldText: w.oldText,
-                          newText: w.newText,
-                        })
-                      }
-                    />
-                  </div>
-                </div>
               </div>
             </details>
 
@@ -2571,6 +2724,7 @@ export function AgreementRecipientReview({
                     redlinePdfTechnicalAppendixPlain={redlinePdfTechnicalAppendixPlain}
                     redlinePdfCompareConfidenceLevel={compareConfidence?.level ?? null}
                     redlinePdfSemanticPresentation={recipientSemanticPresentation}
+                    redlinePdfCondensedCleanRevision={condensedCleanRevisionPdfBundle}
                     pdfReadContext={{
                       agreementId,
                       readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
@@ -2614,6 +2768,11 @@ export function AgreementRecipientReview({
               sectionSubline={
                 businessReviewFocusedWording?.variant === "compare_fallback"
                   ? businessReviewFocusedWording.sectionSubline
+                  : undefined
+              }
+              businessNote={
+                businessReviewFocusedWording?.variant === "compare_fallback"
+                  ? businessReviewFocusedWording.businessNote
                   : undefined
               }
               oldText={businessReviewFocusedWording?.oldText ?? ""}

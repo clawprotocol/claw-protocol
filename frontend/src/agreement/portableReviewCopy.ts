@@ -250,6 +250,38 @@ export const RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING = "Changed wording";
 /** Short instruction under the changed-clause heading (recipient full redline). */
 export const RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION =
   "These are the clauses that appear to have changed. Use the buttons above to jump between review areas.";
+
+/** Condensed revised-draft presentation (recipient compare). */
+export const RECIPIENT_CONDENSED_REVISION_BANNER =
+  "This upload appears to be a condensed revised draft. LawDog grouped related changes for review.";
+export const RECIPIENT_CONDENSED_COMPARE_FOCUS_LABEL = "Compare focus areas";
+/** Non-interactive chips above the clean proposed draft (condensed mode). */
+export const RECIPIENT_CONDENSED_COMPARE_FOCUS_CHIPS: readonly string[] = [
+  "Payment",
+  "Scope",
+  "Ownership",
+  "Third-party services",
+  "Acceptance",
+  "Timeline",
+];
+export const RECIPIENT_CONDENSED_EXPORT_METRICS_DETAILS_SUMMARY = "Export versions & detailed metrics";
+export const RECIPIENT_CONDENSED_TAB_CLEAN = "Clean proposed version";
+export const RECIPIENT_CONDENSED_TAB_CHANGED = "Changed wording";
+export const RECIPIENT_CONDENSED_TAB_ADVANCED = "Advanced legal markup";
+export const RECIPIENT_ADVANCED_REDLINE_INTRO =
+  "Useful for line-by-line inspection. Most people review the clean draft and changed wording first.";
+export const RECIPIENT_NOT_RESTAT_ORIGINAL_INTRO =
+  "Some unchanged or unaddressed original sections are not repeated in this condensed draft.";
+export const RECIPIENT_NOT_RESTAT_ORIGINAL_DETAILS_SUMMARY = "Original sections not directly restated";
+export const RECIPIENT_NOT_RESTAT_ORIGINAL_FOOTNOTE =
+  "These may remain from the original unless the sender accepts a replacement draft that omits them. Absence in this upload does not mean they were deleted from your agreement.";
+export const RECIPIENT_EXPORT_PDF_CLEAN_PROPOSED_HEADING = "Clean proposed revision";
+export const RECIPIENT_EXPORT_PDF_KEY_CHANGED_WORDING_HEADING = "Key changed wording by topic";
+export const RECIPIENT_EXPORT_PDF_ADVANCED_MARKUP_APPENDIX_HEADING = "Advanced legal markup (appendix)";
+export const RECIPIENT_EXPORT_PDF_NOT_RESTAT_APPENDIX_HEADING = "Original sections not directly restated";
+export const RECIPIENT_FOCUS_COMPARE_SCROLL_MISS_NOTE =
+  "Could not jump to an exact clause in the redline. Showing the best matching revision.";
+export const RECIPIENT_FOCUS_COMPARE_BUSINESS_NOTE_LABEL = "Business note";
 /** Closed disclosure wrapping raw insert/delete markup (UI + PDF). */
 export const RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP = "Show advanced legal markup";
 /** Optional line-by-line markup inside a clause prior/revised panel. */
