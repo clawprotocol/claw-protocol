@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
@@ -47,7 +47,17 @@ function makeDraft(id: string) {
 }
 
 describe("AgreementRecipientReview same-PDF import (no material change)", () => {
+  beforeEach(() => {
+    extractMock.mockReset();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    });
+  });
+
   afterEach(() => {
+    extractMock.mockReset();
     cleanup();
     vi.restoreAllMocks();
   });
@@ -102,7 +112,14 @@ describe("AgreementRecipientReview same-PDF import (no material change)", () => 
     });
 
     expect(screen.queryByTestId("recipient-suggested-changes-panel")).toBeNull();
+    expect(screen.queryByTestId("recipient-business-review-cards")).toBeNull();
     expect(screen.queryByText(/Sarah Collins proposed/i)).toBeNull();
+    expect(screen.queryByText(/meaningful revisions/i)).toBeNull();
+    expect(screen.queryByTestId("recipient-focused-wording-dialog")).toBeNull();
+    expect(screen.queryByTestId("recipient-redline-sticky-nav")).toBeNull();
+
+    const noChangePanel = screen.getByTestId("recipient-import-no-change-panel");
+    expect(within(noChangePanel).queryByText(/Changed wording/i)).toBeNull();
 
     extractMock.mockResolvedValueOnce({
       ok: true,
@@ -124,5 +141,82 @@ describe("AgreementRecipientReview same-PDF import (no material change)", () => 
       { timeout: 5000 },
     );
     expect(screen.queryByTestId("recipient-import-no-change-panel")).toBeNull();
+  });
+
+  it("after a material compare, re-uploading the same-as-current draft clears prior UI and shows no-change", async () => {
+    const agreementId = "ag_same_pdf_after_change";
+    const draft = makeDraft(agreementId);
+    const draftSanitizeContext = [draft.title, draft.purpose, draft.payment_terms, ...draft.parties.map((p) => p.name)].join(
+      "\n",
+    );
+    const exactComparePlain = htmlToPlainText(
+      substitutePartyPlaceholdersInUserFacingText(LONG_HTML, draftSanitizeContext),
+    ).trim();
+
+    extractMock.mockResolvedValueOnce({
+      ok: true,
+      text: `${exactComparePlain}\n\nMATERIAL_UNIQUE_TAIL: governing law must be Antarctica only for this counter-proposal.`,
+      importReviewerNotesTail: null,
+      importArtifactsRemoved: [] as string[],
+      pdfThinSanitizeUsedRaw: false,
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes(`/api/agreements/${agreementId}/render`)) {
+        return jsonResponse({ rendered_html: LONG_HTML });
+      }
+      if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
+        return jsonResponse({ draft });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview agreementId={agreementId} recipientAccessToken="tok_same2" />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => expect(screen.queryByText(/Loading agreement/i)).toBeNull());
+
+    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
+    await waitFor(() => expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy());
+    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
+    await waitFor(() => expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy());
+
+    const fileInput = await screen.findByTestId("recipient-import-draft-file-input");
+    fireEvent.change(fileInput, { target: { files: [new File(["a"], "changed.pdf", { type: "application/pdf" })] } });
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("recipient-suggested-changes-panel")).toBeTruthy();
+      },
+      { timeout: 8000 },
+    );
+    expect(screen.queryByTestId("recipient-import-no-change-panel")).toBeNull();
+    expect(screen.getByTestId("recipient-suggested-changes-document")).toBeTruthy();
+
+    extractMock.mockResolvedValueOnce({
+      ok: true,
+      text: `${exactComparePlain}\n\nPage 1 of 2\n`,
+      importReviewerNotesTail: null,
+      importArtifactsRemoved: [] as string[],
+      pdfThinSanitizeUsedRaw: false,
+    });
+
+    fireEvent.change(fileInput, { target: { files: [new File(["b"], "same-as-draft.pdf", { type: "application/pdf" })] } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-import-no-change-panel")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("recipient-suggested-changes-panel")).toBeNull();
+    expect(screen.queryByTestId("recipient-business-review-cards")).toBeNull();
+    expect(screen.queryByText(/Antarctica/i)).toBeNull();
+    expect(screen.queryByText(/meaningful revisions/i)).toBeNull();
+    expect(screen.queryByTestId("recipient-focused-wording-dialog")).toBeNull();
+    expect(screen.queryByTestId("recipient-redline-sticky-nav")).toBeNull();
+    const panel = screen.getByTestId("recipient-import-no-change-panel");
+    expect(within(panel).queryByText(/Changed wording/i)).toBeNull();
   });
 });

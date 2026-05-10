@@ -470,5 +470,7 @@ describe("import no-material-change redline PDF", () => {
     });
     expect(html).toContain(RECIPIENT_IMPORT_NO_CHANGE_REDACT_PDF_HEADLINE);
     expect(html).not.toContain("Sarah Collins proposed 6 meaningful revisions");
+    expect(html.toLowerCase()).not.toContain("meaningful revisions");
+    expect(html.toLowerCase()).not.toMatch(/line-through/);
   });
 });

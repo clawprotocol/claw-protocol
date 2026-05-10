@@ -145,6 +145,12 @@ export const RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE =
 export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_ORIGINAL_DRAFT_PDF = "Download original draft PDF";
 export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REVISED_AGREEMENT_PDF = "Download revised agreement PDF";
 export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REDLINE_PDF = "Download redline PDF";
+/** Redline PDF when import matches the sender’s current draft (summary only, no tracked diff). */
+export const RECIPIENT_EXPORT_IMPORT_NO_CHANGE_REDLINE_PDF =
+  "Download comparison summary (no edits detected)";
+/** Plain-text body for import no-change “redline summary” copy / .txt download (no machine diff). */
+export const RECIPIENT_IMPORT_NO_CHANGE_PLAINTEXT_EXPORT =
+  "No changes detected\n\nThe uploaded draft matches the sender's current agreement after routine PDF cleanup. There is no detailed redline to copy.";
 
 /** Preview / redline summary (true agreement compare). */
 export const RECIPIENT_PREVIEW_SUMMARY_HEADLINE = "Review proposed agreement changes";

@@ -21,6 +21,7 @@ import {
   RECIPIENT_EXPORT_REVIEW_DOWNLOAD_ORIGINAL_DRAFT_PDF,
   RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REDLINE_PDF,
   RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REVISED_AGREEMENT_PDF,
+  RECIPIENT_IMPORT_NO_CHANGE_PLAINTEXT_EXPORT,
 } from "./portableReviewCopy";
 
 /** Plain-text summary of block redline for copy/export (no HTML). */
@@ -160,7 +161,10 @@ export function RecipientPreviewVersionsExport({
     redlinePdfCondensedCleanRevision,
   ]);
 
-  const redlinePlain = useCallback(() => legalRedlineDocumentVmToPlainSummary(legalRedlineVmRef.current), []);
+  const redlinePlain = useCallback(() => {
+    if (redlinePdfImportMaterialNoChange) return RECIPIENT_IMPORT_NO_CHANGE_PLAINTEXT_EXPORT;
+    return legalRedlineDocumentVmToPlainSummary(legalRedlineVmRef.current);
+  }, [redlinePdfImportMaterialNoChange]);
 
   useEffect(() => {
     mountedRef.current = true;

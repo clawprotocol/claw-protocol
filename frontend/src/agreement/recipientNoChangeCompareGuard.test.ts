@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { RECIPIENT_FIXTURE_CONSULTING_AGREEMENT_PARSED_2026_05_10 } from "./fixtures/recipientConsultingAgreementOriginalParsedText";
 import {
   normalizeForRecipientSameDocumentCompare,
   recipientBaselinePlainFromRenderedHtml,
@@ -72,5 +73,19 @@ describe("recipientNoChangeCompareGuard", () => {
 
   it("recipientBaselinePlainFromRenderedHtml decodes entities like htmlToPlainText", () => {
     expect(recipientBaselinePlainFromRenderedHtml("<p>Pay &amp; wire.</p>")).toContain("Pay");
+  });
+
+  it("consulting agreement fixture PDF text matches authoritative render after normalization", () => {
+    const fixture = RECIPIENT_FIXTURE_CONSULTING_AGREEMENT_PARSED_2026_05_10;
+    const paras = fixture.split(/\n\n+/).map((p) => p.replace(/\n/g, " ").trim());
+    const html = `<article>${paras.map((p) => `<p>${p}</p>`).join("")}</article>`;
+    const imported =
+      fixture +
+      "\n\nPage 2 of 4\n" +
+      "Created with LawDog — draft for review\n" +
+      "Sarah Collins proposed revised draft for QA testing\n";
+    expect(recipientImportsMatchAuthoritativeBaseline({ baselineRenderedHtml: html, importedAgreementPlain: imported })).toBe(
+      true,
+    );
   });
 });

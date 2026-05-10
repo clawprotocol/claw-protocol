@@ -6,6 +6,7 @@ import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 import {
   RECIPIENT_BTN_CONTINUE_EDITING,
+  RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE,
   RECIPIENT_WANT_COPY_BODY,
   RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
   RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
@@ -85,6 +86,9 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_PRIMARY)).toBeTruthy();
     expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_SECONDARY)).toBeTruthy();
     expect(screen.getByTestId("recipient-download-draft-pdf")).toBeTruthy();
+    expect(screen.getByTestId("recipient-download-draft-pdf").getAttribute("title")).toBe(
+      RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE,
+    );
     expect(screen.getByRole("button", { name: /Download draft PDF/i })).toBeTruthy();
     expect(screen.getByTestId("recipient-download-draft-text")).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-draft-text")).toBeTruthy();
