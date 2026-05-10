@@ -198,6 +198,42 @@ describe("RecipientLegalRedlineDocument", () => {
     expect(el?.className).not.toMatch(/font-semibold/);
   });
 
+  it("changed-only mode does not render blocks with isMeaningfullyChanged false", () => {
+    const document: LegalRedlineDocumentViewModel = {
+      blocks: [
+        {
+          id: "ghost",
+          kind: "paragraph",
+          label: "Ghost",
+          segments: [
+            { type: "delete", text: "old" },
+            { type: "insert", text: "new" },
+          ],
+          insertCount: 1,
+          deleteCount: 1,
+          sameCount: 0,
+          hasInsert: true,
+          hasDelete: true,
+          hasChange: true,
+          isMeaningfullyChanged: false,
+        },
+      ],
+      stats: {
+        blockCount: 1,
+        changedBlockCount: 1,
+        insertCount: 1,
+        deleteCount: 1,
+        sameCount: 0,
+        segmentCount: 2,
+        currentLen: 3,
+        proposedLen: 3,
+      },
+      hasChanges: true,
+    };
+    render(<RecipientLegalRedlineDocument document={document} variant="suggested" hideUnchangedBlocks />);
+    expect(screen.queryByTestId("recipient-redline-changed-block")).toBeNull();
+  });
+
   it("wraps suggested non-panel changes in a closed Show advanced legal markup disclosure", () => {
     const document: LegalRedlineDocumentViewModel = {
       blocks: [

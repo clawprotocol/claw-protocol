@@ -1,7 +1,10 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildLegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import { applyRecipientMeaningfulChangePass } from "./recipientMeaningfulRedlinePass";
 import {
   openAncestorDetailsWithin,
+  resolveRecipientSemanticScrollTarget,
   scrollRecipientRedlineAnchor,
   scrollRecipientRedlineClausePanel,
 } from "./recipientRedlineDomScroll";
@@ -58,6 +61,16 @@ describe("recipientRedlineDomScroll", () => {
     });
     expect(outer.open).toBe(true);
     expect(el?.id).toBe("hit");
+  });
+
+  it("resolveRecipientSemanticScrollTarget matches centralized scroll resolver output", () => {
+    const vm = applyRecipientMeaningfulChangePass(
+      buildLegalRedlineDocumentViewModel("4. Payment\nDue on receipt.", "4. Payment\nNet 30."),
+    );
+    const r = resolveRecipientSemanticScrollTarget(vm, "payment_terms");
+    expect(r.blockId).toBeTruthy();
+    expect(r.semanticAnchorId).toBeTruthy();
+    expect(r.semanticAnchorId).toMatch(/^semantic-/);
   });
 
   it("scrollRecipientRedlineClausePanel falls back to data-block-id and invokes highlight", async () => {

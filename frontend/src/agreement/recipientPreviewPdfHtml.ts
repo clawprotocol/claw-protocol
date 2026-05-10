@@ -19,6 +19,11 @@ import {
 } from "./portableReviewCopy";
 import { blockPriorAndRevisedPlain, type RecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
+import {
+  recipientBlockHasInlineMarkupDiff,
+  recipientBlockShowsRedline,
+  recipientClauseMeaningfulMaterialRatio,
+} from "./recipientMeaningfulRedlinePass";
 
 export type RecipientPreviewPdfExportKind = "original" | "proposed" | "redline";
 
@@ -290,9 +295,11 @@ function renderSemanticBeforeAfterPdfBlock(
       <pre style="margin:0;font:13px/1.65 Georgia,serif;white-space:pre-wrap;color:#064e3b;">${escapeHtml(revised)}</pre>
     </div>
   </div>`;
-  const micro = `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;">${escapeHtml(
-    RECIPIENT_SHOW_LINE_BY_LINE_MARKUP,
-  )}</summary><div style="margin-top:10px;">${renderBlockInlineFlow(block, { suppressSectionHeader: true })}</div></details>`;
+  const micro = recipientBlockHasInlineMarkupDiff(block)
+    ? `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;">${escapeHtml(
+        RECIPIENT_SHOW_LINE_BY_LINE_MARKUP,
+      )}</summary><div style="margin-top:10px;">${renderBlockInlineFlow(block, { suppressSectionHeader: true })}</div></details>`
+    : "";
   return `<section style="display:block;margin:0;padding:16px 0 18px 14px;border-left:3px solid #cbd5e1;">${header}${pair}${micro}</section>`;
 }
 
@@ -358,7 +365,11 @@ export function buildRecipientRedlinePdfHtml(
     RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE,
   )}</h2>`;
   const sem = human?.semanticRedlinePresentation ?? null;
-  if (sem?.mode === "whole_section_replacement" && !sem.shortRevisedVsLongBaseline) {
+  if (
+    sem?.mode === "whole_section_replacement" &&
+    !sem.shortRevisedVsLongBaseline &&
+    recipientClauseMeaningfulMaterialRatio(vm) >= 0.6
+  ) {
     lead += `<p style="margin:-6px 0 18px;font-size:12px;color:#475569;line-height:1.55;">${escapeHtml(
       RECIPIENT_SEMANTIC_REDLINE_INTRO,
     )}</p>`;
@@ -366,8 +377,9 @@ export function buildRecipientRedlinePdfHtml(
   const exportLevel = human?.exportCompareConfidenceLevel ?? "high";
   const tightenExport = exportLevel !== "high";
   const wantsChangedOnly = human?.exportRedlineChangedSectionsOnly !== false;
-  const hasAnyChanged = vm.blocks.some((b) => b.hasChange);
-  const blocksForPdf = wantsChangedOnly && hasAnyChanged ? vm.blocks.filter((b) => b.hasChange) : vm.blocks;
+  const hasAnyMeaningful = vm.blocks.some((b) => recipientBlockShowsRedline(b));
+  const blocksForPdf =
+    wantsChangedOnly && hasAnyMeaningful ? vm.blocks.filter((b) => recipientBlockShowsRedline(b)) : vm.blocks;
   const seenLabels = new Set<string>();
   const seenContentFp = new Set<string>();
   const seenBoilerFp = new Set<string>();
@@ -396,7 +408,13 @@ export function buildRecipientRedlinePdfHtml(
         seenBoilerFp.add(normFp);
       }
 
-      if (tightenExport && exportLevel === "low" && b.hasChange && blockIsDenseForExportCollapse(b)) {
+      if (
+        tightenExport &&
+        exportLevel === "low" &&
+        b.hasChange &&
+        recipientBlockShowsRedline(b) &&
+        blockIsDenseForExportCollapse(b)
+      ) {
         if (!denseCollapsedOnce) {
           denseCollapsedOnce = true;
           return renderCollapsedExportSection();
@@ -404,12 +422,12 @@ export function buildRecipientRedlinePdfHtml(
         return "";
       }
 
-      if (sem?.blockStyle.get(b.id) === "before_after" && b.hasChange) {
+      if (sem?.blockStyle.get(b.id) === "before_after" && recipientBlockShowsRedline(b)) {
         return renderSemanticBeforeAfterPdfBlock(b, { suppressSectionHeader: suppress });
       }
 
       const flow = renderBlockInlineFlow(b, { suppressSectionHeader: suppress });
-      if (b.hasChange) {
+      if (b.hasChange && recipientBlockShowsRedline(b) && recipientBlockHasInlineMarkupDiff(b)) {
         return `<details style="display:block;margin:0 0 18px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;background:#ffffff;"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;">${escapeHtml(
           RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
         )}</summary><div style="margin-top:10px;">${flow}</div></details>`;

@@ -38,6 +38,12 @@ export type LegalRedlineBlock = {
   hasChange: boolean;
   /** Reserved for per-block instruction-gap hints (future); default false. */
   requestedButNotReflected?: boolean;
+  /**
+   * When false, this block must not show insert/delete UI (equivalence / heading inheritance).
+   * When true with {@link hasChange}, the block is a precision redline target.
+   * When undefined, callers should treat as {@link hasChange} (legacy documents).
+   */
+  isMeaningfullyChanged?: boolean;
 };
 
 export type LegalRedlineDocumentViewModel = {
@@ -618,6 +624,22 @@ export function buildLegalRedlineDocumentViewModel(
   const stats = aggregateStats(blocks, cur.length, prop.length);
   const hasChanges = blocks.some((b) => blockHasMaterialChange(b.segments));
   return {
+    blocks,
+    stats,
+    hasChanges,
+    fallbackReason: detectFallbackReason(blocks),
+  };
+}
+
+/** Recompute {@link LegalRedlineDocumentViewModel} stats after block-level mutations (equivalence pass, etc.). */
+export function withReplacedLegalRedlineBlocks(
+  vm: LegalRedlineDocumentViewModel,
+  blocks: LegalRedlineBlock[],
+): LegalRedlineDocumentViewModel {
+  const stats = aggregateStats(blocks, vm.stats.currentLen, vm.stats.proposedLen);
+  const hasChanges = blocks.some((b) => blockHasMaterialChange(b.segments));
+  return {
+    ...vm,
     blocks,
     stats,
     hasChanges,

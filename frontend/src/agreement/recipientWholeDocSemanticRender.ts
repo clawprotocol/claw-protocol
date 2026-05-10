@@ -4,6 +4,7 @@
  */
 
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import { recipientBlockShowsRedline } from "./recipientMeaningfulRedlinePass";
 
 export type RecipientRedlineSemanticRenderMode = "inline_edit" | "whole_section_replacement";
 
@@ -86,7 +87,8 @@ export function recipientDocumentShortRevisedVsLongBaseline(vm: LegalRedlineDocu
  * Strict clause-scale rewrite (last resort for before/after at block level when baseline is short).
  */
 export function blockQualifiesForBeforeAfterPanelStrict(block: LegalRedlineBlock): boolean {
-  if (!block.hasChange || blockLooksLikeWholeDocumentBlob(block)) return false;
+  if (!block.hasChange || block.isMeaningfullyChanged === false || !recipientBlockShowsRedline(block)) return false;
+  if (blockLooksLikeWholeDocumentBlob(block)) return false;
   const cur = String(block.currentText ?? "").trim();
   const prop = String(block.proposedText ?? "").trim();
   const alt = nonSameSegmentCount(block);
@@ -111,7 +113,8 @@ export function blockQualifiesClausePriorRevisedPanel(
   block: LegalRedlineBlock,
   ctx: { shortRevisedVsLongBaseline: boolean },
 ): boolean {
-  if (!block.hasChange || blockLooksLikeWholeDocumentBlob(block)) return false;
+  if (!block.hasChange || block.isMeaningfullyChanged === false || !recipientBlockShowsRedline(block)) return false;
+  if (blockLooksLikeWholeDocumentBlob(block)) return false;
   if (ctx.shortRevisedVsLongBaseline) {
     return blockQualifiesForBeforeAfterPanelStrict(block);
   }
@@ -170,7 +173,7 @@ export function buildRecipientSemanticRedlinePresentation(
   let changed = 0;
 
   for (const b of vm.blocks) {
-    if (!b.hasChange) {
+    if (!b.hasChange || !recipientBlockShowsRedline(b)) {
       blockStyle.set(b.id, "inline");
       continue;
     }
@@ -182,17 +185,23 @@ export function buildRecipientSemanticRedlinePresentation(
   }
 
   const beforeAfterRatio = changed > 0 ? beforeAfter.length / changed : 0;
-  const heavySegments = vm.stats.segmentCount >= 100 && vm.stats.insertCount + vm.stats.deleteCount >= 85;
-  const fewChangedManyFragments = vm.stats.changedBlockCount <= 4 && vm.stats.segmentCount >= 70;
+  const heavySegments = vm.stats.segmentCount >= 110 && vm.stats.insertCount + vm.stats.deleteCount >= 95;
+  const fewChangedManyFragments = vm.stats.changedBlockCount <= 5 && vm.stats.segmentCount >= 68;
+  const clauseBlocks = vm.blocks.filter((b) => b.kind === "clause");
+  const meaningfulClauseShare =
+    clauseBlocks.length > 0
+      ? clauseBlocks.filter((b) => recipientBlockShowsRedline(b)).length / clauseBlocks.length
+      : 0;
 
   let mode: RecipientRedlineSemanticRenderMode = "inline_edit";
   if (
     !shortRev &&
     !fewChangedManyFragments &&
-    beforeAfter.length >= 6 &&
-    beforeAfterRatio >= 0.55 &&
+    beforeAfter.length >= 8 &&
+    beforeAfterRatio >= 0.62 &&
+    meaningfulClauseShare >= 0.58 &&
     heavySegments &&
-    (Boolean(vm.fallbackReason?.trim()) || vm.stats.changedBlockCount >= 10)
+    (Boolean(vm.fallbackReason?.trim()) || vm.stats.changedBlockCount >= 12)
   ) {
     mode = "whole_section_replacement";
   }

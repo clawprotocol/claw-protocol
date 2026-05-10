@@ -4,6 +4,7 @@
  */
 
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import { recipientBlockShowsRedline } from "./recipientMeaningfulRedlinePass";
 
 function recipientSemanticAnchorSlugForBlockId(blockId: string): string {
   return `semantic-${String(blockId).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -126,7 +127,7 @@ function blockHaystack(block: LegalRedlineBlock): string {
 }
 
 function scoreBlockForSemantic(block: LegalRedlineBlock, id: BusinessReviewSemanticId): number {
-  if (!block.hasChange) return 0;
+  if (!block.hasChange || !recipientBlockShowsRedline(block)) return 0;
   const hay = blockHaystack(block);
   const low = hay.toLowerCase();
   /** Avoid mapping payment / ownership cards to confidentiality-only noise. */
@@ -192,7 +193,7 @@ export function isMeaningfulWordingSide(text: string, minLen = 10): boolean {
 
 /** Deleted vs inserted text for a single changed block (focused OLD/NEW dialog). */
 export function extractFocusedWordingForBlock(block: LegalRedlineBlock): FocusedWordingResult | null {
-  if (!block.hasChange) return null;
+  if (!block.hasChange || !recipientBlockShowsRedline(block)) return null;
   const oldText = block.segments
     .filter((s) => s.type === "delete")
     .map((s) => s.text)
@@ -224,7 +225,7 @@ export type FocusedWordingPick = {
 export function getFocusedWordingPickForSemanticId(vm: LegalRedlineDocumentViewModel, id: BusinessReviewSemanticId): FocusedWordingPick {
   const scored: { block: LegalRedlineBlock; score: number; kw: number }[] = [];
   for (const b of vm.blocks) {
-    if (!b.hasChange) continue;
+    if (!b.hasChange || !recipientBlockShowsRedline(b)) continue;
     const kw = scoreBlockForSemantic(b, id);
     const mass = changeMass(b);
     if (id !== "generic" && kw <= 0) continue;
@@ -261,7 +262,7 @@ export function getPrimaryScrollTargetBlockIdForSemanticId(
 ): string | null {
   const scored: { block: LegalRedlineBlock; score: number; kw: number }[] = [];
   for (const b of vm.blocks) {
-    if (!b.hasChange) continue;
+    if (!b.hasChange || !recipientBlockShowsRedline(b)) continue;
     const kw = scoreBlockForSemantic(b, id);
     const mass = changeMass(b);
     if (id !== "generic" && kw <= 0) continue;
@@ -283,7 +284,11 @@ export function getScrollTargetBlockIdForSemanticOrFallback(
   vm: LegalRedlineDocumentViewModel,
   id: BusinessReviewSemanticId,
 ): string | null {
-  return getPrimaryScrollTargetBlockIdForSemanticId(vm, id) ?? vm.blocks.find((b) => b.hasChange)?.id ?? null;
+  return (
+    getPrimaryScrollTargetBlockIdForSemanticId(vm, id) ??
+    vm.blocks.find((b) => b.hasChange && recipientBlockShowsRedline(b))?.id ??
+    null
+  );
 }
 
 export type RecipientRedlineStickyNavRow = {

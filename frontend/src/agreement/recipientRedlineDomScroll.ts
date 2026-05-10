@@ -2,6 +2,10 @@
  * DOM helpers for recipient full-legal-redline navigation (scroll containers + nested <details>).
  */
 
+import type { LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
+import { getScrollTargetBlockIdForSemanticOrFallback, type BusinessReviewSemanticId } from "./recipientBusinessReviewCardsModel";
+import { recipientSemanticAnchorForBlockId } from "./recipientWholeDocSemanticRender";
+
 function selectorAttrMatch(attr: string, value: string): string {
   const v = String(value ?? "");
   if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
@@ -60,16 +64,28 @@ export function resolveRedlineScrollTarget(t: RecipientRedlineScrollTarget): HTM
   return el;
 }
 
-export function scrollElementIntoScrollport(el: HTMLElement, scrollport: HTMLElement | null): void {
+export type ScrollportBlockAlign = "nearest" | "center";
+
+export function scrollElementIntoScrollport(
+  el: HTMLElement,
+  scrollport: HTMLElement | null,
+  align: ScrollportBlockAlign = "nearest",
+): void {
   const port = scrollport ?? findScrollableAncestor(el, null);
   if (!port || port === document.documentElement) {
-    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    el.scrollIntoView({ block: align === "center" ? "center" : "nearest", behavior: "smooth" });
     return;
   }
   const elRect = el.getBoundingClientRect();
   const portRect = port.getBoundingClientRect();
-  const offset = elRect.top - portRect.top + port.scrollTop - 12;
-  const top = Math.max(0, offset);
+  let top: number;
+  if (align === "center") {
+    const elCenter = elRect.top + elRect.height / 2;
+    const portCenter = portRect.top + port.clientHeight / 2;
+    top = Math.max(0, port.scrollTop + (elCenter - portCenter));
+  } else {
+    top = Math.max(0, elRect.top - portRect.top + port.scrollTop - 12);
+  }
   if (typeof port.scrollTo === "function") {
     port.scrollTo({ top, behavior: "smooth" });
   } else {
@@ -77,18 +93,35 @@ export function scrollElementIntoScrollport(el: HTMLElement, scrollport: HTMLEle
   }
 }
 
+export type ResolvedRecipientSemanticScrollTarget = {
+  semanticAnchorId: string | null;
+  blockId: string | null;
+};
+
+/** Single resolver for business cards, sticky nav, and “view in full legal redline”. */
+export function resolveRecipientSemanticScrollTarget(
+  vm: LegalRedlineDocumentViewModel,
+  semanticId: BusinessReviewSemanticId,
+): ResolvedRecipientSemanticScrollTarget {
+  const blockId = getScrollTargetBlockIdForSemanticOrFallback(vm, semanticId);
+  const semanticAnchorId = blockId ? recipientSemanticAnchorForBlockId(blockId) : null;
+  return { semanticAnchorId, blockId };
+}
+
 export type ScrollRecipientRedlineAnchorOptions = RecipientRedlineScrollTarget & {
   onHighlight?: (anchorId: string | null) => void;
   highlightAnchorId?: string | null;
   highlightClearMs?: number;
+  scrollportAlign?: ScrollportBlockAlign;
 };
 
 /** Resolves target, opens nested details, scrolls into the scrollport. */
 export function scrollRecipientRedlineAnchor(opts: ScrollRecipientRedlineAnchorOptions): HTMLElement | null {
-  const el = resolveRedlineScrollTarget(opts);
+  const { scrollportAlign, ...rest } = opts;
+  const el = resolveRedlineScrollTarget(rest);
   if (!el) return null;
   const port = findScrollableAncestor(el, opts.root);
-  scrollElementIntoScrollport(el, port);
+  scrollElementIntoScrollport(el, port, scrollportAlign ?? "nearest");
   return el;
 }
 
@@ -96,16 +129,23 @@ export function scrollRecipientRedlineAnchor(opts: ScrollRecipientRedlineAnchorO
  * Retries scroll across layout ticks; applies highlight once when a target is found.
  */
 export async function scrollRecipientRedlineAnchorWithRetries(opts: ScrollRecipientRedlineAnchorOptions): Promise<HTMLElement | null> {
-  const { onHighlight, highlightClearMs, highlightAnchorId, anchorAttribute, ...target } = opts;
+  const { onHighlight, highlightClearMs, highlightAnchorId, anchorAttribute, scrollportAlign, ...target } = opts;
   const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
   let best: HTMLElement | null = null;
-  await new Promise<void>((r) => window.requestAnimationFrame(() => r()));
-  for (let attempt = 0; attempt < 4; attempt++) {
+  await new Promise<void>((r) => window.requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  for (let attempt = 0; attempt < 6; attempt++) {
     if (attempt === 1) await sleep(50);
-    if (attempt === 2) await sleep(70);
-    if (attempt === 3) await sleep(140);
+    if (attempt === 2) await sleep(80);
+    if (attempt === 3) await sleep(120);
+    if (attempt === 4) await sleep(200);
+    if (attempt === 5) await sleep(280);
     best =
-      scrollRecipientRedlineAnchor({ ...target, anchorAttribute, anchorValue: opts.anchorValue }) ?? best;
+      scrollRecipientRedlineAnchor({
+        ...target,
+        anchorAttribute,
+        anchorValue: opts.anchorValue,
+        scrollportAlign,
+      }) ?? best;
     if (best) break;
   }
   if (best && onHighlight) {
@@ -132,6 +172,7 @@ export async function scrollRecipientRedlineClausePanel(
   opts: ScrollRecipientRedlineClausePanelOptions,
 ): Promise<HTMLElement | null> {
   const { root, detailsBoundary, semanticAnchorId, blockId, onHighlight, highlightClearMs } = opts;
+  await new Promise<void>((r) => window.requestAnimationFrame(() => requestAnimationFrame(() => r())));
   const tryScroll = async (
     anchorValue: string,
     anchorAttribute: "data-recipient-semantic-anchor" | "data-block-id",
@@ -145,6 +186,7 @@ export async function scrollRecipientRedlineClausePanel(
       highlightAnchorId: highlightId,
       onHighlight,
       highlightClearMs,
+      scrollportAlign: "center",
     });
   };
   if (semanticAnchorId) {

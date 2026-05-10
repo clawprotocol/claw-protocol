@@ -188,10 +188,7 @@ import {
 import { buildRecipientCompareConfidence } from "./recipientCompareConfidence";
 import type { RecipientRevisionLineage } from "./recipientRevisionLineage";
 import { DEFAULT_RECIPIENT_REVISION_LINEAGE } from "./recipientRevisionLineage";
-import {
-  buildRecipientSemanticRedlinePresentation,
-  recipientSemanticAnchorForBlockId,
-} from "./recipientWholeDocSemanticRender";
+import { buildRecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import { buildRecipientFriendlyRedlineChips } from "./recipientFriendlyRedlineSummary";
 import {
   buildHumanReviewHeadline,
@@ -207,13 +204,16 @@ import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import { RecipientFocusedWordingDialog } from "./RecipientFocusedWordingDialog";
 import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
 import { RecipientRedlineStickyNavigator } from "./RecipientRedlineStickyNavigator";
-import { scrollRecipientRedlineClausePanel } from "./recipientRedlineDomScroll";
+import {
+  resolveRecipientSemanticScrollTarget,
+  scrollRecipientRedlineClausePanel,
+} from "./recipientRedlineDomScroll";
 import {
   buildRecipientRedlineStickyNavRows,
   buildRecommendedSenderFocusLines,
-  getScrollTargetBlockIdForSemanticOrFallback,
   type BusinessReviewSemanticId,
 } from "./recipientBusinessReviewCardsModel";
+import { applyRecipientMeaningfulChangePass } from "./recipientMeaningfulRedlinePass";
 import { classifyRecipientRevisedDraftUpload } from "./recipientRevisedDraftReviewerNotes";
 import {
   collapseRecipientRedlineDuplicateInsertBlocks,
@@ -1019,7 +1019,7 @@ export function AgreementRecipientReview({
     if (recipientRedlinePlainTexts.narrowRecipientTargetedRedline) {
       vm = filterNarrowRecipientPaymentRedlineNoise(vm, { narrowPaymentInstruction: true });
     }
-    return vm;
+    return applyRecipientMeaningfulChangePass(vm);
   }, [recipientRedlinePlainTexts]);
 
   const recipientFriendlyRedlineChips = useMemo(() => {
@@ -1097,12 +1097,14 @@ export function AgreementRecipientReview({
     async (semanticId: BusinessReviewSemanticId) => {
       openFullLegalRedlineSection();
       if (!legalRedlineDocumentVm) return;
-      const blockId = getScrollTargetBlockIdForSemanticOrFallback(legalRedlineDocumentVm, semanticId);
-      const anchor = blockId ? recipientSemanticAnchorForBlockId(blockId) : null;
+      const { semanticAnchorId, blockId } = resolveRecipientSemanticScrollTarget(
+        legalRedlineDocumentVm,
+        semanticId,
+      );
       await scrollRecipientRedlineClausePanel({
         root: suggestedChangesDocScrollRef.current,
         detailsBoundary: suggestedChangesDocScrollRef.current,
-        semanticAnchorId: anchor,
+        semanticAnchorId,
         blockId,
         onHighlight: (id) => setHighlightedSemanticAnchor(id),
         highlightClearMs: 2800,
