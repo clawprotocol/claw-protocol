@@ -68,7 +68,7 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps unique ids and at most one visible export surface while rapidly toggling preview", async () => {
+  it("keeps unique ids and stable export surfaces while rapidly toggling preview (draft copy stays available during compare)", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -139,7 +139,7 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
         expect(screen.getByTestId("recipient-preview-versions-export")).toBeTruthy();
       });
       expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(1);
-      expect(screen.queryAllByTestId("recipient-want-a-copy-card")).toHaveLength(0);
+      expect(screen.queryAllByTestId("recipient-want-a-copy-card")).toHaveLength(1);
 
       const exportRegion = screen.getByTestId("recipient-preview-versions-export");
       await userEvent.click(within(exportRegion).getByTestId("recipient-preview-download-original-pdf"));

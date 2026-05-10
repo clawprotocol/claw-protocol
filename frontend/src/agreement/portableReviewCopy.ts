@@ -138,6 +138,13 @@ export const RECIPIENT_PASTE_REVISED_PRIMARY_LABEL = "Paste revised text";
 export const RECIPIENT_EDIT_INSIDE_LAWDOG = "Edit inside LawDog";
 export const RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF = "Download original PDF";
 export const RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT = "Download original text";
+/** Tooltip / native title for “Download draft PDF” (Review somewhere else — always baseline). */
+export const RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE =
+  "Sender’s original agreement draft only — no compare markup, redline, or revised upload text.";
+/** Compare-panel exports: three separate PDF roles. */
+export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_ORIGINAL_DRAFT_PDF = "Download original draft PDF";
+export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REVISED_AGREEMENT_PDF = "Download revised agreement PDF";
+export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REDLINE_PDF = "Download redline PDF";
 
 /** Preview / redline summary (true agreement compare). */
 export const RECIPIENT_PREVIEW_SUMMARY_HEADLINE = "Review proposed agreement changes";

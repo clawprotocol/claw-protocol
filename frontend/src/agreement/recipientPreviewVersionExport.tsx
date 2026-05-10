@@ -17,6 +17,11 @@ import {
   wrapRecipientVersionPdfHtml,
 } from "./recipientPreviewPdfHtml";
 import type { RecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
+import {
+  RECIPIENT_EXPORT_REVIEW_DOWNLOAD_ORIGINAL_DRAFT_PDF,
+  RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REDLINE_PDF,
+  RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REVISED_AGREEMENT_PDF,
+} from "./portableReviewCopy";
 
 /** Plain-text summary of block redline for copy/export (no HTML). */
 export function legalRedlineDocumentVmToPlainSummary(vm: LegalRedlineDocumentViewModel): string {
@@ -339,7 +344,7 @@ export function RecipientPreviewVersionsExport({
             void onPdf("original");
           }}
         >
-          {pdfBusy === "original" ? "Preparing PDF…" : "Download original PDF"}
+          {pdfBusy === "original" ? "Preparing PDF…" : RECIPIENT_EXPORT_REVIEW_DOWNLOAD_ORIGINAL_DRAFT_PDF}
         </button>
         <button
           type="button"
@@ -352,7 +357,7 @@ export function RecipientPreviewVersionsExport({
             void onPdf("proposed");
           }}
         >
-          {pdfBusy === "proposed" ? "Preparing PDF…" : "Download proposed PDF"}
+          {pdfBusy === "proposed" ? "Preparing PDF…" : RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REVISED_AGREEMENT_PDF}
         </button>
         <button
           type="button"
@@ -365,7 +370,7 @@ export function RecipientPreviewVersionsExport({
             void onPdf("redline");
           }}
         >
-          {pdfBusy === "redline" ? "Preparing PDF…" : "Download redline PDF"}
+          {pdfBusy === "redline" ? "Preparing PDF…" : RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REDLINE_PDF}
         </button>
       </div>
 

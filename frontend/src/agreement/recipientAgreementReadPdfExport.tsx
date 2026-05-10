@@ -23,6 +23,8 @@ type Props = {
   pdfDownloadButtonLabel?: string;
   /** Optional `data-testid` on the download button (defaults by `bare`). */
   pdfDownloadButtonTestId?: string;
+  /** Optional native tooltip clarifying export scope (e.g. original-only). */
+  pdfDownloadButtonNativeTitle?: string;
   /** Omit helper line under the button (e.g. when parent already showed trust copy). */
   suppressBareDisclosure?: boolean;
 };
@@ -38,6 +40,7 @@ export function RecipientAgreementReadPdfExport({
   bare = false,
   pdfDownloadButtonLabel = "Download PDF",
   pdfDownloadButtonTestId,
+  pdfDownloadButtonNativeTitle,
   suppressBareDisclosure = false,
 }: Props) {
   const [busy, setBusy] = useState(false);
@@ -157,6 +160,7 @@ export function RecipientAgreementReadPdfExport({
         type="button"
         disabled={busy || !hasBody}
         aria-busy={busy}
+        title={pdfDownloadButtonNativeTitle}
         className={buttonClass}
         data-testid={
           pdfDownloadButtonTestId ?? (bare ? "recipient-request-copy-export-pdf" : "recipient-read-download-pdf")

@@ -119,15 +119,15 @@ describe("AgreementRecipientReview redline chrome", () => {
     const exportRoot = screen.getByTestId("recipient-preview-versions-export");
     expect(exportRoot.textContent).not.toMatch(/\bCLAW\b/i);
     expect(screen.queryAllByTestId("recipient-read-download-pdf")).toHaveLength(0);
-    expect(screen.queryAllByTestId("recipient-download-draft-pdf")).toHaveLength(0);
+    expect(screen.getAllByTestId("recipient-download-draft-pdf").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryAllByTestId("recipient-request-copy-export-pdf")).toHaveLength(0);
     expect(screen.getByRole("heading", { name: /Export review versions/i })).toBeTruthy();
     expect(screen.getByText(/Save the original, proposed version, or redline before sending/i)).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-original-draft")).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-proposed-draft")).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-redline-summary")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Download original PDF/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Download proposed PDF/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download original draft PDF/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download revised agreement PDF/i })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /Download redline PDF/i }).length).toBeGreaterThanOrEqual(1);
     expect((screen.getByTestId("recipient-preview-download-original-pdf") as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId("recipient-preview-download-proposed-pdf") as HTMLButtonElement).disabled).toBe(false);
@@ -142,6 +142,19 @@ describe("AgreementRecipientReview redline chrome", () => {
       expect(init.method?.toUpperCase()).toBe("POST");
       expect(String(init.body)).toContain('"export_kind":"original"');
       expect(String(init.body)).toContain("<p>Services Agreement</p>");
+    });
+
+    await userEvent.click(screen.getByTestId("recipient-download-draft-pdf"));
+    await waitFor(() => {
+      const calls = vi.mocked(globalThis.fetch).mock.calls;
+      const pdfCalls = calls.filter((c) => String(c[0]).includes("recipient-preview-export-pdf"));
+      const init = pdfCalls[pdfCalls.length - 1]![1] as RequestInit;
+      const body = String(init.body);
+      expect(body).toContain('"export_kind":"original"');
+      expect(body).toContain("Pay upon receipt");
+      expect(body).not.toMatch(/Net\s+30/i);
+      expect(body.toLowerCase()).not.toContain("<del");
+      expect(body.toLowerCase()).not.toContain("<ins");
     });
 
     await userEvent.click(screen.getByTestId("recipient-preview-download-proposed-pdf"));

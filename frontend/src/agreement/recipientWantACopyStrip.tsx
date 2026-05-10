@@ -12,6 +12,7 @@ import {
   RECIPIENT_WANT_COPY_LOOPBACK_CUE,
   RECIPIENT_WANT_COPY_UPLOAD_CTA,
   RECIPIENT_WANT_COPY_UPLOAD_TIP,
+  RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE,
 } from "./portableReviewCopy";
 import { recipientExportBasenameFromTitle, recipientTextDownloadFilename } from "./recipientExportFilenames";
 import { recipientUploadError } from "./recipientDraftUploadLog";
@@ -186,6 +187,7 @@ export function RecipientWantACopyStrip({
             readHeaders={readHeaders}
             scrubbedCurrentHtml={scrubbedCurrentHtml}
             pdfDownloadButtonLabel="Download draft PDF"
+            pdfDownloadButtonNativeTitle={RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE}
             pdfDownloadButtonTestId="recipient-download-draft-pdf"
           />
           <button

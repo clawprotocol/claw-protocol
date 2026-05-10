@@ -235,6 +235,7 @@ import {
   notesLikelyDuplicateAgreementBodyForExport,
   notesLikelyDuplicateProposedPlain,
 } from "./recipientPreviewPdfHtml";
+import { stripCompareMarkupFromOriginalDraftHtml } from "./recipientOriginalDraftExportSanitize";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
   buildRecipientRedlineStickyNavRows,
@@ -1684,20 +1685,37 @@ export function AgreementRecipientReview({
     return [draft.title, draft.purpose, draft.payment_terms, ...draft.parties.map((p) => p.name)].join("\n");
   }, [draft]);
 
+  /** Baseline agreement HTML only — never the recipient’s proposed/compare HTML. */
+  const recipientBaselineHtmlSource = useMemo(
+    () => (recipientPreview?.baselineHtml?.trim() ? recipientPreview.baselineHtml : renderedHtml),
+    [recipientPreview?.baselineHtml, renderedHtml],
+  );
+
   const renderedHtmlDisplay = useMemo(
     () => substitutePartyPlaceholdersInUserFacingText(renderedHtml, draftSanitizeContext),
     [renderedHtml, draftSanitizeContext],
   );
 
+  const scrubAgreementHtml = useCallback(
+    (html: string) => substitutePartyPlaceholdersInUserFacingText(html || "", draftSanitizeContext),
+    [draftSanitizeContext],
+  );
+
+  /** Original draft PDF / text / copy — no redline or revised-upload body. */
+  const scrubbedOriginalDraftHtmlForPdfExport = useMemo(() => {
+    const inner = substitutePartyPlaceholdersInUserFacingText(recipientBaselineHtmlSource || "", draftSanitizeContext);
+    return stripCompareMarkupFromOriginalDraftHtml(inner);
+  }, [recipientBaselineHtmlSource, draftSanitizeContext]);
+
   const directCompareDefault = useMemo(
-    () => htmlToPlainText(renderedHtmlDisplay || ""),
-    [renderedHtmlDisplay],
+    () => htmlToPlainText(scrubbedOriginalDraftHtmlForPdfExport || "").trim(),
+    [scrubbedOriginalDraftHtmlForPdfExport],
   );
   const directCompareDefaultRef = useRef(directCompareDefault);
   directCompareDefaultRef.current = directCompareDefault;
 
   const downloadOriginalDraftText = useCallback(() => {
-    const body = htmlToPlainText(renderedHtmlDisplay || "").trim();
+    const body = directCompareDefault.trim();
     if (!body) return;
     const base = recipientExportBasenameFromTitle(draft?.title, agreementId);
     const exportedAt = new Date();
@@ -1709,12 +1727,7 @@ export function AgreementRecipientReview({
     a.download = name;
     a.click();
     URL.revokeObjectURL(url);
-  }, [agreementId, draft, renderedHtmlDisplay]);
-
-  const scrubAgreementHtml = useCallback(
-    (html: string) => substitutePartyPlaceholdersInUserFacingText(html || "", draftSanitizeContext),
-    [draftSanitizeContext],
-  );
+  }, [agreementId, draft, directCompareDefault]);
 
   useEffect(() => {
     void refresh();
@@ -3250,7 +3263,7 @@ export function AgreementRecipientReview({
             agreementId={agreementId}
             agreementTitle={draft.title}
             readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-            scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+            scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
             plainDraftText={directCompareDefault}
             onPrepareRevisedImport={prepareOutsideReviewImportUi}
             onImportedRevisedPlainText={onWantCopyRevisedImported}
@@ -3629,7 +3642,7 @@ export function AgreementRecipientReview({
         Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
       </p>
 
-      {entry.kind === "review" && !viewerLike && draft && !recipientPreview ? (
+      {entry.kind === "review" && !viewerLike && draft ? (
         <div
           ref={recipientOriginalDownloadsRef}
           data-testid="recipient-download-original-anchor"
@@ -3639,7 +3652,7 @@ export function AgreementRecipientReview({
             agreementId={agreementId}
             agreementTitle={draft.title}
             readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-            scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+            scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
             plainDraftText={directCompareDefault}
             onPrepareRevisedImport={prepareOutsideReviewImportUi}
             onImportedRevisedPlainText={onWantCopyRevisedImported}
@@ -4426,7 +4439,7 @@ export function AgreementRecipientReview({
                       agreementId={agreementId}
                       agreementTitle={draft?.title}
                       readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-                      scrubbedCurrentHtml={scrubAgreementHtml(renderedHtmlDisplay)}
+                      scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
                       pdfDownloadButtonLabel={RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF}
                       pdfDownloadButtonTestId="recipient-download-original-pdf"
                     />
@@ -4434,7 +4447,7 @@ export function AgreementRecipientReview({
                       type="button"
                       data-testid="recipient-download-original-text-revise"
                       className="min-w-0 max-w-full break-words rounded-md border border-slate-600/70 bg-slate-900/50 px-2.5 py-1.5 text-left text-[11px] font-semibold text-slate-200 hover:bg-slate-900/75 disabled:cursor-not-allowed disabled:opacity-45 sm:self-center sm:text-xs"
-                      disabled={!htmlToPlainText(renderedHtmlDisplay || "").trim()}
+                      disabled={!directCompareDefault.trim()}
                       onClick={downloadOriginalDraftText}
                     >
                       {RECIPIENT_BTN_DOWNLOAD_ORIGINAL_TEXT}
