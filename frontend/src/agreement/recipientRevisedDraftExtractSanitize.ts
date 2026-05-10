@@ -11,10 +11,14 @@ const REVIEWER_NOTES_SPLIT_RE =
 /** Lines that look like PDF running headers / QA cover lines, not contract text. */
 const PAGE_ARTIFACT_LINE_RES: RegExp[] = [
   /^\s*Sarah\s+Collins\s+revised\s+draft\b/i,
+  /^\s*Sarah\s+Collins\s+proposed\s+revised\s+draft\s+for\s+qa\s+testing\b/i,
+  /^\s*prepared\s+as\s+sarah\s+collins\s+proposed\s+revised\s+agreement\s+draft\b/i,
+  /^\s*this\s+is\s+a\s+clean\s+revised\s+draft\b/i,
   /revised\s+draft\s+for\s+lawdog\s+qa\b/i,
   /^\s*page\s+\d+\s+of\s+\d+\s*$/i,
   /^\s*-\s*page\s+\d+\s*-\s*$/i,
   /^\s*Page\s+\d+\s*\/\s*\d+\s*$/i,
+  /^\s*Page\s+\d+\s*$/i,
   /^\s*CONFIDENTIAL\s*-\s*DRAFT\s*$/i,
 ];
 
@@ -33,6 +37,8 @@ const INLINE_REVIEWER_PARA_RES: RegExp[] = [
   /^\s*Reasoning\s*:/i,
   /^\s*NOTES\s+FOR\s+SENDER\b/i,
   /\bSARAH\s+COLLINS\s+REVIEWER\b/i,
+  /\bprepared\s+as\s+sarah\s+collins\s+proposed\s+revised\s+agreement\s+draft\b/i,
+  /^\s*this\s+is\s+a\s+clean\s+revised\s+draft\b/i,
 ];
 
 /**

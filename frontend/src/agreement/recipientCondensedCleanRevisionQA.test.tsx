@@ -10,10 +10,12 @@ import { RecipientCondensedRevisionSurface } from "./RecipientCondensedRevisionS
 import { detectRecipientReviewPresentationMode } from "./recipientReviewPresentationMode";
 import { buildRecipientRedlinePdfHtml } from "./recipientPreviewPdfHtml";
 import {
+  RECIPIENT_CONDENSED_TAB_CHANGED,
   RECIPIENT_EXPORT_PDF_ADVANCED_MARKUP_APPENDIX_HEADING,
   RECIPIENT_EXPORT_PDF_CLEAN_PROPOSED_HEADING,
   RECIPIENT_EXPORT_PDF_KEY_CHANGED_WORDING_HEADING,
 } from "./portableReviewCopy";
+import { stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import type { RecipientCompareConfidence } from "./recipientCompareConfidence";
 import type { RecipientRedlineStickyNavRow } from "./recipientBusinessReviewCardsModel";
 import { createRef } from "react";
@@ -132,8 +134,22 @@ describe("condensed clean-revision QA (Sarah Collins archetype)", () => {
       />,
     );
     expect(screen.getByTestId("recipient-condensed-tab-clean").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("recipient-condensed-toggle-guidance").textContent).toContain("Review the proposed version first");
+    expect(screen.getByTestId("recipient-condensed-tab-changed").textContent).toContain(RECIPIENT_CONDENSED_TAB_CHANGED);
     expect(screen.queryByTestId("recipient-suggested-changes-document")).toBeNull();
     expect(screen.getByTestId("recipient-condensed-panel-clean")).toBeTruthy();
+  });
+
+  it("strips Sarah Collins QA PDF preamble lines from proposed text", () => {
+    const noisy = [
+      "Sarah Collins proposed revised draft for QA testing - Page 1",
+      "Prepared as Sarah Collins proposed revised agreement draft.",
+      "",
+      sarahCollinsCondensedRevisedFixture(),
+    ].join("\n");
+    const cleaned = stripRecipientQaDraftNoiseLines(noisy);
+    expect(cleaned).toContain("2.0 Payment");
+    expect(cleaned).not.toMatch(/Sarah Collins proposed revised draft for QA testing/i);
   });
 
   it("compare fallback dialog structures prior/revised and offers show-full for long revised text", () => {

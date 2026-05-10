@@ -449,7 +449,7 @@ function buildCondensedCleanRevisionRedlinePdfArticle(
   )}</p>${cc.notRestatedAppendixHtml}`;
   let appendix = "";
   const notes = (human.reviewerNotesPlain ?? "").trim();
-  if (notes && !notesLikelyDuplicateAgreementBodyForExport(notes, vm)) {
+  if (notes && !notesShouldOmitExtractedAppendix(notes, vm, cc.cleanProposedPlain)) {
     appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
       RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
     )}</h2><pre style="margin:0;font:13px/1.65 ui-sans-serif,system-ui;white-space:pre-wrap;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(notes)}</pre>`;
@@ -479,6 +479,64 @@ export function notesLikelyDuplicateAgreementBodyForExport(notes: string, vm: Le
   if (nt.length < 280 || body.length < 400) return false;
   const probe = nt.slice(0, Math.min(900, nt.length));
   return body.includes(probe.slice(0, 400));
+}
+
+function tokenSetForNotesDedupe(s: string): Set<string> {
+  return new Set(
+    s
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase()
+      .split(" ")
+      .map((w) => w.replace(/[^a-z0-9]/g, ""))
+      .filter((w) => w.length > 2),
+  );
+}
+
+/**
+ * When “reviewer notes” are mostly the same text as the proposed draft (common mis-extract), omit notes appendix.
+ */
+export function notesLikelyDuplicateProposedPlain(notes: string, proposedPlain: string): boolean {
+  const n = String(notes ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  const p = String(proposedPlain ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (n.length < 200 || p.length < 200) return false;
+  const A = tokenSetForNotesDedupe(n);
+  const B = tokenSetForNotesDedupe(p);
+  if (A.size === 0 || B.size === 0) return false;
+  let inter = 0;
+  for (const w of A) {
+    if (B.has(w)) inter++;
+  }
+  const union = A.size + B.size - inter;
+  const jaccard = union === 0 ? 0 : inter / union;
+  const lenR = Math.min(n.length, p.length) / Math.max(n.length, p.length);
+  return jaccard >= 0.78 && lenR >= 0.65;
+}
+
+function recipientRedlineVmProposedPlainFingerprint(vm: LegalRedlineDocumentViewModel): string {
+  return vm.blocks
+    .map((b) => {
+      const pt = String(b.proposedText ?? "").trim();
+      if (pt) return pt;
+      return b.segments
+        .filter((s) => s.type !== "delete")
+        .map((s) => s.text)
+        .join("");
+    })
+    .join("\n\n");
+}
+
+export function notesShouldOmitExtractedAppendix(
+  notes: string,
+  vm: LegalRedlineDocumentViewModel,
+  proposedPlainForDedupe?: string | null,
+): boolean {
+  const t = String(notes ?? "").trim();
+  if (!t) return true;
+  if (notesLikelyDuplicateAgreementBodyForExport(t, vm)) return true;
+  const prop = (proposedPlainForDedupe ?? "").trim() || recipientRedlineVmProposedPlainFingerprint(vm);
+  if (prop.length >= 180 && notesLikelyDuplicateProposedPlain(t, prop)) return true;
+  return false;
 }
 
 export function buildRecipientRedlinePdfHtml(
@@ -520,7 +578,7 @@ export function buildRecipientRedlinePdfHtml(
   }
   let appendix = "";
   const notes = (human?.reviewerNotesPlain ?? "").trim();
-  if (notes && !notesLikelyDuplicateAgreementBodyForExport(notes, vm)) {
+  if (notes && !notesShouldOmitExtractedAppendix(notes, vm, null)) {
     appendix += `<h2 style="margin:28px 0 12px;font-size:12px;font-weight:600;color:#475569;letter-spacing:0.06em;text-transform:uppercase;">${escapeHtml(
       RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING,
     )}</h2><pre style="margin:0;font:13px/1.65 ui-sans-serif,system-ui;white-space:pre-wrap;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#fafafa;">${escapeHtml(notes)}</pre>`;

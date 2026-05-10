@@ -118,6 +118,7 @@ import {
   RECIPIENT_BTN_PREVIEW_CHANGES,
   RECIPIENT_BTN_REVIEW_CHANGES,
   RECIPIENT_BTN_SEND_CHANGES,
+  RECIPIENT_BTN_SEND_CLEAN_PROPOSED_SUBCOPY,
   RECIPIENT_CARD_BIGGER_REWRITE_BODY,
   RECIPIENT_CARD_BIGGER_REWRITE_CTA,
   RECIPIENT_CARD_BIGGER_REWRITE_TITLE,
@@ -150,6 +151,7 @@ import {
   RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
   RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE,
+  RECIPIENT_FOCUS_COMPARE_BEST_MATCH_HEADING,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
   RECIPIENT_ONLY_CHANGED_SECTIONS,
   RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING,
@@ -229,7 +231,11 @@ import {
   resolveRecipientSemanticScrollTarget,
   scrollRecipientRedlineClausePanel,
 } from "./recipientRedlineDomScroll";
-import { stripClausePreambleFromRevisedPair } from "./recipientRevisionPreambleStrip";
+import {
+  notesLikelyDuplicateAgreementBodyForExport,
+  notesLikelyDuplicateProposedPlain,
+} from "./recipientPreviewPdfHtml";
+import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
   buildRecipientRedlineStickyNavRows,
   buildRecommendedSenderFocusLines,
@@ -1050,9 +1056,10 @@ export function AgreementRecipientReview({
 
   const recipientPresentationMode = useMemo((): RecipientReviewPresentationMode => {
     if (!recipientRedlinePlainTexts) return "full_clause_redline";
+    const proposedForDetect = stripRecipientQaDraftNoiseLines(recipientRedlinePlainTexts.proposedPlain);
     return detectRecipientReviewPresentationMode({
       currentPlain: recipientRedlinePlainTexts.currentPlain,
-      proposedPlain: recipientRedlinePlainTexts.proposedPlain,
+      proposedPlain: proposedForDetect,
       narrowRecipientTargetedRedline: Boolean(recipientRedlinePlainTexts.narrowRecipientTargetedRedline),
     });
   }, [recipientRedlinePlainTexts]);
@@ -1257,8 +1264,8 @@ export function AgreementRecipientReview({
           const card = businessReviewCardForSemanticId(semanticId, cardTitle ?? fb.sectionLabel ?? "Change");
           setBusinessReviewFocusedWording({
             variant: "compare_fallback",
-            sectionTitle: (cardTitle ?? fb.sectionLabel) || "Changed clause",
-            sectionSubline: fb.sectionLabel,
+            sectionTitle: RECIPIENT_FOCUS_COMPARE_BEST_MATCH_HEADING,
+            sectionSubline: (cardTitle ?? fb.sectionLabel) || "Changed clause",
             businessNote: card.whyMatters,
             oldText: fb.oldText,
             newText: fb.newText,
@@ -1290,8 +1297,8 @@ export function AgreementRecipientReview({
           const card = businessReviewCardForSemanticId(semanticId, cardTitle ?? fb.sectionLabel ?? "Change");
           setBusinessReviewFocusedWording({
             variant: "compare_fallback",
-            sectionTitle: (cardTitle ?? fb.sectionLabel) || "Changed clause",
-            sectionSubline: fb.sectionLabel,
+            sectionTitle: RECIPIENT_FOCUS_COMPARE_BEST_MATCH_HEADING,
+            sectionSubline: (cardTitle ?? fb.sectionLabel) || "Changed clause",
             businessNote: card.whyMatters,
             oldText: fb.oldText,
             newText: fb.newText,
@@ -1440,14 +1447,33 @@ export function AgreementRecipientReview({
     );
   }, [recipientPreview, previewDiff]);
 
-  const separatedNotesForUiTrimmed = recipientPreview?.separatedReviewerNotesForUi?.trim() ?? "";
+  const recipientReviewerNotesPlainForExport = useMemo(() => {
+    const raw = recipientPreview?.separatedReviewerNotesForUi?.trim() ?? "";
+    if (!raw) return null;
+    const proposedDeduped =
+      recipientRedlineStrippedPlainPair?.proposedPlain?.trim() ||
+      stripRecipientQaDraftNoiseLines(recipientRedlinePlainTexts?.proposedPlain ?? "");
+    if (proposedDeduped.length >= 180 && notesLikelyDuplicateProposedPlain(raw, proposedDeduped)) {
+      return null;
+    }
+    if (legalRedlineDocumentVm && notesLikelyDuplicateAgreementBodyForExport(raw, legalRedlineDocumentVm)) {
+      return null;
+    }
+    return raw;
+  }, [
+    recipientPreview?.separatedReviewerNotesForUi,
+    recipientRedlineStrippedPlainPair?.proposedPlain,
+    recipientRedlinePlainTexts?.proposedPlain,
+    legalRedlineDocumentVm,
+  ]);
+
   const showSeparatedReviewerNotesPanel = useMemo(() => {
-    if (!separatedNotesForUiTrimmed) return false;
+    if (!recipientReviewerNotesPlainForExport) return false;
     if (!compareConfidence) return true;
     if (compareConfidence.level !== "high") return true;
     /** Hide only token footers on high-confidence reads; keep anything with a sentence of substance. */
-    return separatedNotesForUiTrimmed.length >= 12;
-  }, [separatedNotesForUiTrimmed, compareConfidence]);
+    return recipientReviewerNotesPlainForExport.length >= 12;
+  }, [recipientReviewerNotesPlainForExport, compareConfidence]);
 
   useLayoutEffect(() => {
     if (!recipientPreview || recipientSuggestedEditsSentAck) return;
@@ -2404,6 +2430,14 @@ export function AgreementRecipientReview({
                 {RECIPIENT_BTN_CONTINUE_EDITING}
               </button>
             </div>
+            {recipientPresentationMode === "condensed_clean_revision" ? (
+              <p
+                className="mt-2 max-w-xl text-[10px] leading-snug text-slate-500"
+                data-testid="recipient-send-clean-proposed-subcopy"
+              >
+                {RECIPIENT_BTN_SEND_CLEAN_PROPOSED_SUBCOPY}
+              </p>
+            ) : null}
 
             <details
               ref={auditDetailsRef}
@@ -2719,7 +2753,7 @@ export function AgreementRecipientReview({
                     detachRedlinePdfButton
                     redlinePdfSummarySentence={recipientRedlinePlainTexts.instructionContextSummary ?? null}
                     redlinePdfSummaryBullets={recipientFriendlyRedlineChips}
-                    redlinePdfReviewerNotesPlain={recipientPreview.separatedReviewerNotesForUi ?? null}
+                    redlinePdfReviewerNotesPlain={recipientReviewerNotesPlainForExport ?? null}
                     redlinePdfStructuredHumanReview={humanReviewStructuredPdf}
                     redlinePdfTechnicalAppendixPlain={redlinePdfTechnicalAppendixPlain}
                     redlinePdfCompareConfidenceLevel={compareConfidence?.level ?? null}
@@ -2756,7 +2790,7 @@ export function AgreementRecipientReview({
                   className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-slate-800/60 bg-slate-950/60 p-2 font-sans text-[11px] leading-relaxed text-slate-400"
                   data-testid="recipient-reviewer-notes-panel-body"
                 >
-                  {recipientPreview.separatedReviewerNotesForUi}
+                  {recipientReviewerNotesPlainForExport}
                 </pre>
               </details>
             ) : null}

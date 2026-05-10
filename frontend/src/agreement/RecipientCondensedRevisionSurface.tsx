@@ -8,6 +8,7 @@ import type { BusinessReviewSemanticId, RecipientRedlineStickyNavRow } from "./r
 import type { FocusedWordingResult } from "./recipientBusinessReviewCardsModel";
 import {
   RECIPIENT_ADVANCED_REDLINE_INTRO,
+  RECIPIENT_ADVANCED_REDLINE_SECONDARY,
   RECIPIENT_BUSINESS_REVIEW_WHY_DETAILS,
   RECIPIENT_CONDENSED_COMPARE_FOCUS_CHIPS,
   RECIPIENT_CONDENSED_COMPARE_FOCUS_LABEL,
@@ -15,6 +16,7 @@ import {
   RECIPIENT_CONDENSED_TAB_ADVANCED,
   RECIPIENT_CONDENSED_TAB_CHANGED,
   RECIPIENT_CONDENSED_TAB_CLEAN,
+  RECIPIENT_CONDENSED_TOGGLE_GUIDANCE,
   RECIPIENT_NOT_RESTAT_ORIGINAL_DETAILS_SUMMARY,
   RECIPIENT_NOT_RESTAT_ORIGINAL_FOOTNOTE,
   RECIPIENT_NOT_RESTAT_ORIGINAL_INTRO,
@@ -117,6 +119,9 @@ export const RecipientCondensedRevisionSurface = forwardRef<HTMLDivElement, Reci
             {RECIPIENT_CONDENSED_TAB_ADVANCED}
           </button>
         </div>
+        <p className="text-[11px] leading-relaxed text-slate-500" data-testid="recipient-condensed-toggle-guidance">
+          {RECIPIENT_CONDENSED_TOGGLE_GUIDANCE}
+        </p>
 
         {selectedTab === "clean" ? (
           <div
@@ -210,7 +215,8 @@ export const RecipientCondensedRevisionSurface = forwardRef<HTMLDivElement, Reci
 
         {selectedTab === "advanced" ? (
           <div role="tabpanel" className="space-y-2" data-testid="recipient-condensed-panel-advanced">
-            <p className="text-[11px] leading-relaxed text-slate-500">{RECIPIENT_ADVANCED_REDLINE_INTRO}</p>
+            <p className="text-[11px] leading-relaxed text-slate-400">{RECIPIENT_ADVANCED_REDLINE_INTRO}</p>
+            <p className="text-[11px] leading-relaxed text-slate-500">{RECIPIENT_ADVANCED_REDLINE_SECONDARY}</p>
             <h3 className="text-sm font-semibold tracking-tight text-slate-200">{RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING}</h3>
             <p className="text-[11px] leading-snug text-slate-500">{RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION}</p>
             <div className="rounded-lg border border-slate-600/40 bg-slate-950/30 p-2 sm:p-3">

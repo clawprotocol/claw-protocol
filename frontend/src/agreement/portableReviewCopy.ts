@@ -194,9 +194,9 @@ export const RECIPIENT_BUSINESS_REVIEW_CARD_WEAK_WORLING_LINE =
   "This section was substantially revised. Open Full legal redline to see the exact changed wording.";
 /** Opens the collapsed full legal redline section (no modal). */
 /** Primary CTA from business-review cards into the clause-level redline surface. */
-export const RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE = "Show changed wording";
+export const RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE = "Open in advanced redline";
 /** Secondary hint under {@link RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE}. */
-export const RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE_HINT = "Opens the matching clause below.";
+export const RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE_HINT = "Jumps to insert/delete markup on the Advanced redline tab.";
 /** Compare fallback modal — opens optional full redline surface. */
 export const RECIPIENT_FOCUS_COMPARE_OPEN_FULL_REDLINE = "Open in full redline";
 /** @deprecated Use {@link RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE}. */
@@ -254,6 +254,9 @@ export const RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION =
 /** Condensed revised-draft presentation (recipient compare). */
 export const RECIPIENT_CONDENSED_REVISION_BANNER =
   "This upload appears to be a condensed revised draft. LawDog grouped related changes for review.";
+/** Shown directly under the clean / compare / advanced segmented control. */
+export const RECIPIENT_CONDENSED_TOGGLE_GUIDANCE =
+  "Review the proposed version first. Use Compare changes if you want to inspect what changed.";
 export const RECIPIENT_CONDENSED_COMPARE_FOCUS_LABEL = "Compare focus areas";
 /** Non-interactive chips above the clean proposed draft (condensed mode). */
 export const RECIPIENT_CONDENSED_COMPARE_FOCUS_CHIPS: readonly string[] = [
@@ -266,10 +269,12 @@ export const RECIPIENT_CONDENSED_COMPARE_FOCUS_CHIPS: readonly string[] = [
 ];
 export const RECIPIENT_CONDENSED_EXPORT_METRICS_DETAILS_SUMMARY = "Export versions & detailed metrics";
 export const RECIPIENT_CONDENSED_TAB_CLEAN = "Clean proposed version";
-export const RECIPIENT_CONDENSED_TAB_CHANGED = "Changed wording";
-export const RECIPIENT_CONDENSED_TAB_ADVANCED = "Advanced legal markup";
+export const RECIPIENT_CONDENSED_TAB_CHANGED = "Compare changes";
+export const RECIPIENT_CONDENSED_TAB_ADVANCED = "Advanced redline";
 export const RECIPIENT_ADVANCED_REDLINE_INTRO =
-  "Useful for line-by-line inspection. Most people review the clean draft and changed wording first.";
+  "This view is for line-by-line inspection. The clean proposed version is what would be sent.";
+export const RECIPIENT_ADVANCED_REDLINE_SECONDARY =
+  "Most reviewers use Clean proposed version and Compare changes first; open this tab only when you need insert/delete markup.";
 export const RECIPIENT_NOT_RESTAT_ORIGINAL_INTRO =
   "Some unchanged or unaddressed original sections are not repeated in this condensed draft.";
 export const RECIPIENT_NOT_RESTAT_ORIGINAL_DETAILS_SUMMARY = "Original sections not directly restated";
@@ -281,7 +286,10 @@ export const RECIPIENT_EXPORT_PDF_ADVANCED_MARKUP_APPENDIX_HEADING = "Advanced l
 export const RECIPIENT_EXPORT_PDF_NOT_RESTAT_APPENDIX_HEADING = "Original sections not directly restated";
 export const RECIPIENT_FOCUS_COMPARE_SCROLL_MISS_NOTE =
   "Could not jump to an exact clause in the redline. Showing the best matching revision.";
+export const RECIPIENT_FOCUS_COMPARE_BEST_MATCH_HEADING = "Best matching section";
 export const RECIPIENT_FOCUS_COMPARE_BUSINESS_NOTE_LABEL = "Business note";
+/** Optional disclosure inside compare modal — raw text, not styled redline. */
+export const RECIPIENT_FOCUS_COMPARE_SHOW_LEGAL_MARKUP = "Show legal markup (raw text)";
 /** Closed disclosure wrapping raw insert/delete markup (UI + PDF). */
 export const RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP = "Show advanced legal markup";
 /** Optional line-by-line markup inside a clause prior/revised panel. */
@@ -298,11 +306,11 @@ export function recipientRedlineReviewAreasLabel(count: number): string {
 }
 
 /** Primary CTA on Business Review cards and dense section shortcuts. */
-export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING = "View changed wording";
+export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING = "Compare this change";
 /** @deprecated Alias — use {@link RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}. */
 export const RECIPIENT_VIEW_CHANGED_WORDING = RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING;
 /** Secondary line under preview CTA (desktop + mobile). */
-export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT = "Opens exact before/after text.";
+export const RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT = "Opens original vs proposed wording in a short panel.";
 /** @deprecated Use {@link RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}. */
 export const RECIPIENT_BUSINESS_REVIEW_VIEW_EXACT_WORDING = RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING;
 export const RECIPIENT_BUSINESS_REVIEW_EXACT_WORDING_TITLE = "Exact wording";
@@ -375,6 +383,9 @@ export const RECIPIENT_BTN_REVIEW_CHANGES = "Compare drafts";
 /** @deprecated No longer shown as a tab; kept for tests referencing assisted label history. */
 export const RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL = "Suggest changes";
 export const RECIPIENT_BTN_SEND_CHANGES = "Send changes";
+/** Shown under Send when reviewing a condensed clean revised draft. */
+export const RECIPIENT_BTN_SEND_CLEAN_PROPOSED_SUBCOPY =
+  "Sends the clean proposed version from your preview — not the compare markup.";
 export const RECIPIENT_BTN_CONTINUE_EDITING = "Continue editing";
 export const RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF = "Download redline PDF";
 

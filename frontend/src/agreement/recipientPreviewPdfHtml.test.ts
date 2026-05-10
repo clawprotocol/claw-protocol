@@ -13,6 +13,7 @@ import { buildRecipientSemanticRedlinePresentation } from "./recipientWholeDocSe
 import {
   buildRecipientRedlinePdfHtml,
   notesLikelyDuplicateAgreementBodyForExport,
+  notesShouldOmitExtractedAppendix,
   sanitizeHtmlForRecipientPdfExport,
   wrapRecipientVersionPdfHtml,
 } from "./recipientPreviewPdfHtml";
@@ -392,6 +393,30 @@ describe("buildRecipientRedlinePdfHtml", () => {
     const vm = buildLegalRedlineDocumentViewModel(cur, prop);
     const html = buildRecipientRedlinePdfHtml(vm, null, {});
     expect((html.match(/STATIC INTRO WITHOUT KEYWORDS/g) ?? []).length).toBeLessThanOrEqual(1);
+  });
+
+  it("omits Additional extracted review notes appendix when notes duplicate the proposed draft body", () => {
+    const proposed =
+      "Sarah Collins proposed revised draft for QA testing - Page 1\n\n1.0 Summary\nThis revised draft reflects clarifications.\n\n" +
+      "2.0 Payment\nNet 30.\n".repeat(30);
+    const vm = buildLegalRedlineDocumentViewModel("Long baseline agreement text ".repeat(50), proposed);
+    const notes = `${proposed}\n\nPrepared as Sarah Collins proposed revised agreement draft.`;
+    const html = buildRecipientRedlinePdfHtml(vm, null, { reviewerNotesPlain: notes });
+    expect(html).not.toContain(RECIPIENT_EXPORT_PDF_APPENDIX_EXTRACTED_NOTES_HEADING);
+  });
+});
+
+describe("notesShouldOmitExtractedAppendix", () => {
+  it("returns true when reviewer notes are mostly the same as proposedPlain", () => {
+    const proposed = "1. Payment\nNet 30 from invoice.\n\n2. Scope\nWebsite and analytics.\n".repeat(12);
+    const vm = buildLegalRedlineDocumentViewModel("Original ".repeat(80), proposed);
+    const notes = `Page 2\n\n${proposed}`;
+    expect(notesShouldOmitExtractedAppendix(notes, vm, proposed)).toBe(true);
+  });
+
+  it("returns false for short substantive notes", () => {
+    const vm = buildLegalRedlineDocumentViewModel("a", "b");
+    expect(notesShouldOmitExtractedAppendix("Call me Monday about indemnity.", vm, null)).toBe(false);
   });
 });
 

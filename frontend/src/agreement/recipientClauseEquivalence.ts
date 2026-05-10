@@ -2,6 +2,8 @@
  * Clause normalization + semantic equivalence for recipient redline (prefer false positives over false negatives).
  */
 
+import { stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
+
 const NUMBERING_PREFIX_RE =
   /^(?:(?:article|section)\s+)?(?:\(?[a-z]\)|\(?[ivxlcdm]+\)|\d+(?:\.\d+)*\.?)\s+/i;
 const LEADING_ENUM_RE = /^(?:\(?[a-z]\)|\(?[ivxlcdm]+\)|\d+(?:\.\d+)*\.?)\s+/i;
@@ -33,7 +35,7 @@ function stripRepeatedHeadingPrefix(norm: string): string {
  * Normalize clause text for identity / equivalence (legal wording preserved; noise stripped).
  */
 export function normalizeClauseForEquivalence(raw: string): string {
-  let t = String(raw ?? "")
+  let t = stripRecipientQaDraftNoiseLines(String(raw ?? ""))
     .normalize("NFKC")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")

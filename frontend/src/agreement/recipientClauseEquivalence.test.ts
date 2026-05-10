@@ -22,6 +22,13 @@ describe("normalizeClauseForEquivalence", () => {
     const b = "The total fee is seven thousand dollars.";
     expect(areClausesSemanticallyEquivalent(a, b)).toBe(true);
   });
+
+  it("strips QA page-label lines so clause bodies still align", () => {
+    const noisy =
+      "Sarah Collins proposed revised draft for QA testing - Page 2\n\n3.2 Invoices\nFees are due Net 30.";
+    const clean = "3.2 Invoices\nFees are due Net 30.";
+    expect(areClausesSemanticallyEquivalent(noisy, clean)).toBe(true);
+  });
 });
 
 describe("areClausesSemanticallyEquivalent", () => {
@@ -48,6 +55,15 @@ describe("areClausesSemanticallyEquivalent", () => {
       areClausesSemanticallyEquivalent(
         "Invoices are payable upon receipt.",
         "Invoices are due Net 45 from invoice date.",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not collapse meaningfully different payment windows", () => {
+    expect(
+      areClausesSemanticallyEquivalent(
+        "Payment is due within five business days of invoice.",
+        "Payment is due within ten calendar days of invoice.",
       ),
     ).toBe(false);
   });

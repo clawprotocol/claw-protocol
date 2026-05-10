@@ -1,14 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   RECIPIENT_BUSINESS_REVIEW_EXACT_WORDING_TITLE,
   RECIPIENT_FOCUS_COMPARE_BUSINESS_NOTE_LABEL,
   RECIPIENT_FOCUS_COMPARE_OPEN_FULL_REDLINE,
   RECIPIENT_FOCUS_COMPARE_SCROLL_MISS_NOTE,
+  RECIPIENT_FOCUS_COMPARE_SHOW_LEGAL_MARKUP,
   RECIPIENT_SEMANTIC_PRIOR_LABEL,
   RECIPIENT_SEMANTIC_REVISED_LABEL,
 } from "./portableReviewCopy";
 
 const REVISED_PREVIEW_MAX = 1000;
+const PRIOR_PREVIEW_MAX = 900;
 
 export type RecipientFocusedWordingDialogProps = {
   open: boolean;
@@ -40,13 +42,28 @@ export function RecipientFocusedWordingDialog({
   variant = "exact",
   onOpenFullRedline,
 }: RecipientFocusedWordingDialogProps) {
-  const [showFullRevised, setShowFullRevised] = useState(false);
   const compare = variant === "compare_fallback";
+  const [showFullRevised, setShowFullRevised] = useState(false);
+  const [showFullPrior, setShowFullPrior] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setShowFullRevised(false);
+      setShowFullPrior(false);
+    }
+  }, [open]);
+
   const revisedChunks = useMemo(() => {
     const t = String(newText ?? "");
     if (t.length <= REVISED_PREVIEW_MAX || showFullRevised) return { text: t, truncated: false };
     return { text: `${t.slice(0, REVISED_PREVIEW_MAX).trim()}…`, truncated: true };
   }, [newText, showFullRevised]);
+
+  const priorChunks = useMemo(() => {
+    const t = String(oldText ?? "");
+    if (t.length <= PRIOR_PREVIEW_MAX || showFullPrior) return { text: t, truncated: false };
+    return { text: `${t.slice(0, PRIOR_PREVIEW_MAX).trim()}…`, truncated: true };
+  }, [oldText, showFullPrior]);
 
   if (!open) return null;
   return (
@@ -70,14 +87,14 @@ export function RecipientFocusedWordingDialog({
             ) : (
               <p className="mt-1 text-[12px] leading-snug text-slate-400">{sectionTitle}</p>
             )}
-            {compare ? (
-              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_FOCUS_COMPARE_SCROLL_MISS_NOTE}</p>
-            ) : null}
             {compare && businessNote ? (
-              <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-                <span className="font-semibold text-slate-300">{RECIPIENT_FOCUS_COMPARE_BUSINESS_NOTE_LABEL}:</span>{" "}
+              <p className="mt-3 text-[12px] leading-relaxed text-slate-200">
+                <span className="font-semibold text-slate-100">{RECIPIENT_FOCUS_COMPARE_BUSINESS_NOTE_LABEL}:</span>{" "}
                 {businessNote}
               </p>
+            ) : null}
+            {compare ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_FOCUS_COMPARE_SCROLL_MISS_NOTE}</p>
             ) : null}
           </div>
           <button
@@ -93,15 +110,25 @@ export function RecipientFocusedWordingDialog({
             <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-200/90">
               {compare ? RECIPIENT_SEMANTIC_PRIOR_LABEL : "Previous wording"}
             </p>
-            <pre className="mt-1.5 whitespace-pre-wrap rounded-lg border border-rose-900/40 bg-rose-950/30 p-3 text-[13px] leading-[1.75] text-rose-50">
-              {oldText}
+            <pre className="mt-1.5 max-h-52 min-h-0 overflow-y-auto whitespace-pre-wrap rounded-lg border border-rose-900/40 bg-rose-950/30 p-3 text-[13px] leading-[1.75] text-rose-50">
+              {priorChunks.text}
             </pre>
+            {priorChunks.truncated && !showFullPrior ? (
+              <button
+                type="button"
+                className="mt-2 text-left text-[11px] font-semibold text-sky-300 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
+                data-testid="recipient-focused-wording-show-full-prior"
+                onClick={() => setShowFullPrior(true)}
+              >
+                Show full original text
+              </button>
+            ) : null}
           </section>
           <section>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-200/90">
               {compare ? RECIPIENT_SEMANTIC_REVISED_LABEL : "Revised wording"}
             </p>
-            <pre className="mt-1.5 whitespace-pre-wrap rounded-lg border border-emerald-900/40 bg-emerald-950/25 p-3 text-[13px] leading-[1.75] text-emerald-50">
+            <pre className="mt-1.5 max-h-52 min-h-0 overflow-y-auto whitespace-pre-wrap rounded-lg border border-emerald-900/40 bg-emerald-950/25 p-3 text-[13px] leading-[1.75] text-emerald-50">
               {revisedChunks.text}
             </pre>
             {revisedChunks.truncated && !showFullRevised ? (
@@ -115,6 +142,21 @@ export function RecipientFocusedWordingDialog({
               </button>
             ) : null}
           </section>
+          {compare ? (
+            <details className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2">
+              <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 marker:content-none hover:text-slate-200 [&::-webkit-details-marker]:hidden">
+                {RECIPIENT_FOCUS_COMPARE_SHOW_LEGAL_MARKUP}
+              </summary>
+              <div className="mt-2 grid gap-2 border-t border-slate-800/50 pt-2 sm:grid-cols-2">
+                <pre className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-md border border-slate-800/80 bg-slate-950/80 p-2 font-mono text-[10px] leading-snug text-slate-400">
+                  {oldText}
+                </pre>
+                <pre className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-md border border-slate-800/80 bg-slate-950/80 p-2 font-mono text-[10px] leading-snug text-slate-400">
+                  {newText}
+                </pre>
+              </div>
+            </details>
+          ) : null}
           {compare && onOpenFullRedline ? (
             <div className="flex flex-col gap-2 border-t border-slate-800/60 pt-4 sm:flex-row sm:justify-end">
               <button
