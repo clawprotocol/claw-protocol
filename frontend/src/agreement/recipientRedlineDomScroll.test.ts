@@ -65,7 +65,10 @@ describe("recipientRedlineDomScroll", () => {
 
   it("resolveRecipientSemanticScrollTarget matches centralized scroll resolver output", () => {
     const vm = applyRecipientMeaningfulChangePass(
-      buildLegalRedlineDocumentViewModel("4. Payment\nDue on receipt.", "4. Payment\nNet 30."),
+      buildLegalRedlineDocumentViewModel(
+        "4. Payment\nFees are due on receipt within five business days.",
+        "4. Payment\nFees are Net 30 from the invoice date.",
+      ),
     );
     const r = resolveRecipientSemanticScrollTarget(vm, "payment_terms");
     expect(r.blockId).toBeTruthy();
@@ -83,7 +86,7 @@ describe("recipientRedlineDomScroll", () => {
     const shell = document.getElementById("shell") as HTMLElement;
     (document.getElementById("outer") as HTMLDetailsElement).open = false;
     const highlights: (string | null)[] = [];
-    const hit = await scrollRecipientRedlineClausePanel({
+    const result = await scrollRecipientRedlineClausePanel({
       root: shell,
       detailsBoundary: shell,
       semanticAnchorId: "semantic-missing",
@@ -91,7 +94,9 @@ describe("recipientRedlineDomScroll", () => {
       onHighlight: (id) => highlights.push(id),
       highlightClearMs: 50,
     });
-    expect(hit?.getAttribute("data-block-id")).toBe("blk-1");
+    expect(result.hit?.getAttribute("data-block-id")).toBe("blk-1");
+    expect(result.matchedBy).toBe("block");
+    expect(result.attempts).toBeGreaterThan(0);
     expect(highlights.some((h) => h === "semantic-missing")).toBe(true);
   });
 });

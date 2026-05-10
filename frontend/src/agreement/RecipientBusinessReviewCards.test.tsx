@@ -6,7 +6,7 @@ import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import {
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT,
-  RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE,
+  RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE,
 } from "./portableReviewCopy";
 
 const paymentVm: LegalRedlineDocumentViewModel = {
@@ -83,7 +83,10 @@ describe("RecipientBusinessReviewCards", () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByText(RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE));
+    const cta = screen.getByTestId("recipient-business-review-show-changed-wording");
+    expect(cta.tagName).toBe("BUTTON");
+    expect(cta.textContent ?? "").toContain(RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE);
+    fireEvent.click(cta);
     await Promise.resolve();
     expect(order).toEqual(["open", "nav"]);
   });

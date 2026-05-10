@@ -405,9 +405,13 @@ function matchScoreForUnnumberedDp(ca: ParsedPlainBlock, pb: ParsedPlainBlock): 
 }
 
 /**
- * Diff two aligned blocks: word-level when similarity is high; otherwise one delete + one insert
- * (avoids cross-section token weaving from global LCS).
+ * Word-level diff for a single aligned clause slice (pair of plain-text excerpts).
+ * Also exported for condensed-draft clause re-split after coarse alignment.
  */
+export function diffLegalRedlineClausePlainText(currentText: string, proposedText: string): LegalRedlineSegment[] {
+  return diffAlignedBlockSegments(currentText, proposedText);
+}
+
 function diffAlignedBlockSegments(currentText: string, proposedText: string): LegalRedlineSegment[] {
   const cur = String(currentText ?? "");
   const prop = String(proposedText ?? "");

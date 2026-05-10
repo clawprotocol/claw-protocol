@@ -5,6 +5,7 @@
 
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
 import { recipientBlockShowsRedline } from "./recipientMeaningfulRedlinePass";
+import { blockPriorAndRevisedPlain } from "./recipientWholeDocSemanticRender";
 
 function recipientSemanticAnchorSlugForBlockId(blockId: string): string {
   return `semantic-${String(blockId).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -291,6 +292,23 @@ export function getScrollTargetBlockIdForSemanticOrFallback(
   );
 }
 
+/** Prior/revised plain text for a relaxed scroll target (modal fallback / “open in full redline”). */
+export function getClauseCompareFallbackForSemanticId(
+  vm: LegalRedlineDocumentViewModel,
+  id: BusinessReviewSemanticId,
+): { blockId: string; sectionLabel: string; oldText: string; newText: string } | null {
+  const bid = getScrollTargetBlockIdForSemanticOrFallback(vm, id);
+  if (!bid) return null;
+  const b = vm.blocks.find((x) => x.id === bid);
+  if (!b) return null;
+  const { prior, revised } = blockPriorAndRevisedPlain(b);
+  const oldText = String(prior).trim() || "—";
+  const newText = String(revised).trim() || "—";
+  if (oldText === "—" && newText === "—") return null;
+  const sectionLabel = (b.label || b.clauseNumber || b.heading || "Section").trim();
+  return { blockId: bid, sectionLabel, oldText, newText };
+}
+
 export type RecipientRedlineStickyNavRow = {
   key: string;
   label: string;
@@ -311,7 +329,7 @@ export function buildRecipientRedlineStickyNavRows(
     if (seen.has(k)) continue;
     seen.add(k);
     const id = friendlyChipToSemanticId(t);
-    const bid = getScrollTargetBlockIdForSemanticOrFallback(vm, id);
+    const bid = getPrimaryScrollTargetBlockIdForSemanticId(vm, id);
     out.push({
       key: k,
       label: t,

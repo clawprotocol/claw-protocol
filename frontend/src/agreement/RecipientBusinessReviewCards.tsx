@@ -13,9 +13,10 @@ import {
   RECIPIENT_BUSINESS_REVIEW_CARD_WEAK_WORLING_LINE,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING,
   RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT,
+  RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE,
+  RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE_HINT,
   RECIPIENT_BUSINESS_REVIEW_SUGGESTED_EDITS_HEADING,
   RECIPIENT_BUSINESS_REVIEW_WHY_DETAILS,
-  RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE,
 } from "./portableReviewCopy";
 
 export type RecipientBusinessReviewCardsProps = {
@@ -25,7 +26,10 @@ export type RecipientBusinessReviewCardsProps = {
   /** Opens the collapsed full legal redline section in the parent panel. */
   onOpenFullRedline?: () => void;
   /** Scrolls to the best-matching block inside the opened redline (full-doc mode). */
-  onNavigateSemanticInRedline?: (semanticId: BusinessReviewSemanticId) => void | Promise<void>;
+  onNavigateSemanticInRedline?: (
+    semanticId: BusinessReviewSemanticId,
+    meta?: { cardTitle?: string; chipLabel?: string },
+  ) => void | Promise<void>;
 };
 
 /**
@@ -162,17 +166,22 @@ export function RecipientBusinessReviewCards({
                   <span className="text-[10px] leading-snug text-slate-500">{RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING_HINT}</span>
                 </>
               ) : onOpenFullRedline ? (
-                <button
-                  type="button"
-                  className="text-left text-[11px] font-semibold text-sky-300/90 underline decoration-sky-700/50 underline-offset-2 hover:text-sky-200"
-                  data-testid="recipient-business-review-view-in-full-redline"
-                  onClick={async () => {
-                    onOpenFullRedline?.();
-                    if (onNavigateSemanticInRedline) await onNavigateSemanticInRedline(id);
-                  }}
-                >
-                  {RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="w-full rounded-md border border-sky-800/40 bg-sky-950/30 px-2 py-1.5 text-left text-[11px] font-semibold text-sky-200 hover:bg-sky-950/55"
+                    data-testid="recipient-business-review-show-changed-wording"
+                    onClick={async () => {
+                      onOpenFullRedline?.();
+                      if (onNavigateSemanticInRedline) await onNavigateSemanticInRedline(id, { cardTitle: card.title });
+                    }}
+                  >
+                    {RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE}
+                  </button>
+                  <span className="text-[10px] leading-snug text-slate-500">
+                    {RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE_HINT}
+                  </span>
+                </>
               ) : null}
             </div>
 
@@ -235,6 +244,24 @@ export function RecipientBusinessReviewCards({
                     <p className="rounded border border-slate-700/60 bg-slate-900/80 px-2 py-1.5 font-mono text-[10px] text-slate-300">
                       {ex}
                     </p>
+                  ) : null}
+                  {onOpenFullRedline && onNavigateSemanticInRedline && mobileSheetId ? (
+                    <button
+                      type="button"
+                      className="mt-3 w-full rounded-md border border-sky-800/45 bg-sky-950/35 px-3 py-2 text-center text-[11px] font-semibold text-sky-200 hover:bg-sky-950/55"
+                      data-testid="recipient-business-review-mobile-show-changed-wording"
+                      onClick={async () => {
+                        const row = rows.find((r) => r.id === mobileSheetId);
+                        onOpenFullRedline();
+                        if (row) {
+                          const c = businessReviewCardForSemanticId(row.id, row.chip);
+                          await onNavigateSemanticInRedline(row.id, { cardTitle: c.title });
+                        }
+                        closePreviewSheet();
+                      }}
+                    >
+                      {RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE}
+                    </button>
                   ) : null}
                 </div>
               );

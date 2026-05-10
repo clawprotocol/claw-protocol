@@ -3,7 +3,10 @@ import { recipientRedlineReviewAreasLabel } from "./portableReviewCopy";
 
 type Props = {
   rows: readonly RecipientRedlineStickyNavRow[];
-  onSelectSemantic: (id: BusinessReviewSemanticId) => void | Promise<void>;
+  onSelectSemantic: (
+    id: BusinessReviewSemanticId,
+    meta?: { chipLabel?: string },
+  ) => void | Promise<void>;
   className?: string;
 };
 
@@ -26,7 +29,7 @@ export function RecipientRedlineStickyNavigator({ rows, onSelectSemantic, classN
             type="button"
             data-testid={`recipient-redline-nav-${r.key.replace(/[^a-z0-9_-]/gi, "_")}`}
             className="shrink-0 rounded-full border border-slate-400/70 bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-800 shadow-sm hover:border-sky-500/50 hover:bg-sky-50/90 hover:text-sky-950"
-            onClick={() => void onSelectSemantic(r.semanticId)}
+            onClick={() => void onSelectSemantic(r.semanticId, { chipLabel: r.label })}
           >
             {r.label}
           </button>

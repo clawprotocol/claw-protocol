@@ -17,13 +17,13 @@ import {
   RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
   RECIPIENT_SHOW_LINE_BY_LINE_MARKUP,
 } from "./portableReviewCopy";
-import { blockPriorAndRevisedPlain, type RecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
-import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
 import {
-  recipientBlockHasInlineMarkupDiff,
-  recipientBlockShowsRedline,
-  recipientClauseMeaningfulMaterialRatio,
-} from "./recipientMeaningfulRedlinePass";
+  blockPriorAndRevisedPlain,
+  recipientBlockEligibleForAdvancedLegalMarkup,
+  type RecipientSemanticRedlinePresentation,
+} from "./recipientWholeDocSemanticRender";
+import type { HumanReviewStructuredForPdf } from "./recipientHumanReviewSummaryModel";
+import { recipientBlockShowsRedline, recipientClauseMeaningfulMaterialRatio } from "./recipientMeaningfulRedlinePass";
 
 export type RecipientPreviewPdfExportKind = "original" | "proposed" | "redline";
 
@@ -295,7 +295,7 @@ function renderSemanticBeforeAfterPdfBlock(
       <pre style="margin:0;font:13px/1.65 Georgia,serif;white-space:pre-wrap;color:#064e3b;">${escapeHtml(revised)}</pre>
     </div>
   </div>`;
-  const micro = recipientBlockHasInlineMarkupDiff(block)
+  const micro = recipientBlockEligibleForAdvancedLegalMarkup(block)
     ? `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;">${escapeHtml(
         RECIPIENT_SHOW_LINE_BY_LINE_MARKUP,
       )}</summary><div style="margin-top:10px;">${renderBlockInlineFlow(block, { suppressSectionHeader: true })}</div></details>`
@@ -427,7 +427,7 @@ export function buildRecipientRedlinePdfHtml(
       }
 
       const flow = renderBlockInlineFlow(b, { suppressSectionHeader: suppress });
-      if (b.hasChange && recipientBlockShowsRedline(b) && recipientBlockHasInlineMarkupDiff(b)) {
+      if (b.hasChange && recipientBlockShowsRedline(b) && recipientBlockEligibleForAdvancedLegalMarkup(b)) {
         return `<details style="display:block;margin:0 0 18px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;background:#ffffff;"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;">${escapeHtml(
           RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP,
         )}</summary><div style="margin-top:10px;">${flow}</div></details>`;

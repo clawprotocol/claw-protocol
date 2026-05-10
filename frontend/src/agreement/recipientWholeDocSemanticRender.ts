@@ -4,7 +4,11 @@
  */
 
 import type { LegalRedlineBlock, LegalRedlineDocumentViewModel } from "./legalRedlineBlocks";
-import { recipientBlockShowsRedline } from "./recipientMeaningfulRedlinePass";
+import {
+  recipientBlockHasInlineMarkupDiff,
+  recipientBlockShowsRedline,
+} from "./recipientMeaningfulRedlinePass";
+import { areClausesSemanticallyEquivalent, materialObligationExpansionLikely } from "./recipientClauseEquivalence";
 
 export type RecipientRedlineSemanticRenderMode = "inline_edit" | "whole_section_replacement";
 
@@ -212,4 +216,20 @@ export function buildRecipientSemanticRedlinePresentation(
     beforeAfterBlockIds: beforeAfter,
     shortRevisedVsLongBaseline: shortRev,
   };
+}
+
+/**
+ * Gates “advanced legal markup” / line-by-line disclosures: both sides present, inline diff exists,
+ * block is a redline target, and prior vs revised are not normalized-equivalent.
+ */
+export function recipientBlockEligibleForAdvancedLegalMarkup(block: LegalRedlineBlock): boolean {
+  if (!recipientBlockShowsRedline(block)) return false;
+  if (!recipientBlockHasInlineMarkupDiff(block)) return false;
+  const { prior, revised } = blockPriorAndRevisedPlain(block);
+  const p0 = String(prior).replace(/\s+/g, " ").trim();
+  const p1 = String(revised).replace(/\s+/g, " ").trim();
+  if (p0.length < 2 || p1.length < 2) return false;
+  if (p0 === "—" && p1 === "—") return false;
+  if (areClausesSemanticallyEquivalent(p0, p1) && !materialObligationExpansionLikely(p0, p1)) return false;
+  return true;
 }

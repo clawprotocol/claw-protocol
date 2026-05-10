@@ -193,7 +193,14 @@ export const RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE =
 export const RECIPIENT_BUSINESS_REVIEW_CARD_WEAK_WORLING_LINE =
   "This section was substantially revised. Open Full legal redline to see the exact changed wording.";
 /** Opens the collapsed full legal redline section (no modal). */
-export const RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE = "View in full legal redline";
+/** Primary CTA from business-review cards into the clause-level redline surface. */
+export const RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE = "Show changed wording";
+/** Secondary hint under {@link RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE}. */
+export const RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE_HINT = "Opens the matching clause below.";
+/** Compare fallback modal — opens optional full redline surface. */
+export const RECIPIENT_FOCUS_COMPARE_OPEN_FULL_REDLINE = "Open in full redline";
+/** @deprecated Use {@link RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE}. */
+export const RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE = RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE;
 /** User-safe — avoids “match failure” tone. */
 export const RECIPIENT_INTENT_NEEDS_MANUAL_PLACEMENT = "This wording is not shown anchored to a single clause in the text below";
 export const RECIPIENT_INTENT_REVIEW_BEFORE_SENDING = "Review before sending";
@@ -237,9 +244,12 @@ export const RECIPIENT_PREVIEW_NOTHING_SENT_UNTIL_SENDER_ACCEPTS =
   "Nothing is sent until the sender accepts.";
 
 /** Subheading above the tracked redline (inside full legal redline). */
-export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Changed sections";
+export const RECIPIENT_HUMAN_REVIEW_REDLINES_SUBHEAD = "Changed wording";
 /** In-panel heading for clause-level panels (UI + PDF body). */
-export const RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING = "Changed sections";
+export const RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING = "Changed wording";
+/** Short instruction under the changed-clause heading (recipient full redline). */
+export const RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION =
+  "These are the clauses that appear to have changed. Use the buttons above to jump between review areas.";
 /** Closed disclosure wrapping raw insert/delete markup (UI + PDF). */
 export const RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP = "Show advanced legal markup";
 /** Optional line-by-line markup inside a clause prior/revised panel. */
@@ -269,7 +279,7 @@ export const RECIPIENT_BUSINESS_REVIEW_EXACT_WORDING_TITLE = "Exact wording";
 export const RECIPIENT_EXPORT_SECTION_SUBSTANTIALLY_REVISED =
   "Section substantially revised — see the summary above; full wording appears in the detailed redline below.";
 /** PDF body: after human summary / key revisions — readable changed-clause section. */
-export const RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE = "Changed sections";
+export const RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE = "Changed wording";
 /** @deprecated Use {@link RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE} (same string). */
 export const RECIPIENT_EXPORT_PDF_CHANGED_SECTIONS_HEADING = RECIPIENT_EXPORT_PDF_SECTION_DETAILED_REDLINE;
 /** Semantic negotiation panels (whole-section rewrite mode). */

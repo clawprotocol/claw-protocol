@@ -19,13 +19,10 @@ import {
 import type { RecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
 import {
   blockPriorAndRevisedPlain,
+  recipientBlockEligibleForAdvancedLegalMarkup,
   recipientSemanticAnchorForBlock,
 } from "./recipientWholeDocSemanticRender";
-import {
-  recipientBlockHasInlineMarkupDiff,
-  recipientBlockShowsRedline,
-  recipientClauseMeaningfulMaterialRatio,
-} from "./recipientMeaningfulRedlinePass";
+import { recipientBlockShowsRedline, recipientClauseMeaningfulMaterialRatio } from "./recipientMeaningfulRedlinePass";
 
 type Props = {
   /** @deprecated Prefer {@link document} for block-aware redline. */
@@ -354,7 +351,7 @@ export function RecipientLegalRedlineDocument({
                         </div>
                       </div>
                     </div>
-                    {recipientBlockHasInlineMarkupDiff(block) ? (
+                    {recipientBlockEligibleForAdvancedLegalMarkup(block) ? (
                       <details className="rounded-md border border-slate-200/90 bg-white/80 px-2 py-1.5">
                         <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
                           {RECIPIENT_SHOW_LINE_BY_LINE_MARKUP}
@@ -399,7 +396,7 @@ export function RecipientLegalRedlineDocument({
                         {RECIPIENT_BUSINESS_REVIEW_PREVIEW_WORDING}
                       </button>
                     ) : null}
-                    {recipientBlockHasInlineMarkupDiff(block) ? (
+                    {recipientBlockEligibleForAdvancedLegalMarkup(block) ? (
                       <details className="mt-2 rounded-md border border-slate-200/90 bg-white/80 px-2 py-1.5">
                         <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
                           {RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP}
@@ -418,7 +415,7 @@ export function RecipientLegalRedlineDocument({
                 ) : variant === "suggested" && changed ? (
                   <div className="space-y-2" data-testid="recipient-redline-clause-inline-wrap">
                     <p className="text-[12px] font-semibold leading-snug text-slate-900">{sectionLabel}</p>
-                    {recipientBlockHasInlineMarkupDiff(block) ? (
+                    {recipientBlockEligibleForAdvancedLegalMarkup(block) ? (
                       <details className="rounded-md border border-slate-200/90 bg-white/90 px-2 py-1.5">
                         <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-800 marker:content-none hover:text-sky-950 [&::-webkit-details-marker]:hidden">
                           {RECIPIENT_SHOW_ADVANCED_LEGAL_MARKUP}

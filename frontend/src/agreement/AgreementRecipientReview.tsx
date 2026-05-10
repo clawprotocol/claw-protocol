@@ -148,10 +148,11 @@ import {
   RECIPIENT_PREVIEW_NOTES_SEPARATE_FROM_AGREEMENT,
   RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY,
   RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
-  RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE,
+  RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
   RECIPIENT_ONLY_CHANGED_SECTIONS,
   RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING,
+  RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION,
   RECIPIENT_SHOW_UNCHANGED_CONTEXT,
   RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES,
   RECIPIENT_DETAILED_EDIT_METRICS_SUMMARY,
@@ -188,7 +189,10 @@ import {
 import { buildRecipientCompareConfidence } from "./recipientCompareConfidence";
 import type { RecipientRevisionLineage } from "./recipientRevisionLineage";
 import { DEFAULT_RECIPIENT_REVISION_LINEAGE } from "./recipientRevisionLineage";
-import { buildRecipientSemanticRedlinePresentation } from "./recipientWholeDocSemanticRender";
+import {
+  buildRecipientSemanticRedlinePresentation,
+  recipientSemanticAnchorForBlockId,
+} from "./recipientWholeDocSemanticRender";
 import { buildRecipientFriendlyRedlineChips } from "./recipientFriendlyRedlineSummary";
 import {
   buildHumanReviewHeadline,
@@ -204,13 +208,18 @@ import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import { RecipientFocusedWordingDialog } from "./RecipientFocusedWordingDialog";
 import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
 import { RecipientRedlineStickyNavigator } from "./RecipientRedlineStickyNavigator";
+import { splitRecipientCondensedGiantChangedBlock } from "./recipientCondensedRedlineClauseSplit";
+import { devLogRecipientRedlineNavigation } from "./recipientRedlineNavigationLog";
 import {
   resolveRecipientSemanticScrollTarget,
   scrollRecipientRedlineClausePanel,
 } from "./recipientRedlineDomScroll";
+import { stripClausePreambleFromRevisedPair } from "./recipientRevisionPreambleStrip";
 import {
   buildRecipientRedlineStickyNavRows,
   buildRecommendedSenderFocusLines,
+  getClauseCompareFallbackForSemanticId,
+  getScrollTargetBlockIdForSemanticOrFallback,
   type BusinessReviewSemanticId,
 } from "./recipientBusinessReviewCardsModel";
 import { applyRecipientMeaningfulChangePass } from "./recipientMeaningfulRedlinePass";
@@ -995,17 +1004,37 @@ export function AgreementRecipientReview({
   const [onlyChangedRedlineSections, setOnlyChangedRedlineSections] = useState(true);
   const suggestedChangesDocScrollRef = useRef<HTMLDivElement>(null);
   const auditDetailsRef = useRef<HTMLDetailsElement>(null);
-  const [businessReviewFocusedWording, setBusinessReviewFocusedWording] = useState<{
-    sectionTitle: string;
-    oldText: string;
-    newText: string;
-  } | null>(null);
+  const [businessReviewFocusedWording, setBusinessReviewFocusedWording] = useState<
+    | {
+        variant?: "exact";
+        sectionTitle: string;
+        oldText: string;
+        newText: string;
+      }
+    | {
+        variant: "compare_fallback";
+        sectionTitle: string;
+        sectionSubline?: string;
+        oldText: string;
+        newText: string;
+        semanticId: BusinessReviewSemanticId;
+      }
+    | null
+  >(null);
 
-  const legalRedlineDocumentBaseVm = useMemo(() => {
+  const recipientRedlineStrippedPlainPair = useMemo(() => {
     if (!recipientRedlinePlainTexts) return null;
-    let vm = buildLegalRedlineDocumentViewModel(
+    return stripClausePreambleFromRevisedPair(
       recipientRedlinePlainTexts.currentPlain,
       recipientRedlinePlainTexts.proposedPlain,
+    );
+  }, [recipientRedlinePlainTexts]);
+
+  const legalRedlineDocumentBaseVm = useMemo(() => {
+    if (!recipientRedlinePlainTexts || !recipientRedlineStrippedPlainPair) return null;
+    let vm = buildLegalRedlineDocumentViewModel(
+      recipientRedlineStrippedPlainPair.currentPlain,
+      recipientRedlineStrippedPlainPair.proposedPlain,
     );
     if (
       recipientRedlinePlainTexts.sourceMode === "baseline_vs_revise_html" &&
@@ -1019,8 +1048,11 @@ export function AgreementRecipientReview({
     if (recipientRedlinePlainTexts.narrowRecipientTargetedRedline) {
       vm = filterNarrowRecipientPaymentRedlineNoise(vm, { narrowPaymentInstruction: true });
     }
+    if (!recipientRedlinePlainTexts.narrowRecipientTargetedRedline) {
+      vm = splitRecipientCondensedGiantChangedBlock(vm);
+    }
     return applyRecipientMeaningfulChangePass(vm);
-  }, [recipientRedlinePlainTexts]);
+  }, [recipientRedlinePlainTexts, recipientRedlineStrippedPlainPair]);
 
   const recipientFriendlyRedlineChips = useMemo(() => {
     if (!recipientPreview || !previewDiff) return [] as string[];
@@ -1093,21 +1125,103 @@ export function AgreementRecipientReview({
     return buildRecipientSemanticRedlinePresentation(legalRedlineDocumentVm);
   }, [legalRedlineDocumentVm, recipientRedlinePlainTexts?.narrowRecipientTargetedRedline]);
 
-  const scrollToSemanticReviewInRedline = useCallback(
+  const scrollRecipientSemanticRelaxed = useCallback(
     async (semanticId: BusinessReviewSemanticId) => {
-      openFullLegalRedlineSection();
       if (!legalRedlineDocumentVm) return;
-      const { semanticAnchorId, blockId } = resolveRecipientSemanticScrollTarget(
-        legalRedlineDocumentVm,
-        semanticId,
-      );
+      const bid = getScrollTargetBlockIdForSemanticOrFallback(legalRedlineDocumentVm, semanticId);
+      const sem = bid ? recipientSemanticAnchorForBlockId(bid) : null;
       await scrollRecipientRedlineClausePanel({
+        root: suggestedChangesDocScrollRef.current,
+        detailsBoundary: suggestedChangesDocScrollRef.current,
+        semanticAnchorId: sem,
+        blockId: bid,
+        onHighlight: (id) => setHighlightedSemanticAnchor(id),
+        highlightClearMs: 2000,
+      });
+    },
+    [legalRedlineDocumentVm],
+  );
+
+  const scrollToSemanticReviewInRedline = useCallback(
+    async (semanticId: BusinessReviewSemanticId, meta?: { cardTitle?: string; chipLabel?: string }) => {
+      openFullLegalRedlineSection();
+      const vm = legalRedlineDocumentVm;
+      const cardTitle = meta?.cardTitle ?? meta?.chipLabel ?? null;
+      const clickTag =
+        meta?.chipLabel != null && String(meta.chipLabel).trim() !== ""
+          ? "recipient-redline-chip-click"
+          : "recipient-redline-card-click";
+      devLogRecipientRedlineNavigation(clickTag, {
+        semanticId,
+        cardTitle,
+        scrollportExists: Boolean(suggestedChangesDocScrollRef.current),
+      });
+      if (!vm) return;
+      const { semanticAnchorId, blockId } = resolveRecipientSemanticScrollTarget(vm, semanticId);
+      devLogRecipientRedlineNavigation(
+        semanticAnchorId || blockId ? "recipient-redline-target-resolved" : "recipient-redline-target-missing",
+        {
+          semanticId,
+          cardTitle,
+          resolvedBlockId: blockId,
+          resolvedSemanticAnchorId: semanticAnchorId,
+          scrollportExists: Boolean(suggestedChangesDocScrollRef.current),
+          retryCount: 0,
+        },
+      );
+      if (!semanticAnchorId && !blockId) {
+        const fb = getClauseCompareFallbackForSemanticId(vm, semanticId);
+        if (fb) {
+          setBusinessReviewFocusedWording({
+            variant: "compare_fallback",
+            sectionTitle: (cardTitle ?? fb.sectionLabel) || "Changed clause",
+            sectionSubline: fb.sectionLabel,
+            oldText: fb.oldText,
+            newText: fb.newText,
+            semanticId,
+          });
+        }
+        return;
+      }
+      const scrollResult = await scrollRecipientRedlineClausePanel({
         root: suggestedChangesDocScrollRef.current,
         detailsBoundary: suggestedChangesDocScrollRef.current,
         semanticAnchorId,
         blockId,
         onHighlight: (id) => setHighlightedSemanticAnchor(id),
-        highlightClearMs: 2800,
+        highlightClearMs: 2000,
+      });
+      if (!scrollResult.hit) {
+        devLogRecipientRedlineNavigation("recipient-redline-target-missing", {
+          semanticId,
+          cardTitle,
+          resolvedBlockId: blockId,
+          reason: "dom_miss",
+          attempts: scrollResult.attempts,
+          scrollportExists: Boolean(suggestedChangesDocScrollRef.current),
+          targetElementExists: false,
+        });
+        const fb = getClauseCompareFallbackForSemanticId(vm, semanticId);
+        if (fb) {
+          setBusinessReviewFocusedWording({
+            variant: "compare_fallback",
+            sectionTitle: (cardTitle ?? fb.sectionLabel) || "Changed clause",
+            sectionSubline: fb.sectionLabel,
+            oldText: fb.oldText,
+            newText: fb.newText,
+            semanticId,
+          });
+        }
+        return;
+      }
+      devLogRecipientRedlineNavigation("recipient-redline-scroll-complete", {
+        semanticId,
+        cardTitle,
+        resolvedBlockId: blockId,
+        matchedBy: scrollResult.matchedBy,
+        attempts: scrollResult.attempts,
+        scrollportExists: Boolean(suggestedChangesDocScrollRef.current),
+        targetElementExists: true,
       });
     },
     [legalRedlineDocumentVm, openFullLegalRedlineSection],
@@ -2211,6 +2325,9 @@ export function AgreementRecipientReview({
                 >
                   {RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING}
                 </h3>
+                <p className="mt-1 text-[11px] leading-snug text-slate-500" data-testid="recipient-redline-changed-wording-instruction">
+                  {RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION}
+                </p>
                 {participantPid ? (
                   <p className="mt-1 text-[10px] leading-snug text-slate-500">
                     Proposed by <span className="text-slate-300">{proposerDisplayNameForApi}</span>
@@ -2239,7 +2356,7 @@ export function AgreementRecipientReview({
                     </label>
                     <RecipientRedlineStickyNavigator
                       rows={buildRecipientRedlineStickyNavRows(presentationFriendlyRedlineChips, legalRedlineDocumentVm)}
-                      onSelectSemantic={scrollToSemanticReviewInRedline}
+                      onSelectSemantic={(id, m) => void scrollToSemanticReviewInRedline(id, m)}
                     />
                     <RecipientLegalRedlineDocument
                       document={legalRedlineDocumentVm}
@@ -2336,7 +2453,7 @@ export function AgreementRecipientReview({
                                 >
                                   <span className="block font-medium text-emerald-50/95">✓ {recipientIntentAppliedRowHeading(it)}</span>
                                   <span className="mt-1 block text-[11px] font-normal text-emerald-100/95 underline decoration-emerald-400/90 decoration-1 underline-offset-2 hover:text-white hover:decoration-emerald-200">
-                                    {RECIPIENT_VIEW_IN_FULL_LEGAL_REDLINE}
+                                    {RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE}
                                   </span>
                                 </button>
                               ) : (
@@ -2492,10 +2609,26 @@ export function AgreementRecipientReview({
 
             <RecipientFocusedWordingDialog
               open={Boolean(businessReviewFocusedWording)}
+              variant={businessReviewFocusedWording?.variant === "compare_fallback" ? "compare_fallback" : "exact"}
               sectionTitle={businessReviewFocusedWording?.sectionTitle ?? ""}
+              sectionSubline={
+                businessReviewFocusedWording?.variant === "compare_fallback"
+                  ? businessReviewFocusedWording.sectionSubline
+                  : undefined
+              }
               oldText={businessReviewFocusedWording?.oldText ?? ""}
               newText={businessReviewFocusedWording?.newText ?? ""}
               onClose={() => setBusinessReviewFocusedWording(null)}
+              onOpenFullRedline={
+                businessReviewFocusedWording?.variant === "compare_fallback"
+                  ? () => {
+                      const sid = businessReviewFocusedWording.semanticId;
+                      setBusinessReviewFocusedWording(null);
+                      openFullLegalRedlineSection();
+                      void scrollRecipientSemanticRelaxed(sid);
+                    }
+                  : undefined
+              }
             />
           </>
         ) : (
