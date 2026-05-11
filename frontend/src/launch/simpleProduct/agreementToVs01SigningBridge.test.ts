@@ -326,6 +326,7 @@ describe("computePaidProAgreementBridgeSkip", () => {
     setPaidProAgreementBridgeSkipMarker("doc_x");
     expect(computePaidProAgreementBridgeSkip("", true)).toBe(false);
   });
+
 });
 
 describe("lawdogSenderFirstBridgeMetadataReady", () => {

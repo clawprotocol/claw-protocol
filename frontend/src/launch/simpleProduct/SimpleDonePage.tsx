@@ -45,6 +45,8 @@ import {
   writePaidProEditReturnHandoff,
 } from "./paidProEditReturnHandoff";
 import { findOpenRecipientProposals } from "../../agreement/recipientProposal";
+import { readPremiumRecipientHandoff } from "../../components/agreements/premiumPartyNamesHandoff";
+import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./reviewLinkRecipientEmailMerge";
 import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
 
 function formatPartiesLineForDone(parties: AgreementDraft["parties"] | undefined, maxNames = 6): string {
@@ -327,12 +329,18 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
     setFinalizeNavigating(true);
     try {
+      const emailMergedDraft = mergeReviewLinkRecipientEmailsOntoHydratedDraft(ownerHandoffDraft, null);
+      const handoff = readPremiumRecipientHandoff();
+      const recipientSetup = handoff
+        ? { recipient1Email: handoff.party1.email, recipient2Email: handoff.party2.email }
+        : null;
       const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
         navigate,
         agreementId: id,
-        draft: ownerHandoffDraft,
+        draft: emailMergedDraft,
         logReason: signingLockActive ? "simple_done_continue_vs01" : "simple_done_finalize_clean",
         reviewerApprovedCleanHandoff: true,
+        recipientSetup,
       });
       if (ok) {
         logOwnerFinalizeRouteDecision({

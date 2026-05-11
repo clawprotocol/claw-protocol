@@ -74,9 +74,10 @@ export function computePaidProAgreementBridgeSkip(
   const sid = (seedDocumentId || "").trim();
   if (readPaidProAgreementBridgeSkipMarker(sid)) return true;
   if (typeof window === "undefined") return false;
+  const b = readAgreementVs01BridgeSession();
+  if (b && b.vs01DocumentId.trim() === sid) return true;
   const q = new URLSearchParams(window.location.search);
   if (q.get("agreement_bridge") !== "1") return false;
-  const b = readAgreementVs01BridgeSession();
   return Boolean(b && b.vs01DocumentId.trim() === sid);
 }
 

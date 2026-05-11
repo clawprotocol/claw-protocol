@@ -9,6 +9,7 @@ import type { PublicVerifyPayload } from "../../agreement/agreementPublicVerify"
 import { SimpleDonePage } from "./SimpleDonePage";
 import { markSimpleFlowSent } from "../simpleFlowSent";
 import { writeSimpleDoneReviewRecipientLinks } from "./simpleDoneReviewRecipientLinks";
+import { persistPremiumRecipientHandoff } from "../../components/agreements/premiumPartyNamesHandoff";
 
 const { mockNavigate, mockTryNavigatePaidProVs01 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
@@ -217,6 +218,52 @@ describe("SimpleDonePage owner approval UX", () => {
       }),
     );
     expect(mockNavigate).toHaveBeenCalledWith("/app/esign/mock-vs01-doc?agreement_bridge=1");
+  });
+
+  it("Finalize for signing passes recipientSetup emails from premium handoff into VS01 bridge", async () => {
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({
+        audit_log: [{ event_type: "recipient_approved", at: "2026-01-02T00:00:00Z" }],
+      }),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({
+        audit_log: [{ event_type: "recipient_approved", at: "2026-01-02T00:00:00Z" }],
+      }),
+    });
+
+    persistPremiumRecipientHandoff({
+      party1: { name: "Owner", email: "owner@firm.com", role: "owner" },
+      party2: { name: "Pat", email: "pat@review.co", role: "party" },
+    });
+
+    markSimpleFlowSent(agreementId);
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId,
+      recipients: [{ displayName: "Pat", reviewHref: "https://example.com/review/pat" }],
+    });
+
+    render(<SimpleDonePage agreementId={agreementId} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByTestId("simple-done-finalize-for-signing"));
+    expect(mockTryNavigatePaidProVs01).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agreementId,
+        logReason: "simple_done_finalize_clean",
+        reviewerApprovedCleanHandoff: true,
+        recipientSetup: expect.objectContaining({
+          recipient1Email: "owner@firm.com",
+          recipient2Email: "pat@review.co",
+        }),
+      }),
+    );
   });
 
   it("pre-approval path keeps Copy review link as primary", async () => {

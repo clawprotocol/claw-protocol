@@ -255,14 +255,7 @@ export function Vs01Wizard({
     goToStep(2);
   }, [paidProAgreementBridgeSkip, step, goToStep]);
 
-  useEffect(() => {
-    if (!paidProAgreementBridgeSkip) return;
-    if (step !== 2 || !docFinalized) return;
-    const t = window.setTimeout(() => {
-      clearPaidProAgreementBridgeSkipMarker();
-    }, 2000);
-    return () => window.clearTimeout(t);
-  }, [paidProAgreementBridgeSkip, step, docFinalized]);
+  /* Skip marker + bridge session persist across refresh; cleared in resetAll or post-sign navigate. */
 
   /** Deep link: /app/esign/:documentId — fetch content and bind hash so steps 1+ unlock. */
   useEffect(() => {
@@ -345,7 +338,6 @@ export function Vs01Wizard({
           const qs = bridgeParams.toString();
           window.setTimeout(() => {
             try {
-              clearAgreementVs01BridgeSession();
               window.history.replaceState(
                 window.history.state,
                 "",

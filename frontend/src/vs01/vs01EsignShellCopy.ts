@@ -33,7 +33,7 @@ export function resolveVs01EsignShellCopy(args: {
   const bridgeMatches = Boolean(bridge && bridge.vs01DocumentId.trim() === seed);
   const marker =
     typeof window !== "undefined" && seed ? readPaidProAgreementBridgeSkipMarker(seed) : false;
-  const agreementBridgeEffective = agreementBridgeQuery || (Boolean(marker) && bridgeMatches);
+  const agreementBridgeEffective = agreementBridgeQuery || Boolean(marker) || bridgeMatches;
 
   if (!agreementBridgeEffective) {
     return {
