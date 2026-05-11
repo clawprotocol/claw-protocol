@@ -3717,6 +3717,224 @@ export function AgreementRecipientReview({
     );
   }
 
+  if (entry.kind === "review" && flowPhase === "declined") {
+    return (
+      <div className="vs01-agreement-review-inner space-y-4 p-6">
+        <p className="text-sm leading-relaxed text-slate-300">
+          You&apos;ve declined this invite. If that was a mistake, contact the sender.
+        </p>
+        {onClose ? (
+          <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact" onClick={onClose}>
+            Close
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  const signingReadyActive = Boolean(bundle && isSigningLockActive(bundle));
+  const recipientProofBadge: ProofBadgeState = agreementFullyExecuted
+    ? "verified"
+    : mySignatureDone
+      ? "signed"
+      : signingReadyActive
+        ? "pending"
+        : "draft";
+  const lockedSignVid = bundle?.signingLock?.lockedVersionId || "";
+  const canRecipientSign =
+    recipientLinkRole === "signer" &&
+    signingReadyActive &&
+    Boolean(lockedSignVid) &&
+    !signingBlockedByProposalQueue;
+
+  const activeSummaryInviter =
+    (inviterDisplayNameOverride || "").trim() || (draft!.parties?.[0]?.name || "").trim() || "the sender";
+  const activeSummaryType = recipientMetadataTypeLine(draft!);
+  const activeSummaryParties = formatPartiesLine(draft!.parties);
+
+  const statusBanner = (() => {
+    if (agreementFullyExecuted) {
+      return {
+        wrap: "border-emerald-800/40 bg-emerald-950/35 text-emerald-50",
+        title: "Agreement fully executed",
+        detail: "All required signatures are recorded for this agreement.",
+      };
+    }
+    if (mySignatureDone) {
+      const { pending } = pendingSignatureCount({ draft: draft!, agreementFullySigned: false });
+      return {
+        wrap: "border-sky-800/40 bg-sky-950/30 text-sky-50",
+        title: "You signed this agreement",
+        detail:
+          pending > 0
+            ? `Waiting on ${pending} more signature${pending === 1 ? "" : "s"}.`
+            : "Your signature is recorded.",
+      };
+    }
+    if (signingReadyActive) {
+      return {
+        wrap: "border-sky-800/40 bg-sky-950/30 text-sky-50",
+        title: "Final version ready for signature",
+        detail:
+          signingBlockedByProposalQueue && recipientLinkRole === "signer"
+            ? "Open change requests are waiting on the owner — signing stays paused until those are cleared."
+            : recipientLinkRole === "signer"
+              ? "The owner set this text as the final signing version — open signing when you are ready."
+              : "The owner set this text as the final signing version.",
+      };
+    }
+    if (hasPendingSuggestion) {
+      return {
+        wrap: "border-amber-700/45 bg-amber-950/35 text-amber-50",
+        title: "Suggested edits sent — waiting on the owner",
+        detail:
+          "Your revised draft is in the owner’s queue. They will apply or decline it before their master draft changes.",
+      };
+    }
+    if (recipientApprovedInAudit || approvedAck) {
+      if (recipientAcceptedNoEditsBanner) {
+        return {
+          wrap: "border-emerald-700/50 bg-emerald-950/40 text-emerald-50",
+          title: "Reviewer approved this draft without requesting changes.",
+          detail: "The sender will finalize and open signing when ready. This page updates automatically.",
+        };
+      }
+      return {
+        wrap: "border-emerald-900/35 bg-emerald-950/25 text-emerald-100",
+        title: "You accepted this draft",
+        detail: "The owner will finalize when they are ready.",
+      };
+    }
+    if (bundle?.reviewSentAt) {
+      return {
+        wrap: "border-violet-800/40 bg-violet-950/25 text-violet-100",
+        title: "Waiting for your review",
+        detail: "Read the document below, then suggest changes or accept when you are comfortable.",
+      };
+    }
+    return null;
+  })();
+
+  const suggestControlsDisabled =
+    saving ||
+    previewing ||
+    revisedUploadAnalyzing ||
+    recipientRevisedDraftFileBusy ||
+    hasPendingSuggestion ||
+    recipientSuggestedEditsSentAck ||
+    recipientAcceptedAwaitingLock;
+
+  const recipientDraftBodyTextareaClass =
+    "w-full min-h-[280px] max-w-full resize-y overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 sm:min-h-[420px]";
+
+  if (entry.kind === "review" && !viewerLike && recipientAcceptedAwaitingLock && draft && flowPhase !== "declined") {
+    return (
+      <div
+        className="vs01-agreement-review-inner space-y-6 pb-8"
+        data-testid="recipient-accepted-awaiting-lock-root"
+      >
+        <div className="flex flex-wrap items-start justify-end gap-3">
+          {onClose ? (
+            <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
+              Close
+            </button>
+          ) : null}
+        </div>
+
+        {statusBanner ? (
+          <div
+            className={`rounded-lg border px-4 py-3 text-sm leading-snug ${statusBanner.wrap}`}
+            role="status"
+            data-testid="recipient-accepted-awaiting-status-banner"
+          >
+            <div className="font-semibold">{statusBanner.title}</div>
+            <p className="mt-1 text-xs opacity-95">{statusBanner.detail}</p>
+          </div>
+        ) : null}
+
+        <div
+          className="rounded-lg border border-slate-700/70 bg-slate-950/50 px-4 py-3 text-slate-200"
+          data-testid="recipient-signing-readiness-panel"
+        >
+          <div className="text-sm font-semibold text-slate-100">Waiting for sender to finalize signing.</div>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+            This page checks for updates automatically (about every {Math.round(RECIPIENT_SIGNING_READINESS_POLL_MS / 1000)}s).
+          </p>
+          <button
+            type="button"
+            className="mt-2 inline-flex items-center justify-center rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="recipient-refresh-signing-status"
+            disabled={loading}
+            onClick={() => void refresh()}
+          >
+            Refresh signing status
+          </button>
+        </div>
+
+        {needsPersonalizedLink ? (
+          <div
+            className="rounded-lg border border-rose-800/45 bg-rose-950/25 px-4 py-3 text-xs text-rose-100"
+            role="alert"
+          >
+            This agreement uses participant ids. Open the personal link the owner sent you (it includes{" "}
+            <code className="text-rose-200">?p=…</code> in the URL) so your suggestions and approvals are attributed
+            correctly.
+          </div>
+        ) : null}
+
+        {recipientAgreementSummaryCard({
+          agreementType: activeSummaryType,
+          partiesLine: activeSummaryParties,
+          sharedBy: activeSummaryInviter,
+          compact: true,
+        })}
+
+        <details
+          className="rounded-xl border border-slate-700/80 bg-white text-slate-900 shadow-sm"
+          data-testid="recipient-approved-draft-collapsed"
+        >
+          <summary className="cursor-pointer list-none px-5 py-4 text-sm font-semibold text-slate-800 marker:content-none hover:bg-slate-50/80 sm:px-6 [&::-webkit-details-marker]:hidden">
+            Approved draft
+            <span className="mt-0.5 block text-xs font-normal text-slate-500">Read-only — tap to expand or collapse.</span>
+          </summary>
+          <div className="border-t border-slate-200 px-5 pb-6 pt-4 sm:px-6">
+            <div
+              className="prose max-w-none text-[0.9375rem] leading-relaxed text-slate-900"
+              dangerouslySetInnerHTML={{ __html: scrubAgreementHtml(renderedHtmlDisplay) || "<p>No preview yet.</p>" }}
+            />
+          </div>
+        </details>
+
+        {!viewerLike && draft ? (
+          <div
+            ref={recipientOriginalDownloadsRef}
+            data-testid="recipient-download-original-anchor"
+            className="min-w-0 max-w-full"
+          >
+            <RecipientWantACopyStrip
+              agreementId={agreementId}
+              agreementTitle={draft.title}
+              readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+              scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
+              plainDraftText={directCompareDefault}
+              recordsAfterAccept
+            />
+          </div>
+        ) : null}
+
+        <p className="text-center text-[10px] text-slate-600 sm:text-left">
+          Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
+        </p>
+
+        {error ? (
+          <p className="rounded-lg border border-rose-800/50 bg-rose-950/30 px-4 py-3 text-sm text-rose-100" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   if (entry.kind === "review" && flowPhase === "landing") {
     const senderName = (draft.parties?.[0]?.name || "").trim() || "the sender";
     const inviterLine = (inviterDisplayNameOverride || "").trim() || senderName;
@@ -3877,116 +4095,6 @@ export function AgreementRecipientReview({
       </div>
     );
   }
-
-  if (entry.kind === "review" && flowPhase === "declined") {
-    return (
-      <div className="vs01-agreement-review-inner space-y-4 p-6">
-        <p className="text-sm leading-relaxed text-slate-300">
-          You&apos;ve declined this invite. If that was a mistake, contact the sender.
-        </p>
-        {onClose ? (
-          <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact" onClick={onClose}>
-            Close
-          </button>
-        ) : null}
-      </div>
-    );
-  }
-
-  const signingReadyActive = Boolean(bundle && isSigningLockActive(bundle));
-  const recipientProofBadge: ProofBadgeState = agreementFullyExecuted
-    ? "verified"
-    : mySignatureDone
-      ? "signed"
-      : signingReadyActive
-        ? "pending"
-        : "draft";
-  const lockedSignVid = bundle?.signingLock?.lockedVersionId || "";
-  const canRecipientSign =
-    recipientLinkRole === "signer" &&
-    signingReadyActive &&
-    Boolean(lockedSignVid) &&
-    !signingBlockedByProposalQueue;
-
-  const activeSummaryInviter =
-    (inviterDisplayNameOverride || "").trim() || (draft!.parties?.[0]?.name || "").trim() || "the sender";
-  const activeSummaryType = recipientMetadataTypeLine(draft!);
-  const activeSummaryParties = formatPartiesLine(draft!.parties);
-
-  const statusBanner = (() => {
-    if (agreementFullyExecuted) {
-      return {
-        wrap: "border-emerald-800/40 bg-emerald-950/35 text-emerald-50",
-        title: "Agreement fully executed",
-        detail: "All required signatures are recorded for this agreement.",
-      };
-    }
-    if (mySignatureDone) {
-      const { pending } = pendingSignatureCount({ draft: draft!, agreementFullySigned: false });
-      return {
-        wrap: "border-sky-800/40 bg-sky-950/30 text-sky-50",
-        title: "You signed this agreement",
-        detail:
-          pending > 0
-            ? `Waiting on ${pending} more signature${pending === 1 ? "" : "s"}.`
-            : "Your signature is recorded.",
-      };
-    }
-    if (signingReadyActive) {
-      return {
-        wrap: "border-sky-800/40 bg-sky-950/30 text-sky-50",
-        title: "Final version ready for signature",
-        detail:
-          signingBlockedByProposalQueue && recipientLinkRole === "signer"
-            ? "Open change requests are waiting on the owner — signing stays paused until those are cleared."
-            : recipientLinkRole === "signer"
-              ? "The owner set this text as the final signing version — open signing when you are ready."
-              : "The owner set this text as the final signing version.",
-      };
-    }
-    if (hasPendingSuggestion) {
-      return {
-        wrap: "border-amber-700/45 bg-amber-950/35 text-amber-50",
-        title: "Suggested edits sent — waiting on the owner",
-        detail:
-          "Your revised draft is in the owner’s queue. They will apply or decline it before their master draft changes.",
-      };
-    }
-    if (recipientApprovedInAudit || approvedAck) {
-      if (recipientAcceptedNoEditsBanner) {
-        return {
-          wrap: "border-emerald-700/50 bg-emerald-950/40 text-emerald-50",
-          title: "Reviewer approved this draft without requesting changes.",
-          detail: "The sender will finalize and open signing when ready. This page updates automatically.",
-        };
-      }
-      return {
-        wrap: "border-emerald-900/35 bg-emerald-950/25 text-emerald-100",
-        title: "You accepted this draft",
-        detail: "The owner will finalize when they are ready.",
-      };
-    }
-    if (bundle?.reviewSentAt) {
-      return {
-        wrap: "border-violet-800/40 bg-violet-950/25 text-violet-100",
-        title: "Waiting for your review",
-        detail: "Read the document below, then suggest changes or accept when you are comfortable.",
-      };
-    }
-    return null;
-  })();
-
-  const suggestControlsDisabled =
-    saving ||
-    previewing ||
-    revisedUploadAnalyzing ||
-    recipientRevisedDraftFileBusy ||
-    hasPendingSuggestion ||
-    recipientSuggestedEditsSentAck ||
-    recipientAcceptedAwaitingLock;
-
-  const recipientDraftBodyTextareaClass =
-    "w-full min-h-[280px] max-w-full resize-y overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 sm:min-h-[420px]";
 
   return (
     <div

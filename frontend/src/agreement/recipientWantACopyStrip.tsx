@@ -4,12 +4,15 @@ import { RecipientAgreementReadPdfExport } from "./recipientAgreementReadPdfExpo
 import {
   RECIPIENT_COPY_ACK_COPIED,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
+  RECIPIENT_RECORDS_APPROVED_PDF_BUTTON_TITLE,
   RECIPIENT_SAFETY_SUGGESTIONS_NOT_SIGNATURES,
   RECIPIENT_WANT_COPY_BODY,
   RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
   RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
   RECIPIENT_WANT_COPY_HEADING,
   RECIPIENT_WANT_COPY_LOOPBACK_CUE,
+  RECIPIENT_WANT_COPY_RECORDS_BODY,
+  RECIPIENT_WANT_COPY_RECORDS_HEADING,
   RECIPIENT_WANT_COPY_UPLOAD_CTA,
   RECIPIENT_WANT_COPY_UPLOAD_TIP,
   RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE,
@@ -27,6 +30,8 @@ type Props = {
   plainDraftText: string;
   /** When set with {@link onImportedRevisedPlainText}, shows primary upload and wires the outside-review → bring-back loop. */
   onPrepareRevisedImport?: () => void;
+  /** After accept while waiting for signing: neutral “Want a copy?” card — no upload dropzone or compare loop copy. */
+  recordsAfterAccept?: boolean;
   onImportedRevisedPlainText?: (
     text: string,
     meta?: {
@@ -45,6 +50,7 @@ export function RecipientWantACopyStrip({
   scrubbedCurrentHtml,
   plainDraftText,
   onPrepareRevisedImport,
+  recordsAfterAccept = false,
   onImportedRevisedPlainText,
   revisedImportDisabled,
 }: Props) {
@@ -54,7 +60,10 @@ export function RecipientWantACopyStrip({
   const [dropzoneActive, setDropzoneActive] = useState(false);
   const wantCopyFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const canWireBringBack = Boolean(onPrepareRevisedImport && onImportedRevisedPlainText);
+  const canWireBringBack =
+    !recordsAfterAccept && Boolean(onPrepareRevisedImport && onImportedRevisedPlainText);
+  const heading = recordsAfterAccept ? RECIPIENT_WANT_COPY_RECORDS_HEADING : RECIPIENT_WANT_COPY_HEADING;
+  const body = recordsAfterAccept ? RECIPIENT_WANT_COPY_RECORDS_BODY : RECIPIENT_WANT_COPY_BODY;
   const importDisabled = Boolean(revisedImportDisabled);
 
   const onDownloadText = useCallback(() => {
@@ -173,10 +182,10 @@ export function RecipientWantACopyStrip({
     <section
       data-testid="recipient-want-a-copy-card"
       className="scroll-mt-8 rounded-xl border border-slate-700/40 bg-slate-950/25 px-4 py-4"
-      aria-label={RECIPIENT_WANT_COPY_HEADING}
+      aria-label={heading}
     >
-      <h2 className="text-sm font-semibold tracking-tight text-slate-100">{RECIPIENT_WANT_COPY_HEADING}</h2>
-      <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{RECIPIENT_WANT_COPY_BODY}</p>
+      <h2 className="text-sm font-semibold tracking-tight text-slate-100">{heading}</h2>
+      <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{body}</p>
       <div className="mt-3 flex flex-col gap-3">
         <div className="flex flex-col gap-2 rounded-lg border border-slate-800/55 bg-slate-950/35 p-2.5 sm:flex-row sm:flex-wrap sm:items-stretch">
           <RecipientAgreementReadPdfExport
@@ -186,27 +195,31 @@ export function RecipientWantACopyStrip({
             agreementTitle={agreementTitle}
             readHeaders={readHeaders}
             scrubbedCurrentHtml={scrubbedCurrentHtml}
-            pdfDownloadButtonLabel="Download draft PDF"
-            pdfDownloadButtonNativeTitle={RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE}
-            pdfDownloadButtonTestId="recipient-download-draft-pdf"
+            pdfDownloadButtonLabel={recordsAfterAccept ? "Download PDF" : "Download draft PDF"}
+            pdfDownloadButtonNativeTitle={
+              recordsAfterAccept ? RECIPIENT_RECORDS_APPROVED_PDF_BUTTON_TITLE : RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE
+            }
+            pdfDownloadButtonTestId={
+              recordsAfterAccept ? "recipient-records-download-pdf" : "recipient-download-draft-pdf"
+            }
           />
           <button
             type="button"
-            data-testid="recipient-download-draft-text"
+            data-testid={recordsAfterAccept ? "recipient-records-download-text" : "recipient-download-draft-text"}
             disabled={!hasText}
             className="min-w-0 max-w-full break-words rounded-md border border-slate-600/70 bg-slate-900/50 px-2.5 py-1.5 text-left text-[11px] font-semibold text-slate-200 hover:bg-slate-900/75 disabled:cursor-not-allowed disabled:opacity-45 sm:text-xs"
             onClick={onDownloadText}
           >
-            Download draft text
+            {recordsAfterAccept ? "Download text" : "Download draft text"}
           </button>
           <button
             type="button"
-            data-testid="recipient-copy-draft-text"
+            data-testid={recordsAfterAccept ? "recipient-records-copy-text" : "recipient-copy-draft-text"}
             disabled={!hasText || copyBusy}
             className="min-w-0 max-w-full break-words rounded-md border border-slate-600/70 bg-slate-900/50 px-2.5 py-1.5 text-left text-[11px] font-semibold text-slate-200 hover:bg-slate-900/75 disabled:cursor-not-allowed disabled:opacity-45 sm:text-xs"
             onClick={() => void onCopyText()}
           >
-            {copyAck ? RECIPIENT_COPY_ACK_COPIED : "Copy draft text"}
+            {copyAck ? RECIPIENT_COPY_ACK_COPIED : recordsAfterAccept ? "Copy text" : "Copy draft text"}
           </button>
         </div>
         {canWireBringBack ? (
@@ -260,7 +273,9 @@ export function RecipientWantACopyStrip({
           </div>
         ) : null}
       </div>
-      <p className="mt-2 text-[10px] leading-snug text-slate-500">{RECIPIENT_WANT_COPY_LOOPBACK_CUE}</p>
+      {!recordsAfterAccept ? (
+        <p className="mt-2 text-[10px] leading-snug text-slate-500">{RECIPIENT_WANT_COPY_LOOPBACK_CUE}</p>
+      ) : null}
       {uploadErr ? (
         <p className="mt-1.5 text-[11px] text-rose-300/95" role="alert">
           {uploadErr}

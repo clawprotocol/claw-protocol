@@ -86,6 +86,13 @@ export const RECIPIENT_WANT_COPY_UPLOAD_TIP =
 export const RECIPIENT_WANT_COPY_COMPARE_HELPER = RECIPIENT_WANT_COPY_UPLOAD_TIP;
 /** Safety line under the dropzone — nothing sends until they review the comparison. */
 export const RECIPIENT_WANT_COPY_LOOPBACK_CUE = "Nothing sends until you review the comparison.";
+/** Post-accept, records-only want-a-copy card (no outside-review upload). */
+export const RECIPIENT_WANT_COPY_RECORDS_HEADING = "Want a copy?";
+export const RECIPIENT_WANT_COPY_RECORDS_BODY =
+  "Download or copy the approved draft for your records.";
+/** Tooltip for PDF export on the post-accept records card. */
+export const RECIPIENT_RECORDS_APPROVED_PDF_BUTTON_TITLE =
+  "Read-only export of the agreement draft you approved (for your records).";
 /** Dropzone primary line (want-a-copy card). */
 export const RECIPIENT_WANT_COPY_DROPZONE_PRIMARY = "Drag your revised draft here";
 export const RECIPIENT_WANT_COPY_DROPZONE_SECONDARY = "PDF, TXT, or Markdown";

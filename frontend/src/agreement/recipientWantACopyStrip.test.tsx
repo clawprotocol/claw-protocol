@@ -9,6 +9,8 @@ import {
   RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
   RECIPIENT_WANT_COPY_HEADING,
   RECIPIENT_WANT_COPY_LOOPBACK_CUE,
+  RECIPIENT_WANT_COPY_RECORDS_BODY,
+  RECIPIENT_WANT_COPY_RECORDS_HEADING,
   RECIPIENT_WANT_COPY_UPLOAD_TIP,
 } from "./portableReviewCopy";
 
@@ -39,6 +41,27 @@ describe("RecipientWantACopyStrip", () => {
     expect(screen.getByTestId("recipient-download-draft-text")).toBeTruthy();
     expect(screen.getByTestId("recipient-copy-draft-text")).toBeTruthy();
     expect(screen.getByTestId("recipient-want-copy-upload-revised")).toBeTruthy();
+  });
+
+  it("recordsAfterAccept: Want a copy heading, no dropzone, no loopback cue, Download PDF / text / Copy text", () => {
+    render(
+      <RecipientWantACopyStrip
+        agreementId="ag_test"
+        readHeaders={{}}
+        scrubbedCurrentHtml="<p>x</p>"
+        plainDraftText="body"
+        recordsAfterAccept
+        onPrepareRevisedImport={vi.fn()}
+        onImportedRevisedPlainText={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: RECIPIENT_WANT_COPY_RECORDS_HEADING })).toBeTruthy();
+    expect(screen.getByText(RECIPIENT_WANT_COPY_RECORDS_BODY)).toBeTruthy();
+    expect(screen.queryByText(RECIPIENT_WANT_COPY_LOOPBACK_CUE)).toBeNull();
+    expect(screen.queryByTestId("recipient-want-copy-dropzone")).toBeNull();
+    expect(screen.getByTestId("recipient-records-download-pdf")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Download text$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Copy text$/ })).toBeTruthy();
   });
 
   it("runs prepare then imports .txt contents via callback", async () => {
