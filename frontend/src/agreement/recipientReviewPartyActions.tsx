@@ -9,6 +9,8 @@ export const recipientPartyReviewCopy = {
   reviewAgreement: "Review agreement",
   reviewAgain: "Review again",
   reviewAndSign: "Review and sign",
+  /** Hub / read-tab link into the signing ceremony when the final version is locked. */
+  continueToSigning: "Continue to signing",
   /** Opens the revise composer (legacy single entry). */
   requestChanges: "Request changes",
   /** Decision menu — bigger rewrite path. */
@@ -144,7 +146,7 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
             className={isLandingPlacement ? landingPrimarySignClass : defaultReviewControlClass}
             href={primarySigningHref}
           >
-            {recipientPartyReviewCopy.reviewAndSign}
+            {recipientPartyReviewCopy.continueToSigning}
           </a>
         ) : null}
 
@@ -218,7 +220,7 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
             className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3 text-base font-semibold text-white hover:bg-emerald-500"
             href={primarySigningHref}
           >
-            {recipientPartyReviewCopy.reviewAndSign}
+            {recipientPartyReviewCopy.continueToSigning}
           </a>
         ) : (
           <button
@@ -251,7 +253,7 @@ export function RecipientPartyReviewActions(props: RecipientPartyReviewActionsPr
           className={isLandingPlacement ? landingPrimarySignClass : defaultReviewControlClass}
           href={primarySigningHref}
         >
-          {recipientPartyReviewCopy.reviewAndSign}
+          {recipientPartyReviewCopy.continueToSigning}
         </a>
       ) : (
         <button

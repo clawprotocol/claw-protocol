@@ -275,7 +275,7 @@ export async function recipientApproveCurrentApi(
     participant_display_name?: string;
     recipientAccessToken?: string | null;
   }
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; draft?: unknown }> {
   try {
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-approve`, {
       method: "POST",
@@ -289,7 +289,14 @@ export async function recipientApproveCurrentApi(
         participant_display_name: opts?.participant_display_name || "",
       }),
     });
-    if (res.ok) return { ok: true };
+    if (res.ok) {
+      try {
+        const j = (await res.json()) as { draft?: unknown };
+        return { ok: true, draft: j?.draft };
+      } catch {
+        return { ok: true };
+      }
+    }
     const j = (await res.json().catch(() => ({}))) as { detail?: string };
     return { ok: false, error: j.detail || `error_${res.status}` };
   } catch {

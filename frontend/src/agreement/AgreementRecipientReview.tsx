@@ -269,10 +269,24 @@ import {
   PASTE_OPTIONAL_NOTE_LABEL,
 } from "./universalReviewIntakeCopy";
 import { RecipientAgreementReadPdfExport } from "./recipientAgreementReadPdfExport";
-import { RecipientPartyReviewActions } from "./recipientReviewPartyActions";
+import { RecipientPartyReviewActions, recipientPartyReviewCopy } from "./recipientReviewPartyActions";
 import { RecipientPreviewVersionsExport } from "./recipientPreviewVersionExport";
 
 const API_BASE = resolveApiBase();
+
+/** Poll GET /agreements after accept until server signing_lock appears (owner finalizes separately). */
+const RECIPIENT_SIGNING_READINESS_POLL_MS = 8000;
+
+function recipientAcceptTransitionDiag(message: string, payload: Record<string, unknown>) {
+  if (typeof window === "undefined") return;
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const on =
+    Boolean(typeof import.meta !== "undefined" && import.meta.env?.DEV) ||
+    window.localStorage?.getItem("lawdogRecipientAcceptDiag") === "1";
+  if (!on) return;
+  // eslint-disable-next-line no-console
+  console.info(`[recipient-accept-transition] ${message}`, payload);
+}
 
 type RecipientPostUploadSurfaceState =
   | null
@@ -1796,6 +1810,85 @@ export function AgreementRecipientReview({
     void refresh();
   }, [refresh]);
 
+  const bundleSigningLocked = Boolean(bundle && isSigningLockActive(bundle));
+  const shouldPollSigningReadiness = useMemo(() => {
+    if (entry.kind !== "review") return false;
+    if (recipientLinkRole !== "signer") return false;
+    if (viewerLike) return false;
+    if (agreementFullyExecuted || mySignatureDone) return false;
+    if (!recipientApprovedInAudit && !approvedAck) return false;
+    if (bundleSigningLocked) return false;
+    return true;
+  }, [
+    entry.kind,
+    recipientLinkRole,
+    viewerLike,
+    agreementFullyExecuted,
+    mySignatureDone,
+    recipientApprovedInAudit,
+    approvedAck,
+    bundleSigningLocked,
+  ]);
+
+  useEffect(() => {
+    if (!shouldPollSigningReadiness) return;
+    let ticks = 0;
+    const maxTicks = 75;
+    const id = window.setInterval(() => {
+      ticks += 1;
+      if (ticks > maxTicks) {
+        window.clearInterval(id);
+        return;
+      }
+      void refresh();
+    }, RECIPIENT_SIGNING_READINESS_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [shouldPollSigningReadiness, refresh]);
+
+  useEffect(() => {
+    if (!shouldPollSigningReadiness) return;
+    const onVis = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [shouldPollSigningReadiness, refresh]);
+
+  const lockedVersionForReadinessDiag = bundle?.signingLock?.lockedVersionId || "";
+  const canRecipientSignDiag =
+    recipientLinkRole === "signer" &&
+    bundleSigningLocked &&
+    Boolean(lockedVersionForReadinessDiag) &&
+    !signingBlockedByProposalQueue;
+
+  useEffect(() => {
+    recipientAcceptTransitionDiag("signing_readiness_tick", {
+      agreementId,
+      entryKind: entry.kind,
+      recipientLinkRole,
+      viewerLike,
+      bundleSigningLocked,
+      approvedAck,
+      recipientApprovedInAudit,
+      signingBlockedByProposalQueue,
+      canRecipientSign: canRecipientSignDiag,
+      shouldPollSigningReadiness,
+      lockedVersionId: lockedVersionForReadinessDiag || null,
+    });
+  }, [
+    agreementId,
+    entry.kind,
+    recipientLinkRole,
+    viewerLike,
+    bundleSigningLocked,
+    approvedAck,
+    recipientApprovedInAudit,
+    signingBlockedByProposalQueue,
+    canRecipientSignDiag,
+    shouldPollSigningReadiness,
+    lockedVersionForReadinessDiag,
+  ]);
+
   const revisionPayload = useMemo(() => {
     if (workflowMode === "quick") {
       return buildRecipientRevisionText(instruction.trim(), "");
@@ -2482,8 +2575,20 @@ export function AgreementRecipientReview({
           humanizeRecipientActionError(r.error, "Couldn't record approval. Please try again."),
         );
       }
+      if (r.draft) {
+        const merged = normalizeAgreementDraftFromApi(r.draft, { fallbackAgreementId: agreementId });
+        if (merged) setDraft(merged);
+      }
       setApprovedAck(true);
+      recipientAcceptTransitionDiag("approve_mutation_success", {
+        agreementId,
+        participantPid: participantPid || null,
+        hasResponseDraft: Boolean(r.draft),
+      });
       await refresh();
+      recipientAcceptTransitionDiag("post_approve_refresh_dispatched", {
+        agreementId,
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not record approval.");
     } finally {
@@ -3502,14 +3607,14 @@ export function AgreementRecipientReview({
                 className="hidden w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-emerald-500 sm:inline-flex sm:w-auto"
                 href={signingHref}
               >
-                Review and sign
+                {recipientPartyReviewCopy.continueToSigning}
               </a>
               <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-800/90 bg-slate-950/95 p-4 backdrop-blur sm:hidden">
                 <a
                   className="vs01-btn inline-flex w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500"
                   href={signingHref}
                 >
-                  Review and sign
+                  {recipientPartyReviewCopy.continueToSigning}
                 </a>
               </div>
             </>
@@ -3791,6 +3896,33 @@ export function AgreementRecipientReview({
         </div>
       ) : null}
 
+      {entry.kind === "review" &&
+      !viewerLike &&
+      recipientLinkRole === "signer" &&
+      (recipientApprovedInAudit || approvedAck) &&
+      !signingReadyActive &&
+      !agreementFullyExecuted &&
+      !mySignatureDone ? (
+        <div
+          className="rounded-lg border border-slate-700/70 bg-slate-950/50 px-4 py-3 text-slate-200"
+          data-testid="recipient-signing-readiness-panel"
+        >
+          <p className="text-xs leading-relaxed text-slate-400">
+            When the sender finalizes this agreement for signature, this page picks it up automatically (about every{" "}
+            {Math.round(RECIPIENT_SIGNING_READINESS_POLL_MS / 1000)}s). If they already clicked finalize, refresh now.
+          </p>
+          <button
+            type="button"
+            className="mt-2 inline-flex items-center justify-center rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="recipient-refresh-signing-status"
+            disabled={loading}
+            onClick={() => void refresh()}
+          >
+            Refresh signing status
+          </button>
+        </div>
+      ) : null}
+
       {entry.kind === "review" && recipientSuggestedEditsSentAck ? (
         <div
           className="rounded-lg border border-emerald-700/45 bg-emerald-950/30 px-4 py-4 text-slate-50 shadow-sm"
@@ -3979,7 +4111,7 @@ export function AgreementRecipientReview({
                 className="inline-flex w-full items-center justify-center rounded-lg border border-sky-700 bg-sky-950/40 px-4 py-3 text-base font-semibold text-sky-100 hover:bg-sky-900/50"
                 href={agreementSigningPath(agreementId, lockedSignVid, undefined, participantPid || undefined)}
               >
-                Ready to sign
+                {recipientPartyReviewCopy.continueToSigning}
               </a>
             ) : recipientLinkRole === "signer" ? (
               <span className="inline-flex w-full items-center justify-center rounded-lg border border-slate-700 bg-slate-950/40 px-4 py-3 text-sm text-slate-500">
