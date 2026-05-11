@@ -59,9 +59,10 @@ export type StepPrepareSignatureProps = {
   /** Paid Pro agreement → VS01 bridge: placement-first framing (not “sign your document” yet). */
   agreementBridgePlacementCopy?: boolean;
   /** Pre-populate placed fields (e.g. from saved draft state on refresh). */
-  initialFields?: PlacedSigningField[];
-  /** Called whenever the internal placed-fields array changes (add/remove/move/resize/value edit). */
-  onFieldsChange?: (fields: PlacedSigningField[]) => void;
+  /** Controlled placed-fields array — parent is source of truth. */
+  fields: PlacedSigningField[];
+  /** Called on every field mutation (add/remove/move/resize/value edit). Parent must apply the update. */
+  onFieldsChange: (fields: PlacedSigningField[]) => void;
   onBack?: () => void;
   onContinue?: () => void;
 };
@@ -141,7 +142,7 @@ export function StepPrepareSignature({
   creatorEmail,
   senderMessage,
   agreementBridgePlacementCopy = false,
-  initialFields,
+  fields,
   onFieldsChange,
   onBack,
   onContinue,
@@ -162,7 +163,23 @@ export function StepPrepareSignature({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
-  const [fields, setFields] = useState<PlacedSigningField[]>(() => initialFields ?? []);
+  const fieldsRef = useRef(fields);
+  fieldsRef.current = fields;
+  const onFieldsChangeRef = useRef(onFieldsChange);
+  onFieldsChangeRef.current = onFieldsChange;
+
+  // eslint-disable-next-line no-console
+  console.info("[vs01-step-prepare-fields-props]", { controlledCount: fields.length });
+
+  /** Stable setter that mimics useState — resolves functional updates against latest prop value. */
+  const setFields = useCallback(
+    (next: PlacedSigningField[] | ((prev: PlacedSigningField[]) => PlacedSigningField[])) => {
+      const resolved = typeof next === "function" ? next(fieldsRef.current) : next;
+      onFieldsChangeRef.current(resolved);
+    },
+    [],
+  );
+
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<SigningFieldType>("signature");
   /** When set, the next click on the document places this field type once, then clears. */
@@ -195,36 +212,6 @@ export function StepPrepareSignature({
   const [pageRenderWidth, setPageRenderWidth] = useState(520);
   const pageSurfaceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const pageStackRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const fieldsRef = useRef(fields);
-  fieldsRef.current = fields;
-  const onFieldsChangeRef = useRef(onFieldsChange);
-  onFieldsChangeRef.current = onFieldsChange;
-
-  /**
-   * Tracks whether the component has confirmed its initial field population.
-   * Prevents emitting onFieldsChange([]) on mount before initialFields are applied.
-   */
-  const fieldInitConfirmedRef = useRef(
-    (initialFields && initialFields.length > 0) ? true : false
-  );
-  const prevInitialFieldsLenRef = useRef(initialFields?.length ?? 0);
-
-  useEffect(() => {
-    const prevLen = prevInitialFieldsLenRef.current;
-    const nextLen = initialFields?.length ?? 0;
-    prevInitialFieldsLenRef.current = nextLen;
-
-    if (nextLen > 0 && prevLen === 0) {
-      fieldInitConfirmedRef.current = true;
-      setFields((prev) => (prev.length === 0 ? initialFields! : prev));
-    }
-  }, [initialFields]);
-
-  useEffect(() => {
-    if (!fieldInitConfirmedRef.current && fields.length === 0) return;
-    fieldInitConfirmedRef.current = true;
-    onFieldsChangeRef.current?.(fields);
-  }, [fields]);
   const typedNameRef = useRef(typedName);
   const initialsRef = useRef(initials);
   typedNameRef.current = typedName;
@@ -311,7 +298,6 @@ export function StepPrepareSignature({
   }, [typedName, initialsTouched]);
 
   useEffect(() => {
-    setFields([]);
     setSelectedFieldId(null);
     setCurrentPage(1);
     setNumPages(0);
@@ -918,6 +904,9 @@ export function StepPrepareSignature({
       setSkippedAutoPages(new Set());
     }
   }, []);
+
+  // eslint-disable-next-line no-console
+  console.info("[vs01-step-prepare-fields-render]", { renderedFieldCount: fields.length });
 
   return (
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title" className="vs01-sign-step">
