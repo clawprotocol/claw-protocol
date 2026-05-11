@@ -9,7 +9,8 @@ describe("ClawProductApp VS01 e-sign route", () => {
     expect(s).toMatch(/case\s+["']esign["']/);
     expect(s).toContain("<Vs01Wizard");
     expect(s).toContain("seedDocumentId={seed}");
-    expect(s).toContain("agreement_bridge");
-    expect(s).toContain("Sign your document");
+    expect(s).toContain("agreement_bridge=1");
+    expect(s).toContain("resolveVs01EsignShellCopy");
+    expect(s).toContain("AppEsignDocumentShell");
   });
 });

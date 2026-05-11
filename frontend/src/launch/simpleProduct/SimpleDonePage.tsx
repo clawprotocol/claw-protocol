@@ -332,6 +332,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
         agreementId: id,
         draft: ownerHandoffDraft,
         logReason: signingLockActive ? "simple_done_continue_vs01" : "simple_done_finalize_clean",
+        reviewerApprovedCleanHandoff: true,
       });
       if (ok) {
         logOwnerFinalizeRouteDecision({

@@ -600,7 +600,11 @@ export function Vs01Wizard({
             );
           })}
         </nav>
-      ) : hideStepper && step === 0 ? null : (
+      ) : hideStepper && step === 0 ? null : paidProAgreementBridgeSkip ? (
+        <p className="mb-4 text-center text-sm leading-relaxed text-slate-400" aria-live="polite">
+          E-sign setup
+        </p>
+      ) : (
         <p className="mb-4 text-center text-sm leading-relaxed text-slate-400" aria-live="polite">
           Step {step + 1} of {stepCount}
         </p>
@@ -684,6 +688,7 @@ export function Vs01Wizard({
             counterparties={counterparties}
             creatorEmail={creatorEmail.trim() ? creatorEmail.trim() : undefined}
             senderMessage={senderMessage}
+            agreementBridgePlacementCopy={paidProAgreementBridgeSkip}
             onBack={() => goToStep(paidProAgreementBridgeSkip ? 0 : 1)}
             onContinue={() => {
               if (receiptId) goToStep(3);

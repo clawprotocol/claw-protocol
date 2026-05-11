@@ -10,18 +10,23 @@ import { JoySocialFooter } from "../joy/JoySocialFooter";
 import { LawdogLogoLink } from "../components/ui/LawdogLogoLink";
 import "../joy/joy.css";
 
+export type AppShellNavMode = "default" | "esign_bridge_focused";
+
 export function AppShell(props: {
   children: ReactNode;
   title: string;
   /** Main intro line; may include a short second line for workspace guidance. */
   subtitle?: ReactNode;
+  /** Paid Pro agreement → VS01 bridge: fewer distractions, no duplicate Home. */
+  navMode?: AppShellNavMode;
 }) {
   const { navigate } = useLaunchNav();
   const { navigateToReuse, navigateToWorkProduct } = usePowerGatedNavigation();
   const access = useAccess();
   const affiliateNav = useFeatureGate("affiliate_opportunity_enabled");
-  const { children, title, subtitle } = props;
+  const { children, title, subtitle, navMode = "default" } = props;
   const showLegacyQuickPath = access.tier === "free";
+  const esignBridgeNav = navMode === "esign_bridge_focused";
 
   return (
     <div className="vs01-root">
@@ -30,25 +35,41 @@ export function AppShell(props: {
         <nav
           className="claw-app-nav flex flex-col gap-3 border-b border-slate-800/80 pb-4 sm:flex-row sm:items-center sm:justify-between"
           aria-label="App"
+          data-testid="app-shell-primary-nav"
+          data-app-shell-nav={esignBridgeNav ? "esign_bridge_focused" : "default"}
         >
           <div className="flex items-center gap-3">
             <LawdogLogoLink homeHref="/app" wordmark surface="dark" />
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              onClick={() => navigate("/")}
-            >
-              Home
-            </button>
+            {!esignBridgeNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                onClick={() => navigate("/")}
+              >
+                Home
+              </button>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              onClick={() => navigate("/app")}
-            >
-              Home
-            </button>
+            {!esignBridgeNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                onClick={() => navigate("/app")}
+              >
+                Home
+              </button>
+            ) : null}
+            {esignBridgeNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                title="Saved agreements and drafts"
+                onClick={() => navigate("/app/agreements")}
+              >
+                My agreements
+              </button>
+            ) : null}
             <button
               type="button"
               className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -56,7 +77,7 @@ export function AppShell(props: {
             >
               Create
             </button>
-            {showLegacyQuickPath ? (
+            {!esignBridgeNav && showLegacyQuickPath ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -65,23 +86,27 @@ export function AppShell(props: {
                 Quick send
               </button>
             ) : null}
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              title="Find and reuse your agreements"
-              onClick={() => navigateToReuse("app_shell_nav", "/app/agreement-memory")}
-            >
-              Reuse
-            </button>
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              title="Briefs, memos, white papers from your LawDog materials — assistive drafts, not proofs"
-              onClick={() => navigateToWorkProduct("app_shell_nav")}
-            >
-              Work product
-            </button>
-            {showLegacyQuickPath ? (
+            {!esignBridgeNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                title="Find and reuse your agreements"
+                onClick={() => navigateToReuse("app_shell_nav", "/app/agreement-memory")}
+              >
+                Reuse
+              </button>
+            ) : null}
+            {!esignBridgeNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                title="Briefs, memos, white papers from your LawDog materials — assistive drafts, not proofs"
+                onClick={() => navigateToWorkProduct("app_shell_nav")}
+              >
+                Work product
+              </button>
+            ) : null}
+            {!esignBridgeNav && showLegacyQuickPath ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -98,21 +123,33 @@ export function AppShell(props: {
             >
               Billing
             </button>
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              title="Webhooks and API integration settings"
-              onClick={() => navigate("/app/integrations")}
-            >
-              Integrations
-            </button>
-            {affiliateNav ? (
+            {!esignBridgeNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                title="Webhooks and API integration settings"
+                onClick={() => navigate("/app/integrations")}
+              >
+                Integrations
+              </button>
+            ) : null}
+            {!esignBridgeNav && affiliateNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact opacity-80"
                 onClick={() => navigate("/app/opportunity")}
               >
                 Earn
+              </button>
+            ) : null}
+            {esignBridgeNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                title="LawDog dashboard"
+                onClick={() => navigate("/app")}
+              >
+                Dashboard
               </button>
             ) : null}
           </div>

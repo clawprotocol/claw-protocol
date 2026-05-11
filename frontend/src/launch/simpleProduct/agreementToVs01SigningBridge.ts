@@ -27,6 +27,11 @@ export type AgreementVs01BridgeSession = {
   source?: "paid_pro_sender_first";
   /** Mirrors premium sender-first intent on the LawDog send surface. */
   signerFirst?: boolean;
+  /**
+   * Set when bridging from reviewer-approved “Finalize for signing” (not Simple Send intake).
+   * Drives VS01 shell copy (“reviewer already approved”) vs generic agreement bridge.
+   */
+  reviewerApprovedCleanHandoff?: boolean;
 };
 
 export function setPaidProAgreementBridgeSkipMarker(documentId: string): void {
@@ -245,6 +250,8 @@ export function buildAgreementVs01BridgeSession(params: {
   draft: AgreementDraft | null;
   /** Set when bridging from paid Pro sender-first `/app/send` → VS01 e-sign. */
   senderFirstLawdogHandoff?: boolean;
+  /** Reviewer approved without edits — finalize-for-signing handoff (not send-page intake). */
+  reviewerApprovedCleanHandoff?: boolean;
 }): AgreementVs01BridgeSession {
   const parties = (params.draft?.parties ?? []) as AgreementParty[];
   const owner =
@@ -265,6 +272,7 @@ export function buildAgreementVs01BridgeSession(params: {
         })
       : [{ id: newCpId(), name: "", email: "", phone: "" }];
   const senderFirst = Boolean(params.senderFirstLawdogHandoff);
+  const reviewerApproved = Boolean(params.reviewerApprovedCleanHandoff);
   return {
     vs01DocumentId: params.vs01DocumentId.trim(),
     agreementId: params.agreementId.trim(),
@@ -277,6 +285,7 @@ export function buildAgreementVs01BridgeSession(params: {
     ...(senderFirst
       ? ({ source: "paid_pro_sender_first" as const, signerFirst: true } as const)
       : {}),
+    ...(reviewerApproved ? { reviewerApprovedCleanHandoff: true as const } : {}),
   };
 }
 
@@ -401,6 +410,8 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
   logReason: string;
   /** Live recipient-setup emails (LawDog intake); merged onto draft before bridge build. */
   recipientSetup?: RecipientSetupEmailInput | null;
+  /** Reviewer-approved clean path (Simple done finalize) — VS01 shell shows reviewer-aware copy. */
+  reviewerApprovedCleanHandoff?: boolean;
 }): Promise<boolean> {
   const id = String(options.agreementId || "").trim();
   if (!id) return false;
@@ -413,6 +424,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     vs01DocumentId: vs01Seed.documentId,
     draft: merged,
     senderFirstLawdogHandoff: true,
+    reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
   });
   logAgreementVs01BridgePreflight(bridge);
   writeAgreementVs01BridgeSession(bridge);

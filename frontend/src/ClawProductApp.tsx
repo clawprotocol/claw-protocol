@@ -51,6 +51,8 @@ import { AccessAccountPanel } from "./components/access/AccessAccountPanel";
 import { Vs01Layout, type Vs01LayoutHero } from "./vs01/Vs01Layout";
 import { Vs01Wizard } from "./vs01/Vs01Wizard";
 import { getVs01UrlBootstrap } from "./vs01/vs01UrlBootstrap";
+import { readAgreementVs01BridgeSession } from "./launch/simpleProduct/agreementToVs01SigningBridge";
+import { logVs01CopyContext, resolveVs01EsignShellCopy } from "./vs01/vs01EsignShellCopy";
 import { ClawPublicFeedView } from "./feed/ClawPublicFeedView";
 import { parseClawPublicFeedPath } from "./feed/clawPublicFeed";
 import { TermsPage } from "./launch/legal/TermsPage";
@@ -330,6 +332,38 @@ function AgreementReviewGate(props: {
   );
 }
 
+/** `/app/esign/:id` — supports `?agreement_bridge=1` paid Pro VS01 handoff (see resolveVs01EsignShellCopy). */
+function AppEsignDocumentShell(props: { seed: string; search: string }) {
+  const { seed, search } = props;
+  const bridge = typeof window !== "undefined" ? readAgreementVs01BridgeSession() : null;
+  const shellCopy = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge });
+
+  useEffect(() => {
+    const b = typeof window !== "undefined" ? readAgreementVs01BridgeSession() : null;
+    const sc = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge: b });
+    logVs01CopyContext({
+      documentId: seed,
+      agreementBridge: sc.agreementBridgeEffective,
+      bridgeSource: b?.source ?? null,
+      signerFirst: b?.signerFirst ?? null,
+      navVariant: sc.navVariant,
+      titleCopy: sc.title,
+      copyVariant: sc.copyVariant,
+      reviewerApprovedCleanHandoff: Boolean(b?.reviewerApprovedCleanHandoff),
+    });
+  }, [seed, search]);
+
+  return (
+    <AppShell
+      title={shellCopy.title}
+      subtitle={shellCopy.subtitle}
+      navMode={shellCopy.navVariant === "esign_bridge_focused" ? "esign_bridge_focused" : "default"}
+    >
+      <Vs01Wizard key={`esign-${seed}`} seedDocumentId={seed} hideStepper />
+    </AppShell>
+  );
+}
+
 /**
  * v1 product shell: launch → VS01 e-sign or agreement wizard. Reuses existing flows and APIs only.
  */
@@ -598,22 +632,8 @@ export function ClawProductApp() {
         if (sub === "new") {
           return <RedirectEsignNewToQuick search={search} />;
         }
-        const shellKey = `esign-${sub.id}`;
         const seed = sub.id;
-        const rawSearch = search?.startsWith("?") ? search.slice(1) : search || "";
-        const agreementBridgeEntry = new URLSearchParams(rawSearch).get("agreement_bridge") === "1";
-        return (
-          <AppShell
-            title={agreementBridgeEntry ? "Sign your document" : "Continue your document"}
-            subtitle={
-              agreementBridgeEntry
-                ? "Place signature fields and sign — signer details were confirmed on the prior step."
-                : "Same path as Quick — you confirm before anything goes out."
-            }
-          >
-            <Vs01Wizard key={shellKey} seedDocumentId={seed} hideStepper />
-          </AppShell>
-        );
+        return <AppEsignDocumentShell seed={seed} search={search || ""} />;
       }
       default:
         break;

@@ -56,6 +56,8 @@ export type StepPrepareSignatureProps = {
   /** When set, Email placement tool prefills from this address. */
   creatorEmail?: string;
   senderMessage: string;
+  /** Paid Pro agreement → VS01 bridge: placement-first framing (not “sign your document” yet). */
+  agreementBridgePlacementCopy?: boolean;
   onBack?: () => void;
   onContinue?: () => void;
 };
@@ -134,6 +136,7 @@ export function StepPrepareSignature({
   counterparties,
   creatorEmail,
   senderMessage,
+  agreementBridgePlacementCopy = false,
   onBack,
   onContinue,
 }: StepPrepareSignatureProps) {
@@ -886,10 +889,12 @@ export function StepPrepareSignature({
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title" className="vs01-sign-step">
       <header className="vs01-sign-step-header">
         <h2 id="vs01-step-prepare-title" className="vs01-card-title">
-          Sign your document
+          {agreementBridgePlacementCopy ? "Place signature fields" : "Sign your document"}
         </h2>
         <p className="vs01-card-help vs01-sign-step-lead">
-          Choose a field type, use Place on document, then click once where it should go.
+          {agreementBridgePlacementCopy
+            ? 'Choose a field type, click "Place on document," then click where it belongs.'
+            : "Choose a field type, use Place on document, then click once where it should go."}
         </p>
       </header>
 
