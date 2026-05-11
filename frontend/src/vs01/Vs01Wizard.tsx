@@ -151,7 +151,21 @@ export function Vs01Wizard({
     () => INITIAL_RECIPIENT_FIELDS
   );
   const [recipientSigningFinished, setRecipientSigningFinished] = useState(false);
-  const [senderPlacedFields, setSenderPlacedFields] = useState<PlacedSigningField[]>([]);
+  const [senderPlacedFields, setSenderPlacedFieldsRaw] = useState<PlacedSigningField[]>([]);
+  /** Once saved draft with fields has hydrated, prevent any [] overwrite unless explicit clear. */
+  const senderFieldsHydratedRef = useRef(false);
+  const setSenderPlacedFields = useCallback((next: PlacedSigningField[] | ((prev: PlacedSigningField[]) => PlacedSigningField[])) => {
+    setSenderPlacedFieldsRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      if (resolved.length === 0 && senderFieldsHydratedRef.current && prev.length > 0) {
+        return prev;
+      }
+      if (resolved.length > 0) {
+        senderFieldsHydratedRef.current = true;
+      }
+      return resolved;
+    });
+  }, []);
   const [senderSignatureRef, setSenderSignatureRef] = useState<Vs01SenderSignatureRef | null>(null);
   const [loading, setLoading] = useState<Vs01LoadingState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -422,7 +436,8 @@ export function Vs01Wizard({
     (payload: Vs01FinalizeDocumentPayload) => {
       setDocumentId(payload.documentId ? payload.documentId : null);
       setContentSha256(payload.contentSha256 ? payload.contentSha256 : null);
-      setSenderPlacedFields([]);
+      senderFieldsHydratedRef.current = false;
+      setSenderPlacedFieldsRaw([]);
       setSenderSignatureRef(null);
       setRecipientPlacedFields([]);
       if (!payload.documentId?.trim()) {
@@ -492,6 +507,7 @@ export function Vs01Wizard({
     if (did) clearVs01DraftState(did, "reset_all");
     bridgeHandoffSnapshotRef.current = null;
     bridgeHydratedSeedSid.current = null;
+    senderFieldsHydratedRef.current = false;
     setAgreementTitle("");
     setAgreementTitleUserEdited(false);
     setDocumentMeta(null);
@@ -505,7 +521,7 @@ export function Vs01Wizard({
     setReceiptHashSha256(null);
     setReceipt(null);
     setRecipientPlacedFields([]);
-    setSenderPlacedFields([]);
+    setSenderPlacedFieldsRaw([]);
     setSenderSignatureRef(null);
     setStep(0);
     setFurthestStep(0);

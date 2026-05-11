@@ -283,3 +283,62 @@ describe("mergeBridgeEmailsIntoSavedCounterparties", () => {
     expect(saved[0].email).toBe("");
   });
 });
+
+describe("vs01DraftStatePersist — hydration guard scenarios", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("a user intentionally removing all fields saves empty array", () => {
+    saveVs01DraftState(makeState({
+      senderPlacedFields: [makePlacedField()],
+    }));
+    expect(loadVs01DraftState("doc_test_1")!.senderPlacedFields).toHaveLength(1);
+
+    saveVs01DraftState(makeState({
+      senderPlacedFields: [],
+    }));
+    const loaded = loadVs01DraftState("doc_test_1")!;
+    expect(loaded.senderPlacedFields).toHaveLength(0);
+  });
+
+  it("hydrated fields survive a second save that preserves them", () => {
+    const fields: PlacedSigningField[] = [
+      makePlacedField({ id: "s1", type: "signature" }),
+      makePlacedField({ id: "t1", type: "text", value: "Title" }),
+      makePlacedField({ id: "e1", type: "email", value: "a@b.com" }),
+    ];
+    saveVs01DraftState(makeState({ senderPlacedFields: fields, step: 2 }));
+
+    const loaded = loadVs01DraftState("doc_test_1")!;
+    expect(loaded.senderPlacedFields).toHaveLength(3);
+
+    saveVs01DraftState(makeState({
+      senderPlacedFields: loaded.senderPlacedFields,
+      step: 2,
+    }));
+    const reloaded = loadVs01DraftState("doc_test_1")!;
+    expect(reloaded.senderPlacedFields).toHaveLength(3);
+    expect(reloaded.senderPlacedFields[1].value).toBe("Title");
+  });
+
+  it("bridge hydration does not clear fields when saved state has them", () => {
+    const savedFields: PlacedSigningField[] = [
+      makePlacedField({ id: "f1" }),
+      makePlacedField({ id: "f2", type: "text" }),
+    ];
+    saveVs01DraftState(makeState({
+      senderPlacedFields: savedFields,
+      counterparties: [{ id: "cp1", name: "R", email: "r@test.com", phone: "" }],
+    }));
+
+    const saved = loadVs01DraftState("doc_test_1")!;
+    const bridgeCps: Vs01Counterparty[] = [
+      { id: "cp1", name: "R", email: "r@bridge.com", phone: "" },
+    ];
+    const merged = mergeBridgeEmailsIntoSavedCounterparties(saved.counterparties, bridgeCps);
+    expect(merged[0].email).toBe("r@test.com");
+    expect(saved.senderPlacedFields).toHaveLength(2);
+    expect(saved.senderPlacedFields[0].id).toBe("f1");
+  });
+});

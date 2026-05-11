@@ -200,7 +200,29 @@ export function StepPrepareSignature({
   const onFieldsChangeRef = useRef(onFieldsChange);
   onFieldsChangeRef.current = onFieldsChange;
 
+  /**
+   * Tracks whether the component has confirmed its initial field population.
+   * Prevents emitting onFieldsChange([]) on mount before initialFields are applied.
+   */
+  const fieldInitConfirmedRef = useRef(
+    (initialFields && initialFields.length > 0) ? true : false
+  );
+  const prevInitialFieldsLenRef = useRef(initialFields?.length ?? 0);
+
   useEffect(() => {
+    const prevLen = prevInitialFieldsLenRef.current;
+    const nextLen = initialFields?.length ?? 0;
+    prevInitialFieldsLenRef.current = nextLen;
+
+    if (nextLen > 0 && prevLen === 0) {
+      fieldInitConfirmedRef.current = true;
+      setFields((prev) => (prev.length === 0 ? initialFields! : prev));
+    }
+  }, [initialFields]);
+
+  useEffect(() => {
+    if (!fieldInitConfirmedRef.current && fields.length === 0) return;
+    fieldInitConfirmedRef.current = true;
     onFieldsChangeRef.current?.(fields);
   }, [fields]);
   const typedNameRef = useRef(typedName);
