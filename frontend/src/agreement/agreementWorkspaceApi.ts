@@ -140,6 +140,37 @@ export async function fetchAgreementDraft(
   }
 }
 
+/** Same GET as {@link fetchAgreementDraft} but also returns server `signing_lock` (owner resume / finalize UX). */
+export async function fetchAgreementDraftWithSigningLock(
+  agreementId: string,
+  opts?: { partyNameContext?: string },
+): Promise<{
+  ok: boolean;
+  draft: AgreementDraft | null;
+  lockedVersionId: string | null;
+}> {
+  const id = String(agreementId || "").trim();
+  if (!id) return { ok: false, draft: null, lockedVersionId: null };
+  try {
+    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}`, {
+      headers: clawAgreementHeaders(),
+    });
+    if (!res.ok) return { ok: false, draft: null, lockedVersionId: null };
+    const j = (await res.json()) as {
+      draft?: unknown;
+      signing_lock?: { locked_version_id?: string } | null;
+    };
+    const draft = normalizeAgreementDraftFromApi(j?.draft ?? null, {
+      fallbackAgreementId: id,
+      partyNameContext: opts?.partyNameContext,
+    });
+    const lv = String(j?.signing_lock?.locked_version_id || "").trim();
+    return { ok: draft != null, draft, lockedVersionId: lv || null };
+  } catch {
+    return { ok: false, draft: null, lockedVersionId: null };
+  }
+}
+
 export async function patchWorkspaceArchive(agreementId: string, archived: boolean): Promise<boolean> {
   try {
     const res = await fetch(

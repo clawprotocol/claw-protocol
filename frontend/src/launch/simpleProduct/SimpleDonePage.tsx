@@ -33,7 +33,9 @@ import {
   writeSimpleDoneReviewRecipientLinks,
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
+import { shouldWritePaidProEditReturnHandoffAfterReview } from "../../components/agreements/draftRecipientReviewSignals";
 import {
+  clearPaidProEditReturnHandoff,
   paidProEditReturnHasRecoverableBody,
   writePaidProEditReturnHandoff,
 } from "./paidProEditReturnHandoff";
@@ -203,12 +205,18 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const backToDraft = useCallback(async () => {
     const id = agreementId.trim();
     writeCreateReviewAgreementResumeId(id);
+    try {
+      clearPaidProEditReturnHandoff();
+    } catch {
+      /* ignore */
+    }
     if (id) {
       const { ok, draft } = await fetchAgreementDraft(id);
-      if (ok && draft && paidProEditReturnHasRecoverableBody(draft)) {
+      const hasRec = Boolean(ok && draft && paidProEditReturnHasRecoverableBody(draft));
+      if (shouldWritePaidProEditReturnHandoffAfterReview(draft, hasRec)) {
         writePaidProEditReturnHandoff({
           agreementId: id,
-          liveDraft: draft,
+          liveDraft: draft!,
           premiumSendIntent: "review",
         });
       }

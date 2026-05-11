@@ -15,7 +15,7 @@ import {
 } from "../../agreement/agreementDraftNormalize";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
-import { fetchAgreementDraft } from "../../agreement/agreementWorkspaceApi";
+import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
 import { apiUrl, resolveApiBase } from "../../lib/clawApi";
 import { PREMIUM_COMPLETION_ATTEMPT_MAX_MS } from "../../lib/premiumCompletionAttemptTimeout";
 import { defaultPostCheckoutRunModelPassInput, getPremiumGenerationIntakeFingerprint } from "../../lib/postCheckoutProFlow";
@@ -313,6 +313,10 @@ import {
   readPaidProEditReturnHandoff,
 } from "../../launch/simpleProduct/paidProEditReturnHandoff";
 import { mergePaidProAuthoritativeDraftFieldsFromApi } from "../../launch/simpleProduct/paidProResumeDraftMerge";
+import {
+  draftAuditHasRecipientRecordedApproval,
+  logOwnerReviewReturnState,
+} from "./draftRecipientReviewSignals";
 import {
   armPaidProStarterSignatureSendFromCreateFlow,
   clearPaidProStarterSignatureSendFromCreateFlow,
@@ -1695,6 +1699,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumRecipientUxActive, setPremiumRecipientUxActive] = useState(false);
   /** Snapshot / completed premium: suppress starter paywall and “fix draft” friction. */
   const [premiumPersistedFlowActive, setPremiumPersistedFlowActive] = useState(false);
+  /** Server signing lock `locked_version_id` from GET /agreements/:id (owner resume after recipient acceptance). */
+  const [ownerResumeServerLockVid, setOwnerResumeServerLockVid] = useState<string | null>(null);
   /** Bumps when sessionStorage premium recipient gate changes so memos re-read peek helpers. */
   const [premiumSurfaceGateTick, setPremiumSurfaceGateTick] = useState(0);
   const bumpPremiumSurfaceGateTick = React.useCallback(() => setPremiumSurfaceGateTick((n) => n + 1), []);
@@ -6967,6 +6973,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase,
   });
 
+  const ownerRecipientAcceptedAwaitingLock = useMemo(
+    () =>
+      Boolean(
+        draft &&
+          (reviewAgreementId || "").trim() &&
+          draftAuditHasRecipientRecordedApproval(draft) &&
+          !ownerResumeServerLockVid &&
+          isPaidProAgreementAuthoritative({
+            draft,
+            agreementId: (reviewAgreementId || "").trim(),
+            includeLocalCompletionMarker: false,
+          }),
+      ),
+    [draft, reviewAgreementId, ownerResumeServerLockVid],
+  );
+
+  const showOwnerRecipientAcceptedFinalizePanel = useMemo(
+    () =>
+      Boolean(
+        createProductionTwoPane &&
+          simpleProductFlow &&
+          liveWorkspaceTwoPane &&
+          ownerRecipientAcceptedAwaitingLock,
+      ),
+    [
+      createProductionTwoPane,
+      simpleProductFlow,
+      liveWorkspaceTwoPane,
+      ownerRecipientAcceptedAwaitingLock,
+    ],
+  );
+
   useEffect(() => {
     if (!paidProAuthoritative || createUiStage !== CreateUiStage.RECIPIENTS) return;
     const inPersistedRecipientShell =
@@ -8467,6 +8505,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [reviewAgreementId]);
 
   useEffect(() => {
+    setOwnerResumeServerLockVid(null);
+  }, [reviewAgreementId]);
+
+  useEffect(() => {
+    if (!createProductionTwoPane || !simpleProductFlow || !liveWorkspaceTwoPane) return;
+    const id = reviewAgreementId?.trim();
+    if (!id || !draft) return;
+    if (!draftAuditHasRecipientRecordedApproval(draft)) return;
+    if (ownerResumeServerLockVid) return;
+    let cancelled = false;
+    const tick = async () => {
+      const r = await fetchAgreementDraftWithSigningLock(id, { partyNameContext: "Party" });
+      if (cancelled || !r.ok || !r.lockedVersionId) return;
+      setOwnerResumeServerLockVid(r.lockedVersionId);
+    };
+    void tick();
+    const iv = window.setInterval(() => void tick(), 12_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(iv);
+    };
+  }, [
+    createProductionTwoPane,
+    simpleProductFlow,
+    liveWorkspaceTwoPane,
+    reviewAgreementId,
+    draft,
+    ownerResumeServerLockVid,
+  ]);
+
+  useEffect(() => {
     if (!(reviewAgreementId || "").trim()) {
       setPaidProEditReturnResumeActive(false);
     }
@@ -8501,19 +8570,45 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     productionResumeHydratedRef.current = true;
     void (async () => {
       try {
-        const { ok, draft: ad } = await fetchAgreementDraft(hid, { partyNameContext: "Party" });
+        const { ok, draft: ad, lockedVersionId: lockVidFromGet } = await fetchAgreementDraftWithSigningLock(hid, {
+          partyNameContext: "Party",
+        });
         if (!ok || !ad) {
           clearCreateReviewAgreementResumeId();
           productionResumeHydratedRef.current = false;
           return;
         }
+        const lockVid = String(lockVidFromGet || "").trim();
+        if (lockVid) setOwnerResumeServerLockVid(lockVid);
+        const recipientApproved = draftAuditHasRecipientRecordedApproval(ad);
+        if (recipientApproved) {
+          clearPaidProEditReturnHandoff();
+          setProFullDraftQualityRetry(false);
+          setPaidProEditReturnResumeActive(false);
+          if (
+            isPaidProAgreementAuthoritative({
+              draft: ad,
+              agreementId: hid,
+              includeLocalCompletionMarker: false,
+            })
+          ) {
+            setPremiumPersistedFlowActive(true);
+            logPaidProEditReturnSkipBasicGenerate(
+              "recipient_approved_resume_skip_session_snapshot",
+              hid.length <= 12 ? hid : `${hid.slice(0, 8)}…`,
+            );
+          }
+        }
         const editReturn = readPaidProEditReturnHandoff();
         const editReturnMatch = Boolean(editReturn && editReturn.agreementId === hid);
         let adForHydrate = ad as AgreementDraft;
-        if (editReturnMatch && editReturn?.draftSnapshot) {
+        const mergeEditReturnSnapshot = Boolean(
+          editReturnMatch && editReturn?.draftSnapshot && !recipientApproved,
+        );
+        if (mergeEditReturnSnapshot && editReturn?.draftSnapshot) {
           adForHydrate = mergePaidProEditReturnSnapshotIntoApiDraft(ad as AgreementDraft, editReturn.draftSnapshot);
         }
-        if (editReturnMatch && editReturn) {
+        if (editReturnMatch && editReturn && !recipientApproved) {
           const docLenPre = materialPremiumPipelineCorpusMaxLen(adForHydrate);
           const hasRec = paidProEditReturnHasRecoverableBody(adForHydrate);
           const partyCountPre = Array.isArray(adForHydrate.parties) ? adForHydrate.parties.length : 0;
@@ -8581,7 +8676,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
         setDisplayPhase(nextDisplay);
-        if (editReturnMatch) {
+        if (editReturnMatch && !recipientApproved) {
           clearPaidProEditReturnHandoff();
           const docLenH = materialPremiumPipelineCorpusMaxLen(next);
           const hasDocH = paidProEditReturnHasRecoverableBody(next as unknown as AgreementDraft);
@@ -8594,6 +8689,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             docLen: docLenH,
           });
         }
+        logOwnerReviewReturnState({
+          agreementId: hid,
+          hasReviewDraft: true,
+          recipientApprovedInAudit: recipientApproved,
+          signingLockActive: Boolean(lockVid),
+          createUiStage: String(CreateUiStage.DRAFT),
+          createFlowPhase: "draft_ready_for_review",
+          displayPhase: nextDisplay,
+          recoveryFlags: {
+            recipientApprovedHydrate: recipientApproved,
+            usedEditReturnSnapshot: mergeEditReturnSnapshot,
+            premiumPersistedForced: recipientApproved,
+          },
+          primaryCta: recipientApproved && !lockVid ? "finalize_in_workspace" : "resume_default",
+          corpusLen: materialPremiumPipelineCorpusMaxLen(next),
+        });
         setHardError(null);
         if (rawIntake.trim()) {
           setIntakeBaselineCommitted(rawIntake);
@@ -9198,7 +9309,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [hasFullDraftAccess, premiumPersistedFlowActive, premiumPaidReadonlyPick.plainText, reviewDocRefreshTick],
   );
   const shouldShowPaidRetry = Boolean(
-    proFullDraftQualityRetry && !hasUsablePaidBody && !paidProEditReturnResumeActive,
+    proFullDraftQualityRetry &&
+      !hasUsablePaidBody &&
+      !paidProEditReturnResumeActive &&
+      !(draft && draftAuditHasRecipientRecordedApproval(draft)),
   );
 
   const premiumProTruthSnapshot = useMemo(() => {
@@ -11186,7 +11300,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         (draft &&
           getDraftFirstReviewBlocker(draft) === "party_placeholder" &&
           (draftHasFullDraftExpansion(draft) || tierAllowsAdvancedFullDraftReveal(tier)))) &&
-      !(showFullDraftDiffPreview && createUiStage === CreateUiStage.DRAFT),
+      !(showFullDraftDiffPreview && createUiStage === CreateUiStage.DRAFT) &&
+      !ownerRecipientAcceptedAwaitingLock,
   );
 
   /** Free starter path on recipients — show subtle “sendable as-is” reassurance (not paywalled). */
@@ -13750,6 +13865,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           role="region"
                           aria-label="Agreement text preview"
                         >
+                          {showOwnerRecipientAcceptedFinalizePanel ? (
+                            <div
+                              className="mb-4 rounded-lg border border-emerald-700/45 bg-emerald-950/25 px-4 py-4 text-left"
+                              data-testid="owner-recipient-accepted-finalize-panel"
+                              role="region"
+                              aria-label="Reviewer accepted"
+                            >
+                              <p className="text-sm font-semibold text-emerald-50">Reviewer accepted this draft.</p>
+                              <p className="mt-2 text-xs leading-relaxed text-emerald-100/90">
+                                Finalize for signing in your agreement workspace — that creates the signing lock so
+                                reviewers can continue to signing.
+                              </p>
+                              <button
+                                type="button"
+                                className="mt-3 inline-flex min-h-[2.5rem] items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                                data-testid="owner-continue-to-signing-workspace"
+                                onClick={() => {
+                                  const id = (reviewAgreementId || "").trim();
+                                  if (!id) return;
+                                  void navigate(`/app/agreements/${encodeURIComponent(id)}`);
+                                }}
+                              >
+                                Finalize for signing
+                              </button>
+                            </div>
+                          ) : null}
                           {reviewShowsSimplifiedAdvancedDraft && createUiStage === CreateUiStage.DRAFT
                             ? (() => {
                                 const rawSimplifiedBanner = intakeCombined.trim();
