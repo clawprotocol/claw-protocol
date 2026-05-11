@@ -34,6 +34,12 @@ import {
   type PaidProVs01PostSignHandoffV1,
 } from "./vs01PaidProPostSignHandoff";
 import { sha256Bytes } from "../utils/agreements/hash";
+import {
+  clearVs01DraftState,
+  loadVs01DraftState,
+  mergeBridgeEmailsIntoSavedCounterparties,
+  saveVs01DraftState,
+} from "./vs01DraftStatePersist";
 import type {
   Vs01Counterparty,
   Vs01DocumentIntakeSource,
@@ -299,21 +305,31 @@ export function Vs01Wizard({
         if (paidProAgreementHandoff && bridge && bridge.vs01DocumentId.trim() === sid) {
           bridgeHandoffSnapshotRef.current = bridge;
           bridgeHydratedSeedSid.current = sid;
-          const cps =
+          const saved = loadVs01DraftState(sid);
+          const bridgeCps =
             bridge.counterparties?.length > 0 ? bridge.counterparties : initialCounterparties();
-          const titleForUi = (bridge.agreementTitle || "").trim() || "Agreement";
+          const cps = saved && saved.counterparties.length > 0
+            ? mergeBridgeEmailsIntoSavedCounterparties(saved.counterparties, bridgeCps)
+            : bridgeCps;
+          const titleForUi = (saved?.agreementTitle || bridge.agreementTitle || "").trim() || "Agreement";
           flushSync(() => {
             setAgreementTitle(titleForUi);
-            setCreatorName(bridge.creatorName || "");
-            setCreatorEmail(bridge.creatorEmail || "");
+            setCreatorName(saved?.creatorName || bridge.creatorName || "");
+            setCreatorEmail(saved?.creatorEmail || bridge.creatorEmail || "");
             setCounterparties(cps);
-            setAgreementTitleUserEdited(Boolean((bridge.agreementTitle || "").trim()));
+            setAgreementTitleUserEdited(Boolean(titleForUi));
             setDocumentMeta({
               fileName: `${titleForUi.replace(/[/\\]/g, "-")}.pdf`,
               source: "upload",
             });
+            if (saved) {
+              setSenderPlacedFields(saved.senderPlacedFields);
+              setRecipientPlacedFields(saved.recipientPlacedFields);
+              setSenderMessage(saved.senderMessage || "");
+              if (saved.senderSignatureRef) setSenderSignatureRef(saved.senderSignatureRef);
+            }
           });
-          const nextStep: Vs01Step = 2;
+          const nextStep: Vs01Step = saved ? saved.step : 2;
           // eslint-disable-next-line no-console
           console.info("[vs01-paid-pro-skip-details]", {
             seedDocumentId: sid,
@@ -321,6 +337,7 @@ export function Vs01Wizard({
             signerFirst: bridge.signerFirst ?? null,
             senderFirstLawdogHandoff: bridge.senderFirstLawdogHandoff ?? null,
             nextStep,
+            hydratedFromSaved: Boolean(saved),
           });
           // eslint-disable-next-line no-console
           console.info("[vs01-bridge-hydrate]", {
@@ -331,8 +348,10 @@ export function Vs01Wizard({
             nextStep,
             paidProAgreementHandoff: true,
             counterpartiesCount: cps.length,
+            savedFieldCount: saved ? saved.senderPlacedFields.length + saved.recipientPlacedFields.length : 0,
           });
-          setFurthestStep((prev) => (nextStep > prev ? nextStep : prev));
+          const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
+          setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
           goToStep(nextStep);
           bridgeParams.delete("agreement_bridge");
           const qs = bridgeParams.toString();
@@ -350,9 +369,27 @@ export function Vs01Wizard({
           return;
         }
 
+        /* Non-bridge seed path: hydrate saved draft state if available. */
+        const saved = loadVs01DraftState(sid);
         bridgeHydratedSeedSid.current = sid;
-        setFurthestStep((prev) => (1 > prev ? 1 : prev));
-        goToStep(1);
+        if (saved && saved.senderPlacedFields.length > 0) {
+          flushSync(() => {
+            if (saved.agreementTitle) setAgreementTitle(saved.agreementTitle);
+            if (saved.creatorName) setCreatorName(saved.creatorName);
+            if (saved.creatorEmail) setCreatorEmail(saved.creatorEmail);
+            if (saved.senderMessage) setSenderMessage(saved.senderMessage);
+            if (saved.counterparties.length > 0) setCounterparties(saved.counterparties);
+            setSenderPlacedFields(saved.senderPlacedFields);
+            setRecipientPlacedFields(saved.recipientPlacedFields);
+            if (saved.senderSignatureRef) setSenderSignatureRef(saved.senderSignatureRef);
+          });
+          const fs = Math.max(saved.step, saved.furthestStep) as Vs01Step;
+          setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
+          goToStep(saved.step);
+        } else {
+          setFurthestStep((prev) => (1 > prev ? 1 : prev));
+          goToStep(1);
+        }
       } catch (e) {
         console.error("[Vs01Wizard] seed document load failed", e);
         if (!cancelled) setError("Could not load this document. Check the link or start a new packet.");
@@ -430,9 +467,11 @@ export function Vs01Wizard({
   );
 
   const resetAll = useCallback(() => {
+    const did = documentId?.trim();
     clearPaidProVs01PostSignHandoff();
     clearPaidProAgreementBridgeSkipMarker();
     clearAgreementVs01BridgeSession();
+    if (did) clearVs01DraftState(did, "reset_all");
     bridgeHandoffSnapshotRef.current = null;
     bridgeHydratedSeedSid.current = null;
     setAgreementTitle("");
@@ -453,7 +492,48 @@ export function Vs01Wizard({
     setStep(0);
     setFurthestStep(0);
     setError(null);
-  }, []);
+  }, [documentId]);
+
+  /* ---- Auto-save draft state on meaningful changes ---- */
+  const draftStateSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const did = (documentId || "").trim();
+    if (!did) return;
+    if (step < 1) return;
+    if (draftStateSaveTimerRef.current) clearTimeout(draftStateSaveTimerRef.current);
+    draftStateSaveTimerRef.current = setTimeout(() => {
+      saveVs01DraftState({
+        v: 1,
+        documentId: did,
+        step,
+        furthestStep,
+        agreementTitle,
+        creatorName,
+        creatorEmail,
+        senderMessage,
+        counterparties,
+        senderPlacedFields,
+        recipientPlacedFields,
+        senderSignatureRef,
+        savedAt: Date.now(),
+      });
+    }, 400);
+    return () => {
+      if (draftStateSaveTimerRef.current) clearTimeout(draftStateSaveTimerRef.current);
+    };
+  }, [
+    documentId,
+    step,
+    furthestStep,
+    agreementTitle,
+    creatorName,
+    creatorEmail,
+    senderMessage,
+    counterparties,
+    senderPlacedFields,
+    recipientPlacedFields,
+    senderSignatureRef,
+  ]);
 
   const stepCount = STEPS.length;
 
@@ -745,6 +825,7 @@ export function Vs01Wizard({
                   signerCount: signers.length,
                   vs01DocumentId: did,
                 });
+                clearVs01DraftState(did, "post_sign_navigate");
                 navigate(`/app/agreements/${encodeURIComponent(linkedAgreementId)}?vs01_saved=1`);
                 return;
               }
