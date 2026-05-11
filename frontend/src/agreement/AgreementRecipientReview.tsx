@@ -288,6 +288,19 @@ function recipientAcceptTransitionDiag(message: string, payload: Record<string, 
   console.info(`[recipient-accept-transition] ${message}`, payload);
 }
 
+/** Dev / QA: `localStorage.lawdogRecipientFlowDiag = "1"` (also honors `lawdogRecipientAcceptDiag`). */
+function recipientFlowDiag(tag: string, payload: Record<string, unknown>) {
+  if (typeof window === "undefined") return;
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const on =
+    Boolean(typeof import.meta !== "undefined" && import.meta.env?.DEV) ||
+    window.localStorage?.getItem("lawdogRecipientFlowDiag") === "1" ||
+    window.localStorage?.getItem("lawdogRecipientAcceptDiag") === "1";
+  if (!on) return;
+  // eslint-disable-next-line no-console
+  console.info(tag, payload);
+}
+
 type RecipientPostUploadSurfaceState =
   | null
   | { surface: "notes_only"; notes: string }
@@ -1811,9 +1824,17 @@ export function AgreementRecipientReview({
   }, [refresh]);
 
   const bundleSigningLocked = Boolean(bundle && isSigningLockActive(bundle));
+  const recipientAcceptedRecorded = Boolean(recipientApprovedInAudit || approvedAck);
+  const recipientAcceptedAwaitingLock =
+    entry.kind === "review" && !viewerLike && recipientAcceptedRecorded && !bundleSigningLocked;
+  const recipientAcceptedNoEditsBanner =
+    recipientAcceptedAwaitingLock &&
+    !hasPendingSuggestion &&
+    !recipientSuggestedEditsSentAck &&
+    !recipientPreview;
   const shouldPollSigningReadiness = useMemo(() => {
     if (entry.kind !== "review") return false;
-    if (recipientLinkRole !== "signer") return false;
+    // Review links default to role "reviewer"; they still need signing_lock hydration after owner finalize.
     if (viewerLike) return false;
     if (agreementFullyExecuted || mySignatureDone) return false;
     if (!recipientApprovedInAudit && !approvedAck) return false;
@@ -1821,7 +1842,6 @@ export function AgreementRecipientReview({
     return true;
   }, [
     entry.kind,
-    recipientLinkRole,
     viewerLike,
     agreementFullyExecuted,
     mySignatureDone,
@@ -1853,6 +1873,75 @@ export function AgreementRecipientReview({
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [shouldPollSigningReadiness, refresh]);
+
+  const lastReviewStateDiagKeyRef = useRef("");
+  useEffect(() => {
+    if (entry.kind !== "review" || viewerLike) return;
+    const key = JSON.stringify({
+      agreementId,
+      recipientLinkRole,
+      approved: recipientAcceptedRecorded,
+      bundleSigningLocked,
+      shouldPollSigningReadiness,
+      flowPhase,
+      workspaceTab,
+      approving,
+    });
+    if (key === lastReviewStateDiagKeyRef.current) return;
+    lastReviewStateDiagKeyRef.current = key;
+    recipientFlowDiag("[recipient-review-state]", {
+      agreementId,
+      recipientLinkRole,
+      viewerLike,
+      recipientApprovedInAudit,
+      approvedAck,
+      bundleSigningLocked,
+      lockedVersionId: bundle?.signingLock?.lockedVersionId ?? null,
+      shouldPollSigningReadiness,
+      flowPhase,
+      workspaceTab,
+      approving,
+    });
+  }, [
+    agreementId,
+    approving,
+    approvedAck,
+    bundle?.signingLock?.lockedVersionId,
+    bundleSigningLocked,
+    entry.kind,
+    flowPhase,
+    recipientApprovedInAudit,
+    recipientLinkRole,
+    recipientAcceptedRecorded,
+    shouldPollSigningReadiness,
+    viewerLike,
+    workspaceTab,
+  ]);
+
+  const prevBundleSigningLockedRef = useRef(false);
+  useEffect(() => {
+    if (bundleSigningLocked && !prevBundleSigningLockedRef.current) {
+      recipientFlowDiag("[recipient-signing-lock-detected]", {
+        agreementId,
+        lockedVersionId: bundle?.signingLock?.lockedVersionId ?? null,
+        recipientLinkRole,
+      });
+      recipientFlowDiag("[recipient-review-promote-to-signing]", {
+        agreementId,
+        recipientLinkRole,
+        viewerLike,
+      });
+    }
+    prevBundleSigningLockedRef.current = bundleSigningLocked;
+  }, [agreementId, bundle?.signingLock?.lockedVersionId, bundleSigningLocked, recipientLinkRole, viewerLike]);
+
+  useEffect(() => {
+    if (entry.kind !== "review" || viewerLike) return;
+    if (!recipientAcceptedRecorded) return;
+    if (bundleSigningLocked) return;
+    setWorkspaceTab((t) => (t === "revise" ? "read" : t));
+    setComposePathCardsVisible(false);
+  }, [bundleSigningLocked, entry.kind, recipientAcceptedRecorded, viewerLike]);
 
   const lockedVersionForReadinessDiag = bundle?.signingLock?.lockedVersionId || "";
   const canRecipientSignDiag =
@@ -3655,7 +3744,14 @@ export function AgreementRecipientReview({
             plainDraftText={directCompareDefault}
             onPrepareRevisedImport={prepareOutsideReviewImportUi}
             onImportedRevisedPlainText={onWantCopyRevisedImported}
-            revisedImportDisabled={saving || previewing || hasPendingSuggestion || recipientSuggestedEditsSentAck}
+            revisedImportDisabled={
+              saving ||
+              previewing ||
+              hasPendingSuggestion ||
+              recipientSuggestedEditsSentAck ||
+              recipientApprovedInAudit ||
+              approvedAck
+            }
           />
         </div>
       ) : null;
@@ -3723,7 +3819,9 @@ export function AgreementRecipientReview({
             promoteLooksGoodVisually={false}
             looksGoodLoading={approving}
             looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
-            requestChangesDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+            requestChangesDisabled={
+              hasPendingSuggestion || recipientSuggestedEditsSentAck || recipientApprovedInAudit || approvedAck
+            }
             onReviewPrimary={() => setFlowPhase("active")}
             onRequestChanges={() => {
               setFlowPhase("active");
@@ -3755,7 +3853,9 @@ export function AgreementRecipientReview({
             promoteLooksGoodVisually={false}
             looksGoodLoading={approving}
             looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
-            requestChangesDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+            requestChangesDisabled={
+              hasPendingSuggestion || recipientSuggestedEditsSentAck || recipientApprovedInAudit || approvedAck
+            }
             onReviewPrimary={() => setFlowPhase("active")}
             onRequestChanges={() => {
               setFlowPhase("active");
@@ -3853,6 +3953,13 @@ export function AgreementRecipientReview({
       };
     }
     if (recipientApprovedInAudit || approvedAck) {
+      if (recipientAcceptedNoEditsBanner) {
+        return {
+          wrap: "border-emerald-700/50 bg-emerald-950/40 text-emerald-50",
+          title: "Reviewer approved this draft without requesting changes.",
+          detail: "The sender will finalize and open signing when ready. This page updates automatically.",
+        };
+      }
       return {
         wrap: "border-emerald-900/35 bg-emerald-950/25 text-emerald-100",
         title: "You accepted this draft",
@@ -3875,7 +3982,8 @@ export function AgreementRecipientReview({
     revisedUploadAnalyzing ||
     recipientRevisedDraftFileBusy ||
     hasPendingSuggestion ||
-    recipientSuggestedEditsSentAck;
+    recipientSuggestedEditsSentAck ||
+    recipientAcceptedAwaitingLock;
 
   const recipientDraftBodyTextareaClass =
     "w-full min-h-[280px] max-w-full resize-y overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 sm:min-h-[420px]";
@@ -3898,7 +4006,6 @@ export function AgreementRecipientReview({
 
       {entry.kind === "review" &&
       !viewerLike &&
-      recipientLinkRole === "signer" &&
       (recipientApprovedInAudit || approvedAck) &&
       !signingReadyActive &&
       !agreementFullyExecuted &&
@@ -4012,7 +4119,11 @@ export function AgreementRecipientReview({
         <div className="min-w-0">
           <h1 className="text-lg font-semibold tracking-tight text-slate-100 sm:text-xl">{RECIPIENT_PUBLIC_HERO_TITLE}</h1>
           <p className="mt-1 max-w-xl text-sm text-slate-400">
-            {workspaceTab === "read" ? RECIPIENT_PUBLIC_HERO_SUBTITLE : "Suggest updates, preview, then send them to the owner."}
+            {workspaceTab === "read"
+              ? recipientAcceptedAwaitingLock
+                ? "You are done reviewing. The sender will open signing when they finalize — this page updates automatically."
+                : RECIPIENT_PUBLIC_HERO_SUBTITLE
+              : "Suggest updates, preview, then send them to the owner."}
           </p>
           {workspaceTab === "read" ? recipientTrustCueStrip() : null}
         </div>
@@ -4086,7 +4197,9 @@ export function AgreementRecipientReview({
             promoteLooksGoodVisually={false}
             looksGoodLoading={approving}
             looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
-            requestChangesDisabled={hasPendingSuggestion || recipientSuggestedEditsSentAck}
+            requestChangesDisabled={
+              hasPendingSuggestion || recipientSuggestedEditsSentAck || recipientApprovedInAudit || approvedAck
+            }
             onDownloadOriginal={() => {
               recipientOriginalDownloadsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
@@ -4127,7 +4240,8 @@ export function AgreementRecipientReview({
       {entry.kind === "review" &&
       draft &&
       isPaidProAgreementAuthoritative({ draft, agreementId, includeLocalCompletionMarker: false }) &&
-      !viewerLike ? (
+      !viewerLike &&
+      !recipientAcceptedAwaitingLock ? (
         <div className="rounded-lg border border-violet-800/45 bg-slate-950/50 px-4 py-4 text-slate-100">
           <div className="text-xs font-semibold uppercase tracking-wide text-violet-200/90">Note for the owner</div>
           <p className="mt-1 text-[11px] leading-snug text-slate-400">

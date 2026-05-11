@@ -5890,6 +5890,19 @@ const AgreementReview: React.FC<Props> = ({
                     setError(humanizeOwnerSigningLockError(lockRes.error));
                     return;
                   }
+                  if (import.meta.env.MODE !== "test") {
+                    const ownerFinalizeDiag =
+                      import.meta.env.DEV ||
+                      (typeof window !== "undefined" &&
+                        window.localStorage?.getItem("lawdogOwnerFinalizeDiag") === "1");
+                    if (ownerFinalizeDiag) {
+                      // eslint-disable-next-line no-console
+                      console.info("[owner-finalize-signing-lock-create]", {
+                        agreementId,
+                        locked_version_id: sl.lockedVersionId,
+                      });
+                    }
+                  }
                   access.recordUsage("signature_requests");
                   try {
                     const mintKey =
