@@ -68,8 +68,11 @@ function formatRelativeUpdated(iso: string): string {
   return `Last edited ${new Date(iso).toLocaleDateString()}`;
 }
 
-function agreementStatusLabel(r: WorkspaceIndexAgreement): string {
+/** Status line for recent-agreement rows (workspace index). */
+export function workspaceAgreementStatusLabel(r: WorkspaceIndexAgreement): string {
   if (r.completed_signed) return "Signed";
+  if (r.has_server_signing_lock) return "Ready to sign";
+  if (r.reviewer_approved) return "Reviewer approved — ready to sign";
   if (r.review_sent_at) return "Sent";
   if (r.version_ledger_count > 0) return "Ready to send";
   return "Draft";
@@ -581,7 +584,7 @@ export function AppDashboard() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-slate-100">{displayAgreementTitle(r.title)}</p>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {agreementStatusLabel(r)} · {formatRelativeUpdated(r.updated_at)}
+                  {workspaceAgreementStatusLabel(r)} · {formatRelativeUpdated(r.updated_at)}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">

@@ -30,3 +30,16 @@ export function logOwnerReviewReturnState(payload: Record<string, unknown>): voi
   // eslint-disable-next-line no-console
   console.info("[owner-review-return-state]", payload);
 }
+
+/** Dev / QA: `localStorage.lawdogOwnerReviewLinkStatusDiag = "1"` (also honors `lawdogOwnerReviewReturnDiag`). */
+export function logOwnerReviewLinkStatus(payload: Record<string, unknown>): void {
+  if (typeof window === "undefined") return;
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const on =
+    Boolean(typeof import.meta !== "undefined" && import.meta.env?.DEV) ||
+    window.localStorage?.getItem("lawdogOwnerReviewLinkStatusDiag") === "1" ||
+    window.localStorage?.getItem("lawdogOwnerReviewReturnDiag") === "1";
+  if (!on) return;
+  // eslint-disable-next-line no-console
+  console.info("[owner-review-link-status]", payload);
+}

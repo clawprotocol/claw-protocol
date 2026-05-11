@@ -4550,6 +4550,12 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
             isinstance(e, dict) and str(e.get("event_type") or "") == "signed"
             for e in audit
         )
+        reviewer_approved = any(
+            isinstance(e, dict)
+            and str(e.get("event_type") or "")
+            in ("recipient_approved", "participant_approved")
+            for e in audit
+        )
         lock = read_signing_lock(aid)
         lv_raw = str((lock or {}).get("locked_version_id") or "").strip()
         lv: Optional[str] = lv_raw or None
@@ -4572,6 +4578,7 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                 "locked_version_id": lv,
                 "workspace_archived_at": d.get("workspace_archived_at"),
                 "review_sent_at": d.get("review_sent_at"),
+                "reviewer_approved": reviewer_approved,
                 "workspace_folder_id": wfid,
                 "workspace_folder_name": (folder_names.get(wfid) if wfid else None),
                 "workspace_tags": tags_out,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { agreementPublicVerifyPath, fetchPublicAgreementVerify } from "../../agreement/agreementPublicVerify";
-import { fetchAgreementDraft } from "../../agreement/agreementWorkspaceApi";
+import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import {
   CANONICAL_PROOF_SENTENCE,
@@ -33,12 +33,17 @@ import {
   writeSimpleDoneReviewRecipientLinks,
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
-import { shouldWritePaidProEditReturnHandoffAfterReview } from "../../components/agreements/draftRecipientReviewSignals";
+import {
+  draftAuditHasRecipientRecordedApproval,
+  logOwnerReviewLinkStatus,
+  shouldWritePaidProEditReturnHandoffAfterReview,
+} from "../../components/agreements/draftRecipientReviewSignals";
 import {
   clearPaidProEditReturnHandoff,
   paidProEditReturnHasRecoverableBody,
   writePaidProEditReturnHandoff,
 } from "./paidProEditReturnHandoff";
+import { findOpenRecipientProposals } from "../../agreement/recipientProposal";
 
 function formatPartiesLineForDone(parties: AgreementDraft["parties"] | undefined, maxNames = 6): string {
   const names = (parties || [])
@@ -72,7 +77,9 @@ export function SimpleDonePage(props: { agreementId: string }) {
   );
   const [reviewBundleCopyFlash, setReviewBundleCopyFlash] = useState(false);
   const [ownerHandoffDraft, setOwnerHandoffDraft] = useState<AgreementDraft | null>(null);
+  const [ownerSigningLockVid, setOwnerSigningLockVid] = useState<string | null>(null);
   const ownerSuccessLoggedRef = useRef<string | null>(null);
+  const ownerReviewLinkStatusDiagKeyRef = useRef("");
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
   const csn = isLawdogCsnTraffic();
   const showClaimBlock = Boolean(confirmedSend || signed);
@@ -145,18 +152,29 @@ export function SimpleDonePage(props: { agreementId: string }) {
   useEffect(() => {
     if (!isPaidProReviewDonePath) return;
     let cancel = false;
-    void (async () => {
-      const { ok, draft } = await fetchAgreementDraft(agreementId);
-      if (cancel || !ok || !draft) return;
-      setOwnerHandoffDraft(draft);
-    })();
+    const run = async () => {
+      const { ok, draft, lockedVersionId } = await fetchAgreementDraftWithSigningLock(agreementId);
+      if (cancel) return;
+      if (ok && draft) setOwnerHandoffDraft(draft);
+      else setOwnerHandoffDraft(null);
+      setOwnerSigningLockVid(lockedVersionId && lockedVersionId.trim() ? lockedVersionId.trim() : null);
+    };
+    void run();
+    const id = window.setInterval(() => void run(), 12_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") void run();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       cancel = true;
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [agreementId, isPaidProReviewDonePath]);
 
   useEffect(() => {
     ownerSuccessLoggedRef.current = null;
+    ownerReviewLinkStatusDiagKeyRef.current = "";
   }, [agreementId]);
 
   useEffect(() => {
@@ -166,6 +184,34 @@ export function SimpleDonePage(props: { agreementId: string }) {
     // eslint-disable-next-line no-console
     console.info("[review-link-owner-success-visible]", { agreementId });
   }, [agreementId, isPaidProReviewDonePath, reviewLinksReady]);
+
+  useEffect(() => {
+    if (!isPaidProReviewDonePath || !reviewLinksReady) return;
+    const recipientApprovalDetected = Boolean(
+      ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
+    );
+    const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
+    const primaryCtaLabel = signingLockActive
+      ? "Continue to signing"
+      : recipientApprovalDetected
+        ? "Finalize for signing"
+        : "Copy review link";
+    const payload = {
+      agreementId,
+      recipientApprovalDetected,
+      signingLockActive,
+      lockedVersionId: ownerSigningLockVid,
+      finalizedVersionId: ownerSigningLockVid,
+      currentRoute: typeof window !== "undefined" ? window.location.pathname : "",
+      primaryCtaLabel,
+      backToDraftTarget: "/app/create",
+      reviewLinksReady: true,
+    };
+    const key = JSON.stringify(payload);
+    if (key === ownerReviewLinkStatusDiagKeyRef.current) return;
+    ownerReviewLinkStatusDiagKeyRef.current = key;
+    logOwnerReviewLinkStatus(payload);
+  }, [agreementId, isPaidProReviewDonePath, reviewLinksReady, ownerHandoffDraft, ownerSigningLockVid]);
 
   const retryRemintReviewLink = useCallback(async () => {
     const id = agreementId.trim();
@@ -204,6 +250,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   const backToDraft = useCallback(async () => {
     const id = agreementId.trim();
+    logOwnerReviewLinkStatus({
+      agreementId: id,
+      action: "back_to_draft_click",
+      backToDraftTarget: "/app/create",
+      currentRoute: typeof window !== "undefined" ? window.location.pathname : "",
+    });
     writeCreateReviewAgreementResumeId(id);
     try {
       clearPaidProEditReturnHandoff();
@@ -213,6 +265,14 @@ export function SimpleDonePage(props: { agreementId: string }) {
     if (id) {
       const { ok, draft } = await fetchAgreementDraft(id);
       const hasRec = Boolean(ok && draft && paidProEditReturnHasRecoverableBody(draft));
+      const recipientApprovalDetected = Boolean(draft && draftAuditHasRecipientRecordedApproval(draft));
+      logOwnerReviewLinkStatus({
+        agreementId: id,
+        action: "back_to_draft_after_fetch",
+        recipientApprovalDetected,
+        willWritePaidProHandoff: shouldWritePaidProEditReturnHandoffAfterReview(draft, hasRec),
+        backToDraftTarget: "/app/create",
+      });
       if (shouldWritePaidProEditReturnHandoffAfterReview(draft, hasRec)) {
         writePaidProEditReturnHandoff({
           agreementId: id,
@@ -247,6 +307,23 @@ export function SimpleDonePage(props: { agreementId: string }) {
       (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement";
     const partiesLine = formatPartiesLineForDone(ownerHandoffDraft?.parties);
     const primaryReviewHref = (reviewHandoffRows[0]?.reviewHref || "").trim();
+    const ownerWorkspaceHref = `/app/agreements/${encodeURIComponent(agreementId)}`;
+    const recipientApprovalDetected = Boolean(
+      ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
+    );
+    const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
+    const noOpenChangeRequests =
+      !ownerHandoffDraft || findOpenRecipientProposals(ownerHandoffDraft.audit_log).length === 0;
+    const showApprovedNoEditsCopy =
+      recipientApprovalDetected && !signingLockActive && noOpenChangeRequests;
+    const flowShellTitle =
+      !reviewLinksReady || !primaryReviewHref
+        ? "Review link could not be created"
+        : signingLockActive
+          ? "Ready to sign"
+          : recipientApprovalDetected
+            ? "Reviewer approved"
+            : "Review link created";
     const copyPrimaryReviewLink = () => {
       const text =
         reviewHandoffRows.length <= 1
@@ -260,16 +337,50 @@ export function SimpleDonePage(props: { agreementId: string }) {
     };
 
     return (
-      <SimpleFlowShell
-        title={reviewLinksReady && primaryReviewHref ? "Review link created" : "Review link could not be created"}
-      >
+      <SimpleFlowShell title={flowShellTitle}>
         <div className="vs01-card vs01-card--envelope space-y-5 text-center sm:text-left">
           <div className="rounded-xl border border-emerald-900/35 bg-emerald-950/25 px-5 py-6">
             {reviewLinksReady && primaryReviewHref ? (
               <>
-                <p className="text-sm leading-relaxed text-slate-300">
-                  Nothing has been signed. Copy this private link and send it to the reviewer.
-                </p>
+                {signingLockActive ? (
+                  <p className="text-sm leading-relaxed text-emerald-100/95">
+                    This agreement is locked for signature. Open it in your workspace to continue signing or copy
+                    signing links.
+                  </p>
+                ) : showApprovedNoEditsCopy ? (
+                  <>
+                    <p className="text-base font-semibold text-emerald-100">
+                      Reviewer approved this draft without requesting changes.
+                    </p>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                      Nothing is signed yet. Open the agreement workspace to finalize for signing when you are ready.
+                    </p>
+                  </>
+                ) : recipientApprovalDetected ? (
+                  <>
+                    <p className="text-base font-semibold text-emerald-100">Reviewer accepted this draft.</p>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                      {noOpenChangeRequests
+                        ? "Open your agreement workspace to finalize for signing when you are ready."
+                        : "There are still open change requests on this agreement. Open the workspace to resolve them before finalizing."}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm leading-relaxed text-slate-300">
+                    Nothing has been signed. Copy this private link and send it to the reviewer.
+                  </p>
+                )}
+                {recipientApprovalDetected ? (
+                  <p
+                    className="mt-3 rounded-lg border border-emerald-800/40 bg-emerald-950/40 px-3 py-2 text-left text-xs font-medium text-emerald-50"
+                    data-testid="simple-done-owner-approval-status"
+                  >
+                    Status:{" "}
+                    {signingLockActive
+                      ? "Signing version locked — continue in workspace"
+                      : "Reviewer approved — ready to sign"}
+                  </p>
+                ) : null}
                 <dl className="mt-5 space-y-3 text-left text-sm text-slate-300">
                   <div>
                     <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</dt>
@@ -308,13 +419,43 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   />
                 </label>
                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  <button
-                    type="button"
-                    className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
-                    onClick={() => copyPrimaryReviewLink()}
-                  >
-                    {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
-                  </button>
+                  {signingLockActive ? (
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                      data-testid="simple-done-continue-to-signing"
+                      onClick={() => void navigate(ownerWorkspaceHref)}
+                    >
+                      Continue to signing
+                    </button>
+                  ) : recipientApprovalDetected ? (
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                      data-testid="simple-done-finalize-for-signing"
+                      onClick={() => void navigate(ownerWorkspaceHref)}
+                    >
+                      Finalize for signing
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                      onClick={() => copyPrimaryReviewLink()}
+                    >
+                      {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
+                    </button>
+                  )}
+                  {signingLockActive || recipientApprovalDetected ? (
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                      data-testid="simple-done-copy-review-link-secondary"
+                      onClick={() => copyPrimaryReviewLink()}
+                    >
+                      {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
@@ -326,7 +467,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   </button>
                   <button
                     type="button"
-                    className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                    className="text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-400 hover:underline sm:min-h-[2.5rem]"
                     onClick={() => void backToDraft()}
                   >
                     Back to draft

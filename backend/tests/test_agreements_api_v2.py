@@ -572,6 +572,40 @@ def test_workspace_index_folder_tags_and_patch(monkeypatch, tmp_path):
     assert mine.get("workspace_tags") == ["nda", "priority"]
 
 
+def test_workspace_index_reviewer_approved_flag(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    from backend.services import agreement_draft_store as ads
+
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Review approved row",
+            "jurisdiction": "TX",
+            "parties": [{"name": "A", "role": "owner"}],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    d = ads.load_draft(aid)
+    d["audit_log"] = list(d.get("audit_log") or [])
+    d["audit_log"].append({"event_type": "recipient_approved", "at": "2026-01-02T00:00:00Z"})
+    ads.save_draft(d)
+
+    idx = client.get("/api/agreements/workspace-index", headers=_ORG_H)
+    assert idx.status_code == 200
+    rows = idx.json()["agreements"]
+    mine = next(r for r in rows if r["id"] == aid)
+    assert mine.get("reviewer_approved") is True
+
+
 def test_agreements_refine_alias_requires_instruction(monkeypatch, tmp_path):
     """POST /refine delegates to /revise — empty instruction is rejected."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))

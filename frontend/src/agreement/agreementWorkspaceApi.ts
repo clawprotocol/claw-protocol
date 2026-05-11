@@ -16,6 +16,8 @@ export type WorkspaceIndexAgreement = {
   locked_version_id: string | null;
   workspace_archived_at: string | null;
   review_sent_at: string | null;
+  /** True when audit log includes recipient/participant approval (reviewer accepted on link). */
+  reviewer_approved?: boolean;
   workspace_folder_id?: string | null;
   workspace_folder_name?: string | null;
   workspace_tags?: string[];
