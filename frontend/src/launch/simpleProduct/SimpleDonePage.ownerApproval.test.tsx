@@ -10,7 +10,19 @@ import { SimpleDonePage } from "./SimpleDonePage";
 import { markSimpleFlowSent } from "../simpleFlowSent";
 import { writeSimpleDoneReviewRecipientLinks } from "./simpleDoneReviewRecipientLinks";
 
-const { mockNavigate } = vi.hoisted(() => ({ mockNavigate: vi.fn() }));
+const { mockNavigate, mockTryNavigatePaidProVs01 } = vi.hoisted(() => ({
+  mockNavigate: vi.fn(),
+  mockTryNavigatePaidProVs01: vi.fn(
+    async (opts: { navigate: (to: string) => void | Promise<void>; agreementId: string }) => {
+      void opts.navigate(`/app/esign/mock-vs01-doc?agreement_bridge=1`);
+      return true;
+    },
+  ),
+}));
+
+vi.mock("./agreementToVs01SigningBridge", () => ({
+  tryNavigatePaidProAgreementSenderFirstVs01Esign: mockTryNavigatePaidProVs01,
+}));
 
 vi.mock("../LaunchNavContext", () => ({
   useLaunchNav: () => ({
@@ -62,6 +74,10 @@ const verifyPayload: PublicVerifyPayload = {
 describe("SimpleDonePage owner approval UX", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
+    mockTryNavigatePaidProVs01.mockImplementation(async (opts) => {
+      void opts.navigate(`/app/esign/mock-vs01-doc?agreement_bridge=1`);
+      return true;
+    });
     sessionStorage.clear();
     vi.spyOn(agreementPublicVerify, "fetchPublicAgreementVerify").mockResolvedValue(verifyPayload);
   });
@@ -72,7 +88,7 @@ describe("SimpleDonePage owner approval UX", () => {
     sessionStorage.clear();
   });
 
-  it("shows Finalize for signing and navigates to workspace when reviewer approved without lock", async () => {
+  it("shows Finalize for signing and routes to VS01 e-sign bridge when reviewer approved without lock", async () => {
     const spyLock = vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,
       draft: baseDraft({
@@ -108,6 +124,66 @@ describe("SimpleDonePage owner approval UX", () => {
     );
 
     await userEvent.click(screen.getByTestId("simple-done-finalize-for-signing"));
+    expect(mockTryNavigatePaidProVs01).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agreementId,
+        logReason: "simple_done_finalize_clean",
+      }),
+    );
+    expect(mockNavigate).toHaveBeenCalledWith("/app/esign/mock-vs01-doc?agreement_bridge=1");
+  });
+
+  it("Finalize for signing routes to negotiation workspace when open recipient proposals exist", async () => {
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({
+        audit_log: [
+          { event_type: "recipient_approved", at: "2026-01-02T00:00:00Z" },
+          {
+            event_type: "recipient_proposal_pending",
+            at: "2026-01-02T01:00:00Z",
+            value: {
+              proposal_id: "p1",
+              instruction: "Change term X",
+              draft: { title: "Lease" },
+            },
+          },
+        ],
+      }),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({
+        audit_log: [
+          { event_type: "recipient_approved", at: "2026-01-02T00:00:00Z" },
+          {
+            event_type: "recipient_proposal_pending",
+            at: "2026-01-02T01:00:00Z",
+            value: {
+              proposal_id: "p1",
+              instruction: "Change term X",
+              draft: { title: "Lease" },
+            },
+          },
+        ],
+      }),
+    });
+
+    markSimpleFlowSent(agreementId);
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId,
+      recipients: [{ displayName: "Pat", reviewHref: "https://example.com/review/pat" }],
+    });
+
+    render(<SimpleDonePage agreementId={agreementId} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByTestId("simple-done-finalize-for-signing"));
+    expect(mockTryNavigatePaidProVs01).not.toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith(`/app/agreements/${encodeURIComponent(agreementId)}`);
   });
 
@@ -132,6 +208,15 @@ describe("SimpleDonePage owner approval UX", () => {
       expect(screen.getByTestId("simple-done-continue-to-signing")).toBeTruthy();
     });
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain("Signing version locked");
+
+    await userEvent.click(screen.getByTestId("simple-done-continue-to-signing"));
+    expect(mockTryNavigatePaidProVs01).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agreementId,
+        logReason: "simple_done_continue_vs01",
+      }),
+    );
+    expect(mockNavigate).toHaveBeenCalledWith("/app/esign/mock-vs01-doc?agreement_bridge=1");
   });
 
   it("pre-approval path keeps Copy review link as primary", async () => {

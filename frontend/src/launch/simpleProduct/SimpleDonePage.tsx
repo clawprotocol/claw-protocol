@@ -35,6 +35,7 @@ import {
 } from "./simpleDoneReviewRecipientLinks";
 import {
   draftAuditHasRecipientRecordedApproval,
+  logOwnerFinalizeRouteDecision,
   logOwnerReviewLinkStatus,
   shouldWritePaidProEditReturnHandoffAfterReview,
 } from "../../components/agreements/draftRecipientReviewSignals";
@@ -44,6 +45,7 @@ import {
   writePaidProEditReturnHandoff,
 } from "./paidProEditReturnHandoff";
 import { findOpenRecipientProposals } from "../../agreement/recipientProposal";
+import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
 
 function formatPartiesLineForDone(parties: AgreementDraft["parties"] | undefined, maxNames = 6): string {
   const names = (parties || [])
@@ -78,6 +80,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const [reviewBundleCopyFlash, setReviewBundleCopyFlash] = useState(false);
   const [ownerHandoffDraft, setOwnerHandoffDraft] = useState<AgreementDraft | null>(null);
   const [ownerSigningLockVid, setOwnerSigningLockVid] = useState<string | null>(null);
+  const [finalizeNavigating, setFinalizeNavigating] = useState(false);
   const ownerSuccessLoggedRef = useRef<string | null>(null);
   const ownerReviewLinkStatusDiagKeyRef = useRef("");
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
@@ -284,6 +287,79 @@ export function SimpleDonePage(props: { agreementId: string }) {
     void navigate("/app/create");
   }, [agreementId, navigate]);
 
+  const handleOwnerFinalizeOrContinueSigning = useCallback(async () => {
+    const id = agreementId.trim();
+    const openCount = ownerHandoffDraft ? findOpenRecipientProposals(ownerHandoffDraft.audit_log).length : 0;
+    const recipientApprovalDetected = Boolean(
+      ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
+    );
+    const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
+    const primaryCtaLabel = signingLockActive ? "Continue to signing" : "Finalize for signing";
+    const negotiationHref = `/app/agreements/${encodeURIComponent(id)}`;
+
+    if (openCount > 0) {
+      logOwnerFinalizeRouteDecision({
+        agreementId: id,
+        recipientApprovalDetected,
+        openProposalCount: openCount,
+        signingLockActive,
+        routeTarget: negotiationHref,
+        primaryCtaLabel,
+        reason: "open_recipient_proposals",
+      });
+      void navigate(negotiationHref);
+      return;
+    }
+
+    if (!ownerHandoffDraft) {
+      logOwnerFinalizeRouteDecision({
+        agreementId: id,
+        recipientApprovalDetected,
+        openProposalCount: openCount,
+        signingLockActive,
+        routeTarget: negotiationHref,
+        primaryCtaLabel,
+        reason: "missing_draft_hydration",
+      });
+      void navigate(negotiationHref);
+      return;
+    }
+
+    setFinalizeNavigating(true);
+    try {
+      const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
+        navigate,
+        agreementId: id,
+        draft: ownerHandoffDraft,
+        logReason: signingLockActive ? "simple_done_continue_vs01" : "simple_done_finalize_clean",
+      });
+      if (ok) {
+        logOwnerFinalizeRouteDecision({
+          agreementId: id,
+          recipientApprovalDetected,
+          openProposalCount: openCount,
+          signingLockActive,
+          routeTarget: "vs01_esign_bridge",
+          primaryCtaLabel,
+          reason: "vs01_seed_navigate_ok",
+        });
+      } else {
+        logOwnerFinalizeRouteDecision({
+          agreementId: id,
+          recipientApprovalDetected,
+          openProposalCount: openCount,
+          signingLockActive,
+          routeTarget: negotiationHref,
+          primaryCtaLabel,
+          reason: "vs01_seed_navigate_failed",
+        });
+        void navigate(negotiationHref);
+      }
+    } finally {
+      setFinalizeNavigating(false);
+    }
+  }, [agreementId, navigate, ownerHandoffDraft, ownerSigningLockVid]);
+
   function copyAllReviewLinks(): void {
     if (reviewHandoffRows.length === 0) return;
     const text =
@@ -307,7 +383,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
       (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement";
     const partiesLine = formatPartiesLineForDone(ownerHandoffDraft?.parties);
     const primaryReviewHref = (reviewHandoffRows[0]?.reviewHref || "").trim();
-    const ownerWorkspaceHref = `/app/agreements/${encodeURIComponent(agreementId)}`;
     const recipientApprovalDetected = Boolean(
       ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
     );
@@ -424,18 +499,20 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       type="button"
                       className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
                       data-testid="simple-done-continue-to-signing"
-                      onClick={() => void navigate(ownerWorkspaceHref)}
+                      disabled={finalizeNavigating}
+                      onClick={() => void handleOwnerFinalizeOrContinueSigning()}
                     >
-                      Continue to signing
+                      {finalizeNavigating ? "Opening…" : "Continue to signing"}
                     </button>
                   ) : recipientApprovalDetected ? (
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
                       data-testid="simple-done-finalize-for-signing"
-                      onClick={() => void navigate(ownerWorkspaceHref)}
+                      disabled={finalizeNavigating}
+                      onClick={() => void handleOwnerFinalizeOrContinueSigning()}
                     >
-                      Finalize for signing
+                      {finalizeNavigating ? "Opening…" : "Finalize for signing"}
                     </button>
                   ) : (
                     <button

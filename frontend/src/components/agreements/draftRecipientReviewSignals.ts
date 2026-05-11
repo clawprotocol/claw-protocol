@@ -43,3 +43,17 @@ export function logOwnerReviewLinkStatus(payload: Record<string, unknown>): void
   // eslint-disable-next-line no-console
   console.info("[owner-review-link-status]", payload);
 }
+
+/** Dev / QA: same flags as {@link logOwnerReviewLinkStatus} + `lawdogOwnerFinalizeRouteDiag`. */
+export function logOwnerFinalizeRouteDecision(payload: Record<string, unknown>): void {
+  if (typeof window === "undefined") return;
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const on =
+    Boolean(typeof import.meta !== "undefined" && import.meta.env?.DEV) ||
+    window.localStorage?.getItem("lawdogOwnerFinalizeRouteDiag") === "1" ||
+    window.localStorage?.getItem("lawdogOwnerReviewLinkStatusDiag") === "1" ||
+    window.localStorage?.getItem("lawdogOwnerReviewReturnDiag") === "1";
+  if (!on) return;
+  // eslint-disable-next-line no-console
+  console.info("[owner-finalize-route-decision]", payload);
+}
