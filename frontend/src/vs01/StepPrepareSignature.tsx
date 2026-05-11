@@ -58,6 +58,10 @@ export type StepPrepareSignatureProps = {
   senderMessage: string;
   /** Paid Pro agreement → VS01 bridge: placement-first framing (not “sign your document” yet). */
   agreementBridgePlacementCopy?: boolean;
+  /** Pre-populate placed fields (e.g. from saved draft state on refresh). */
+  initialFields?: PlacedSigningField[];
+  /** Called whenever the internal placed-fields array changes (add/remove/move/resize/value edit). */
+  onFieldsChange?: (fields: PlacedSigningField[]) => void;
   onBack?: () => void;
   onContinue?: () => void;
 };
@@ -137,6 +141,8 @@ export function StepPrepareSignature({
   creatorEmail,
   senderMessage,
   agreementBridgePlacementCopy = false,
+  initialFields,
+  onFieldsChange,
   onBack,
   onContinue,
 }: StepPrepareSignatureProps) {
@@ -156,7 +162,7 @@ export function StepPrepareSignature({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
-  const [fields, setFields] = useState<PlacedSigningField[]>([]);
+  const [fields, setFields] = useState<PlacedSigningField[]>(() => initialFields ?? []);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<SigningFieldType>("signature");
   /** When set, the next click on the document places this field type once, then clears. */
@@ -191,6 +197,12 @@ export function StepPrepareSignature({
   const pageStackRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const fieldsRef = useRef(fields);
   fieldsRef.current = fields;
+  const onFieldsChangeRef = useRef(onFieldsChange);
+  onFieldsChangeRef.current = onFieldsChange;
+
+  useEffect(() => {
+    onFieldsChangeRef.current?.(fields);
+  }, [fields]);
   const typedNameRef = useRef(typedName);
   const initialsRef = useRef(initials);
   typedNameRef.current = typedName;

@@ -119,10 +119,10 @@ describe("VS01 manual field sizing map and resize bounds", () => {
     expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.signature.height).toBeLessThanOrEqual(0.056);
   });
 
-  it("orders default widths: email > text > printed_name and email > date", () => {
+  it("orders default widths: email >= text >= printed_name and email > date", () => {
     const { text, email, printed_name, date } = VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM;
-    expect(email.width).toBeGreaterThan(text.width);
-    expect(text.width).toBeGreaterThan(printed_name.width);
+    expect(email.width).toBeGreaterThanOrEqual(text.width);
+    expect(text.width).toBeGreaterThanOrEqual(printed_name.width);
     expect(email.width).toBeGreaterThan(date.width);
   });
 

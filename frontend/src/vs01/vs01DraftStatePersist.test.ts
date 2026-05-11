@@ -135,6 +135,103 @@ describe("vs01DraftStatePersist", () => {
   });
 });
 
+describe("vs01DraftStatePersist — refresh persistence", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("saved senderPlacedFields survive a simulated refresh (save then immediate load)", () => {
+    const fields: PlacedSigningField[] = [
+      makePlacedField({ id: "sig1", type: "signature", page: 0, x: 0.2, y: 0.3 }),
+      makePlacedField({ id: "email1", type: "email", page: 0, x: 0.4, y: 0.5, value: "test@example.com" }),
+      makePlacedField({ id: "date1", type: "date", page: 1, x: 0.1, y: 0.9, value: "2026-05-11" }),
+    ];
+    saveVs01DraftState(makeState({ senderPlacedFields: fields }));
+
+    const loaded = loadVs01DraftState("doc_test_1");
+    expect(loaded).not.toBeNull();
+    expect(loaded!.senderPlacedFields).toHaveLength(3);
+    expect(loaded!.senderPlacedFields[0].id).toBe("sig1");
+    expect(loaded!.senderPlacedFields[1].value).toBe("test@example.com");
+    expect(loaded!.senderPlacedFields[2].value).toBe("2026-05-11");
+    expect(loaded!.senderPlacedFields[2].page).toBe(1);
+  });
+
+  it("bridge flow: saved state with fields is not overwritten by bridge session presence", () => {
+    const savedFields: PlacedSigningField[] = [
+      makePlacedField({ id: "f1", type: "signature", page: 0 }),
+      makePlacedField({ id: "f2", type: "text", page: 0, value: "Important clause" }),
+    ];
+    const savedCps: Vs01Counterparty[] = [
+      { id: "cp1", name: "Recipient", email: "recip@saved.com", phone: "" },
+    ];
+    saveVs01DraftState(makeState({
+      senderPlacedFields: savedFields,
+      counterparties: savedCps,
+      step: 2,
+      furthestStep: 2,
+    }));
+
+    const bridgeCps: Vs01Counterparty[] = [
+      { id: "cp1", name: "Recipient", email: "recip@bridge.com", phone: "" },
+    ];
+
+    const saved = loadVs01DraftState("doc_test_1");
+    expect(saved).not.toBeNull();
+    expect(saved!.senderPlacedFields).toHaveLength(2);
+    expect(saved!.senderPlacedFields[0].id).toBe("f1");
+    expect(saved!.senderPlacedFields[1].value).toBe("Important clause");
+
+    const mergedCps = mergeBridgeEmailsIntoSavedCounterparties(
+      saved!.counterparties,
+      bridgeCps,
+    );
+    expect(mergedCps[0].email).toBe("recip@saved.com");
+  });
+
+  it("bridge flow: blank emails in saved state are filled from bridge counterparties", () => {
+    const savedCps: Vs01Counterparty[] = [
+      { id: "cp1", name: "Recipient", email: "", phone: "" },
+    ];
+    saveVs01DraftState(makeState({
+      senderPlacedFields: [makePlacedField()],
+      counterparties: savedCps,
+    }));
+
+    const bridgeCps: Vs01Counterparty[] = [
+      { id: "cp1", name: "Recipient", email: "filled@bridge.com", phone: "" },
+    ];
+
+    const saved = loadVs01DraftState("doc_test_1")!;
+    const mergedCps = mergeBridgeEmailsIntoSavedCounterparties(
+      saved.counterparties,
+      bridgeCps,
+    );
+    expect(mergedCps[0].email).toBe("filled@bridge.com");
+    expect(saved.senderPlacedFields).toHaveLength(1);
+  });
+
+  it("clearVs01DraftState only removes specified documentId", () => {
+    saveVs01DraftState(makeState({ documentId: "doc_keep" }));
+    saveVs01DraftState(makeState({ documentId: "doc_remove" }));
+    clearVs01DraftState("doc_remove", "test");
+    expect(loadVs01DraftState("doc_keep")).not.toBeNull();
+    expect(loadVs01DraftState("doc_remove")).toBeNull();
+  });
+
+  it("fields with positions and dimensions round-trip exactly", () => {
+    const fields: PlacedSigningField[] = [
+      makePlacedField({ id: "precise", x: 0.12345, y: 0.67891, width: 0.234, height: 0.0456 }),
+    ];
+    saveVs01DraftState(makeState({ senderPlacedFields: fields }));
+    const loaded = loadVs01DraftState("doc_test_1")!;
+    expect(loaded.senderPlacedFields[0].x).toBeCloseTo(0.12345, 10);
+    expect(loaded.senderPlacedFields[0].y).toBeCloseTo(0.67891, 10);
+    expect(loaded.senderPlacedFields[0].width).toBeCloseTo(0.234, 10);
+    expect(loaded.senderPlacedFields[0].height).toBeCloseTo(0.0456, 10);
+  });
+});
+
 describe("mergeBridgeEmailsIntoSavedCounterparties", () => {
   it("fills blank saved email from bridge without overwriting existing", () => {
     const saved: Vs01Counterparty[] = [

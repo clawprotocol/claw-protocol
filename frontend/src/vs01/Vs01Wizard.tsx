@@ -350,6 +350,16 @@ export function Vs01Wizard({
             counterpartiesCount: cps.length,
             savedFieldCount: saved ? saved.senderPlacedFields.length + saved.recipientPlacedFields.length : 0,
           });
+          if (saved) {
+            // eslint-disable-next-line no-console
+            console.info("[vs01-draft-state-hydrate-applied]", {
+              documentId: sid,
+              step: saved.step,
+              senderPlacedFields: saved.senderPlacedFields.length,
+              recipientPlacedFields: saved.recipientPlacedFields.length,
+              counterparties: saved.counterparties.length,
+            });
+          }
           const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
           setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
           goToStep(nextStep);
@@ -382,6 +392,14 @@ export function Vs01Wizard({
             setSenderPlacedFields(saved.senderPlacedFields);
             setRecipientPlacedFields(saved.recipientPlacedFields);
             if (saved.senderSignatureRef) setSenderSignatureRef(saved.senderSignatureRef);
+          });
+          // eslint-disable-next-line no-console
+          console.info("[vs01-draft-state-hydrate-applied]", {
+            documentId: sid,
+            step: saved.step,
+            senderPlacedFields: saved.senderPlacedFields.length,
+            recipientPlacedFields: saved.recipientPlacedFields.length,
+            counterparties: saved.counterparties.length,
           });
           const fs = Math.max(saved.step, saved.furthestStep) as Vs01Step;
           setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
@@ -761,6 +779,8 @@ export function Vs01Wizard({
             creatorEmail={creatorEmail.trim() ? creatorEmail.trim() : undefined}
             senderMessage={senderMessage}
             agreementBridgePlacementCopy={paidProAgreementBridgeSkip}
+            initialFields={senderPlacedFields}
+            onFieldsChange={setSenderPlacedFields}
             onBack={() => goToStep(paidProAgreementBridgeSkip ? 0 : 1)}
             onContinue={() => {
               if (receiptId) goToStep(3);

@@ -2680,7 +2680,7 @@ button.vs01-upload-btn:disabled {
   white-space: normal;
   word-break: break-word;
   line-height: 1.22;
-  font-size: max(0.42rem, 9cqi);
+  font-size: clamp(0.5rem, 9cqi, 0.78rem);
 }
 
 /* Step 4: default single-line e-sign look; allow wrap when the box is resized taller (container). */
@@ -2691,7 +2691,7 @@ button.vs01-upload-btn:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.2;
-  font-size: max(0.4rem, 8.5cqi);
+  font-size: clamp(0.46rem, 8.5cqi, 0.74rem);
 }
 
 @container vs01-placed-field (min-height: 3.35rem) {
@@ -2907,7 +2907,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-text {
-  font-size: max(0.45rem, 9.5cqi);
+  font-size: clamp(0.5rem, 9.5cqi, 0.78rem);
   line-height: 1.15;
   color: #111111;
   overflow: hidden;
@@ -2926,7 +2926,7 @@ button.vs01-upload-btn:disabled {
   border: 1px solid color-mix(in srgb, var(--vs01-color-accent) 45%, transparent);
   background: rgba(255, 252, 248, 0.92);
   border-radius: 4px;
-  font-size: max(0.45rem, 9.5cqi);
+  font-size: clamp(0.5rem, 9.5cqi, 0.78rem);
   line-height: 1.2;
   color: #111111;
   cursor: text;
@@ -2950,6 +2950,8 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-placement-box--printed_name,
 .vs01-sign-placement-box--date {
   cursor: default;
+  gap: 0.06rem;
+  padding: 0.14rem 0.24rem 0.18rem;
 }
 
 .vs01-recipient-assign-step .vs01-sign-placement-box--text,
@@ -3561,7 +3563,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-label {
-  font-size: max(0.42rem, 5cqi);
+  font-size: clamp(0.42rem, 5cqi, 0.58rem);
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;

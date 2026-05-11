@@ -50,22 +50,40 @@ export function saveVs01DraftState(state: Vs01DraftState): void {
     // eslint-disable-next-line no-console
     console.info("[vs01-draft-state-save]", {
       documentId: did,
-      fieldCount: state.senderPlacedFields.length + state.recipientPlacedFields.length,
-      signerCount: state.counterparties.length,
-      currentStep: state.step,
-      reason: "auto",
+      step: state.step,
+      senderPlacedFields: state.senderPlacedFields.length,
+      recipientPlacedFields: state.recipientPlacedFields.length,
+      counterparties: state.counterparties.length,
     });
   }
 }
 
 export function loadVs01DraftState(documentId: string | null | undefined): Vs01DraftState | null {
   const did = (documentId || "").trim();
-  if (!did) return null;
+  if (!did) {
+    if (diagEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-draft-state-load-miss]", { documentId: did, reason: "empty_id" });
+    }
+    return null;
+  }
   try {
     const raw = sessionStorage.getItem(keyFor(did));
-    if (!raw) return null;
+    if (!raw) {
+      if (diagEnabled()) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-draft-state-load-miss]", { documentId: did, reason: "no_entry" });
+      }
+      return null;
+    }
     const o = JSON.parse(raw) as Vs01DraftState;
-    if (o?.v !== 1 || o.documentId?.trim() !== did) return null;
+    if (o?.v !== 1 || o.documentId?.trim() !== did) {
+      if (diagEnabled()) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-draft-state-load-miss]", { documentId: did, reason: "version_mismatch" });
+      }
+      return null;
+    }
     if (!Array.isArray(o.counterparties)) return null;
     if (!Array.isArray(o.senderPlacedFields)) o.senderPlacedFields = [];
     if (!Array.isArray(o.recipientPlacedFields)) o.recipientPlacedFields = [];
@@ -73,10 +91,10 @@ export function loadVs01DraftState(documentId: string | null | undefined): Vs01D
       // eslint-disable-next-line no-console
       console.info("[vs01-draft-state-hydrate]", {
         documentId: did,
-        fieldCount: o.senderPlacedFields.length + o.recipientPlacedFields.length,
-        signerCount: o.counterparties.length,
-        currentStep: o.step,
-        reason: "load",
+        step: o.step,
+        senderPlacedFields: o.senderPlacedFields.length,
+        recipientPlacedFields: o.recipientPlacedFields.length,
+        counterparties: o.counterparties.length,
       });
     }
     return o;
