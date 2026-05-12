@@ -24,6 +24,7 @@ function makeRecipientField(id: string, cpId: string): Vs01RecipientPlacedField 
 describe("buildVs01RecipientSigningUrl", () => {
   afterEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
   });
 
   it("includes vs01_recipient_sign=1 in the generated URL", () => {
@@ -101,9 +102,10 @@ describe("buildVs01RecipientSigningUrl", () => {
 describe("storeRecipientManifest / loadRecipientManifest", () => {
   afterEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
   });
 
-  it("round-trips fields through sessionStorage", () => {
+  it("round-trips fields through storage", () => {
     const fields = [makeRecipientField("f1", "cp1"), makeRecipientField("f2", "cp1")];
     storeRecipientManifest("doc_a", "cp1", fields);
     const loaded = loadRecipientManifest("doc_a", "cp1");
@@ -121,5 +123,15 @@ describe("storeRecipientManifest / loadRecipientManifest", () => {
     storeRecipientManifest("doc_a", "cp2", [makeRecipientField("f2", "cp2")]);
     expect(loadRecipientManifest("doc_a", "cp1")![0].id).toBe("f1");
     expect(loadRecipientManifest("doc_a", "cp2")![0].id).toBe("f2");
+  });
+
+  it("falls back to localStorage when sessionStorage is cleared", () => {
+    const fields = [makeRecipientField("f1", "cp1")];
+    storeRecipientManifest("doc_ls", "cp1", fields);
+    sessionStorage.clear();
+    const loaded = loadRecipientManifest("doc_ls", "cp1");
+    expect(loaded).not.toBeNull();
+    expect(loaded).toHaveLength(1);
+    expect(loaded![0].id).toBe("f1");
   });
 });

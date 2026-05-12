@@ -90,6 +90,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
 
   let recipientHydratedFields: Vs01RecipientPlacedField[] = [];
   let recipientManifestDecodeError: string | null = null;
+  let hydrationSource: "url_manifest" | "stored_manifest" | "none" = "none";
 
   if (manifestRaw) {
     const decoded = decodeRecipientManifestParam(manifestRaw);
@@ -99,29 +100,48 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
         recipientName || "Recipient",
         recipientEmail || undefined
       );
+      hydrationSource = "url_manifest";
     } else {
       recipientManifestDecodeError = decoded.error;
     }
-  } else if (manifestStored || !manifestRaw) {
-    const stored = loadRecipientManifest(documentId, counterpartyIdFromUrl || lockedId);
+  } else {
+    const lookupId = counterpartyIdFromUrl || lockedId;
+    const stored = loadRecipientManifest(documentId, lookupId);
     if (stored && stored.length > 0) {
       recipientHydratedFields = ensureRecipientFieldDefaults(
         rebindRecipientFieldsToCounterparty(stored, lockedId),
         recipientName || "Recipient",
         recipientEmail || undefined
       );
+      hydrationSource = "stored_manifest";
     }
   }
 
-  if (typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1") {
+  const diagEnabled =
+    typeof window !== "undefined" &&
+    (import.meta.env.DEV || window.localStorage?.getItem("lawdogVs01FieldDiag") === "1");
+
+  if (diagEnabled) {
     // eslint-disable-next-line no-console
-    console.info("[vs01-recipient-link-open]", {
+    console.info("[vs01-recipient-hydration]", {
       documentId,
       recipientIndex,
-      recipientFieldCount: recipientHydratedFields.length,
-      routeTarget: "recipient_signing",
-      sourceInline: Boolean(manifestRaw),
-      sourceStorage: !manifestRaw && recipientHydratedFields.length > 0,
+      counterpartyId: lockedId,
+      fieldCount: recipientHydratedFields.length,
+      hydrationSource,
+      manifestParamPresent: recipientManifestParamPresent,
+      manifestDecodeError: recipientManifestDecodeError,
+      urlCounterpartyId: counterpartyIdFromUrl || null,
+    });
+  }
+
+  if (recipientHydratedFields.length === 0 && !recipientManifestDecodeError && recipientManifestParamPresent) {
+    // eslint-disable-next-line no-console
+    console.warn("[vs01-recipient-hydration-miss]", {
+      documentId,
+      counterpartyId: lockedId,
+      reason: manifestRaw ? "decode_returned_empty" : "storage_miss",
+      hint: "Fields were placed but could not be loaded. Recipient may see empty state.",
     });
   }
 

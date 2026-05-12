@@ -72,11 +72,9 @@ const ACCESS_HEADER_ASIDE = (
   </details>
 );
 
-const SIGN_HERO: Vs01LayoutHero = {
-  eyebrow: "CLAW",
-  title: "Sign a document",
-  subtitle: "Send a file, collect signatures, and get a record you can trust later.",
-  tagline: "Simple sending — with verification when you need it.",
+const RECIPIENT_SIGNING_HERO: Vs01LayoutHero = {
+  title: "Review and sign",
+  subtitle: "Complete your assigned fields below, then finish signing.",
 };
 
 const AGREEMENT_HERO: Vs01LayoutHero = {
@@ -335,12 +333,13 @@ function AgreementReviewGate(props: {
 /** `/app/esign/:id` — supports `?agreement_bridge=1` paid Pro VS01 handoff (see resolveVs01EsignShellCopy). */
 function AppEsignDocumentShell(props: { seed: string; search: string }) {
   const { seed, search } = props;
+  const [vs01Step, setVs01Step] = useState(0);
   const bridge = typeof window !== "undefined" ? readAgreementVs01BridgeSession() : null;
-  const shellCopy = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge });
+  const shellCopy = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge, vs01Step });
 
   useEffect(() => {
     const b = typeof window !== "undefined" ? readAgreementVs01BridgeSession() : null;
-    const sc = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge: b });
+    const sc = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge: b, vs01Step });
     logVs01CopyContext({
       documentId: seed,
       agreementBridge: sc.agreementBridgeEffective,
@@ -350,8 +349,9 @@ function AppEsignDocumentShell(props: { seed: string; search: string }) {
       titleCopy: sc.title,
       copyVariant: sc.copyVariant,
       reviewerApprovedCleanHandoff: Boolean(b?.reviewerApprovedCleanHandoff),
+      vs01Step,
     });
-  }, [seed, search]);
+  }, [seed, search, vs01Step]);
 
   return (
     <AppShell
@@ -359,7 +359,7 @@ function AppEsignDocumentShell(props: { seed: string; search: string }) {
       subtitle={shellCopy.subtitle}
       navMode={shellCopy.navVariant === "esign_bridge_focused" ? "esign_bridge_focused" : "default"}
     >
-      <Vs01Wizard key={`esign-${seed}`} seedDocumentId={seed} hideStepper />
+      <Vs01Wizard key={`esign-${seed}`} seedDocumentId={seed} hideStepper onStepChange={setVs01Step} />
     </AppShell>
   );
 }
@@ -399,9 +399,8 @@ export function ClawProductApp() {
   if (recipientSignBootstrap) {
     return (
       <Vs01Layout
-        hero={SIGN_HERO}
-        headerAside={ACCESS_HEADER_ASIDE}
-        productNav={{ label: "← Home", onClick: () => navigate("/") }}
+        hero={RECIPIENT_SIGNING_HERO}
+        recipientPublicFooter
       >
         <Vs01Wizard />
       </Vs01Layout>

@@ -4027,6 +4027,24 @@ button.vs01-upload-btn:disabled {
   margin-top: 0.35rem;
 }
 
+.vs01-recipient-signing-subtitle {
+  margin: 0.15rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-recipient-signing-field-count {
+  color: var(--vs01-color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.vs01-recipient-signing-progress {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--vs01-color-text-muted);
+}
+
 .vs01-recipient-signing-intent {
   margin-top: 0.85rem;
   padding: 0.65rem 0.75rem;
@@ -4035,15 +4053,26 @@ button.vs01-upload-btn:disabled {
   background: color-mix(in srgb, var(--vs01-color-bg-card) 92%, transparent);
 }
 
-.vs01-recipient-signing-intent__primary {
-  margin: 0;
-  font-size: 0.875rem;
+.vs01-recipient-signing-intent__toggle {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.8125rem;
   line-height: 1.45;
-  color: var(--vs01-color-text-primary);
+  color: var(--vs01-color-text-secondary);
+}
+
+.vs01-recipient-signing-intent__toggle::-webkit-details-marker {
+  display: none;
+}
+
+.vs01-recipient-signing-intent__body {
+  margin-top: 0.4rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid color-mix(in srgb, var(--vs01-color-border) 50%, transparent);
 }
 
 .vs01-recipient-signing-intent__secondary {
-  margin: 0.4rem 0 0;
+  margin: 0;
   font-size: 0.8125rem;
   line-height: 1.4;
   color: var(--vs01-color-text-secondary);

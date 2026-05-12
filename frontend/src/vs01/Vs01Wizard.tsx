@@ -198,7 +198,19 @@ export function Vs01Wizard({
         blockedSenderSetup: true,
         recipientFieldCount: INITIAL_RECIPIENT_FIELDS.length,
         lockedCounterpartyId: RECIPIENT_LOCKED_CP_ID,
+        manifestParamPresent: VS01_URL_BOOT?.recipientManifestParamPresent ?? false,
+        manifestDecodeError: VS01_URL_BOOT?.recipientManifestDecodeError ?? null,
+        documentId: VS01_URL_BOOT?.documentId ?? null,
       });
+      if (INITIAL_RECIPIENT_FIELDS.length === 0 && VS01_URL_BOOT?.recipientManifestParamPresent) {
+        // eslint-disable-next-line no-console
+        console.warn("[vs01-recipient-field-mismatch]", {
+          reason: "zero_fields_despite_manifest_param",
+          lockedCounterpartyId: RECIPIENT_LOCKED_CP_ID,
+          documentId: VS01_URL_BOOT?.documentId,
+          hint: "Fields were expected but hydration returned empty. Check manifest encoding/storage.",
+        });
+      }
     }
   }, [seedDocumentId, hideStepper]);
 

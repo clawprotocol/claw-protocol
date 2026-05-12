@@ -304,11 +304,13 @@ export function RecipientSigningView({
     !manifestDecodeError && myFields.length > 0 && myFields.every(fieldIsComplete);
   const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
 
-  const showEmptyFieldsHint = !manifestDecodeError && myFields.length === 0;
+  const genuinelyNoFields = !manifestDecodeError && myFields.length === 0 && !manifestParamPresent;
+  const hydrationMiss = !manifestDecodeError && myFields.length === 0 && manifestParamPresent;
+  const showEmptyFieldsHint = genuinelyNoFields || hydrationMiss;
 
-  const emptyFieldsMessage = manifestParamPresent
-    ? "No fields are assigned to you on this document yet."
-    : "This link does not include field placement data. Ask the sender to open Receipt and copy your signing link again after placing fields for signers.";
+  const emptyFieldsMessage = hydrationMiss
+    ? "Your signing fields could not be loaded from this link. Ask the sender to resend the signing link, or try opening it in the same browser the sender used."
+    : "This link does not include field placement data. Ask the sender to share an updated signing link after placing fields.";
 
   const handleFinish = useCallback(() => {
     if (manifestDecodeError) {
@@ -317,19 +319,20 @@ export function RecipientSigningView({
     }
     if (myFields.length === 0) {
       onError(
-        manifestParamPresent
-          ? "No fields are assigned to you on this document."
-          : "This link does not include field placements. Ask the sender for an updated signing link from the receipt step."
+        hydrationMiss
+          ? "Your signing fields could not be loaded. Ask the sender to resend your signing link."
+          : "No fields are assigned to you. Ask the sender for an updated signing link."
       );
       return;
     }
     if (!allComplete) {
-      onError("Complete every assigned field before finishing.");
+      const remaining = myFields.filter((f) => !fieldIsComplete(f)).length;
+      onError(`Complete ${remaining === 1 ? "the remaining field" : `all ${remaining} remaining fields`} before finishing.`);
       return;
     }
     onError(null);
     onFinishSigning();
-  }, [allComplete, manifestDecodeError, manifestParamPresent, myFields.length, onError, onFinishSigning]);
+  }, [allComplete, hydrationMiss, manifestDecodeError, myFields, onError, onFinishSigning]);
 
   return (
     <section
@@ -340,6 +343,9 @@ export function RecipientSigningView({
         <h2 id="vs01-recipient-signing-title" className="vs01-card-title">
           Review and sign
         </h2>
+        <p className="vs01-recipient-signing-subtitle">
+          Complete your assigned fields below, then choose Finish signing.
+        </p>
         <p className="vs01-recipient-signing-signer">
           <span className="vs01-recipient-signing-name">{signerName}</span>
           {signerEmail ? (
@@ -349,6 +355,11 @@ export function RecipientSigningView({
               </span>
               <span className="vs01-recipient-signing-email">{signerEmail}</span>
             </>
+          ) : null}
+          {myFields.length > 0 ? (
+            <span className="vs01-recipient-signing-field-count">
+              {" · "}{myFields.length} field{myFields.length === 1 ? "" : "s"} assigned
+            </span>
           ) : null}
         </p>
       </header>
@@ -633,14 +644,6 @@ export function RecipientSigningView({
         </p>
       </div>
 
-      <div className="vs01-recipient-signing-intent" role="note">
-        <p className="vs01-recipient-signing-intent__primary">{ESIGN_INTENT_FINISH_SIGNING_ACTION}</p>
-        <p className="vs01-recipient-signing-intent__secondary">{RECORDS_DOWNLOAD_KEEP_COPY_SHORT}</p>
-        <p className="vs01-recipient-signing-intent__product">
-          {PRODUCT_NOT_LAW_FIRM} {NOT_LEGAL_ADVICE}
-        </p>
-      </div>
-
       <div className="vs01-recipient-signing-footer-actions">
         <button
           type="button"
@@ -650,7 +653,22 @@ export function RecipientSigningView({
         >
           Finish signing
         </button>
+        {myFields.length > 0 && !allComplete ? (
+          <p className="vs01-recipient-signing-progress">
+            {myFields.filter(fieldIsComplete).length} of {myFields.length} fields complete
+          </p>
+        ) : null}
       </div>
+
+      <details className="vs01-recipient-signing-intent">
+        <summary className="vs01-recipient-signing-intent__toggle">{ESIGN_INTENT_FINISH_SIGNING_ACTION}</summary>
+        <div className="vs01-recipient-signing-intent__body">
+          <p className="vs01-recipient-signing-intent__secondary">{RECORDS_DOWNLOAD_KEEP_COPY_SHORT}</p>
+          <p className="vs01-recipient-signing-intent__product">
+            {PRODUCT_NOT_LAW_FIRM} {NOT_LEGAL_ADVICE}
+          </p>
+        </div>
+      </details>
     </section>
   );
 }

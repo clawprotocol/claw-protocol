@@ -8,33 +8,45 @@ import { encodeRecipientManifestForUrl, VS01_RECIPIENT_MANIFEST_QUERY } from "./
 export const VS01_RECIPIENT_SIGN_QUERY = "vs01_recipient_sign";
 
 const MANIFEST_STORAGE_PREFIX = "claw_vs01_rlink_manifest_";
+const MANIFEST_LS_PREFIX = "claw_vs01_rlink_ls_manifest_";
 
 function manifestStorageKey(documentId: string, counterpartyId: string): string {
   return `${MANIFEST_STORAGE_PREFIX}${documentId.trim()}_${counterpartyId.trim()}`;
 }
 
-/** Persist recipient field manifest in sessionStorage so the URL stays short. */
+function manifestLsKey(documentId: string, counterpartyId: string): string {
+  return `${MANIFEST_LS_PREFIX}${documentId.trim()}_${counterpartyId.trim()}`;
+}
+
+/** Persist recipient field manifest in both sessionStorage (fast) and localStorage (durable). */
 export function storeRecipientManifest(
   documentId: string,
   counterpartyId: string,
   fields: Vs01RecipientPlacedField[],
 ): void {
   if (typeof window === "undefined") return;
-  try {
-    const key = manifestStorageKey(documentId, counterpartyId);
-    sessionStorage.setItem(key, JSON.stringify(fields));
-  } catch { /* quota */ }
+  const key = manifestStorageKey(documentId, counterpartyId);
+  const lsKey = manifestLsKey(documentId, counterpartyId);
+  const json = JSON.stringify(fields);
+  try { sessionStorage.setItem(key, json); } catch { /* quota */ }
+  try { localStorage.setItem(lsKey, json); } catch { /* quota */ }
 }
 
-/** Read manifest previously stored by the sender in the same browser. */
+/** Read manifest previously stored by the sender — tries sessionStorage then localStorage. */
 export function loadRecipientManifest(
   documentId: string,
   counterpartyId: string,
 ): Vs01RecipientPlacedField[] | null {
   if (typeof window === "undefined") return null;
+  const key = manifestStorageKey(documentId, counterpartyId);
+  const lsKey = manifestLsKey(documentId, counterpartyId);
+  let raw: string | null = null;
+  try { raw = sessionStorage.getItem(key); } catch { /* ignore */ }
+  if (!raw) {
+    try { raw = localStorage.getItem(lsKey); } catch { /* ignore */ }
+  }
+  if (!raw) return null;
   try {
-    const raw = sessionStorage.getItem(manifestStorageKey(documentId, counterpartyId));
-    if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? (parsed as Vs01RecipientPlacedField[]) : null;
   } catch {
