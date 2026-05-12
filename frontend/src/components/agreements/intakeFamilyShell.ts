@@ -13,6 +13,7 @@ import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementMod
 import { extractBetweenPartyPair } from "./partyBetweenParse";
 import { applyIntakePartyRoleOverlay, type IntakePartyRoleLabels } from "./partyRoleIntake";
 import { applySimpleFlowSmartDefaults, type ParsedDraftShape } from "./intakeSmartDefaults";
+import { preserveExtractedFacts } from "./draftFactPreservation";
 
 const MAX_PARTY_NAME_LEN = 280;
 
@@ -203,16 +204,23 @@ export function applyAgreementFamilyIntakeShell(
     };
   }
   if (!nz(next.payment_terms)) {
+    const structuredPayment = nz(structured.payment);
     next = {
       ...next,
-      payment_terms: "To be agreed between the parties (add specifics in review if compensation applies).",
+      payment_terms: structuredPayment || nz(live.compensationLine) || "To be agreed between the parties (add specifics in review if compensation applies).",
     };
   }
   if (!nz(next.duration) && !nz(next.due_date)) {
     next = {
       ...next,
-      duration: nz(live.termLine) || nz(structured.term) || "As stated in the agreement or to be refined in review.",
+      duration: nz(structured.term) || nz(live.termLine) || "As stated in the agreement or to be refined in review.",
     };
+  }
+  if (!nz(next.termination_summary)) {
+    const structuredTermination = nz(structured.termination);
+    if (structuredTermination) {
+      next = { ...next, termination_summary: structuredTermination };
+    }
   }
   if (!nz(next.effective_date)) {
     next = { ...next, effective_date: "Upon full execution by the parties unless otherwise specified." };
@@ -245,5 +253,10 @@ export function runIntakeDefaultsAndRoles(
     next = applyAgreementFamilyIntakeShell(next, rawIntake, family);
   }
   next = applyNamedPartyFallbackFromIntake(next, rawIntake);
+  const { draft: preserved, restoredFields } = preserveExtractedFacts(next, rawIntake);
+  next = preserved;
+  if (restoredFields.length > 0) {
+    console.debug("[draft-fact-preservation]", { restoredFields });
+  }
   return applyIntakePartyRoleOverlay(next, roles);
 }

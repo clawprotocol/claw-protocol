@@ -126,28 +126,38 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   }
 
   if (!(next.purpose || "").trim()) {
+    const structuredScope = structured.scope.trim();
     const scopeOnly = (live.scopeLine || "").trim();
-    next.purpose = scopeOnly || "Scope and deliverables to be refined in review.";
+    next.purpose = structuredScope || scopeOnly || "Scope and deliverables to be refined in review.";
   }
 
   if (!(next.payment_terms || "").trim()) {
     const fromStructured = formatPaymentTermsLine(payment);
+    const structuredPayment = structured.payment.trim();
     next.payment_terms =
       (fromStructured && payment.valid) || (fromStructured && payment.amount != null)
         ? fromStructured
-        : live.compensationLine ||
+        : structuredPayment || live.compensationLine ||
           "Payment schedule to be agreed with the other party — add specifics in review.";
   }
 
   if (!(next.duration || "").trim() && !(next.due_date || "").trim()) {
+    const structuredTerm = structured.term.trim();
     next.duration =
-      live.termLine ||
+      structuredTerm || live.termLine ||
       live.scheduleLine ||
       "12 months unless terminated earlier as agreed in writing.";
   }
 
   if (!(next.effective_date || "").trim()) {
     next.effective_date = "Upon full execution by all parties";
+  }
+
+  if (!(next.termination_summary || "").trim()) {
+    const structuredTermination = structured.termination.trim();
+    if (structuredTermination) {
+      next.termination_summary = structuredTermination;
+    }
   }
 
   return next;

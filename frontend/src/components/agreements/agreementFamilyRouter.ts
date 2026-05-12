@@ -67,7 +67,15 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     /\bindependent\s+contractor\b/i.test(low) ||
     /\b(?:web|software|app|mobile|platform)\s+develop(?:ment|er)?\b/i.test(low) ||
     /\bdevelopment\s+agreement\b/i.test(low) ||
-    /\b(?:freelance|contract)\s+(?:work|project|engagement)\b/i.test(low);
+    /\b(?:freelance|contract)\s+(?:work|project|engagement)\b/i.test(low) ||
+    /\bvendor\b/i.test(low) ||
+    /\bsubcontract(?:or|ing)?\b/i.test(low) ||
+    /\bstatement\s+of\s+work\b/i.test(low) ||
+    /\b(?:design|creative|marketing|branding)\s+(?:services?|agreement|contract)\b/i.test(low) ||
+    /\bcollaboration\s+agreement\b/i.test(low) ||
+    /\bjoint\s+venture\b/i.test(low) ||
+    /\b(?:monthly|weekly|hourly)\s+(?:rate|fee|retainer)\b/i.test(low) ||
+    /\bdeliverables?\b/i.test(low);
 
   if (commercialSignals.nda && ndaHybridSignals && !primaryServiceIntent) {
     return "confidentiality_commercial_protections_agreement";

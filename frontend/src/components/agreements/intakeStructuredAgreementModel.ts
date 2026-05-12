@@ -444,13 +444,13 @@ function extractTermAndMeta(lower: string, text: string): FieldMeta {
 
 function extractGoverningLaw(lower: string, text: string): string {
   const gl = text.match(
-    /\b(?:govern(?:ed|ing)\s+by|laws?\s+of|jurisdiction|venue\s+in)\s*[:\s]+([^\n.]{2,120})/i,
+    /\b(?:govern(?:ed|ing)\s+(?:by|law)|laws?\s+of|jurisdiction|venue\s+in)\s*[:\s]+([^\n.]{2,120})/i,
   );
   if (gl) return normalizeIntakeFieldText(gl[1], 140);
   const state = text.match(/\b(?:State\s+of|Commonwealth\s+of)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/);
   if (state) return normalizeIntakeFieldText(`State of ${state[1]}`, 120);
   if (/\bdelaware\b/i.test(lower) && /\b(?:law|DE|corp)\b/i.test(lower)) return "Delaware";
-  if (/\bnew\s+york\b/i.test(lower) && /\b(?:law|NYS)\b/i.test(lower)) return "New York";
+  if (/\bnew\s+york\b/i.test(lower) && /\b(?:law|NYS|govern)\b/i.test(lower)) return "New York";
   return "";
 }
 
