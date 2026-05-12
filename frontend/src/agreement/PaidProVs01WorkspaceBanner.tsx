@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ProofStatus, vs01ReceiptToProofStatusData } from "../components/proof/ProofStatus";
 import { LawdogRecordedMark } from "../components/ui/LawdogRecordedMark";
+import { openReceiptProofBundleDownload } from "../export/dataExportApi";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { getReceipt } from "../vs01/vs01Api";
 import {
@@ -15,14 +16,6 @@ type Props = {
   visible: boolean;
 };
 
-function truncateMiddle(s: string, max = 22): string {
-  const t = s.trim();
-  if (t.length <= max) return t;
-  const keep = max - 3;
-  const head = Math.ceil(keep / 2);
-  const tail = Math.floor(keep / 2);
-  return `${t.slice(0, head)}…${t.slice(t.length - tail)}`;
-}
 
 /**
  * Shown on `/app/agreements/:id` after paid Pro VS01 handoff: saved status, copy signing link, proof details.
@@ -35,6 +28,11 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
   const [receipt, setReceipt] = useState<unknown>(null);
   const [receiptLoadError, setReceiptLoadError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const showProofDiag =
+    typeof window !== "undefined" &&
+    (import.meta.env.DEV ||
+      localStorage.getItem("lawdogProofDiag") === "1" ||
+      new URLSearchParams(window.location.search).get("proof_diag") === "1");
 
   useEffect(() => {
     if (!visible) return;
@@ -94,14 +92,6 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
     setHandoff(null);
   }, []);
 
-  const openProofDetails = useCallback(() => {
-    const el = proofDetailsRef.current;
-    if (!el) return;
-    el.open = true;
-    window.requestAnimationFrame(() => {
-      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
-  }, []);
 
   if (!visible || !handoff) return null;
 
@@ -153,9 +143,10 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--auto min-h-[2.5rem] px-4 text-sm text-slate-200"
-                onClick={openProofDetails}
+                disabled={!handoff.receiptId?.trim()}
+                onClick={() => handoff.receiptId?.trim() && openReceiptProofBundleDownload(handoff.receiptId.trim())}
               >
-                View proof
+                Download proof
               </button>
             </div>
           ) : null}
@@ -189,61 +180,63 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
                     Open
                   </button>
                 </div>
-                <p className="mt-2 font-mono text-[10px] text-slate-600" title={s.signingUrl}>
-                  {truncateMiddle(s.signingUrl, 56)}
-                </p>
               </li>
             ))}
           </ul>
         </details>
-      ) : signers.length === 1 && firstSigningUrl ? (
-        <p className="mt-3 border-t border-slate-800/60 pt-3 font-mono text-[10px] text-slate-600" title={firstSigningUrl}>
-          {truncateMiddle(firstSigningUrl, 72)}
-        </p>
       ) : null}
 
-      <details ref={proofDetailsRef} className="mt-4 border-t border-slate-800/60 pt-4">
-        <summary className="cursor-pointer text-xs font-medium text-slate-400">Proof status and receipt details</summary>
-        <div className="mt-3">
-          <ProofStatus
-            {...vs01ReceiptToProofStatusData({
-              receipt,
-              receiptId: handoff.receiptId,
-              receiptHashSha256: handoff.receiptHashSha256,
-            })}
-            exportReceiptId={handoff.receiptId.trim()}
-            className="mt-0"
-          />
-          {receiptLoadError ? (
-            <p className="mt-2 text-xs text-amber-200/90">Could not refresh receipt payload: {receiptLoadError}</p>
-          ) : null}
-          <dl className="mt-3 space-y-1 text-xs text-slate-400">
-            <div className="flex gap-2">
-              <dt className="shrink-0 text-slate-500">Receipt ID</dt>
-              <dd className="min-w-0 break-all font-mono text-slate-300">{handoff.receiptId}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="shrink-0 text-slate-500">SHA-256</dt>
-              <dd className="min-w-0 break-all font-mono text-slate-300">
-                {handoff.receiptHashSha256?.trim() || "—"}
-              </dd>
-            </div>
-          </dl>
-          <button
-            type="button"
-            className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3 text-xs"
-            disabled={!handoff.receiptHashSha256?.trim()}
-            onClick={() =>
-              void copyText(
-                "proof-hash",
-                `${handoff.receiptId}\n${handoff.receiptHashSha256?.trim() ?? ""}`.trim(),
-              )
-            }
-          >
-            {copiedKey === "proof-hash" ? "Copied" : "Copy proof receipt"}
-          </button>
-        </div>
-      </details>
+      <p className="mt-3 border-t border-slate-800/60 pt-3 text-[11px] text-slate-300">
+        Proof record saved. Verification package available.
+      </p>
+      <p className="mt-1 text-[11px] text-slate-500">
+        Optional public timestamp &middot; Not requested yet
+      </p>
+
+      {showProofDiag ? (
+        <details ref={proofDetailsRef} className="mt-4 border-t border-slate-800/60 pt-4">
+          <summary className="cursor-pointer text-xs font-medium text-slate-400">Proof status and receipt details</summary>
+          <div className="mt-3">
+            <ProofStatus
+              {...vs01ReceiptToProofStatusData({
+                receipt,
+                receiptId: handoff.receiptId,
+                receiptHashSha256: handoff.receiptHashSha256,
+              })}
+              exportReceiptId={handoff.receiptId.trim()}
+              className="mt-0"
+            />
+            {receiptLoadError ? (
+              <p className="mt-2 text-xs text-amber-200/90">Could not refresh receipt payload: {receiptLoadError}</p>
+            ) : null}
+            <dl className="mt-3 space-y-1 text-xs text-slate-400">
+              <div className="flex gap-2">
+                <dt className="shrink-0 text-slate-500">Receipt ID</dt>
+                <dd className="min-w-0 break-all font-mono text-slate-300">{handoff.receiptId}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="shrink-0 text-slate-500">SHA-256</dt>
+                <dd className="min-w-0 break-all font-mono text-slate-300">
+                  {handoff.receiptHashSha256?.trim() || "—"}
+                </dd>
+              </div>
+            </dl>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3 text-xs"
+              disabled={!handoff.receiptHashSha256?.trim()}
+              onClick={() =>
+                void copyText(
+                  "proof-hash",
+                  `${handoff.receiptId}\n${handoff.receiptHashSha256?.trim() ?? ""}`.trim(),
+                )
+              }
+            >
+              {copiedKey === "proof-hash" ? "Copied" : "Copy proof receipt"}
+            </button>
+          </div>
+        </details>
+      ) : null}
     </section>
   );
 }

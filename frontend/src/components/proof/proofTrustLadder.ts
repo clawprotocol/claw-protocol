@@ -1,9 +1,9 @@
 /** Short progression hint — use next to proof surfaces for consistency. */
-export const PROOF_LADDER_SUBTITLE = "Recorded → Ready to verify → Anchored externally";
+export const PROOF_LADDER_SUBTITLE = "Recorded → Ready to verify → Timestamped";
 
 /** Single calm message under the proof card (primary surface). */
 export const PROOF_CARD_MICRO_TRUST =
-  "Recorded in LawDog now. You can verify this record independently. External anchoring is optional and may finish later — it is not required for your record to exist and is not legal advice.";
+  "Saved in LawDog now. Optional public blockchain timestamping may be added later.";
 
 /** Secondary line under the Recorded row (timestamp or fallback). */
 export function proofRecordedRowSecondary(
@@ -15,20 +15,20 @@ export function proofRecordedRowSecondary(
   return "Not on file yet.";
 }
 
-/** Secondary line under the “Ready to verify” row. */
+/** Secondary line under the \u201cReady to verify\u201d row. */
 export function proofVerifiableRowDetail(status: "ready" | "processing" | "unavailable"): string {
   switch (status) {
     case "ready":
-      return "You can check this record yourself — no trust in us required for the check.";
+      return "You can check this record yourself \u2014 no trust in us required for the check.";
     case "processing":
-      return "Verify materials are preparing…";
+      return "Verify materials are preparing\u2026";
     case "unavailable":
     default:
       return "Not ready yet.";
   }
 }
 
-/** Secondary line under the “Anchored externally” row. */
+/** Secondary line under the \u201cTimestamped\u201d row. */
 export function proofAnchorRowDetail(
   status:
     | "not_started"
@@ -40,23 +40,23 @@ export function proofAnchorRowDetail(
 ): string {
   switch (status) {
     case "not_started":
-      return "Optional external timestamp — not required for your record.";
+      return "Optional \u2014 not required for your record.";
     case "available":
-      return "Optional anchoring available if you choose it.";
+      return "Optional timestamping available if you choose it.";
     case "queued":
-      return "Queued for external anchoring…";
+      return "Queued for timestamping\u2026";
     case "pending":
-      return "External anchoring in progress…";
+      return "Timestamping in progress\u2026";
     case "confirmed":
-      return "Anchored externally — complete.";
+      return "Timestamped \u2014 complete.";
     case "failed":
-      return "Anchoring did not complete — your LawDog record still stands.";
+      return "Timestamping did not complete \u2014 your LawDog record still stands.";
     default:
-      return "Optional external timestamp — not required for your record.";
+      return "Optional \u2014 not required for your record.";
   }
 }
 
-/** Row title is “Ready to verify” — pills are short state, not a repeat of the title. */
+/** Row title is \u201cReady to verify\u201d \u2014 pills are short state, not a repeat of the title. */
 export function proofVerifiablePill(status: "ready" | "processing" | "unavailable"): string {
   switch (status) {
     case "ready":
@@ -90,11 +90,11 @@ export function proofAnchorPill(
       return "Optional";
     case "not_started":
     default:
-      return "—";
+      return "\u2014";
   }
 }
 
-/** Tucked under “View details” — slightly more literal. */
+/** Tucked under \u201cView details\u201d \u2014 slightly more literal. */
 export function proofVerificationDetailTechnical(status: "ready" | "processing" | "unavailable"): string {
   switch (status) {
     case "ready":
@@ -118,9 +118,9 @@ export function proofAnchorDetailTechnical(
 ): string {
   switch (status) {
     case "not_started":
-      return "No external anchor requested";
+      return "No external timestamp requested";
     case "available":
-      return "External anchor available (optional)";
+      return "External timestamping available (optional)";
     case "queued":
       return "Queued for external network";
     case "pending":
@@ -128,8 +128,8 @@ export function proofAnchorDetailTechnical(
     case "confirmed":
       return "Confirmed on external network";
     case "failed":
-      return "External anchoring did not complete";
+      return "Timestamping did not complete";
     default:
-      return "No external anchor requested";
+      return "No external timestamp requested";
   }
 }

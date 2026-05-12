@@ -309,7 +309,7 @@ export function ProofStatus(props: ProofStatusProps) {
             <div className="proof-status__row-head">
               <span className="proof-status__label">
                 <StatusIcon variant="anchored" />
-                Anchored externally
+                Timestamped
               </span>
               <span className={anchoredPillClass}>{proofAnchorPill(anchorStatus)}</span>
             </div>
@@ -375,7 +375,7 @@ export function ProofStatus(props: ProofStatusProps) {
               </>
             ) : null}
 
-            <dt className="proof-status__dt">Anchored externally</dt>
+            <dt className="proof-status__dt">Timestamped</dt>
             <dd className="proof-status__dd">{proofAnchorDetailTechnical(anchorStatus)}</dd>
 
             {showNetworkInDetails ? (
