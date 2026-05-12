@@ -5,6 +5,7 @@
 
 import type { AgreementDraft } from "./agreementTypes";
 import { normalizeJurisdictionDisplay } from "./jurisdictionNormalize";
+import { formatLegalPartyList } from "../components/agreements/formatLegalPartyList";
 
 const INTERNAL_PARTY_REF_RE = /\s*[\[(]?\s*(?:ORG|PARTY|CLIENT|COMPANY)_\d+\s*[\])]?\s*/gi;
 
@@ -15,41 +16,6 @@ function stripInternalPartyRefsFromName(name: string): string {
   return cleaned.replace(/\s+/g, " ").trim();
 }
 
-function isPlaceholderPartyRole(role: string): boolean {
-  const s = (role || "").trim();
-  if (!s) return false;
-  if (/^[\[(]?\s*(?:ORG|PARTY|CLIENT|COMPANY)_\d+\s*[\])]?$/i.test(s)) return true;
-  return /^[\[(]?\s*party_\d+\s*[\])]?$/i.test(s);
-}
-
-function partyDisplayNamesRole(parties: AgreementDraft["parties"]): [[string, string], [string, string]] {
-  const raw = [...(parties || [])];
-  const p0 = raw[0];
-  const p1 = raw[1];
-
-  function nm(idx: number, p: (typeof parties)[number] | undefined): string {
-    if (!p) return idx === 0 ? "Party A" : "Party B";
-    const n = stripInternalPartyRefsFromName((p.name || "").trim());
-    if (n) return n;
-    return idx === 0 ? "Party A" : "Party B";
-  }
-
-  function roleLbl(idx: number, p: (typeof parties)[number] | undefined): string {
-    if (!p) return "Party";
-    const r = (p.role || "").trim();
-    if (isPlaceholderPartyRole(r)) return idx === 0 ? "Client" : "Consultant";
-    const low = r.toLowerCase();
-    if (low === "party_a") return "Client";
-    if (low === "party_b") return "Consultant";
-    if (low === "party" || !r) return "Party";
-    return r === low ? normalizeJurisdictionDisplay(r) || r : r;
-  }
-
-  return [
-    [nm(0, p0), roleLbl(0, p0)],
-    [nm(1, p1), roleLbl(1, p1)],
-  ];
-}
 
 function escapeHtml(s: string): string {
   return s
@@ -103,18 +69,22 @@ export function renderAgreementDraftHtmlLikeBackend(draft: AgreementDraft): stri
   const paymentTerms = escapeHtml((draft.payment_terms || "").trim() || "TBD");
   const duration = escapeHtml((draft.duration || "").trim() || "TBD");
   const dueDate = escapeHtml((draft.due_date || "").trim() || "TBD");
-  const [[partyANameRaw, partyARoleRaw], [partyBNameRaw, partyBRoleRaw]] = partyDisplayNamesRole(draft.parties || []);
-  const partyAName = escapeHtml(partyANameRaw);
-  const partyBName = escapeHtml(partyBNameRaw);
-  const partyARole = escapeHtml(partyARoleRaw);
-  const partyBRole = escapeHtml(partyBRoleRaw);
+  const partiesForFormat = (draft.parties || []).map((p, idx) => {
+    const rawName = stripInternalPartyRefsFromName((p?.name || "").trim());
+    const name = rawName || (idx === 0 ? "Party A" : "Party B");
+    const role = (p?.role || "").trim() || "party";
+    return { name, role };
+  });
+  const partyListHtml = escapeHtml(formatLegalPartyList(partiesForFormat));
+  const partyAName = escapeHtml(partiesForFormat[0]?.name || "Party A");
+  const partyBName = escapeHtml(partiesForFormat[1]?.name || "Party B");
 
   return (
     "<article style='position:relative'>" +
     `<h1 style='text-align:center;margin-bottom:6px'>${title}</h1>` +
     "<p style='text-align:center;margin-top:0;color:#475569'>Draft Agreement (non-binding template)</p>" +
-    `<p>This ${title} (the \"Agreement\") is made effective as of ${effectiveDate}, by and between ` +
-    `${partyAName} (${partyARole}) and ${partyBName} (${partyBRole}). The parties agree as follows:</p>` +
+    `<p>This ${title} (the "Agreement") is made effective as of ${effectiveDate}, by and between ` +
+    `${partyListHtml}. The parties agree as follows:</p>` +
     "<h2>1. Scope of Services</h2>" +
     `<p>${purpose}. The service provider will perform the services in a professional and workmanlike manner and ` +
     "will keep the client reasonably informed regarding project progress.</p>" +

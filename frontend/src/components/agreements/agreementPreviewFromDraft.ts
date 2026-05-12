@@ -18,6 +18,7 @@ import {
   partyNameLooksLikeRawPrompt,
   tryExtractPartyPairFromPromptBlob,
 } from "./agreementPreviewPartyLine";
+import { formatLegalPartyPreamble } from "./formatLegalPartyList";
 import { formatPaymentTermsLine } from "./intakeCurrencyParse";
 import { normalizePaymentTermsForDisplay, normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
 import {
@@ -110,14 +111,15 @@ function partiesPreambleBlock(draft: ParsedDraftShape): string {
       : null;
 
   if (extracted) {
-    return `This Agreement (“Agreement”) is entered into by and between:\n${extracted.a} and ${extracted.b} (collectively, the “Parties”).`;
+    return formatLegalPartyPreamble([
+      { name: extracted.a, role: "party" },
+      { name: extracted.b, role: "party" },
+    ]);
   }
 
-  if (ps.length >= 2 && n0 && n1 && !partyNameLooksLikeRawPrompt(n0) && !partyNameLooksLikeRawPrompt(n1)) {
-    const line = ps
-      .map((p) => ((p.role || "").trim() && p.role !== "party" ? `${p.name} (“${p.role}”)` : p.name))
-      .join(" and ");
-    return `This Agreement (“Agreement”) is entered into by and between:\n${line} (collectively, the “Parties”).`;
+  const validParties = ps.filter((p) => (p.name || "").trim() && !partyNameLooksLikeRawPrompt(p.name));
+  if (validParties.length >= 2) {
+    return formatLegalPartyPreamble(validParties);
   }
 
   return `This Agreement (“Agreement”) is entered into by the parties identified above (the “Parties”).`;

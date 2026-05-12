@@ -189,13 +189,14 @@ export function formatPartySegmentForPreview(raw: string): string {
   return s;
 }
 
-/** Format a line that may contain " and " between two parties (e.g. parties: …). */
+/** Format a line that may contain " and " or commas between parties (e.g. parties: …). */
 export function formatPartiesJoinedLine(line: string): string {
   const t = line.replace(/\s+/g, " ").trim();
   if (!t) return t;
-  return t
+  const segments = t
     .split(/\s+and\s+/i)
     .map((p) => formatPartySegmentForPreview(p.trim()))
-    .filter(Boolean)
-    .join(" and ");
+    .filter(Boolean);
+  if (segments.length <= 2) return segments.join(" and ");
+  return segments.slice(0, -1).join(", ") + ", and " + segments[segments.length - 1];
 }
