@@ -176,7 +176,15 @@ export function StepPrepareSignature({
   /** Stable setter that mimics useState — resolves functional updates against latest prop value. */
   const setFields = useCallback(
     (next: PlacedSigningField[] | ((prev: PlacedSigningField[]) => PlacedSigningField[])) => {
-      const resolved = typeof next === "function" ? next(fieldsRef.current) : next;
+      const prev = fieldsRef.current;
+      const resolved = typeof next === "function" ? next(prev) : next;
+      if (resolved === prev) return;
+      if (
+        resolved.length === prev.length &&
+        resolved.every((f, i) => f === prev[i])
+      ) {
+        return;
+      }
       onFieldsChangeRef.current(resolved);
     },
     [],
@@ -456,8 +464,10 @@ export function StepPrepareSignature({
   /** Add/remove auto-initials slots only when toggle, page count, or skipped pages change — not on every name keystroke. */
   useEffect(() => {
     if (!autoInitialsEveryPage) {
-      setFields((prev) => prev.filter((f) => !f.autoInitials));
-      setSkippedAutoPages(new Set());
+      if (fieldsRef.current.some((f) => f.autoInitials)) {
+        setFields((prev) => prev.filter((f) => !f.autoInitials));
+      }
+      setSkippedAutoPages((prev) => (prev.size === 0 ? prev : new Set()));
       return;
     }
     if (numPages <= 0) return;
@@ -528,7 +538,7 @@ export function StepPrepareSignature({
       setFields((prev) => {
         const next = [...prev, nf];
         // eslint-disable-next-line no-console
-        console.info("[vs01-placement-field-added]", { tool: armedTool, nextCount: next.length, fieldId: nf.id });
+        console.info("[vs01-placement-field-added]", { tool: armedTool, prevCount: prev.length, nextCount: next.length, fieldId: nf.id });
         return next;
       });
       setSelectedFieldId(nf.id);
