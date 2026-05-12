@@ -30,7 +30,6 @@ import {
   findAutoInitialsMarginSlotOrNull,
   labelForFieldType,
   labelForRecipientFieldType,
-  layoutRecipientInitialsPairForPage,
   newSigningFieldId,
   rebuildRecipientAutoInitialsEveryPage,
   repositionAllRecipientAutoInitialsNonOverlapping,
@@ -246,10 +245,9 @@ export function StepCompleteAndSend({
         !target.autoInitials &&
         target.type === "initials"
       ) {
-        const pair = layoutRecipientInitialsPairForPage(target.page, senderPlacedFields);
         const page = target.page;
         const cpId = target.counterpartyId;
-        const base = prev.map((f) => (f.id === fieldId ? { ...f, ...pair.manual } : f));
+        const base = prev.map((f) => (f.id === fieldId ? { ...f, ...patch } : f));
         const rObs = base
           .filter((o) => o.page === page && !o.autoInitials)
           .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));

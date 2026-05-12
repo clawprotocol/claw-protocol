@@ -489,3 +489,99 @@ describe("manual initials placement (armed tool path)", () => {
     expect(size.height).toBeGreaterThan(0.02);
   });
 });
+
+describe("recipient manual initials: rebuild preserves user placement", () => {
+  const senderFields: PlacedSigningField[] = [];
+  const cps = [{ id: "cp1", name: "Party A" }];
+
+  it("rebuildRecipientAutoInitialsEveryPage does NOT snap manual initials to bottom-right layout", () => {
+    const userX = 0.15;
+    const userY = 0.22;
+    const manual: Vs01RecipientPlacedField = {
+      id: "man_init_1",
+      counterpartyId: "cp1",
+      type: "initials",
+      page: 0,
+      x: userX,
+      y: userY,
+      width: 0.074,
+      height: 0.034,
+      value: "",
+    };
+    const rebuilt = rebuildRecipientAutoInitialsEveryPage(
+      [manual], "cp1", 1, new Set(), senderFields, cps
+    );
+    const found = rebuilt.find((f) => f.id === "man_init_1");
+    expect(found).toBeDefined();
+    expect(found!.x).toBe(userX);
+    expect(found!.y).toBe(userY);
+  });
+
+  it("rebuild creates auto-initials separately alongside user-placed manual initials", () => {
+    const manual: Vs01RecipientPlacedField = {
+      id: "man_init_2",
+      counterpartyId: "cp1",
+      type: "initials",
+      page: 0,
+      x: 0.1,
+      y: 0.1,
+      width: 0.074,
+      height: 0.034,
+      value: "",
+    };
+    const rebuilt = rebuildRecipientAutoInitialsEveryPage(
+      [manual], "cp1", 2, new Set(), senderFields, cps
+    );
+    const manualResult = rebuilt.filter((f) => !f.autoInitials && f.type === "initials");
+    const autoResult = rebuilt.filter((f) => f.autoInitials && f.type === "initials");
+    expect(manualResult).toHaveLength(1);
+    expect(manualResult[0].id).toBe("man_init_2");
+    expect(manualResult[0].x).toBe(0.1);
+    expect(autoResult.length).toBeGreaterThanOrEqual(1);
+    for (const a of autoResult) expect(a.autoInitials).toBe(true);
+  });
+
+  it("manual initials survive multiple rebuilds at the user-placed position", () => {
+    const manual: Vs01RecipientPlacedField = {
+      id: "man_survive",
+      counterpartyId: "cp1",
+      type: "initials",
+      page: 0,
+      x: 0.35,
+      y: 0.42,
+      width: 0.074,
+      height: 0.034,
+      value: "",
+    };
+    let fields: Vs01RecipientPlacedField[] = [manual];
+    for (let i = 0; i < 3; i++) {
+      fields = rebuildRecipientAutoInitialsEveryPage(fields, "cp1", 1, new Set(), senderFields, cps);
+    }
+    const found = fields.find((f) => f.id === "man_survive");
+    expect(found).toBeDefined();
+    expect(found!.x).toBe(0.35);
+    expect(found!.y).toBe(0.42);
+  });
+
+  it("removing auto-initials (toggle off) does not remove manual initials", () => {
+    const manual: Vs01RecipientPlacedField = {
+      id: "man_keep",
+      counterpartyId: "cp1",
+      type: "initials",
+      page: 0,
+      x: 0.2,
+      y: 0.3,
+      width: 0.074,
+      height: 0.034,
+      value: "",
+    };
+    const rebuilt = rebuildRecipientAutoInitialsEveryPage(
+      [manual], "cp1", 2, new Set(), senderFields, cps
+    );
+    expect(rebuilt.some((f) => f.autoInitials)).toBe(true);
+
+    const afterOff = rebuilt.filter((f) => !(f.autoInitials && f.counterpartyId === "cp1"));
+    expect(afterOff.find((f) => f.id === "man_keep")).toBeDefined();
+    expect(afterOff.find((f) => f.id === "man_keep")!.x).toBe(0.2);
+  });
+});

@@ -554,21 +554,6 @@ export function rebuildRecipientAutoInitialsEveryPage(
     return true;
   });
 
-  rest = rest.map((f) => {
-    if (
-      f.counterpartyId !== counterpartyId ||
-      f.type !== "initials" ||
-      f.autoInitials ||
-      f.page < 0 ||
-      f.page >= numPages ||
-      skippedPages.has(f.page)
-    ) {
-      return f;
-    }
-    const pair = layoutRecipientInitialsPairForPage(f.page, senderPlacedFields);
-    return { ...f, ...pair.manual };
-  });
-
   const autos: Vs01RecipientPlacedField[] = [];
   for (let p = 0; p < numPages; p++) {
     if (skippedPages.has(p)) continue;
