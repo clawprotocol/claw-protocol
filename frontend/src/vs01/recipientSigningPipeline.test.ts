@@ -173,6 +173,14 @@ describe("Recipient signing pipeline — UX (no marketing headers in signing mod
     expect(src).toContain("recipientSigningFinished");
     expect(src).toContain("vs01-recipient-signing-done");
   });
+
+  it("recipient completion screen uses recipient-safe copy (not internal process language)", () => {
+    const src = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
+    expect(src).not.toContain("Saved in this session");
+    expect(src).toContain("all set");
+    expect(src).toMatch(/email\s+delivery/);
+    expect(src).toMatch(/all signatures are\s+complete/);
+  });
 });
 
 describe("Recipient signing pipeline — diagnostics", () => {

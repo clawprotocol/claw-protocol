@@ -640,7 +640,9 @@ export function Vs01Wizard({
                 {JOY_COPY.signLockedIn}
               </h2>
               <p className="vs01-card-help">
-                Saved in this session. The sender continues from their receipt flow when everyone has signed.
+                You're all set. A copy of the signed record will be available to the sender, and email
+                delivery will be used when enabled. The sender will be notified when all signatures are
+                complete.
               </p>
             </section>
           ) : (
