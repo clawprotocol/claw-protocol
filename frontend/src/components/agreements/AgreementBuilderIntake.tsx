@@ -978,7 +978,7 @@ function buildUpgradeCheckoutCompletionLabel(
   const names = (d.parties || [])
     .map((p) => (p?.name || "").trim())
     .filter(Boolean);
-  if (names.length >= 2) return `${names.slice(0, 2).join(" · ")}${names.length > 2 ? " · …" : ""}`;
+  if (names.length >= 2) return names.join(" · ");
   if (names.length === 1) return names[0];
   return "This agreement";
 }

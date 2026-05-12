@@ -97,6 +97,27 @@ function clampPartySegment(raw: string): string {
   return formatted;
 }
 
+const SIGNER_LINE_EXTRACT_RE =
+  /(?:sender\s*[/&]?\s*)?(?:signer|party|signatory|recipient|reviewer)\s*(?:#?\d+)?[:\s\u2014\u2013-]+([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)+)/gi;
+
+function extractExplicitSignerNames(raw: string): string[] | null {
+  const lines = raw.split(/[\n\r]+/).map((l) => l.trim()).filter(Boolean);
+  const results: string[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    SIGNER_LINE_EXTRACT_RE.lastIndex = 0;
+    const m = SIGNER_LINE_EXTRACT_RE.exec(line);
+    if (!m || !m[1]) continue;
+    const name = m[1].trim();
+    if (name.length < 3) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push(name);
+  }
+  return results.length >= 2 ? results : null;
+}
+
 type PartiesExtract = {
   parties: string[];
   uncertain: boolean;
@@ -169,6 +190,19 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
 
   const commaPair = tryCommaPairFirstLine(text);
   if (commaPair) return commaPair;
+
+  const signerRows = extractExplicitSignerNames(text);
+  if (signerRows && signerRows.length >= 2) {
+    const a = clampPartySegment(signerRows[0]);
+    const b = clampPartySegment(signerRows[1]);
+    if (a.length > 1 && b.length > 1) {
+      return {
+        parties: signerRows.map((n) => clampPartySegment(n)).filter(Boolean),
+        uncertain: false,
+        structured: { party_1: a, party_2: b },
+      };
+    }
+  }
 
   if (/\bI\s+will\b/i.test(text) && /\byou\b/i.test(lower)) {
     return { parties: [], uncertain: true, structured: null };
@@ -566,9 +600,10 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
 
 export function structuredPartiesDisplayLine(structured: IntakeStructuredAgreement): string | null {
   if (structured.partiesUncertain || structured.parties.length < 2) return null;
-  const [a, b] = structured.parties;
-  if (!a?.trim() || !b?.trim()) return null;
-  return `${a} and ${b}`;
+  const valid = structured.parties.filter((p) => p?.trim());
+  if (valid.length < 2) return null;
+  if (valid.length === 2) return `${valid[0]} and ${valid[1]}`;
+  return valid.slice(0, -1).join(", ") + ", and " + valid[valid.length - 1];
 }
 
 export function structuredPartiesStructured(structured: IntakeStructuredAgreement): StructuredTwoParties | null {

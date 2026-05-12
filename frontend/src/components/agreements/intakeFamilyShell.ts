@@ -2,7 +2,7 @@
  * Family-aware deterministic shells so non–service-contract intakes still produce a reviewable draft.
  * No extra API calls.
  */
-import { applyNamedPartyFallbackFromIntake } from "./intakeNamedPartyFallback";
+import { applyNamedPartyFallbackFromIntake, tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 import {
   detectAgreementFamily,
   needsServiceBilateralSmartDefaults,
@@ -124,17 +124,22 @@ export function applyAgreementFamilyIntakeShell(
     }
     let parties = [...(parsed.parties || [])];
     if (parties.length < 2) {
-      const between = extractBetweenPartyPair(intakeText);
-      if (between && between.left.trim().length > 1 && between.right.trim().length > 1) {
-        parties = [
-          { name: between.left.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
-          { name: between.right.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
-        ];
+      const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
+      if (explicitSigners && explicitSigners.length >= 2) {
+        parties = explicitSigners;
       } else {
-        parties = [
-          { name: "Party A (disclosing / receiving — edit in review)", role: "party" },
-          { name: "Party B (disclosing / receiving — edit in review)", role: "party" },
-        ];
+        const between = extractBetweenPartyPair(intakeText);
+        if (between && between.left.trim().length > 1 && between.right.trim().length > 1) {
+          parties = [
+            { name: between.left.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
+            { name: between.right.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
+          ];
+        } else {
+          parties = [
+            { name: "Party A (disclosing / receiving — edit in review)", role: "party" },
+            { name: "Party B (disclosing / receiving — edit in review)", role: "party" },
+          ];
+        }
       }
     }
     const purpose =
@@ -163,23 +168,28 @@ export function applyAgreementFamilyIntakeShell(
   // generic_business_agreement
   let next: ParsedDraftShape = { ...parsed, agreement_family: "generic_business_agreement" };
   if ((next.parties || []).length < 2) {
-    const between = extractBetweenPartyPair(intakeText);
-    if (between && between.left.trim().length > 1 && between.right.trim().length > 1) {
-      next = {
-        ...next,
-        parties: [
-          { name: between.left.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
-          { name: between.right.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
-        ],
-      };
+    const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
+    if (explicitSigners && explicitSigners.length >= 2) {
+      next = { ...next, parties: explicitSigners };
     } else {
-      next = {
-        ...next,
-        parties: [
-          { name: "Party A (edit in review)", role: "party" },
-          { name: "Party B (edit in review)", role: "party" },
-        ],
-      };
+      const between = extractBetweenPartyPair(intakeText);
+      if (between && between.left.trim().length > 1 && between.right.trim().length > 1) {
+        next = {
+          ...next,
+          parties: [
+            { name: between.left.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
+            { name: between.right.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
+          ],
+        };
+      } else {
+        next = {
+          ...next,
+          parties: [
+            { name: "Party A (edit in review)", role: "party" },
+            { name: "Party B (edit in review)", role: "party" },
+          ],
+        };
+      }
     }
   }
   if (!nz(next.title)) next = { ...next, title: nz(live.docTitle) || "Agreement" };

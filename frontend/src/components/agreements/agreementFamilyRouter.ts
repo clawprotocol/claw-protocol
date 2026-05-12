@@ -57,11 +57,23 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     return "operating_agreement";
   }
 
-  if (commercialSignals.nda && ndaHybridSignals) {
+  const primaryServiceIntent =
+    /\bconsult(?:ant|ing)\b/i.test(low) ||
+    /\badvisory\b/i.test(low) ||
+    /\bretainer\b/i.test(low) ||
+    /\bservices?\s+agreement\b/i.test(low) ||
+    /\bscope\s+of\s+work\b/i.test(low) ||
+    /\b(?:saas|msa|master\s+service)\b/i.test(low) ||
+    /\bindependent\s+contractor\b/i.test(low) ||
+    /\b(?:web|software|app|mobile|platform)\s+develop(?:ment|er)?\b/i.test(low) ||
+    /\bdevelopment\s+agreement\b/i.test(low) ||
+    /\b(?:freelance|contract)\s+(?:work|project|engagement)\b/i.test(low);
+
+  if (commercialSignals.nda && ndaHybridSignals && !primaryServiceIntent) {
     return "confidentiality_commercial_protections_agreement";
   }
 
-  if (ndaDominant || /\bconfidentiality\s+agreement\b/i.test(t)) {
+  if ((ndaDominant || /\bconfidentiality\s+agreement\b/i.test(t)) && !primaryServiceIntent) {
     return "nda";
   }
 

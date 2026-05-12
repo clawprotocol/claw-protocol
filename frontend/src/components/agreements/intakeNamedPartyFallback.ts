@@ -16,9 +16,62 @@ function looksLikeGenericPartyRow(parties: { name: string; role: string }[]): bo
 }
 
 /**
+ * Extract explicit signer/party rows from intake text.
+ * Matches patterns like:
+ *   "Sender/signer 1: Anthem Blanchard, anthem@example.com"
+ *   "Signer 2: Sarah Collins (sarah@test.com)"
+ *   "Party 3 - Michael Reed"
+ *   "Signer: Jamie Chen jamie@x.com"
+ */
+const SIGNER_LINE_RE =
+  /(?:sender\s*[/&]?\s*)?(?:signer|party|signatory|recipient|reviewer)\s*(?:#?\d+)?[:\s—–-]+([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)+)/gi;
+
+const EMAIL_AFTER_NAME_RE = /[,\s(]+([^\s,()@]+@[^\s,()]+)/;
+
+function extractExplicitSignerRows(raw: string): { name: string; role: string; email?: string }[] | null {
+  const lines = raw.split(/[\n\r]+/).map((l) => l.trim()).filter(Boolean);
+  const results: { name: string; role: string; email?: string }[] = [];
+  const seenNames = new Set<string>();
+
+  for (const line of lines) {
+    SIGNER_LINE_RE.lastIndex = 0;
+    const m = SIGNER_LINE_RE.exec(line);
+    if (!m || !m[1]) continue;
+    const name = m[1].trim().slice(0, MAX_NAME);
+    if (name.length < 3) continue;
+    const nameKey = name.toLowerCase();
+    if (seenNames.has(nameKey)) continue;
+    seenNames.add(nameKey);
+    const rest = line.slice(m.index + m[0].length);
+    const emailMatch = rest.match(EMAIL_AFTER_NAME_RE) || line.slice(m.index).match(EMAIL_AFTER_NAME_RE);
+    const email = emailMatch?.[1]?.trim();
+    results.push({ name, role: "party", ...(email ? { email } : {}) });
+  }
+
+  if (results.length < 2) {
+    const fullText = raw.replace(/\s+/g, " ").trim();
+    SIGNER_LINE_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = SIGNER_LINE_RE.exec(fullText)) !== null) {
+      const name = match[1].trim().slice(0, MAX_NAME);
+      if (name.length < 3) continue;
+      const nameKey = name.toLowerCase();
+      if (seenNames.has(nameKey)) continue;
+      seenNames.add(nameKey);
+      results.push({ name, role: "party" });
+    }
+  }
+
+  return results.length >= 2 ? results : null;
+}
+
+/**
  * e.g. "employment agreement for John Smith at Acme LLC" / "for Jane Doe in Widget Inc."
  */
-export function tryInferNamedPartiesFromIntake(raw: string): { name: string; role: string }[] | null {
+export function tryInferNamedPartiesFromIntake(raw: string): { name: string; role: string; email?: string }[] | null {
+  const explicit = extractExplicitSignerRows(raw);
+  if (explicit && explicit.length >= 2) return explicit;
+
   const t = raw.replace(/\s+/g, " ").trim();
   if (t.length < 12) return null;
 

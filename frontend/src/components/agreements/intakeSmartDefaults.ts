@@ -2,6 +2,7 @@ import type { AgreementFamily } from "./agreementFamilyRouter";
 import { formatPaymentTermsLine, type IntakePaymentField } from "./intakeCurrencyParse";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
+import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 import { extractBetweenPartyPair } from "./partyBetweenParse";
 
 export type { AgreementFamily } from "./agreementFamilyRouter";
@@ -10,7 +11,7 @@ export type { AgreementFamily } from "./agreementFamilyRouter";
 export type ParsedDraftShape = {
   title: string;
   jurisdiction: string;
-  parties: { name: string; role: string }[];
+  parties: { name: string; role: string; email?: string }[];
   purpose: string;
   payment_terms: string;
   duration: string | null;
@@ -60,10 +61,11 @@ function splitPartiesFromLiveLine(line: string | null): { name: string; role: st
     .trim();
   const parts = t.split(/\s*;\s*/).map((s) => s.trim()).filter(Boolean);
   if (parts.length >= 2) {
-    return [
-      { name: parts[0].slice(0, MAX_PARTY_NAME_LEN), role: "party" },
-      { name: parts[1].slice(0, MAX_PARTY_NAME_LEN), role: "party" },
-    ];
+    return parts.map((name) => ({ name: name.slice(0, MAX_PARTY_NAME_LEN), role: "party" }));
+  }
+  const comma = t.split(/\s*,\s*/).map((s) => s.trim()).filter(Boolean);
+  if (comma.length >= 3) {
+    return comma.map((name) => ({ name: name.slice(0, MAX_PARTY_NAME_LEN), role: "party" }));
   }
   const segments = t.split(/\s+and\s+/i).filter(Boolean);
   if (segments.length >= 2) {
@@ -100,21 +102,26 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   }
 
   if ((next.parties || []).length < 2) {
-    const fromBetween = extractBetweenPartyPair(intakeText);
-    const fromLive =
-      fromBetween && fromBetween.left.trim().length > 1 && fromBetween.right.trim().length > 1
-        ? [
-            { name: fromBetween.left.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" as const },
-            { name: fromBetween.right.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" as const },
-          ]
-        : splitPartiesFromLiveLine(live.partiesLine);
-    if (fromLive) {
-      next.parties = fromLive;
+    const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
+    if (explicitSigners && explicitSigners.length >= 2) {
+      next.parties = explicitSigners;
     } else {
-      next.parties = [
-        { name: "Party A (edit in review)", role: "party" },
-        { name: "Party B (edit in review)", role: "party" },
-      ];
+      const fromBetween = extractBetweenPartyPair(intakeText);
+      const fromLive =
+        fromBetween && fromBetween.left.trim().length > 1 && fromBetween.right.trim().length > 1
+          ? [
+              { name: fromBetween.left.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" as const },
+              { name: fromBetween.right.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" as const },
+            ]
+          : splitPartiesFromLiveLine(live.partiesLine);
+      if (fromLive) {
+        next.parties = fromLive;
+      } else {
+        next.parties = [
+          { name: "Party A (edit in review)", role: "party" },
+          { name: "Party B (edit in review)", role: "party" },
+        ];
+      }
     }
   }
 

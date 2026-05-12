@@ -721,8 +721,8 @@ export function extractCleanPremiumParties(intakeText: string, draft: ParsedDraf
   const rawIntake = intakeText.trim();
   const fam = draft.agreement_family ?? null;
   if ((draft.parties?.length ?? 0) >= 2 && !draftHasPlaceholderParties(draft)) {
-    return (draft.parties || []).slice(0, 2).map((p, idx) => ({
-      name: coercePartyNameForRecipientAutoFill(nz(p.name), idx === 0 ? 0 : 1, fam),
+    return (draft.parties || []).map((p, idx) => ({
+      name: coercePartyNameForRecipientAutoFill(nz(p.name), idx <= 1 ? (idx as 0 | 1) : 1, fam),
       role: nz(p.role) || "party",
     }));
   }

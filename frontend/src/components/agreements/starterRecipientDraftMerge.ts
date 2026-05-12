@@ -64,12 +64,13 @@ export function sanitizeStarterSignerLabelsLine(raw: string): string {
 /**
  * Free/starter review canonicalization: normalize party rows to safe, non-prose display names.
  * This is applied before review and before send handoff to keep starter flow deterministic.
+ * Preserves all parties (2+), not just first two.
  */
 export function canonicalizeStarterDraftForReview(parsed: ParsedDraftShape): ParsedDraftShape {
   const base = Array.isArray(parsed.parties) ? parsed.parties : [];
-  const out = base.slice(0, 2).map((p, idx) => ({
+  const out = base.map((p, idx) => ({
     ...p,
-    name: cleanStarterPartyName(String(p?.name || ""), idx === 0 ? 0 : 1, parsed.agreement_family ?? null),
+    name: cleanStarterPartyName(String(p?.name || ""), idx <= 1 ? (idx as 0 | 1) : 1, parsed.agreement_family ?? null),
     role: cleanRole(p?.role),
   }));
   return {

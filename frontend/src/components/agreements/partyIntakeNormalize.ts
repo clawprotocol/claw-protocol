@@ -27,20 +27,17 @@ export function sanitizePartiesInput(input: string): string {
   return s;
 }
 
-/** Single joined line (comma or "and") parses to two non-empty party rows — after sanitization. */
+/** Joined line (comma or "and") parses to non-empty party rows — after sanitization. Preserves all parties. */
 export function parsePartiesFromUserInput(s: string): { name: string; role: string }[] | null {
   const t = sanitizePartiesInput(s.trim());
   if (!t) return null;
   const comma = t.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean);
   if (comma.length >= 2) {
-    return comma.slice(0, 2).map((name) => ({ name: name.slice(0, MAX_PARTY_INLINE_LEN), role: "party" }));
+    return comma.map((name) => ({ name: name.slice(0, MAX_PARTY_INLINE_LEN), role: "party" }));
   }
   const and = t.split(/\s+and\s+/i).map((x) => x.trim()).filter(Boolean);
   if (and.length >= 2) {
-    return [
-      { name: and[0].slice(0, MAX_PARTY_INLINE_LEN), role: "party" },
-      { name: and.slice(1).join(" and ").slice(0, MAX_PARTY_INLINE_LEN), role: "party" },
-    ];
+    return and.map((name) => ({ name: name.slice(0, MAX_PARTY_INLINE_LEN), role: "party" }));
   }
   return null;
 }

@@ -72,17 +72,19 @@ export function inferRelationshipOptionOrder(corpus: string): Array<"services" |
 
 /**
  * Maps optional UI labels onto API draft parties. When unset, both sides use generic `party`.
+ * Preserves all parties (2+), applying role labels to the first two.
  */
 export function applyIntakePartyRoleOverlay(parsed: ParsedDraftShape, roles: IntakePartyRoleLabels): ParsedDraftShape {
   const parties = parsed.parties || [];
   if (parties.length < 2) return parsed;
-  const [p0, p1] = parties;
+  const [p0, p1, ...rest] = parties;
   if (roles.relationship === "unset") {
     return {
       ...parsed,
       parties: [
-        { name: p0.name, role: "party" },
-        { name: p1.name, role: "party" },
+        { ...p0, role: "party" },
+        { ...p1, role: "party" },
+        ...rest.map((p) => ({ ...p, role: p.role || "party" })),
       ],
     };
   }
@@ -91,8 +93,9 @@ export function applyIntakePartyRoleOverlay(parsed: ParsedDraftShape, roles: Int
   return {
     ...parsed,
     parties: [
-      { name: p0.name, role: a },
-      { name: p1.name, role: b },
+      { ...p0, role: a },
+      { ...p1, role: b },
+      ...rest.map((p) => ({ ...p, role: p.role || "party" })),
     ],
   };
 }
