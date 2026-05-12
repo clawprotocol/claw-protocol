@@ -168,8 +168,10 @@ export function StepPrepareSignature({
   const onFieldsChangeRef = useRef(onFieldsChange);
   onFieldsChangeRef.current = onFieldsChange;
 
-  // eslint-disable-next-line no-console
-  console.info("[vs01-step-prepare-fields-props]", { controlledCount: fields.length });
+  if (typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1") {
+    // eslint-disable-next-line no-console
+    console.info("[vs01-step-prepare-fields-props]", { controlledCount: fields.length });
+  }
 
   /** Stable setter that mimics useState — resolves functional updates against latest prop value. */
   const setFields = useCallback(
@@ -905,8 +907,10 @@ export function StepPrepareSignature({
     }
   }, []);
 
-  // eslint-disable-next-line no-console
-  console.info("[vs01-step-prepare-fields-render]", { renderedFieldCount: fields.length });
+  if (typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1") {
+    // eslint-disable-next-line no-console
+    console.info("[vs01-step-prepare-fields-render]", { renderedFieldCount: fields.length });
+  }
 
   return (
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title" className="vs01-sign-step">

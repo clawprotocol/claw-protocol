@@ -21,11 +21,14 @@ export function parseAgreementBridgeQuery(search: string | null | undefined): bo
 /**
  * App shell hero + nav for `/app/esign/:documentId` (ClawProductApp). Bridge UX when entering from
  * paid Pro agreement VS01 seed (`agreement_bridge=1` and/or skip marker + session).
+ *
+ * When `vs01Step` >= 4 (receipt/done), completion-specific copy replaces the setup framing.
  */
 export function resolveVs01EsignShellCopy(args: {
   search: string | null | undefined;
   seedDocumentId: string;
   bridge: AgreementVs01BridgeSession | null;
+  vs01Step?: number;
 }): Vs01EsignShellCopyBundle {
   const seed = args.seedDocumentId.trim();
   const agreementBridgeQuery = parseAgreementBridgeQuery(args.search);
@@ -42,6 +45,19 @@ export function resolveVs01EsignShellCopy(args: {
       agreementBridgeEffective: false,
       copyVariant: "normal",
       navVariant: "full",
+    };
+  }
+
+  const step = args.vs01Step ?? 0;
+
+  if (step >= 4) {
+    return {
+      title: "E-signing package ready",
+      subtitle:
+        "Share the signing link with the recipient. Your proof record is being prepared.",
+      agreementBridgeEffective: true,
+      copyVariant: "bridge_reviewer_approved",
+      navVariant: "esign_bridge_focused",
     };
   }
 

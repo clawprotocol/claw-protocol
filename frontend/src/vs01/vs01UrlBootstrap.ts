@@ -1,5 +1,5 @@
 import type { Vs01Counterparty, Vs01Step, Vs01RecipientPlacedField } from "./types";
-import { VS01_RECIPIENT_SIGN_QUERY } from "./StepReceipt";
+import { VS01_RECIPIENT_SIGN_QUERY, loadRecipientManifest } from "./StepReceipt";
 import {
   decodeRecipientManifestParam,
   ensureRecipientFieldDefaults,
@@ -85,20 +85,44 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   });
 
   const manifestRaw = params.get(VS01_RECIPIENT_MANIFEST_QUERY);
-  const recipientManifestParamPresent = manifestRaw !== null;
-  const decoded = decodeRecipientManifestParam(manifestRaw);
+  const manifestStored = params.get("vs01_rmanifest_stored") === "1";
+  const recipientManifestParamPresent = manifestRaw !== null || manifestStored;
 
   let recipientHydratedFields: Vs01RecipientPlacedField[] = [];
   let recipientManifestDecodeError: string | null = null;
 
-  if (decoded.ok) {
-    recipientHydratedFields = ensureRecipientFieldDefaults(
-      rebindRecipientFieldsToCounterparty(decoded.fields, lockedId),
-      recipientName || "Recipient",
-      recipientEmail || undefined
-    );
-  } else {
-    recipientManifestDecodeError = decoded.error;
+  if (manifestRaw) {
+    const decoded = decodeRecipientManifestParam(manifestRaw);
+    if (decoded.ok) {
+      recipientHydratedFields = ensureRecipientFieldDefaults(
+        rebindRecipientFieldsToCounterparty(decoded.fields, lockedId),
+        recipientName || "Recipient",
+        recipientEmail || undefined
+      );
+    } else {
+      recipientManifestDecodeError = decoded.error;
+    }
+  } else if (manifestStored || !manifestRaw) {
+    const stored = loadRecipientManifest(documentId, counterpartyIdFromUrl || lockedId);
+    if (stored && stored.length > 0) {
+      recipientHydratedFields = ensureRecipientFieldDefaults(
+        rebindRecipientFieldsToCounterparty(stored, lockedId),
+        recipientName || "Recipient",
+        recipientEmail || undefined
+      );
+    }
+  }
+
+  if (typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1") {
+    // eslint-disable-next-line no-console
+    console.info("[vs01-recipient-link-open]", {
+      documentId,
+      recipientIndex,
+      recipientFieldCount: recipientHydratedFields.length,
+      routeTarget: "recipient_signing",
+      sourceInline: Boolean(manifestRaw),
+      sourceStorage: !manifestRaw && recipientHydratedFields.length > 0,
+    });
   }
 
   memo = {

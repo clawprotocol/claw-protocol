@@ -119,6 +119,30 @@ describe("resolveVs01EsignShellCopy", () => {
     expect(r.agreementBridgeEffective).toBe(false);
     expect(r.copyVariant).toBe("normal");
   });
+
+  it("bridge flow at receipt step (vs01Step >= 4) shows completion copy, not 'Prepare for e-signing'", () => {
+    const r = resolveVs01EsignShellCopy({
+      search: "?agreement_bridge=1",
+      seedDocumentId: doc,
+      bridge: bridge({ reviewerApprovedCleanHandoff: true }),
+      vs01Step: 4,
+    });
+    expect(r.agreementBridgeEffective).toBe(true);
+    expect(r.title).not.toBe("Prepare for e-signing");
+    expect(r.title).toContain("ready");
+    expect(r.subtitle).toContain("recipient");
+  });
+
+  it("bridge flow at setup step (vs01Step < 4) still shows 'Prepare for e-signing'", () => {
+    const r = resolveVs01EsignShellCopy({
+      search: "?agreement_bridge=1",
+      seedDocumentId: doc,
+      bridge: bridge({ reviewerApprovedCleanHandoff: true }),
+      vs01Step: 2,
+    });
+    expect(r.title).toBe("Prepare for e-signing");
+    expect(r.subtitle).toContain("reviewer already approved");
+  });
 });
 
 describe("parseAgreementBridgeQuery", () => {

@@ -725,6 +725,7 @@ export function createPlacedFieldAtClick(
   options?: { autoInitials?: boolean }
 ): PlacedSigningField {
   const { x, y, width, height } = computeRectFromClick(type, clickX, clickY);
+  const auto = options?.autoInitials === true;
   return {
     id: newSigningFieldId(),
     type,
@@ -734,7 +735,7 @@ export function createPlacedFieldAtClick(
     width,
     height,
     value: defaultValueForType(type, ctx),
-    autoInitials: options?.autoInitials,
+    ...(auto ? { autoInitials: true } : {}),
   };
 }
 

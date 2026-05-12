@@ -437,3 +437,55 @@ describe("VS01 auto initials placement", () => {
     }
   });
 });
+
+describe("manual initials placement (armed tool path)", () => {
+  const ctx = { typedName: "Test User", initials: "TU", signerEmail: "test@example.com" };
+
+  it("createPlacedFieldAtClick creates a manual initials field without autoInitials flag", () => {
+    const field = createPlacedFieldAtClick("initials", 0, 0.5, 0.5, ctx);
+    expect(field.type).toBe("initials");
+    expect(field.autoInitials).toBeUndefined();
+    expect(field.page).toBe(0);
+    expect(field.value).toBe("TU");
+  });
+
+  it("auto-initials fields have autoInitials: true", () => {
+    const autoFields = buildAutoInitialsFields(3, ctx, new Set());
+    expect(autoFields.length).toBeGreaterThan(0);
+    for (const f of autoFields) {
+      expect(f.autoInitials).toBe(true);
+      expect(f.type).toBe("initials");
+    }
+  });
+
+  it("manual initials are preserved when toggling auto-initials off (filter by autoInitials flag)", () => {
+    const manual = createPlacedFieldAtClick("initials", 0, 0.3, 0.3, ctx);
+    const sig = createPlacedFieldAtClick("signature", 0, 0.5, 0.5, ctx);
+    const autoFields = buildAutoInitialsFields(2, ctx, new Set(), [manual, sig]);
+    const all = [manual, sig, ...autoFields];
+
+    const afterToggleOff = all.filter((f) => !f.autoInitials);
+    expect(afterToggleOff).toHaveLength(2);
+    expect(afterToggleOff.find((f) => f.id === manual.id)).toBeDefined();
+    expect(afterToggleOff.find((f) => f.id === sig.id)).toBeDefined();
+  });
+
+  it("initials tool is in SIGNING_FIELD_TOOLS and follows same placement pattern as signature", () => {
+    const initialsTool = SIGNING_FIELD_TOOLS.find((t) => t.type === "initials");
+    expect(initialsTool).toBeDefined();
+    expect(initialsTool!.label).toBe("Initials");
+
+    const sigTool = SIGNING_FIELD_TOOLS.find((t) => t.type === "signature");
+    expect(sigTool).toBeDefined();
+
+    expect(RECIPIENT_FIELD_TOOLS.find((t) => t.type === "initials")).toBeDefined();
+  });
+
+  it("manual initials default size is in range (compact, not signature-sized)", () => {
+    const size = defaultSizeForType("initials");
+    expect(size.width).toBeLessThan(defaultSizeForType("signature").width);
+    expect(size.height).toBeLessThan(defaultSizeForType("signature").height);
+    expect(size.width).toBeGreaterThan(0.04);
+    expect(size.height).toBeGreaterThan(0.02);
+  });
+});

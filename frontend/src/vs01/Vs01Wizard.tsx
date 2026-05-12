@@ -101,6 +101,8 @@ export type Vs01WizardProps = {
   hideStepper?: boolean;
   /** From `/app/quick?start=` — highlights entry path; PDF may auto-open file picker once. */
   quickEntryIntent?: "pdf" | "type" | "speak" | null;
+  /** Fires whenever the active VS01 step changes (used by shell to update hero copy). */
+  onStepChange?: (step: Vs01Step) => void;
 };
 
 /**
@@ -112,6 +114,7 @@ export function Vs01Wizard({
   seedDocumentId = null,
   hideStepper = false,
   quickEntryIntent = null,
+  onStepChange,
 }: Vs01WizardProps) {
   const access = useAccess();
   const { navigate } = useLaunchNav();
@@ -188,6 +191,15 @@ export function Vs01Wizard({
     didLogVs01RouteMount.current = true;
     // eslint-disable-next-line no-console
     console.info("[vs01-route-mounted]", { seedDocumentId: seed, hideStepper });
+    if (RECIPIENT_SIGNER_DEEP_LINK) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-recipient-route-guard]", {
+        recipientSign: true,
+        blockedSenderSetup: true,
+        recipientFieldCount: INITIAL_RECIPIENT_FIELDS.length,
+        lockedCounterpartyId: RECIPIENT_LOCKED_CP_ID,
+      });
+    }
   }, [seedDocumentId, hideStepper]);
 
   useEffect(() => {
@@ -249,10 +261,13 @@ export function Vs01Wizard({
     [docFinalized, detailsOk, paidProAgreementBridgeSkip, receiptId, furthestStep, recipientPlacedFields.length]
   );
 
+  const onStepChangeRef = useRef(onStepChange);
+  onStepChangeRef.current = onStepChange;
   const goToStep = useCallback((target: Vs01Step) => {
     setStep(target);
     setFurthestStep((prev) => (target > prev ? target : prev));
     setError(null);
+    onStepChangeRef.current?.(target);
   }, []);
 
   useEffect(() => {
