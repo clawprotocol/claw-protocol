@@ -148,4 +148,37 @@ describe("StepPrepareSignature controlled field rendering", () => {
     expect(spy).toHaveBeenCalledTimes(3);
     expect(spy.mock.calls[2][0]).toHaveLength(3);
   });
+
+  it("bridge hydration: parent sets fields via prop, then child add reads latest", () => {
+    const onChange = vi.fn();
+    const hydrated = Array.from({ length: 5 }, (_, i) => makePlacedField(`h${i}`));
+
+    const { getByTestId, rerender } = render(
+      <ControlledFieldChild fields={[]} onFieldsChange={onChange} />,
+    );
+    expect(getByTestId("field-count").textContent).toBe("0");
+
+    act(() => {
+      rerender(<ControlledFieldChild fields={hydrated} onFieldsChange={onChange} />);
+    });
+    expect(getByTestId("field-count").textContent).toBe("5");
+
+    act(() => { getByTestId("add").click(); });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0]).toHaveLength(6);
+  });
+
+  it("placement after clear: child can add fields after parent resets to empty", () => {
+    const spy = vi.fn();
+    const initial = [makePlacedField("f1"), makePlacedField("f2")];
+    const { getByTestId } = render(<ParentHarness initial={initial} spy={spy} />);
+    expect(getByTestId("field-count").textContent).toBe("2");
+
+    act(() => { getByTestId("clear").click(); });
+    expect(getByTestId("field-count").textContent).toBe("0");
+
+    act(() => { getByTestId("add").click(); });
+    expect(getByTestId("field-count").textContent).toBe("1");
+    expect(spy.mock.calls[spy.mock.calls.length - 1][0]).toHaveLength(1);
+  });
 });

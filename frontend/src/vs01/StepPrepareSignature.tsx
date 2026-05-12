@@ -491,23 +491,46 @@ export function StepPrepareSignature({
 
   const onPagePlacementClick = useCallback(
     (pageIndex0: number, ev: React.MouseEvent<HTMLDivElement>) => {
-      if (busy || armedTool == null) return;
+      if (busy || armedTool == null) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-placement-page-click]", { tool: armedTool, page: pageIndex0, blockedReason: busy ? "busy" : "not_armed" });
+        return;
+      }
       const t = ev.target as HTMLElement;
-      if (t.closest?.(".vs01-sign-placement-box")) return;
+      if (t.closest?.(".vs01-sign-placement-box")) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-placement-page-click]", { tool: armedTool, page: pageIndex0, blockedReason: "clicked_existing_field" });
+        return;
+      }
       const surface = ev.currentTarget.parentElement as HTMLElement | null;
-      if (!surface) return;
+      if (!surface) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-placement-page-click]", { tool: armedTool, page: pageIndex0, blockedReason: "no_surface" });
+        return;
+      }
       const rect = surface.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
+      if (rect.width <= 0 || rect.height <= 0) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-placement-page-click]", { tool: armedTool, page: pageIndex0, blockedReason: "zero_rect", w: rect.width, h: rect.height });
+        return;
+      }
 
       const px = (ev.clientX - rect.left) / rect.width;
       const py = (ev.clientY - rect.top) / rect.height;
+      // eslint-disable-next-line no-console
+      console.info("[vs01-placement-page-click]", { tool: armedTool, page: pageIndex0, x: px.toFixed(3), y: py.toFixed(3) });
       const ctx = {
         typedName,
         initials,
         signerEmail: signerEmailForPlacement,
       };
       const nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, ctx);
-      setFields((prev) => [...prev, nf]);
+      setFields((prev) => {
+        const next = [...prev, nf];
+        // eslint-disable-next-line no-console
+        console.info("[vs01-placement-field-added]", { tool: armedTool, nextCount: next.length, fieldId: nf.id });
+        return next;
+      });
       setSelectedFieldId(nf.id);
       setCurrentPage(pageIndex0 + 1);
       setArmedTool(null);
@@ -1273,6 +1296,8 @@ export function StepPrepareSignature({
                   onClick={() => {
                     setActiveTool(type);
                     setArmedTool(null);
+                    // eslint-disable-next-line no-console
+                    console.info("[vs01-placement-tool-selected]", { tool: type, placementMode: "off" });
                   }}
                 >
                   {labelForFieldType(type)}
@@ -1287,7 +1312,11 @@ export function StepPrepareSignature({
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--auto vs01-sign-place-cta"
                 disabled={busy || !placementSurface || previewLoading}
-                onClick={() => setArmedTool(activeTool)}
+                onClick={() => {
+                  setArmedTool(activeTool);
+                  // eslint-disable-next-line no-console
+                  console.info("[vs01-placement-tool-selected]", { tool: activeTool, placementMode: "on" });
+                }}
               >
                 Place {labelForFieldType(activeTool)} on document
               </button>

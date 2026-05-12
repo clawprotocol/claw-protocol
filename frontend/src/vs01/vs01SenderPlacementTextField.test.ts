@@ -585,3 +585,71 @@ describe("recipient manual initials: rebuild preserves user placement", () => {
     expect(afterOff.find((f) => f.id === "man_keep")!.x).toBe(0.2);
   });
 });
+
+describe("sender placement: each tool type creates a field via click", () => {
+  const ctx = { typedName: "Jane Doe", initials: "JD", signerEmail: "jane@example.com" };
+  const allTools: Array<{ type: "signature" | "initials" | "printed_name" | "text" | "email" | "date"; expectValue: string }> = [
+    { type: "signature", expectValue: "Jane Doe" },
+    { type: "initials", expectValue: "JD" },
+    { type: "printed_name", expectValue: "Jane Doe" },
+    { type: "text", expectValue: "" },
+    { type: "email", expectValue: "jane@example.com" },
+    { type: "date", expectValue: new Date().toISOString().slice(0, 10) },
+  ];
+
+  for (const { type, expectValue } of allTools) {
+    it(`clicking PDF with armed "${type}" tool creates a field at the click point`, () => {
+      const field = createPlacedFieldAtClick(type, 2, 0.4, 0.6, ctx);
+      expect(field.type).toBe(type);
+      expect(field.page).toBe(2);
+      expect(field.x).toBeGreaterThanOrEqual(0);
+      expect(field.x).toBeLessThanOrEqual(1);
+      expect(field.y).toBeGreaterThanOrEqual(0);
+      expect(field.y).toBeLessThanOrEqual(1);
+      expect(field.width).toBeGreaterThan(0);
+      expect(field.height).toBeGreaterThan(0);
+      expect(field.value).toBe(expectValue);
+      expect(field.autoInitials).toBeUndefined();
+      expect(field.id).toBeTruthy();
+    });
+  }
+
+  it("simulated controlled-component setFields adds field to parent state", () => {
+    let parentFields: PlacedSigningField[] = [];
+    const fieldsRef = { current: parentFields };
+    const onFieldsChange = (next: PlacedSigningField[]) => {
+      parentFields = next;
+    };
+    const onFieldsChangeRef = { current: onFieldsChange };
+
+    const setFields = (next: PlacedSigningField[] | ((prev: PlacedSigningField[]) => PlacedSigningField[])) => {
+      const resolved = typeof next === "function" ? next(fieldsRef.current) : next;
+      onFieldsChangeRef.current(resolved);
+    };
+
+    const nf = createPlacedFieldAtClick("signature", 0, 0.5, 0.5, ctx);
+    setFields((prev) => [...prev, nf]);
+    expect(parentFields).toHaveLength(1);
+    expect(parentFields[0].type).toBe("signature");
+
+    fieldsRef.current = parentFields;
+    const nf2 = createPlacedFieldAtClick("email", 1, 0.3, 0.4, ctx);
+    setFields((prev) => [...prev, nf2]);
+    expect(parentFields).toHaveLength(2);
+    expect(parentFields[1].type).toBe("email");
+  });
+
+  it("all 6 sender tools are present in SIGNING_FIELD_TOOLS", () => {
+    const types = SIGNING_FIELD_TOOLS.map((t) => t.type);
+    for (const { type } of allTools) {
+      expect(types).toContain(type);
+    }
+  });
+
+  it("each tool has a non-empty label in SIGNING_FIELD_TOOLS", () => {
+    for (const tool of SIGNING_FIELD_TOOLS) {
+      expect(tool.label.length).toBeGreaterThan(0);
+      expect(labelForFieldType(tool.type)).toBe(tool.label);
+    }
+  });
+});
