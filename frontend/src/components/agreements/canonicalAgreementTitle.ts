@@ -75,20 +75,35 @@ export type CanonicalTitleResolution = {
 export function explicitIntentCanonicalTitle(rawIntake: string | null | undefined): string | null {
   const low = (rawIntake || "").toLowerCase();
   if (!low) return null;
-  if (/\b(?:residential|commercial)?\s*lease\s+agreement\b/.test(low)) return "Lease Agreement";
-  if (/\bsublease\s+agreement\b/.test(low)) return "Sublease Agreement";
-  if (/\b(?:real\s+estate\s+)?purchase\s+(?:and\s+sale\s+)?agreement\b/.test(low)) {
+  // Lease: distinguish commercial vs residential when the intake is explicit; otherwise
+  // fall back to the neutral "Lease Agreement" canonical.
+  if (/\bcommercial\s+lease\s+(?:agreement|contract)\b/.test(low)) return "Commercial Lease Agreement";
+  if (/\bresidential\s+lease\s+(?:agreement|contract)\b/.test(low)) return "Residential Lease Agreement";
+  if (/\b(?:residential|commercial)?\s*lease\s+(?:agreement|contract)\b/.test(low)) return "Lease Agreement";
+  if (/\bsublease\s+(?:agreement|contract)\b/.test(low)) return "Sublease Agreement";
+  if (/\b(?:real\s+estate\s+)?purchase\s+(?:and\s+sale\s+)?(?:agreement|contract)\b/.test(low)) {
     return /\breal\s+estate\b/.test(low) ? "Real Estate Purchase Agreement" : "Purchase Agreement";
   }
-  if (/\bco[-\s]?ownership\s+agreement\b/.test(low)) return "Co-Ownership Agreement";
-  if (/\bproperty\s+management\s+agreement\b/.test(low)) return "Property Management Agreement";
+  if (/\bco[-\s]?ownership\s+(?:agreement|contract)\b/.test(low)) return "Co-Ownership Agreement";
+  if (/\bproperty\s+management\s+(?:agreement|contract)\b/.test(low)) return "Property Management Agreement";
   if (/\blicense\s+agreement\b/.test(low)) return "License Agreement";
   if (/\bdistribution\s+agreement\b/.test(low)) return "Distribution Agreement";
   if (/\bpartnership\s+agreement\b/.test(low)) return "Partnership Agreement";
   if (/\bjoint\s+venture\s+agreement\b/.test(low)) return "Joint Venture Agreement";
   if (/\bequipment\s+(?:rental|lease)\s+agreement\b/.test(low)) return "Equipment Lease Agreement";
-  if (/\bemployment\s+agreement\b/.test(low)) return "Employment Agreement";
-  if (/\bindependent\s+contractor\s+agreement\b/.test(low)) return "Independent Contractor Agreement";
+  if (/\bemployment\s+(?:agreement|contract)\b/.test(low)) return "Employment Agreement";
+  if (/\bindependent\s+contractor\s+(?:agreement|contract)\b/.test(low)) return "Independent Contractor Agreement";
+  // Software / web / mobile / app development — all collapse to "Web Development Agreement"
+  // when the intake says "web …", and to "Software Development Agreement" otherwise.
+  if (/\bweb\s+development\s+(?:agreement|contract)\b/.test(low)) return "Web Development Agreement";
+  if (/\b(?:mobile|app)\s+development\s+(?:agreement|contract)\b/.test(low)) return "Mobile Development Agreement";
+  if (/\bsoftware\s+development\s+(?:agreement|contract)\b/.test(low)) return "Software Development Agreement";
+  if (/\bdevelopment\s+(?:agreement|contract)\b/.test(low)) return "Development Agreement";
+  if (/\b(?:mutual\s+)?(?:nda|non[-\s]?disclosure)\s+(?:agreement|contract)\b/.test(low)) {
+    return /\bmutual\b/.test(low) ? "Mutual Non-Disclosure Agreement" : "Non-Disclosure Agreement";
+  }
+  if (/\bservices?\s+(?:agreement|contract)\b/.test(low)) return "Services Agreement";
+  if (/\bconsulting\s+(?:agreement|contract)\b/.test(low)) return "Consulting Agreement";
   return null;
 }
 
@@ -155,15 +170,28 @@ export function resolveCanonicalAgreementTitle(opts: {
     }
   }
 
-  // Universal invariant 2: explicit document-intent phrases dominate routing for the
+  // Universal invariant 2 (P1): explicit document-intent phrases dominate routing for the
   // catch-all "generic_business_agreement" family (lease, purchase, co-ownership, property
-  // management, license, distribution, partnership, JV, equipment lease, etc.). Specific
-  // family routes (nda, consulting, services, OA) keep their canonical titles unless a
-  // dedicated override (advisor / mutual-NDA / family legacy) already fired above.
-  if (opts.family === "generic_business_agreement") {
+  // management, license, distribution, partnership, JV, equipment lease, etc.). For specific
+  // family routes (consulting, services, ICA), the explicit-intent title still wins so a
+  // "Commercial Lease Agreement" intake never renders as plain "Consulting Agreement" when
+  // a stray role token elsewhere in the intake nudged the family detector.
+  // Operating-agreement and NDA families keep their specialized title pipelines.
+  if (
+    opts.family === "generic_business_agreement" ||
+    opts.family === "consulting_agreement" ||
+    opts.family === "services_agreement" ||
+    opts.family === "independent_contractor_agreement" ||
+    opts.family === "confidentiality_commercial_protections_agreement"
+  ) {
     const intentTitle = explicitIntentCanonicalTitle(intake);
     if (intentTitle) {
-      if (!current || isGenericOrEmptyTitle(current, opts.family) || /^business\s+agreement$/i.test(current)) {
+      const replaceableCanonical =
+        /^business\s+agreement$/i.test(current) ||
+        /^consulting\s+agreement$/i.test(current) ||
+        /^services\s+agreement$/i.test(current) ||
+        /^independent\s+contractor\s+agreement$/i.test(current);
+      if (!current || isGenericOrEmptyTitle(current, opts.family) || replaceableCanonical) {
         return { title: intentTitle, source: "explicit-intent" };
       }
     }

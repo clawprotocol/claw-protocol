@@ -16,6 +16,12 @@ import { preCleanBetweenTailForMultiPartySplit, stripPartyRoleAnnotations, trunc
 
 export type IntakeStructuredAgreement = {
   parties: string[];
+  /**
+   * Display-only role hints aligned by lowercase party name (P2 hardening). Canonical names
+   * in `parties` stay clean — this side channel lets preview rendering surface a parenthetical
+   * "(Guarantor)" / "(Escrow Agent)" / "(Trustee)" etc. without polluting the name.
+   */
+  partyRoleHints: Record<string, string>;
   scope: string;
   payment: string;
   term: string;
@@ -153,13 +159,23 @@ function stripTrailingForPurpose(raw: string): string {
 }
 
 function clampPartySegment(raw: string): string {
+  const { name } = clampPartySegmentWithRole(raw);
+  return name;
+}
+
+/**
+ * Like {@link clampPartySegment} but also returns the role hint stripped from the input.
+ * Used by P2 display-layer role preservation: canonical name stays clean, role surfaces
+ * separately via {@link IntakeStructuredAgreement.partyRoleHints}.
+ */
+function clampPartySegmentWithRole(raw: string): { name: string; role: string | null } {
   const noEntityFor = stripCompanyForSuffix(raw);
   const noPurposeFor = stripTrailingForPurpose(noEntityFor);
-  const { name: noRole } = stripPartyRoleAnnotations(noPurposeFor);
+  const { name: noRole, role } = stripPartyRoleAnnotations(noPurposeFor);
   const formatted = formatPartySegmentForPreview(normalizePartyNameFragment(noRole));
-  if (formatted.length > MAX_PARTY_CHARS) return "";
-  if (wordCount(formatted) > MAX_PARTY_WORDS) return "";
-  return formatted;
+  if (formatted.length > MAX_PARTY_CHARS) return { name: "", role: null };
+  if (wordCount(formatted) > MAX_PARTY_WORDS) return { name: "", role: null };
+  return { name: formatted, role: role || null };
 }
 
 const SIGNER_LINE_EXTRACT_RE =
@@ -185,19 +201,77 @@ function extractExplicitSignerNames(raw: string): string[] | null {
 
 type PartiesExtract = {
   parties: string[];
+  /** Display-role hints, keyed by lowercase canonical name. */
+  roleHints: Record<string, string>;
   uncertain: boolean;
   structured: StructuredTwoParties | null;
 };
+
+function applyClampedSegments(
+  raws: string[],
+): { parties: string[]; roleHints: Record<string, string> } {
+  const parties: string[] = [];
+  const roleHints: Record<string, string> = {};
+  for (const r of raws) {
+    const { name, role } = clampPartySegmentWithRole(r);
+    if (name.length <= 1) continue;
+    parties.push(name);
+    if (role) roleHints[name.toLowerCase()] = role;
+  }
+  return { parties, roleHints };
+}
+
+/**
+ * Pair-wise role hint capture: takes CLEAN names from `cleanSegments` (already split off the
+ * pre-cleaned tail, so prefixes like "with " / inline ", as <role>" no longer attach to the
+ * name) and looks each name up in `rawSegments` (the un-cleaned tail) to recover the role
+ * suffix that was stripped during pre-clean. This avoids leaking ", with " → " and " noise
+ * (e.g. "With Jamie Chen") into the canonical party name while still capturing the role.
+ */
+function captureRoleHintsForCleanNames(
+  cleanSegments: string[],
+  rawSegments: string[] | null,
+): { parties: string[]; roleHints: Record<string, string> } {
+  const cleaned = applyClampedSegments(cleanSegments);
+  if (!rawSegments) return cleaned;
+  const roleByLower = { ...cleaned.roleHints };
+  for (const name of cleaned.parties) {
+    const lower = name.toLowerCase();
+    if (roleByLower[lower]) continue;
+    // Find a raw segment that contains the cleaned name (case-insensitive). The matching
+    // raw segment likely carries the trailing " as <role>" / "individually and as <role>"
+    // tail that pre-clean removed.
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matcher = new RegExp(`\\b${escaped}\\b`, "i");
+    const raw = rawSegments.find((s) => matcher.test(s));
+    if (!raw) continue;
+    const { role } = clampPartySegmentWithRole(raw);
+    if (role) roleByLower[lower] = role;
+  }
+  return { parties: cleaned.parties, roleHints: roleByLower };
+}
 
 /**
  * Split "A, B, and C" / "A, B, C" into ≥3 candidate party segments.
  * Returns null if only 2 segments or any segment doesn't look like a name fragment.
  */
 function splitMultiPartyCommaList(line: string): string[] | null {
+  return splitMultiPartyCommaListInternal(line, /* strict */ true);
+}
+
+/**
+ * Lenient variant: splits the same way but tolerates role-hint suffixes ("Name as escrow agent",
+ * "Name individually and as guarantor") that exceed the strict 6-word / 60-char party-fragment
+ * limit. Used to capture {@link IntakeStructuredAgreement.partyRoleHints} on the original (pre-
+ * cleaned) tail before pre-clean strips role suffixes for splitting.
+ */
+function splitMultiPartyCommaListWithRoles(line: string): string[] | null {
+  return splitMultiPartyCommaListInternal(line, /* strict */ false);
+}
+
+function splitMultiPartyCommaListInternal(line: string, strict: boolean): string[] | null {
   const trimmed = line.trim().replace(/[.!?]+$/g, "");
   if (!trimmed) return null;
-  // "Jamie Chen individually and as guarantor" contains the word "and" — naive splitting on
-  // `\s+and\s+` would fragment the phrase into a bogus fourth segment ("as guarantor").
   const INDIV_MASK = /\{\{indiv_as:([a-z0-9_]+)\}\}/gi;
   const masked = trimmed.replace(/\bindividually\s+and\s+as\s+([a-z][a-z\s\-]{2,40})\b/gi, (_, role: string) => {
     const key = role.replace(/\s+/g, "_").toLowerCase();
@@ -209,10 +283,21 @@ function splitMultiPartyCommaList(line: string): string[] | null {
     .map((s) => s.replace(INDIV_MASK, (_, key: string) => `individually and as ${key.replace(/_/g, " ")}`))
     .filter(Boolean);
   if (segments.length < 3) return null;
-  if (!segments.every((s) => looksLikeNameFragment(s) && s.length <= 60 && wordCount(s) <= 6)) {
-    return null;
+  if (strict) {
+    if (!segments.every((s) => looksLikeNameFragment(s) && s.length <= 60 && wordCount(s) <= 6)) {
+      return null;
+    }
+    return segments;
   }
-  return segments;
+  // Lenient: accept role-hint tails ("Name as <role>") even when the segment exceeds the
+  // strict word count, since the role suffix is stripped before display anyway.
+  const allowable = segments.every((s) => {
+    if (s.length > 100) return false;
+    if (/\bas\s+/i.test(s) && wordCount(s) <= 12) return true;
+    if (/\bindividually\s+and\s+as\s+/i.test(s) && wordCount(s) <= 14) return true;
+    return looksLikeNameFragment(s) && s.length <= 60 && wordCount(s) <= 6;
+  });
+  return allowable ? segments : null;
 }
 
 function tryCommaPairFirstLine(text: string): PartiesExtract | null {
@@ -222,16 +307,18 @@ function tryCommaPairFirstLine(text: string): PartiesExtract | null {
   if (/\bbetween\b/i.test(firstLineRaw)) return null;
 
   // Universal: strip parenthetical role hints "(landlord)" and "as <role>" clauses
-  // before splitting so role labels don't break the comma+and splitter.
+  // before splitting so role labels don't break the comma+and splitter. Capture roles
+  // from the original (pre-clean) tokens so display rendering can surface them.
   const firstLine = preCleanBetweenTailForMultiPartySplit(firstLineRaw);
-
-  // Multi-party "A, B, and C" / "A, B, C" — return ALL segments before falling back to 2-party split.
+  // Raw splitter recovers role hints; cleaned splitter provides canonical names.
+  const rawMulti = splitMultiPartyCommaListWithRoles(firstLineRaw);
   const multi = splitMultiPartyCommaList(firstLine);
   if (multi) {
-    const clamped = multi.map((s) => clampPartySegment(s)).filter((s) => s.length > 1);
+    const { parties: clamped, roleHints } = captureRoleHintsForCleanNames(multi, rawMulti);
     if (clamped.length >= 3) {
       return {
         parties: clamped,
+        roleHints,
         uncertain: false,
         structured: { party_1: clamped[0], party_2: clamped[1] },
       };
@@ -245,15 +332,18 @@ function tryCommaPairFirstLine(text: string): PartiesExtract | null {
   const rCut = rightRaw.search(/\b(?:for|whereas|effective|hereafter)\b|[.!?](?:\s|$)/i);
   if (rCut > 0) rightRaw = rightRaw.slice(0, rCut).trim();
   if (!looksLikeNameFragment(leftRaw) || !looksLikeNameFragment(rightRaw)) return null;
-  const a = clampPartySegment(leftRaw);
-  const b = clampPartySegment(rightRaw);
+  const { name: a, role: roleA } = clampPartySegmentWithRole(leftRaw);
+  const { name: b, role: roleB } = clampPartySegmentWithRole(rightRaw);
   if (a.length < 2 || b.length < 2) return null;
   const conf = confidenceBetweenPair(a, b);
   const structured: StructuredTwoParties = { party_1: a, party_2: b };
+  const roleHints: Record<string, string> = {};
+  if (roleA) roleHints[a.toLowerCase()] = roleA;
+  if (roleB) roleHints[b.toLowerCase()] = roleB;
   if (conf >= PARTY_CONFIDENCE_SHOW) {
-    return { parties: [a, b], uncertain: false, structured };
+    return { parties: [a, b], roleHints, uncertain: false, structured };
   }
-  return { parties: [], uncertain: true, structured: null };
+  return { parties: [], roleHints: {}, uncertain: true, structured: null };
 }
 
 /**
@@ -271,25 +361,23 @@ function sliceFirstPartyListSentenceFromBetweenTail(tail: string): string {
 function extractStructuredParties(text: string, lower: string): PartiesExtract {
   const betweenPair = extractBetweenPartyPair(text);
   if (betweenPair) {
-    // First, try to detect multi-party "between A, B, and C" / "between A, B, C, and D"
-    // by re-splitting the original "between" tail on comma+and. This rescues 3+ parties
-    // before the 2-party pair clamp drops anyone (regression spec §2).
     const betweenIdx = text.toLowerCase().indexOf("between ");
     if (betweenIdx >= 0) {
       const firstLine = (text.slice(betweenIdx + "between ".length).split(/\n/)[0] || "").trim();
-      // Labeled fields (Rent:, Property:, Term:, …) must win over sentence slicing — otherwise
-      // a period after "July 1, 2026" can clip the tail before "Rent:" and address commas leak
-      // into party segments ("Austin TX" as a fake party).
       const tailRaw = sliceFirstPartyListSentenceFromBetweenTail(truncatePartyClauseTailAtLabeledFields(firstLine));
-      // Universal: drop "(landlord)" / "(seller)" / ", as guarantor," role hints
-      // before splitting so they never absorb a comma boundary or party slot.
       const tail = preCleanBetweenTailForMultiPartySplit(tailRaw);
+      // Source list parallel to `multi` — used to recover role hints destroyed by pre-clean.
+      // Use the LENIENT splitter so role suffixes ("as escrow agent") survive on the raw list.
+      const rawMulti = splitMultiPartyCommaListWithRoles(tailRaw);
       const multi = splitMultiPartyCommaList(tail);
       if (multi) {
-        const clamped = multi.map((s) => clampPartySegment(s)).filter((s) => s.length > 1);
+        // Names always come from the cleaned splitter (so "with Jamie Chen" never leaks);
+        // role hints are recovered from the raw splitter when they line up.
+        const { parties: clamped, roleHints } = captureRoleHintsForCleanNames(multi, rawMulti);
         if (clamped.length >= 3) {
           return {
             parties: clamped,
+            roleHints,
             uncertain: false,
             structured: { party_1: clamped[0], party_2: clamped[1] },
           };
@@ -297,15 +385,26 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
       }
     }
 
-    const a = clampPartySegment(betweenPair.left);
-    const b = clampPartySegment(betweenPair.right);
+    // Apply pre-clean to the bilateral pair so trailing role/capacity tails ("Trustee of …")
+    // and parenthetical role hints don't leak into canonical names. The pre-clean is the same
+    // function used for multi-party splitting; the role suffix is captured separately.
+    const cleanedLeftRaw = preCleanBetweenTailForMultiPartySplit(betweenPair.left);
+    const cleanedRightRaw = preCleanBetweenTailForMultiPartySplit(betweenPair.right);
+    const { name: a } = clampPartySegmentWithRole(cleanedLeftRaw);
+    const { name: b } = clampPartySegmentWithRole(cleanedRightRaw);
+    // Recover roles from the original (un-cleaned) sides.
+    const { role: roleA } = clampPartySegmentWithRole(betweenPair.left);
+    const { role: roleB } = clampPartySegmentWithRole(betweenPair.right);
     if (a.length > 1 && b.length > 1) {
       const conf = confidenceBetweenPair(a, b);
       const structured: StructuredTwoParties = { party_1: a, party_2: b };
+      const roleHints: Record<string, string> = {};
+      if (roleA) roleHints[a.toLowerCase()] = roleA;
+      if (roleB) roleHints[b.toLowerCase()] = roleB;
       if (conf >= PARTY_CONFIDENCE_SHOW) {
-        return { parties: [a, b], uncertain: false, structured };
+        return { parties: [a, b], roleHints, uncertain: false, structured };
       }
-      return { parties: [], uncertain: true, structured: null };
+      return { parties: [], roleHints: {}, uncertain: true, structured: null };
     }
   }
 
@@ -313,9 +412,6 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
   if (partiesEq) {
     const rawBody = partiesEq[1].trim();
     if (rawBody.length > 200 || wordCount(rawBody) > 24) {
-      // Long wall-of-text paragraph — try a strict comma-only list of short segments
-      // before bailing. This preserves multi-party Parties: A, B, C, D lines without
-      // accepting prose blocks like "This agreement is entered into by ...".
       const strictCommaParts = rawBody
         .split(/\s*,\s*/)
         .map((x) => x.trim())
@@ -324,38 +420,40 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
         strictCommaParts.length >= 2 &&
         strictCommaParts.every((p) => p.length <= 60 && wordCount(p) <= 6 && looksLikeNameFragment(p));
       if (looksLikeListOfNames && rawBody.length <= 320) {
-        const allClamped = strictCommaParts.map((p) => clampPartySegment(p)).filter((s) => s.length > 1);
+        const { parties: allClamped, roleHints } = applyClampedSegments(strictCommaParts);
         if (allClamped.length >= 2) {
           return {
             parties: allClamped,
+            roleHints,
             uncertain: false,
             structured: { party_1: allClamped[0], party_2: allClamped[1] },
           };
         }
       }
-      return { parties: [], uncertain: true, structured: null };
+      return { parties: [], roleHints: {}, uncertain: true, structured: null };
     }
     const commaParts = rawBody.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean);
     if (commaParts.length >= 2) {
-      const allClamped = commaParts.map((p) => clampPartySegment(p)).filter((s) => s.length > 1);
+      const { parties: allClamped, roleHints } = applyClampedSegments(commaParts);
       if (allClamped.length >= 2) {
         return {
           parties: allClamped,
+          roleHints,
           uncertain: false,
           structured: { party_1: allClamped[0], party_2: allClamped[1] },
         };
       }
     }
-    // Try " A and B and C" / " A, B, and C" combined splits
     const andSplit = rawBody
       .split(/\s*,\s*|\s+and\s+/i)
       .map((x) => x.trim())
       .filter(Boolean);
     if (andSplit.length >= 2) {
-      const allClamped = andSplit.map((p) => clampPartySegment(p)).filter((s) => s.length > 1);
+      const { parties: allClamped, roleHints } = applyClampedSegments(andSplit);
       if (allClamped.length >= 2) {
         return {
           parties: allClamped,
+          roleHints,
           uncertain: false,
           structured: { party_1: allClamped[0], party_2: allClamped[1] },
         };
@@ -363,14 +461,22 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
     }
     const joined = formatPartiesJoinedLine(rawBody);
     const structured = splitTwoPartiesFromJoinedLine(joined);
-    if (structured && clampPartySegment(structured.party_1) && clampPartySegment(structured.party_2)) {
-      const a = clampPartySegment(structured.party_1);
-      const b = clampPartySegment(structured.party_2);
-      if (a.length > 1 && b.length > 1) {
-        return { parties: [a, b], uncertain: false, structured: { party_1: a, party_2: b } };
+    if (structured) {
+      const aRes = clampPartySegmentWithRole(structured.party_1);
+      const bRes = clampPartySegmentWithRole(structured.party_2);
+      if (aRes.name.length > 1 && bRes.name.length > 1) {
+        const roleHints: Record<string, string> = {};
+        if (aRes.role) roleHints[aRes.name.toLowerCase()] = aRes.role;
+        if (bRes.role) roleHints[bRes.name.toLowerCase()] = bRes.role;
+        return {
+          parties: [aRes.name, bRes.name],
+          roleHints,
+          uncertain: false,
+          structured: { party_1: aRes.name, party_2: bRes.name },
+        };
       }
     }
-    return { parties: [], uncertain: true, structured: null };
+    return { parties: [], roleHints: {}, uncertain: true, structured: null };
   }
 
   const commaPair = tryCommaPairFirstLine(text);
@@ -378,10 +484,11 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
 
   const signerRows = extractExplicitSignerNames(text);
   if (signerRows && signerRows.length >= 2) {
-    const allClamped = signerRows.map((n) => clampPartySegment(n)).filter((s) => s.length > 1);
+    const { parties: allClamped, roleHints } = applyClampedSegments(signerRows);
     if (allClamped.length >= 2) {
       return {
         parties: allClamped,
+        roleHints,
         uncertain: false,
         structured: { party_1: allClamped[0], party_2: allClamped[1] },
       };
@@ -389,10 +496,10 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
   }
 
   if (/\bI\s+will\b/i.test(text) && /\byou\b/i.test(lower)) {
-    return { parties: [], uncertain: true, structured: null };
+    return { parties: [], roleHints: {}, uncertain: true, structured: null };
   }
 
-  return { parties: [], uncertain: false, structured: null };
+  return { parties: [], roleHints: {}, uncertain: false, structured: null };
 }
 
 const FUZZY_SCOPE_PATTERNS: { re: RegExp; label: string }[] = [
@@ -888,6 +995,7 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
   if (!text) {
     return {
       parties: [],
+      partyRoleHints: {},
       scope: "",
       payment: "",
       term: "",
@@ -932,6 +1040,7 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
 
   return {
     parties: partyEx.parties,
+    partyRoleHints: partyEx.roleHints,
     scope: scopeNorm,
     payment: normalizeIntakeFieldText(payment),
     term: termNorm,

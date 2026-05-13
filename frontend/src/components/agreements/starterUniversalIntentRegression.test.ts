@@ -79,7 +79,7 @@ describe("Universal invariant 1+2: explicit document intent dominates entity-sha
     const intake =
       "Create a residential lease agreement between Sunset Holdings LLC, as landlord, and Alex Park and Jamie Chen as tenants for 123 Mockingbird Lane, Austin TX. Rent: $3,200/month. Term: 12 months starting July 1, 2026. Security deposit $3,200. Governing law: Texas.";
     const { draft, gated, partyNames } = runStarter(intake);
-    expect(draft.title).toMatch(/^lease\s+agreement$/i);
+    expect(draft.title).toMatch(/^residential\s+lease\s+agreement$/i);
     expect(gated).toBe(false);
     expectAllNamesPresent(partyNames, ["Sunset Holdings LLC", "Alex Park", "Jamie Chen"]);
     expect(partyNames.length).toBe(3);

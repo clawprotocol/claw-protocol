@@ -219,6 +219,8 @@ export function applyAgreementFamilyIntakeShell(
      * Jamie Chen as members, not generic placeholders).
      */
     if (inputParties.length < 2 && structured.parties.length >= 2) {
+      // For OA, the canonical role is "member"; structured role hints are display-only and
+      // don't override the OA-specific member role here.
       const fromStructured = structured.parties
         .map((n) => ({ name: cleanForCompanyTail(n).slice(0, MAX_PARTY_NAME_LEN), role: "member" as const }))
         .filter((p) => p.name.length > 1);
@@ -318,7 +320,10 @@ export function applyAgreementFamilyIntakeShell(
       if (explicitSigners && explicitSigners.length >= 2) {
         parties = explicitSigners;
       } else if (!structured.partiesUncertain && structured.parties.length >= 2) {
-        parties = structured.parties.map((n) => ({ name: n.slice(0, MAX_PARTY_NAME_LEN), role: "party" }));
+        parties = structured.parties.map((n) => {
+          const roleHint = structured.partyRoleHints[n.toLowerCase()] || "party";
+          return { name: n.slice(0, MAX_PARTY_NAME_LEN), role: roleHint };
+        });
       } else {
         const between = extractBetweenPartyPair(intakeText);
         if (between && between.left.trim().length > 1 && between.right.trim().length > 1) {
@@ -377,18 +382,18 @@ export function applyAgreementFamilyIntakeShell(
         !explicitSigners ||
         structured.parties.length >= (explicitSigners?.length ?? 0));
 
+    const fromStructuredWithRoles = (): { name: string; role: string }[] =>
+      structured.parties.map((n) => {
+        const roleHint = structured.partyRoleHints[n.toLowerCase()] || "party";
+        return { name: n.slice(0, MAX_PARTY_NAME_LEN), role: roleHint };
+      });
+
     if (preferStructured) {
-      next = {
-        ...next,
-        parties: structured.parties.map((n) => ({ name: n.slice(0, MAX_PARTY_NAME_LEN), role: "party" })),
-      };
+      next = { ...next, parties: fromStructuredWithRoles() };
     } else if (explicitSigners && explicitSigners.length >= 2) {
       next = { ...next, parties: explicitSigners };
     } else if (structuredOk) {
-      next = {
-        ...next,
-        parties: structured.parties.map((n) => ({ name: n.slice(0, MAX_PARTY_NAME_LEN), role: "party" })),
-      };
+      next = { ...next, parties: fromStructuredWithRoles() };
     } else {
       // Universal fallback: only adopt extractBetweenPartyPair output when each side looks
       // like a clean party fragment (≤6 words, no internal commas/semicolons). Otherwise
@@ -467,6 +472,50 @@ export function applyAgreementFamilyIntakeShell(
 }
 
 /**
+ * Universal cardinality guard (P0): if structured parsing yielded ≥3 parties, no later
+ * heuristic / fallback / sanitizer is allowed to reduce the count. Compare structured.parties
+ * against the current draft.parties and adopt structured when it is strictly larger AND
+ * each entry survives the per-name clamp.
+ *
+ * This runs as the FINAL step so any path that may have collapsed a 3-party list (between/and
+ * 2-party fallback, signer-row dedupe, generic Party A/B placeholder rescue, etc.) is undone.
+ */
+export function preserveLargestPartyListFromIntake(
+  draft: ParsedDraftShape,
+  intakeText: string,
+): ParsedDraftShape {
+  const structured = parseIntakeToStructuredAgreement(intakeText);
+  if (structured.partiesUncertain) return draft;
+  const structuredNames = structured.parties.map((n) => (n || "").trim()).filter((n) => n.length > 1);
+  if (structuredNames.length < 3) return draft;
+
+  const currentNames = (draft.parties || [])
+    .map((p) => (p?.name || "").trim())
+    .filter((n) => n.length > 0);
+  if (currentNames.length >= structuredNames.length) return draft;
+
+  // Treat generic Party A/B placeholders as "absent" — they should always lose to a
+  // structured 3+ list even when the count happens to match.
+  const allGeneric = currentNames.length > 0 && currentNames.every((n) => /^party\s*[a-z]?$/i.test(n));
+  if (currentNames.length >= structuredNames.length && !allGeneric) return draft;
+
+  // Preserve role metadata when the existing draft party name appears within structured;
+  // otherwise default to "party" so downstream rendering treats the recovered entry as generic.
+  const byName = new Map<string, { name: string; role: string; email?: string }>();
+  for (const p of draft.parties || []) {
+    const k = (p.name || "").trim().toLowerCase();
+    if (k) byName.set(k, p);
+  }
+  const merged = structuredNames.map((n) => {
+    const k = n.toLowerCase();
+    const prior = byName.get(k);
+    if (prior) return prior;
+    return { name: n.slice(0, MAX_PARTY_NAME_LEN), role: "party" };
+  });
+  return { ...draft, parties: merged };
+}
+
+/**
  * Single entry: attach `agreement_family`, optional `[agreement-family-route]` log,
  * then either bilateral service smart defaults or family shell + party overlay.
  */
@@ -496,5 +545,8 @@ export function runIntakeDefaultsAndRoles(
   if (restoredFields.length > 0) {
     console.debug("[draft-fact-preservation]", { restoredFields });
   }
-  return applyIntakePartyRoleOverlay(next, roles);
+  next = applyIntakePartyRoleOverlay(next, roles);
+  // Final P0 cardinality guard — runs AFTER role overlay so any path that downsized a 3+
+  // structured list is restored.
+  return preserveLargestPartyListFromIntake(next, rawIntake);
 }

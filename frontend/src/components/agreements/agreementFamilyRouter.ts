@@ -109,6 +109,49 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     return "confidentiality_commercial_protections_agreement";
   }
 
+  /**
+   * Explicit non-service intent (P1 universal hardening): when intake plainly says
+   * "lease agreement" / "purchase agreement" / "property management agreement" /
+   * "co-ownership agreement" / "employment agreement" / "license agreement" /
+   * "partnership agreement" / "distribution agreement" / "joint venture agreement",
+   * route to the catch-all generic family so {@link explicitIntentCanonicalTitle}
+   * can render the canonical heading. This must beat incidental "advisor"/"services"
+   * tokens that show up only inside party names like "Beta Advisors".
+   */
+  const explicitNonServiceIntent =
+    /\b(?:residential|commercial)?\s*lease\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bsublease\s+(?:agreement|contract)\b/i.test(low) ||
+    /\b(?:real\s+estate\s+)?purchase\s+(?:and\s+sale\s+)?(?:agreement|contract)\b/i.test(low) ||
+    /\bproperty\s+management\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bco[-\s]?ownership\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bemployment\s+(?:agreement|contract)\b/i.test(low) ||
+    /\blicense\s+agreement\b/i.test(low) ||
+    /\bdistribution\s+agreement\b/i.test(low) ||
+    /\bpartnership\s+agreement\b/i.test(low) ||
+    /\bjoint\s+venture\s+agreement\b/i.test(low) ||
+    /\bequipment\s+(?:rental|lease)\s+agreement\b/i.test(low);
+  if (explicitNonServiceIntent) {
+    return "generic_business_agreement";
+  }
+
+  /**
+   * Explicit "<type> Agreement" titles dominate role-token noise inside party names.
+   * E.g. "Services agreement between Beta Advisors LLC, …" must route to services,
+   * not consulting, even though "Advisors" appears in a party name.
+   */
+  if (/\bservices?\s+(?:agreement|contract)\b/i.test(low)) {
+    return "services_agreement";
+  }
+  if (/\bconsulting\s+(?:agreement|contract)\b/i.test(low)) {
+    return "consulting_agreement";
+  }
+  if (/\b(?:advisor(?:y|s)?\s+(?:agreement|contract)|board\s+advisor)\b/i.test(low)) {
+    return "consulting_agreement";
+  }
+  if (/\bindependent\s+contractor\s+(?:agreement|contract)\b/i.test(low) || /\b1099\s+(?:agreement|contract)\b/i.test(low)) {
+    return "independent_contractor_agreement";
+  }
+
   if (
     commercialSignals.contractorLike &&
     (commercialSignals.servicesLike || commercialSignals.commission || /\b(statement\s+of\s+work|sow)\b/i.test(low))

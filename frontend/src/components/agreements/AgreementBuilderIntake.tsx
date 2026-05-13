@@ -196,6 +196,11 @@ import {
   STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME,
 } from "./starterReviewPremiumUpsellCopy";
 import {
+  STARTER_PARTY_CAUTION_NOTICE,
+  STARTER_PARTY_PRO_REQUIRED_NOTICE,
+  resolveStarterPartyCountGuard,
+} from "./starterPartyLimits";
+import {
   draftHasPlaceholderFieldsForRecipients,
   draftHasPlaceholderParties,
   draftPartyPlaceholdersOkViaLivePreview,
@@ -7863,9 +7868,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [intakeCombined, agreementDocumentText],
   );
 
+  /**
+   * Universal multi-party party-count guard for the starter / free flow.
+   *   • 1–6 real parties  → no notice, no block (status: "normal")
+   *   • 7–12 real parties → caution notice, no block (status: "caution")
+   *   • 13+ real parties  → Pro is required before send (status: "requires_pro")
+   *
+   * Computed AFTER `runIntakeDefaultsAndRoles` + `preserveLargestPartyListFromIntake`
+   * have run and the canonicalized draft is in React state. The guard is read-only —
+   * it never mutates or truncates `draft.parties`.
+   *
+   * For the `requires_pro` state we route the primary CTA to the SAME existing Pro
+   * upgrade entry point (`launchUpgradeCheckoutFromStarterDraft` →
+   * `beginAdvancedFullDraftCheckout` → `/app/checkout/...`) by forcing
+   * `showUpgradeToFullDraftOnReview` to true below.
+   */
+  const starterPartyCountGuard = useMemo(
+    () => resolveStarterPartyCountGuard(draft?.parties ?? null),
+    [draft?.parties],
+  );
+
+  const starterPartyCountRequiresPro = Boolean(
+    starterPartyCountGuard.requiresProUpgrade &&
+      !premiumPersistedFlowActive &&
+      !premiumSendPathUnlocked,
+  );
+
   const showUpgradeToFullDraftOnReview = useMemo(() => {
     if (suppressIntakePremiumUpsell) return false;
     if (premiumPersistedFlowActive || premiumSendPathUnlocked) return false;
+    // Universal P0 starter party-count gate: 13+ parties always force the Pro upgrade CTA
+    // on the review surface so free continuation never proceeds. We do NOT mutate the
+    // party list — the gate is purely UX / routing.
+    if (
+      starterPartyCountRequiresPro &&
+      createUiStage === CreateUiStage.DRAFT &&
+      draft &&
+      displayPhase !== "followup_required"
+    ) {
+      return true;
+    }
     if (upgradeLockActive && createUiStage === CreateUiStage.DRAFT && draft) {
       if (displayPhase === "followup_required") return false;
       return true;
@@ -7887,6 +7929,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPersistedFlowActive,
     premiumSendPathUnlocked,
     suppressIntakePremiumUpsell,
+    starterPartyCountRequiresPro,
   ]);
 
   /** Stable Pro entitlement for this agreement (tier, session flags, snapshot, authoritative premium body). */
@@ -14945,6 +14988,43 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     <p className="mb-2 text-center text-[11px] font-medium leading-snug text-slate-400 sm:text-xs">
                       {NOTHING_SENT_UNTIL_CONFIRM}
                     </p>
+                  ) : null}
+                  {/*
+                    Starter party-count guardrail (universal):
+                      • caution      → 7–12 real parties; keep free flow but recommend a careful review.
+                      • requires_pro → 13+ real parties; primary CTA is forced to the existing Pro upgrade
+                                       path elsewhere in this component. No party data is truncated.
+                  */}
+                  {createUiStage === CreateUiStage.DRAFT &&
+                  !premiumPersistedFlowActive &&
+                  !premiumSendPathUnlocked &&
+                  starterPartyCountGuard.status !== "normal" ? (
+                    <div
+                      data-testid={
+                        starterPartyCountGuard.status === "requires_pro"
+                          ? "starter-party-count-pro-required"
+                          : "starter-party-count-caution"
+                      }
+                      className={
+                        starterPartyCountGuard.status === "requires_pro"
+                          ? "mb-3 rounded-lg border border-amber-400/55 bg-amber-500/15 px-3 py-2.5 text-center sm:px-4"
+                          : "mb-3 rounded-lg border border-slate-500/55 bg-slate-800/60 px-3 py-2.5 text-center sm:px-4"
+                      }
+                      role={starterPartyCountGuard.status === "requires_pro" ? "alert" : "status"}
+                      aria-live="polite"
+                    >
+                      <p
+                        className={
+                          starterPartyCountGuard.status === "requires_pro"
+                            ? "text-sm font-semibold leading-relaxed text-amber-50 sm:text-[0.9375rem]"
+                            : "text-sm leading-relaxed text-slate-100 sm:text-[0.9375rem]"
+                        }
+                      >
+                        {starterPartyCountGuard.status === "requires_pro"
+                          ? STARTER_PARTY_PRO_REQUIRED_NOTICE
+                          : STARTER_PARTY_CAUTION_NOTICE}
+                      </p>
+                    </div>
                   ) : null}
                   {showUpgradeIntakeFullDraftCallout &&
                   createProductionTwoPane &&

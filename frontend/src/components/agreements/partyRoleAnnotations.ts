@@ -164,5 +164,8 @@ export function preCleanBetweenTailForMultiPartySplit(tail: string): string {
 
   // Collapse double spaces / dangling commas.
   s = s.replace(/\s{2,}/g, " ").replace(/\s+,/g, ",").replace(/,\s*,/g, ",").trim();
+  // Strip trailing punctuation that role/parenthetical removal may have left dangling
+  // ("John Smith," → "John Smith"). Preserve a trailing entity suffix dot ("Inc.", "Co.").
+  s = s.replace(/[,;:]+$/g, "").trim();
   return s;
 }

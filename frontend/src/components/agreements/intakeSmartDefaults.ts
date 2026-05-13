@@ -116,10 +116,15 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
       next.parties = explicitSigners;
     } else if (!structured.partiesUncertain && structured.parties.length >= 2) {
       // Honor the multi-party output of the structured extractor (Parties: A, B, C, D).
-      next.parties = structured.parties.map((name) => ({
-        name: name.slice(0, MAX_PARTY_NAME_LEN),
-        role: "party" as const,
-      }));
+      // Apply per-name role hints (P2): "Jamie Chen as guarantor" → role "guarantor",
+      // canonical name stays "Jamie Chen".
+      next.parties = structured.parties.map((name) => {
+        const roleHint = structured.partyRoleHints[name.toLowerCase()] || "party";
+        return {
+          name: name.slice(0, MAX_PARTY_NAME_LEN),
+          role: roleHint,
+        };
+      });
     } else {
       const fromBetween = extractBetweenPartyPair(intakeText);
       const fromLive =

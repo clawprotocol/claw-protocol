@@ -71,7 +71,18 @@ export function inferRelationshipOptionOrder(corpus: string): Array<"services" |
 }
 
 /**
- * Maps optional UI labels onto API draft parties. When unset, both sides use generic `party`.
+ * Substantive roles already captured from intake (P2 — guarantor, escrow agent, trustee,
+ * landlord, seller, etc.) MUST survive an "unset" overlay. The overlay only stomps roles
+ * the user explicitly chose via the relationship picker.
+ */
+const GENERIC_OR_EMPTY_ROLE = (role: string | undefined): boolean => {
+  const r = (role || "").trim().toLowerCase();
+  return !r || r === "party" || r === "parties" || r === "signer" || r === "signatory";
+};
+
+/**
+ * Maps optional UI labels onto API draft parties. When unset, both sides use generic `party`
+ * UNLESS a substantive role was already captured from the intake itself (preserved verbatim).
  * Preserves all parties (2+), applying role labels to the first two.
  */
 export function applyIntakePartyRoleOverlay(parsed: ParsedDraftShape, roles: IntakePartyRoleLabels): ParsedDraftShape {
@@ -82,9 +93,9 @@ export function applyIntakePartyRoleOverlay(parsed: ParsedDraftShape, roles: Int
     return {
       ...parsed,
       parties: [
-        { ...p0, role: "party" },
-        { ...p1, role: "party" },
-        ...rest.map((p) => ({ ...p, role: p.role || "party" })),
+        { ...p0, role: GENERIC_OR_EMPTY_ROLE(p0.role) ? "party" : p0.role },
+        { ...p1, role: GENERIC_OR_EMPTY_ROLE(p1.role) ? "party" : p1.role },
+        ...rest.map((p) => ({ ...p, role: GENERIC_OR_EMPTY_ROLE(p.role) ? "party" : p.role })),
       ],
     };
   }

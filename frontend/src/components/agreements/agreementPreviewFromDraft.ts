@@ -94,34 +94,150 @@ function formatScheduleFragment(raw: string): string {
   return t;
 }
 
+/**
+ * Family-aware labels for the Term/Effective-Date section (P3 hardening). Purchase
+ * agreements never read "Term: until 2026-08-15" — they read "Closing Date: …". Leases
+ * use "Lease Term" + "Commencement Date". NDAs use "Confidentiality Term". Consulting/
+ * services agreements use "Services Term". Generic fallback is the legacy "Term".
+ */
+function timingLabelsForFamily(
+  family: string | undefined | null,
+  title: string | undefined | null,
+): { sectionHeading: string; durationLabel: string; effectiveLabel: string; keyDateLabel: string } {
+  const fam = (family || "").toLowerCase();
+  const t = (title || "").toLowerCase();
+  const isPurchase =
+    fam === "generic_business_agreement" &&
+    (/\bpurchase\s+agreement\b/.test(t) || /\breal\s+estate\s+purchase\s+agreement\b/.test(t));
+  const isLease =
+    fam === "generic_business_agreement" &&
+    (/\blease\s+agreement\b/.test(t) || /\bsublease\s+agreement\b/.test(t));
+  const isPropertyMgmt = fam === "generic_business_agreement" && /\bproperty\s+management\s+agreement\b/.test(t);
+  if (isPurchase) {
+    return {
+      sectionHeading: "Closing and Effective Date",
+      durationLabel: "Closing window",
+      effectiveLabel: "Effective Date",
+      keyDateLabel: "Closing Date",
+    };
+  }
+  if (isLease) {
+    return {
+      sectionHeading: "Lease Term and Commencement",
+      durationLabel: "Lease Term",
+      effectiveLabel: "Commencement Date",
+      keyDateLabel: "Key Date",
+    };
+  }
+  if (isPropertyMgmt) {
+    return {
+      sectionHeading: "Term and Commencement",
+      durationLabel: "Management Term",
+      effectiveLabel: "Commencement Date",
+      keyDateLabel: "Key Date",
+    };
+  }
+  if (fam === "nda" || fam === "confidentiality_commercial_protections_agreement") {
+    return {
+      sectionHeading: "Confidentiality Term and Effective Date",
+      durationLabel: "Confidentiality Term",
+      effectiveLabel: "Effective Date",
+      keyDateLabel: "Key Date",
+    };
+  }
+  if (fam === "consulting_agreement" || fam === "services_agreement" || fam === "independent_contractor_agreement") {
+    return {
+      sectionHeading: "Services Term and Effective Date",
+      durationLabel: "Services Term",
+      effectiveLabel: "Effective Date",
+      keyDateLabel: "Key Date",
+    };
+  }
+  return {
+    sectionHeading: "Term and Effective Date",
+    durationLabel: "Term",
+    effectiveLabel: "Effective Date",
+    keyDateLabel: "Key date",
+  };
+}
+
 function buildTermAndScheduleSection(draft: ParsedDraftShape): string {
+  const labels = timingLabelsForFamily(draft.agreement_family, draft.title);
   const parts: string[] = [];
   const dur = (draft.duration || "").trim();
   const eff = (draft.effective_date || "").trim();
   const due = (draft.due_date || "").trim();
-  if (dur) parts.push(`Term: ${dur}`);
-  if (eff) parts.push(`Effective Date: ${formatScheduleFragment(eff)}`);
-  if (due) parts.push(`Key date: ${formatScheduleFragment(due)}`);
+  if (dur) parts.push(`${labels.durationLabel}: ${dur}`);
+  if (eff) parts.push(`${labels.effectiveLabel}: ${formatScheduleFragment(eff)}`);
+  if (due) parts.push(`${labels.keyDateLabel}: ${formatScheduleFragment(due)}`);
   if (!parts.length) return MISSING;
   return parts.join("\n");
 }
 
 /**
+ * Family-aware section heading for the Term/Effective-Date block. Used by the
+ * starter / generic / premium routes to pick "Closing and Effective Date" vs
+ * "Lease Term and Commencement" vs the legacy "Term and Effective Date" heading.
+ */
+function termAndScheduleSectionHeading(draft: ParsedDraftShape): string {
+  return timingLabelsForFamily(draft.agreement_family, draft.title).sectionHeading;
+}
+
+/**
  * Roles are only included in the rendered preamble when role confidence is high.
  * Confidence model: a role is "high" if it's a substantive non-generic value AND
- * was either explicitly applied via party-role overlay or carried through from
- * canonical entity types ("company"/"members"). For starter previews we always
- * suppress inferred role labels so the prose renders neutrally as the "Parties"
- * collective — preventing speculative "(Developers)"/"(Clients)" markup when
- * the intake didn't actually establish a role taxonomy.
+ * was either explicitly applied via party-role overlay, carried through from
+ * canonical entity types ("company"/"members"), or captured directly from the
+ * intake as a structural party-role (guarantor, escrow agent, trustee, etc.).
+ *
+ * Starter preview (P2 hardening): when a party has a high-confidence intake-captured
+ * role token like "guarantor", we render it parenthetically — `Jamie Chen (Guarantor)` —
+ * but never invent speculative roles. Generic / "party" roles continue to render via
+ * the neutral collective Parties phrasing.
  */
 const HIGH_CONFIDENCE_ROLES = new Set(["company", "members"]);
 const GENERIC_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
 
+/**
+ * Roles captured directly from intake phrasing that are safe to display in starter preview
+ * preambles. These are concrete, structurally meaningful roles (not generic placeholder
+ * words). When set, the preamble renders e.g. `First County Escrow (Escrow Agent)`.
+ */
+const STARTER_DISPLAY_ROLE_TOKENS = new Set([
+  "guarantor",
+  "escrow agent",
+  "escrow",
+  "title agent",
+  "trustee",
+  "landlord",
+  "lessor",
+  "tenant",
+  "lessee",
+  "seller",
+  "buyer",
+  "purchaser",
+  "co-tenant",
+  "co-signer",
+  "advisor",
+  "investor",
+  "owner",
+  "manager",
+  "licensor",
+  "licensee",
+  "witness",
+  "notary",
+  "notary public",
+  "broker",
+]);
+
 function partyEntryWithRoleConfidence(p: { name: string; role?: string }, starterPreview: boolean): PartyEntry {
   const role = (p.role || "").trim().toLowerCase();
   if (starterPreview) {
-    // Starter preview: drop ALL inferred role labels — render as generic "Parties".
+    // Substantive intake-captured roles render parenthetically; everything else collapses
+    // to neutral "party" so the prose stays the collective "Parties".
+    if (role && STARTER_DISPLAY_ROLE_TOKENS.has(role)) {
+      return { name: p.name, role: p.role };
+    }
     return { name: p.name, role: "party" };
   }
   if (!role || GENERIC_ROLE.has(role)) {
@@ -130,7 +246,7 @@ function partyEntryWithRoleConfidence(p: { name: string; role?: string }, starte
   if (HIGH_CONFIDENCE_ROLES.has(role)) {
     return { name: p.name, role: p.role };
   }
-  // Non-generic, non-canonical role: keep (user-supplied via overlay).
+  // Non-generic, non-canonical role: keep (user-supplied via overlay or intake-captured).
   return { name: p.name, role: p.role };
 }
 
@@ -385,7 +501,7 @@ export function buildAgreementPreviewTextCore(
     premiumSectionHeading(2, "Payment Terms", premiumDeliverable),
     airLongPaymentTerms(pay, premiumDeliverable),
     "",
-    premiumSectionHeading(3, "Term and Effective Date", premiumDeliverable),
+    premiumSectionHeading(3, termAndScheduleSectionHeading(draft), premiumDeliverable),
     termSection,
     "",
     premiumSectionHeading(4, "Governing Law", premiumDeliverable),
