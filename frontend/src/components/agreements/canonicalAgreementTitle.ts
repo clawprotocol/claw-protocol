@@ -88,16 +88,66 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   if (/\bproperty\s+management\s+(?:agreement|contract)\b/.test(low)) return "Property Management Agreement";
   if (/\blicense\s+agreement\b/.test(low)) return "License Agreement";
   if (/\bdistribution\s+agreement\b/.test(low)) return "Distribution Agreement";
+
+  // Event-family explicit intents (post-hardening polish #3). Order: most specific first
+  // so "commercial event production agreement" beats plain "event production agreement".
+  if (/\bcommercial\s+event\s+production\s+(?:agreement|contract)\b/.test(low)) return "Commercial Event Production Agreement";
+  if (/\bevent\s+production\s+(?:agreement|contract)\b/.test(low)) return "Event Production Agreement";
+  if (/\bevent\s+services?\s+(?:agreement|contract)\b/.test(low)) return "Event Services Agreement";
+  if (/\bconference\s+services?\s+(?:agreement|contract)\b/.test(low)) return "Conference Services Agreement";
+  if (/\bvenue\s+(?:agreement|contract)\b/.test(low)) return "Venue Agreement";
+  if (/\bsponsorship\s+(?:agreement|contract)\b/.test(low)) return "Sponsorship Agreement";
+  if (/\bvendor\s+coordination\s+(?:agreement|contract)\b/.test(low)) return "Vendor Coordination Agreement";
+  // "Staffing agreement" only counts as event when the intake also has clear event/conference
+  // /venue/production context — never for plain employment-staffing.
+  if (
+    /\bstaffing\s+(?:agreement|contract)\b/.test(low) &&
+    /\b(?:event|events|conference|venue|production|festival|tour)\b/.test(low)
+  ) {
+    return "Event Staffing Agreement";
+  }
+
+  // Strategic-partnership / collaboration explicit intents (post-hardening polish #2).
+  // Note: ordinary "partner" wording must NOT route here — these patterns require the
+  // explicit "<phrase> agreement" anchor.
+  if (/\bstrategic\s+partnership\s+(?:agreement|contract)\b/.test(low)) return "Strategic Partnership Agreement";
+  if (/\bmulti[-\s]?party\s+partnership\s+(?:agreement|contract)\b/.test(low)) return "Multi-Party Partnership Agreement";
+  if (/\bjoint\s+collaboration\s+(?:agreement|contract)\b/.test(low)) return "Joint Collaboration Agreement";
+  if (/\bcommercial\s+collaboration\s+(?:agreement|contract)\b/.test(low)) return "Commercial Collaboration Agreement";
+  if (/\bproject\s+collaboration\s+(?:agreement|contract)\b/.test(low)) return "Project Collaboration Agreement";
+  if (/\bcollaboration\s+(?:agreement|contract)\b/.test(low)) return "Collaboration Agreement";
+  if (/\bco[-\s]?development\s+(?:agreement|contract)\b/.test(low)) return "Co-Development Agreement";
   if (/\bpartnership\s+agreement\b/.test(low)) return "Partnership Agreement";
   if (/\bjoint\s+venture\s+agreement\b/.test(low)) return "Joint Venture Agreement";
   if (/\bequipment\s+(?:rental|lease)\s+agreement\b/.test(low)) return "Equipment Lease Agreement";
   if (/\bemployment\s+(?:agreement|contract)\b/.test(low)) return "Employment Agreement";
   if (/\bindependent\s+contractor\s+(?:agreement|contract)\b/.test(low)) return "Independent Contractor Agreement";
-  // Software / web / mobile / app development — all collapse to "Web Development Agreement"
-  // when the intake says "web …", and to "Software Development Agreement" otherwise.
+
+  // Software / tech / integration / implementation explicit intents (post-hardening polish #1).
+  // Layered most-specific first so "software integration and deployment agreement" yields
+  // "Software Integration Agreement", "saas implementation agreement" yields "SaaS
+  // Implementation Agreement", etc. Ordering also guarantees these dominate the consulting
+  // fallback when an intake mentions a "Consulting" entity name in the party list.
+  if (/\bsoftware\s+integration(?:\s+(?:and|&)\s+(?:deployment|implementation|migration|support))*\s+(?:agreement|contract)\b/.test(low)) {
+    return "Software Integration Agreement";
+  }
+  if (/\bsoftware\s+deployment(?:\s+(?:and|&)\s+(?:integration|implementation|migration|support))*\s+(?:agreement|contract)\b/.test(low)) {
+    return "Software Deployment Agreement";
+  }
+  if (/\bsoftware\s+implementation(?:\s+(?:and|&)\s+(?:integration|deployment|migration|support))*\s+(?:agreement|contract)\b/.test(low)) {
+    return "Software Implementation Agreement";
+  }
+  if (/\bsoftware\s+services?\s+(?:agreement|contract)\b/.test(low)) return "Software Services Agreement";
   if (/\bweb\s+development\s+(?:agreement|contract)\b/.test(low)) return "Web Development Agreement";
   if (/\b(?:mobile|app)\s+development\s+(?:agreement|contract)\b/.test(low)) return "Mobile Development Agreement";
   if (/\bsoftware\s+development\s+(?:agreement|contract)\b/.test(low)) return "Software Development Agreement";
+  if (/\bsaas\s+implementation\s+(?:agreement|contract)\b/.test(low)) return "SaaS Implementation Agreement";
+  if (/\bsaas\s+services?\s+(?:agreement|contract)\b/.test(low)) return "SaaS Services Agreement";
+  if (/\bapi\s+integration\s+(?:agreement|contract)\b/.test(low)) return "API Integration Agreement";
+  if (/\bcloud\s+migration\s+(?:agreement|contract)\b/.test(low)) return "Cloud Migration Agreement";
+  if (/\btechnology\s+services?\s+(?:agreement|contract)\b/.test(low)) return "Technology Services Agreement";
+  if (/\bimplementation\s+(?:agreement|contract)\b/.test(low)) return "Implementation Agreement";
+  if (/\bsupport\s+services\s+(?:agreement|contract)\b/.test(low)) return "Support Services Agreement";
   if (/\bdevelopment\s+(?:agreement|contract)\b/.test(low)) return "Development Agreement";
   if (/\b(?:mutual\s+)?(?:nda|non[-\s]?disclosure)\s+(?:agreement|contract)\b/.test(low)) {
     return /\bmutual\b/.test(low) ? "Mutual Non-Disclosure Agreement" : "Non-Disclosure Agreement";
@@ -186,11 +236,19 @@ export function resolveCanonicalAgreementTitle(opts: {
   ) {
     const intentTitle = explicitIntentCanonicalTitle(intake);
     if (intentTitle) {
+      // "Replaceable canonical" titles: titles that are the family default placeholder
+      // (or a near-default like generic "Development Agreement" / "Partnership Agreement")
+      // and should be upgraded when a more specific explicit-intent phrase is present in
+      // the raw intake. We never overwrite a substantive custom title (e.g. an upstream
+      // "Apollo Strategic Partnership Agreement 2026") set by the parser.
       const replaceableCanonical =
         /^business\s+agreement$/i.test(current) ||
         /^consulting\s+agreement$/i.test(current) ||
         /^services\s+agreement$/i.test(current) ||
-        /^independent\s+contractor\s+agreement$/i.test(current);
+        /^independent\s+contractor\s+agreement$/i.test(current) ||
+        /^development\s+agreement$/i.test(current) ||
+        /^partnership\s+agreement$/i.test(current) ||
+        /^collaboration\s+agreement$/i.test(current);
       if (!current || isGenericOrEmptyTitle(current, opts.family) || replaceableCanonical) {
         return { title: intentTitle, source: "explicit-intent" };
       }

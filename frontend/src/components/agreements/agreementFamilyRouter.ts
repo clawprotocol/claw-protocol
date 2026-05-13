@@ -135,6 +135,65 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
   }
 
   /**
+   * Event-family explicit titles (post-hardening polish #3): explicit "event production
+   * agreement" / "venue agreement" / "sponsorship agreement" etc. route to the catch-all
+   * generic family so the canonical title resolver can render the right heading. Plain
+   * "staffing agreement" requires concrete event/conference/venue/production context to
+   * count — ordinary employment-staffing agreements continue down the services path.
+   */
+  const explicitEventIntent =
+    /\b(?:commercial\s+)?event\s+production\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bevent\s+services?\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bvenue\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bsponsorship\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bvendor\s+coordination\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bconference\s+services?\s+(?:agreement|contract)\b/i.test(low) ||
+    (/\bstaffing\s+(?:agreement|contract)\b/i.test(low) &&
+      /\b(?:event|events|conference|venue|production|festival|tour)\b/i.test(low));
+  if (explicitEventIntent) {
+    return "generic_business_agreement";
+  }
+
+  /**
+   * Strategic-partnership / collaboration explicit titles (post-hardening polish #2). These
+   * are co-arrangement intents and should NOT route into the bilateral consulting/services
+   * shells (which expect a 2-party fee-for-services structure). The catch-all generic family
+   * preserves multi-party structures and lets the canonical title resolver render the
+   * specific title. NB: ordinary "partner" wording on its own does NOT match here — the
+   * "<phrase> agreement" anchor is required to avoid LLC/operating-agreement confusion.
+   */
+  const explicitCollaborationIntent =
+    /\bstrategic\s+partnership\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bmulti[-\s]?party\s+partnership\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bjoint\s+collaboration\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bcommercial\s+collaboration\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bproject\s+collaboration\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bcollaboration\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bco[-\s]?development\s+(?:agreement|contract)\b/i.test(low);
+  if (explicitCollaborationIntent) {
+    return "generic_business_agreement";
+  }
+
+  /**
+   * Software / tech / integration / implementation explicit titles (post-hardening polish #1).
+   * Routes to `services_agreement` so existing services smart defaults still apply, but more
+   * importantly so the canonical title resolver picks the precise heading instead of falling
+   * back to "Consulting Agreement" when a party name happens to contain the word "Consulting".
+   */
+  const explicitTechServicesIntent =
+    /\bsoftware\s+(?:integration|deployment|implementation)(?:\s+(?:and|&)\s+(?:integration|deployment|implementation|migration|support))*\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bsoftware\s+services?\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bsaas\s+(?:implementation|services?)\s+(?:agreement|contract)\b/i.test(low) ||
+    /\btechnology\s+services?\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bapi\s+integration\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bcloud\s+migration\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bimplementation\s+(?:agreement|contract)\b/i.test(low) ||
+    /\bsupport\s+services\s+(?:agreement|contract)\b/i.test(low);
+  if (explicitTechServicesIntent) {
+    return "services_agreement";
+  }
+
+  /**
    * Explicit "<type> Agreement" titles dominate role-token noise inside party names.
    * E.g. "Services agreement between Beta Advisors LLC, …" must route to services,
    * not consulting, even though "Advisors" appears in a party name.

@@ -148,6 +148,57 @@ export function extractFormationJurisdictionHint(raw: string): string | null {
   return null;
 }
 
+/**
+ * Extracts an explicit "event dates …" range from raw intake — used by the generic family
+ * shell to populate `draft.duration` for event-production / event-services agreements.
+ *
+ * Supports same-month ranges ("September 12–15, 2026", "September 12-15, 2026") and
+ * cross-month ranges ("August 30 – September 2, 2026", "August 30 to September 2, 2026").
+ * Returns the canonical normalized range string, or null when no clean signal is present.
+ *
+ * Universal invariant: this helper never inspects `draft.duration` — it only reads raw
+ * intake. Existing duration extraction (e.g. "9 months beginning July 1, 2026") is left
+ * untouched for non-event agreements.
+ */
+export function extractEventDateRangeFromIntake(rawIntake: string | null | undefined): string | null {
+  const t = (rawIntake || "").replace(/\s+/g, " ").trim();
+  if (!t) return null;
+  const sameMonth = t.match(
+    /\bevent\s+dates?\b\s*[:\-]?\s*([A-Za-z]+)\s+(\d{1,2})\s*(?:[-–]|to|through)\s*(\d{1,2})(?:\s*,\s*(\d{4}))?\b/i,
+  );
+  if (sameMonth) {
+    const [, month, d1, d2, year] = sameMonth;
+    return year ? `${month} ${d1}–${d2}, ${year}` : `${month} ${d1}–${d2}`;
+  }
+  const crossMonth = t.match(
+    /\bevent\s+dates?\b\s*[:\-]?\s*([A-Za-z]+)\s+(\d{1,2})\s*(?:[-–]|to|through)\s*([A-Za-z]+)\s+(\d{1,2})(?:\s*,\s*(\d{4}))?\b/i,
+  );
+  if (crossMonth) {
+    const [, m1, d1, m2, d2, year] = crossMonth;
+    return year ? `${m1} ${d1} – ${m2} ${d2}, ${year}` : `${m1} ${d1} – ${m2} ${d2}`;
+  }
+  return null;
+}
+
+/**
+ * Detects an event-family canonical title from the resolved draft heading. Used to gate
+ * `extractEventDateRangeFromIntake` — we only override `draft.duration` when the user
+ * actually asked for an event-style agreement.
+ */
+function isEventFamilyTitle(title: string | null | undefined): boolean {
+  const t = (title || "").toLowerCase();
+  if (!t) return false;
+  return (
+    /\bevent\s+production\s+agreement\b/.test(t) ||
+    /\bevent\s+services\s+agreement\b/.test(t) ||
+    /\bevent\s+staffing\s+agreement\b/.test(t) ||
+    /\bconference\s+services\s+agreement\b/.test(t) ||
+    /\bvenue\s+agreement\b/.test(t) ||
+    /\bsponsorship\s+agreement\b/.test(t) ||
+    /\bvendor\s+coordination\s+agreement\b/.test(t)
+  );
+}
+
 function defaultPartiesForOperating(company: string | null): { name: string; role: string }[] {
   const c = (company || "").trim() || "The limited liability company";
   return [
@@ -458,6 +509,23 @@ export function applyAgreementFamilyIntakeShell(
       ...next,
       duration: nz(structured.term) || nz(live.termLine) || "As stated in the agreement.",
     };
+  }
+  /**
+   * Event-family timing override: when the resolved title is an event-production /
+   * event-services / venue / sponsorship / etc. agreement AND the intake explicitly
+   * supplied an "event dates …" range, replace `draft.duration` with the canonical range.
+   * The generic date-range extractor in {@link parseIntakeToStructuredAgreement} can lose
+   * the year and end-day for hyphenated month-day ranges; this override surfaces the full
+   * range so the preview renders e.g. "Event Dates: September 12–15, 2026".
+   *
+   * Non-event agreements skip this branch entirely — services / lease / purchase / etc.
+   * keep their existing duration extraction unchanged.
+   */
+  if (isEventFamilyTitle(next.title)) {
+    const eventRange = extractEventDateRangeFromIntake(intakeText);
+    if (eventRange) {
+      next = { ...next, duration: eventRange };
+    }
   }
   if (!nz(next.termination_summary)) {
     const structuredTermination = nz(structured.termination);

@@ -113,6 +113,19 @@ function timingLabelsForFamily(
     fam === "generic_business_agreement" &&
     (/\blease\s+agreement\b/.test(t) || /\bsublease\s+agreement\b/.test(t));
   const isPropertyMgmt = fam === "generic_business_agreement" && /\bproperty\s+management\s+agreement\b/.test(t);
+  // Event family is detected from title alone — covers "Event Production Agreement",
+  // "Commercial Event Production Agreement", "Event Services Agreement", "Event Staffing
+  // Agreement", "Conference Services Agreement", "Venue Agreement", "Sponsorship
+  // Agreement", "Vendor Coordination Agreement". We never coerce ordinary services /
+  // employment-staffing into this branch — the title check is the authoritative signal.
+  const isEvent =
+    /\bevent\s+production\s+agreement\b/.test(t) ||
+    /\bevent\s+services\s+agreement\b/.test(t) ||
+    /\bevent\s+staffing\s+agreement\b/.test(t) ||
+    /\bconference\s+services\s+agreement\b/.test(t) ||
+    /\bvenue\s+agreement\b/.test(t) ||
+    /\bsponsorship\s+agreement\b/.test(t) ||
+    /\bvendor\s+coordination\s+agreement\b/.test(t);
   if (isPurchase) {
     return {
       sectionHeading: "Closing and Effective Date",
@@ -134,6 +147,14 @@ function timingLabelsForFamily(
       sectionHeading: "Term and Commencement",
       durationLabel: "Management Term",
       effectiveLabel: "Commencement Date",
+      keyDateLabel: "Key Date",
+    };
+  }
+  if (isEvent) {
+    return {
+      sectionHeading: "Event Term and Effective Date",
+      durationLabel: "Event Dates",
+      effectiveLabel: "Effective Date",
       keyDateLabel: "Key Date",
     };
   }
