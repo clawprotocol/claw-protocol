@@ -18,7 +18,7 @@ import {
   partyNameLooksLikeRawPrompt,
   tryExtractPartyPairFromPromptBlob,
 } from "./agreementPreviewPartyLine";
-import { formatLegalPartyPreamble } from "./formatLegalPartyList";
+import { formatLegalPartyPreamble, type PartyEntry } from "./formatLegalPartyList";
 import { formatPaymentTermsLine } from "./intakeCurrencyParse";
 import { normalizePaymentTermsForDisplay, normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
 import {
@@ -29,14 +29,17 @@ import {
   isJurisdictionDisplayLowConfidence,
   sanitizeJurisdictionForStarterGoverningLaw,
 } from "./starterAgreementPreviewNormalize";
+import {
+  sanitizeStarterPartyNameForDisplay,
+  sanitizeStarterPreviewProse,
+} from "./starterPreviewProseSanitize";
 
 const MISSING = "[Not yet specified]";
 /**
  * Neutral placeholder for termination when intake had no explicit termination/notice signal.
  * Keep this strictly about TERMINATION (not compensation) to avoid cross-section contamination.
  */
-const NEUTRAL_TERMINATION_NOTE =
-  "Termination terms to be agreed by the Parties or refined in review.";
+const NEUTRAL_TERMINATION_NOTE = "Termination terms to be agreed by the Parties.";
 
 function nz(s: string | null | undefined): string {
   const t = (s || "").trim();
@@ -103,7 +106,35 @@ function buildTermAndScheduleSection(draft: ParsedDraftShape): string {
   return parts.join("\n");
 }
 
-function partiesPreambleBlock(draft: ParsedDraftShape): string {
+/**
+ * Roles are only included in the rendered preamble when role confidence is high.
+ * Confidence model: a role is "high" if it's a substantive non-generic value AND
+ * was either explicitly applied via party-role overlay or carried through from
+ * canonical entity types ("company"/"members"). For starter previews we always
+ * suppress inferred role labels so the prose renders neutrally as the "Parties"
+ * collective — preventing speculative "(Developers)"/"(Clients)" markup when
+ * the intake didn't actually establish a role taxonomy.
+ */
+const HIGH_CONFIDENCE_ROLES = new Set(["company", "members"]);
+const GENERIC_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
+
+function partyEntryWithRoleConfidence(p: { name: string; role?: string }, starterPreview: boolean): PartyEntry {
+  const role = (p.role || "").trim().toLowerCase();
+  if (starterPreview) {
+    // Starter preview: drop ALL inferred role labels — render as generic "Parties".
+    return { name: p.name, role: "party" };
+  }
+  if (!role || GENERIC_ROLE.has(role)) {
+    return { name: p.name, role: "party" };
+  }
+  if (HIGH_CONFIDENCE_ROLES.has(role)) {
+    return { name: p.name, role: p.role };
+  }
+  // Non-generic, non-canonical role: keep (user-supplied via overlay).
+  return { name: p.name, role: p.role };
+}
+
+function partiesPreambleBlock(draft: ParsedDraftShape, starterPreview: boolean = false): string {
   const ps = draft.parties || [];
   const n0 = (ps[0]?.name || "").trim();
   const n1 = (ps[1]?.name || "").trim();
@@ -121,12 +152,18 @@ function partiesPreambleBlock(draft: ParsedDraftShape): string {
     ]);
   }
 
-  const validParties = ps.filter((p) => (p.name || "").trim() && !partyNameLooksLikeRawPrompt(p.name));
+  const validParties = ps
+    .filter((p) => (p.name || "").trim() && !partyNameLooksLikeRawPrompt(p.name))
+    .map((p) => ({
+      ...p,
+      name: starterPreview ? sanitizeStarterPartyNameForDisplay(p.name) : p.name,
+    }))
+    .map((p) => partyEntryWithRoleConfidence(p, starterPreview));
   if (validParties.length >= 2) {
     return formatLegalPartyPreamble(validParties);
   }
 
-  return `This Agreement (“Agreement”) is entered into by the parties identified above (the “Parties”).`;
+  return `This Agreement (\u201cAgreement\u201d) is entered into by the parties identified above (the \u201cParties\u201d).`;
 }
 
 function operatingCompanyLabel(draft: ParsedDraftShape): string {
@@ -241,7 +278,9 @@ function buildOperatingAgreementPreviewText(draft: ParsedDraftShape, options?: A
     );
   }
   lines.push(AGREEMENT_PREVIEW_ESIGN_NOTICE, "");
-  return collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
+  const collapsed = collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
+  // Starter preview path also runs through the operating-agreement builder.
+  return starterPreview ? sanitizeStarterPreviewProse(collapsed) : collapsed;
 }
 
 /**
@@ -259,7 +298,7 @@ export function buildAgreementPreviewTextCore(
   }
 
   const title = nz(draft.title);
-  const partiesBlock = partiesPreambleBlock(draft);
+  const partiesBlock = partiesPreambleBlock(draft, starterPreview);
   const purposeRaw = (draft.purpose || "").trim();
   const purposePrepared = premiumDeliverable
     ? applyPremiumDeliverableWeakPhraseReplacements(stripPreviewEsignNoticeLines(purposeRaw))
@@ -369,7 +408,9 @@ export function buildAgreementPreviewTextCore(
     );
   }
   lines.push(AGREEMENT_PREVIEW_ESIGN_NOTICE, "");
-  return collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
+  const collapsed = collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
+  // Starter preview: humanize internal-process phrasing for customer-facing prose.
+  return starterPreview ? sanitizeStarterPreviewProse(collapsed) : collapsed;
 }
 
 /**

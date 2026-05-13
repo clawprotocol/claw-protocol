@@ -14,6 +14,7 @@ import { extractBetweenPartyPair } from "./partyBetweenParse";
 import { applyIntakePartyRoleOverlay, type IntakePartyRoleLabels } from "./partyRoleIntake";
 import { applySimpleFlowSmartDefaults, type ParsedDraftShape } from "./intakeSmartDefaults";
 import { preserveExtractedFacts } from "./draftFactPreservation";
+import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
 
 const MAX_PARTY_NAME_LEN = 280;
 
@@ -142,6 +143,8 @@ export function applyAgreementFamilyIntakeShell(
     if (parties.length < 2) {
       if (explicitSigners && explicitSigners.length >= 2) {
         parties = explicitSigners;
+      } else if (!structured.partiesUncertain && structured.parties.length >= 2) {
+        parties = structured.parties.map((n) => ({ name: n.slice(0, MAX_PARTY_NAME_LEN), role: "party" }));
       } else {
         const between = extractBetweenPartyPair(intakeText);
         if (between && between.left.trim().length > 1 && between.right.trim().length > 1) {
@@ -189,6 +192,11 @@ export function applyAgreementFamilyIntakeShell(
     const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
     if (explicitSigners && explicitSigners.length >= 2) {
       next = { ...next, parties: explicitSigners };
+    } else if (!structured.partiesUncertain && structured.parties.length >= 2) {
+      next = {
+        ...next,
+        parties: structured.parties.map((n) => ({ name: n.slice(0, MAX_PARTY_NAME_LEN), role: "party" })),
+      };
     } else {
       const between = extractBetweenPartyPair(intakeText);
       if (between && between.left.trim().length > 1 && between.right.trim().length > 1) {
@@ -210,7 +218,15 @@ export function applyAgreementFamilyIntakeShell(
       }
     }
   }
-  if (!nz(next.title)) next = { ...next, title: nz(live.docTitle) || "Agreement" };
+  // Canonical title: preserve substantive existing title; fall back to live docTitle, then family canonical.
+  {
+    const resolved = resolveCanonicalAgreementTitle({
+      currentTitle: next.title,
+      liveDocTitle: live.docTitle,
+      family: "generic_business_agreement",
+    });
+    next = { ...next, title: resolved.title };
+  }
   if (!nz(next.jurisdiction) || nz(next.jurisdiction).toLowerCase() === "tbd") {
     next = { ...next, jurisdiction: nz(structured.governing_law) || "Delaware" };
   }

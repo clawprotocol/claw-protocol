@@ -26,6 +26,21 @@ const PLACEHOLDER_PATTERNS = [
   /to be (?:refined|described|agreed|defined) in review/i,
 ];
 
+/**
+ * Archetype default-purpose patterns that may be overridden by HIGH-confidence
+ * labeled scope extraction (Scope:/Purpose: etc, confidence ~0.92). These are
+ * the canned family-shell purposes that should not block a clearly extracted
+ * specific scope from the user's intake.
+ */
+const ARCHETYPE_PURPOSE_PATTERNS = [
+  /^mutual protection of confidential and proprietary information/i,
+  /^protection of confidential and proprietary information/i,
+  /^governance, economics, management, and operations of the LLC/i,
+  /^scope of work described in your text/i,
+];
+
+const HIGH_CONFIDENCE_LABELED_THRESHOLD = 0.85;
+
 const GENERIC_DURATION_PATTERNS = [
   /^12 months unless terminated/i,
   /^as stated in the agreement/i,
@@ -79,6 +94,12 @@ export function preserveExtractedFacts(
   return { draft: next, restoredFields: restored };
 }
 
+function isArchetypeDefaultPurpose(val: string): boolean {
+  const t = val.trim();
+  if (!t) return false;
+  return ARCHETYPE_PURPOSE_PATTERNS.some((re) => re.test(t));
+}
+
 function restoreScope(
   draft: ParsedDraftShape,
   structured: IntakeStructuredAgreement,
@@ -88,7 +109,14 @@ function restoreScope(
   const extracted = structured.scope.trim();
 
   if (!extracted || structured.scopeConfidence < SCOPE_CONFIDENCE_THRESHOLD) return draft;
-  if (current && !isPlaceholderValue(current)) return draft;
+  if (current && !isPlaceholderValue(current)) {
+    // Allow HIGH-confidence labeled scope to override archetype defaults
+    // (e.g. NDA's "Mutual protection of confidential...") so a user's specific
+    // "Purpose: Pre-IPO due diligence on Project Apollo" wins.
+    const canOverrideArchetype =
+      structured.scopeConfidence >= HIGH_CONFIDENCE_LABELED_THRESHOLD && isArchetypeDefaultPurpose(current);
+    if (!canOverrideArchetype) return draft;
+  }
 
   restored.push("purpose");
   return { ...draft, purpose: extracted };

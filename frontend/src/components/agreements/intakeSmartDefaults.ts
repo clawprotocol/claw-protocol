@@ -1,9 +1,10 @@
-import type { AgreementFamily } from "./agreementFamilyRouter";
+import { detectAgreementFamily, type AgreementFamily } from "./agreementFamilyRouter";
 import { formatPaymentTermsLine, type IntakePaymentField } from "./intakeCurrencyParse";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 import { extractBetweenPartyPair } from "./partyBetweenParse";
+import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
 
 export type { AgreementFamily } from "./agreementFamilyRouter";
 
@@ -91,8 +92,14 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   const payment = live.payment;
   let next: ParsedDraftShape = { ...parsed, payment };
 
-  if (!(next.title || "").trim()) {
-    next.title = live.docTitle || "Agreement";
+  {
+    const family = (next.agreement_family ?? detectAgreementFamily(intakeText)) as AgreementFamily;
+    const resolved = resolveCanonicalAgreementTitle({
+      currentTitle: next.title,
+      liveDocTitle: live.docTitle,
+      family,
+    });
+    next.title = resolved.title;
   }
 
   const j = (next.jurisdiction || "").trim().toLowerCase();
@@ -105,6 +112,12 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
     const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
     if (explicitSigners && explicitSigners.length >= 2) {
       next.parties = explicitSigners;
+    } else if (!structured.partiesUncertain && structured.parties.length >= 2) {
+      // Honor the multi-party output of the structured extractor (Parties: A, B, C, D).
+      next.parties = structured.parties.map((name) => ({
+        name: name.slice(0, MAX_PARTY_NAME_LEN),
+        role: "party" as const,
+      }));
     } else {
       const fromBetween = extractBetweenPartyPair(intakeText);
       const fromLive =

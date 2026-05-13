@@ -76,7 +76,10 @@ describe("buildAgreementPreviewText", () => {
       purpose: longPurpose,
     };
     const t = buildAgreementPreviewText(d, { starterPreview: true });
-    expect(t).toContain("To be agreed in review");
+    // Starter prose sanitizer rewrites "To be agreed in review" → public-facing phrasing
+    // and never leaks internal "in review" wording into customer-facing prose.
+    expect(t).toMatch(/to be agreed (?:by|between) the parties/i);
+    expect(t).not.toMatch(/in review/i);
     expect(t).not.toContain("Their Lobby");
     expect(t).toContain("simplified starter preview");
     const scopeSection = t.split("1. Scope of Services / Purpose")[1]?.split("2. Payment Terms")[0] ?? "";
