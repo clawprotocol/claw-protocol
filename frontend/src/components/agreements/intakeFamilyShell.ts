@@ -115,9 +115,24 @@ export function applyAgreementFamilyIntakeShell(
   }
 
   if (family === "nda") {
+    /**
+     * NDA archetype detection:
+     *   - Treat as MUTUAL by default (matches modern best practice and test scenarios).
+     *   - Only fall back to UNILATERAL when intake explicitly mentions one-way phrasing
+     *     ("Disclosing Party", "Receiving Party", "one-way NDA", "unilateral").
+     *   - Multi-party (3+ signers) is always mutual.
+     */
+    const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
+    const isMultiParty = (parsed.parties || []).length >= 3 || (explicitSigners?.length ?? 0) >= 3;
+    const lowIntake = intakeText.toLowerCase();
+    const explicitlyUnilateral =
+      /\b(?:one[-\s]?way|unilateral)\s+(?:nda|non[-\s]?disclosure|confidential)/i.test(intakeText) ||
+      (/\bdisclosing\s+party\b/i.test(intakeText) && /\breceiving\s+party\b/i.test(intakeText) && !/\bmutual\b/i.test(intakeText));
+    const isMutual = isMultiParty || !explicitlyUnilateral || /\bmutual\b/i.test(lowIntake);
+
     let title = nz(parsed.title);
     if (!title || /^agreement$/i.test(title)) {
-      title = /\bmutual\b/i.test(intakeText) ? "Mutual Confidentiality Agreement" : "Confidentiality Agreement";
+      title = isMutual ? "Mutual Non-Disclosure Agreement" : "Non-Disclosure Agreement";
     }
     let jurisdiction = nz(parsed.jurisdiction);
     if (!jurisdiction || jurisdiction.toLowerCase() === "tbd") {
@@ -125,7 +140,6 @@ export function applyAgreementFamilyIntakeShell(
     }
     let parties = [...(parsed.parties || [])];
     if (parties.length < 2) {
-      const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
       if (explicitSigners && explicitSigners.length >= 2) {
         parties = explicitSigners;
       } else {
@@ -136,9 +150,10 @@ export function applyAgreementFamilyIntakeShell(
             { name: between.right.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" },
           ];
         } else {
+          // Neutral placeholders — never inject "disclosing/receiving" unless the user did.
           parties = [
-            { name: "Party A (disclosing / receiving — edit in review)", role: "party" },
-            { name: "Party B (disclosing / receiving — edit in review)", role: "party" },
+            { name: "Party A (edit in review)", role: "party" },
+            { name: "Party B (edit in review)", role: "party" },
           ];
         }
       }
@@ -146,7 +161,9 @@ export function applyAgreementFamilyIntakeShell(
     const purpose =
       nz(parsed.purpose) ||
       nz(structured.scope) ||
-      "Protection of confidential and proprietary information disclosed between the parties for the relationship described in this agreement.";
+      (isMutual
+        ? "Mutual protection of confidential and proprietary information exchanged between the parties for the relationship described in this agreement."
+        : "Protection of confidential and proprietary information disclosed between the parties for the relationship described in this agreement.");
     const payment_terms =
       nz(parsed.payment_terms) ||
       "No fees unless the parties document compensation in a separate writing or amendment.";

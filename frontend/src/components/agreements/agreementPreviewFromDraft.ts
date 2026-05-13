@@ -31,8 +31,12 @@ import {
 } from "./starterAgreementPreviewNormalize";
 
 const MISSING = "[Not yet specified]";
-const STANDARD_DEFAULTS_NOTE =
-  "Compensation and payment terms shall be defined as agreed between the Parties and set forth in this Agreement.";
+/**
+ * Neutral placeholder for termination when intake had no explicit termination/notice signal.
+ * Keep this strictly about TERMINATION (not compensation) to avoid cross-section contamination.
+ */
+const NEUTRAL_TERMINATION_NOTE =
+  "Termination terms to be agreed by the Parties or refined in review.";
 
 function nz(s: string | null | undefined): string {
   const t = (s || "").trim();
@@ -288,9 +292,9 @@ export function buildAgreementPreviewTextCore(
     : termNoticeRaw;
   const termNotice = termNoticePrepared
     ? starterPreview
-      ? compressTerminationSummaryForStarter(termNoticePrepared) || MISSING
+      ? compressTerminationSummaryForStarter(termNoticePrepared) || NEUTRAL_TERMINATION_NOTE
       : nz(termNoticePrepared)
-    : STANDARD_DEFAULTS_NOTE;
+    : NEUTRAL_TERMINATION_NOTE;
   const more = sanitizeUserAdditionalTerms(draft.additional_terms, premiumDeliverable);
 
   const introGeneral = starterPreview

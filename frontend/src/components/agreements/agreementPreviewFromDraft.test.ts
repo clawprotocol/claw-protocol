@@ -39,14 +39,16 @@ describe("buildAgreementPreviewText", () => {
     expect(t).not.toMatch(/SIGNATURES\s*\(PLACEHOLDER\)/i);
   });
 
-  it("omits additional-terms section when empty and softens empty termination line", () => {
+  it("omits additional-terms section when empty and uses neutral termination placeholder", () => {
     const sparse: ParsedDraftShape = {
       ...minimal,
       termination_summary: "",
       additional_terms: "",
     };
     const t = buildAgreementPreviewText(sparse);
-    expect(t).toContain("Compensation and payment terms shall be defined as agreed between the Parties");
+    // Neutral termination note must be ABOUT termination, not about compensation/payment.
+    expect(t).toContain("Termination terms to be agreed");
+    expect(t).not.toContain("Compensation and payment terms shall be defined as agreed");
     expect(t).not.toContain("6. Additional Terms");
   });
 

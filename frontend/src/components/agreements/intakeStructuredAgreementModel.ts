@@ -166,14 +166,52 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
   if (partiesEq) {
     const rawBody = partiesEq[1].trim();
     if (rawBody.length > 200 || wordCount(rawBody) > 24) {
+      // Long wall-of-text paragraph — try a strict comma-only list of short segments
+      // before bailing. This preserves multi-party Parties: A, B, C, D lines without
+      // accepting prose blocks like "This agreement is entered into by ...".
+      const strictCommaParts = rawBody
+        .split(/\s*,\s*/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const looksLikeListOfNames =
+        strictCommaParts.length >= 2 &&
+        strictCommaParts.every((p) => p.length <= 60 && wordCount(p) <= 6 && looksLikeNameFragment(p));
+      if (looksLikeListOfNames && rawBody.length <= 320) {
+        const allClamped = strictCommaParts.map((p) => clampPartySegment(p)).filter((s) => s.length > 1);
+        if (allClamped.length >= 2) {
+          return {
+            parties: allClamped,
+            uncertain: false,
+            structured: { party_1: allClamped[0], party_2: allClamped[1] },
+          };
+        }
+      }
       return { parties: [], uncertain: true, structured: null };
     }
     const commaParts = rawBody.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean);
     if (commaParts.length >= 2) {
-      const a = clampPartySegment(commaParts[0]);
-      const b = clampPartySegment(commaParts[1]);
-      if (a.length > 1 && b.length > 1) {
-        return { parties: [a, b], uncertain: false, structured: { party_1: a, party_2: b } };
+      const allClamped = commaParts.map((p) => clampPartySegment(p)).filter((s) => s.length > 1);
+      if (allClamped.length >= 2) {
+        return {
+          parties: allClamped,
+          uncertain: false,
+          structured: { party_1: allClamped[0], party_2: allClamped[1] },
+        };
+      }
+    }
+    // Try " A and B and C" / " A, B, and C" combined splits
+    const andSplit = rawBody
+      .split(/\s*,\s*|\s+and\s+/i)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    if (andSplit.length >= 2) {
+      const allClamped = andSplit.map((p) => clampPartySegment(p)).filter((s) => s.length > 1);
+      if (allClamped.length >= 2) {
+        return {
+          parties: allClamped,
+          uncertain: false,
+          structured: { party_1: allClamped[0], party_2: allClamped[1] },
+        };
       }
     }
     const joined = formatPartiesJoinedLine(rawBody);
@@ -193,13 +231,12 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
 
   const signerRows = extractExplicitSignerNames(text);
   if (signerRows && signerRows.length >= 2) {
-    const a = clampPartySegment(signerRows[0]);
-    const b = clampPartySegment(signerRows[1]);
-    if (a.length > 1 && b.length > 1) {
+    const allClamped = signerRows.map((n) => clampPartySegment(n)).filter((s) => s.length > 1);
+    if (allClamped.length >= 2) {
       return {
-        parties: signerRows.map((n) => clampPartySegment(n)).filter(Boolean),
+        parties: allClamped,
         uncertain: false,
-        structured: { party_1: a, party_2: b },
+        structured: { party_1: allClamped[0], party_2: allClamped[1] },
       };
     }
   }
@@ -237,12 +274,31 @@ function chunkAfterRegex(text: string, re: RegExp, maxLen = 200): string {
 
 type FieldMeta = { text: string; confidence: number; signal: boolean; inferred: boolean };
 
+/**
+ * Boundary regex for labeled-field scope extraction. Scope/Purpose extraction must terminate at
+ * the next labeled field (Term, Payment, Governing law, Confidentiality, IP, Termination, etc.),
+ * a sentence boundary (period followed by space + capital), or the next double-newline.
+ */
+const NEXT_LABELED_FIELD_BOUNDARY =
+  /\b(?:term|duration|effective[\s-]date|payment|fee|compensation|rate|governing[\s-]law|jurisdiction|venue|confidentialit(?:y|ies)|ip|intellectual[\s-]property|work[-\s]?for[-\s]?hire|termination|notice|e[-\s]?signatures?|signatures?|deliverables?)\s*[:\-]/i;
+
+function trimScopeAtFieldBoundary(captured: string): string {
+  let s = captured.replace(/\s+/g, " ").trim();
+  if (!s) return s;
+  const boundaryMatch = NEXT_LABELED_FIELD_BOUNDARY.exec(s);
+  if (boundaryMatch && boundaryMatch.index !== undefined && boundaryMatch.index >= 4) {
+    s = s.slice(0, boundaryMatch.index).replace(/[\s,;:]+$/g, "").trim();
+  }
+  return s;
+}
+
 function extractScopeAndMeta(lower: string, text: string): FieldMeta {
   let best: FieldMeta = { text: "", confidence: 0, signal: false, inferred: false };
 
   const labeled = text.match(/\b(?:scope|purpose|services?|work|tasks?)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) {
-    const t = normalizeIntakeFieldText(labeled[1], 220);
+    const trimmed = trimScopeAtFieldBoundary(labeled[1]);
+    const t = normalizeIntakeFieldText(trimmed, 220);
     if (t)
       return { text: t, confidence: 0.92, signal: true, inferred: t.length < 28 && !/[.!?]/.test(t) };
   }

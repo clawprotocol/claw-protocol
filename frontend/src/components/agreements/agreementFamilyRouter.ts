@@ -77,6 +77,27 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     /\b(?:monthly|weekly|hourly)\s+(?:rate|fee|retainer)\b/i.test(low) ||
     /\bdeliverables?\b/i.test(low);
 
+  /**
+   * Pure NDA archetype short-circuit: when intake clearly says NDA / Non-Disclosure / Mutual NDA
+   * AND there is NO scope-of-work, payment, deliverable, or service-fee structure described,
+   * route as `nda` regardless of incidental "evaluation" / "collaboration" / "services" mentions.
+   */
+  const explicitlyNdaTitle =
+    /\bmutual\s+(?:nda|non[-\s]?disclosure)\b/i.test(low) ||
+    /\bmutual\s+confidentiality\s+agreement\b/i.test(low) ||
+    /\b(?:non[-\s]?disclosure|nda)\s+(?:agreement|between|among)\b/i.test(low) ||
+    /^\s*(?:mutual\s+)?(?:nda|non[-\s]?disclosure)\b[.:]/i.test(t);
+  const lacksCommercialStructure =
+    !/\$\s*\d/i.test(low) &&
+    !/\b\d+\s*(?:\/|per)\s*(?:hour|hr|month|mo|year|day|visit)\b/i.test(low) &&
+    !/\bscope\s+of\s+work\b/i.test(low) &&
+    !/\bdeliverable/i.test(low) &&
+    !/\bstatement\s+of\s+work\b/i.test(low) &&
+    !/\bmonthly\s+retainer\b/i.test(low);
+  if (explicitlyNdaTitle && lacksCommercialStructure) {
+    return "nda";
+  }
+
   if ((ndaDominant || /\bconfidentiality\s+agreement\b/i.test(t)) && !primaryServiceIntent) {
     return "nda";
   }

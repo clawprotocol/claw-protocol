@@ -33,10 +33,16 @@ function runPipeline(intakeText: string, draft?: Partial<ParsedDraftShape>): Par
   return runIntakeDefaultsAndRoles(base, intakeText, true, defaultIntakePartyRoleLabels());
 }
 
+// Mutable pool ensures unique names within a single test (avoids random-collision flakes).
+const FIRSTS = ["James", "Maria", "Devon", "Aisha", "Liam", "Priya", "Carlos", "Yuki", "Tamara", "Viktor"];
+const LASTS = ["Navarro", "Okonkwo", "Petrov", "Shimizu", "Adeyemi", "Lindqvist", "Moreau", "Patel", "Torres", "Williams"];
+let _nameSeed = 0;
 function randomName(): string {
-  const firsts = ["James", "Maria", "Devon", "Aisha", "Liam", "Priya", "Carlos", "Yuki", "Tamara", "Viktor"];
-  const lasts = ["Navarro", "Okonkwo", "Petrov", "Shimizu", "Adeyemi", "Lindqvist", "Moreau", "Patel", "Torres", "Williams"];
-  return `${firsts[Math.floor(Math.random() * firsts.length)]} ${lasts[Math.floor(Math.random() * lasts.length)]}`;
+  // Round-robin-with-rotation guarantees uniqueness up to FIRSTS.length × LASTS.length combinations.
+  const i = _nameSeed++;
+  const f = FIRSTS[i % FIRSTS.length];
+  const l = LASTS[Math.floor(i / FIRSTS.length) % LASTS.length];
+  return `${f} ${l}`;
 }
 
 function randomJurisdiction(): string {

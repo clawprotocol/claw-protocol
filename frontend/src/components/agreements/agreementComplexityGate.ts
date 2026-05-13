@@ -31,7 +31,7 @@ export function resolveSafeSimplifiedAgreementRouting(
     case "contractor":
       return { agreement_family: "independent_contractor_agreement", title: "Independent Contractor Agreement" };
     case "nda":
-      return { agreement_family: "nda", title: "Confidentiality Agreement" };
+      return { agreement_family: "nda", title: "Non-Disclosure Agreement" };
     case "payment_plan":
       return { agreement_family: "generic_business_agreement", title: "Payment Plan Agreement" };
     default:
