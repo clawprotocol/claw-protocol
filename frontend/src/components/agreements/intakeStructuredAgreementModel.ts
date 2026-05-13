@@ -19,6 +19,8 @@ export type IntakeStructuredAgreement = {
   payment: string;
   term: string;
   governing_law: string;
+  /** 0–1 confidence for governing_law extraction. >=0.8 = authoritative (cannot be overwritten by defaults). */
+  governingLawConfidence: number;
   confidentiality: string;
   termination: string;
   /** When true, omit party lines and rely on placeholders / suggestions. */
@@ -70,12 +72,24 @@ function dedupeLooseSentences(s: string): string {
   return out.join(" ");
 }
 
+/**
+ * Tokens that indicate a structural agreement field, NOT a party name.
+ * Lines or fragments starting with these must be rejected from party extraction
+ * (regression spec §5: prevents "Term: starts May 15, 2026" from leaking into parties[]).
+ */
+const STRUCTURAL_FIELD_PREFIXES =
+  /^(?:term|duration|effective(?:\s+date)?|start(?:\s+date)?|end(?:\s+date)?|payment|compensation|fee|price|governing\s+law|jurisdiction|venue|scope|purpose|deliverables?|services?|confidentialit(?:y|ies)|nda|non[-\s]?disclosure|termination|notice|signatures?|e[-\s]?signatures?)\s*[:\-]/i;
+
 function looksLikeNameFragment(s: string): boolean {
   const t = s.trim();
   if (t.length < 2) return false;
   if (wordCount(t) > MAX_PARTY_WORDS) return false;
   if (t.length > MAX_PARTY_CHARS) return false;
   if (/^(?:if|when|the|this|payment|fee|i\s+will|we\s+will|whereas|agreement|contract)\b/i.test(t)) return false;
+  // Reject structural field prefixes ("Term:", "Effective Date:", "Payment:" etc.)
+  if (STRUCTURAL_FIELD_PREFIXES.test(t)) return false;
+  // Reject fragments containing a date inside, since dates are never party names.
+  if (DATE_LIKE.test(t) || DATE_NUMERIC.test(t)) return false;
   return wordCount(t) >= 2 || /(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?|LLP|PLLC)\b/i.test(t);
 }
 
@@ -124,11 +138,43 @@ type PartiesExtract = {
   structured: StructuredTwoParties | null;
 };
 
+/**
+ * Split "A, B, and C" / "A, B, C" into ≥3 candidate party segments.
+ * Returns null if only 2 segments or any segment doesn't look like a name fragment.
+ */
+function splitMultiPartyCommaList(line: string): string[] | null {
+  const trimmed = line.trim().replace(/[.!?]+$/g, "");
+  if (!trimmed) return null;
+  const segments = trimmed
+    .split(/\s*,\s*(?:and\s+)?|\s+and\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length < 3) return null;
+  if (!segments.every((s) => looksLikeNameFragment(s) && s.length <= 60 && wordCount(s) <= 6)) {
+    return null;
+  }
+  return segments;
+}
+
 function tryCommaPairFirstLine(text: string): PartiesExtract | null {
   const firstLine = (text.split(/\n/)[0] || "").trim();
   if (firstLine.length < 8) return null;
   if (/^\s*parties?\s*:/i.test(firstLine)) return null;
   if (/\bbetween\b/i.test(firstLine)) return null;
+
+  // Multi-party "A, B, and C" / "A, B, C" — return ALL segments before falling back to 2-party split.
+  const multi = splitMultiPartyCommaList(firstLine);
+  if (multi) {
+    const clamped = multi.map((s) => clampPartySegment(s)).filter((s) => s.length > 1);
+    if (clamped.length >= 3) {
+      return {
+        parties: clamped,
+        uncertain: false,
+        structured: { party_1: clamped[0], party_2: clamped[1] },
+      };
+    }
+  }
+
   const idx = firstLine.indexOf(",");
   if (idx < 2 || idx >= firstLine.length - 3) return null;
   let leftRaw = firstLine.slice(0, idx).trim();
@@ -150,6 +196,25 @@ function tryCommaPairFirstLine(text: string): PartiesExtract | null {
 function extractStructuredParties(text: string, lower: string): PartiesExtract {
   const betweenPair = extractBetweenPartyPair(text);
   if (betweenPair) {
+    // First, try to detect multi-party "between A, B, and C" / "between A, B, C, and D"
+    // by re-splitting the original "between" tail on comma+and. This rescues 3+ parties
+    // before the 2-party pair clamp drops anyone (regression spec §2).
+    const betweenIdx = text.toLowerCase().indexOf("between ");
+    if (betweenIdx >= 0) {
+      const tail = text.slice(betweenIdx + "between ".length).split(/\n|[.!?](?:\s|$)/)[0] || "";
+      const multi = splitMultiPartyCommaList(tail);
+      if (multi) {
+        const clamped = multi.map((s) => clampPartySegment(s)).filter((s) => s.length > 1);
+        if (clamped.length >= 3) {
+          return {
+            parties: clamped,
+            uncertain: false,
+            structured: { party_1: clamped[0], party_2: clamped[1] },
+          };
+        }
+      }
+    }
+
     const a = clampPartySegment(betweenPair.left);
     const b = clampPartySegment(betweenPair.right);
     if (a.length > 1 && b.length > 1) {
@@ -352,6 +417,21 @@ function extractScopeAndMeta(lower: string, text: string): FieldMeta {
   return best;
 }
 
+/**
+ * Tokens that must NEVER populate the Payment Terms field — semantic suppression
+ * for confidentiality / IP / NDA / proprietary content that may otherwise leak
+ * via the loose `(?:payment|compensation|fee|price)` rate fallback (regression spec §4).
+ */
+const NON_PAYMENT_SEMANTIC_TOKENS =
+  /\b(?:confidential(?:ity)?|nda|non[-\s]?disclosure|proprietary|trade\s+secret|mutual\s+confidentiality|disclosing\s+party|receiving\s+party)\b/i;
+
+function looksLikePaymentText(s: string): boolean {
+  const t = s.trim();
+  if (!t) return false;
+  if (NON_PAYMENT_SEMANTIC_TOKENS.test(t)) return false;
+  return true;
+}
+
 function extractPaymentLine(text: string, payment: IntakePaymentField): string {
   if (payment.amount != null) {
     if (payment.installmentAmountUnspecified) {
@@ -370,7 +450,7 @@ function extractPaymentLine(text: string, payment: IntakePaymentField): string {
     return normalizeIntakeFieldText(parts.join("; "), 180);
   }
   const rate = text.match(/\b(?:payment|compensation|fee|price)\s*(?:of|is)?\s*([^\n,.]{3,100})/i);
-  if (rate) return normalizeIntakeFieldText(rate[1], 160);
+  if (rate && looksLikePaymentText(rate[1])) return normalizeIntakeFieldText(rate[1], 160);
   return "";
 }
 
@@ -428,7 +508,58 @@ function durationMatchIsTerminationNoticeContext(text: string, m: RegExpMatchArr
   );
 }
 
+/**
+ * Detects "starts X (and ends Y)" / "effective X" / "from X to Y" patterns and emits clean
+ * "Start Date: X · End Date: Y" / "Start Date: X" labels (regression spec §5).
+ * Returns null if no clean start/end signal is present.
+ */
+function extractStartEndDateLabel(text: string, lower: string): string | null {
+  const dateAlt = `(?:${DATE_LIKE.source}|${DATE_NUMERIC.source})`;
+  // "starts <date> (and ends <date>)?"
+  const startsEnds = text.match(
+    new RegExp(`\\b(?:starts?|begins?|effective(?:\\s+date)?)\\s+(?:on\\s+)?(${dateAlt})(?:.{0,40}?(?:and\\s+)?ends?\\s+(?:on\\s+)?(${dateAlt}))?`, "i"),
+  );
+  if (startsEnds) {
+    const start = startsEnds[1]?.trim();
+    const end = startsEnds[2]?.trim();
+    if (start && end) return `Start Date: ${start} · End Date: ${end}`;
+    if (start) return `Start Date: ${start}`;
+  }
+  // "from X to/through Y"
+  const fromTo = text.match(
+    new RegExp(`\\bfrom\\s+(${dateAlt})\\s+(?:to|through|thru|until)\\s+(${dateAlt})`, "i"),
+  );
+  if (fromTo) {
+    return `Start Date: ${fromTo[1].trim()} · End Date: ${fromTo[2].trim()}`;
+  }
+  // Standalone "ends <date>"
+  const endsOnly = text.match(new RegExp(`\\bends?\\s+(?:on\\s+)?(${dateAlt})`, "i"));
+  if (endsOnly) return `End Date: ${endsOnly[1].trim()}`;
+  // Standalone "Effective Date: X" / "effective <date>"
+  const effLabeled = text.match(new RegExp(`\\beffective\\s+date\\s*[:\\-]\\s*(${dateAlt})`, "i"));
+  if (effLabeled) return `Effective Date: ${effLabeled[1].trim()}`;
+  // "Start Date:" / "End Date:" labeled forms (preserve verbatim)
+  const startLabeled = text.match(new RegExp(`\\bstart\\s+date\\s*[:\\-]\\s*(${dateAlt})`, "i"));
+  const endLabeled = text.match(new RegExp(`\\bend\\s+date\\s*[:\\-]\\s*(${dateAlt})`, "i"));
+  if (startLabeled && endLabeled) {
+    return `Start Date: ${startLabeled[1].trim()} · End Date: ${endLabeled[1].trim()}`;
+  }
+  if (startLabeled) return `Start Date: ${startLabeled[1].trim()}`;
+  if (endLabeled) return `End Date: ${endLabeled[1].trim()}`;
+  void lower;
+  return null;
+}
+
 function extractTermAndMeta(lower: string, text: string): FieldMeta {
+  // Prefer paired Start/End date labels when BOTH are present (regression spec §5):
+  // these are unambiguous and the user explicitly stated both ends of the term.
+  const startEndLabel = extractStartEndDateLabel(text, lower);
+  if (startEndLabel && startEndLabel.includes("·")) {
+    return { text: startEndLabel, confidence: 0.92, signal: true, inferred: false };
+  }
+
+  // Then prefer explicit "<N> <units>" duration ("8 months", "2 years") since this
+  // is the most concrete term length when an effective-date is also present.
   const m = text.match(/\b(\d+)\s*(year|years|yr|yrs|month|months|mo|week|weeks|day|days)\b/i);
   if (m) {
     const unit = m[2].toLowerCase();
@@ -438,6 +569,11 @@ function extractTermAndMeta(lower: string, text: string): FieldMeta {
       const t = formatTermLengthToken(m[1], m[2]);
       return { text: t, confidence: 0.88, signal: true, inferred: false };
     }
+  }
+
+  // Fall back to a single Start/Effective/End label when no duration count is present.
+  if (startEndLabel) {
+    return { text: startEndLabel, confidence: 0.86, signal: true, inferred: false };
   }
   if (/\bperpetual|indefinite\b/i.test(lower)) {
     return { text: "Until terminated by either party", confidence: 0.86, signal: true, inferred: false };
@@ -452,7 +588,8 @@ function extractTermAndMeta(lower: string, text: string): FieldMeta {
   if (DATE_LIKE.test(text) || DATE_NUMERIC.test(text)) {
     const dm = text.match(DATE_LIKE) || text.match(DATE_NUMERIC);
     const snippet = dm ? dm[0].trim() : "Date mentioned";
-    let line = normalizeIntakeFieldText(`Start / date: ${snippet}`, 120);
+    // Use clean "Start Date:" label instead of legacy "Start / date:" hybrid.
+    let line = normalizeIntakeFieldText(`Start Date: ${snippet}`, 120);
     if (/\bmonth-to-month\b/i.test(lower)) {
       line = normalizeIntakeFieldText(`${line}; Month-to-month (continues until terminated as agreed)`, 200);
     }
@@ -498,17 +635,64 @@ function extractTermAndMeta(lower: string, text: string): FieldMeta {
   return { text: "", confidence: 0, signal: false, inferred: false };
 }
 
-function extractGoverningLaw(lower: string, text: string): string {
+/**
+ * 50 US states + DC for bare-state governing-law detection ("Oklahoma law", "Texas law", etc.).
+ * Single-source list — used to anchor the heuristic to actual jurisdictions only.
+ */
+const US_JURISDICTIONS = [
+  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut",
+  "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
+  "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan",
+  "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+  "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
+  "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
+  "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
+  "Wisconsin", "Wyoming", "District of Columbia",
+];
+const US_JURIS_ALT = US_JURISDICTIONS
+  .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
+const STATE_LAW_RE = new RegExp(`\\b(${US_JURIS_ALT})\\s+(?:state\\s+)?(?:law|jurisdiction|courts?)\\b`, "i");
+const BARE_STATE_RE = new RegExp(`\\b(${US_JURIS_ALT})\\b`, "i");
+
+/** Strip trailing " law"/" jurisdiction"/" courts" so "Oklahoma law" → "Oklahoma". */
+function trimGoverningLawSuffix(s: string): string {
+  return s
+    .replace(/\s+(?:state\s+)?(?:laws?|jurisdiction|courts?)\s*$/i, "")
+    .replace(/^(?:the\s+)?(?:state\s+of|commonwealth\s+of)\s+/i, "State of ")
+    .trim();
+}
+
+/**
+ * Returns governing-law text + confidence (0–1). >= 0.8 marks an authoritative extraction
+ * that downstream defaults / family shells must never overwrite.
+ */
+function extractGoverningLawWithConfidence(lower: string, text: string): { value: string; confidence: number } {
+  // Labeled forms: "Governing law: X", "governed by X", "laws of X", "jurisdiction: X", "venue in X".
   const gl = text.match(
     /\b(?:govern(?:ed|ing)\s+(?:by|law)|laws?\s+of|jurisdiction|venue\s+in)\s*[:\s]+([^\n.]{2,120})/i,
   );
-  if (gl) return normalizeIntakeFieldText(gl[1], 140);
+  if (gl) return { value: normalizeIntakeFieldText(trimGoverningLawSuffix(gl[1]), 140), confidence: 0.95 };
+
+  // "State of X" / "Commonwealth of X" preamble.
   const state = text.match(/\b(?:State\s+of|Commonwealth\s+of)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/);
-  if (state) return normalizeIntakeFieldText(`State of ${state[1]}`, 120);
-  if (/\bdelaware\b/i.test(lower) && /\b(?:law|DE|corp)\b/i.test(lower)) return "Delaware";
-  if (/\bnew\s+york\b/i.test(lower) && /\b(?:law|NYS|govern)\b/i.test(lower)) return "New York";
-  return "";
+  if (state) return { value: normalizeIntakeFieldText(`State of ${state[1]}`, 120), confidence: 0.9 };
+
+  // Bare "<US state> law/jurisdiction/courts" — covers "Oklahoma law" etc.
+  const stateLaw = text.match(STATE_LAW_RE);
+  if (stateLaw) return { value: normalizeIntakeFieldText(stateLaw[1], 120), confidence: 0.9 };
+
+  // Last-resort: a single bare US state mention paired with legal context anywhere in intake.
+  const bare = text.match(BARE_STATE_RE);
+  if (bare && /\b(?:law|jurisdiction|venue|govern|courts?|legal)\b/i.test(lower)) {
+    return { value: normalizeIntakeFieldText(bare[1], 120), confidence: 0.82 };
+  }
+
+  if (/\bdelaware\b/i.test(lower) && /\b(?:law|DE|corp)\b/i.test(lower)) return { value: "Delaware", confidence: 0.7 };
+  if (/\bnew\s+york\b/i.test(lower) && /\b(?:law|NYS|govern)\b/i.test(lower)) return { value: "New York", confidence: 0.7 };
+  return { value: "", confidence: 0 };
 }
+
 
 function extractConfidentiality(lower: string, text: string): string {
   if (/\bnda|non-disclosure|confidential(?:ity)?\b/.test(lower)) {
@@ -582,7 +766,7 @@ export function extractScheduleLine(lower: string, text: string): string | null 
   if (/\bweekly\b/i.test(lower)) return "Paid weekly";
   if (/\bmonthly\b/i.test(lower)) return "Paid monthly";
   const byDate = text.match(/\bby\s+([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?)\b/);
-  if (byDate) return `Deadline / date: ${byDate[1]}`;
+  if (byDate) return `Deadline: ${byDate[1]}`;
   if (unclearPaymentSchedule(lower)) return "Payment schedule not set";
   return null;
 }
@@ -600,6 +784,7 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
       payment: "",
       term: "",
       governing_law: "",
+      governingLawConfidence: 0,
       confidentiality: "",
       termination: "",
       partiesUncertain: false,
@@ -619,7 +804,8 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
   let scope = scopeMeta.text;
   const payment = extractPaymentLine(text, paymentField);
   let term = termMeta.text;
-  const governing_law = extractGoverningLaw(lower, text);
+  const govLaw = extractGoverningLawWithConfidence(lower, text);
+  const governing_law = govLaw.value;
   const confidentiality = extractConfidentiality(lower, text);
   const termination = extractTermination(lower, text);
   if (termination.trim() && /^\d+\s*days?$/i.test(term.trim())) {
@@ -642,6 +828,7 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
     payment: normalizeIntakeFieldText(payment),
     term: termNorm,
     governing_law: normalizeIntakeFieldText(governing_law, 120),
+    governingLawConfidence: govLaw.confidence,
     confidentiality: normalizeIntakeFieldText(confidentiality, 220),
     termination: normalizeIntakeFieldText(termination, 220),
     partiesUncertain: partyEx.uncertain,

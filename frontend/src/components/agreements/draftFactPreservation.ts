@@ -153,6 +153,13 @@ function restoreDuration(
   return { ...draft, duration: extracted };
 }
 
+/**
+ * Confidence threshold above which extracted governing law is AUTHORITATIVE —
+ * no later default / family shell may overwrite it. Aligns with the regression
+ * spec: "Once a governing law is extracted with confidence >= 0.8, it becomes authoritative."
+ */
+const AUTHORITATIVE_GOVERNING_LAW_CONFIDENCE = 0.8;
+
 function restoreJurisdiction(
   draft: ParsedDraftShape,
   structured: IntakeStructuredAgreement,
@@ -162,6 +169,17 @@ function restoreJurisdiction(
   const extracted = structured.governing_law.trim();
 
   if (!extracted) return draft;
+
+  // Authoritative override: high-confidence extraction always wins, even over a
+  // non-generic default like "Delaware" written by an earlier shell pass.
+  const isAuthoritative = (structured.governingLawConfidence ?? 0) >= AUTHORITATIVE_GOVERNING_LAW_CONFIDENCE;
+  if (isAuthoritative) {
+    if (current.toLowerCase() === extracted.toLowerCase()) return draft;
+    restored.push("jurisdiction");
+    return { ...draft, jurisdiction: extracted };
+  }
+
+  // Lower-confidence: only restore if current is empty or a known default.
   if (current && !GENERIC_JURISDICTION.test(current) && current.toLowerCase() !== "tbd") return draft;
 
   restored.push("jurisdiction");

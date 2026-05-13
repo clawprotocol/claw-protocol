@@ -20,10 +20,20 @@ const minimal = (family: ParsedDraftShape["agreement_family"]): ParsedDraftShape
 });
 
 describe("needsComplexityIntercept", () => {
-  it("is true for operating agreement family", () => {
-    expect(needsComplexityIntercept("We need an LLC operating agreement for two members.", "operating_agreement")).toBe(
-      true,
-    );
+  it("is FALSE for a simple operating agreement (progressive enhancement, regression spec §6)", () => {
+    // Simple OAs no longer hard-block. Premium upsell remains AFTER starter generation.
+    expect(
+      needsComplexityIntercept("We need an LLC operating agreement for two members.", "operating_agreement"),
+    ).toBe(false);
+  });
+
+  it("is TRUE for an operating agreement with high-complexity signals (vesting / classes / waterfall)", () => {
+    expect(
+      needsComplexityIntercept(
+        "Operating agreement: Class A and Class B units, 4-year vesting with 1-year cliff, drag-along, pro-rata participation.",
+        "operating_agreement",
+      ),
+    ).toBe(true);
   });
 
   it("detects SAFE from intake text", () => {
@@ -45,13 +55,23 @@ describe("needsComplexityIntercept", () => {
     ).toBe(false);
   });
 
-  it("is true for consulting + LLC with ownership/governance signals", () => {
+  it("is FALSE for consulting + LLC with ownership wording absent complex economics (loosened gate)", () => {
+    // Plain ownership wording without vesting / classes / waterfall is no longer gating-worthy.
     expect(
       needsComplexityIntercept(
         "consulting agreement for Peaceful Journey LLC. Members: 60% / 40%. Capital contributions of $50,000 each.",
         "consulting_agreement",
       ),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("is FALSE for advisor agreements regardless of equity wording (regression spec §6)", () => {
+    expect(
+      needsComplexityIntercept(
+        "Advisor agreement between FoundCo and Jane Smith. Equity: 0.25%.",
+        "consulting_agreement",
+      ),
+    ).toBe(false);
   });
 
   it("is false for employment-style generic intake (instant family policy)", () => {

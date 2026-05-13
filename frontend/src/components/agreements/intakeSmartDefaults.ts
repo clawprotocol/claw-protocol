@@ -5,6 +5,7 @@ import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementMod
 import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 import { extractBetweenPartyPair } from "./partyBetweenParse";
 import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
+import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
 
 export type { AgreementFamily } from "./agreementFamilyRouter";
 
@@ -147,10 +148,18 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   if (!(next.payment_terms || "").trim()) {
     const fromStructured = formatPaymentTermsLine(payment);
     const structuredPayment = structured.payment.trim();
+    /**
+     * Semantic suppression (regression spec §4): never let confidentiality / NDA tokens
+     * leak into Payment Terms via the live compensation heuristic. If structured + live
+     * are both empty/contaminated, fall through to a neutral no-payment line.
+     */
+    const safeStructuredPayment = isPaymentSemanticallySafe(structuredPayment) ? structuredPayment : "";
+    const liveComp = (live.compensationLine || "").trim();
+    const safeLiveComp = isPaymentSemanticallySafe(liveComp) ? liveComp : "";
     next.payment_terms =
       (fromStructured && payment.valid) || (fromStructured && payment.amount != null)
         ? fromStructured
-        : structuredPayment || live.compensationLine ||
+        : safeStructuredPayment || safeLiveComp ||
           "Payment schedule to be agreed with the other party — add specifics in review.";
   }
 

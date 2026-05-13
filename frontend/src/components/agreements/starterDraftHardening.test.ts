@@ -301,8 +301,17 @@ describe("complexity gate calibration", () => {
     expect(matchesAdvancedCommercialStructureSignals(intake)).toBe(false);
   });
 
-  it("LLC operating agreement DOES gate", () => {
+  it("simple LLC operating agreement does NOT hard-gate (progressive enhancement, spec §6)", () => {
+    // Regression spec §6: simple operating agreements now flow through to a starter draft;
+    // premium upsell is offered AFTER generation rather than blocking the user.
     const intake = "Operating agreement for Sunrise Ventures LLC. Members: Alice (60%), Bob (40%). Manager-managed.";
+    const family = detectAgreementFamily(intake);
+    expect(shouldInterceptAdvancedDocumentFamily(intake, family)).toBe(false);
+  });
+
+  it("complex LLC operating agreement (vesting / preferred classes) DOES gate", () => {
+    const intake =
+      "Operating agreement: Class A common units and Class B preferred units, 4-year vesting with 1-year cliff, drag-along and pro-rata participation rights, waterfall distributions.";
     const family = detectAgreementFamily(intake);
     expect(shouldInterceptAdvancedDocumentFamily(intake, family)).toBe(true);
   });

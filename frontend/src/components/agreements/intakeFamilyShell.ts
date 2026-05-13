@@ -15,6 +15,7 @@ import { applyIntakePartyRoleOverlay, type IntakePartyRoleLabels } from "./party
 import { applySimpleFlowSmartDefaults, type ParsedDraftShape } from "./intakeSmartDefaults";
 import { preserveExtractedFacts } from "./draftFactPreservation";
 import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
+import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
 
 const MAX_PARTY_NAME_LEN = 280;
 
@@ -131,8 +132,20 @@ export function applyAgreementFamilyIntakeShell(
       (/\bdisclosing\s+party\b/i.test(intakeText) && /\breceiving\s+party\b/i.test(intakeText) && !/\bmutual\b/i.test(intakeText));
     const isMutual = isMultiParty || !explicitlyUnilateral || /\bmutual\b/i.test(lowIntake);
 
+    /**
+     * Canonical NDA title resolution (regression spec §3):
+     *   - Empty / "Agreement" / "Confidentiality Agreement" / "Mutual Confidentiality Agreement"
+     *     are LEGACY upstream titles that must be replaced with the canonical NDA heading.
+     *   - Truly custom user-typed titles (e.g. "ProjectApollo Confidentiality Pact 2026")
+     *     are preserved verbatim.
+     */
     let title = nz(parsed.title);
-    if (!title || /^agreement$/i.test(title)) {
+    const isLegacyOrGeneric =
+      !title ||
+      /^agreement$/i.test(title) ||
+      /^confidentiality\s+agreement$/i.test(title) ||
+      /^mutual\s+confidentiality\s+agreement$/i.test(title);
+    if (isLegacyOrGeneric) {
       title = isMutual ? "Mutual Non-Disclosure Agreement" : "Non-Disclosure Agreement";
     }
     let jurisdiction = nz(parsed.jurisdiction);
@@ -237,10 +250,11 @@ export function applyAgreementFamilyIntakeShell(
     };
   }
   if (!nz(next.payment_terms)) {
-    const structuredPayment = nz(structured.payment);
+    const structuredPayment = isPaymentSemanticallySafe(structured.payment) ? nz(structured.payment) : "";
+    const liveComp = isPaymentSemanticallySafe(live.compensationLine) ? nz(live.compensationLine) : "";
     next = {
       ...next,
-      payment_terms: structuredPayment || nz(live.compensationLine) || "To be agreed between the parties (add specifics in review if compensation applies).",
+      payment_terms: structuredPayment || liveComp || "To be agreed between the parties (add specifics in review if compensation applies).",
     };
   }
   if (!nz(next.duration) && !nz(next.due_date)) {

@@ -96,11 +96,15 @@ const EMPTY: LivePreviewModel = {
 function inferDocTitle(lower: string, firstLine: string): string {
   /** Prefer commercial / consulting shapes before confidentiality heuristics (avoid “Confidentiality” substring false positives). */
   if (/\bconsult(?:ant|ing)?\b|\bretainer\b|\bfreelance\b|\bcontractor\b|\b1099\b/.test(lower)) return "Consulting Agreement";
-  if (
-    /\b(?:mutual\s+)?nda\b|\bnon[-\s]?disclosure\b|\bconfidentiality\s+agreement\b|\bconfidential\s+(?:information|materials|data|records)\b/i.test(
-      lower,
-    )
-  ) {
+  // Canonical NDA wording — return the canonical heading directly so downstream resolvers
+  // never see a legacy "Confidentiality Agreement" string for an NDA-shaped intake (regression spec §3).
+  if (/\b(?:mutual\s+)?nda\b|\bnon[-\s]?disclosure\b/i.test(lower)) {
+    if (/\bmutual\b/i.test(lower) || !/\b(?:one[-\s]?way|unilateral)\b/i.test(lower)) {
+      return "Mutual Non-Disclosure Agreement";
+    }
+    return "Non-Disclosure Agreement";
+  }
+  if (/\bconfidentiality\s+agreement\b|\bconfidential\s+(?:information|materials|data|records)\b/i.test(lower)) {
     return "Confidentiality Agreement";
   }
   if (/\b(lease|rent(al)?|landlord|tenant)\b/.test(lower)) return "Lease Agreement";

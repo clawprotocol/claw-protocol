@@ -52,8 +52,20 @@ describe("preserveExtractedFacts", () => {
     expect(restoredFields).toContain("jurisdiction");
   });
 
-  it("does NOT override jurisdiction when draft has non-default value", () => {
+  it("DOES override jurisdiction when intake has authoritative (>=0.8 confidence) extraction", () => {
+    // Regression spec §1: once governing law is extracted with confidence >= 0.8 it is
+    // authoritative. Even a non-default existing jurisdiction must be replaced — otherwise
+    // a stale "New York" from a prior session could mask the user's explicit "Texas".
     const intake = "Agreement. Governing law: Texas.";
+    const draft = baseDraft({ jurisdiction: "New York" });
+    const { draft: result, restoredFields } = preserveExtractedFacts(draft, intake);
+    expect(result.jurisdiction).toBe("Texas");
+    expect(restoredFields).toContain("jurisdiction");
+  });
+
+  it("does NOT override jurisdiction when intake has only a low-confidence signal", () => {
+    // No legal context anywhere → bare state in prose has confidence < 0.8 and must NOT win.
+    const intake = "Agreement description that mentions Texas as a place name only.";
     const draft = baseDraft({ jurisdiction: "New York" });
     const { draft: result, restoredFields } = preserveExtractedFacts(draft, intake);
     expect(result.jurisdiction).toBe("New York");

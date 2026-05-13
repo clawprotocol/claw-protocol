@@ -30,10 +30,24 @@ const GENERIC_TITLE_PATTERNS: RegExp[] = [
   /^untitled$/i,
 ];
 
-export function isGenericOrEmptyTitle(title: string | null | undefined): boolean {
+/**
+ * Family-specific legacy titles that should be replaced with the canonical heading.
+ * E.g. NDA family must always read "Non-Disclosure Agreement" — never the legacy
+ * "Confidentiality Agreement" / "Mutual Confidentiality Agreement" labels.
+ */
+const FAMILY_LEGACY_TITLE_PATTERNS: Partial<Record<AgreementFamily, RegExp[]>> = {
+  nda: [/^confidentiality\s+agreement$/i, /^mutual\s+confidentiality\s+agreement$/i],
+};
+
+export function isGenericOrEmptyTitle(title: string | null | undefined, family?: AgreementFamily): boolean {
   const t = (title || "").trim();
   if (!t) return true;
-  return GENERIC_TITLE_PATTERNS.some((re) => re.test(t));
+  if (GENERIC_TITLE_PATTERNS.some((re) => re.test(t))) return true;
+  if (family) {
+    const familyLegacy = FAMILY_LEGACY_TITLE_PATTERNS[family];
+    if (familyLegacy && familyLegacy.some((re) => re.test(t))) return true;
+  }
+  return false;
 }
 
 export type CanonicalTitleResolution = {
@@ -48,11 +62,11 @@ export function resolveCanonicalAgreementTitle(opts: {
   family: AgreementFamily;
 }): CanonicalTitleResolution {
   const current = (opts.currentTitle || "").trim();
-  if (current && !isGenericOrEmptyTitle(current)) {
+  if (current && !isGenericOrEmptyTitle(current, opts.family)) {
     return { title: current, source: "preserved" };
   }
   const live = (opts.liveDocTitle || "").trim();
-  if (live && !isGenericOrEmptyTitle(live)) {
+  if (live && !isGenericOrEmptyTitle(live, opts.family)) {
     return { title: live, source: "live" };
   }
   return { title: CANONICAL_TITLE_FOR_FAMILY[opts.family] ?? "Business Agreement", source: "family" };
