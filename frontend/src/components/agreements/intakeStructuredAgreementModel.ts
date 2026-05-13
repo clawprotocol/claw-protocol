@@ -104,8 +104,19 @@ function confidenceBetweenPair(left: string, right: string): number {
   return Math.min(1, c);
 }
 
+/**
+ * Strip "for <Entity> LLC/Inc/Corp" trailing phrase that names the COMPANY rather than
+ * a party (regression spec P2 — third party should not absorb "for Apollo Data LLC").
+ */
+function stripCompanyForSuffix(raw: string): string {
+  return raw
+    .replace(/\s+for\s+[A-Z][A-Za-z0-9&'\-\s]{1,80}?\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|LLP|PLLC)\b\.?$/i, "")
+    .trim();
+}
+
 function clampPartySegment(raw: string): string {
-  const formatted = formatPartySegmentForPreview(normalizePartyNameFragment(raw));
+  const cleaned = stripCompanyForSuffix(raw);
+  const formatted = formatPartySegmentForPreview(normalizePartyNameFragment(cleaned));
   if (formatted.length > MAX_PARTY_CHARS) return "";
   if (wordCount(formatted) > MAX_PARTY_WORDS) return "";
   return formatted;
@@ -404,7 +415,7 @@ function extractScopeAndMeta(lower: string, text: string): FieldMeta {
       }
     } else if (!best.text) {
       best = {
-        text: "Scope of work described in your text — refine wording in review.",
+        text: "Scope of work described in this Agreement.",
         confidence: 0.55,
         signal: true,
         inferred: true,
@@ -426,10 +437,28 @@ const NON_PAYMENT_SEMANTIC_TOKENS =
   /\b(?:confidential(?:ity)?|nda|non[-\s]?disclosure|proprietary|trade\s+secret|mutual\s+confidentiality|disclosing\s+party|receiving\s+party)\b/i;
 
 function looksLikePaymentText(s: string): boolean {
-  const t = s.trim();
+  const t = s.trim().replace(/^[:\-\s]+/, "").trim();
   if (!t) return false;
+  if (t.length < 4) return false;
   if (NON_PAYMENT_SEMANTIC_TOKENS.test(t)) return false;
   return true;
+}
+
+/**
+ * Extract a "Compensation: 0.5% equity ..." labeled payment line: equity / percent compensation
+ * is genuine payment data and should populate Payment Terms even when no $ amount is present.
+ * Returns empty when no clean equity/percent signal exists.
+ */
+function extractEquityCompensationLine(text: string): string {
+  const labeled = text.match(
+    /\b(?:compensation|payment|fee|equity|grant)\s*[:\-]\s*([^\n]{3,200}?)(?:\.\s|\n|$)/i,
+  );
+  if (!labeled) return "";
+  const body = labeled[1].trim();
+  if (!looksLikePaymentText(body)) return "";
+  // Only accept when the body actually contains $-amount, percent, or equity wording.
+  if (!/\b(?:\$\s*\d|\d+\s*%|equity|shares?|options?|warrants?|RSUs?|vesting)\b/i.test(body)) return "";
+  return normalizeIntakeFieldText(body, 200);
 }
 
 function extractPaymentLine(text: string, payment: IntakePaymentField): string {
@@ -449,6 +478,9 @@ function extractPaymentLine(text: string, payment: IntakePaymentField): string {
     const parts = money.slice(0, 3).map((m) => m.replace(/\s+/g, " ").trim());
     return normalizeIntakeFieldText(parts.join("; "), 180);
   }
+  // Equity / percent compensation is also genuine payment data.
+  const equity = extractEquityCompensationLine(text);
+  if (equity) return equity;
   const rate = text.match(/\b(?:payment|compensation|fee|price)\s*(?:of|is)?\s*([^\n,.]{3,100})/i);
   if (rate && looksLikePaymentText(rate[1])) return normalizeIntakeFieldText(rate[1], 160);
   return "";
@@ -614,7 +646,7 @@ function extractTermAndMeta(lower: string, text: string): FieldMeta {
     const soft = text.match(TERM_DURATION_SOFT);
     const frag = soft ? soft[0].replace(/\s+/g, " ").trim() : "timing";
     return {
-      text: normalizeIntakeFieldText(`Timing noted (${frag}) — refine in review.`, 140),
+      text: normalizeIntakeFieldText(`Timing as described (${frag}).`, 140),
       confidence: 0.58,
       signal: true,
       inferred: true,
@@ -625,7 +657,7 @@ function extractTermAndMeta(lower: string, text: string): FieldMeta {
     const soft = text.match(PAYMENT_CADENCE_IN_TERM);
     const frag = soft ? soft[0].replace(/\s+/g, " ").trim() : "cadence";
     return {
-      text: normalizeIntakeFieldText(`Timing noted (${frag}) — refine in review.`, 140),
+      text: normalizeIntakeFieldText(`Timing as described (${frag}).`, 140),
       confidence: 0.56,
       signal: true,
       inferred: true,

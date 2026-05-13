@@ -107,7 +107,15 @@ function inferDocTitle(lower: string, firstLine: string): string {
   if (/\bconfidentiality\s+agreement\b|\bconfidential\s+(?:information|materials|data|records)\b/i.test(lower)) {
     return "Confidentiality Agreement";
   }
-  if (/\b(lease|rent(al)?|landlord|tenant)\b/.test(lower)) return "Lease Agreement";
+  // Lease Agreement: only when tenant/lease wording is in genuine lease context.
+  // Avoid false positives like "multi-tenant" (SaaS), "tenant of record", etc. by requiring
+  // a co-occurring lease/rent/landlord term elsewhere in the intake.
+  if (
+    (/\blease\b/.test(lower) || /\b(?:landlord|rental)\b/.test(lower)) &&
+    /\b(?:lease|rent|landlord|tenant|premises|leased|leasing)\b/.test(lower)
+  ) {
+    return "Lease Agreement";
+  }
   if (/\b(employ|hire|salary|w-2|w2|onboarding)\b/.test(lower)) return "Employment Agreement";
   if (/\b(mow|lawn|landscap|clean(ing)?|maintain|plumb|electric|hvac)\b/.test(lower)) return "Service Agreement";
   if (/\b(saas|software|license|subscription)\b/.test(lower)) return "Software / Services Agreement";

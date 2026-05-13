@@ -39,7 +39,9 @@ describe("applyAgreementFamilyIntakeShell operating_agreement", () => {
       "Put together a standard operating agreement for LLC. The name of the LLC is ABC LLC. The LLC is formed in Oklahoma.";
     const out = applyAgreementFamilyIntakeShell(sparse, raw, "operating_agreement");
     expect(out.title).toMatch(/Operating Agreement/i);
-    expect(out.title).toContain("ABC LLC");
+    // Canonical title is "Operating Agreement"; the company name surfaces in `llc_company_name`
+    // (and the OA preview "Company:" line) — never as a hybrid title (regression spec P3).
+    expect(out.llc_company_name).toBe("ABC LLC");
     expect(out.jurisdiction).toMatch(/Oklahoma/i);
     expect(out.parties.length).toBeGreaterThanOrEqual(2);
     expect(out.purpose.length).toBeGreaterThan(20);

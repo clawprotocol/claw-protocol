@@ -152,7 +152,11 @@ function formatEntityTitleCase(entity: string): string {
       const core = lead ? coreWithLead.slice(lead.length) : coreWithLead;
       if (!core) return tok;
       if (/^and$/i.test(core)) return `${lead}and${trail}`;
-      return `${lead}${titleCaseWord(core)}${trail}`;
+      const titled = titleCaseWord(core);
+      // Dedupe trailing punctuation when the canonical suffix already ends with a period
+      // (e.g. "Inc." + "." trail → "Inc.", not "Inc..").
+      const safeTrail = titled.endsWith(".") && trail.startsWith(".") ? trail.slice(1) : trail;
+      return `${lead}${titled}${safeTrail}`;
     })
     .join(" ");
 }

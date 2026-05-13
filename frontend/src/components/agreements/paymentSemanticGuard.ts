@@ -30,4 +30,4 @@ export function isPaymentSemanticallySafe(candidate: string | null | undefined):
  * is semantically safe — preferred over silently reusing unrelated extracted text.
  */
 export const NO_PAYMENT_NEUTRAL_FALLBACK =
-  "No payment terms specified — confirm or omit in review.";
+  "No fees unless the parties document compensation in a separate writing or amendment.";

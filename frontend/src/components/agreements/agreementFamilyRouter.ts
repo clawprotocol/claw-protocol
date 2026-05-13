@@ -59,7 +59,7 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
 
   const primaryServiceIntent =
     /\bconsult(?:ant|ing)\b/i.test(low) ||
-    /\badvisory\b/i.test(low) ||
+    /\badvisor(?:y|s)?\b/i.test(low) ||
     /\bretainer\b/i.test(low) ||
     /\bservices?\s+agreement\b/i.test(low) ||
     /\bscope\s+of\s+work\b/i.test(low) ||
@@ -124,7 +124,11 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     return "independent_contractor_agreement";
   }
 
-  if (/\bconsult(?:ant|ing)\b/i.test(low) || /\badvisory\b/i.test(low) || /\bretainer\b/i.test(low)) {
+  if (
+    /\bconsult(?:ant|ing)\b/i.test(low) ||
+    /\badvisor(?:y|s)?\b/i.test(low) ||
+    /\bretainer\b/i.test(low)
+  ) {
     return "consulting_agreement";
   }
 

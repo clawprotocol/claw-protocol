@@ -99,6 +99,7 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
       currentTitle: next.title,
       liveDocTitle: live.docTitle,
       family,
+      intakeText,
     });
     next.title = resolved.title;
   }
@@ -132,8 +133,8 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
         next.parties = fromLive;
       } else {
         next.parties = [
-          { name: "Party A (edit in review)", role: "party" },
-          { name: "Party B (edit in review)", role: "party" },
+          { name: "Party A", role: "party" },
+          { name: "Party B", role: "party" },
         ];
       }
     }
@@ -142,16 +143,16 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   if (!(next.purpose || "").trim()) {
     const structuredScope = structured.scope.trim();
     const scopeOnly = (live.scopeLine || "").trim();
-    next.purpose = structuredScope || scopeOnly || "Scope and deliverables to be refined in review.";
+    next.purpose = structuredScope || scopeOnly || "Scope and deliverables to be agreed between the parties.";
   }
 
   if (!(next.payment_terms || "").trim()) {
     const fromStructured = formatPaymentTermsLine(payment);
     const structuredPayment = structured.payment.trim();
     /**
-     * Semantic suppression (regression spec §4): never let confidentiality / NDA tokens
-     * leak into Payment Terms via the live compensation heuristic. If structured + live
-     * are both empty/contaminated, fall through to a neutral no-payment line.
+     * Semantic suppression: never let confidentiality / NDA tokens leak into Payment Terms
+     * via the live compensation heuristic. If structured + live are both empty/contaminated,
+     * fall through to a neutral no-payment line (public-facing copy only — no "in review").
      */
     const safeStructuredPayment = isPaymentSemanticallySafe(structuredPayment) ? structuredPayment : "";
     const liveComp = (live.compensationLine || "").trim();
@@ -160,7 +161,7 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
       (fromStructured && payment.valid) || (fromStructured && payment.amount != null)
         ? fromStructured
         : safeStructuredPayment || safeLiveComp ||
-          "Payment schedule to be agreed with the other party — add specifics in review.";
+          "No fees unless the parties document compensation in a separate writing or amendment.";
   }
 
   if (!(next.duration || "").trim() && !(next.due_date || "").trim()) {

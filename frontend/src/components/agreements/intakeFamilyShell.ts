@@ -23,9 +23,27 @@ function nz(s: string | null | undefined): string {
   return (s || "").trim();
 }
 
+/**
+ * Imperative phrasings that must NEVER become an LLC display name.
+ * "Create an LLC", "Draft an LLC", "Form an LLC" etc. are intent verbs, not entity names.
+ */
+const IMPERATIVE_LLC_PHRASE =
+  /^(?:create|draft|build|form|set\s+up|setup|generate|make|prepare|start)\s+(?:an?\s+|the\s+)?LLC$/i;
+
 /** Extract "ABC LLC" style name from common phrasing. */
 export function extractLlcDisplayName(raw: string): string | null {
   const t = raw.replace(/\s+/g, " ").trim();
+
+  // Highest-priority signal: "... for <Entity> LLC[.,]" — explicit entity callout (regression spec P2).
+  // Anchored to "for" + capitalized phrase + "LLC" (or other entity suffix), then a sentence break.
+  const forEntity = t.match(
+    /\bfor\s+([A-Z][A-Za-z0-9&'\-\s]{1,80}?\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|LLP|PLLC))\b/,
+  );
+  if (forEntity?.[1]) {
+    const name = forEntity[1].trim().replace(/\s+/g, " ");
+    if (name.length > 1 && !IMPERATIVE_LLC_PHRASE.test(name)) return name.slice(0, MAX_PARTY_NAME_LEN);
+  }
+
   const m1 = t.match(
     /\bname\s+of\s+(?:the\s+)?(?:LLC|limited\s+liability\s+company)\s+is\s+([^.\n]+?)(?:\.|,|\s+the\s+|\s+The\s+LLC\b|\s+LLC\s+is\b)/i,
   );
@@ -33,12 +51,60 @@ export function extractLlcDisplayName(raw: string): string | null {
     const name = m1[1].trim().replace(/\s+/g, " ");
     if (name.length > 1 && name.length <= MAX_PARTY_NAME_LEN) return name;
   }
+
+  // Generic capitalized "X LLC" anywhere in the intake — but skip imperative prefixes.
   const m2 = t.match(/\b([A-Z][A-Za-z0-9&,.'\-\s]{1,120}?\bLLC\b)/);
   if (m2) {
     const name = m2[1].trim().replace(/\s+/g, " ");
-    if (name.length > 1) return name.slice(0, MAX_PARTY_NAME_LEN);
+    if (name.length > 1 && !IMPERATIVE_LLC_PHRASE.test(name)) return name.slice(0, MAX_PARTY_NAME_LEN);
   }
   return null;
+}
+
+/**
+ * Detects "Manager-managed" / "Member-managed" / "managed by managers" wording.
+ * Returns null when no explicit signal is present (callers fall back to a neutral default).
+ */
+export function extractLlcManagementStructure(raw: string): string | null {
+  const low = (raw || "").toLowerCase();
+  if (!low) return null;
+  if (/\bmanager[-\s]?managed\b/.test(low)) return "Manager-managed";
+  if (/\bmember[-\s]?managed\b/.test(low)) return "Member-managed";
+  if (/\bmanaged\s+by\s+(?:the\s+)?managers?\b/.test(low)) return "Manager-managed";
+  if (/\bmanaged\s+by\s+(?:the\s+)?members?\b/.test(low)) return "Member-managed";
+  return null;
+}
+
+/**
+ * Extracts ownership rows from "Ownership: A 40%, B 40%, C 20%" / "Members: A (40%) ..." style intake.
+ * Returns a normalized "A 40%; B 40%; C 20%" string, or null when no clean signal is present.
+ */
+export function extractLlcOwnershipSummary(raw: string): string | null {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  if (!t) return null;
+  // Look for "Ownership:" or "Members:" labeled segment
+  const labeled = t.match(
+    /\b(?:ownership|members?|cap\s*table|equity\s+split|allocations?)\s*[:\-]\s*([^.\n]{6,300})/i,
+  );
+  const body = labeled?.[1] ?? null;
+  if (!body) return null;
+  // Split on commas/semicolons, keep entries that look like "<Name> <number>%".
+  const rows = body
+    .split(/\s*[,;]\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      // "Alpha Trust 40%" or "Alpha Trust (40%)"
+      const m = s.match(/^([A-Z][A-Za-z0-9&'\-.\s]{1,60}?)\s*\(?\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\)?$/);
+      if (!m) return null;
+      const name = m[1].trim().replace(/\s+/g, " ");
+      const pct = m[2];
+      if (!name || !pct) return null;
+      return `${name} ${pct}%`;
+    })
+    .filter((x): x is string => Boolean(x));
+  if (rows.length < 2) return null;
+  return rows.join("; ");
 }
 
 /** US state / formation phrase from intake (not legal advice — heuristic only). */
@@ -52,10 +118,10 @@ export function extractFormationJurisdictionHint(raw: string): string | null {
 }
 
 function defaultPartiesForOperating(company: string | null): { name: string; role: string }[] {
-  const c = (company || "").trim() || "The limited liability company (name in review)";
+  const c = (company || "").trim() || "The limited liability company";
   return [
     { name: c.slice(0, MAX_PARTY_NAME_LEN), role: "company" },
-    { name: "Members (names and interests to be finalized in review)", role: "members" },
+    { name: "Members of the LLC", role: "members" },
   ];
 }
 
@@ -73,10 +139,19 @@ export function applyAgreementFamilyIntakeShell(
   if (family === "operating_agreement") {
     const company = extractLlcDisplayName(intakeText) || nz(parsed.llc_company_name ?? null) || null;
     const stateHint = extractFormationJurisdictionHint(intakeText) || nz(structured.governing_law) || "";
+    const management = extractLlcManagementStructure(intakeText) || nz(parsed.management_structure ?? null) || null;
+    const ownership = extractLlcOwnershipSummary(intakeText) || nz(parsed.members_ownership_summary ?? null) || null;
 
+    /**
+     * Canonical title resolution (regression spec P3):
+     *   - Empty / "Agreement" → canonical "Operating Agreement"
+     *   - Imperative phrases like "Create an LLC" must never make it into the title
+     *   - Truly custom titles (e.g. "Apollo Data LLC Operating Agreement") are preserved
+     */
     let title = nz(parsed.title);
-    if (!title || /^agreement$/i.test(title)) {
-      title = company ? `Operating Agreement — ${company}` : "Operating Agreement";
+    const titleLooksImperative = /^(?:create|draft|build|form|generate|make|prepare|start)\b/i.test(title);
+    if (!title || /^agreement$/i.test(title) || /^operating\s+agreement\b\s*[—-]\s*create\b/i.test(title) || titleLooksImperative) {
+      title = "Operating Agreement";
     }
 
     let jurisdiction = nz(parsed.jurisdiction);
@@ -84,8 +159,44 @@ export function applyAgreementFamilyIntakeShell(
       jurisdiction = stateHint || "Delaware";
     }
 
+    /**
+     * Strip "for <Entity> LLC" trailing phrases on individual party names — that wording
+     * names the COMPANY, not the third party (regression spec P2). Also drop a duplicate
+     * member entry that exactly equals the company name (the LLC itself isn't a member).
+     */
+    const cleanForCompanyTail = (name: string): string =>
+      (name || "")
+        .replace(/\s+for\s+[A-Z][A-Za-z0-9&'\-\s]{1,80}?\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|LLP|PLLC)\b\.?$/i, "")
+        .trim();
+    const dedupeAgainstCompany = (
+      list: { name: string; role: string }[],
+    ): { name: string; role: string }[] => {
+      if (!company) return list;
+      const co = company.toLowerCase();
+      const dedup = list.filter((p) => p.name.toLowerCase() !== co);
+      return dedup.length >= 2 ? dedup : list;
+    };
+
+    let inputParties = (parsed.parties || [])
+      .map((p) => ({ ...p, name: cleanForCompanyTail(p.name) }))
+      .filter((p) => p.name.length > 1);
+    inputParties = dedupeAgainstCompany(inputParties);
+
+    /**
+     * If the parsed draft has no usable parties yet, adopt the structured-extracted owners
+     * (regression spec P2 — Apollo Data LLC intake should surface Alpha Trust / Beta Capital /
+     * Jamie Chen as members, not generic placeholders).
+     */
+    if (inputParties.length < 2 && structured.parties.length >= 2) {
+      const fromStructured = structured.parties
+        .map((n) => ({ name: cleanForCompanyTail(n).slice(0, MAX_PARTY_NAME_LEN), role: "member" as const }))
+        .filter((p) => p.name.length > 1);
+      const dedup = dedupeAgainstCompany(fromStructured);
+      if (dedup.length >= 2) inputParties = dedup;
+    }
+
     const parties =
-      (parsed.parties || []).length >= 2 ? [...parsed.parties] : defaultPartiesForOperating(company);
+      inputParties.length >= 2 ? [...inputParties] : defaultPartiesForOperating(company);
 
     const purpose =
       nz(parsed.purpose) ||
@@ -100,12 +211,14 @@ export function applyAgreementFamilyIntakeShell(
 
     const effective_date =
       nz(parsed.effective_date) ||
-      "Upon adoption by the members (unless a different effective date is specified in review).";
+      "Upon adoption by the members.";
 
     return {
       ...parsed,
       agreement_family: "operating_agreement",
       llc_company_name: company,
+      management_structure: management,
+      members_ownership_summary: ownership,
       title,
       jurisdiction,
       parties,
@@ -168,8 +281,8 @@ export function applyAgreementFamilyIntakeShell(
         } else {
           // Neutral placeholders — never inject "disclosing/receiving" unless the user did.
           parties = [
-            { name: "Party A (edit in review)", role: "party" },
-            { name: "Party B (edit in review)", role: "party" },
+            { name: "Party A", role: "party" },
+            { name: "Party B", role: "party" },
           ];
         }
       }
@@ -185,7 +298,7 @@ export function applyAgreementFamilyIntakeShell(
       "No fees unless the parties document compensation in a separate writing or amendment.";
     const duration = nz(parsed.duration) || nz(structured.term) || live.termLine || "As stated in the agreement body.";
     const effective_date =
-      nz(parsed.effective_date) || "Upon full execution by the parties unless otherwise specified in review.";
+      nz(parsed.effective_date) || "Upon full execution by the parties.";
     return {
       ...parsed,
       agreement_family: "nda",
@@ -224,8 +337,8 @@ export function applyAgreementFamilyIntakeShell(
         next = {
           ...next,
           parties: [
-            { name: "Party A (edit in review)", role: "party" },
-            { name: "Party B (edit in review)", role: "party" },
+            { name: "Party A", role: "party" },
+            { name: "Party B", role: "party" },
           ],
         };
       }
@@ -237,6 +350,7 @@ export function applyAgreementFamilyIntakeShell(
       currentTitle: next.title,
       liveDocTitle: live.docTitle,
       family: "generic_business_agreement",
+      intakeText,
     });
     next = { ...next, title: resolved.title };
   }
@@ -246,7 +360,7 @@ export function applyAgreementFamilyIntakeShell(
   if (!nz(next.purpose)) {
     next = {
       ...next,
-      purpose: nz(structured.scope) || nz(live.scopeLine) || "Commercial arrangement to be described in review.",
+      purpose: nz(structured.scope) || nz(live.scopeLine) || "Commercial arrangement to be agreed between the parties.",
     };
   }
   if (!nz(next.payment_terms)) {
@@ -254,13 +368,13 @@ export function applyAgreementFamilyIntakeShell(
     const liveComp = isPaymentSemanticallySafe(live.compensationLine) ? nz(live.compensationLine) : "";
     next = {
       ...next,
-      payment_terms: structuredPayment || liveComp || "To be agreed between the parties (add specifics in review if compensation applies).",
+      payment_terms: structuredPayment || liveComp || "No fees unless the parties document compensation in a separate writing or amendment.",
     };
   }
   if (!nz(next.duration) && !nz(next.due_date)) {
     next = {
       ...next,
-      duration: nz(structured.term) || nz(live.termLine) || "As stated in the agreement or to be refined in review.",
+      duration: nz(structured.term) || nz(live.termLine) || "As stated in the agreement.",
     };
   }
   if (!nz(next.termination_summary)) {
