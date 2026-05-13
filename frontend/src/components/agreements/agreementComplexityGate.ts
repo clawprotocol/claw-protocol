@@ -59,7 +59,8 @@ export function simplifyParsedDraftForInstantPath(parsed: ParsedDraftShape, rawI
   };
   const pay = (next.payment_terms || "").trim();
   if (/^n\/a$/i.test(pay) || /^not applicable/i.test(pay)) {
-    next.payment_terms = "Economics and fees to be described in the agreement body or finalized in review.";
+    next.payment_terms =
+      "Economics and fees to be described in the agreement body unless otherwise agreed by the parties.";
   }
   return next;
 }

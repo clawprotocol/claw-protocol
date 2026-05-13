@@ -38,6 +38,9 @@ const REPLACEMENTS: Replacement[] = [
 
   // "to be agreed in review" → "to be agreed between the parties".
   { pattern: /\bto be agreed in review\b/gi, replacement: "to be agreed between the parties" },
+  { pattern: /\bfor this review shell\b/gi, replacement: "for the final agreement" },
+  { pattern: /\breview shell\b/gi, replacement: "starter preview" },
+  { pattern: /\bfinalized in review\b/gi, replacement: "completed by the parties unless otherwise agreed" },
 
   // Cleanup leftover whitespace from placeholder removal.
   { pattern: / {2,}/g, replacement: " " },

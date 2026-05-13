@@ -76,6 +76,37 @@ export function extractLlcManagementStructure(raw: string): string | null {
 }
 
 /**
+ * Returns the parsed [{ name, pct }] member rows from a labeled "Ownership/Members/Cap table"
+ * segment. Useful for both the rendered ownership summary AND the party list (members).
+ *
+ * Universal rule: when the intake explicitly names the LLC's members and percentages, we should
+ * surface those people as the party rows for the operating agreement, not "Members of the LLC".
+ */
+export function extractLlcMemberRows(raw: string): { name: string; pct: string }[] {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  if (!t) return [];
+  const labeled = t.match(
+    /\b(?:ownership|members?|cap\s*table|equity\s+split|allocations?)\s*[:\-]\s*([^.\n]{6,300})/i,
+  );
+  const body = labeled?.[1] ?? null;
+  if (!body) return [];
+  const rows = body
+    .split(/\s*[,;]\s*|\s+and\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const m = s.match(/^([A-Z][A-Za-z0-9&'\-.\s]{1,60}?)\s*\(?\s*(\d{1,3}(?:\.\d+)?)\s*%\s*\)?$/);
+      if (!m) return null;
+      const name = m[1].trim().replace(/\s+/g, " ");
+      const pct = m[2];
+      if (!name || !pct) return null;
+      return { name, pct };
+    })
+    .filter((x): x is { name: string; pct: string } => Boolean(x));
+  return rows;
+}
+
+/**
  * Extracts ownership rows from "Ownership: A 40%, B 40%, C 20%" / "Members: A (40%) ..." style intake.
  * Returns a normalized "A 40%; B 40%; C 20%" string, or null when no clean signal is present.
  */
@@ -193,6 +224,23 @@ export function applyAgreementFamilyIntakeShell(
         .filter((p) => p.name.length > 1);
       const dedup = dedupeAgainstCompany(fromStructured);
       if (dedup.length >= 2) inputParties = dedup;
+    }
+
+    /**
+     * Universal P2 fallback: if intake has a labeled "Members:" / "Ownership:" list with names
+     * and percentages, surface those member names as parties even when the structured pair
+     * extractor didn't find a "between …" clause. Pure-OA intakes routinely look like:
+     *   "Operating agreement for Sunrise Ventures LLC. Members: Alice 40%, Bob 35%, Carol 25%."
+     */
+    if (inputParties.length < 2) {
+      const memberRows = extractLlcMemberRows(intakeText);
+      if (memberRows.length >= 2) {
+        const fromMembers = memberRows
+          .map((r) => ({ name: r.name.slice(0, MAX_PARTY_NAME_LEN), role: "member" as const }))
+          .filter((p) => p.name.length > 1);
+        const dedup = dedupeAgainstCompany(fromMembers);
+        if (dedup.length >= 2) inputParties = dedup;
+      }
     }
 
     const parties =
@@ -316,16 +364,45 @@ export function applyAgreementFamilyIntakeShell(
   let next: ParsedDraftShape = { ...parsed, agreement_family: "generic_business_agreement" };
   if ((next.parties || []).length < 2) {
     const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
-    if (explicitSigners && explicitSigners.length >= 2) {
+    const structuredOk = !structured.partiesUncertain && structured.parties.length >= 2;
+    /**
+     * Prefer structured multi-party extraction over the loose `tryInferNamedPartiesFromIntake`
+     * "between … and …" heuristic whenever structured has **more** parties (3+ seller/buyer/escrow
+     * lists, property-management triples, etc.) or the same-or-better count — the between-regex
+     * cannot see Oxford-comma triples and would otherwise clobber a clean structured.parties[].
+     */
+    const preferStructured =
+      structuredOk &&
+      (structured.parties.length >= 3 ||
+        !explicitSigners ||
+        structured.parties.length >= (explicitSigners?.length ?? 0));
+
+    if (preferStructured) {
+      next = {
+        ...next,
+        parties: structured.parties.map((n) => ({ name: n.slice(0, MAX_PARTY_NAME_LEN), role: "party" })),
+      };
+    } else if (explicitSigners && explicitSigners.length >= 2) {
       next = { ...next, parties: explicitSigners };
-    } else if (!structured.partiesUncertain && structured.parties.length >= 2) {
+    } else if (structuredOk) {
       next = {
         ...next,
         parties: structured.parties.map((n) => ({ name: n.slice(0, MAX_PARTY_NAME_LEN), role: "party" })),
       };
     } else {
+      // Universal fallback: only adopt extractBetweenPartyPair output when each side looks
+      // like a clean party fragment (≤6 words, no internal commas/semicolons). Otherwise
+      // the structured extractor already flagged uncertainty and we should keep going,
+      // landing on neutral placeholders rather than swallowing prose into party names.
       const between = extractBetweenPartyPair(intakeText);
-      if (between && between.left.trim().length > 1 && between.right.trim().length > 1) {
+      const looksClean = (raw: string) => {
+        const t = raw.trim();
+        if (t.length < 2 || t.length > 80) return false;
+        if (t.split(/\s+/).filter(Boolean).length > 6) return false;
+        if (/[,;]/.test(t)) return false;
+        return true;
+      };
+      if (between && looksClean(between.left) && looksClean(between.right)) {
         next = {
           ...next,
           parties: [

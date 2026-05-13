@@ -230,7 +230,9 @@ function buildOperatingAgreementPreviewText(draft: ParsedDraftShape, options?: A
   const lawLine =
     starterPreview && isJurisdictionDisplayLowConfidence((draft.jurisdiction || "").trim())
       ? `State of formation and governing law: ${STARTER_GOVERNING_LAW_DISPLAY_FALLBACK}.`
-      : `The LLC is treated as formed or governed under ${law} for this review shell (confirm with counsel).`;
+      : starterPreview
+        ? `State of formation and governing law: ${law} (confirm formation and choice-of-law details with counsel).`
+        : `The LLC is treated as formed or governed under ${law} for this review shell (confirm with counsel).`;
 
   const introOa = starterPreview
     ? "This simplified LLC starter preview highlights key fields only. It is not legal advice — confirm details with counsel before adoption."

@@ -12,6 +12,7 @@ import {
 } from "./intakeCurrencyParse";
 import { formatPartiesJoinedLine, formatPartySegmentForPreview } from "./partyFormat";
 import { normalizePartyNameFragment, splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
+import { preCleanBetweenTailForMultiPartySplit, stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
 export type IntakeStructuredAgreement = {
   parties: string[];
@@ -85,11 +86,27 @@ function looksLikeNameFragment(s: string): boolean {
   if (t.length < 2) return false;
   if (wordCount(t) > MAX_PARTY_WORDS) return false;
   if (t.length > MAX_PARTY_CHARS) return false;
-  if (/^(?:if|when|the|this|payment|fee|i\s+will|we\s+will|whereas|agreement|contract)\b/i.test(t)) return false;
+  // Reject prose-flavored starters. Note: "the" / "this" are allowed when followed by a
+  // Capitalized noun phrase (e.g. "the Chen Family Trust", "the Olson Family Trust"),
+  // because legitimate party names regularly include the article.
+  if (/^(?:if|when|payment|fee|i\s+will|we\s+will|whereas|agreement|contract)\b/i.test(t)) return false;
+  if (/^(?:the|this)\s+(?![A-Z])/i.test(t)) return false;
   // Reject structural field prefixes ("Term:", "Effective Date:", "Payment:" etc.)
   if (STRUCTURAL_FIELD_PREFIXES.test(t)) return false;
+  // Reject fragments containing structural labels inline (e.g. "Operating agreement for X. Members:"
+  // or "Sunset Holdings LLC. Term:"). A party name is a single noun-phrase, never a multi-clause sentence.
+  if (
+    /\b(?:members?|ownership|operating\s+agreement|payment|term|scope|purpose|effective\s+date|deliverables?|services?|property|premises|address|purchase\s+price|rent|deposit|closing\s+date|governing\s+law)\s*[:\-]/i.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  if (/\b(?:agreement|contract)\b/i.test(t) && /\bfor\b|\bbetween\b/i.test(t)) return false;
   // Reject fragments containing a date inside, since dates are never party names.
   if (DATE_LIKE.test(t) || DATE_NUMERIC.test(t)) return false;
+  // Reject percentage tokens (ownership rows like "Alice 40%" should never become parties via this path).
+  if (/\d+\s*%/.test(t)) return false;
   return wordCount(t) >= 2 || /(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?|LLP|PLLC)\b/i.test(t);
 }
 
@@ -114,9 +131,32 @@ function stripCompanyForSuffix(raw: string): string {
     .trim();
 }
 
+/**
+ * Strip a trailing purpose phrase ("Acme LLC for SaaS implementation" → "Acme LLC").
+ *
+ * Universal rule: when a party segment ends with " for <noun phrase>" and the noun phrase
+ * is NOT itself an entity-suffixed company (already handled by `stripCompanyForSuffix`),
+ * the "for …" tail is the deal's purpose, not part of the party's name. Only fires when
+ * the segment is too long to be a name (>3 words) so simple two-word names are safe.
+ */
+function stripTrailingForPurpose(raw: string): string {
+  const s = raw.trim();
+  if (wordCount(s) <= 3) return s;
+  const m = s.match(/^(.+?)\s+for\s+([A-Za-z][A-Za-z0-9&'\-\s]{1,80})$/i);
+  if (!m) return s;
+  const prefix = m[1].trim().replace(/[,;:]+$/, "").trim();
+  const tail = m[2].trim();
+  if (wordCount(prefix) < 2) return s;
+  // Don't strip when the tail is itself an entity (already covered by stripCompanyForSuffix).
+  if (/(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|LLP|PLLC)\b/i.test(tail)) return s;
+  return prefix;
+}
+
 function clampPartySegment(raw: string): string {
-  const cleaned = stripCompanyForSuffix(raw);
-  const formatted = formatPartySegmentForPreview(normalizePartyNameFragment(cleaned));
+  const noEntityFor = stripCompanyForSuffix(raw);
+  const noPurposeFor = stripTrailingForPurpose(noEntityFor);
+  const { name: noRole } = stripPartyRoleAnnotations(noPurposeFor);
+  const formatted = formatPartySegmentForPreview(normalizePartyNameFragment(noRole));
   if (formatted.length > MAX_PARTY_CHARS) return "";
   if (wordCount(formatted) > MAX_PARTY_WORDS) return "";
   return formatted;
@@ -156,9 +196,17 @@ type PartiesExtract = {
 function splitMultiPartyCommaList(line: string): string[] | null {
   const trimmed = line.trim().replace(/[.!?]+$/g, "");
   if (!trimmed) return null;
-  const segments = trimmed
+  // "Jamie Chen individually and as guarantor" contains the word "and" — naive splitting on
+  // `\s+and\s+` would fragment the phrase into a bogus fourth segment ("as guarantor").
+  const INDIV_MASK = /\{\{indiv_as:([a-z0-9_]+)\}\}/gi;
+  const masked = trimmed.replace(/\bindividually\s+and\s+as\s+([a-z][a-z\s\-]{2,40})\b/gi, (_, role: string) => {
+    const key = role.replace(/\s+/g, "_").toLowerCase();
+    return `{{indiv_as:${key}}}`;
+  });
+  const segments = masked
     .split(/\s*,\s*(?:and\s+)?|\s+and\s+/i)
     .map((s) => s.trim())
+    .map((s) => s.replace(INDIV_MASK, (_, key: string) => `individually and as ${key.replace(/_/g, " ")}`))
     .filter(Boolean);
   if (segments.length < 3) return null;
   if (!segments.every((s) => looksLikeNameFragment(s) && s.length <= 60 && wordCount(s) <= 6)) {
@@ -168,10 +216,14 @@ function splitMultiPartyCommaList(line: string): string[] | null {
 }
 
 function tryCommaPairFirstLine(text: string): PartiesExtract | null {
-  const firstLine = (text.split(/\n/)[0] || "").trim();
-  if (firstLine.length < 8) return null;
-  if (/^\s*parties?\s*:/i.test(firstLine)) return null;
-  if (/\bbetween\b/i.test(firstLine)) return null;
+  const firstLineRaw = (text.split(/\n/)[0] || "").trim();
+  if (firstLineRaw.length < 8) return null;
+  if (/^\s*parties?\s*:/i.test(firstLineRaw)) return null;
+  if (/\bbetween\b/i.test(firstLineRaw)) return null;
+
+  // Universal: strip parenthetical role hints "(landlord)" and "as <role>" clauses
+  // before splitting so role labels don't break the comma+and splitter.
+  const firstLine = preCleanBetweenTailForMultiPartySplit(firstLineRaw);
 
   // Multi-party "A, B, and C" / "A, B, C" — return ALL segments before falling back to 2-party split.
   const multi = splitMultiPartyCommaList(firstLine);
@@ -204,6 +256,18 @@ function tryCommaPairFirstLine(text: string): PartiesExtract | null {
   return { parties: [], uncertain: true, structured: null };
 }
 
+/**
+ * Clip the "between …" tail to the first clause without treating entity abbreviations
+ * ("Co.", "Inc.", "Corp.", "Ltd.", "L.L.C.") as sentence boundaries — a naive `[.!?]\s`
+ * split would truncate "… Beacon Property Co. (manager), and …" at the dot in "Co.".
+ */
+function sliceFirstPartyListSentenceFromBetweenTail(tail: string): string {
+  const line = (tail.split(/\n/)[0] || "").trim();
+  const m = line.match(/\.\s+(?=[A-Z][a-z])/);
+  if (!m || m.index === undefined) return line;
+  return line.slice(0, m.index).trim();
+}
+
 function extractStructuredParties(text: string, lower: string): PartiesExtract {
   const betweenPair = extractBetweenPartyPair(text);
   if (betweenPair) {
@@ -212,7 +276,14 @@ function extractStructuredParties(text: string, lower: string): PartiesExtract {
     // before the 2-party pair clamp drops anyone (regression spec §2).
     const betweenIdx = text.toLowerCase().indexOf("between ");
     if (betweenIdx >= 0) {
-      const tail = text.slice(betweenIdx + "between ".length).split(/\n|[.!?](?:\s|$)/)[0] || "";
+      const firstLine = (text.slice(betweenIdx + "between ".length).split(/\n/)[0] || "").trim();
+      // Labeled fields (Rent:, Property:, Term:, …) must win over sentence slicing — otherwise
+      // a period after "July 1, 2026" can clip the tail before "Rent:" and address commas leak
+      // into party segments ("Austin TX" as a fake party).
+      const tailRaw = sliceFirstPartyListSentenceFromBetweenTail(truncatePartyClauseTailAtLabeledFields(firstLine));
+      // Universal: drop "(landlord)" / "(seller)" / ", as guarantor," role hints
+      // before splitting so they never absorb a comma boundary or party slot.
+      const tail = preCleanBetweenTailForMultiPartySplit(tailRaw);
       const multi = splitMultiPartyCommaList(tail);
       if (multi) {
         const clamped = multi.map((s) => clampPartySegment(s)).filter((s) => s.length > 1);
@@ -481,8 +552,13 @@ function extractPaymentLine(text: string, payment: IntakePaymentField): string {
   // Equity / percent compensation is also genuine payment data.
   const equity = extractEquityCompensationLine(text);
   if (equity) return equity;
-  const rate = text.match(/\b(?:payment|compensation|fee|price)\s*(?:of|is)?\s*([^\n,.]{3,100})/i);
-  if (rate && looksLikePaymentText(rate[1])) return normalizeIntakeFieldText(rate[1], 160);
+  const rate = text.match(/\b(?:payment|compensation|fee|price)\s*[:\-]?\s*(?:of|is)?\s*([^\n,.]{3,100})/i);
+  if (rate && looksLikePaymentText(rate[1])) {
+    // Strip leading colon/dash punctuation that the loose regex may have captured
+    // before normalizing for display (e.g. "Management fee: 8% of monthly rent").
+    const cleaned = rate[1].replace(/^[:\-\s]+/, "").trim();
+    if (cleaned.length >= 2) return normalizeIntakeFieldText(cleaned, 160);
+  }
   return "";
 }
 

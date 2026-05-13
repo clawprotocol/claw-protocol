@@ -4,6 +4,7 @@
  */
 
 import { normalizePartyNameFragment } from "./partyIntakeNormalize";
+import { truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
 const TAIL_STOP = /\s+(?:\n|(?:(?:for|whereas|hereafter|effective|the\s+term|term:|scope:|consideration|warranties)\b))/i;
 
@@ -19,6 +20,7 @@ export function extractBetweenPartyPair(raw: string): { left: string; right: str
   let tail = text.slice(m.index + m[0].length);
   const nl = tail.indexOf("\n");
   if (nl >= 0) tail = tail.slice(0, nl);
+  tail = truncatePartyClauseTailAtLabeledFields(tail);
   const stop = TAIL_STOP.exec(tail);
   if (stop && stop.index !== undefined && stop.index > 0) tail = tail.slice(0, stop.index);
   tail = tail.trim();
@@ -40,6 +42,7 @@ export function verbatimBetweenClause(raw: string): string | null {
   const m = text.match(/\bbetween\s+[\s\S]+/i);
   if (!m) return null;
   let clause = m[0];
+  clause = truncatePartyClauseTailAtLabeledFields(clause);
   const stop = TAIL_STOP.exec(clause);
   if (stop && stop.index !== undefined && stop.index > 8) clause = clause.slice(0, stop.index);
   const oneLine = clause.replace(/\s+/g, " ").trim();

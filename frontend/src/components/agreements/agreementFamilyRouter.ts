@@ -50,7 +50,10 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     /\bllc\s+agreement\b/i.test(low) ||
     /\bmember[-\s]?managed\b/i.test(t) ||
     /\bmanager[-\s]?managed\b/i.test(t) ||
-    (/\bllc\b/i.test(t) && /\b(?:members?|membership|units?|capital\s+contributions?|distributions?)\b/i.test(low)) ||
+    (/\bllc\b/i.test(t) &&
+      /\b(?:membership(?:\s+interests?)?|managing\s+member|member[-\s]?managed|members?\s+of\s+(?:the\s+)?(?:llc|limited\s+liability\s+company)|members?\s*:|(?:equity|capital|membership)\s+units?\b|capital\s+contributions?|distributions?)\b/i.test(
+        low,
+      )) ||
     /\bcompany\s+formation\b/i.test(low) ||
     (/\bllc\b/i.test(t) && /\b(?:governance|company\s+operating)\b/i.test(low))
   ) {

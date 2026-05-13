@@ -60,8 +60,37 @@ export function isGenericOrEmptyTitle(title: string | null | undefined, family?:
 export type CanonicalTitleResolution = {
   title: string;
   /** "preserved" = upstream title kept; "live" = derived from live docTitle; "family" = family canonical. */
-  source: "preserved" | "live" | "family" | "advisor" | "nda-mutual";
+  source: "preserved" | "live" | "family" | "advisor" | "nda-mutual" | "explicit-intent";
 };
+
+/**
+ * Explicit document-intent → canonical title.
+ *
+ * Universal invariant 2: when intake plainly says "lease agreement" / "purchase agreement" /
+ * "co-ownership agreement" / "property management agreement" / etc., that intent should drive
+ * the title — even if the routed family is the catch-all "generic_business_agreement".
+ *
+ * Returns null when no explicit intent phrase is found (callers fall back to family canonical).
+ */
+export function explicitIntentCanonicalTitle(rawIntake: string | null | undefined): string | null {
+  const low = (rawIntake || "").toLowerCase();
+  if (!low) return null;
+  if (/\b(?:residential|commercial)?\s*lease\s+agreement\b/.test(low)) return "Lease Agreement";
+  if (/\bsublease\s+agreement\b/.test(low)) return "Sublease Agreement";
+  if (/\b(?:real\s+estate\s+)?purchase\s+(?:and\s+sale\s+)?agreement\b/.test(low)) {
+    return /\breal\s+estate\b/.test(low) ? "Real Estate Purchase Agreement" : "Purchase Agreement";
+  }
+  if (/\bco[-\s]?ownership\s+agreement\b/.test(low)) return "Co-Ownership Agreement";
+  if (/\bproperty\s+management\s+agreement\b/.test(low)) return "Property Management Agreement";
+  if (/\blicense\s+agreement\b/.test(low)) return "License Agreement";
+  if (/\bdistribution\s+agreement\b/.test(low)) return "Distribution Agreement";
+  if (/\bpartnership\s+agreement\b/.test(low)) return "Partnership Agreement";
+  if (/\bjoint\s+venture\s+agreement\b/.test(low)) return "Joint Venture Agreement";
+  if (/\bequipment\s+(?:rental|lease)\s+agreement\b/.test(low)) return "Equipment Lease Agreement";
+  if (/\bemployment\s+agreement\b/.test(low)) return "Employment Agreement";
+  if (/\bindependent\s+contractor\s+agreement\b/.test(low)) return "Independent Contractor Agreement";
+  return null;
+}
 
 /**
  * Detects "advisor" intent in raw intake — used by canonical title resolution to choose
@@ -123,6 +152,20 @@ export function resolveCanonicalAgreementTitle(opts: {
       /^non[-\s]?disclosure\s+agreement$/i.test(current)
     ) {
       return { title: "Mutual Non-Disclosure Agreement", source: "nda-mutual" };
+    }
+  }
+
+  // Universal invariant 2: explicit document-intent phrases dominate routing for the
+  // catch-all "generic_business_agreement" family (lease, purchase, co-ownership, property
+  // management, license, distribution, partnership, JV, equipment lease, etc.). Specific
+  // family routes (nda, consulting, services, OA) keep their canonical titles unless a
+  // dedicated override (advisor / mutual-NDA / family legacy) already fired above.
+  if (opts.family === "generic_business_agreement") {
+    const intentTitle = explicitIntentCanonicalTitle(intake);
+    if (intentTitle) {
+      if (!current || isGenericOrEmptyTitle(current, opts.family) || /^business\s+agreement$/i.test(current)) {
+        return { title: intentTitle, source: "explicit-intent" };
+      }
     }
   }
 

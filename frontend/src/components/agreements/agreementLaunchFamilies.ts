@@ -97,11 +97,15 @@ export function operatingAgreementHasHighComplexitySignals(intakeText: string): 
 }
 
 /**
- * True when intake mixes entity / governance / economics signals that a thin instant
- * template can mislabel — stop before auto-generate and show the complexity gate.
+ * True when intake mixes ENTITY + STRUCTURED-FINANCE signals that a thin instant template
+ * can mislabel — stop before auto-generate and show the complexity gate.
  *
- * Regression spec §6: advisor agreements are now ALWAYS allowed to generate a starter,
- * and simple LLC operating agreements only gate when truly complex.
+ * Universal invariant 3 (per product spec): gate ONLY on true advanced-structure signals
+ * (waterfall, preferred equity, securities/SAFE/convertible, GP/LP economics, multi-class
+ * equity, voting waterfalls, capital-call cure, drag/tag, pro-rata, etc.). Ordinary
+ * business terms — price, rent, fee, deposit, closing date, escrow, monthly payment,
+ * ownership percentage, guarantor, LLC party, multiple parties — must NEVER trigger
+ * the gate by themselves.
  */
 export function matchesAdvancedCommercialStructureSignals(intakeText: string): boolean {
   const t = (intakeText || "").replace(/\s+/g, " ").trim();
@@ -117,27 +121,36 @@ export function matchesAdvancedCommercialStructureSignals(intakeText: string): b
       low,
     );
 
-  // Plain entity + ownership wording is no longer gating-worthy on its own — only gate
-  // if accompanied by *complex* economics/governance signals.
-  if (entityShell && ownershipCluster) {
-    if (operatingAgreementHasHighComplexitySignals(t)) return true;
-    // Otherwise allow simplified starter (regression spec §6).
-  }
+  // Plain entity + ownership wording is NOT gating-worthy on its own — only when
+  // accompanied by *advanced* economics/governance signals (vesting, classes, drag/tag, etc.).
+  if (entityShell && ownershipCluster && operatingAgreementHasHighComplexitySignals(t)) return true;
 
-  if (/\bgovernance\b/i.test(low) && /\b(?:llc|members?|managers?|board|company|corp)\b/i.test(low)) return true;
-
-  if (/\b(?:custom\s+)?liabilit(?:y|ies)\b/i.test(low) && /\b(?:indemnif|hold\s+harmless|defend)\b/i.test(low)) return true;
-
-  if (/\bmultiple\s+obligations\b/i.test(low)) return true;
-
-  if (/\b(?:earnout|royalt(?:y|ies)|liquidated\s+damages|carve[\s-]?out)\b/i.test(low)) return true;
-
-  if (/\bconsult(?:ing|ant)\b/i.test(low) && entityShell && ownershipCluster && operatingAgreementHasHighComplexitySignals(t)) {
+  // Governance/board/voting STRUCTURE — not just the word "governance".
+  if (
+    /\b(?:board\s+of\s+managers|management\s+committee|voting\s+(?:waterfall|threshold|control)|board\s+control)\b/i.test(
+      low,
+    )
+  ) {
     return true;
   }
 
+  // Securities-style finance signals (paired with entity context to avoid false positives).
+  // Note: "pro-rata" is intentionally NOT included here as a sole trigger because pro-rata
+  // is a normal cost-sharing concept in co-ownership and partnerships; gate only when paired
+  // with participation/equity/distribution semantics (handled below).
   if (
-    /\b(?:escrow|revenue\s*share|equity\s+compensation|performance\s+bonus|tiered\s+pricing)\b/i.test(low)
+    entityShell &&
+    /\b(?:syndication|securitization|capital\s+calls?|preferred\s+(?:equity|return|units|members)|gp[\/\s]+lp|general\s+partner|limited\s+partner|drag[-\s]?along|tag[-\s]?along|earnout)\b/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+
+  // Pro-rata is gating ONLY when paired with equity/participation/distribution wording.
+  if (
+    entityShell &&
+    /\bpro[-\s]?rata\s+(?:participation|rights?|share|allocation|distributions?|equity|units?)\b/i.test(low)
   ) {
     return true;
   }

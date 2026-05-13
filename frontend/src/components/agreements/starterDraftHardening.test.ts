@@ -321,14 +321,30 @@ describe("complexity gate calibration", () => {
     expect(shouldInterceptAdvancedDocumentFamily(intake, undefined)).toBe(true);
   });
 
-  it("revenue share DOES gate", () => {
+  it("ordinary revenue share alone does NOT gate (per invariant 3)", () => {
+    // Universal invariant 3: revenue share is ordinary commercial / partnership economics.
+    // It is NOT a true advanced-structure signal (no waterfall / preferred equity / SAFE / etc.).
     const intake = "Partnership with 60/40 revenue share and quarterly distributions.";
+    expect(matchesAdvancedCommercialStructureSignals(intake)).toBe(false);
+  });
+
+  it("revenue share with waterfall + preferred return DOES gate (true advanced structure)", () => {
+    const intake =
+      "Partnership LLC between Alpha Capital LP and Beta Holdings: waterfall distributions with 8% preferred return, 60/40 revenue share thereafter, capital calls with cure rights.";
     expect(matchesAdvancedCommercialStructureSignals(intake)).toBe(true);
   });
 
-  it("equity compensation DOES gate", () => {
-    const intake = "Employment agreement with equity compensation: 10,000 stock options vesting over 4 years.";
-    expect(matchesAdvancedCommercialStructureSignals(intake)).toBe(true);
+  it("ordinary equity compensation alone does NOT gate (per invariant 3)", () => {
+    // Universal invariant 3: ordinary employment equity grants are NOT a structured-finance signal.
+    // Vesting language is not present in this intake; gate is correctly off.
+    const intake = "Employment agreement with equity compensation of stock options.";
+    expect(matchesAdvancedCommercialStructureSignals(intake)).toBe(false);
+  });
+
+  it("multi-class equity with vesting + drag-along DOES gate (true advanced structure)", () => {
+    const intake =
+      "Operating agreement for ApexCo LLC. Class A common units and Class B preferred units. 4-year vesting. Drag-along rights.";
+    expect(shouldInterceptAdvancedDocumentFamily(intake, "operating_agreement")).toBe(true);
   });
 });
 

@@ -13,7 +13,8 @@ const INCOMPLETE_HEAD = /^(due|net|pay|payment|invoice|billable|compensation|fee
 const PREPOSITION_TAIL = /^(on|by|before|after|within)\s*$/i;
 
 /** Polished starter fallbacks when extraction is unusable (starter tier only). */
-export const STARTER_PAYMENT_FALLBACK_COMPENSATION = "Compensation terms to be finalized in review.";
+export const STARTER_PAYMENT_FALLBACK_COMPENSATION =
+  "Compensation terms to be completed by the parties unless otherwise agreed.";
 export const STARTER_PAYMENT_FALLBACK_PAYMENT = "Payment terms: To be agreed between the parties.";
 export const STARTER_PAYMENT_FALLBACK_COMMERCIAL = "Commercial terms to be confirmed before signing.";
 

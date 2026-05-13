@@ -3,8 +3,19 @@
  * but the intake names a person + entity (e.g. employment-style phrasing).
  */
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { stripPartyRoleAnnotations } from "./partyRoleAnnotations";
 
 const MAX_NAME = 280;
+
+/**
+ * Universal cleanup applied to every name produced by this fallback. Strips trailing
+ * "(landlord)" / "(seller)" / "as guarantor" role hints so they don't leak into the
+ * party name. Role metadata is dropped here because callers tag with role: "party".
+ */
+function cleanFallbackName(raw: string): string {
+  const { name } = stripPartyRoleAnnotations((raw || "").trim());
+  return name.replace(/\s+/g, " ").trim();
+}
 
 function looksLikeGenericPartyRow(parties: { name: string; role: string }[]): boolean {
   if (parties.length < 2) return true;
@@ -80,8 +91,8 @@ export function tryInferNamedPartiesFromIntake(raw: string): { name: string; rol
   );
   if (emp && emp[1] && emp[2]) {
     return [
-      { name: emp[1].trim().slice(0, MAX_NAME), role: "party" },
-      { name: emp[2].trim().replace(/\s+/g, " ").slice(0, MAX_NAME), role: "party" },
+      { name: cleanFallbackName(emp[1]).slice(0, MAX_NAME), role: "party" },
+      { name: cleanFallbackName(emp[2]).slice(0, MAX_NAME), role: "party" },
     ];
   }
 
@@ -90,15 +101,15 @@ export function tryInferNamedPartiesFromIntake(raw: string): { name: string; rol
   );
   if (forOrg && forOrg[1] && forOrg[2] && /\b(?:agreement|contract|employment)\b/i.test(t)) {
     return [
-      { name: forOrg[1].trim().slice(0, MAX_NAME), role: "party" },
-      { name: forOrg[2].trim().replace(/\s+/g, " ").slice(0, MAX_NAME), role: "party" },
+      { name: cleanFallbackName(forOrg[1]).slice(0, MAX_NAME), role: "party" },
+      { name: cleanFallbackName(forOrg[2]).slice(0, MAX_NAME), role: "party" },
     ];
   }
 
   const between = t.match(/\bbetween\s+([^,]{2,120}?)\s+and\s+([^.,;]{2,120})\b/i);
   if (between && between[1] && between[2]) {
-    const a = between[1].trim();
-    const b = between[2].trim();
+    const a = cleanFallbackName(between[1]);
+    const b = cleanFallbackName(between[2]);
     if (a.length >= 2 && b.length >= 2 && !/^the\s+/i.test(a)) {
       return [
         { name: a.slice(0, MAX_NAME), role: "party" },

@@ -4,7 +4,7 @@
  */
 
 /** Shown when governing-law inference is weak or malformed — calm copy, not legal advice. */
-export const STARTER_GOVERNING_LAW_DISPLAY_FALLBACK = "To be agreed in review";
+export const STARTER_GOVERNING_LAW_DISPLAY_FALLBACK = "To be agreed by the parties unless otherwise agreed";
 
 const US_STATE_LOWER = new Set([
   "alabama",
