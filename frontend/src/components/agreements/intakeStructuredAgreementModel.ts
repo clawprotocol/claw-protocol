@@ -240,7 +240,7 @@ type FieldMeta = { text: string; confidence: number; signal: boolean; inferred: 
 function extractScopeAndMeta(lower: string, text: string): FieldMeta {
   let best: FieldMeta = { text: "", confidence: 0, signal: false, inferred: false };
 
-  const labeled = text.match(/\b(?:scope|services?|work|tasks?)\s*[:\-]\s*([^\n]+)/i);
+  const labeled = text.match(/\b(?:scope|purpose|services?|work|tasks?)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) {
     const t = normalizeIntakeFieldText(labeled[1], 220);
     if (t)

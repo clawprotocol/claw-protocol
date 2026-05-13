@@ -36,10 +36,19 @@ describe("needsComplexityIntercept", () => {
     ).toBe(false);
   });
 
-  it("is true for consulting + LLC entity (trust gate)", () => {
+  it("is false for simple consulting + LLC entity (normal commercial)", () => {
     expect(
       needsComplexityIntercept(
         "consulting agreement between Anthem Blanchard and Peaceful Journey LLC for advisory services.",
+        "consulting_agreement",
+      ),
+    ).toBe(false);
+  });
+
+  it("is true for consulting + LLC with ownership/governance signals", () => {
+    expect(
+      needsComplexityIntercept(
+        "consulting agreement for Peaceful Journey LLC. Members: 60% / 40%. Capital contributions of $50,000 each.",
         "consulting_agreement",
       ),
     ).toBe(true);

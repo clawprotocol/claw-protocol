@@ -77,12 +77,12 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     /\b(?:monthly|weekly|hourly)\s+(?:rate|fee|retainer)\b/i.test(low) ||
     /\bdeliverables?\b/i.test(low);
 
-  if (commercialSignals.nda && ndaHybridSignals && !primaryServiceIntent) {
-    return "confidentiality_commercial_protections_agreement";
-  }
-
   if ((ndaDominant || /\bconfidentiality\s+agreement\b/i.test(t)) && !primaryServiceIntent) {
     return "nda";
+  }
+
+  if (commercialSignals.nda && ndaHybridSignals && !primaryServiceIntent) {
+    return "confidentiality_commercial_protections_agreement";
   }
 
   if (

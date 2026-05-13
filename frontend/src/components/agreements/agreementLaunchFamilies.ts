@@ -77,10 +77,10 @@ export function matchesAdvancedCommercialStructureSignals(intakeText: string): b
 
   if (/\b(?:earnout|royalt(?:y|ies)|liquidated\s+damages|carve[\s-]?out)\b/i.test(low)) return true;
 
-  if (/\bconsult(?:ing|ant)\b/i.test(low) && entityShell && t.length > 36) return true;
+  if (/\bconsult(?:ing|ant)\b/i.test(low) && entityShell && ownershipCluster) return true;
 
   if (
-    /\b(?:milestone|escrow|revenue\s*share|equity\s+compensation|performance\s+bonus|tiered\s+pricing)\b/i.test(low)
+    /\b(?:escrow|revenue\s*share|equity\s+compensation|performance\s+bonus|tiered\s+pricing)\b/i.test(low)
   ) {
     return true;
   }
