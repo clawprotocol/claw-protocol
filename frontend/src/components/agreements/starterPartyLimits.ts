@@ -38,11 +38,22 @@ export const STARTER_PARTY_CAUTION_NOTICE =
   "This agreement includes several parties. Please review each party and signer carefully before sending.";
 
 /**
- * Customer-facing notice shown for ≥13 parties. Public phrasing only — must not reference
- * internal pipeline language.
+ * Title for the Pro-required notice (≥13 real parties). Single canonical headline used
+ * by the inline starter notice and the sticky-bar fallback.
+ */
+export const STARTER_PARTY_PRO_REQUIRED_TITLE = "Large multi-party signing requires LawDog Pro";
+
+/**
+ * Body copy for the Pro-required notice. Public phrasing only — must not reference
+ * internal pipeline language. Pairs with {@link STARTER_PARTY_PRO_REQUIRED_TITLE}.
  */
 export const STARTER_PARTY_PRO_REQUIRED_NOTICE =
-  "This agreement has 13+ parties. Multi-party signing at this size requires LawDog Pro before sending.";
+  "This draft was created successfully, but agreements with 13 or more parties require LawDog Pro before sending and signature collection.";
+
+/**
+ * Primary CTA label override for the Pro-required tier. Keeps starter / caution CTAs unchanged.
+ */
+export const STARTER_PARTY_PRO_REQUIRED_CTA_LABEL = "Continue to LawDog Pro";
 
 export type StarterPartyCountStatus = "normal" | "caution" | "requires_pro";
 

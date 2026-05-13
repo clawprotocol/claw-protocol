@@ -250,7 +250,13 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const j = s.indexOf("const firstBlocker = draft", i);
     expect(j).toBeGreaterThan(i);
     const block = s.slice(i, j);
-    expect(block).toContain('label: streamlineFirstRunReviewUi ? "Send with LawDog Pro" : "Upgrade to send"');
+    // Historical labels are preserved for normal/caution tiers via the same
+    // `streamlineFirstRunReviewUi` ternary. The new Pro-required (13+ parties) tier
+    // resolves to STARTER_PARTY_PRO_REQUIRED_CTA_LABEL ("Continue to LawDog Pro") via
+    // `starterPartyCountRequiresPro`, but the existing `continue_basic_draft` action wires
+    // remain unchanged.
+    expect(block).toMatch(/streamlineFirstRunReviewUi[\s\S]{0,60}"Send with LawDog Pro"[\s\S]{0,60}"Upgrade to send"/);
+    expect(block).toContain("STARTER_PARTY_PRO_REQUIRED_CTA_LABEL");
     expect(block).toContain('action: "continue_basic_draft"');
     expect(block).not.toContain("label: streamlineContinueLabelEarly");
   });

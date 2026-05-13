@@ -15,7 +15,9 @@ import { describe, expect, it } from "vitest";
 import {
   STARTER_NORMAL_PARTY_LIMIT,
   STARTER_PARTY_CAUTION_NOTICE,
+  STARTER_PARTY_PRO_REQUIRED_CTA_LABEL,
   STARTER_PARTY_PRO_REQUIRED_NOTICE,
+  STARTER_PARTY_PRO_REQUIRED_TITLE,
   STARTER_PRO_REVIEW_PARTY_THRESHOLD,
   countRealParties,
   getStarterPartyCountNotice,
@@ -35,16 +37,21 @@ describe("starterPartyLimits — constants", () => {
   });
 
   it("public copy never references internal-process language", () => {
-    const banned = /\b(?:parser|fallback|shell|internal|hard\s+cut|algorithm)\b/i;
+    const banned = /\b(?:parser|fallback|shell|internal|hard\s+cut|algorithm|threshold\s+logic)\b/i;
     expect(STARTER_PARTY_CAUTION_NOTICE).not.toMatch(banned);
     expect(STARTER_PARTY_PRO_REQUIRED_NOTICE).not.toMatch(banned);
+    expect(STARTER_PARTY_PRO_REQUIRED_TITLE).not.toMatch(banned);
+    expect(STARTER_PARTY_PRO_REQUIRED_CTA_LABEL).not.toMatch(banned);
   });
 
   it("public copy mentions reviewing parties / Pro upgrade for the right states", () => {
     expect(STARTER_PARTY_CAUTION_NOTICE).toMatch(/review/i);
     expect(STARTER_PARTY_CAUTION_NOTICE).toMatch(/before sending/i);
-    expect(STARTER_PARTY_PRO_REQUIRED_NOTICE).toMatch(/13\+/);
+    expect(STARTER_PARTY_PRO_REQUIRED_TITLE).toMatch(/Large multi-party signing requires LawDog Pro/);
+    expect(STARTER_PARTY_PRO_REQUIRED_NOTICE).toMatch(/13 or more parties/);
     expect(STARTER_PARTY_PRO_REQUIRED_NOTICE).toMatch(/LawDog Pro/);
+    expect(STARTER_PARTY_PRO_REQUIRED_NOTICE).toMatch(/sending and signature collection/);
+    expect(STARTER_PARTY_PRO_REQUIRED_CTA_LABEL).toBe("Continue to LawDog Pro");
   });
 });
 

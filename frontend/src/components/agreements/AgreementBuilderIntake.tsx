@@ -196,10 +196,10 @@ import {
   STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME,
 } from "./starterReviewPremiumUpsellCopy";
 import {
-  STARTER_PARTY_CAUTION_NOTICE,
-  STARTER_PARTY_PRO_REQUIRED_NOTICE,
+  STARTER_PARTY_PRO_REQUIRED_CTA_LABEL,
   resolveStarterPartyCountGuard,
 } from "./starterPartyLimits";
+import { StarterPartyCountNotice } from "./StarterPartyCountNotice";
 import {
   draftHasPlaceholderFieldsForRecipients,
   draftHasPlaceholderParties,
@@ -10872,8 +10872,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         }
         if (showUpgradeToFullDraftOnReview) {
+          // Pro-required tier (13+ real parties) gets an explicit, lower-pressure label.
+          // Normal/caution tiers keep the existing "Send with LawDog Pro" / "Upgrade to send" copy.
+          const proRequiredCtaLabel = starterPartyCountRequiresPro
+            ? STARTER_PARTY_PRO_REQUIRED_CTA_LABEL
+            : streamlineFirstRunReviewUi
+              ? "Send with LawDog Pro"
+              : "Upgrade to send";
           return {
-            label: streamlineFirstRunReviewUi ? "Send with LawDog Pro" : "Upgrade to send",
+            label: proRequiredCtaLabel,
             action: "continue_basic_draft",
             disabled: !draft,
             reason: !draft ? "no_draft" : undefined,
@@ -11037,6 +11044,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     proCheckoutRecipientStageAdvanceAllowed,
     displayPhase,
     paidProRecipientSetupOnDraft,
+    starterPartyCountRequiresPro,
   ]);
 
   useEffect(() => {
@@ -13420,6 +13428,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 : "Updates after you finish typing"}
                     </p>
                   ) : null}
+                  {/*
+                    Canonical starter party-count notice — rendered inline at the top of the
+                    review surface so it is visible regardless of sticky-bar mount state, mobile
+                    keyboard overlay, or hydration timing. Mirrors the sticky-bar fallback above
+                    the bottom CTA. The presentational component renders nothing for "normal".
+                  */}
+                  {createUiStage === CreateUiStage.DRAFT &&
+                  draft &&
+                  !premiumPersistedFlowActive &&
+                  !premiumSendPathUnlocked ? (
+                    <StarterPartyCountNotice
+                      status={starterPartyCountGuard.status}
+                      surface="inline"
+                    />
+                  ) : null}
                   {((productionDraftPrimaryReviewSurface &&
                     createUiStage === CreateUiStage.DRAFT &&
                     (draft !== null || createFlowPhase === "generating_draft")) ||
@@ -14990,41 +15013,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     </p>
                   ) : null}
                   {/*
-                    Starter party-count guardrail (universal):
+                    Starter party-count guardrail (universal) — sticky-bar mirror.
                       • caution      → 7–12 real parties; keep free flow but recommend a careful review.
                       • requires_pro → 13+ real parties; primary CTA is forced to the existing Pro upgrade
                                        path elsewhere in this component. No party data is truncated.
+                    The canonical inline copy lives inside the preview region (#claw-simple-create-preview)
+                    so the notice is visible regardless of sticky-bar mount state. We also render here as a
+                    redundant fallback for desktop layouts that scroll the preview off-screen.
                   */}
                   {createUiStage === CreateUiStage.DRAFT &&
                   !premiumPersistedFlowActive &&
-                  !premiumSendPathUnlocked &&
-                  starterPartyCountGuard.status !== "normal" ? (
-                    <div
-                      data-testid={
-                        starterPartyCountGuard.status === "requires_pro"
-                          ? "starter-party-count-pro-required"
-                          : "starter-party-count-caution"
-                      }
-                      className={
-                        starterPartyCountGuard.status === "requires_pro"
-                          ? "mb-3 rounded-lg border border-amber-400/55 bg-amber-500/15 px-3 py-2.5 text-center sm:px-4"
-                          : "mb-3 rounded-lg border border-slate-500/55 bg-slate-800/60 px-3 py-2.5 text-center sm:px-4"
-                      }
-                      role={starterPartyCountGuard.status === "requires_pro" ? "alert" : "status"}
-                      aria-live="polite"
-                    >
-                      <p
-                        className={
-                          starterPartyCountGuard.status === "requires_pro"
-                            ? "text-sm font-semibold leading-relaxed text-amber-50 sm:text-[0.9375rem]"
-                            : "text-sm leading-relaxed text-slate-100 sm:text-[0.9375rem]"
-                        }
-                      >
-                        {starterPartyCountGuard.status === "requires_pro"
-                          ? STARTER_PARTY_PRO_REQUIRED_NOTICE
-                          : STARTER_PARTY_CAUTION_NOTICE}
-                      </p>
-                    </div>
+                  !premiumSendPathUnlocked ? (
+                    <StarterPartyCountNotice
+                      status={starterPartyCountGuard.status}
+                      surface="sticky"
+                    />
                   ) : null}
                   {showUpgradeIntakeFullDraftCallout &&
                   createProductionTwoPane &&

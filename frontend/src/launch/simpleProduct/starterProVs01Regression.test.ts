@@ -10,7 +10,12 @@ describe("starter Pro VS01 regression (source locks)", () => {
   it("Send with LawDog Pro path arms starter signature session (not review-only)", () => {
     const intake = readFileSync(join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("armPaidProStarterSignatureSendFromCreateFlow");
-    expect(intake).toContain('label: streamlineFirstRunReviewUi ? "Send with LawDog Pro" : "Upgrade to send"');
+    // Both the historical labels are still selected by the same `streamlineFirstRunReviewUi`
+    // ternary inside `unifiedPrimaryCta`. The Pro-required tier (13+ parties) gets a more
+    // explicit label routed through `STARTER_PARTY_PRO_REQUIRED_CTA_LABEL`; non–Pro-required
+    // tiers keep the historical "Send with LawDog Pro" / "Upgrade to send" choices intact.
+    expect(intake).toMatch(/streamlineFirstRunReviewUi[\s\S]{0,60}"Send with LawDog Pro"[\s\S]{0,60}"Upgrade to send"/);
+    expect(intake).toContain("STARTER_PARTY_PRO_REQUIRED_CTA_LABEL");
     expect(intake).toContain("persistPremiumForkUserSendMode(\"signature\")");
   });
 

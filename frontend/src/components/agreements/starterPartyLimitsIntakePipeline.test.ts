@@ -173,8 +173,8 @@ describe("Starter party-count guard — render layer never truncates parties", (
 });
 
 describe("Starter party-count notice copy — no internal-process language", () => {
-  it("never mentions parser, fallback, shell, internal, hard cut, or algorithm", () => {
-    const banned = /\b(?:parser|fallback|shell|internal|hard\s+cut|algorithm)\b/i;
+  it("never mentions parser, fallback, shell, internal, hard cut, algorithm, or threshold logic", () => {
+    const banned = /\b(?:parser|fallback|shell|internal|hard\s+cut|algorithm|threshold\s+logic)\b/i;
     expect(STARTER_PARTY_CAUTION_NOTICE).not.toMatch(banned);
     expect(STARTER_PARTY_PRO_REQUIRED_NOTICE).not.toMatch(banned);
   });
