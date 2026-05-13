@@ -277,8 +277,18 @@ function splitMultiPartyCommaListInternal(line: string, strict: boolean): string
     const key = role.replace(/\s+/g, "_").toLowerCase();
     return `{{indiv_as:${key}}}`;
   });
+  // Two-stage split:
+  //   1. Comma + optional "and" — the structural Oxford boundary. Stays case-insensitive
+  //      because the comma is the real separator and tolerates "And" / "AND" after it.
+  //   2. Standalone " and " — LOWERCASE ONLY (no `i` flag). A capitalized mid-name
+  //      "And" inside a multi-word entity (e.g. "Beacon Cross-Continental Operations
+  //      And Logistics Group LLC") is treated as part of the name, not a list separator.
+  //      Real list separators in user prose are virtually always lowercase " and ".
+  const COMMA_OXFORD_SPLIT = /\s*,\s*(?:and\s+)?/i;
+  const STANDALONE_LOWERCASE_AND_SPLIT = /\s+and\s+/;
   const segments = masked
-    .split(/\s*,\s*(?:and\s+)?|\s+and\s+/i)
+    .split(COMMA_OXFORD_SPLIT)
+    .flatMap((s) => s.split(STANDALONE_LOWERCASE_AND_SPLIT))
     .map((s) => s.trim())
     .map((s) => s.replace(INDIV_MASK, (_, key: string) => `individually and as ${key.replace(/_/g, " ")}`))
     .filter(Boolean);

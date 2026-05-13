@@ -293,6 +293,104 @@ describe("Continuity sentence-boundary regression — payment/term tail does not
   }
 });
 
+/* ─────── 1c. Capitalized mid-name "And" splitter regression ──────────────────
+ *
+ * Pre-existing defect surfaced (and now patched) while writing this suite: the multi-
+ * party Oxford-list splitter `splitMultiPartyCommaListInternal` used a single regex
+ *   /\s*,\s*(?:and\s+)?|\s+and\s+/i
+ * with the `i` flag applied to BOTH alternatives. That made a capitalized " And "
+ * inside a multi-word entity name (e.g. "Beacon Cross-Continental Operations And
+ * Logistics Group LLC") match the standalone " and " alternative and split the name
+ * in two. The patch keeps the comma+and form case-insensitive (the comma is the real
+ * separator) but requires the standalone " and " form to be lowercase only. Real list
+ * separators in user-typed prose are virtually always lowercase " and ".
+ *
+ * These tests pin the fix.
+ */
+
+describe("Continuity capital-And splitter regression — entity names with capital And survive", () => {
+  it("3-party list: 'Operations And Logistics' inside party 1 stays one party", () => {
+    // Fixture sits inside the strict 6-word / 60-char per-party ceiling enforced by
+    // `splitMultiPartyCommaListInternal`. The defect under test is the capital " And "
+    // mid-name split; the per-party word ceiling is a separate constraint we do not
+    // broaden here.
+    const intake =
+      "Services agreement between Beacon Operations And Logistics Group LLC, Apollo Data LLC, and Coastal Reserve LLC. Fee $25,000.";
+    const draft = runIntake(intake);
+    const names = partyNamesOf(draft);
+    expect(names.length).toBe(3);
+    expectListContainsCaseInsensitive(names, "Beacon Operations And Logistics Group LLC");
+    expectListContainsCaseInsensitive(names, "Apollo Data LLC");
+    expectListContainsCaseInsensitive(names, "Coastal Reserve LLC");
+    // Deterministic: rerun yields the same order/count.
+    expect(partyNamesOf(runIntake(intake))).toEqual(names);
+  });
+
+  it("normal Oxford list with no mid-name 'And' still splits correctly into 4 parties", () => {
+    const intake =
+      "Services agreement between Apollo Data LLC, Beta Advisors LLC, Gamma Holdings LLC, and Delta Trust LLC. Fee $7,500/month.";
+    const draft = runIntake(intake);
+    const names = partyNamesOf(draft);
+    expect(names.length).toBe(4);
+    expectListContainsCaseInsensitive(names, "Apollo Data LLC");
+    expectListContainsCaseInsensitive(names, "Beta Advisors LLC");
+    expectListContainsCaseInsensitive(names, "Gamma Holdings LLC");
+    expectListContainsCaseInsensitive(names, "Delta Trust LLC");
+  });
+
+  it("ampersand entity names still preserve correctly alongside a capital-And entity", () => {
+    const intake =
+      "Services agreement between Smith & Wesson Holdings LLC, Black & Decker Inc., Beacon Operations And Logistics Group LLC, and Atlas Partners LP. Fee $15,000.";
+    const draft = runIntake(intake);
+    const names = partyNamesOf(draft);
+    expect(names.length).toBe(4);
+    const joined = names.join(" | ");
+    expect(joined).toMatch(/Smith\s*&\s*Wesson/);
+    expect(joined).toMatch(/Black\s*&\s*Decker/);
+    expectListContainsCaseInsensitive(names, "Beacon Operations And Logistics Group LLC");
+    expectListContainsCaseInsensitive(names, "Atlas Partners LP");
+  });
+
+  it("8-party caution: a mid-name capital 'And' does not collapse the count below 8", () => {
+    const names = [
+      "Beacon Operations And Logistics Group LLC",
+      "Apollo 1 LLC",
+      "Apollo 2 LLC",
+      "Apollo 3 LLC",
+      "Apollo 4 LLC",
+      "Apollo 5 LLC",
+      "Apollo 6 LLC",
+      "Apollo 7 LLC",
+    ];
+    const intake = `Services agreement between ${buildOxfordList(names)}. Fee $11,000/month.`;
+    const draft = runIntake(intake);
+    const out = partyNamesOf(draft);
+    expect(out.length).toBe(8);
+    for (const n of names) expectListContainsCaseInsensitive(out, n);
+    const guard = resolveStarterPartyCountGuard(draft.parties);
+    expect(guard.realCount).toBe(8);
+    expect(guard.status).toBe("caution");
+  });
+
+  it("13-party Pro-required: mid-name capital 'And' does not collapse the count below 13", () => {
+    const names = [
+      "Beacon Operations And Logistics Group LLC",
+      ...Array.from({ length: 12 }, (_, i) => `Atlas ${i + 1} LLC`),
+    ];
+    const intake = `Services agreement between ${buildOxfordList(names)}. Fee $14,000/month.`;
+    const draft = runIntake(intake);
+    const out = partyNamesOf(draft);
+    expect(out.length).toBe(13);
+    for (const n of names) expectListContainsCaseInsensitive(out, n);
+    const guard = resolveStarterPartyCountGuard(draft.parties);
+    expect(guard.realCount).toBe(13);
+    expect(guard.status).toBe("requires_pro");
+    // Bridge-side cardinality stays correct too — no signer truncation.
+    const bridge = bridgeOf(draft);
+    expect(1 + bridge.counterparties.length).toBe(13);
+  });
+});
+
 /* ─────────────── 2. Mixed entities, long names, punctuation, ampersand ─────── */
 
 describe("Continuity I10 — mixed LLC / individual / punctuation / ampersand stress", () => {
