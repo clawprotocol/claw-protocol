@@ -434,6 +434,8 @@ export function resolvePremiumRefineApplyOutcome(args: {
         currentDocumentText: baselineText,
         userInstruction: inst,
       });
+      // eslint-disable-next-line no-console
+      console.info("[premium-refine-deterministic-surgical]", surg.log);
       if (surg.applied && surg.text.trim() !== baselineText.trim()) {
         const outS = surg.text.trim();
         const accS = evaluatePremiumRefineCandidate(outS, baselineText, baselineLen, undefined, inst);
@@ -448,6 +450,12 @@ export function resolvePremiumRefineApplyOutcome(args: {
             unchangedDuplicateLateFee: false,
           };
         }
+        // eslint-disable-next-line no-console
+        console.info("[premium-refine-deterministic-surgical]", {
+          ...surg.log,
+          premiumRefineEvalRejected: true,
+          evalDecision: accS.decision,
+        });
       }
     }
 

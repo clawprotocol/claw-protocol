@@ -10,6 +10,10 @@ import { resolvePremiumRefineApplyOutcome } from "./premiumRefineLateFeeFallback
 const PRODUCTION_TERMINATION_INSTR =
   "Revise the termination section to require forty-five (45) days' prior written notice for termination for convenience instead of thirty (30) days. Keep all other commercial, payment, ownership, confidentiality, governing law, dispute resolution, signature, party identity, and project scope terms unchanged.";
 
+/** Exact production-style numbered convenience clause (notice period is fifteen, not thirty). */
+const PRODUCTION_NINE_ONE_CONVENIENCE =
+  "9.1 Termination for Convenience. Any Party may terminate its participation in this Agreement for convenience upon at least fifteen (15) days' prior written notice to the other Parties, unless the Parties agree in writing to a different notice period for a specific project phase.";
+
 function buildProStyleIntegrationFixture(): string {
   const filler = "Supporting operational text. ".repeat(650);
   const parties =
@@ -65,6 +69,9 @@ describe("applyDeterministicSurgicalRevisionFallback — termination for conveni
     });
     expect(r.applied).toBe(true);
     expect(r.reason).toBe("termination_notice_period");
+    expect(r.log.deterministicSurgicalFallbackApplied).toBe(true);
+    expect(r.log.deterministicSurgicalFallbackAttempted).toBe(true);
+    expect(r.log.deterministicSurgicalFallbackMatchedClause).toMatch(/upon/i);
     expect(r.text).toContain("forty-five (45) days' prior written notice");
     expect(r.text).toContain("US$68,500");
     expect(r.text).toContain("four (4) months");
@@ -91,6 +98,8 @@ describe("applyDeterministicSurgicalRevisionFallback — termination for conveni
       userInstruction: "Is this termination section fair?",
     });
     expect(r.applied).toBe(false);
+    expect(r.log.deterministicSurgicalFallbackAttempted).toBe(false);
+    expect(r.log.deterministicSurgicalFallbackApplied).toBe(false);
   });
 
   it("does not run on vague improvement instructions", () => {
@@ -100,6 +109,55 @@ describe("applyDeterministicSurgicalRevisionFallback — termination for conveni
       userInstruction: "Make termination better.",
     });
     expect(r.applied).toBe(false);
+    expect(r.log.deterministicSurgicalFallbackApplied).toBe(false);
+  });
+});
+
+describe("production-shaped Article 9.1 — fifteen (15) days convenience notice", () => {
+  it("replaces convenience notice even when the document has fifteen (15) days and the user references thirty (30) in the prompt", () => {
+    const doc = [
+      "## Article 8 — Termination for Cause",
+      "8.1 A party may terminate for cause only after a cure period of twenty-one (21) days following delivery of a detailed breach notice.",
+      "",
+      "## Article 9 — Termination",
+      PRODUCTION_NINE_ONE_CONVENIENCE,
+      "",
+      "## Fees",
+      "The fee remains US$68,500.",
+      "## Governing Law",
+      "Oklahoma.",
+      "## Signatures",
+      "FoundryCo Inc. / Beacon Operations And Logistics Group LLC / Apollo Data Services LLC / Smith & Wesson Holdings LLC / Coastal Reserve Partners LP",
+      "",
+      "x".repeat(12000),
+    ].join("\n\n");
+
+    const r = applyDeterministicSurgicalRevisionFallback({
+      currentDocumentText: doc,
+      userInstruction: PRODUCTION_TERMINATION_INSTR,
+    });
+    expect(r.applied).toBe(true);
+    expect(r.log.deterministicSurgicalFallbackApplied).toBe(true);
+    expect(r.log.deterministicSurgicalFallbackMatchedClause).toMatch(/fifteen\s*\(\s*15\s*\)/i);
+
+    const s91 = r.text.split(/9\.1\s+Termination\s+for\s+Convenience/i)[1] ?? "";
+    const s91Window = s91.slice(0, 900);
+    expect(s91Window).toMatch(/forty-five \(45\)\s*days['']?\s+prior\s+written\s+notice/i);
+    expect(s91Window).not.toMatch(/fifteen\s*\(\s*15\s*\)\s*days/i);
+    expect(r.text).toMatch(/twenty-one\s*\(\s*21\s*\)\s*days/i);
+    expect(r.text).toContain("US$68,500");
+    expect(r.text).toMatch(/Oklahoma/i);
+    expect(r.text).toContain("FoundryCo Inc.");
+
+    const resolved = resolvePremiumRefineApplyOutcome({
+      apiOut: doc,
+      baselineText: doc,
+      baselineLen: doc.length,
+      summaryChanges: [],
+      userInstruction: PRODUCTION_TERMINATION_INSTR,
+    });
+    expect(resolved.acceptance.decision).toBe("accepted");
+    expect(resolved.appliedDeterministicSurgicalFallback).toBe(true);
   });
 });
 

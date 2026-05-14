@@ -3,24 +3,49 @@ import {
   isAdvisoryNoteOrCommentIntent,
 } from "./premiumRefineAcceptance";
 
+/** QA / console payload for premium-refine deterministic surgical path. */
+export type DeterministicSurgicalFallbackLog = {
+  deterministicSurgicalFallbackAttempted: boolean;
+  deterministicSurgicalFallbackMatchedClause: string | null;
+  deterministicSurgicalFallbackApplied: boolean;
+  /** Machine reason: `termination_notice_period`, `none`, or why matching/replace did not apply. */
+  deterministicSurgicalFallbackReason: string;
+};
+
 export type DeterministicSurgicalRevisionFallbackResult = {
   text: string;
   applied: boolean;
   reason: string;
   changedSections: string[];
+  log: DeterministicSurgicalFallbackLog;
 };
+
+function emptyLog(reason: string): DeterministicSurgicalFallbackLog {
+  return {
+    deterministicSurgicalFallbackAttempted: false,
+    deterministicSurgicalFallbackMatchedClause: null,
+    deterministicSurgicalFallbackApplied: false,
+    deterministicSurgicalFallbackReason: reason,
+  };
+}
 
 /** Narrow instruction gate: operative termination-for-convenience notice period change. */
 export function looksLikeTerminationConvenienceNoticeDaysInstruction(instr: string): boolean {
   const t = (instr || "").trim();
   if (t.length < 40) return false;
   if (!/\bterminat/i.test(t)) return false;
-  if (!/\b(?:for\s+convenience|without\s+cause|termination\s+for\s+convenience|convenience\s+termination)\b/i.test(t)) {
+  if (
+    !/\b(?:for\s+convenience|without\s+cause|termination\s+for\s+convenience|convenience\s+termination)\b/i.test(t)
+  ) {
     return false;
   }
   if (!/\b(?:forty[-\s]?five|\(\s*45\s*\)|\b45\b)/i.test(t)) return false;
   if (!/\bday/i.test(t)) return false;
-  if (!/\b(?:revise|change|replace|require|update|modify|instead\s+of|from\s+(?:thirty|\(30\)|30)|to\s+(?:forty|45|\(45\)))\b/i.test(t)) {
+  if (
+    !/\b(?:revise|change|replace|require|update|modify|instead\s+of|from\s+(?:thirty|\(30\)|30|fifteen|\(15\)|15)|to\s+(?:forty|45|\(45\)))\b/i.test(
+      t,
+    )
+  ) {
     return false;
   }
   if (/^(?:is|are|does|do|can|should|would|could)\b.+\?$/is.test(t)) return false;
@@ -43,17 +68,19 @@ function parseTargetNoticePhrase(instr: string): string | null {
   return null;
 }
 
-const NOTICE_OLD_PATTERNS: { re: RegExp; label: string }[] = [
-  { re: /\bthirty\s*\(\s*30\s*\)\s*days?['']?s?\s+prior\s+written\s+notice\b/i, label: "thirty (30) canonical" },
-  { re: /\bthirty\s+days?['']?s?\s+prior\s+written\s+notice\b/i, label: "thirty days words" },
-  { re: /\b30\s+days?['']?s?\s+prior\s+written\s+notice\b/i, label: "30 days numeric" },
-];
+/**
+ * "upon (at least) fifteen (15) days' prior written notice" and word/numeric variants.
+ * Optional "prior" supports "… days written notice". Curly apostrophe (U+2019) allowed.
+ */
+const UPON_DAYS_PRIOR_WRITTEN_NOTICE_RE =
+  /\bupon\s+(?:at\s+least\s+)?(?:(?:[a-z]+(?:-[a-z]+)?(?:\s+[a-z]+(?:-[a-z]+)?)*)\s*\(\s*\d+\s*\)|\d+)\s*days?[''\u2019]?\s+(?:prior\s+)?written\s+notice\b/i;
 
 function sentenceHasConvenienceTermination(s: string): boolean {
   return (
     /\bfor\s+convenience\b/i.test(s) ||
     /\bwithout\s+cause\b/i.test(s) ||
     /\btermination\s+for\s+convenience\b/i.test(s) ||
+    /\bterminate\s+this\s+Agreement\s+for\s+convenience\b/i.test(s) ||
     (/\bterminate\b/i.test(s) && /\bparticipation\b/i.test(s) && /\bconvenience\b/i.test(s))
   );
 }
@@ -67,73 +94,78 @@ function sentenceIsCauseCureOnly(s: string): boolean {
 /**
  * Within a single sentence, replace termination-for-convenience notice period wording only.
  */
-function replaceNoticeInConvenienceSentence(sentence: string, targetPhrase: string): { next: string; hit: boolean } {
+function replaceNoticeInConvenienceSentence(
+  sentence: string,
+  targetTail: string,
+): { next: string; hit: boolean; matched: string | null } {
   if (!sentenceHasConvenienceTermination(sentence) || sentenceIsCauseCureOnly(sentence)) {
-    return { next: sentence, hit: false };
+    return { next: sentence, hit: false, matched: null };
   }
-  let next = sentence;
-  let hit = false;
-  for (const { re } of NOTICE_OLD_PATTERNS) {
-    if (re.test(sentence)) {
-      next = sentence.replace(re, targetPhrase);
-      hit = next !== sentence;
-      break;
-    }
+  const m = sentence.match(UPON_DAYS_PRIOR_WRITTEN_NOTICE_RE);
+  if (!m || m.index === undefined) {
+    return { next: sentence, hit: false, matched: null };
   }
-  return { next, hit };
+  const matched = m[0];
+  const next = sentence.replace(UPON_DAYS_PRIOR_WRITTEN_NOTICE_RE, `upon ${targetTail}`);
+  return { next, hit: next !== sentence, matched };
 }
 
-function applyTerminationConvenienceNoticeToBlock(block: string, targetPhrase: string): { text: string; hit: boolean } {
+function applyTerminationConvenienceNoticeToBlock(
+  block: string,
+  targetTail: string,
+): { text: string; hit: boolean; matched: string | null } {
   const parts = block.split(/(?<=[.!?]["']?)\s+/);
   let any = false;
+  let matched: string | null = null;
   const out = parts.map((p) => {
-    const r = replaceNoticeInConvenienceSentence(p, targetPhrase);
-    if (r.hit) any = true;
+    const r = replaceNoticeInConvenienceSentence(p, targetTail);
+    if (r.hit) {
+      any = true;
+      matched = r.matched;
+    }
     return r.next;
   });
-  return { text: out.join(" "), hit: any };
+  return { text: out.join(" "), hit: any, matched };
 }
 
 function tryTerminationConvenienceNoticeFallback(
   doc: string,
-  instr: string,
-): { text: string; changedSections: string[] } | null {
-  const targetPhrase = parseTargetNoticePhrase(instr);
-  if (!targetPhrase) return null;
-  if (!/(?:thirty\s*\(\s*30\s*\)|\bthirty\s+days|\b30\s+days)/i.test(doc)) return null;
-
+  targetTail: string,
+): { text: string; changedSections: string[]; matchedClausePreview: string | null; changed: boolean } {
   const paras = doc.split(/\n\n+/);
   for (let i = 0; i < paras.length; i++) {
     const sliceEnd = Math.min(paras.length, i + 4);
     const windowText = paras.slice(i, sliceEnd).join("\n\n");
-    if (!/for\s+convenience|without\s+cause|termination\s+for\s+convenience|terminate\s+(?:its\s+)?participation/i.test(
-      windowText,
-    )) {
-      continue;
-    }
-    if (
-      !/(?:thirty\s*\(\s*30\s*\)|\bthirty\s+days|\b30\s+days).{0,240}prior\s+written\s+notice|prior\s+written\s+notice.{0,240}(?:thirty\s*\(\s*30\s*\)|\bthirty\s+days|\b30\s+days)/is.test(
+    const convTopic =
+      /for\s+convenience|termination\s+for\s+convenience|without\s+cause|terminate\s+(?:its\s+)?participation|terminate\s+this\s+Agreement\s+for\s+convenience/i.test(
         windowText,
-      )
-    ) {
-      continue;
-    }
+      );
+    if (!convTopic) continue;
+    if (!UPON_DAYS_PRIOR_WRITTEN_NOTICE_RE.test(windowText)) continue;
+
     const rebuilt = [...paras];
     let changed = false;
+    let matchedClausePreview: string | null = null;
     for (let j = i; j < sliceEnd; j++) {
-      const { text, hit } = applyTerminationConvenienceNoticeToBlock(rebuilt[j]!, targetPhrase);
+      const { text, hit, matched } = applyTerminationConvenienceNoticeToBlock(rebuilt[j]!, targetTail);
       if (hit) {
         rebuilt[j] = text;
         changed = true;
+        matchedClausePreview = matched ? matched.slice(0, 160) : null;
         break;
       }
     }
     if (!changed) continue;
     const merged = rebuilt.join("\n\n");
     if (merged === doc) continue;
-    return { text: merged, changedSections: ["termination_for_convenience_notice"] };
+    return {
+      text: merged,
+      changedSections: ["termination_for_convenience_notice"],
+      matchedClausePreview,
+      changed: true,
+    };
   }
-  return null;
+  return { text: doc, changedSections: [], matchedClausePreview: null, changed: false };
 }
 
 /**
@@ -146,28 +178,69 @@ export function applyDeterministicSurgicalRevisionFallback(args: {
 }): DeterministicSurgicalRevisionFallbackResult {
   const doc = args.currentDocumentText;
   const instr = args.userInstruction.trim();
-  const base: DeterministicSurgicalRevisionFallbackResult = {
+  const baseFail = (reason: string): DeterministicSurgicalRevisionFallbackResult => ({
     text: doc,
     applied: false,
-    reason: "none",
+    reason,
     changedSections: [],
-  };
-  if (!doc.trim() || !instr) return base;
+    log: emptyLog(reason),
+  });
 
-  if (classifyPremiumRefineRevisionIntent(instr) !== "surgical_revision") return base;
-  if (isAdvisoryNoteOrCommentIntent(instr)) return base;
+  if (!doc.trim() || !instr) return baseFail("empty_instruction_or_document");
 
-  if (looksLikeTerminationConvenienceNoticeDaysInstruction(instr)) {
-    const hit = tryTerminationConvenienceNoticeFallback(doc, instr);
-    if (hit && hit.text !== doc) {
-      return {
-        text: hit.text,
-        applied: true,
-        reason: "termination_notice_period",
-        changedSections: hit.changedSections,
-      };
-    }
+  if (classifyPremiumRefineRevisionIntent(instr) !== "surgical_revision") {
+    return baseFail("not_surgical_revision_intent");
+  }
+  if (isAdvisoryNoteOrCommentIntent(instr)) {
+    return baseFail("advisory_intent");
   }
 
-  return base;
+  if (!looksLikeTerminationConvenienceNoticeDaysInstruction(instr)) {
+    return baseFail("instruction_not_termination_convenience_notice");
+  }
+
+  const targetTail = parseTargetNoticePhrase(instr);
+  if (!targetTail) {
+    return {
+      text: doc,
+      applied: false,
+      reason: "target_notice_parse_failed",
+      changedSections: [],
+      log: {
+        deterministicSurgicalFallbackAttempted: true,
+        deterministicSurgicalFallbackMatchedClause: null,
+        deterministicSurgicalFallbackApplied: false,
+        deterministicSurgicalFallbackReason: "target_notice_parse_failed",
+      },
+    };
+  }
+
+  const hit = tryTerminationConvenienceNoticeFallback(doc, targetTail);
+  if (hit.changed && hit.text !== doc) {
+    return {
+      text: hit.text,
+      applied: true,
+      reason: "termination_notice_period",
+      changedSections: hit.changedSections,
+      log: {
+        deterministicSurgicalFallbackAttempted: true,
+        deterministicSurgicalFallbackMatchedClause: hit.matchedClausePreview,
+        deterministicSurgicalFallbackApplied: true,
+        deterministicSurgicalFallbackReason: "termination_notice_period",
+      },
+    };
+  }
+
+  return {
+    text: doc,
+    applied: false,
+    reason: "no_convenience_notice_span_matched",
+    changedSections: [],
+    log: {
+      deterministicSurgicalFallbackAttempted: true,
+      deterministicSurgicalFallbackMatchedClause: null,
+      deterministicSurgicalFallbackApplied: false,
+      deterministicSurgicalFallbackReason: "no_convenience_notice_span_matched",
+    },
+  };
 }
