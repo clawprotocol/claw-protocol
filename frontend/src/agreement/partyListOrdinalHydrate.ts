@@ -166,8 +166,127 @@ export function hydrateBetweenPartiesLineIfCorrupt(
 const UNDERLINE_SIG_RE = /^_{3,}\s*$/;
 
 /** Slot-style fallback labels (Party A … Party Z) from placeholder resolution — never leave embedded in headings. */
-function lineContainsPartySlotFallback(t: string): boolean {
+export function lineContainsPartySlotFallback(t: string): boolean {
   return /(?<![A-Za-z])Party\s+[A-Z]\b/i.test(t);
+}
+
+const AND_PARTY_LETTER_FALLBACK_RE = /\band\s+Party\s+[A-Z]\b/i;
+
+/** Double suffix punctuation (e.g. `Inc..`) from merged model fragments. */
+function lineContainsDuplicateEntityPunct(t: string): boolean {
+  return /(?:Inc|LLC|Corp|Ltd|LP|L\.L\.C)\.\.+/i.test(t);
+}
+
+function formatOxfordPartyListInline(parties: readonly string[]): string {
+  if (parties.length === 0) return "";
+  if (parties.length === 1) return parties[0]!;
+  const head = parties.slice(0, -1).join(", ");
+  return `${head}, and ${parties[parties.length - 1]!}`;
+}
+
+function firstFuzzyPartyIndexInTail(tail: string, canonical: string): number {
+  const low = tail.toLowerCase();
+  const c = canonical.trim();
+  if (!c) return -1;
+  let idx = low.indexOf(c.toLowerCase());
+  if (idx >= 0) return idx;
+  if (c.length >= 10) {
+    const frag = c.slice(0, 12).toLowerCase();
+    idx = low.indexOf(frag);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+/** True when multiple authoritative parties appear in `tail` but not in draft order. */
+function introPartyOrderContradictsAuthoritative(tail: string, authoritativeParties: readonly string[]): boolean {
+  if (authoritativeParties.length < 2) return false;
+  const hits = authoritativeParties.map((a) => firstFuzzyPartyIndexInTail(tail, a));
+  let last = -1;
+  for (let i = 0; i < hits.length; i++) {
+    if (hits[i]! < 0) continue;
+    if (last >= 0 && hits[i]! <= last) return true;
+    last = hits[i]!;
+  }
+  return false;
+}
+
+type PartyIntroSplit = { prefix: string; connector: string; tail: string };
+
+/**
+ * Locate the party-intro connector on a single line (longest / left-most wins among alternatives).
+ * Skips when the intro is clearly delegating to a numbered list on the same line.
+ */
+function findPartyIntroductionSplit(line: string): PartyIntroSplit | null {
+  const candidates: Array<{ idx: number; phrase: string }> = [];
+  const tryRe = (re: RegExp) => {
+    re.lastIndex = 0;
+    const m = re.exec(line);
+    if (m) candidates.push({ idx: m.index, phrase: m[0] });
+  };
+  tryRe(/\bby\s+and\s+among\s+the\s+following\s+parties\s*:/i);
+  tryRe(/\bby\s+and\s+among\s+the\s+following\s+parties\b/i);
+  tryRe(/\bamong\s+the\s+following\s+parties\b/i);
+  tryRe(/\bby\s+and\s+among\b/i);
+  tryRe(/\bby\s+and\s+between\b/i);
+  tryRe(/\bbetween:\s+/i);
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => a.idx - b.idx || b.phrase.length - a.phrase.length);
+  const { idx, phrase } = candidates[0]!;
+  const prefix = line.slice(0, idx);
+  const tail = line.slice(idx + phrase.length).trimStart();
+  if (/^:\s*\d/.test(tail)) return null;
+  if (/^\d+[\.)]\s/.test(tail)) return null;
+  if (/^following\s+parties\s*:?\s*$/i.test(tail)) return null;
+  return { prefix, connector: phrase, tail };
+}
+
+function tailNeedsPartyIntroRepair(tail: string, authoritativeParties: readonly string[]): boolean {
+  if (!tail.trim() || authoritativeParties.length === 0) return false;
+  if (lineContainsPartySlotFallback(tail)) return true;
+  if (AND_PARTY_LETTER_FALLBACK_RE.test(tail)) return true;
+  if (textContainsUnresolvedIdentityPlaceholders(tail)) return true;
+  if (lineContainsDuplicateEntityPunct(tail)) return true;
+  if (bodyLooksLikeMergedPartyFragments(tail, authoritativeParties)) return true;
+  if (introPartyOrderContradictsAuthoritative(tail, authoritativeParties)) return true;
+  return false;
+}
+
+/**
+ * Repairs opening party-introduction paragraphs (inline “by and among …” / “by and between …”)
+ * when the model leaves slot fallbacks, bracket tokens, duplicate suffix punctuation, Frankenstein
+ * merges, or party-order drift vs `draft.parties[]` order.
+ */
+export function hydratePartyIntroductionParagraphs(
+  text: string,
+  authoritativeParties: readonly string[],
+): string {
+  if (!text.trim() || authoritativeParties.length === 0) return text;
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const split = findPartyIntroductionSplit(raw);
+    if (!split) continue;
+    const { prefix, connector, tail } = split;
+    if (!tailNeedsPartyIntroRepair(tail, authoritativeParties)) continue;
+
+    let suffix = "";
+    const postSentence = tail.match(/\.\s+(?:This\s+|WHEREAS|NOW,|WITNESS|THE\s+PARTIES|Each\s+party|Recitals)\b/i);
+    if (postSentence) {
+      suffix = tail.slice(postSentence.index!);
+    } else if (/\.\.\.\s*$/.test(tail)) {
+      suffix = ".";
+    } else if (/\.{2,}\s*$/.test(tail.trim())) {
+      suffix = ".";
+    } else if (/\.\s*$/.test(tail.trim())) {
+      suffix = ".";
+    }
+
+    const needSpace = !/\s$/.test(connector) && !/^\s/.test(tail);
+    const oxford = formatOxfordPartyListInline(authoritativeParties);
+    lines[i] = `${prefix}${connector}${needSpace ? " " : ""}${oxford}${suffix}`;
+  }
+  return lines.join("\n");
 }
 
 function shouldTreatAsSignaturePartyHeading(line: string, authoritativeParties: readonly string[]): boolean {

@@ -20,6 +20,9 @@ import {
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
 } from "../../agreement/partyPlaceholderDisplay";
+import {
+  textContainsPremiumIdentityDefects,
+} from "./premiumIdentityCorpusPreviewGuard";
 import * as previewFromDraft from "./agreementPreviewFromDraft";
 
 const EXACT_SOFTWARE_INTEGRATION_PROMPT =
@@ -78,6 +81,30 @@ const twoPartyBase = (parties: ParsedDraftShape["parties"]): ParsedDraftShape =>
   payment: { amount: null, cadence: null, valid: true },
 });
 
+const INTRO_LEAK_PAID_BODY = `
+SOFTWARE INTEGRATION AGREEMENT
+
+This Software Integration Agreement is entered into as of May 1, 2026, by and among Beacon Operations and Party F, Foundryco Inc.., Apollo Data Services LLC, Smith & Wesson Holdings LLC, and Coastal Reserve Partners Lp.
+
+${"x".repeat(520)}
+`.trim();
+
+describe("premium identity defects detector", () => {
+  it("flags raw corrupt intro before hydration", () => {
+    expect(textContainsPremiumIdentityDefects(INTRO_LEAK_PAID_BODY)).toBe(true);
+  });
+
+  it("clears after full hydrateIdentity pipeline", () => {
+    const structured = runStarterIntake(EXACT_SOFTWARE_INTEGRATION_PROMPT);
+    const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(
+      INTRO_LEAK_PAID_BODY,
+      structured,
+      EXACT_SOFTWARE_INTEGRATION_PROMPT,
+    );
+    expect(textContainsPremiumIdentityDefects(hydrated)).toBe(false);
+  });
+});
+
 describe("premium identity corpus + preview guard", () => {
   it("detects unresolved identity tokens in raw full document before display hydration (structured parties look fine)", () => {
     const draft = twoPartyBase([
@@ -121,6 +148,28 @@ describe("premium identity corpus + preview guard", () => {
     expect(out).not.toMatch(/Smith\s*&\s*Smith\s*&/i);
     expect(out.toLowerCase()).not.toContain("beacon operations and coastal reserve");
     expect(out).not.toMatch(/(?<![A-Za-z])Party\s+[A-Z]\b/);
+  });
+
+  it("paid authoritative path clears corrupt by-and-among party intro (no Party F / Inc.. / Lp drift)", () => {
+    const structured = runStarterIntake(EXACT_SOFTWARE_INTEGRATION_PROMPT);
+    expect(textContainsPremiumIdentityDefects(INTRO_LEAK_PAID_BODY)).toBe(true);
+    const out = buildAgreementPreviewText(structured, {
+      starterPreview: false,
+      premiumDeliverablePreview: true,
+      intakeText: EXACT_SOFTWARE_INTEGRATION_PROMPT,
+      paidAuthoritativeProBody: INTRO_LEAK_PAID_BODY,
+    });
+    expect(textContainsPremiumIdentityDefects(out)).toBe(false);
+    expect(out).toMatch(/by and among FoundryCo Inc\., Beacon Operations And Logistics Group LLC/);
+    expect(out).not.toContain("Foundryco");
+    expect(out).not.toContain("Inc..");
+    expect(out).not.toMatch(/Partners\s+Lp\b/);
+    expect(out).not.toMatch(/Party\s+F/i);
+    expect(
+      structured.parties?.every((p) =>
+        out.toLowerCase().includes(String(p.name || "").trim().toLowerCase()),
+      ),
+    ).toBe(true);
   });
 
   it("hydrateIdentityPlaceholdersInAgreementPreviewPlain matches authoritative slot order for mixed fragments", () => {

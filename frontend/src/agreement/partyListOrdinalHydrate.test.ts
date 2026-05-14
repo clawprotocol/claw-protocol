@@ -7,6 +7,7 @@ import { runIntakeDefaultsAndRoles } from "../components/agreements/intakeFamily
 import { defaultIntakePartyRoleLabels } from "../components/agreements/partyRoleIntake";
 import type { ParsedDraftShape } from "../components/agreements/intakeSmartDefaults";
 import {
+  hydratePartyIntroductionParagraphs,
   hydratePartyListAndSignatureOrdinals,
   hydratePartyListLinesByOrdinal,
 } from "./partyListOrdinalHydrate";
@@ -66,6 +67,25 @@ function blankParsed(): ParsedDraftShape {
 function structuredFromPrompt(): ParsedDraftShape {
   return runIntakeDefaultsAndRoles(blankParsed(), EXACT_PROMPT, true, defaultIntakePartyRoleLabels());
 }
+
+const INTRO_LEAK_PARAGRAPH = `This Software Integration Agreement ("Agreement") is made and entered into as of May 1, 2026, by and among Beacon Operations and Party F, Foundryco Inc.., Apollo Data Services LLC, Smith & Wesson Holdings LLC, and Coastal Reserve Partners Lp.`;
+
+describe("hydratePartyIntroductionParagraphs", () => {
+  it("canonicalizes corrupt five-party by-and-among inline list (production leak)", () => {
+    const out = hydratePartyIntroductionParagraphs(INTRO_LEAK_PARAGRAPH, [...AUTH]);
+    expect(out).toMatch(/by and among FoundryCo Inc\., Beacon Operations And Logistics Group LLC/);
+    expect(out).toContain("Apollo Data Services LLC");
+    expect(out).toMatch(/Smith\s*&\s*Wesson Holdings LLC/);
+    expect(out).toMatch(/Coastal Reserve Partners LP/);
+    expect(out).not.toMatch(/Party\s+F/i);
+    expect(out).not.toContain("Foundryco");
+    expect(out).not.toContain("Inc..");
+    expect(out).not.toMatch(/Partners\s+Lp\b/);
+    for (const n of AUTH) {
+      expect(out).toContain(n);
+    }
+  });
+});
 
 describe("partyListOrdinalHydrate", () => {
   it("repairs numbered party list by ordinal (production corrupt list)", () => {
@@ -138,10 +158,10 @@ ${CORRUPT_SIGS}
 `.trim();
     const out = hydrateIdentityPlaceholdersInAgreementPreviewPlain(blob, draft, EXACT_PROMPT);
     expect(out.toLowerCase()).not.toContain("beacon operations and coastal reserve");
-    expect(out).not.toMatch(/Foundryco Inc\.\./i);
+    expect(out).not.toContain("Inc..");
     expect(out).not.toMatch(/Smith\s*&\s*Smith\s*&/i);
     for (const n of names) {
-      expect(out).toContain(n);
+      expect(out.toLowerCase()).toContain(n.toLowerCase());
     }
   });
 

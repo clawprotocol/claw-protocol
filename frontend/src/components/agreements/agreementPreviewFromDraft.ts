@@ -42,7 +42,8 @@ import {
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
 } from "../../agreement/partyPlaceholderDisplay";
-import { hydratePartyListAndSignatureOrdinals } from "../../agreement/partyListOrdinalHydrate";
+import { hydratePartyIntroductionParagraphs, hydratePartyListAndSignatureOrdinals } from "../../agreement/partyListOrdinalHydrate";
+import { finalizePremiumIdentityCorpusInPreview } from "./premiumIdentityCorpusPreviewGuard";
 
 const MISSING = "[Not yet specified]";
 /**
@@ -659,7 +660,12 @@ export function hydrateIdentityPlaceholdersInAgreementPreviewPlain(
   const t = (text || "").trim();
   if (!t) return t;
   const auth = (draft.parties || [])
-    .map((p) => String(p.name || "").replace(/\s+/g, " ").trim())
+    .map((p) =>
+      restorePartyCasingFromIntake(
+        String(p.name || "").replace(/\s+/g, " ").trim(),
+        intakeText ?? null,
+      ),
+    )
     .filter((n) => n.length > 0);
   const ctx = [
     String(intakeText ?? "").trim(),
@@ -669,13 +675,16 @@ export function hydrateIdentityPlaceholdersInAgreementPreviewPlain(
     ...auth,
   ].join("\n");
   let out = hydratePartyListAndSignatureOrdinals(t, auth);
+  out = hydratePartyIntroductionParagraphs(out, auth);
   out = substitutePartyPlaceholdersInUserFacingText(out, ctx, auth.length ? auth : null);
+  out = hydratePartyIntroductionParagraphs(out, auth);
   out = hydratePartyListAndSignatureOrdinals(out, auth);
   if (textContainsUnresolvedIdentityPlaceholders(out)) {
     out = substitutePartyPlaceholdersInUserFacingText(out, ctx, auth.length ? auth : null);
+    out = hydratePartyIntroductionParagraphs(out, auth);
     out = hydratePartyListAndSignatureOrdinals(out, auth);
   }
-  return out;
+  return finalizePremiumIdentityCorpusInPreview(out, auth, ctx);
 }
 
 /**

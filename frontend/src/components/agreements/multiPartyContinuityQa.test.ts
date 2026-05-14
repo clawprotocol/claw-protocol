@@ -34,7 +34,11 @@ import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { resolveStarterPartyCountGuard } from "./starterPartyLimits";
-import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
+import {
+  buildAgreementPreviewText,
+  buildAgreementPreviewTextCore,
+  hydrateIdentityPlaceholdersInAgreementPreviewPlain,
+} from "./agreementPreviewFromDraft";
 import { formatLegalPartyPreamble } from "./formatLegalPartyList";
 import { buildAgreementVs01BridgeSession } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
@@ -42,6 +46,7 @@ import {
   formatAuthoritativeAgreementPartiesHeadline,
   orderedAuthoritativePartyDisplayNames,
 } from "../../agreement/handoffPartyDisplay";
+import { textContainsPremiumIdentityDefects } from "./premiumIdentityCorpusPreviewGuard";
 
 /* ─────────────────────────── Helpers (lightweight) ───────────────────────────── */
 
@@ -775,5 +780,41 @@ describe("Continuity handoff summaries — five-party Foundry / Beacon / Apollo 
       expectListContainsCaseInsensitive(names, expected);
     }
     expectNoDuplicateNames(names);
+  });
+});
+
+/* ─────────────────── 11. Premium rendered preview — no Party letter fallbacks / intro drift ──────────── */
+
+const SOFTWARE_INTEGRATION_INTAKE =
+  "Create a software integration agreement between FoundryCo Inc., Beacon Operations And Logistics Group LLC, Apollo Data Services LLC, Smith & Wesson Holdings LLC, and Coastal Reserve Partners LP. Fee $47,500. Term 4 months. Governing law Oklahoma. Include confidentiality, ownership of deliverables after payment, termination rights, dispute resolution, and electronic signatures.";
+
+const LEAKY_PREMIUM_BODY = `
+SOFTWARE INTEGRATION AGREEMENT
+
+This Software Integration Agreement is entered into as of May 1, 2026, by and among Beacon Operations and Party F, Foundryco Inc.., Apollo Data Services LLC, Smith & Wesson Holdings LLC, and Coastal Reserve Partners Lp.
+
+${"y".repeat(520)}
+`.trim();
+
+describe("Continuity I11 — premium identity intro in rendered preview", () => {
+  it("rejects Party A–Z residue and bracket placeholders after full display hydrate", () => {
+    const draft = runIntake(SOFTWARE_INTEGRATION_INTAKE);
+    const out = hydrateIdentityPlaceholdersInAgreementPreviewPlain(LEAKY_PREMIUM_BODY, draft, SOFTWARE_INTEGRATION_INTAKE);
+    expect(textContainsPremiumIdentityDefects(out)).toBe(false);
+    expect(out).not.toMatch(/(?<![A-Za-z])Party\s+[A-Z]\b/);
+    expect(out).not.toMatch(/\[(?:ORG|PERSON)_\d+\]/i);
+    expect(out).toMatch(/by and among FoundryCo Inc\./);
+  });
+
+  it("buildAgreementPreviewText premium path never leaves intro-slot corruption visible", () => {
+    const draft = runIntake(SOFTWARE_INTEGRATION_INTAKE);
+    const preview = buildAgreementPreviewText(draft, {
+      starterPreview: false,
+      premiumDeliverablePreview: true,
+      intakeText: SOFTWARE_INTEGRATION_INTAKE,
+      paidAuthoritativeProBody: LEAKY_PREMIUM_BODY,
+    });
+    expect(textContainsPremiumIdentityDefects(preview)).toBe(false);
+    expect(preview).not.toMatch(/(?<![A-Za-z])Party\s+[A-Z]\b/);
   });
 });
