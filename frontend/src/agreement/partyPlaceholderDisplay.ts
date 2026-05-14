@@ -123,12 +123,6 @@ export function substitutePartyPlaceholdersInUserFacingText(
     const idx = Math.max(0, slot - 1);
     if (auth.length > 0) {
       if (auth[idx]) return auth[idx];
-      const last = auth[auth.length - 1];
-      // Paid bodies sometimes emit N+1 for an N-party draft (e.g. [ORG_6] with five parties).
-      // Prefer the last authoritative party over a generic "Party …" label.
-      if (last && slot > auth.length && slot <= auth.length + 1) {
-        return last;
-      }
       return slotFallback(idx);
     }
     return candidates[idx] ?? slotFallback(idx);

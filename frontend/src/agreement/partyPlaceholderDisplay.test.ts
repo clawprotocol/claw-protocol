@@ -40,11 +40,12 @@ describe("partyPlaceholderDisplay", () => {
     );
   });
 
-  it("maps [ORG_{N+1}] to the last authoritative party when the draft has N parties (paid-body off-by-one)", () => {
+  it("does not map out-of-range ORG slots to the last party inside prose (avoids Frankenstein merges)", () => {
     const auth = ["P1 LLC", "P2 LLC", "P3 LLC", "P4 LLC", "P5 LLC"];
-    expect(substitutePartyPlaceholdersInUserFacingText("Between [ORG_1] and Beacon and [ORG_6].", "", auth)).toBe(
-      "Between P1 LLC and Beacon and P5 LLC.",
-    );
+    const out = substitutePartyPlaceholdersInUserFacingText("Between [ORG_1] and Beacon and [ORG_6].", "", auth);
+    expect(out).toContain("P1 LLC");
+    expect(out).toMatch(/\bParty\s+[A-Z]\b/);
+    expect(out).not.toMatch(/P5 LLC\s*\./);
   });
 
   it("replaces bare ORG_1 with inferred party", () => {

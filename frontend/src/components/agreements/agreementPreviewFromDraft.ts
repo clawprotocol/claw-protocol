@@ -42,6 +42,7 @@ import {
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
 } from "../../agreement/partyPlaceholderDisplay";
+import { hydratePartyListAndSignatureOrdinals } from "../../agreement/partyListOrdinalHydrate";
 
 const MISSING = "[Not yet specified]";
 /**
@@ -667,9 +668,12 @@ export function hydrateIdentityPlaceholdersInAgreementPreviewPlain(
     draft.payment_terms || "",
     ...auth,
   ].join("\n");
-  let out = substitutePartyPlaceholdersInUserFacingText(t, ctx, auth.length ? auth : null);
+  let out = hydratePartyListAndSignatureOrdinals(t, auth);
+  out = substitutePartyPlaceholdersInUserFacingText(out, ctx, auth.length ? auth : null);
+  out = hydratePartyListAndSignatureOrdinals(out, auth);
   if (textContainsUnresolvedIdentityPlaceholders(out)) {
     out = substitutePartyPlaceholdersInUserFacingText(out, ctx, auth.length ? auth : null);
+    out = hydratePartyListAndSignatureOrdinals(out, auth);
   }
   return out;
 }
