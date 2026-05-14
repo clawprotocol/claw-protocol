@@ -23,6 +23,13 @@ import {
   RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REVISED_AGREEMENT_PDF,
   RECIPIENT_IMPORT_NO_CHANGE_PLAINTEXT_EXPORT,
 } from "./portableReviewCopy";
+import {
+  finalizeUserVisibleAgreementPlainText,
+  stripHtmlAgreementScanText,
+} from "../components/agreements/agreementTemplatePlaceholderSafety";
+
+const RECIPIENT_PLACEHOLDER_EXPORT_BLOCKED =
+  "This export is blocked because drafting placeholders still appear in the agreement text. Resolve them before exporting or copying.";
 
 /** Plain-text summary of block redline for copy/export (no HTML). */
 export function legalRedlineDocumentVmToPlainSummary(vm: LegalRedlineDocumentViewModel): string {
@@ -206,8 +213,23 @@ export function RecipientPreviewVersionsExport({
   const copyText = useCallback(
     async (label: "original" | "proposed" | "redline", text: string) => {
       safeSet(() => setCopyFlowError(null));
+      const ph = finalizeUserVisibleAgreementPlainText(text, {
+        intakeRaw: "",
+        partyNames: [],
+        agreementFamily: null,
+        surface: `recipient_preview_copy_${label}`,
+      });
+      if (!ph.ok) {
+        safeSet(() => setCopyFlowError(RECIPIENT_PLACEHOLDER_EXPORT_BLOCKED));
+        if (copyErrorTimerRef.current) clearTimeout(copyErrorTimerRef.current);
+        copyErrorTimerRef.current = setTimeout(() => {
+          copyErrorTimerRef.current = null;
+          safeSet(() => setCopyFlowError(null));
+        }, 4500);
+        return;
+      }
       try {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(ph.text);
         safeSet(() => setCopyAck(label));
         clearCopyAckSoon();
       } catch {
@@ -224,9 +246,24 @@ export function RecipientPreviewVersionsExport({
 
   const downloadTextFile = useCallback(
     (kind: RecipientPreviewPdfExportKind, body: string) => {
+      const ph = finalizeUserVisibleAgreementPlainText(body, {
+        intakeRaw: "",
+        partyNames: [],
+        agreementFamily: null,
+        surface: `recipient_preview_download_text_${kind}`,
+      });
+      if (!ph.ok) {
+        safeSet(() => setCopyFlowError(RECIPIENT_PLACEHOLDER_EXPORT_BLOCKED));
+        if (copyErrorTimerRef.current) clearTimeout(copyErrorTimerRef.current);
+        copyErrorTimerRef.current = setTimeout(() => {
+          copyErrorTimerRef.current = null;
+          safeSet(() => setCopyFlowError(null));
+        }, 4500);
+        return;
+      }
       const ctx = pdfReadContextRef.current;
       const base = ctx?.exportBasename ?? "agreement";
-      const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+      const blob = new Blob([ph.text], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -264,6 +301,21 @@ export function RecipientPreviewVersionsExport({
               );
       if (!html.trim()) {
         safeSet(() => setPdfErrors((p) => ({ ...p, [kind]: "Nothing to export yet." })));
+        schedulePdfErrorClear(kind);
+        return;
+      }
+      const scanPlain = stripHtmlAgreementScanText(html);
+      const ph = finalizeUserVisibleAgreementPlainText(scanPlain, {
+        intakeRaw: "",
+        partyNames: [],
+        agreementFamily: null,
+        surface: `recipient_preview_export_pdf_${kind}`,
+      });
+      if (!ph.ok) {
+        safeSet(() => {
+          setPdfErrors((p) => ({ ...p, [kind]: RECIPIENT_PLACEHOLDER_EXPORT_BLOCKED }));
+          setA11yStatus(RECIPIENT_PLACEHOLDER_EXPORT_BLOCKED);
+        });
         schedulePdfErrorClear(kind);
         return;
       }

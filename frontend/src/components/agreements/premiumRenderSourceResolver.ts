@@ -119,7 +119,11 @@ export function validatePremiumRenderBody(
     }
   }
 
-  const acc = rejectPremiumBodyForProRender(t, { intakeLower: intakeLow });
+  const acc = rejectPremiumBodyForProRender(t, {
+    intakeLower: intakeLow,
+    intakeText: opts.intakeText ?? null,
+    partyNames: opts.draft?.parties?.map((p) => p.name) ?? null,
+  });
   const serverAcceptableFallback = opts.mode === "server" && isAcceptablePremiumFullDocumentText(t);
   if (!acc.ok && !serverAcceptableFallback) {
     return { ok: false, reasons: acc.reasons.length ? acc.reasons : ["rejected_by_client_acceptance"] };

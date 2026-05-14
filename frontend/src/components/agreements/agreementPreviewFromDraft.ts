@@ -46,6 +46,10 @@ import {
 import { hydratePartyIntroductionParagraphs, hydratePartyListAndSignatureOrdinals } from "../../agreement/partyListOrdinalHydrate";
 import { finalizePremiumIdentityCorpusInPreview } from "./premiumIdentityCorpusPreviewGuard";
 import { finalizePartyDisplayNameForUserFacing } from "../../agreement/partyNameDisplayCasing";
+import {
+  finalizeUserVisibleAgreementPlainText,
+  PLACEHOLDER_SAFETY_PREVIEW_BLOCKED,
+} from "./agreementTemplatePlaceholderSafety";
 
 const MISSING = "[Not yet specified]";
 /**
@@ -649,6 +653,22 @@ export function hydrateIdentityPlaceholdersInAgreementPreviewPlain(
   return finalizePremiumIdentityCorpusInPreview(out, auth, ctx);
 }
 
+function applyAgreementPreviewPlaceholderGate(
+  text: string,
+  draft: ParsedDraftShape,
+  options: AgreementPreviewBuildOptions | undefined,
+  surface: string,
+): string {
+  const gate = finalizeUserVisibleAgreementPlainText(text, {
+    intakeRaw: options?.intakeText ?? null,
+    partyNames: (draft.parties || []).map((p) => p.name),
+    agreementFamily: draft.agreement_family ?? null,
+    surface,
+  });
+  if (!gate.ok) return PLACEHOLDER_SAFETY_PREVIEW_BLOCKED;
+  return gate.text;
+}
+
 /**
  * Human-readable draft agreement text (fixed section order, stable formatting).
  * Premium path uses {@link resolvePremiumRenderSource} (single source of truth).
@@ -671,12 +691,14 @@ export function buildAgreementPreviewText(
     });
     if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
     const collapsed = collapseDuplicateEsignNoticesInFullPreview(res.text);
-    return hydrateIdentityPlaceholdersInAgreementPreviewPlain(collapsed, draft, options?.intakeText ?? null);
+    const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(collapsed, draft, options?.intakeText ?? null);
+    return applyAgreementPreviewPlaceholderGate(hydrated, draft, options, "preview_premium_deliverable");
   }
   const core = buildAgreementPreviewTextCore(draft, options);
-  if (starterPreview) return core;
+  if (starterPreview) return applyAgreementPreviewPlaceholderGate(core, draft, options, "preview_starter");
   if (textContainsUnresolvedIdentityPlaceholders(core)) {
-    return hydrateIdentityPlaceholdersInAgreementPreviewPlain(core, draft, options?.intakeText ?? null);
+    const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(core, draft, options?.intakeText ?? null);
+    return applyAgreementPreviewPlaceholderGate(hydrated, draft, options, "preview_structured_hydrated");
   }
-  return core;
+  return applyAgreementPreviewPlaceholderGate(core, draft, options, "preview_structured");
 }

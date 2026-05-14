@@ -41,6 +41,11 @@ from backend.security.recipient_access_token import (
     mint_recipient_access_token,
     verify_recipient_access_token,
 )
+from backend.agreements.placeholder_template_safety import (
+    primary_agreement_plain_field_and_value,
+    strip_html_agreement_scan_text,
+    validate_user_visible_agreement_text,
+)
 from backend.agreements.premium_dev_context_leak import (
     premium_document_text_has_dev_context_leak,
     sanitize_premium_intake_for_retry,
@@ -5314,6 +5319,26 @@ def post_recipient_preview_export_pdf(
             },
         )
 
+    draft_pdf = _load_or_404(aid)
+    party_names_pdf = [str(p.name or "").strip() for p in (draft_pdf.parties or []) if str(p.name or "").strip()]
+    scan_plain = strip_html_agreement_scan_text(body.html or "")
+    ok_ph_pdf, _, ph_diag_pdf = validate_user_visible_agreement_text(
+        scan_plain,
+        party_names=party_names_pdf,
+        intake_raw="",
+        surface="recipient_preview_export_pdf",
+        agreement_family="",
+    )
+    if not ok_ph_pdf:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "agreement_placeholder_blocked",
+                "message": "This export still contains drafting placeholders. Resolve them in the agreement before creating a PDF.",
+                "placeholder": ph_diag_pdf,
+            },
+        )
+
     built = agreement_rendered_html_to_pdf_bytes(
         body.html,
         title="Agreement",
@@ -5434,6 +5459,34 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
                 exc=exc,
             ),
         ) from exc
+
+    # --- placeholder_template_safety (pre-render) ---
+    party_names_vs = [str(p.name or "").strip() for p in (draft.parties or []) if str(p.name or "").strip()]
+    field_key_vs, corpus_vs = primary_agreement_plain_field_and_value(draft)
+    ok_ph_vs, fixed_corpus_vs, ph_diag_vs = validate_user_visible_agreement_text(
+        corpus_vs,
+        party_names=party_names_vs,
+        intake_raw="",
+        surface="vs01_signing_seed",
+        agreement_family="",
+    )
+    if not ok_ph_vs:
+        log.warning(
+            "[agreement-vs01-seed] event=rejected agreement_id=%s stage=placeholder_safety status=422",
+            aid,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=_vs01_signing_seed_error_detail(
+                agreement_id=aid,
+                stage="placeholder_safety",
+                code="vs01_signing_seed_placeholder_blocked",
+                message="Signing seed is blocked until drafting placeholders are resolved.",
+                extra={"placeholder": ph_diag_vs},
+            ),
+        )
+    if (corpus_vs or "").strip() and fixed_corpus_vs.strip() != corpus_vs.strip():
+        draft = _merge_agreement_draft(draft, **{field_key_vs: fixed_corpus_vs})
 
     # --- economics_watermark (fail-open: seed must not depend on usage-economics DB uptime) ---
     try:
@@ -5791,6 +5844,31 @@ def pro_redline_accept_import(agreement_id: str, request: Request) -> Dict[str, 
     imported = str(pending.get("imported_text") or "").strip()
     if not imported:
         raise HTTPException(status_code=400, detail="invalid_pending_import")
+    party_names_imp: List[str] = []
+    for p in raw.get("parties") or []:
+        if isinstance(p, dict):
+            nm = str(p.get("name") or "").strip()
+        else:
+            nm = str(getattr(p, "name", "") or "").strip()
+        if nm:
+            party_names_imp.append(nm)
+    ok_imp, fixed_imp, diag_imp = validate_user_visible_agreement_text(
+        imported,
+        party_names=party_names_imp,
+        intake_raw="",
+        surface="pro_redline_accept_import",
+        agreement_family=str(raw.get("title") or "")[:120],
+    )
+    if not ok_imp:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "agreement_placeholder_blocked",
+                "message": "Imported text still contains drafting placeholders. Fix them before accepting the import.",
+                "placeholder": diag_imp,
+            },
+        )
+    imported = fixed_imp.strip()
     base_before = _canonical_agreement_plain_from_raw(raw)
     now = _utc_now_iso()
     from_v = int(pr.get("version_counter") or 0)
@@ -6021,6 +6099,31 @@ def pro_redline_suggestion_mark_applied(
     pr["version_counter"] = int(pr.get("version_counter") or 0) + 1
     applied_doc = (body.applied_document_text or "").strip()
     if applied_doc:
+        party_names_pr: List[str] = []
+        for p in raw.get("parties") or []:
+            if isinstance(p, dict):
+                nm = str(p.get("name") or "").strip()
+            else:
+                nm = str(getattr(p, "name", "") or "").strip()
+            if nm:
+                party_names_pr.append(nm)
+        ok_ph, fixed_doc, ph_diag = validate_user_visible_agreement_text(
+            applied_doc,
+            party_names=party_names_pr,
+            intake_raw="",
+            surface="pro_redline_mark_applied",
+            agreement_family=str(raw.get("title") or "")[:120],
+        )
+        if not ok_ph:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "agreement_placeholder_blocked",
+                    "message": "Applied text still contains drafting placeholders. Resolve them before saving.",
+                    "placeholder": ph_diag,
+                },
+            )
+        applied_doc = fixed_doc.strip()
         raw["server_full_document_text"] = applied_doc
         raw["premium_server_full_document_text"] = applied_doc
         raw["premium_full_document_text"] = applied_doc

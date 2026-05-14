@@ -3,6 +3,7 @@
  * this rejects obvious contamination / starter-shell masquerading as Pro).
  */
 
+import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const BANNED_SUBSTRINGS = [
@@ -83,7 +84,12 @@ export function isLikelyFiveSectionStarterShellPro(body: string): boolean {
 
 export function rejectPremiumBodyForProRender(
   body: string,
-  opts?: { intakeLower?: string },
+  opts?: {
+    intakeLower?: string;
+    /** Original-case intake for placeholder literal allowlist. */
+    intakeText?: string | null;
+    partyNames?: readonly (string | null | undefined)[] | null;
+  },
 ): PremiumClientAcceptanceResult {
   const reasons: string[] = [];
   const low = (body || "").trim().toLowerCase();
@@ -111,7 +117,21 @@ export function rejectPremiumBodyForProRender(
     }
   }
   const uniq = [...new Set(reasons)];
-  return { ok: uniq.length === 0, reasons: uniq };
+  if (uniq.length > 0) return { ok: false, reasons: uniq };
+  const intakeRaw = ((opts?.intakeText ?? "") || "").trim() || (opts?.intakeLower ?? "");
+  const ph = finalizeUserVisibleAgreementPlainText((body || "").trim(), {
+    intakeRaw,
+    partyNames: opts?.partyNames ?? null,
+    agreementFamily: null,
+    surface: "rejectPremiumBodyForProRender",
+  });
+  if (!ph.ok) {
+    return {
+      ok: false,
+      reasons: ph.remaining.slice(0, 12).map((x) => `placeholder:${x.slice(0, 48)}`),
+    };
+  }
+  return { ok: true, reasons: [] };
 }
 
 /** Stated people + project anchors: tolerate split names, Client/Developer labels, and brand. */

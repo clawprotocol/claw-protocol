@@ -199,10 +199,14 @@ export function validatePaidProOutput(args: {
     return dcl;
   }
   const intakeLower = rawI.toLowerCase();
-  const a = rejectPremiumBodyForProRender(t, { intakeLower });
-  if (!a.ok) {
-    logVpaidDevFail(a.reasons);
-    return a;
+  const acc = rejectPremiumBodyForProRender(t, {
+    intakeLower,
+    intakeText: args.rawIntake,
+    partyNames: args.draft?.parties?.map((p) => p.name) ?? null,
+  });
+  if (!acc.ok) {
+    logVpaidDevFail(acc.reasons);
+    return acc;
   }
   const s = rejectPaidProStitchedOrThinShell(t, intakeLower);
   if (!s.ok) {

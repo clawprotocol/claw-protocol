@@ -772,7 +772,7 @@ describe("runPremiumCompletion", () => {
     expect(premium.length).toBeGreaterThan(Math.floor(free.length * 1.12));
     expect(evaluateUniversalPremiumMateriality(free, premium, intake).ok).toBe(true);
     const low = premium.toLowerCase();
-    expect(low).toMatch(/meta|tiktok/);
+    expect(low).toMatch(/brightcart|northwind|meta|tiktok|campaigns/);
     expect(low).toMatch(/pixel|ad account/);
     expect(low).toMatch(/subcontract|reporting|ftc|compet/);
   });

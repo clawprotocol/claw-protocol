@@ -83,6 +83,7 @@ import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedB
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
+import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 
 export type PremiumCompletionInput = {
   intakeText: string;
@@ -1251,6 +1252,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   let outMerged: ParsedDraftShape = merged;
   let winningPremiumBodyText = "";
   const intakeLowerGlobal = (rawForSoT || rawIntake).toLowerCase();
+  const premiumRejectCtx = {
+    intakeLower: intakeLowerGlobal,
+    intakeText: rawForSoT || rawIntake,
+    partyNames: merged.parties?.map((p) => p.name) ?? null,
+  };
   let premiumRenderSource: PremiumRenderSource = "fallback_preview";
   let founderDetailsGateMessage: string | null = null;
   let proIntentGateMessage: string | null = null;
@@ -1444,7 +1450,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         };
       }
       {
-        const acc0 = rejectPremiumBodyForProRender(doc, { intakeLower: intakeLowerGlobal });
+        const acc0 = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
         if (!acc0.ok && import.meta.env.MODE !== "test") {
           try {
             const full2 = await postPremiumFullDraftOnce({
@@ -1494,7 +1500,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           }
         }
       }
-      let acc = rejectPremiumBodyForProRender(doc, { intakeLower: intakeLowerGlobal });
+      let acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
       const intakeS = (rawForSoT || rawIntake).trim();
       const founderIntent = isFounderEquityVestingIntent(intakeS);
       const intentModeFirst: "full" | "base_only" =
@@ -1530,7 +1536,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
                   doc = nextDoc;
                   effectiveFull = fr;
                   usedClientRetry = true;
-                  acc = rejectPremiumBodyForProRender(doc, { intakeLower: intakeLowerGlobal });
+                  acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
                   vPaid = validatePaidProOutput({
                     text: doc,
                     rawIntake: rawForSoT || rawIntake,
@@ -1555,7 +1561,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
               console.info("[founder_intent] title gate: required title phrase not found after retry");
             }
             doc = "";
-            acc = rejectPremiumBodyForProRender(doc, { intakeLower: intakeLowerGlobal });
+            acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
             vPaid = validatePaidProOutput({
               text: doc,
               rawIntake: rawForSoT || rawIntake,
@@ -1586,7 +1592,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
               tierADiag.serverTextClearedBeforeMerge = true;
               tierADiag.serverTextClearReason = "paid_output_validation_failed";
             }
-            acc = rejectPremiumBodyForProRender(doc, { intakeLower: intakeLowerGlobal });
+            acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
           }
         }
       }
@@ -1598,7 +1604,31 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         docLen: (doc || "").length,
         effGen: (effectiveFull.generation_outcome || "").trim(),
       };
+      let placeholderClientOk = true;
       if (acc.ok && vPaid.ok) {
+        const ph = finalizeUserVisibleAgreementPlainText(doc, {
+          intakeRaw: (rawForSoT || rawIntake || "").trim(),
+          partyNames: (merged.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean),
+          agreementFamily: merged.agreement_family ?? null,
+          surface: "premium_completion_pipeline",
+        });
+        if (!ph.ok) {
+          placeholderClientOk = false;
+          if (!proIntentGateMessage) {
+            proIntentGateMessage =
+              "Unresolved drafting placeholders remain in the Pro agreement. Edit the document or run **Retry Pro draft**.";
+          }
+          logPremiumCompletionDebug({
+            stage: "pipeline_placeholder_blocked",
+            remaining: ph.remaining,
+            repaired: ph.repaired,
+            accepted: false,
+          });
+        } else {
+          doc = ph.text;
+        }
+      }
+      if (acc.ok && vPaid.ok && placeholderClientOk) {
         const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
         const srvFull = (effectiveFull.server_full_document_text || "").trim();
         const srvRepair = (effectiveFull.server_repair_document_text || "").trim();
@@ -1714,7 +1744,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   if (!(winningPremiumBodyText || "").trim() && premiumRenderSource !== "rejected_paid_corpus") {
     const stripped = stripClientPremiumArtifactBlocksFromDraft(outMerged);
     const rawSoT = rawForSoT || rawIntake;
-    const fb =
+    let fb =
       import.meta.env.MODE === "test"
         ? buildAgreementPreviewText(stripped, {
             starterPreview: false,
@@ -1722,11 +1752,32 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             intakeText: rawSoT,
           })
         : buildPremiumPostCheckoutStitchedBody(stripped, rawSoT);
+    const phFb = finalizeUserVisibleAgreementPlainText(fb, {
+      intakeRaw: (rawSoT || "").trim(),
+      partyNames: (merged.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean),
+      agreementFamily: merged.agreement_family ?? null,
+      surface: "premium_completion_fallback_stitched",
+    });
+    if (!phFb.ok) {
+      logPremiumCompletionDebug({
+        stage: "fallback_stitched_placeholder_blocked",
+        remaining: phFb.remaining,
+        repaired: phFb.repaired,
+        accepted: false,
+      });
+      if (!proIntentGateMessage) {
+        proIntentGateMessage =
+          "Unresolved drafting placeholders remain in the fallback preview. Edit fields or run **Retry Pro draft**.";
+      }
+      fb = "";
+    } else {
+      fb = phFb.text;
+    }
     if (import.meta.env.MODE === "test") {
       winningPremiumBodyText = fb;
       premiumRenderSource = "fallback_preview";
     } else {
-      winningPremiumBodyText = PRO_FALLBACK_HEADER + fb;
+      winningPremiumBodyText = fb.trim() ? PRO_FALLBACK_HEADER + fb : "";
       premiumRenderSource = "fallback_preview_error";
     }
   }
@@ -1773,6 +1824,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     Boolean((outMerged.premium_full_document_text || "").trim()) &&
     rejectPremiumBodyForProRender((outMerged.premium_full_document_text || "").trim(), {
       intakeLower: intakeLowerGlobal,
+      intakeText: rawForSoT || rawIntake,
+      partyNames: outMerged.parties?.map((p) => p.name) ?? null,
     }).ok;
   if (import.meta.env.DEV) {
     const hit = gapTraceNeedlesHit(winningPremiumBodyText || "");

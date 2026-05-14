@@ -371,8 +371,11 @@ function vs01SeedFailureReason(detail: unknown, httpStatus: number): string {
   if (detail && typeof detail === "object") {
     const o = detail as Record<string, unknown>;
     const code = o.code;
-    if (typeof code === "string" && code.trim()) return code.trim();
     const message = o.message;
+    if (typeof code === "string" && code.trim() === "vs01_signing_seed_placeholder_blocked") {
+      if (typeof message === "string" && message.trim()) return message.trim();
+    }
+    if (typeof code === "string" && code.trim()) return code.trim();
     if (typeof message === "string" && message.trim()) return message.trim();
   }
   return `http_${httpStatus}`;
