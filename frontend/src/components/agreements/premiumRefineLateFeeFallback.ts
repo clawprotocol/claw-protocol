@@ -14,6 +14,7 @@ import {
   tryPremiumRefineAdvisoryAppendAcceptance,
 } from "./premiumRefineAcceptance";
 import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
+import { applyDeterministicSurgicalRevisionFallback } from "./premiumRefineDeterministicSurgicalFallback";
 
 type PremiumRefineAcceptanceResult = ReturnType<typeof evaluatePremiumRefineCandidate>;
 
@@ -352,6 +353,10 @@ export type PremiumRefineResolveOutcome = {
   finalText: string;
   acceptance: PremiumRefineAcceptanceResult;
   usedLocalLateFeeFallback: boolean;
+  /** True when {@link applyDeterministicSurgicalRevisionFallback} produced the accepted body. */
+  appliedDeterministicSurgicalFallback: boolean;
+  /** e.g. `termination_notice_period` when a clause-local rule applied. */
+  deterministicSurgicalFallbackReason: string | null;
   whatChangedLine: string | null;
   unchangedDuplicateLateFee: boolean;
 };
@@ -389,40 +394,84 @@ export function resolvePremiumRefineApplyOutcome(args: {
       finalText: out0,
       acceptance: acc,
       usedLocalLateFeeFallback: false,
+      appliedDeterministicSurgicalFallback: false,
+      deterministicSurgicalFallbackReason: null,
       whatChangedLine: joinSummaryChanges(summaryChanges),
       unchangedDuplicateLateFee: false,
     };
   }
 
-  if (
-    acc.decision === "rejected_unchanged" &&
-    inst.length > 0 &&
-    !premiumRefineSummaryIsUnchangedFailOpen(summaryChanges)
-  ) {
-    const fb = tryPremiumRefineLateFeeLocalFallback({
-      currentDocumentText: baselineText,
-      userInstruction: inst,
-    });
-    if (fb) {
-      const out1 = fb.text.trim();
-      const acc1 = evaluatePremiumRefineCandidate(out1, baselineText, baselineLen, summaryChanges, inst);
-      if (acc1.decision === "accepted") {
-        return {
-          finalText: out1,
-          acceptance: acc1,
-          usedLocalLateFeeFallback: true,
-          whatChangedLine: fb.summaryLine,
-          unchangedDuplicateLateFee: false,
-        };
+  if (acc.decision === "rejected_unchanged" && inst.length > 0) {
+    const failOpen = premiumRefineSummaryIsUnchangedFailOpen(summaryChanges);
+
+    if (!failOpen) {
+      const fb = tryPremiumRefineLateFeeLocalFallback({
+        currentDocumentText: baselineText,
+        userInstruction: inst,
+      });
+      if (fb) {
+        const out1 = fb.text.trim();
+        const acc1 = evaluatePremiumRefineCandidate(out1, baselineText, baselineLen, summaryChanges, inst);
+        if (acc1.decision === "accepted") {
+          return {
+            finalText: out1,
+            acceptance: acc1,
+            usedLocalLateFeeFallback: true,
+            appliedDeterministicSurgicalFallback: false,
+            deterministicSurgicalFallbackReason: null,
+            whatChangedLine: fb.summaryLine,
+            unchangedDuplicateLateFee: false,
+          };
+        }
       }
     }
-    const dup = looksLikeLateFeeInstruction(inst) && documentAlreadyHasLateFeeClause(baselineText);
+
+    if (
+      classifyPremiumRefineRevisionIntent(inst) === "surgical_revision" &&
+      !isAdvisoryNoteOrCommentIntent(inst)
+    ) {
+      const surg = applyDeterministicSurgicalRevisionFallback({
+        currentDocumentText: baselineText,
+        userInstruction: inst,
+      });
+      if (surg.applied && surg.text.trim() !== baselineText.trim()) {
+        const outS = surg.text.trim();
+        const accS = evaluatePremiumRefineCandidate(outS, baselineText, baselineLen, undefined, inst);
+        if (accS.decision === "accepted") {
+          return {
+            finalText: outS,
+            acceptance: accS,
+            usedLocalLateFeeFallback: false,
+            appliedDeterministicSurgicalFallback: true,
+            deterministicSurgicalFallbackReason: surg.reason,
+            whatChangedLine: `Applied local rule: ${surg.reason.replace(/_/g, " ")}.`,
+            unchangedDuplicateLateFee: false,
+          };
+        }
+      }
+    }
+
+    if (!failOpen) {
+      const dup = looksLikeLateFeeInstruction(inst) && documentAlreadyHasLateFeeClause(baselineText);
+      return {
+        finalText: out0,
+        acceptance: acc,
+        usedLocalLateFeeFallback: false,
+        appliedDeterministicSurgicalFallback: false,
+        deterministicSurgicalFallbackReason: null,
+        whatChangedLine: null,
+        unchangedDuplicateLateFee: dup,
+      };
+    }
+
     return {
       finalText: out0,
       acceptance: acc,
       usedLocalLateFeeFallback: false,
+      appliedDeterministicSurgicalFallback: false,
+      deterministicSurgicalFallbackReason: null,
       whatChangedLine: null,
-      unchangedDuplicateLateFee: dup,
+      unchangedDuplicateLateFee: false,
     };
   }
 
@@ -430,6 +479,8 @@ export function resolvePremiumRefineApplyOutcome(args: {
     finalText: out0,
     acceptance: acc,
     usedLocalLateFeeFallback: false,
+    appliedDeterministicSurgicalFallback: false,
+    deterministicSurgicalFallbackReason: null,
     whatChangedLine: null,
     unchangedDuplicateLateFee: false,
   };
@@ -685,6 +736,8 @@ export async function executePremiumRefineUpdate(args: {
             finalText: built,
             acceptance: accBuilt,
             usedLocalLateFeeFallback: false,
+            appliedDeterministicSurgicalFallback: false,
+            deterministicSurgicalFallbackReason: null,
             whatChangedLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
             unchangedDuplicateLateFee: false,
           },
@@ -735,6 +788,8 @@ export async function executePremiumRefineUpdate(args: {
             finalText: builtMinimal,
             acceptance: accMin,
             usedLocalLateFeeFallback: false,
+            appliedDeterministicSurgicalFallback: false,
+            deterministicSurgicalFallbackReason: null,
             whatChangedLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
             unchangedDuplicateLateFee: false,
           },
@@ -785,6 +840,8 @@ export async function executePremiumRefineUpdate(args: {
             finalText: forcedAdvisory,
             acceptance: accForced,
             usedLocalLateFeeFallback: false,
+            appliedDeterministicSurgicalFallback: false,
+            deterministicSurgicalFallbackReason: null,
             whatChangedLine: PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
             unchangedDuplicateLateFee: false,
           },
@@ -811,13 +868,17 @@ export async function executePremiumRefineUpdate(args: {
   let resolved = runResolve(r0);
 
   if (resolved.acceptance.decision === "accepted") {
+    const det = resolved.appliedDeterministicSurgicalFallback === true;
+    const applyDecision = det ? "accepted_deterministic_surgical_fallback" : "accepted_replacement";
     // eslint-disable-next-line no-console
     console.info("[premium-refine-apply]", {
       intent: promptIntent,
+      revisionIntent: resolved.acceptance.revisionIntent,
       authoritativeLen: baselineLen,
       candidateLen: (r0.updated_document_text || "").trim().length,
       outputLen: resolved.finalText.length,
-      applyDecision: "accepted_replacement",
+      applyDecision,
+      deterministicSurgicalFallbackReason: resolved.deterministicSurgicalFallbackReason,
       preservationFallbackUsed: false,
       placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(resolved.finalText).count,
     });
@@ -833,7 +894,7 @@ export async function executePremiumRefineUpdate(args: {
         surgicalRejectedShortExhausted: false,
         lastRefineResponse: lastR,
         usedAppendReviewerNotePreserve: false,
-        refineApplyDecision: null,
+        refineApplyDecision: det ? "accepted_deterministic_surgical_fallback" : null,
       }),
     });
   }
@@ -856,13 +917,19 @@ export async function executePremiumRefineUpdate(args: {
     lastR = r1;
     resolved = runResolve(r1);
     if (resolved.acceptance.decision === "accepted") {
+      const det = resolved.appliedDeterministicSurgicalFallback === true;
+      const applyDecision = det
+        ? "accepted_deterministic_surgical_fallback"
+        : "accepted_replacement_after_surgical_retry";
       // eslint-disable-next-line no-console
       console.info("[premium-refine-apply]", {
         intent: promptIntent,
+        revisionIntent: resolved.acceptance.revisionIntent,
         authoritativeLen: baselineLen,
         candidateLen: (r1.updated_document_text || "").trim().length,
         outputLen: resolved.finalText.length,
-        applyDecision: "accepted_replacement_after_surgical_retry",
+        applyDecision,
+        deterministicSurgicalFallbackReason: resolved.deterministicSurgicalFallbackReason,
         preservationFallbackUsed: false,
         placeholderTokenCount: scanPremiumRefinePlaceholderCorruption(resolved.finalText).count,
       });
@@ -878,7 +945,7 @@ export async function executePremiumRefineUpdate(args: {
           surgicalRejectedShortExhausted: false,
           lastRefineResponse: lastR,
           usedAppendReviewerNotePreserve: false,
-          refineApplyDecision: null,
+          refineApplyDecision: det ? "accepted_deterministic_surgical_fallback" : null,
         }),
       });
     }
@@ -914,6 +981,8 @@ export async function executePremiumRefineUpdate(args: {
               finalText: out2,
               acceptance: acc2,
               usedLocalLateFeeFallback: false,
+              appliedDeterministicSurgicalFallback: false,
+              deterministicSurgicalFallbackReason: null,
               whatChangedLine: cdf.summaryLine,
               unchangedDuplicateLateFee: false,
             },
@@ -966,6 +1035,8 @@ export async function executePremiumRefineUpdate(args: {
               finalText: out3,
               acceptance: acc3,
               usedLocalLateFeeFallback: false,
+              appliedDeterministicSurgicalFallback: false,
+              deterministicSurgicalFallbackReason: null,
               whatChangedLine: note.summaryLine,
               unchangedDuplicateLateFee: false,
             },
