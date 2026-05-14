@@ -2,16 +2,19 @@
  * Draft review policy (frontend only):
  * - **Advisory structural gaps** — title/jurisdiction/dates/etc. from parse (`AgreementBuilderIntake` `missing`):
  *   soft guidance only; never block upgrade/checkout or draft review surfaces.
- * - **Execution-oriented placeholders** — party names / generic title signals (`getDraftFirstReviewBlocker`):
+ * - **Execution-oriented placeholders** — party names / generic title signals / unresolved
+ *   identity tokens in the user-visible full document (`getDraftFirstReviewBlocker`):
  *   used for premium send-mode defaults and for recipient-handoff gates; final send validation stays on the server.
  */
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { hydrateIdentityPlaceholdersInAgreementPreviewPlain } from "./agreementPreviewFromDraft";
 import {
   getSafeFallbackPartyLabels,
   isHighConfidencePartyNameForAutoPopulation,
   isProsePollutedPartyName,
 } from "./partyNameConfidence";
 import { readPremiumPartyNamesHandoff } from "./premiumPartyNamesHandoff";
+import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import { sanitizePartiesInput, splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
 
 const PLACEHOLDER_PARTY_NAME_RE =
@@ -263,18 +266,45 @@ export function draftHasPlaceholderFieldsForRecipients(draft: ParsedDraftShape |
   return false;
 }
 
+/** True when the plain document still contains internal identity tokens after deterministic hydration. */
+export function hydratedFullDocumentStillContainsUnresolvedIdentityPlaceholders(
+  rawPlain: string | null | undefined,
+  draft: ParsedDraftShape | null | undefined,
+  intakeText?: string | null,
+): boolean {
+  const raw = (rawPlain || "").trim();
+  if (!draft || !raw) return false;
+  const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(raw, draft, intakeText);
+  return textContainsUnresolvedIdentityPlaceholders(hydrated);
+}
+
 /**
  * Execution-oriented gaps that may affect review UX (party/title placeholders).
  * Structured parse gaps (`computeMissing` / parent `missing`) are **draft advisory only** during
  * free or Pro draft review — they never block upgrade/checkout and are not returned here.
  */
-export type DraftReviewFirstBlocker = "party_placeholder" | "other_placeholder";
+export type DraftReviewFirstBlocker =
+  | "party_placeholder"
+  | "other_placeholder"
+  | "identity_placeholder_in_corpus";
 
 export function getDraftFirstReviewBlocker(
   draft: ParsedDraftShape | null | undefined,
+  opts?: {
+    /** Same string shown as the full agreement preview (e.g. `renderedAgreementPreview`). */
+    userVisibleFullDocumentPlain?: string | null;
+    intakeText?: string | null;
+  },
 ): DraftReviewFirstBlocker | null {
   if (!draft) return null;
   if (draftHasPlaceholderParties(draft)) return "party_placeholder";
+  const plain = (opts?.userVisibleFullDocumentPlain || "").trim();
+  if (
+    plain.length >= 400 &&
+    hydratedFullDocumentStillContainsUnresolvedIdentityPlaceholders(plain, draft, opts?.intakeText ?? null)
+  ) {
+    return "identity_placeholder_in_corpus";
+  }
   if (draftHasPlaceholderFieldsForRecipients(draft)) return "other_placeholder";
   return null;
 }

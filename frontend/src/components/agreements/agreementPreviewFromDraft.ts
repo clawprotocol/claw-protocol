@@ -38,6 +38,10 @@ import {
   sanitizeStarterPartyNameForDisplay,
   sanitizeStarterPreviewProse,
 } from "./starterPreviewProseSanitize";
+import {
+  substitutePartyPlaceholdersInUserFacingText,
+  textContainsUnresolvedIdentityPlaceholders,
+} from "../../agreement/partyPlaceholderDisplay";
 
 const MISSING = "[Not yet specified]";
 /**
@@ -643,6 +647,34 @@ export function buildAgreementPreviewTextCore(
 }
 
 /**
+ * Deterministic hydration for the final user-visible full-document preview (Pro resolver output,
+ * snapshot handoff, read-only corpus). Uses ordered `draft.parties` names when present.
+ */
+export function hydrateIdentityPlaceholdersInAgreementPreviewPlain(
+  text: string,
+  draft: ParsedDraftShape,
+  intakeText?: string | null,
+): string {
+  const t = (text || "").trim();
+  if (!t) return t;
+  const auth = (draft.parties || [])
+    .map((p) => String(p.name || "").replace(/\s+/g, " ").trim())
+    .filter((n) => n.length > 0);
+  const ctx = [
+    String(intakeText ?? "").trim(),
+    draft.title || "",
+    draft.purpose || "",
+    draft.payment_terms || "",
+    ...auth,
+  ].join("\n");
+  let out = substitutePartyPlaceholdersInUserFacingText(t, ctx, auth.length ? auth : null);
+  if (textContainsUnresolvedIdentityPlaceholders(out)) {
+    out = substitutePartyPlaceholdersInUserFacingText(out, ctx, auth.length ? auth : null);
+  }
+  return out;
+}
+
+/**
  * Human-readable draft agreement text (fixed section order, stable formatting).
  * Premium path uses {@link resolvePremiumRenderSource} (single source of truth).
  */
@@ -663,7 +695,13 @@ export function buildAgreementPreviewText(
         buildAgreementPreviewTextCore(draft, { ...options, starterPreview: false, premiumDeliverablePreview: true }),
     });
     if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
-    return collapseDuplicateEsignNoticesInFullPreview(res.text);
+    const collapsed = collapseDuplicateEsignNoticesInFullPreview(res.text);
+    return hydrateIdentityPlaceholdersInAgreementPreviewPlain(collapsed, draft, options?.intakeText ?? null);
   }
-  return buildAgreementPreviewTextCore(draft, options);
+  const core = buildAgreementPreviewTextCore(draft, options);
+  if (starterPreview) return core;
+  if (textContainsUnresolvedIdentityPlaceholders(core)) {
+    return hydrateIdentityPlaceholdersInAgreementPreviewPlain(core, draft, options?.intakeText ?? null);
+  }
+  return core;
 }

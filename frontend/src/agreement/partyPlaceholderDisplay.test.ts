@@ -40,6 +40,13 @@ describe("partyPlaceholderDisplay", () => {
     );
   });
 
+  it("maps [ORG_{N+1}] to the last authoritative party when the draft has N parties (paid-body off-by-one)", () => {
+    const auth = ["P1 LLC", "P2 LLC", "P3 LLC", "P4 LLC", "P5 LLC"];
+    expect(substitutePartyPlaceholdersInUserFacingText("Between [ORG_1] and Beacon and [ORG_6].", "", auth)).toBe(
+      "Between P1 LLC and Beacon and P5 LLC.",
+    );
+  });
+
   it("replaces bare ORG_1 with inferred party", () => {
     const ctx = "Parties: Delta LLC, Epsilon Co";
     expect(resolvePartyNameForUserFacing("ORG_1", 0, ctx)).toBe("Delta LLC");

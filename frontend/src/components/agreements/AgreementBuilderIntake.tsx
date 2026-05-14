@@ -136,6 +136,7 @@ import {
   buildAgreementPreviewText,
   buildAgreementPreviewTextCore,
   collapseDuplicateEsignNoticesInFullPreview,
+  hydrateIdentityPlaceholdersInAgreementPreviewPlain,
 } from "./agreementPreviewFromDraft";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import { extractStructuredPatchesFromPreview } from "./agreementPreviewSync";
@@ -211,6 +212,7 @@ import {
   pickRecipientSignerLabelsForHandoff,
 } from "./reviewPlaceholderGuard";
 import { fetchPremiumAdvisoryEnrichmentAfterAccept } from "./premiumAdvisoryPostAccept";
+import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import {
   buildPremiumMergedIntakeWithUserNotes,
   extractCleanPremiumParties,
@@ -1809,7 +1811,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           isAuthoritativePremiumPipelineRenderSource(String(snapHandoff.premiumPipelineRenderSource || "")) &&
           authPlain.length >= 500
         ) {
-          setAgreementDocumentText(collapseDuplicateEsignNoticesInFullPreview(authPlain));
+          const collapsed = collapseDuplicateEsignNoticesInFullPreview(authPlain);
+          setAgreementDocumentText(hydrateIdentityPlaceholdersInAgreementPreviewPlain(collapsed, d, debouncedStepBuffer));
         } else {
           setAgreementDocumentText(buildPreviewForCurrentTier(d));
         }
@@ -1817,12 +1820,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         /* ignore */
       }
     },
-    [buildPreviewForCurrentTier],
+    [buildPreviewForCurrentTier, debouncedStepBuffer],
   );
 
   const renderedAgreementPreview = useMemo(
     () => (draft ? buildPreviewForCurrentTier(draft) : ""),
     [draft, buildPreviewForCurrentTier],
+  );
+
+  const getDraftFirstReviewBlockerForFork = React.useCallback(
+    (d: ParsedDraftShape) =>
+      getDraftFirstReviewBlocker(d, {
+        userVisibleFullDocumentPlain:
+          d === draft && renderedAgreementPreview.trim().length >= 400 ? renderedAgreementPreview : undefined,
+        intakeText: debouncedStepBuffer,
+      }),
+    [draft, renderedAgreementPreview, debouncedStepBuffer],
   );
 
   const [starterDraftCopyAck, setStarterDraftCopyAck] = useState(false);
@@ -7296,12 +7309,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!createProductionTwoPane || createUiStage !== CreateUiStage.DRAFT) return;
     const hasP = draftHasPlaceholderParties(draft);
     const hasF = draftHasPlaceholderFieldsForRecipients(draft);
+    const identityBlock =
+      draft && renderedAgreementPreview.trim().length >= 400
+        ? getDraftFirstReviewBlocker(draft, {
+            userVisibleFullDocumentPlain: renderedAgreementPreview,
+            intakeText: debouncedStepBuffer,
+          }) === "identity_placeholder_in_corpus"
+        : false;
     console.debug("[review-placeholder-guard]", {
       hasPlaceholderParties: hasP,
       hasPlaceholderFields: hasF,
-      continueAllowed: Boolean(draft && !hasP && !isGenerating),
+      hasIdentityPlaceholderCorpusBlocker: identityBlock,
+      renderedPreviewHasUnresolvedIdentityTokens:
+        renderedAgreementPreview.trim().length > 0
+          ? textContainsUnresolvedIdentityPlaceholders(renderedAgreementPreview)
+          : false,
+      continueAllowed: Boolean(draft && !hasP && !identityBlock && !isGenerating),
     });
-  }, [createProductionTwoPane, createUiStage, draft, isGenerating]);
+  }, [
+    createProductionTwoPane,
+    createUiStage,
+    draft,
+    isGenerating,
+    renderedAgreementPreview,
+    debouncedStepBuffer,
+  ]);
 
   useEffect(() => {
     if (!createProductionTwoPane) return;
@@ -8895,9 +8927,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeCombined,
       hasRecipientsReady: hasAnyValidRecipientEmail,
       suggestCollaboratePrimed: peekPremiumCollaborateFirstDefaultPrimed(),
-      getDraftFirstReviewBlocker,
+      getDraftFirstReviewBlocker: getDraftFirstReviewBlockerForFork,
     });
-  }, [draft, agreementDocumentText, intakeCombined, hasAnyValidRecipientEmail, premiumForkPrimedNonce]);
+  }, [draft, agreementDocumentText, intakeCombined, hasAnyValidRecipientEmail, premiumForkPrimedNonce, getDraftFirstReviewBlockerForFork]);
 
   const effectivePremiumSendMode = useMemo((): PremiumSendIntent => {
     if (paidProAuthoritative) {
@@ -10886,7 +10918,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: !draft ? "no_draft" : undefined,
           };
         }
-        const firstBlocker = draft ? getDraftFirstReviewBlocker(draft) : null;
+        const firstBlocker = draft
+          ? getDraftFirstReviewBlocker(draft, {
+              userVisibleFullDocumentPlain: renderedAgreementPreview,
+              intakeText: debouncedStepBuffer,
+            })
+          : null;
         const softPartyRecipientsPath = Boolean(
           draft &&
             (missing.length === 0 || createProductionTwoPane) &&
@@ -10924,10 +10961,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const reviewIncomplete = Boolean(
           draft &&
             (partyNamesIncompleteForProgress ||
+              firstBlocker === "identity_placeholder_in_corpus" ||
               (!limitedReviewIgnoresGenericTitleOnly && draftHasPlaceholderFieldsForRecipients(draft))),
         );
-        if (reviewIncomplete && !softPartyRecipientsPath && !premiumOverridesReviewFriction) {
-          const fixLabel = firstBlocker === "party_placeholder" ? "Add party names" : "Fix details";
+        if (
+          reviewIncomplete &&
+          !softPartyRecipientsPath &&
+          (!premiumOverridesReviewFriction || firstBlocker === "identity_placeholder_in_corpus")
+        ) {
+          const fixLabel =
+            firstBlocker === "party_placeholder"
+              ? "Add party names"
+              : firstBlocker === "identity_placeholder_in_corpus"
+                ? "Fix document"
+                : "Fix details";
           return {
             label: fixLabel,
             action: "fix_review",
@@ -11045,6 +11092,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase,
     paidProRecipientSetupOnDraft,
     starterPartyCountRequiresPro,
+    renderedAgreementPreview,
+    debouncedStepBuffer,
   ]);
 
   useEffect(() => {
@@ -11343,13 +11392,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       Boolean(draft) &&
       !isGenerating &&
       !draftPreCommitFreeze &&
+      getDraftFirstReviewBlocker(draft, {
+        userVisibleFullDocumentPlain: renderedAgreementPreview,
+        intakeText: debouncedStepBuffer,
+      }) !== "identity_placeholder_in_corpus" &&
       (!draftHasPlaceholderParties(draft) ||
         draftHasFullDraftExpansion(draft) ||
         tierAllowsAdvancedFullDraftReveal(tier)) &&
       (!draftHasPlaceholderFieldsForRecipients(draft) ||
         (showUpgradeToFullDraftOnReview && draft && !draftHasPlaceholderParties(draft)) ||
         (draft &&
-          getDraftFirstReviewBlocker(draft) === "party_placeholder" &&
+          getDraftFirstReviewBlocker(draft, {
+            userVisibleFullDocumentPlain: renderedAgreementPreview,
+            intakeText: debouncedStepBuffer,
+          }) === "party_placeholder" &&
           (draftHasFullDraftExpansion(draft) || tierAllowsAdvancedFullDraftReveal(tier)))) &&
       !(showFullDraftDiffPreview && createUiStage === CreateUiStage.DRAFT) &&
       !ownerRecipientAcceptedAwaitingLock,
@@ -11417,7 +11473,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return failVisible("Please complete the missing review details before continuing.");
     }
 
-    const first = getDraftFirstReviewBlocker(d);
+    const first = getDraftFirstReviewBlocker(d, {
+      userVisibleFullDocumentPlain: renderedAgreementPreview,
+      intakeText: debouncedStepBuffer,
+    });
 
     if (first === "party_placeholder") {
       /** BASIC/simple-create: open the dedicated party/recipient name modal instead of scrolling the full agreement editor. */
@@ -11523,6 +11582,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
     openPartyDetailsModalForReviewPlaceholder,
+    renderedAgreementPreview,
+    debouncedStepBuffer,
   ]);
 
   const handOffProductionDraftToRecipients = React.useCallback(
@@ -11565,6 +11626,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const d = opts?.partyNamesJustResolvedDraft ?? draft;
     if (d) {
+      const corpusPlainForGate =
+        d === draft && renderedAgreementPreview.trim().length >= 400
+          ? renderedAgreementPreview
+          : buildAgreementPreviewText(d, {
+              starterPreview: false,
+              premiumDeliverablePreview: true,
+              intakeText: debouncedStepBuffer,
+            });
+      if (
+        corpusPlainForGate.trim().length >= 400 &&
+        getDraftFirstReviewBlocker(d, {
+          userVisibleFullDocumentPlain: corpusPlainForGate,
+          intakeText: debouncedStepBuffer,
+        }) === "identity_placeholder_in_corpus"
+      ) {
+        setHardError(
+          "The agreement preview still contains unresolved internal placeholders. Fix party names in review before continuing.",
+        );
+        return;
+      }
       const { n1, n2 } = getRecipientHandoffNamesFromDraft(d);
       const next1 = pickRecipientNameForHandoff(recipient1Name, n1);
       const next2 = pickRecipientNameForHandoff(recipient2Name, n2);
@@ -11619,6 +11700,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient2Name,
     persistPremiumRecipientHandoffFromDraftAndUi,
     applyHandoffAgreementPreviewOrAuthoritative,
+    buildAgreementPreviewText,
+    renderedAgreementPreview,
+    debouncedStepBuffer,
   ]);
 
   const handlePremiumReviewFirstContinueToSigners = React.useCallback((opts?: { telemetryMode?: PremiumSendIntent }) => {

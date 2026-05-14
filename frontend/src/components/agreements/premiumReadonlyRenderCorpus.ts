@@ -1,4 +1,8 @@
-import { buildAgreementPreviewText, buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
+import {
+  buildAgreementPreviewText,
+  buildAgreementPreviewTextCore,
+  hydrateIdentityPlaceholdersInAgreementPreviewPlain,
+} from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   emitPremiumRenderResolveLog,
@@ -124,18 +128,22 @@ export function pickPremiumPaidReadonlyPlainText(args: {
         pipelineSource: pipeSrc,
       });
     }
+    const finalized =
+      args.draft && authHydr.trim()
+        ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(authHydr, args.draft, args.intakeText ?? null)
+        : authHydr;
     const nonThin =
-      authHydr.length >= 1200 || premiumReadonlyCorpusSignalHits(authHydr) >= 3;
+      finalized.length >= 1200 || premiumReadonlyCorpusSignalHits(finalized) >= 3;
     return {
-      plainText: authHydr,
+      plainText: finalized,
       sourceUsed: "server_full_document_text",
       audit: {
         selected: "server_full_document_text",
         forcedPremiumSource: true,
-        candidates: [
-          {
-            source: "server_full_document_text",
-            len: authHydr.length,
+      candidates: [
+        {
+          source: "server_full_document_text",
+          len: finalized.length,
             nonThin,
             eligible: true,
             reason: "hydrated_authoritative_pipeline_body_first",
@@ -181,10 +189,13 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
 
   const plain = (res.text || "").trim();
-  const nonThin = plain.length >= 1200 || premiumReadonlyCorpusSignalHits(plain) >= 3;
+  const finalizedPlain =
+    args.draft && plain ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(plain, args.draft, args.intakeText ?? null) : plain;
+  const nonThin =
+    finalizedPlain.length >= 1200 || premiumReadonlyCorpusSignalHits(finalizedPlain) >= 3;
 
   return {
-    plainText: plain,
+    plainText: finalizedPlain,
     sourceUsed: res.premium_render_source,
     audit: {
       selected: res.premium_render_source,
@@ -192,7 +203,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       candidates: [
         {
           source: res.premium_render_source,
-          len: plain.length,
+          len: finalizedPlain.length,
           nonThin,
           eligible: Boolean(plain),
           reason: res.premium_render_reason,
