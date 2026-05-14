@@ -777,7 +777,7 @@ describe("Continuity handoff summaries — five-party Foundry / Beacon / Apollo 
       "Smith & Wesson Holdings LLC",
       "Coastal Reserve Partners LP",
     ]) {
-      expectListContainsCaseInsensitive(names, expected);
+      expect(names).toContain(expected);
     }
     expectNoDuplicateNames(names);
   });
@@ -804,6 +804,9 @@ describe("Continuity I11 — premium identity intro in rendered preview", () => 
     expect(out).not.toMatch(/(?<![A-Za-z])Party\s+[A-Z]\b/);
     expect(out).not.toMatch(/\[(?:ORG|PERSON)_\d+\]/i);
     expect(out).toMatch(/by and among FoundryCo Inc\./);
+    expect(out).toContain("Coastal Reserve Partners LP");
+    expect(out).not.toContain("Foundryco");
+    expect(out).not.toMatch(/Partners Lp\b/);
   });
 
   it("buildAgreementPreviewText premium path never leaves intro-slot corruption visible", () => {
@@ -816,5 +819,9 @@ describe("Continuity I11 — premium identity intro in rendered preview", () => 
     });
     expect(textContainsPremiumIdentityDefects(preview)).toBe(false);
     expect(preview).not.toMatch(/(?<![A-Za-z])Party\s+[A-Z]\b/);
+    expect(preview).toContain("FoundryCo Inc.");
+    expect(preview).toContain("Coastal Reserve Partners LP");
+    expect(preview).not.toContain("Foundryco");
+    expect(preview).not.toMatch(/Partners Lp\b/);
   });
 });

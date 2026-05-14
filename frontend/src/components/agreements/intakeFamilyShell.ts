@@ -16,6 +16,7 @@ import { applySimpleFlowSmartDefaults, type ParsedDraftShape } from "./intakeSma
 import { preserveExtractedFacts } from "./draftFactPreservation";
 import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
 import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
+import { applyPartyNameCasingPassToDraft } from "../../agreement/partyNameDisplayCasing";
 
 const MAX_PARTY_NAME_LEN = 280;
 
@@ -616,5 +617,6 @@ export function runIntakeDefaultsAndRoles(
   next = applyIntakePartyRoleOverlay(next, roles);
   // Final P0 cardinality guard — runs AFTER role overlay so any path that downsized a 3+
   // structured list is restored.
-  return preserveLargestPartyListFromIntake(next, rawIntake);
+  next = preserveLargestPartyListFromIntake(next, rawIntake);
+  return applyPartyNameCasingPassToDraft(next, rawIntake);
 }

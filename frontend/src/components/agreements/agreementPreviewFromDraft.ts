@@ -44,6 +44,7 @@ import {
 } from "../../agreement/partyPlaceholderDisplay";
 import { hydratePartyIntroductionParagraphs, hydratePartyListAndSignatureOrdinals } from "../../agreement/partyListOrdinalHydrate";
 import { finalizePremiumIdentityCorpusInPreview } from "./premiumIdentityCorpusPreviewGuard";
+import { finalizePartyDisplayNameForUserFacing } from "../../agreement/partyNameDisplayCasing";
 
 const MISSING = "[Not yet specified]";
 /**
@@ -90,48 +91,6 @@ function resolveStarterDisplayTitle(
     if (resolution.title) return resolution.title;
   }
   return MISSING;
-}
-
-/**
- * Display-layer casing restoration for a single party name.
- *
- * When the canonicalizer normalized intentional intake casing (e.g. "FoundryCo Inc."
- * → "Foundryco Inc.") and the original intake text is available, prefer the source-
- * text variant ONLY when it has strictly more uppercase letters than the cleaned
- * variant. This guards against demoting an upgraded canonical form (e.g. "Smith And
- * Wesson Holdings LLC") back to a lowercase user variant — only deliberately-cased
- * names like FoundryCo / MidCap / iCloud are restored.
- *
- * Returns the input unchanged whenever:
- *   • the intake text is missing,
- *   • the cleaned name does not appear (case-insensitive, word-boundary) in the intake,
- *   • the intake variant has equal or fewer uppercase letters than the cleaned variant,
- *   • or the regex compilation fails for any reason.
- */
-function restorePartyCasingFromIntake(
-  name: string,
-  intakeText: string | null | undefined,
-): string {
-  const trimmed = (name || "").trim();
-  const intake = (intakeText || "").trim();
-  if (!trimmed || !intake) return name;
-  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // Use character-class boundaries (not \b) because canonical names frequently end in
-  // a non-word character ("Inc.", "L.L.C.") where \b would not match against a trailing
-  // space. We accept any non-alphanumeric / non-period boundary on either side.
-  let m: RegExpExecArray | null = null;
-  try {
-    m = new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, "i").exec(intake);
-  } catch {
-    return name;
-  }
-  if (!m) return name;
-  const original = m[0];
-  if (original === trimmed) return name;
-  const upperOrig = (original.match(/[A-Z]/g) || []).length;
-  const upperClean = (trimmed.match(/[A-Z]/g) || []).length;
-  if (upperOrig <= upperClean) return name;
-  return original;
 }
 
 /** Collapses repeated LawDog e-sign footers to a single trailing notice (all preview modes). */
@@ -376,8 +335,8 @@ function partiesPreambleBlock(
 
   if (extracted) {
     return formatLegalPartyPreamble([
-      { name: restorePartyCasingFromIntake(extracted.a, intakeText), role: "party" },
-      { name: restorePartyCasingFromIntake(extracted.b, intakeText), role: "party" },
+      { name: finalizePartyDisplayNameForUserFacing(extracted.a, intakeText), role: "party" },
+      { name: finalizePartyDisplayNameForUserFacing(extracted.b, intakeText), role: "party" },
     ]);
   }
 
@@ -389,7 +348,7 @@ function partiesPreambleBlock(
     }))
     .map((p) => ({
       ...p,
-      name: restorePartyCasingFromIntake(p.name, intakeText),
+      name: finalizePartyDisplayNameForUserFacing(p.name, intakeText),
     }))
     .map((p) => partyEntryWithRoleConfidence(p, starterPreview));
   if (validParties.length >= 2) {
@@ -661,7 +620,7 @@ export function hydrateIdentityPlaceholdersInAgreementPreviewPlain(
   if (!t) return t;
   const auth = (draft.parties || [])
     .map((p) =>
-      restorePartyCasingFromIntake(
+      finalizePartyDisplayNameForUserFacing(
         String(p.name || "").replace(/\s+/g, " ").trim(),
         intakeText ?? null,
       ),

@@ -1,14 +1,22 @@
 import type { AgreementDraft } from "./agreementTypes";
 import { participantDisplayName } from "./participantModel";
+import { finalizePartyDisplayNameForUserFacing } from "./partyNameDisplayCasing";
 
 /**
  * Ordered display names for every agreement party on the draft — authoritative for send / review / done summaries.
  * Does not use recipient or signer rows; only `draft.parties`.
+ *
+ * When `intakeText` is provided, party casing is aligned to raw intake spans plus suffix normalization.
  */
 export function orderedAuthoritativePartyDisplayNames(
   parties: AgreementDraft["parties"] | null | undefined,
+  intakeText?: string | null,
 ): string[] {
-  return (parties ?? []).map((p, idx) => participantDisplayName(p, idx).trim()).filter((n) => n.length > 0);
+  return (parties ?? [])
+    .map((p, idx) =>
+      finalizePartyDisplayNameForUserFacing(participantDisplayName(p, idx).trim(), intakeText ?? null),
+    )
+    .filter((n) => n.length > 0);
 }
 
 /**
@@ -17,8 +25,9 @@ export function orderedAuthoritativePartyDisplayNames(
  */
 export function formatAuthoritativeAgreementPartiesHeadline(
   parties: AgreementDraft["parties"] | null | undefined,
+  intakeText?: string | null,
 ): string {
-  const names = orderedAuthoritativePartyDisplayNames(parties);
+  const names = orderedAuthoritativePartyDisplayNames(parties, intakeText);
   if (names.length === 0) return "—";
   if (names.length === 1) return names[0]!;
   if (names.length === 2) return `${names[0]} ↔ ${names[1]}`;
@@ -30,11 +39,11 @@ export function formatAuthoritativeAgreementPartiesHeadline(
  */
 export function formatAuthoritativeAgreementPartiesInline(
   parties: AgreementDraft["parties"] | null | undefined,
-  opts?: { maxShown?: number; separator?: string },
+  opts?: { maxShown?: number; separator?: string; intakeText?: string | null },
 ): string {
   const sep = opts?.separator ?? " · ";
   const maxShown = Math.max(1, opts?.maxShown ?? 48);
-  const names = orderedAuthoritativePartyDisplayNames(parties);
+  const names = orderedAuthoritativePartyDisplayNames(parties, opts?.intakeText);
   if (names.length === 0) return "—";
   if (names.length <= maxShown) return names.join(sep);
   const head = names.slice(0, maxShown);

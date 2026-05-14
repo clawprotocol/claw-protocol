@@ -1500,8 +1500,6 @@ function readInitialPremiumReturnFromWindow(): {
   return { phase: null, pipelineMessage: null };
 }
 
-const PAID_PRO_CARD_AI_DISABLED_EXPLAIN = "Manual edit is ready. AI edit coming next.";
-
 const AgreementBuilderIntake: React.FC<Props> = ({
   onCreated,
   onCreateHydrateFailed,
@@ -14634,7 +14632,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               type="button"
                                               className="rounded-lg bg-stone-800 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm"
                                               disabled={
-                                                !showPersistedRefineBelowDocument ||
                                                 !paidProCardAiInstruction.trim() ||
                                                 loading ||
                                                 draftPreCommitFreeze
@@ -14644,11 +14641,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               {PRO_REFINE_APPLY_REVISION_BUTTON_LABEL}
                                             </button>
                                           </div>
-                                          {!showPersistedRefineBelowDocument ? (
-                                            <p className="mt-2 text-xs leading-relaxed text-stone-600">
-                                              {PAID_PRO_CARD_AI_DISABLED_EXPLAIN}
-                                            </p>
-                                          ) : null}
                                         </div>
                                       </>
                                     ) : (
