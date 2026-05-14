@@ -249,10 +249,13 @@ export type DirectTextCompareResult = {
 };
 
 /**
- * Full analysis for two full-text agreement pastes. Uses the same redline
- * diff engine as the rest of LawDog for insert/delete and inline view.
+ * Paragraph-level diff rows only (no word-level redline). Shared by {@link analyzeDirectTextCompare}
+ * and review change ledgers.
  */
-export function analyzeDirectTextCompare(beforeRaw: string, afterRaw: string): DirectTextCompareResult {
+export function diffPlainTextParagraphRows(
+  beforeRaw: string,
+  afterRaw: string,
+): { rows: ClauseRow[]; truncated: boolean; pBefore: string[]; pAfter: string[] } {
   const before0 = (beforeRaw || "").replace(/\r/g, "\n");
   const after0 = (afterRaw || "").replace(/\r/g, "\n");
 
@@ -262,11 +265,24 @@ export function analyzeDirectTextCompare(beforeRaw: string, afterRaw: string): D
   pBefore = pBefore.slice(0, MAX_PARAGRAPHS);
   pAfter = pAfter.slice(0, MAX_PARAGRAPHS);
 
+  const rows = pBefore.length + pAfter.length < 1 ? [] : alignParagraphs(pBefore, pAfter);
+  return { rows, truncated, pBefore, pAfter };
+}
+
+/**
+ * Full analysis for two full-text agreement pastes. Uses the same redline
+ * diff engine as the rest of LawDog for insert/delete and inline view.
+ */
+export function analyzeDirectTextCompare(beforeRaw: string, afterRaw: string): DirectTextCompareResult {
+  const before0 = (beforeRaw || "").replace(/\r/g, "\n");
+  const after0 = (afterRaw || "").replace(/\r/g, "\n");
+
+  const { rows: clauseRows, truncated, pBefore, pAfter } = diffPlainTextParagraphRows(before0, after0);
+
   const redline = buildAgreementRedline(before0, after0);
   const additionWordsApprox = countRedlineWords(redline.segments, "insert");
   const deletionWordsApprox = countRedlineWords(redline.segments, "delete");
   const topicHighlights = buildTopicHighlights(pBefore, pAfter);
-  const clauseRows = pBefore.length + pAfter.length < 1 ? [] : alignParagraphs(pBefore, pAfter);
   let unchangedClauses = 0;
   let addedClauses = 0;
   let removedClauses = 0;

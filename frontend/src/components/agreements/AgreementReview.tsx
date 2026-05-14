@@ -119,6 +119,8 @@ import {
   agreementFieldLabel,
   compareAgreementSnapshots,
 } from "../../vs01/agreementCompare";
+import { buildReviewChangeLedger } from "../../agreement/reviewChangeLedger";
+import { ReviewChangeLedgerPanel } from "./ReviewChangeLedgerPanel";
 import { buildAgreementRedline } from "../../vs01/agreementRedline";
 import { featureFlags } from "../../config/featureFlags";
 import { NegotiationTimelineView } from "../../vs01/NegotiationTimelineView";
@@ -1174,6 +1176,15 @@ const AgreementReview: React.FC<Props> = ({
     return buildAgreementRedline(
       htmlToPlainText(pendingRevision.baselineRenderedHtml),
       htmlToPlainText(pendingRevision.proposedHtml)
+    );
+  }, [pendingRevision]);
+
+  /** Paragraph-level audit ledger; does not depend on inline redline rendering. */
+  const revisionChangeLedger = useMemo(() => {
+    if (!pendingRevision) return null;
+    return buildReviewChangeLedger(
+      htmlToPlainText(pendingRevision.baselineRenderedHtml),
+      htmlToPlainText(pendingRevision.proposedHtml),
     );
   }, [pendingRevision]);
 
@@ -3502,6 +3513,8 @@ const AgreementReview: React.FC<Props> = ({
             View changes
           </button>
         </div>
+
+        {revisionChangeLedger ? <ReviewChangeLedgerPanel ledger={revisionChangeLedger} /> : null}
 
         {compareViewMode === "structured" ? (
           <>
