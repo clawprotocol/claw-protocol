@@ -46,6 +46,11 @@ import {
 } from "./simpleDoneReviewRecipientLinks";
 import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
 import {
+  linearPremiumRecipientSlots,
+  MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
+  readPremiumRecipientHandoff,
+} from "../../components/agreements/premiumPartyNamesHandoff";
+import {
   buildAgreementVs01BridgeSession,
   fetchAgreementVs01SigningSeed,
   logAgreementToVs01EsignRoute,
@@ -409,13 +414,19 @@ export function SimpleSendPage(props: { agreementId: string }) {
       if (!cancelled && vs01Seed.ok) {
         setSenderFirstVs01SeedFailure(null);
         const live = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+        const ho = readPremiumRecipientHandoff();
+        const partyCap = Math.min((live?.parties ?? []).length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
         const recipientSetup =
-          live != null
+          live != null && ho && partyCap > 0
             ? {
-                recipient1Email: (live.parties?.[0] as { email?: string } | undefined)?.email,
-                recipient2Email: (live.parties?.[1] as { email?: string } | undefined)?.email,
+                recipientPartyEmails: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.email || ""),
               }
-            : null;
+            : live != null
+              ? {
+                  recipient1Email: (live.parties?.[0] as { email?: string } | undefined)?.email,
+                  recipient2Email: (live.parties?.[1] as { email?: string } | undefined)?.email,
+                }
+              : null;
         const finalBridgeDraft = mergeLiveDraftWithRecipientSetupForVs01Bridge(live, recipientSetup);
         logAgreementVs01RecipientEmailMergeDiagnostics(
           finalBridgeDraft,

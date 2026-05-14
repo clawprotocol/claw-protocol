@@ -3,6 +3,7 @@ import {
   clearPremiumPartyNamesHandoff,
   hydrateEmailFromHandoff,
   hydrateNameFromHandoff,
+  linearPremiumRecipientSlots,
   persistPremiumRecipientHandoff,
   readPremiumRecipientHandoff,
   writePremiumPartyNamesHandoff,
@@ -96,6 +97,21 @@ describe("premiumRecipientHandoff", () => {
     expect(h?.party1.email).toBe("x@example.com");
     expect(h?.party2.name).toBe("Ben");
     expect(h?.party2.email).toBe("y@example.com");
+  });
+
+  it("linearPremiumRecipientSlots maps partyIndexSlots to indices 2..n-1", () => {
+    writePremiumRecipientHandoffExact(
+      { name: "P0", email: "a@test.dev", role: "party" },
+      { name: "P1", email: "b@test.dev", role: "party" },
+      [
+        { name: "P2", email: "c@test.dev", role: "party" },
+        { name: "P3", email: "d@test.dev", role: "party" },
+        { name: "P4", email: "e@test.dev", role: "party" },
+      ],
+    );
+    const ho = readPremiumRecipientHandoff();
+    const slots = linearPremiumRecipientSlots(ho, 5);
+    expect(slots.map((s) => s.email)).toEqual(["a@test.dev", "b@test.dev", "c@test.dev", "d@test.dev", "e@test.dev"]);
   });
 
   it("writePremiumRecipientHandoffExact overwrites including empty emails", () => {

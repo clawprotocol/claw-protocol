@@ -124,6 +124,8 @@ export function logAgreementVs01BridgePreflight(bridge: AgreementVs01BridgeSessi
 export type RecipientSetupEmailInput = {
   recipient1Email?: string | null | undefined;
   recipient2Email?: string | null | undefined;
+  /** When set, merges plausible emails onto `draft.parties[i]` for every index (preferred for multi-party). */
+  recipientPartyEmails?: readonly (string | null | undefined)[] | undefined;
 };
 
 function normalizeRecipientSetupSlot(raw: string | null | undefined): string | undefined {
@@ -134,10 +136,18 @@ function normalizeRecipientSetupSlot(raw: string | null | undefined): string | u
 
 export function recipientSetupPlausibleInputFlags(
   setup: RecipientSetupEmailInput | null | undefined,
-): { hasRecipient1Email: boolean; hasRecipient2Email: boolean } {
+): { hasRecipient1Email: boolean; hasRecipient2Email: boolean; hasAnyPartyEmail: boolean } {
+  const arr = setup?.recipientPartyEmails;
+  const fromArray =
+    Array.isArray(arr) &&
+    arr.some((x) => {
+      const n = normalizeRecipientSetupSlot(x ?? undefined);
+      return Boolean(n);
+    });
   return {
     hasRecipient1Email: Boolean(normalizeRecipientSetupSlot(setup?.recipient1Email)),
     hasRecipient2Email: Boolean(normalizeRecipientSetupSlot(setup?.recipient2Email)),
+    hasAnyPartyEmail: fromArray,
   };
 }
 
@@ -146,7 +156,7 @@ export function recipientSetupPlausibleInputFlags(
  */
 export function logAgreementVs01RecipientEmailMergeDiagnostics(
   mergedDraft: AgreementDraft | null,
-  inputFlags: { hasRecipient1Email: boolean; hasRecipient2Email: boolean },
+  inputFlags: ReturnType<typeof recipientSetupPlausibleInputFlags>,
 ): void {
   if (!mergedDraft) return;
   const preview = buildAgreementVs01BridgeSession({
@@ -198,11 +208,17 @@ export function mergePaidProRecipientSetupEmailsIntoDraft(
     if (!normalizedSlots.some(Boolean)) return draft;
   } else {
     const setup = slotEmails as RecipientSetupEmailInput;
-    normalizedSlots = [
-      normalizeRecipientSetupSlot(setup.recipient1Email),
-      normalizeRecipientSetupSlot(setup.recipient2Email),
-    ];
-    if (!normalizedSlots[0] && !normalizedSlots[1]) return draft;
+    const arr = setup.recipientPartyEmails;
+    if (Array.isArray(arr) && arr.length > 0) {
+      normalizedSlots = arr.map((x) => normalizeRecipientSetupSlot(x ?? undefined));
+      if (!normalizedSlots.some(Boolean)) return draft;
+    } else {
+      normalizedSlots = [
+        normalizeRecipientSetupSlot(setup.recipient1Email),
+        normalizeRecipientSetupSlot(setup.recipient2Email),
+      ];
+      if (!normalizedSlots[0] && !normalizedSlots[1]) return draft;
+    }
   }
 
   const parties = [...(draft.parties ?? [])] as AgreementParty[];

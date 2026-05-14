@@ -256,6 +256,38 @@ describe("mergePaidProRecipientSetupEmailsIntoDraft + paid Pro sender-first brid
     expect((merged?.parties?.[1] as { email?: string })?.email).toBe("");
   });
 
+  it("mergeLiveDraft applies recipientPartyEmails by party index for five parties", () => {
+    const draft = {
+      title: "T",
+      parties: Array.from({ length: 5 }, (_, i) => ({
+        id: `p${i}`,
+        name: `Party ${i}`,
+        role: "signer",
+        email: "",
+      })),
+    } as AgreementDraft;
+    const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(draft, {
+      recipientPartyEmails: ["", "", "onlythird@example.com", "", ""],
+    });
+    expect((merged?.parties?.[2] as { email?: string })?.email).toBe("onlythird@example.com");
+    expect((merged?.parties?.[0] as { email?: string })?.email).toBe("");
+    expect((merged?.parties?.[4] as { email?: string })?.email).toBe("");
+  });
+
+  it("recipientSetupPlausibleInputFlags treats indexed recipientPartyEmails as any-party signal", () => {
+    expect(
+      recipientSetupPlausibleInputFlags({
+        recipientPartyEmails: ["", "", "x@y.com"],
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        hasRecipient1Email: false,
+        hasRecipient2Email: false,
+        hasAnyPartyEmail: true,
+      }),
+    );
+  });
+
   it("logAgreementVs01RecipientEmailMergeDiagnostics omits raw local parts", () => {
     const draft = {
       title: "T",
@@ -274,6 +306,7 @@ describe("mergePaidProRecipientSetupEmailsIntoDraft + paid Pro sender-first brid
       expect.objectContaining({
         hasRecipient1Email: false,
         hasRecipient2Email: false,
+        hasAnyPartyEmail: false,
         mergedPartiesWithEmailCount: 2,
         mergedCreatorEmailDomain: "alpha.test",
         mergedCounterpartiesWithEmailCount: 1,

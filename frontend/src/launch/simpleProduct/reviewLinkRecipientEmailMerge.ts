@@ -2,6 +2,7 @@ import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTy
 import { readPremiumRecipientHandoff } from "../../components/agreements/premiumPartyNamesHandoff";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
+import { mergePaidProRecipientSetupEmailsIntoDraft } from "./agreementToVs01SigningBridge";
 
 const SIMPLE_SEND_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -80,7 +81,8 @@ export function logReviewLinkRecipientEmailPreflight(draft: AgreementDraft | nul
 function handoffEmailForPartyName(fp: AgreementParty, handoff: NonNullable<ReturnType<typeof readPremiumRecipientHandoff>>): string {
   const fn = (fp.name || "").trim().toLowerCase();
   if (!fn) return "";
-  for (const slot of [handoff.party1, handoff.party2]) {
+  const linear = [handoff.party1, handoff.party2, ...(handoff.partyIndexSlots ?? [])];
+  for (const slot of linear) {
     if ((slot.name || "").trim().toLowerCase() !== fn) continue;
     const e = plausibleSlotEmail(slot.email);
     if (e) return e;
@@ -92,7 +94,9 @@ function mergeHandoffOntoParties(
   base: AgreementParty[],
   handoff: NonNullable<ReturnType<typeof readPremiumRecipientHandoff>>,
 ): AgreementParty[] {
-  const slotReadable = [handoff.party1, handoff.party2].filter((s) => plausibleSlotEmail(s.email)).length;
+  const slotReadable = [handoff.party1, handoff.party2, ...(handoff.partyIndexSlots ?? [])].filter((s) =>
+    plausibleSlotEmail(s.email),
+  ).length;
   logReviewLinkRecipientEmailHandoffRead({
     handoffPresent: true,
     slotEmailsReadable: slotReadable,
@@ -100,7 +104,8 @@ function mergeHandoffOntoParties(
   return base.map((fp, i) => {
     let email = plausibleSlotEmail(fp.email);
     if (email) return { ...fp, email };
-    const slot = i === 0 ? handoff.party1 : i === 1 ? handoff.party2 : null;
+    const slot =
+      i === 0 ? handoff.party1 : i === 1 ? handoff.party2 : handoff.partyIndexSlots?.[i - 2] ?? null;
     if (slot) {
       const fromSlot = plausibleSlotEmail(slot.email);
       if (fromSlot) return { ...fp, email: fromSlot };
@@ -140,10 +145,14 @@ export function mergeReviewLinkRecipientEmailsOntoHydratedDraft(
 
 export function mergeLiveDraftWithRecipientSetupForReviewLinks(
   liveDraft: AgreementDraft | null,
-  recipientSetup: { recipient1Email?: string | null; recipient2Email?: string | null } | null,
+  recipientSetup: { recipient1Email?: string | null; recipient2Email?: string | null; recipientPartyEmails?: readonly (string | null | undefined)[] } | null,
 ): AgreementDraft | null {
   if (!liveDraft) return null;
   if (!recipientSetup) return liveDraft;
+  const arr = recipientSetup.recipientPartyEmails;
+  if (Array.isArray(arr) && arr.length > 0) {
+    return mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, arr) ?? liveDraft;
+  }
   const s1 = plausibleSlotEmail(recipientSetup.recipient1Email);
   const s2 = plausibleSlotEmail(recipientSetup.recipient2Email);
   if (!s1 && !s2) return liveDraft;

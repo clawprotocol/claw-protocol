@@ -233,11 +233,16 @@ import {
 import { buildUpgradeSourceTextForPremium } from "./premiumUpgradeSourceText";
 import { isLikelyCategoryOrTradeLabel } from "./premiumDraftTransform";
 import {
+  buildPartyIndexSlotsFromPartiesAndCandidates,
   hydrateEmailFromHandoff,
   hydrateNameFromHandoff,
+  linearPremiumRecipientSlots,
   persistPremiumRecipientHandoff,
   readPremiumRecipientHandoff,
   writePremiumRecipientHandoffExact,
+  writePremiumRecipientHandoffLinear,
+  MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
+  type PremiumRecipientHandoffSlot,
 } from "./premiumPartyNamesHandoff";
 import { ensurePremiumCompletion } from "./premiumCompletionEnsure";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
@@ -1012,6 +1017,8 @@ type CreateFlowSendRecipientsPanelProps = {
   setRecipient2Name: React.Dispatch<React.SetStateAction<string>>;
   recipient2Email: string;
   setRecipient2Email: React.Dispatch<React.SetStateAction<string>>;
+  extraPartyReviewEmails: string[];
+  setExtraPartyReviewEmails: React.Dispatch<React.SetStateAction<string[]>>;
   recipientSignerLabels: string;
   setRecipientSignerLabels: React.Dispatch<React.SetStateAction<string>>;
   reviewHandoffAgreementEcho: string | null | undefined;
@@ -1053,6 +1060,8 @@ function CreateFlowSendRecipientsPanel({
   setRecipient2Name,
   recipient2Email,
   setRecipient2Email,
+  extraPartyReviewEmails,
+  setExtraPartyReviewEmails,
   recipientSignerLabels,
   setRecipientSignerLabels,
   reviewHandoffAgreementEcho,
@@ -1073,9 +1082,15 @@ function CreateFlowSendRecipientsPanel({
 }: CreateFlowSendRecipientsPanelProps) {
   const r1e = stripRecipientEmailNoise(recipient1Email);
   const r2e = stripRecipientEmailNoise(recipient2Email);
+  const cappedParties = (draft?.parties ?? []).slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+  const partyCount = cappedParties.length;
   const primaryName = (recipient1Name || "").trim() || "Recipient";
   const r1Invalid = r1e.length > 0 && !looksLikeEmail(r1e);
   const r2Invalid = r2e.length > 0 && !looksLikeEmail(r2e);
+  const extraInvalidIdx = extraPartyReviewEmails.findIndex((raw) => {
+    const e = stripRecipientEmailNoise(raw);
+    return e.length > 0 && !looksLikeEmail(e);
+  });
   const primaryEmailLine = looksLikeEmail(r1e)
     ? r1e
     : r1Invalid
@@ -1132,50 +1147,82 @@ function CreateFlowSendRecipientsPanel({
 
   const recipientFields = (
     <div className="mt-4 space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-medium text-slate-400 sm:text-sm">
-          Recipient 1 name
-          <input
-            type="text"
-            data-claw-recipient-field="r1-name"
-            value={recipient1Name}
-            onChange={(e) => setRecipient1Name(e.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
-            autoComplete="name"
-          />
-        </label>
-        <label className="block text-xs font-medium text-slate-400 sm:text-sm">
-          Recipient 1 email
-          <input
-            type="email"
-            data-claw-recipient-field="r1-email"
-            value={recipient1Email}
-            onChange={(e) => setRecipient1Email(e.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
-            autoComplete="email"
-          />
-        </label>
-        <label className="block text-xs font-medium text-slate-400 sm:text-sm">
-          Recipient 2 name (optional)
-          <input
-            type="text"
-            data-claw-recipient-field="r2-name"
-            value={recipient2Name}
-            onChange={(e) => setRecipient2Name(e.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
-          />
-        </label>
-        <label className="block text-xs font-medium text-slate-400 sm:text-sm">
-          Recipient 2 email (optional)
-          <input
-            type="email"
-            data-claw-recipient-field="r2-email"
-            value={recipient2Email}
-            onChange={(e) => setRecipient2Email(e.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
-          />
-        </label>
-      </div>
+      {cappedParties.map((party, idx) => {
+        const partyLine = String((party as { name?: string }).name ?? "").trim() || `Party ${idx + 1}`;
+        const emailVal =
+          idx === 0 ? recipient1Email : idx === 1 ? recipient2Email : extraPartyReviewEmails[idx - 2] ?? "";
+        const onEmailChange =
+          idx === 0
+            ? (v: string) => setRecipient1Email(v)
+            : idx === 1
+              ? (v: string) => setRecipient2Email(v)
+              : (v: string) =>
+                  setExtraPartyReviewEmails((prev) => {
+                    const next = [...prev];
+                    while (next.length < idx - 1) next.push("");
+                    next[idx - 2] = v;
+                    return next;
+                  });
+        return (
+          <div
+            key={`ag_party_recipient_${idx}`}
+            className="rounded-lg border border-slate-700/45 bg-slate-950/30 p-3 sm:p-4"
+            data-testid={idx >= 2 ? `agreement-party-review-email-${idx}` : undefined}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Agreement party {idx + 1}
+            </p>
+            <p className="mt-1 text-sm font-semibold text-slate-100">{partyLine}</p>
+            {idx === 0 ? (
+              <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+                Recipient 1 name
+                <input
+                  type="text"
+                  data-claw-recipient-field="r1-name"
+                  value={recipient1Name}
+                  onChange={(e) => setRecipient1Name(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                  autoComplete="name"
+                />
+              </label>
+            ) : idx === 1 ? (
+              <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+                Recipient 2 name (optional)
+                <input
+                  type="text"
+                  data-claw-recipient-field="r2-name"
+                  value={recipient2Name}
+                  onChange={(e) => setRecipient2Name(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                />
+              </label>
+            ) : null}
+            <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+              <span className="block">
+                {idx === 0 ? "Recipient 1 email" : idx === 1 ? "Recipient 2 email (optional)" : "Review link email (optional)"}
+              </span>
+              <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
+                Add email for review link delivery/labeling — optional. LawDog does not email automatically.
+              </span>
+              <input
+                type="email"
+                data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email") : `party-${idx}-email`}
+                aria-label={
+                  idx === 0
+                    ? "Recipient 1 email"
+                    : idx === 1
+                      ? "Recipient 2 email (optional)"
+                      : `${partyLine} — review link email (optional)`
+                }
+                value={emailVal}
+                onChange={(e) => onEmailChange(e.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                autoComplete={idx === 0 ? "email" : "off"}
+              />
+            </label>
+          </div>
+        );
+      })}
       {!minimalProSendRecipientChrome ? (
         <label className="block text-xs font-medium text-slate-400 sm:text-sm">
           Optional signer roles / labels
@@ -1224,8 +1271,9 @@ function CreateFlowSendRecipientsPanel({
       <p className="mt-3 text-sm leading-relaxed text-slate-300">
         {paidProInlineRecipientShell && effectivePremiumSendMode === "review" ? (
           <>
-            Add the other party&apos;s email. They&apos;ll get a private review link where they can suggest changes.
-            Nothing is signed yet.
+            {partyCount > 2
+              ? "Add review-link emails next to each agreement party as needed. At least one valid email unlocks continue — all fields are optional except where you enter text."
+              : "Add the other party&apos;s email. They&apos;ll get a private review link where they can suggest changes. Nothing is signed yet."}
           </>
         ) : (
           <>
@@ -1236,20 +1284,34 @@ function CreateFlowSendRecipientsPanel({
       </p>
       {!minimalProSendRecipientChrome ? senderInviteTrustStrip : null}
       <div className="mt-5 rounded-xl border border-slate-700/45 bg-slate-900/35 px-4 py-4 sm:px-5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Who receives it</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Agreement parties</p>
         {minimalProSendRecipientChrome ? (
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
             {effectivePremiumSendMode === "review"
-              ? "Add recipients for the review record. You will create a secure link on the next step."
+              ? "Optional email per party for review-link labeling. LawDog does not email automatically — you copy and share the link."
               : "Add signers for the record. You will create secure links on the next step."}
           </p>
         ) : null}
-        <p className="mt-2 text-lg font-medium tracking-tight text-slate-100">{primaryName}</p>
-        <p className={`mt-1 text-sm ${looksLikeEmail(r1e) ? "text-slate-300" : "text-amber-200/90"}`}>{primaryEmailLine}</p>
+        {partyCount > 2 ? (
+          <p className="mt-2 text-sm leading-snug text-slate-300">
+            <span className="font-medium text-slate-400">{partyCount} parties</span>
+            <span className="text-slate-500"> — add at least one valid review email to continue.</span>
+          </p>
+        ) : (
+          <>
+            <p className="mt-2 text-lg font-medium tracking-tight text-slate-100">{primaryName}</p>
+            <p className={`mt-1 text-sm ${looksLikeEmail(r1e) ? "text-slate-300" : "text-amber-200/90"}`}>{primaryEmailLine}</p>
+          </>
+        )}
         {r2Invalid ? (
           <p className="mt-2 text-xs text-amber-200/90">Recipient 2 email doesn’t look valid — fix it or clear that field.</p>
         ) : null}
-        {looksLikeEmail(r2e) ? (
+        {extraInvalidIdx >= 0 ? (
+          <p className="mt-2 text-xs text-amber-200/90">
+            One agreement party email doesn&apos;t look valid — fix it or clear that field.
+          </p>
+        ) : null}
+        {looksLikeEmail(r2e) && partyCount <= 2 ? (
           <p className="mt-3 text-xs text-slate-500">
             Also included for{" "}
             <span className="font-medium text-slate-300">
@@ -1671,10 +1733,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [recipient2Name, setRecipient2Name] = useState("");
   const [recipient2Email, setRecipient2Email] = useState("");
   const [recipientSignerLabels, setRecipientSignerLabels] = useState("");
+  const [extraPartyReviewEmails, setExtraPartyReviewEmails] = useState<string[]>([]);
   const recipient1NameRef = useRef("");
   const recipient2NameRef = useRef("");
   const recipient1EmailRef = useRef("");
   const recipient2EmailRef = useRef("");
+  const extraPartyReviewEmailsRef = useRef<string[]>([]);
   const recipientSignerLabelsRef = useRef("");
   const [recipientsDeferred, setRecipientsDeferred] = useState(false);
   const [agreementTypeAccepted, setAgreementTypeAccepted] = useState(false);
@@ -1919,6 +1983,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     draftSnapshotRef.current = draft;
   }, [draft]);
+  useEffect(() => {
+    const parties = draft?.parties ?? [];
+    const capped = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+    const extraCount = Math.max(0, capped - 2);
+    setExtraPartyReviewEmails((prev) => {
+      const next = prev.slice(0, extraCount);
+      while (next.length < extraCount) {
+        const pIdx = next.length + 2;
+        const fromDraft = stripRecipientEmailNoise(String((parties[pIdx] as { email?: string })?.email ?? ""));
+        next.push(looksLikeEmail(fromDraft) ? fromDraft : "");
+      }
+      return next;
+    });
+  }, [draft?.parties?.length]);
   const paidProAuthoritativeRef = useRef(false);
   useLayoutEffect(() => {
     recipient1NameRef.current = recipient1Name;
@@ -1932,6 +2010,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     recipient2EmailRef.current = recipient2Email;
   }, [recipient2Email]);
+  useLayoutEffect(() => {
+    extraPartyReviewEmailsRef.current = extraPartyReviewEmails;
+  }, [extraPartyReviewEmails]);
   useLayoutEffect(() => {
     recipientSignerLabelsRef.current = recipientSignerLabels;
   }, [recipientSignerLabels]);
@@ -1973,6 +2054,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setRecipient2Name((p) => hydrateNameFromHandoff(p, ho.party2.name));
     setRecipient1Email((p) => hydrateEmailFromHandoff(p, ho.party1.email));
     setRecipient2Email((p) => hydrateEmailFromHandoff(p, ho.party2.email));
+    const partiesLen = Math.min(
+      (draftSnapshotRef.current?.parties ?? []).length,
+      MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
+    );
+    if (partiesLen > 2) {
+      const slots = linearPremiumRecipientSlots(ho, partiesLen);
+      setExtraPartyReviewEmails(slots.slice(2).map((s) => String(s.email ?? "").trim()));
+    } else {
+      setExtraPartyReviewEmails([]);
+    }
   }, [premiumSendConfirmOpen]);
 
   useLayoutEffect(() => {
@@ -1985,6 +2076,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setRecipient2Name((p) => hydrateNameFromHandoff(p, ho.party2.name));
     setRecipient1Email((p) => hydrateEmailFromHandoff(p, ho.party1.email));
     setRecipient2Email((p) => hydrateEmailFromHandoff(p, ho.party2.email));
+    const partiesLen = Math.min(
+      (draftSnapshotRef.current?.parties ?? []).length,
+      MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
+    );
+    if (partiesLen > 2) {
+      const slots = linearPremiumRecipientSlots(ho, partiesLen);
+      setExtraPartyReviewEmails(slots.slice(2).map((s) => String(s.email ?? "").trim()));
+    } else {
+      setExtraPartyReviewEmails([]);
+    }
   }, [
     createUiStage,
     createProductionTwoPane,
@@ -3152,6 +3253,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return looksLikeEmail(em) ? em : "";
   }
 
+  function buildRecipientPartyEmailsArrayForHandoff(d: ParsedDraftShape | null): string[] | undefined {
+    const parties = d?.parties ?? [];
+    const n = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+    if (n === 0) return undefined;
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const draftEm = partyEmailAtIndex(parties, i);
+      if (i === 0) {
+        const u = stripRecipientEmailNoise(recipient1EmailRef.current);
+        out.push(looksLikeEmail(u) ? u : draftEm);
+        continue;
+      }
+      if (i === 1) {
+        const u = stripRecipientEmailNoise(recipient2EmailRef.current);
+        out.push(looksLikeEmail(u) ? u : draftEm);
+        continue;
+      }
+      const u = stripRecipientEmailNoise(extraPartyReviewEmailsRef.current[i - 2] ?? "");
+      out.push(looksLikeEmail(u) ? u : draftEm);
+    }
+    return out;
+  }
+
   const persistPremiumRecipientHandoffFromDraftAndUi = React.useCallback(
     (
       d: ParsedDraftShape,
@@ -3160,47 +3284,55 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         displayName2?: string;
       },
     ) => {
-      const p0 = d.parties?.[0];
-      const p1 = d.parties?.[1];
-      const n1 =
-        (opts?.displayName1 ?? "").trim() ||
-        (recipient1NameRef.current || "").trim() ||
-        String(p0?.name || "").trim();
-      const n2 =
-        (opts?.displayName2 ?? "").trim() ||
-        (recipient2NameRef.current || "").trim() ||
-        String(p1?.name || "").trim();
-      const draftE1 = partyEmailAtIndex(d.parties, 0);
-      const draftE2 = partyEmailAtIndex(d.parties, 1);
-      const ui1 = stripRecipientEmailNoise(recipient1EmailRef.current);
-      const ui2 = stripRecipientEmailNoise(recipient2EmailRef.current);
-      const e1 = looksLikeEmail(ui1) ? ui1 : draftE1 || undefined;
-      const e2 = looksLikeEmail(ui2) ? ui2 : draftE2 || undefined;
-      persistPremiumRecipientHandoff({
-        party1: {
-          name: n1,
-          ...(e1 ? { email: e1 } : {}),
-          role: String(p0?.role || "party").trim() || "party",
-        },
-        party2: {
-          name: n2,
-          ...(e2 ? { email: e2 } : {}),
-          role: String(p1?.role || "party").trim() || "party",
-        },
-      });
+      const parties = d.parties ?? [];
+      const n = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+      const slots: PremiumRecipientHandoffSlot[] = [];
+      const extraRef = extraPartyReviewEmailsRef.current;
+      for (let i = 0; i < n; i++) {
+        const p = parties[i]!;
+        const draftEm = partyEmailAtIndex(d.parties, i);
+        if (i === 0) {
+          const n1 =
+            (opts?.displayName1 ?? "").trim() ||
+            (recipient1NameRef.current || "").trim() ||
+            String(p?.name || "").trim();
+          const ui1 = stripRecipientEmailNoise(recipient1EmailRef.current);
+          const e1 = looksLikeEmail(ui1) ? ui1 : draftEm || "";
+          slots.push({
+            name: n1,
+            email: e1,
+            role: String(p?.role || "party").trim() || "party",
+          });
+          continue;
+        }
+        if (i === 1) {
+          const p1 = parties[1]!;
+          const n2 =
+            (opts?.displayName2 ?? "").trim() ||
+            (recipient2NameRef.current || "").trim() ||
+            String(p1?.name || "").trim();
+          const ui2 = stripRecipientEmailNoise(recipient2EmailRef.current);
+          const e2 = looksLikeEmail(ui2) ? ui2 : draftEm || "";
+          slots.push({
+            name: n2,
+            email: e2,
+            role: String(p1?.role || "party").trim() || "party",
+          });
+          continue;
+        }
+        const ui = stripRecipientEmailNoise(extraRef[i - 2] ?? "");
+        const em = looksLikeEmail(ui) ? ui : draftEm || "";
+        slots.push({
+          name: String(p?.name || "").trim(),
+          email: em,
+          role: String(p?.role || "party").trim() || "party",
+        });
+      }
+      if (slots.length === 0) return;
+      writePremiumRecipientHandoffLinear(slots);
     },
     [],
   );
-
-  useEffect(() => {
-    if (createUiStage !== CreateUiStage.RECIPIENTS || !createProductionTwoPane) return;
-    if (createFlowSendEditorPrimedRef.current) return;
-    createFlowSendEditorPrimedRef.current = true;
-    const r1e = stripRecipientEmailNoise(recipient1Email);
-    if (!(recipient1Name || "").trim() || !looksLikeEmail(r1e)) {
-      setCreateFlowSendRecipientEditorOpen(true);
-    }
-  }, [createUiStage, createProductionTwoPane, recipient1Name, recipient1Email]);
 
   function scrollVisibleRecipientSetupIntoView(block: ScrollLogicalPosition = "center") {
     const regions = document.querySelectorAll<HTMLElement>("[data-claw-recipient-setup]");
@@ -3214,7 +3346,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     regions[0]?.scrollIntoView({ behavior: "smooth", block });
   }
 
-  function focusVisibleRecipientInput(field: "r1-name" | "r1-email" | "r2-name" | "r2-email"): boolean {
+  function focusVisibleRecipientInput(field: string): boolean {
     const inputs = document.querySelectorAll<HTMLInputElement>(`[data-claw-recipient-field="${field}"]`);
     for (const el of inputs) {
       const r = el.getBoundingClientRect();
@@ -3399,6 +3531,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setRecipient1Email((c0?.email || "").trim());
     if (merged.displayName2) setRecipient2Name(merged.displayName2);
     setRecipient2Email((c1?.email || "").trim());
+    {
+      const cappedPartyCount = Math.min(merged.draft.parties?.length ?? 0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+      if (cappedPartyCount <= 2) {
+        setExtraPartyReviewEmails([]);
+      } else {
+        setExtraPartyReviewEmails(
+          Array.from({ length: cappedPartyCount - 2 }, (_, j) => {
+            const idx = j + 2;
+            const fromCandidate = (snap.recipientCandidates?.[idx]?.email ?? "").trim();
+            const fromDraft = stripRecipientEmailNoise(
+              String((merged.draft.parties?.[idx] as { email?: string })?.email ?? ""),
+            );
+            return (
+              (looksLikeEmail(fromCandidate) ? fromCandidate : "") ||
+              (looksLikeEmail(fromDraft) ? fromDraft : "")
+            );
+          }),
+        );
+      }
+    }
     setRecipientSignerLabels(
       pickRecipientSignerLabelsForHandoff(recipientSignerLabelsRef.current, merged.displayName1, merged.displayName2, {
         role1: merged.draft.parties?.[0]?.role,
@@ -3455,6 +3607,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         email: (c1?.email || "").trim(),
         role: (merged.draft.parties?.[1]?.role || "party").trim() || "party",
       },
+      buildPartyIndexSlotsFromPartiesAndCandidates(merged.draft.parties ?? [], snap.recipientCandidates ?? []),
     );
     bumpPremiumSurfaceGateTick();
   }
@@ -4703,6 +4856,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setRecipient1Email((rc0.email || "").trim());
         if (merged.displayName2) setRecipient2Name(merged.displayName2);
         setRecipient2Email((rc1.email || "").trim());
+        {
+          const cappedPartyCount = Math.min(merged.draft.parties?.length ?? 0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+          if (cappedPartyCount <= 2) {
+            setExtraPartyReviewEmails([]);
+          } else {
+            setExtraPartyReviewEmails(
+              Array.from({ length: cappedPartyCount - 2 }, (_, j) => {
+                const idx = j + 2;
+                const fromCandidate = (result.recipientCandidates?.[idx]?.email ?? "").trim();
+                const fromDraft = stripRecipientEmailNoise(
+                  String((merged.draft.parties?.[idx] as { email?: string })?.email ?? ""),
+                );
+                return (
+                  (looksLikeEmail(fromCandidate) ? fromCandidate : "") ||
+                  (looksLikeEmail(fromDraft) ? fromDraft : "")
+                );
+              }),
+            );
+          }
+        }
         setRecipientSignerLabels(
           pickRecipientSignerLabelsForHandoff(recipientSignerLabelsRef.current, merged.displayName1, merged.displayName2, {
             role1: merged.draft.parties?.[0]?.role,
@@ -4761,6 +4934,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             email: (rc1.email || "").trim(),
             role: (merged.draft.parties?.[1]?.role || "party").trim() || "party",
           },
+          buildPartyIndexSlotsFromPartiesAndCandidates(merged.draft.parties ?? [], result.recipientCandidates ?? []),
         );
         try {
           if (url) {
@@ -4926,6 +5100,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             email: "",
             role: (merged.draft.parties?.[1]?.role || "party").trim() || "party",
           },
+          buildPartyIndexSlotsFromPartiesAndCandidates(merged.draft.parties ?? [], []),
         );
         try {
           if (url) {
@@ -6498,8 +6673,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
       const primedForHandoff =
         mergeLiveDraftWithRecipientSetupForVs01Bridge(normalized as unknown as AgreementDraft, {
-          recipient1Email: recipient1EmailRef.current,
-          recipient2Email: recipient2EmailRef.current,
+          recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(normalized as unknown as ParsedDraftShape),
         }) ?? (normalized as unknown as AgreementDraft);
 
       if (premiumSendAnotherSkipOnCreatedRef.current) {
@@ -6600,7 +6774,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ),
     );
     const hasProductionRecipientEmail =
-      [recipient1Email, recipient2Email].some((e) => looksLikeEmail(String(e ?? ""))) || draftPartyEmailsReadyForSend;
+      [recipient1Email, recipient2Email, ...extraPartyReviewEmails].some((e) =>
+        looksLikeEmail(String(e ?? "")),
+      ) || draftPartyEmailsReadyForSend;
     const productionRecipientsPersist =
       createProductionTwoPane &&
       draft &&
@@ -6637,6 +6813,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         recipient1Email,
         recipient2Name,
         recipient2Email,
+        recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(draft),
         stripRecipientEmailNoise,
         looksLikeEmail,
       });
@@ -6731,6 +6908,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         recipient1Email,
         recipient2Name,
         recipient2Email,
+        recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(d),
         stripRecipientEmailNoise,
         looksLikeEmail,
       });
@@ -8874,14 +9052,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ),
   );
   const hasAnyValidRecipientEmail =
-    [recipient1Email, recipient2Email].some((e) => looksLikeEmail(String(e ?? ""))) || draftPartyRecipientEmailPresent;
+    [recipient1Email, recipient2Email, ...extraPartyReviewEmails].some((e) =>
+      looksLikeEmail(String(e ?? "")),
+    ) || draftPartyRecipientEmailPresent;
   const recipientEmailsHaveValidationErrors = useMemo(() => {
     const r1e = stripRecipientEmailNoise(recipient1Email);
     const r2e = stripRecipientEmailNoise(recipient2Email);
     if (r1e.length > 0 && !looksLikeEmail(r1e)) return true;
     if (recipient2Name.trim() && r2e.length > 0 && !looksLikeEmail(r2e)) return true;
+    for (const raw of extraPartyReviewEmails) {
+      const e = stripRecipientEmailNoise(raw);
+      if (e.length > 0 && !looksLikeEmail(e)) return true;
+    }
     return false;
-  }, [recipient1Email, recipient2Email, recipient2Name]);
+  }, [recipient1Email, recipient2Email, recipient2Name, extraPartyReviewEmails]);
+
+  useEffect(() => {
+    if (createUiStage !== CreateUiStage.RECIPIENTS || !createProductionTwoPane) return;
+    if (createFlowSendEditorPrimedRef.current) return;
+    createFlowSendEditorPrimedRef.current = true;
+    if (!hasAnyValidRecipientEmail) {
+      setCreateFlowSendRecipientEditorOpen(true);
+    }
+  }, [createUiStage, createProductionTwoPane, hasAnyValidRecipientEmail]);
+
   /** Paid authoritative Pro: premium recipient/send UI on the Pro review column (DRAFT), not legacy RECIPIENTS. */
   const paidProRecipientSetupOnDraft = useMemo(
     () =>
@@ -11269,8 +11463,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const primedForSendShell =
       mergeLiveDraftWithRecipientSetupForVs01Bridge(draft as unknown as AgreementDraft, {
-        recipient1Email: recipient1EmailRef.current,
-        recipient2Email: recipient2EmailRef.current,
+        recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(draft),
       }) ?? (draft as unknown as AgreementDraft);
     navigate(`/app/send/${encodeURIComponent(id)}`, {
       simpleSendHandoff: buildSimpleSendHandoff({
@@ -11892,20 +12085,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const focusFirstMissingRecipientRequirement = React.useCallback(() => {
-    const r1n = recipient1Name.trim();
+    const partyCount = draft?.parties?.length ?? 0;
     const r1e = stripRecipientEmailNoise(recipient1Email);
-    if (!r1n) {
-      if (focusVisibleRecipientInput("r1-name")) return;
-    }
-    if (!looksLikeEmail(r1e)) {
+    if (r1e.length > 0 && !looksLikeEmail(r1e)) {
       if (focusVisibleRecipientInput("r1-email")) return;
     }
     const r2e = stripRecipientEmailNoise(recipient2Email);
+    if (r2e.length > 0 && !looksLikeEmail(r2e)) {
+      if (focusVisibleRecipientInput("r2-email")) return;
+    }
+    for (let j = 0; j < extraPartyReviewEmails.length; j++) {
+      const e = stripRecipientEmailNoise(extraPartyReviewEmails[j] ?? "");
+      if (e.length > 0 && !looksLikeEmail(e)) {
+        if (focusVisibleRecipientInput(`party-${j + 2}-email`)) return;
+      }
+    }
+    const r1n = recipient1Name.trim();
+    if (partyCount <= 2 && !r1n) {
+      if (focusVisibleRecipientInput("r1-name")) return;
+    }
+    if (partyCount <= 2 && !looksLikeEmail(r1e)) {
+      if (focusVisibleRecipientInput("r1-email")) return;
+    }
     if (recipient2Name.trim() && !looksLikeEmail(r2e)) {
       if (focusVisibleRecipientInput("r2-email")) return;
     }
     scrollVisibleRecipientSetupIntoView("center");
-  }, [recipient1Name, recipient1Email, recipient2Name, recipient2Email]);
+  }, [
+    draft?.parties?.length,
+    recipient1Name,
+    recipient1Email,
+    recipient2Name,
+    recipient2Email,
+    extraPartyReviewEmails,
+  ]);
 
   const assertRecipientsValidForPremiumSend = React.useCallback((): boolean => {
     const r1e = stripRecipientEmailNoise(recipient1Email);
@@ -11922,13 +12135,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       focusFirstMissingRecipientRequirement();
       return false;
     }
+    for (let j = 0; j < extraPartyReviewEmails.length; j++) {
+      const e = stripRecipientEmailNoise(extraPartyReviewEmails[j] ?? "");
+      if (e && !looksLikeEmail(e)) {
+        setHardError("One of the agreement party emails doesn’t look valid — fix it or clear that field.");
+        focusFirstMissingRecipientRequirement();
+        return false;
+      }
+    }
     if (!hasAnyValidRecipientEmail) {
       setHardError("Add at least one valid recipient email, then try again.");
       focusFirstMissingRecipientRequirement();
       return false;
     }
     return true;
-  }, [recipient1Email, recipient2Email, recipient2Name, hasAnyValidRecipientEmail, focusFirstMissingRecipientRequirement]);
+  }, [
+    recipient1Email,
+    recipient2Email,
+    recipient2Name,
+    extraPartyReviewEmails,
+    hasAnyValidRecipientEmail,
+    focusFirstMissingRecipientRequirement,
+  ]);
 
   const executePrimaryCta = (cta: PrimaryCtaState) => {
     console.log("[CTA EXECUTE]", {
@@ -12670,6 +12898,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setRecipient2Name={setRecipient2Name}
           recipient2Email={recipient2Email}
           setRecipient2Email={setRecipient2Email}
+          extraPartyReviewEmails={extraPartyReviewEmails}
+          setExtraPartyReviewEmails={setExtraPartyReviewEmails}
           recipientSignerLabels={recipientSignerLabels}
           setRecipientSignerLabels={setRecipientSignerLabels}
           reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -14675,6 +14905,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       setRecipient2Name={setRecipient2Name}
                                       recipient2Email={recipient2Email}
                                       setRecipient2Email={setRecipient2Email}
+                                      extraPartyReviewEmails={extraPartyReviewEmails}
+                                      setExtraPartyReviewEmails={setExtraPartyReviewEmails}
                                       recipientSignerLabels={recipientSignerLabels}
                                       setRecipientSignerLabels={setRecipientSignerLabels}
                                       reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -14959,6 +15191,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         setRecipient2Name={setRecipient2Name}
                         recipient2Email={recipient2Email}
                         setRecipient2Email={setRecipient2Email}
+                        extraPartyReviewEmails={extraPartyReviewEmails}
+                        setExtraPartyReviewEmails={setExtraPartyReviewEmails}
                         recipientSignerLabels={recipientSignerLabels}
                         setRecipientSignerLabels={setRecipientSignerLabels}
                         reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -16064,7 +16298,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             )}
             <p className="mt-2 text-sm leading-relaxed text-slate-300 sm:text-[0.9375rem]">
               {effectivePremiumSendMode === "review"
-                ? "Named recipients (for your records):"
+                ? "Reviewer emails (optional, for your records):"
                 : "Named signers (for your records):"}
             </p>
             {!minimalProSendRecipientChrome && effectivePremiumSendMode === "signature" ? (
@@ -16081,11 +16315,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               </div>
             ) : null}
             <ul className="mt-3 list-none space-y-1.5 text-left text-sm text-slate-200 sm:text-[0.9375rem]">
-              {[recipient1Email, recipient2Email]
+              {[recipient1Email, recipient2Email, ...extraPartyReviewEmails]
                 .map((e) => String(e ?? "").trim())
                 .filter((e) => looksLikeEmail(e))
-                .map((e) => (
-                  <li key={e} className="flex gap-2">
+                .map((e, i) => (
+                  <li key={`${e}:${i}`} className="flex gap-2">
                     <span className="shrink-0 text-slate-500" aria-hidden>
                       •
                     </span>

@@ -17,6 +17,10 @@ export type PremiumRecipientHandoffV2 = {
   party1: PremiumRecipientHandoffSlot;
   party2: PremiumRecipientHandoffSlot;
   savedAt: number;
+  /**
+   * Party indices 2..n-1 (agreement order). Indices 0–1 stay in `party1` / `party2` for backward compatibility.
+   */
+  partyIndexSlots?: PremiumRecipientHandoffSlot[];
 };
 
 function emptySlot(): PremiumRecipientHandoffSlot {
@@ -42,6 +46,18 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
     if (raw) {
       const parsed = JSON.parse(raw) as PremiumRecipientHandoffV2;
       if (parsed?.v === 2 && parsed.party1 && parsed.party2) {
+        const rawExtra = (parsed as { partyIndexSlots?: unknown }).partyIndexSlots;
+        let partyIndexSlots: PremiumRecipientHandoffSlot[] | undefined;
+        if (Array.isArray(rawExtra)) {
+          const cleaned = rawExtra
+            .filter((x): x is PremiumRecipientHandoffSlot => Boolean(x) && typeof x === "object")
+            .map((x) => ({
+              name: String((x as PremiumRecipientHandoffSlot).name || "").trim(),
+              email: String((x as PremiumRecipientHandoffSlot).email || "").trim(),
+              role: String((x as PremiumRecipientHandoffSlot).role || "").trim() || "party",
+            }));
+          if (cleaned.length > 0) partyIndexSlots = cleaned;
+        }
         return {
           v: 2,
           party1: {
@@ -55,6 +71,7 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
             role: String(parsed.party2.role || "").trim(),
           },
           savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : Date.now(),
+          ...(partyIndexSlots ? { partyIndexSlots } : {}),
         };
       }
     }
@@ -101,15 +118,32 @@ function mergeSlot(
 export function persistPremiumRecipientHandoff(patch: {
   party1?: Partial<{ name: string; email: string; role: string }>;
   party2?: Partial<{ name: string; email: string; role: string }>;
+  partyIndexSlots?: Array<Partial<{ name: string; email: string; role: string }> | null | undefined>;
 }): void {
   const cur = readPremiumRecipientHandoff();
   const base1 = cur?.party1 ?? emptySlot();
   const base2 = cur?.party2 ?? emptySlot();
   const party1 = mergeSlot(base1, patch.party1 ?? {});
   const party2 = mergeSlot(base2, patch.party2 ?? {});
-  if (!party1.name && !party2.name && !party1.email && !party2.email) return;
+  let partyIndexSlots: PremiumRecipientHandoffSlot[] | undefined = cur?.partyIndexSlots;
+  if (patch.partyIndexSlots !== undefined) {
+    const prevExtra = cur?.partyIndexSlots ?? [];
+    partyIndexSlots = patch.partyIndexSlots.map((p, j) => {
+      const base = prevExtra[j] ?? emptySlot();
+      return mergeSlot(base, p ?? {});
+    });
+    if (partyIndexSlots.length === 0) partyIndexSlots = undefined;
+  }
+  const extraHasSignal = (partyIndexSlots ?? []).some((s) => s.name || s.email);
+  if (!party1.name && !party2.name && !party1.email && !party2.email && !extraHasSignal) return;
   try {
-    const payload: PremiumRecipientHandoffV2 = { v: 2, party1, party2, savedAt: Date.now() };
+    const payload: PremiumRecipientHandoffV2 = {
+      v: 2,
+      party1,
+      party2,
+      savedAt: Date.now(),
+      ...(partyIndexSlots?.length ? { partyIndexSlots } : {}),
+    };
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
     const p1e = Boolean(String(party1.email || "").trim());
@@ -152,8 +186,13 @@ export function clearPremiumPartyNamesHandoff(): void {
 }
 
 /** Replace session handoff entirely (e.g. premium snapshot hydration). Allows explicit empty emails. */
-export function writePremiumRecipientHandoffExact(party1: PremiumRecipientHandoffSlot, party2: PremiumRecipientHandoffSlot): void {
+export function writePremiumRecipientHandoffExact(
+  party1: PremiumRecipientHandoffSlot,
+  party2: PremiumRecipientHandoffSlot,
+  partyIndexSlots?: PremiumRecipientHandoffSlot[],
+): void {
   try {
+    const extra = (partyIndexSlots ?? []).filter((s) => s && (s.name || s.email));
     const payload: PremiumRecipientHandoffV2 = {
       v: 2,
       party1: {
@@ -167,8 +206,16 @@ export function writePremiumRecipientHandoffExact(party1: PremiumRecipientHandof
         role: String(party2.role ?? "").trim() || "party",
       },
       savedAt: Date.now(),
+      ...(extra.length > 0 ? { partyIndexSlots: extra } : {}),
     };
-    if (!payload.party1.name && !payload.party2.name && !payload.party1.email && !payload.party2.email) return;
+    if (
+      !payload.party1.name &&
+      !payload.party2.name &&
+      !payload.party1.email &&
+      !payload.party2.email &&
+      !extra.length
+    )
+      return;
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
     const p1e = Boolean(String(payload.party1.email || "").trim());
@@ -199,4 +246,54 @@ export function hydrateNameFromHandoff(localName: string, handoffName: string): 
   const h = String(handoffName ?? "").trim();
   if (l) return l;
   return h;
+}
+
+/** Cap for multi-party review-link recipient session rows (agreement party order). */
+export const MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS = 24;
+
+/** One session slot per agreement party index (0..n-1), capped. */
+export function linearPremiumRecipientSlots(
+  handoff: PremiumRecipientHandoffV2 | null,
+  partyCount: number,
+): PremiumRecipientHandoffSlot[] {
+  const n = Math.min(Math.max(partyCount, 0), MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+  const out: PremiumRecipientHandoffSlot[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!handoff) {
+      out.push(emptySlot());
+      continue;
+    }
+    if (i === 0) out.push({ ...handoff.party1 });
+    else if (i === 1) out.push({ ...handoff.party2 });
+    else out.push({ ...(handoff.partyIndexSlots?.[i - 2] ?? emptySlot()) });
+  }
+  return out;
+}
+
+/** Persist full ordered party-indexed reviewer rows (`party1`/`party2` + optional `partyIndexSlots`). */
+export function writePremiumRecipientHandoffLinear(slots: PremiumRecipientHandoffSlot[]): void {
+  const party1 = slots[0] ?? emptySlot();
+  const party2 = slots[1] ?? emptySlot();
+  const partyIndexSlots = slots.length > 2 ? slots.slice(2, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS) : undefined;
+  writePremiumRecipientHandoffExact(party1, party2, partyIndexSlots);
+}
+
+/** Build `partyIndexSlots` for indices ≥2 from authoritative parties + optional checkout candidates. */
+export function buildPartyIndexSlotsFromPartiesAndCandidates(
+  parties: readonly { name?: string | null; role?: string | null; email?: string | null }[],
+  candidates: readonly { email?: string | null }[],
+): PremiumRecipientHandoffSlot[] | undefined {
+  const max = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+  if (max <= 2) return undefined;
+  const out: PremiumRecipientHandoffSlot[] = [];
+  for (let i = 2; i < max; i++) {
+    const p = parties[i]!;
+    const em = String(candidates[i]?.email ?? p.email ?? "").trim();
+    out.push({
+      name: String(p.name || "").trim(),
+      email: em,
+      role: String(p.role || "party").trim() || "party",
+    });
+  }
+  return out.length ? out : undefined;
 }

@@ -16,6 +16,8 @@ describe("SimpleDonePage review-link receipt", () => {
     expect(s).toContain("Review link could not be created. Please try again.");
     expect(s).toContain("Copy public verify link");
     expect(s).toContain("/app/send/");
+    expect(s).toContain("linearPremiumRecipientSlots");
+    expect(s).toContain("recipientPartyEmails");
     expect(s).not.toContain("ProofOpportunityBridgeCard");
     expect(s).not.toContain("Retry review links");
     expect(s).not.toContain("Review links are not ready yet");

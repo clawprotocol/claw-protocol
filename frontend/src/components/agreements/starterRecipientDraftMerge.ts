@@ -17,6 +17,11 @@ export type StarterRecipientHandoffOpts = {
   recipient1Email: string;
   recipient2Name: string;
   recipient2Email: string;
+  /**
+   * Optional per-party reviewer emails aligned to `parsed.parties` indices (same length as parties).
+   * When provided with matching length, merges all indices; slots 0–1 still honor name overrides from the legacy fields.
+   */
+  recipientPartyEmails?: string[];
   stripRecipientEmailNoise: (s: string) => string;
   looksLikeEmail: (s: string) => boolean;
 };
@@ -109,6 +114,7 @@ export function applyStarterRecipientUiToDraftParties(
     recipient1Email,
     recipient2Name,
     recipient2Email,
+    recipientPartyEmails,
     stripRecipientEmailNoise,
     looksLikeEmail,
   } = opts;
@@ -119,6 +125,9 @@ export function applyStarterRecipientUiToDraftParties(
 
   const base = Array.isArray(parsed.parties) ? ([...parsed.parties] as PartyRow[]) : [];
   const out: PartyRow[] = [...base];
+
+  const fullPartyEmails =
+    Array.isArray(recipientPartyEmails) && recipientPartyEmails.length === out.length ? recipientPartyEmails : null;
 
   const mergeSlot = (idx: number, name: string, email: string) => {
     const prev = out[idx];
@@ -140,8 +149,17 @@ export function applyStarterRecipientUiToDraftParties(
     };
   };
 
-  mergeSlot(0, n1, e1);
-  mergeSlot(1, n2, e2);
+  if (fullPartyEmails) {
+    for (let i = 0; i < out.length; i++) {
+      const raw = fullPartyEmails[i] ?? "";
+      const email = looksLikeEmail(raw) ? stripRecipientEmailNoise(raw) : "";
+      const nameOv = i === 0 ? n1 : i === 1 ? n2 : "";
+      mergeSlot(i, nameOv, email);
+    }
+  } else {
+    mergeSlot(0, n1, e1);
+    mergeSlot(1, n2, e2);
+  }
 
   return { ...parsed, parties: out };
 }

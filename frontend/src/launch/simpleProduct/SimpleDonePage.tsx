@@ -45,11 +45,15 @@ import {
   writePaidProEditReturnHandoff,
 } from "./paidProEditReturnHandoff";
 import { findOpenRecipientProposals } from "../../agreement/recipientProposal";
-import { readPremiumRecipientHandoff } from "../../components/agreements/premiumPartyNamesHandoff";
+import {
+  linearPremiumRecipientSlots,
+  MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
+  readPremiumRecipientHandoff,
+} from "../../components/agreements/premiumPartyNamesHandoff";
 import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./reviewLinkRecipientEmailMerge";
 import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
 import {
-  formatAuthoritativeAgreementPartiesInline,
+  formatAuthoritativeAgreementPartiesHeadline,
   orderedAuthoritativePartyDisplayNames,
 } from "../../agreement/handoffPartyDisplay";
 
@@ -149,16 +153,10 @@ export function SimpleDonePage(props: { agreementId: string }) {
     Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
 
   const cachedAgreementPartyDisplayNames = reviewRecipientHandoff?.agreementPartyDisplayNames;
-  const paidProDonePartiesLine = useMemo(() => {
-    const fromDraft = formatAuthoritativeAgreementPartiesInline(ownerHandoffDraft?.parties, {
-      maxShown: 48,
-      separator: ", ",
-    });
-    if (fromDraft !== "—") return fromDraft;
-    if (cachedAgreementPartyDisplayNames && cachedAgreementPartyDisplayNames.length > 0) {
-      return cachedAgreementPartyDisplayNames.join(", ");
-    }
-    return "—";
+  const paidProDoneAgreementPartyNames = useMemo(() => {
+    const fromDraft = orderedAuthoritativePartyDisplayNames(ownerHandoffDraft?.parties);
+    if (fromDraft.length > 0) return fromDraft;
+    return cachedAgreementPartyDisplayNames ?? [];
   }, [ownerHandoffDraft?.parties, cachedAgreementPartyDisplayNames]);
 
   useEffect(() => {
@@ -339,9 +337,13 @@ export function SimpleDonePage(props: { agreementId: string }) {
     try {
       const emailMergedDraft = mergeReviewLinkRecipientEmailsOntoHydratedDraft(ownerHandoffDraft, null);
       const handoff = readPremiumRecipientHandoff();
-      const recipientSetup = handoff
-        ? { recipient1Email: handoff.party1.email, recipient2Email: handoff.party2.email }
-        : null;
+      const partyCap = Math.min((emailMergedDraft.parties ?? []).length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+      const recipientSetup =
+        handoff && partyCap > 0
+          ? {
+              recipientPartyEmails: linearPremiumRecipientSlots(handoff, partyCap).map((s) => s.email || ""),
+            }
+          : null;
       const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
         navigate,
         agreementId: id,
@@ -398,7 +400,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
   if (isPaidProReviewDonePath) {
     const agreementTitle =
       (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement";
-    const partiesLine = paidProDonePartiesLine;
     const primaryReviewHref = (reviewHandoffRows[0]?.reviewHref || "").trim();
     const recipientApprovalDetected = Boolean(
       ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
@@ -480,7 +481,21 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   </div>
                   <div>
                     <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement parties</dt>
-                    <dd className="mt-0.5">{partiesLine}</dd>
+                    <dd className="mt-0.5 text-slate-200">
+                      {paidProDoneAgreementPartyNames.length > 2 ? (
+                        <ol className="list-decimal space-y-0.5 pl-5">
+                          {paidProDoneAgreementPartyNames.map((n, i) => (
+                            <li key={`simple_done_party_${i}`}>{n}</li>
+                          ))}
+                        </ol>
+                      ) : ownerHandoffDraft?.parties?.length ? (
+                        formatAuthoritativeAgreementPartiesHeadline(ownerHandoffDraft.parties)
+                      ) : paidProDoneAgreementPartyNames.length > 0 ? (
+                        paidProDoneAgreementPartyNames.join(", ")
+                      ) : (
+                        "—"
+                      )}
+                    </dd>
                   </div>
                   {reviewHandoffRows.length > 0 ? (
                     <div>
