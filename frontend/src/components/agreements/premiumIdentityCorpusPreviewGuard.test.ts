@@ -120,6 +120,7 @@ describe("premium identity corpus + preview guard", () => {
     expect(lower).toContain("coastal reserve partners");
     expect(out).not.toMatch(/Smith\s*&\s*Smith\s*&/i);
     expect(out.toLowerCase()).not.toContain("beacon operations and coastal reserve");
+    expect(out).not.toMatch(/(?<![A-Za-z])Party\s+[A-Z]\b/);
   });
 
   it("hydrateIdentityPlaceholdersInAgreementPreviewPlain matches authoritative slot order for mixed fragments", () => {

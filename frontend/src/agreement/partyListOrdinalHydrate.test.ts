@@ -89,6 +89,42 @@ describe("partyListOrdinalHydrate", () => {
     expect(out).not.toMatch(/SMITH &\s*Wesson.*SMITH &/i);
   });
 
+  it("repairs signature heading before By when line embeds Party F (second signer)", () => {
+    const fixture = `
+Signature page:
+
+Foundryco Inc.
+
+By: Authorized Signatory
+
+Beacon Operations and Party F
+
+By: Authorized Signatory
+
+Apollo Data Services LLC
+
+By: Authorized Signatory
+`.trim();
+    const out = hydratePartyListAndSignatureOrdinals(fixture, AUTH);
+    expect(out).toContain("Beacon Operations And Logistics Group LLC");
+    expect(out).not.toMatch(/Party\s+F\b/i);
+    expect(out).toContain("FoundryCo Inc.");
+    expect(out).toContain("Apollo Data Services LLC");
+  });
+
+  it("normalizes casing on a signature heading before By", () => {
+    const fixture = `
+Signature page
+
+foundryco inc
+
+By: x
+`.trim();
+    const out = hydratePartyListAndSignatureOrdinals(fixture, AUTH);
+    expect(out).toContain("FoundryCo Inc.");
+    expect(out).not.toMatch(/Party\s+[A-Z]\b/);
+  });
+
   it("never emits Beacon Operations and Coastal Reserve Frankenstein on full hydrate pipeline", () => {
     const draft = structuredFromPrompt();
     const names = (draft.parties || []).map((p) => p.name);

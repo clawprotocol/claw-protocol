@@ -151,7 +151,7 @@ export function hydrateBetweenPartiesLineIfCorrupt(
     if (!/^between\s+/i.test(t)) continue;
     if (
       !textContainsUnresolvedIdentityPlaceholders(t) &&
-      !/\bParty\s+[A-Z]\b/.test(t) &&
+      !lineContainsPartySlotFallback(t) &&
       !bodyLooksLikeMergedPartyFragments(t, authoritativeParties)
     ) {
       continue;
@@ -165,15 +165,86 @@ export function hydrateBetweenPartiesLineIfCorrupt(
 
 const UNDERLINE_SIG_RE = /^_{3,}\s*$/;
 
+/** Slot-style fallback labels (Party A … Party Z) from placeholder resolution — never leave embedded in headings. */
+function lineContainsPartySlotFallback(t: string): boolean {
+  return /(?<![A-Za-z])Party\s+[A-Z]\b/i.test(t);
+}
+
 function shouldTreatAsSignaturePartyHeading(line: string, authoritativeParties: readonly string[]): boolean {
   const t = line.trim();
   if (!t) return false;
   if (/^by\s*:/i.test(t)) return false;
   if (/^(date|title|name)\s*:/i.test(t)) return false;
   if (textContainsUnresolvedIdentityPlaceholders(t)) return true;
-  if (/\bParty\s+[A-Z]\b/.test(t)) return true;
+  if (lineContainsPartySlotFallback(t)) return true;
   if (bodyLooksLikeMergedPartyFragments(t, authoritativeParties)) return true;
   return authoritativeParties.some((p) => bodyFuzzyMatchesAuthoritativeParty(t, p));
+}
+
+const SIGNATURE_SECTION_START_RE =
+  /^\s*(?:signatures?\b|signature\s+page|in\s+witness\s+whereof|witness\s+whereof)/i;
+
+function signatureHeadingNeedsAuthoritativeReplacement(
+  line: string,
+  ordinalParty: string,
+  authoritativeParties: readonly string[],
+): boolean {
+  const t = line.trim();
+  if (!t || /^by\s*:/i.test(t)) return false;
+  if (shouldTreatAsSignaturePartyHeading(t, authoritativeParties)) return true;
+  const tn = normalizePartyCompare(t);
+  const an = normalizePartyCompare(ordinalParty);
+  if (tn === an && t !== ordinalParty) return true;
+  return false;
+}
+
+/**
+ * Repairs signer name lines that appear immediately before a `By:` line (optionally separated by
+ * blank lines). Production often omits underline rules; ordinal still maps Nth heading → party N.
+ */
+export function hydrateSignatureHeadingBeforeByLines(
+  text: string,
+  authoritativeParties: readonly string[],
+): string {
+  if (!text.trim() || authoritativeParties.length === 0) return text;
+  const lines = text.split("\n");
+  let inSignatureSection = false;
+  let ordinal = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const row = lines[i];
+    const t = row.trim();
+    if (SIGNATURE_SECTION_START_RE.test(t)) {
+      inSignatureSection = true;
+      ordinal = 0;
+      continue;
+    }
+    if (UNDERLINE_SIG_RE.test(row)) {
+      inSignatureSection = true;
+      continue;
+    }
+    if (!t) continue;
+    if (inSignatureSection && ordinal >= authoritativeParties.length) {
+      inSignatureSection = false;
+    }
+    if (!inSignatureSection) continue;
+    if (/^by\s*:/i.test(t)) continue;
+
+    let k = i + 1;
+    while (k < lines.length && !lines[k].trim()) k++;
+    if (k >= lines.length) continue;
+    if (!/^by\s*:/i.test(lines[k].trim())) continue;
+    if (ordinal >= authoritativeParties.length) continue;
+
+    const auth = authoritativeParties[ordinal];
+    if (signatureHeadingNeedsAuthoritativeReplacement(row, auth, authoritativeParties)) {
+      const indent = row.match(/^\s*/)?.[0] ?? "";
+      lines[i] = `${indent}${auth}`;
+    }
+    ordinal++;
+  }
+
+  return lines.join("\n");
 }
 
 /**
@@ -196,11 +267,12 @@ export function hydrateSignatureUnderlinePartyHeadings(
     const ct = candidate.trim();
     if (/^by\s*:/i.test(ct)) continue;
     if (ordinal >= authoritativeParties.length) break;
-    if (shouldTreatAsSignaturePartyHeading(candidate, authoritativeParties)) {
+    const auth = authoritativeParties[ordinal];
+    if (signatureHeadingNeedsAuthoritativeReplacement(candidate, auth, authoritativeParties)) {
       const indent = candidate.match(/^\s*/)?.[0] ?? "";
-      lines[j] = `${indent}${authoritativeParties[ordinal]}`;
-      ordinal++;
+      lines[j] = `${indent}${auth}`;
     }
+    ordinal++;
   }
   return lines.join("\n");
 }
@@ -216,6 +288,7 @@ export function hydratePartyListAndSignatureOrdinals(
   let out = text;
   out = hydratePartyListLinesByOrdinal(out, authoritativeParties);
   out = hydrateSignatureUnderlinePartyHeadings(out, authoritativeParties);
+  out = hydrateSignatureHeadingBeforeByLines(out, authoritativeParties);
   out = hydrateBetweenPartiesLineIfCorrupt(out, authoritativeParties);
   return out;
 }
