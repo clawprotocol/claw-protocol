@@ -16,6 +16,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(dotenv_path=_REPO_ROOT / ".env", override=False)
 
 from backend.security.ai_airlock import run_ai_airlock
+from backend.security.privilege_policy import AirlockPolicyProfile
 
 
 class ExternalAIBlockedError(RuntimeError):
@@ -132,20 +133,26 @@ def _user_content_with_minimized(original: Any, minimized: str) -> Union[str, Li
     return minimized
 
 
-def _messages_after_user_airlock(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _messages_after_user_airlock(
+    messages: List[Dict[str, Any]],
+    *,
+    airlock_profile: AirlockPolicyProfile = "default",
+) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for msg in messages:
         if (msg.get("role") or "") != "user":
             out.append(msg)
             continue
         raw = _user_content_text_for_airlock(msg.get("content"))
-        airlock_result = run_ai_airlock(raw)
+        airlock_result = run_ai_airlock(raw, policy_profile=airlock_profile)
         if airlock_result.blocked:
             codes = tuple(airlock_result.policy_decision.reason_codes)
             log.warning(
-                "[claw-ai-airlock] user_message_blocked block_reason=%s policy_reason_codes=%s user_content_chars=%s",
+                "[claw-ai-airlock] user_message_blocked block_reason=%s policy_reason_codes=%s "
+                "airlock_profile=%s user_content_chars=%s",
                 airlock_result.block_reason,
                 ",".join(codes) if codes else "",
+                airlock_profile,
                 len(raw),
             )
             raise ExternalAIBlockedError(
@@ -164,7 +171,8 @@ def call_legal_llm(
     temperature: float = 0.0,
     *,
     usage_sink: Optional[List[Dict[str, Any]]] = None,
-    **_: Any,
+    airlock_profile: AirlockPolicyProfile = "default",
+    **kwargs: Any,
 ) -> str:
     """
     Thin wrapper around OpenAI chat completions so the rest
@@ -179,8 +187,18 @@ def call_legal_llm(
         ``CLAW_ALLOW_EXTERNAL_AI_LOCAL=1`` allows the pre-LLM airlock to continue (redact + minimize) when
         privilege heuristics would otherwise block; ``production``/``prod`` never honor this. See
         :mod:`backend.config.external_ai_policy`.
+      - ``airlock_profile`` — ``default`` keeps strict litigation single-word matches; ``agreement_outbound``
+        is for LawDog agreement JSON (drops false-positive singles like ``settlement`` / ``discovery`` while
+        retaining hard litigation tokens such as ``plaintiff`` / ``subpoena``).
     """
-    outbound_messages = _messages_after_user_airlock(messages)
+    kwargs.pop("trace_context", None)
+    if kwargs:
+        log.warning(
+            "[claw-llm] call_legal_llm dropping unexpected kwargs keys=%s",
+            sorted(kwargs.keys()),
+        )
+    profile: AirlockPolicyProfile = airlock_profile
+    outbound_messages = _messages_after_user_airlock(messages, airlock_profile=profile)
     client = _get_client()
     resolved_model = model or DEFAULT_MODEL
     tokens_kwargs = build_chat_completion_tokens_kwargs(resolved_model, max_tokens)

@@ -98,6 +98,22 @@ def test_oversized_input_minimized() -> None:
     assert r.original_length == len(raw)
 
 
+def test_airlock_allows_counsel_in_commercial_agreement_json() -> None:
+    """Regression: standalone 'counsel' must not block LawDog Pro JSON (repair payloads may echo model boilerplate)."""
+    import json
+
+    blob = json.dumps(
+        {
+            "intake": "SaaS agreement. Each party may consult independent counsel. Delaware law.",
+            "context": {"title": "Services Agreement"},
+        },
+        ensure_ascii=False,
+    )
+    r = run_ai_airlock(blob)
+    assert r.blocked is False
+    assert len((r.minimized_text or "").strip()) > 0
+
+
 def test_transformation_metadata_coherent_when_blocked() -> None:
     r = run_ai_airlock("privileged communication under work product doctrine")
     assert r.blocked is True
@@ -166,6 +182,28 @@ def test_minimize_for_airlock_deterministic() -> None:
     m2 = minimize_for_airlock(s, max_chars=100)
     assert m1 == m2
     assert len(m1) <= 100
+
+
+def test_airlock_agreement_outbound_allows_lawdog_qa_saas_reseller_prompt() -> None:
+    raw = (
+        "Create a SaaS reseller and white-label services agreement between Redwood Peak Ventures LLC, "
+        "Atlas Harbor Technologies Inc., Meridian Workforce Group LLC, Prairie Signal Holdings LP, "
+        "and NovaGrid Systems LLC. Scope includes white-label deployment of workflow automation software, "
+        "API integrations, onboarding support, analytics dashboards, and ongoing maintenance. "
+        "Total fee $124,750 paid across 5 milestone payments tied to deployment phases. "
+        "Term 18 months with automatic month-to-month renewal unless terminated with 30 days notice. "
+        "Governing law Delaware. Include confidentiality, data security obligations, intellectual property "
+        "ownership, limitation of liability, indemnification, uptime/service level expectations, non-solicitation, "
+        "termination for cause and convenience, dispute resolution, force majeure, audit rights, and electronic signatures."
+    )
+    r = run_ai_airlock(raw, policy_profile="agreement_outbound")
+    assert r.blocked is False
+    assert len((r.minimized_text or "").strip()) > 0
+
+
+def test_airlock_default_profile_still_blocks_standalone_settlement_word() -> None:
+    r = run_ai_airlock("settlement and mutual release for both parties.")
+    assert r.blocked is True
 
 
 def test_airlock_result_is_typed() -> None:

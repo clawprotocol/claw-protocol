@@ -1,6 +1,16 @@
 import type { LivePreviewModel } from "./liveDraftHeuristics";
 import { getGuidedFlowConfig, type GuidedFlowId } from "./guidedFlowConfig";
 import { resolveGuidedFlowId } from "./agreementIntakeDraftModel";
+import { explicitIntentCanonicalTitle } from "./canonicalAgreementTitle";
+
+function guidedFlowIdFromExplicitHeadline(headline: string): GuidedFlowId {
+  const t = headline.toLowerCase();
+  if (t.includes("non-disclosure agreement") || t.includes("mutual non-disclosure")) return "nda";
+  if (t.includes("independent contractor agreement")) return "contractor";
+  if (/\bconsulting\s+agreement$/i.test(headline.trim()) || t === "consulting agreement") return "consulting";
+  if (t.includes("payment plan agreement")) return "payment_plan";
+  return "default";
+}
 
 function collapseWs(s: string): string {
   return s.replace(/\s+/g, " ").trim();
@@ -73,15 +83,21 @@ export type CanonicalAgreementTypeResult = {
  * Prefer guided flow routing over heuristic docTitle when they conflict (e.g. employment vs consulting).
  */
 export function getCanonicalAgreementTypeForCreate(rawIntake: string, live: LivePreviewModel): CanonicalAgreementTypeResult {
-  const flowId = resolveGuidedFlowId(rawIntake.trim(), live);
+  const trimmed = rawIntake.trim();
+  const explicitHeadline = explicitIntentCanonicalTitle(trimmed);
+  if (explicitHeadline) {
+    const flowId = guidedFlowIdFromExplicitHeadline(explicitHeadline);
+    return { headline: explicitHeadline, isSuggested: false, flowId };
+  }
+  const flowId = resolveGuidedFlowId(trimmed, live);
   const headline = FLOW_HEADLINE[flowId] ?? FLOW_HEADLINE.default;
   const modelTitle = (live.docTitle || "").trim();
   const modelNorm = modelTitle.toLowerCase().replace(/\s+/g, " ");
   const headNorm = headline.toLowerCase();
 
-  const employmentish = /\bemployment|hire|w-2|w2|employee\b/i.test(rawIntake) || modelNorm.includes("employment");
+  const employmentish = /\bemployment|hire|w-2|w2|employee\b/i.test(trimmed) || modelNorm.includes("employment");
   const consultingish =
-    flowId === "consulting" || /\bconsult|retainer|sow|1099|contractor\b/i.test(rawIntake.toLowerCase());
+    flowId === "consulting" || /\bconsult|retainer|sow|1099|contractor\b/i.test(trimmed.toLowerCase());
 
   let isSuggested = false;
   if (modelTitle === "Agreement" || !modelTitle) {
@@ -95,7 +111,7 @@ export function getCanonicalAgreementTypeForCreate(rawIntake: string, live: Live
     }
   }
 
-  if (agreementTypeExplicitlyMatchesFlow(rawIntake.trim(), flowId)) {
+  if (agreementTypeExplicitlyMatchesFlow(trimmed, flowId)) {
     isSuggested = false;
   }
 

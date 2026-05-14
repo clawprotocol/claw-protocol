@@ -7,6 +7,7 @@ import { resolveGuidedFlowId } from "./agreementIntakeDraftModel";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies";
+import { explicitIntentCanonicalTitle } from "./canonicalAgreementTitle";
 
 export function needsComplexityIntercept(intakeText: string, family: AgreementFamily | undefined): boolean {
   return shouldInterceptAdvancedDocumentFamily(intakeText, family);
@@ -21,6 +22,23 @@ export function resolveSafeSimplifiedAgreementRouting(
   _parsed: ParsedDraftShape,
 ): { agreement_family: AgreementFamily; title: string } {
   const raw = rawIntake.trim();
+  const explicit = explicitIntentCanonicalTitle(raw);
+  if (explicit) {
+    const low = raw.toLowerCase();
+    if (
+      /\b(?:mutual\s+)?(?:non[-\s]?disclosure|nda)\b/i.test(low) &&
+      (explicit.toLowerCase().includes("non-disclosure") || explicit.toLowerCase().includes("nda"))
+    ) {
+      return { agreement_family: "nda", title: explicit };
+    }
+    if (/\bindependent\s+contractor\b/i.test(low) || explicit.toLowerCase().includes("independent contractor")) {
+      return { agreement_family: "independent_contractor_agreement", title: explicit };
+    }
+    if (/\bconsulting\s+agreement\b/i.test(low) || explicit.toLowerCase() === "consulting agreement") {
+      return { agreement_family: "consulting_agreement", title: explicit };
+    }
+    return { agreement_family: "services_agreement", title: explicit };
+  }
   const live = buildLiveDraftPreview(raw);
   const flow = resolveGuidedFlowId(raw, live);
   const low = raw.toLowerCase();

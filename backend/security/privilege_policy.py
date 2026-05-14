@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Final, Iterable, Sequence
+from typing import Final, Iterable, Literal, Sequence
+
+AirlockPolicyProfile = Literal["default", "agreement_outbound"]
 
 # ---------------------------------------------------------------------------
 # Reason codes (stable strings for logging, metrics, and policy wiring)
@@ -30,7 +32,10 @@ LEGAL_SENSITIVE_SINGLE_TERMS: Final[frozenset[str]] = frozenset(
     {
         "attorney",
         "lawyer",
-        "counsel",
+        # "counsel" alone appears in routine commercial agreements ("independent counsel",
+        # "each party may consult counsel") and in LawDog repair payloads; do not block
+        # outbound agreement drafting. Retain phrase-level matches like "opposing counsel"
+        # under litigation signals.
     }
 )
 
@@ -49,6 +54,12 @@ LITIGATION_SINGLE_TERMS: Final[frozenset[str]] = frozenset(
         "defendant",
         "discovery",
     }
+)
+
+# Outbound commercial agreement drafting (JSON repair payloads, etc.): allow standalone
+# "settlement" / "discovery" (payment settlement, API discovery) while keeping hard litigation tokens.
+LITIGATION_SINGLE_TERMS_AGREEMENT_OUTBOUND: Final[frozenset[str]] = frozenset(
+    LITIGATION_SINGLE_TERMS - frozenset({"settlement", "discovery"})
 )
 
 LITIGATION_PHRASES: Final[tuple[str, ...]] = (
@@ -104,8 +115,11 @@ _LEGAL_SENSITIVE_PHRASE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     _compile_phrase_patterns(LEGAL_SENSITIVE_PHRASES)
 )
 
-_LITIGATION_WORD_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+_LITIGATION_WORD_PATTERNS_DEFAULT: Final[tuple[re.Pattern[str], ...]] = (
     _compile_word_patterns(LITIGATION_SINGLE_TERMS)
+)
+_LITIGATION_WORD_PATTERNS_AGREEMENT_OUTBOUND: Final[tuple[re.Pattern[str], ...]] = (
+    _compile_word_patterns(LITIGATION_SINGLE_TERMS_AGREEMENT_OUTBOUND)
 )
 _LITIGATION_PHRASE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     _compile_phrase_patterns(LITIGATION_PHRASES)
@@ -137,7 +151,11 @@ def _any_match(text: str, patterns: Sequence[re.Pattern[str]]) -> bool:
     return any(p.search(text) for p in patterns)
 
 
-def _collect_reason_codes(text: str) -> tuple[str, ...]:
+def _collect_reason_codes(
+    text: str,
+    *,
+    policy_profile: AirlockPolicyProfile = "default",
+) -> tuple[str, ...]:
     codes: list[str] = []
 
     if _any_match(text, _LEGAL_SENSITIVE_WORD_PATTERNS) or _any_match(
@@ -145,9 +163,12 @@ def _collect_reason_codes(text: str) -> tuple[str, ...]:
     ):
         codes.append(REASON_LEGAL_SENSITIVE_TERM)
 
-    if _any_match(text, _LITIGATION_WORD_PATTERNS) or _any_match(
-        text, _LITIGATION_PHRASE_PATTERNS
-    ):
+    lit_word_patterns = (
+        _LITIGATION_WORD_PATTERNS_AGREEMENT_OUTBOUND
+        if policy_profile == "agreement_outbound"
+        else _LITIGATION_WORD_PATTERNS_DEFAULT
+    )
+    if _any_match(text, lit_word_patterns) or _any_match(text, _LITIGATION_PHRASE_PATTERNS):
         codes.append(REASON_LITIGATION_SIGNAL)
 
     if _any_match(text, _PRIVILEGE_WORD_PATTERNS):
@@ -160,7 +181,11 @@ def _collect_reason_codes(text: str) -> tuple[str, ...]:
     return tuple(sorted(frozenset(codes)))
 
 
-def evaluate_privilege_policy(text: str) -> PrivilegePolicyDecision:
+def evaluate_privilege_policy(
+    text: str,
+    *,
+    policy_profile: AirlockPolicyProfile = "default",
+) -> PrivilegePolicyDecision:
     """
     Classify ``text`` using conservative keyword/phrase rules.
 
@@ -179,7 +204,7 @@ def evaluate_privilege_policy(text: str) -> PrivilegePolicyDecision:
             reason_codes=(),
         )
 
-    reason_codes = _collect_reason_codes(normalized)
+    reason_codes = _collect_reason_codes(normalized, policy_profile=policy_profile)
     is_legal_sensitive = len(reason_codes) > 0
     is_privileged_candidate = (
         REASON_PRIVILEGE_CANDIDATE_TERM in reason_codes

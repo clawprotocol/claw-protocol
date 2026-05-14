@@ -66,6 +66,7 @@ import {
 import {
   buildPaidProValidationDiagnostics,
   rejectPremiumBodyForProRender,
+  rejectPremiumDegradedFiller,
   stripClientPremiumArtifactBlocksFromDraft,
 } from "./premiumFullDraftClientAcceptance";
 import { mapPremiumFullDraftFamilyHint } from "./premiumFullDraftMapFamily";
@@ -1313,10 +1314,18 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         tierADiag.backendGenerationOutcome = (full.generation_outcome || "ok").trim();
         tierADiag.schemaValidationReasons = (full.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
       }
-      let doc = (full.document_text || "").trim();
-      let usedClientRetry = false;
       let effectiveFull: PremiumFullDraftResult = full;
+      let doc = (effectiveFull.document_text || "").trim();
       const serverGenDegraded = (full.generation_outcome || "").trim() === "degraded";
+      if (serverGenDegraded) {
+        const c0 = (full.server_generation_failure_code || "").trim();
+        const hard0 = c0 === "airlock_blocked" || c0 === "dev_context_leak";
+        if (hard0 || !rejectPremiumDegradedFiller(doc).ok) {
+          doc = "";
+          effectiveFull = { ...full, document_text: "" };
+        }
+      }
+      let usedClientRetry = false;
       {
         const firstOk =
           (full.generation_outcome || "ok") === "ok" && !serverGenDegraded && doc.length >= 400;
@@ -1361,9 +1370,32 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           code: c,
           message: m || "Your agreement is ready. You can refine any wording below.",
         };
+        if (
+          (c === "airlock_blocked" ||
+            c === "dev_context_leak" ||
+            !(full.document_text || "").trim() ||
+            !rejectPremiumDegradedFiller((full.document_text || "").trim()).ok) &&
+          (m || "").trim()
+        ) {
+          proIntentGateMessage = (m || "").trim();
+        }
         if (import.meta.env.MODE !== "test") {
-          // eslint-disable-next-line no-console
-          console.info("[CLAW] premium degraded accepted", { code: c });
+          const hardBlock = c === "airlock_blocked" || c === "dev_context_leak";
+          const origBody = (full.document_text || "").trim();
+          const emptyDoc = !origBody;
+          const fillerBad = !rejectPremiumDegradedFiller(origBody).ok;
+          if (hardBlock || emptyDoc || fillerBad) {
+            // eslint-disable-next-line no-console
+            console.warn("[CLAW] premium generation incomplete", {
+              code: c,
+              document_empty: emptyDoc,
+              degraded_filler: fillerBad,
+              generation_outcome: (full.generation_outcome || "").trim(),
+            });
+          } else {
+            // eslint-disable-next-line no-console
+            console.info("[CLAW] premium degraded accepted", { code: c });
+          }
         }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -1582,7 +1614,12 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         });
         winningPremiumBodyText = doc;
         if (serverGenDegraded) {
-          premiumRenderSource = "server_full_draft_degraded";
+          const fc = (full.server_generation_failure_code || "").trim();
+          if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {
+            premiumRenderSource = "server_full_draft_degraded";
+          } else {
+            premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+          }
         } else {
           premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
         }

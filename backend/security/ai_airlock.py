@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 
 from backend.config.external_ai_policy import is_non_production_external_ai_bypass_active
 
-from .privilege_policy import PrivilegePolicyDecision, evaluate_privilege_policy
+from .privilege_policy import (
+    AirlockPolicyProfile,
+    PrivilegePolicyDecision,
+    evaluate_privilege_policy,
+)
 from .redaction import RedactionResult, redact_text
 
 # Conservative cap for outbound excerpt size; easy to tune or inject later.
@@ -75,6 +79,7 @@ def run_ai_airlock(
     text: str,
     *,
     max_minimized_chars: int = _DEFAULT_MAX_MINIMIZED_CHARS,
+    policy_profile: AirlockPolicyProfile = "default",
 ) -> AIAirlockResult:
     """
     Evaluate privilege policy, then redact and minimize when allowed for external AI.
@@ -82,8 +87,8 @@ def run_ai_airlock(
     When blocked, safe outbound fields are empty; raw input is not copied into outputs.
     """
     original_length = len(text)
-    policy = evaluate_privilege_policy(text)
-    summary: list[str] = ["privilege_policy_evaluated"]
+    policy = evaluate_privilege_policy(text, policy_profile=policy_profile)
+    summary: list[str] = ["privilege_policy_evaluated", f"policy_profile:{policy_profile}"]
 
     if _external_ai_blocked(policy):
         if is_non_production_external_ai_bypass_active():

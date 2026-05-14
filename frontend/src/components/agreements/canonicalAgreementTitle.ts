@@ -198,6 +198,13 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   if (/\b(?:mutual\s+)?(?:nda|non[-\s]?disclosure)\s+(?:agreement|contract)\b/.test(low)) {
     return /\bmutual\b/.test(low) ? "Mutual Non-Disclosure Agreement" : "Non-Disclosure Agreement";
   }
+  if (
+    /\bsaas\s+reseller\b/.test(low) &&
+    /\bwhite[-\s]?label\b/.test(low) &&
+    /\bservices?\s+agreement\b/.test(low)
+  ) {
+    return "SaaS Reseller and White-Label Services Agreement";
+  }
   if (/\bservices?\s+(?:agreement|contract)\b/.test(low)) return "Services Agreement";
   if (/\bconsulting\s+(?:agreement|contract)\b/.test(low)) return "Consulting Agreement";
   return null;

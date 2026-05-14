@@ -664,12 +664,20 @@ def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
     return "unknown", f"{et}"
 
 
+_SUPPRESS_DEGRADED_FAKE_DOCUMENT_CODES: frozenset[str] = frozenset(
+    {
+        "airlock_blocked",
+        "dev_context_leak",
+    }
+)
+
+
 def _build_premium_full_draft_fallback_document(
     intake_s: str,
     ctx_dict: Optional[Dict[str, Any]],
     failure_code: str,
 ) -> str:
-    """Structured preview from intake + context when the Pro model path is unavailable."""
+    """Structured preview from intake + context when the Pro model path is unavailable (no repeated filler clauses)."""
     title = ""
     if ctx_dict:
         title = str(ctx_dict.get("title") or "").strip()
@@ -678,19 +686,17 @@ def _build_premium_full_draft_fallback_document(
     blob = build_free_reference_blob(intake_s, ctx_dict).strip()
     if len(blob) < 400:
         blob = f"{(intake_s or '').strip()}\n\n{blob}".strip()
-    pad = "\n\n".join(
-        [
-            f"{i}. Operative terms. The parties intend to document the relationship described in the intake above; "
-            f"specific commercial, payment, and liability terms should be completed in review."
-            for i in range(1, 13)
-        ]
+    # Single neutral completion note — never emit many copies of the same generic “operative terms” line.
+    completion = (
+        "Complete operative commercial terms (scope, fees, liability, termination, and signatures) "
+        "from the summary above; refine after internal or external review before signing."
     )
     return (
         f"# {title}\n\n"
         f"*We saved your Pro upgrade. The automated full pass was not available for this run ({failure_code}). "
         f"Below is a structured summary from your notes — you can edit freely. Use **Retry Pro draft** later for another full pass, or keep refining below.*\n\n"
         f"## Summary from your intake\n\n{blob}\n\n"
-        f"## Commercial framework (fill in with counsel as needed)\n\n{pad}\n"
+        f"## Commercial framework\n\n{completion}\n"
     )
 
 
@@ -703,27 +709,43 @@ def _premium_full_draft_degraded_response(
     primary_full: str = "",
     repair_body: str = "",
 ) -> PremiumFullDraftResponse:
-    doc = _build_premium_full_draft_fallback_document(intake_s, ctx_dict, failure_code)
+    suppress_body = failure_code in _SUPPRESS_DEGRADED_FAKE_DOCUMENT_CODES
+    doc = (
+        ""
+        if suppress_body
+        else _build_premium_full_draft_fallback_document(intake_s, ctx_dict, failure_code)
+    )
     fam = ""
     if ctx_dict:
         fam = str(ctx_dict.get("agreement_family") or "").strip()
     log.error(
-        "premium_full_draft event=degraded_response failure_code=%s failure_message=%s doc_len=%s",
+        "premium_full_draft event=degraded_response failure_code=%s failure_message=%s doc_len=%s suppress_body=%s",
         failure_code,
         failure_message[:200],
         len(doc),
+        int(suppress_body),
     )
-    log.info("[CLAW] premium degraded accepted failure_code=%s", failure_code)
+    if suppress_body:
+        log.warning(
+            "[CLAW] premium generation blocked category=%s stage=model_path suppress_fallback_document=1",
+            failure_code,
+        )
+    else:
+        log.info("[CLAW] premium degraded fallback_document failure_code=%s", failure_code)
+    srv_full = "" if suppress_body else (primary_full or "")
+    srv_repair = "" if suppress_body else (repair_body or "")
     return PremiumFullDraftResponse(
         title=str((ctx_dict or {}).get("title") or "").strip() or "Agreement",
         agreement_family=fam,
         document_text=doc,
-        server_full_document_text=primary_full,
-        server_repair_document_text=repair_body,
+        server_full_document_text=srv_full,
+        server_repair_document_text=srv_repair,
         key_terms_found=[],
         missing_material_info=[f"pro_model_unavailable:{failure_code}"],
         generation_outcome="degraded",
-        schema_validation_reasons=[f"fallback:{failure_code}"],
+        schema_validation_reasons=(
+            [f"fallback_suppressed:{failure_code}"] if suppress_body else [f"fallback:{failure_code}"]
+        ),
         server_generation_failure_code=failure_code,
         server_generation_failure_message=failure_message,
     )
@@ -740,7 +762,10 @@ def _degraded_user_message_for_code(code: str) -> str:
         "openai_connection": "Your agreement is ready. You can refine any wording below, or **Retry Pro draft** after checking your network.",
         "openai_server": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** in a few minutes if you want another pass.",
         "json_parse": "Your agreement is ready. You can refine any wording below, or try **Retry Pro draft** to regenerate the full pass.",
-        "airlock_blocked": "Your agreement is ready. Add detail in the editor, then you can use **Retry Pro draft** for another pass if needed.",
+        "airlock_blocked": (
+            "LawDog Pro could not complete the full drafting pass. Your upgrade is saved. "
+            "Please retry, or continue editing the starter draft."
+        ),
         "empty_output": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for another pass.",
         "dev_context_leak": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for a fresh pass.",
         "payload_limits": "Your agreement is ready. Try shortening the intake and using **Retry Pro draft**, or keep editing the text below.",
@@ -1493,6 +1518,7 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
             model=llm_model,
             max_tokens=max_out,
             temperature=0.2 if body.action == "update" else 0.15,
+            airlock_profile="agreement_outbound",
         )
         log.info(
             "claw_premium route=premium_refine openai_response_chars=%d action=%s",
@@ -2235,6 +2261,7 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
             model=llm_model,
             max_tokens=max_out,
             temperature=0.1,
+            airlock_profile="agreement_outbound",
         )
         log.info("claw_premium route=premium_finalize_audit openai_response_chars=%d", len((llm_text or "").strip()))
         parsed = _extract_json_object(llm_text)
@@ -2307,6 +2334,7 @@ def premium_review_route(request: Request, body: PremiumReviewRouteRequest) -> P
             model=llm_model,
             max_tokens=max_out,
             temperature=0.1,
+            airlock_profile="agreement_outbound",
         )
         parsed = _extract_json_object(llm_text)
         out = _retune_review_route_thresholds(_normalize_premium_review_route_result(parsed), payload)
@@ -3514,6 +3542,7 @@ def _revise_llm_once(
             max_tokens=max_tokens,
             temperature=temperature,
             trace_context=trace_context,
+            airlock_profile="agreement_outbound",
         )
         parsed = _extract_json_object(llm_text)
         return _normalize_parsed_draft(parsed), True
@@ -3694,6 +3723,7 @@ def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> Agr
             max_tokens=parse_max_tokens,
             temperature=0.0,
             usage_sink=usage_holder,
+            airlock_profile="agreement_outbound",
         )
         parsed = _extract_json_object(llm_text)
         if body.ai_model_class == "premium":
@@ -3789,6 +3819,7 @@ def premium_missing_facts(request: Request, body: PremiumMissingFactsRequest) ->
             model=llm_model,
             max_tokens=max_out,
             temperature=0.1,
+            airlock_profile="agreement_outbound",
         )
         parsed = _extract_json_object(llm_text)
         out = _normalize_premium_missing_facts_result(parsed)
@@ -3907,6 +3938,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             model=llm_model,
             max_tokens=max_out,
             temperature=0.2 if sim_regen else 0.15,
+            airlock_profile="agreement_outbound",
         )
         log.info(
             "claw_premium route=premium_full_draft openai_response_chars=%s model=%s",
@@ -3975,6 +4007,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 model=llm_model,
                 max_tokens=max_out,
                 temperature=0.22,
+                airlock_profile="agreement_outbound",
             )
             parsed_repair = _extract_json_object(llm_repair)
             out = _normalize_premium_full_draft_result(parsed_repair)
@@ -4012,6 +4045,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 model=llm_model,
                 max_tokens=max_out,
                 temperature=0.12,
+                airlock_profile="agreement_outbound",
             )
             parsed_c = _extract_json_object(llm_clean)
             out_clean = _normalize_premium_full_draft_result(parsed_c)
@@ -4204,6 +4238,7 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
             model=llm_model,
             max_tokens=max_out,
             temperature=0.2,
+            airlock_profile="agreement_outbound",
         )
         log.info("claw_premium route=premium_review openai_response_chars=%d", len((llm_text or "").strip()))
         parsed = _extract_json_object(llm_text)

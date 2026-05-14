@@ -13,7 +13,18 @@ export function mapPremiumFullDraftFamilyHint(
     return "operating_agreement";
   }
   if (/\bnda\b|non[-\s]?disclosure|confidentiality\s+and\s+commercial|commercial\s+protections/.test(t)) {
-    if (/\bcommercial|services|ip|work\s+product|referral|contractor/.test(t)) {
+    if (
+      /\bconfidentiality\s+and\s+commercial|commercial\s+protections\b/.test(t) &&
+      (fallback === "services_agreement" ||
+        fallback === "consulting_agreement" ||
+        fallback === "independent_contractor_agreement")
+    ) {
+      return fallback;
+    }
+    if (
+      /\bcommercial|services|ip|work\s+product|referral|contractor/.test(t) &&
+      !/\b(saas|reseller|white[-\s]?label|software\s+services|implementation|integration)\b/.test(t)
+    ) {
       return "confidentiality_commercial_protections_agreement";
     }
     return "nda";

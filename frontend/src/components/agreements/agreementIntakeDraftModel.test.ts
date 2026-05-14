@@ -32,6 +32,15 @@ describe("guided flow routing", () => {
     expect(resolveGuidedFlowId(raw, live)).toBe("consulting");
   });
 
+  it("resolveGuidedFlowId does not route SaaS reseller + milestone payments to payment_plan", () => {
+    const raw =
+      "Create a SaaS reseller and white-label services agreement between Alpha LLC and Beta LLC. " +
+      "Total fee $124,750 paid across 5 milestone payments tied to deployment phases.";
+    const live = buildLiveDraftPreview(raw);
+    expect(resolveGuidedFlowId(raw, live)).not.toBe("payment_plan");
+    expect(resolveGuidedFlowId(raw, live)).toBe("default");
+  });
+
   it("getNextQuestion returns parties first for thin NDA starter", () => {
     const text = "Simple NDA between two parties";
     const live = buildLiveDraftPreview(text);

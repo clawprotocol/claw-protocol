@@ -132,3 +132,22 @@ describe("agreement display title pipeline — poisoned draft.title", () => {
     expect(heading).toMatch(/^CONSULTING AGREEMENT$/i);
   });
 });
+
+describe("SaaS reseller / white-label QA routing", () => {
+  const QA =
+    "Create a SaaS reseller and white-label services agreement between Redwood Peak Ventures LLC and Atlas Harbor Technologies Inc. " +
+    "Scope includes white-label deployment of workflow automation software and API integrations. " +
+    "Total fee $124,750 paid across 5 milestone payments tied to deployment phases. " +
+    "Term 18 months with automatic month-to-month renewal unless terminated with 30 days notice. " +
+    "Governing law Delaware. Include confidentiality, indemnification, and dispute resolution.";
+
+  it("explicit canonical title matches reseller + white-label + services agreement", async () => {
+    const { explicitIntentCanonicalTitle } = await import("./canonicalAgreementTitle");
+    expect(explicitIntentCanonicalTitle(QA)).toBe("SaaS Reseller and White-Label Services Agreement");
+  });
+
+  it("detectAgreementFamily routes to services_agreement (not confidentiality hybrid)", async () => {
+    const { detectAgreementFamily } = await import("./agreementFamilyRouter");
+    expect(detectAgreementFamily(QA)).toBe("services_agreement");
+  });
+});

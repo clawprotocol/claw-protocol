@@ -17,6 +17,49 @@ const BANNED_SUBSTRINGS = [
   "gap-trace",
 ] as const;
 
+/** Server-side degraded fallback artifacts — never treat as a real Pro body. */
+const DEGRADED_FALLBACK_BANNED_SUBSTRINGS = [
+  "operative terms. the parties intend to document",
+  "automated full pass was not available",
+  "fill in with counsel as needed",
+  "summary from your intake",
+  "commercial framework",
+  "premium generation detail",
+  "below is a structured summary from your notes",
+  "confidentiality and commercial protections agreement",
+] as const;
+
+const REVIEW_COMPLETION_STUB =
+  "specific commercial, payment, and liability terms should be completed in review";
+
+export type PremiumClientAcceptanceResult = { ok: boolean; reasons: string[] };
+
+function countLinesContaining(body: string, needleLower: string): number {
+  let n = 0;
+  for (const line of (body || "").split(/\n/)) {
+    if (line.toLowerCase().includes(needleLower)) n += 1;
+  }
+  return n;
+}
+
+/** Rejects known LawDog Pro degraded-template filler (repeated generic clauses, airlock copy). */
+export function rejectPremiumDegradedFiller(body: string): PremiumClientAcceptanceResult {
+  const low = (body || "").trim().toLowerCase();
+  const reasons: string[] = [];
+  for (const b of DEGRADED_FALLBACK_BANNED_SUBSTRINGS) {
+    if (low.includes(b)) reasons.push(`degraded_filler:${b.slice(0, 42).replace(/\s+/g, " ")}`);
+  }
+  const ot = "operative terms. the parties intend to document";
+  if (countLinesContaining(body, ot) >= 3) {
+    reasons.push("degraded_filler:repeated_operative_terms");
+  }
+  if (countLinesContaining(body, REVIEW_COMPLETION_STUB) >= 3) {
+    reasons.push("degraded_filler:repeated_review_completion_stub");
+  }
+  const uniq = [...new Set(reasons)];
+  return { ok: uniq.length === 0, reasons: uniq };
+}
+
 const SCENARIO_CUES = /\b(logo|revision|vesting|founder|estate|sibling|probate|loan|lend|repay|installment)\b/i;
 
 /** True when body looks like the five-slot starter shell (title + 5 short sections, little operative depth). */
@@ -38,8 +81,6 @@ export function isLikelyFiveSectionStarterShellPro(body: string): boolean {
   return false;
 }
 
-export type PremiumClientAcceptanceResult = { ok: boolean; reasons: string[] };
-
 export function rejectPremiumBodyForProRender(
   body: string,
   opts?: { intakeLower?: string },
@@ -54,6 +95,8 @@ export function rejectPremiumBodyForProRender(
   for (const b of BANNED_SUBSTRINGS) {
     if (low.includes(b)) reasons.push(`banned_substring:${b.slice(0, 32)}`);
   }
+  const degradedFiller = rejectPremiumDegradedFiller(body);
+  if (!degradedFiller.ok) reasons.push(...degradedFiller.reasons);
   if (isLikelyFiveSectionStarterShellPro(body)) reasons.push("starter_shell_five_section");
   const tl = body.trim().split(/\n/)[0]?.replace(/^#+\s*/, "").trim().toLowerCase() || "";
   const titleLine = tl.length < 80 ? tl : tl.slice(0, 80);

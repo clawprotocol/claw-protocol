@@ -119,4 +119,11 @@ describe("resolveSafeSimplifiedAgreementRouting", () => {
     expect(r.agreement_family).toBe("consulting_agreement");
     expect(r.title).toBe("Consulting Agreement");
   });
+
+  it("LawDog QA SaaS reseller prompt routes to explicit services title (not payment plan)", () => {
+    const raw = `Create a SaaS reseller and white-label services agreement between Redwood Peak Ventures LLC, Atlas Harbor Technologies Inc., Meridian Workforce Group LLC, Prairie Signal Holdings LP, and NovaGrid Systems LLC. Scope includes white-label deployment of workflow automation software, API integrations, onboarding support, analytics dashboards, and ongoing maintenance. Total fee $124,750 paid across 5 milestone payments tied to deployment phases. Term 18 months with automatic month-to-month renewal unless terminated with 30 days notice. Governing law Delaware.`;
+    const r = resolveSafeSimplifiedAgreementRouting(raw, minimal("generic_business_agreement"));
+    expect(r.agreement_family).toBe("services_agreement");
+    expect(r.title).toBe("SaaS Reseller and White-Label Services Agreement");
+  });
 });

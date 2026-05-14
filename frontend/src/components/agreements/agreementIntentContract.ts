@@ -71,7 +71,7 @@ const EMP = /\b(employment|w-2|w2|at-?will|employee|salary|payroll|offer\s+lette
 const C1099 = /\b(1099|independent\s+contractor|freelance|consulting\s+agreement|sow|retainer|hourly\s+rate)\b/i;
 const CONSULT = /\b(consult|advisory|retainer|msa|master\s+service|sow|deliverables|statement\s+of\s+work)\b/i;
 const LOAN = /\b(loan|lent|borrow|lend|repay|installment|promissory|principal|interest|apr|iou)\b/i;
-const WEB = /\b(website|web\s*site|web\s+app|saas|api|software\s+develop|devops|hosting|cms|web\s+build)\b/i;
+const WEB = /\b(website|web\s*site|web\s+app|saas|api|software\s+develop|devops|hosting|cms|web\s+build|reseller|white[-\s]?label|workflow\s+automation)\b/i;
 const DESIGN = /\b(logo|brand|graphic\s+design|illustrat|creative\s+direct|design\s+services|branding)\b/i;
 
 function collapse(s: string): string {

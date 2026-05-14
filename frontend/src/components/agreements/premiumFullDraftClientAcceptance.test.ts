@@ -3,6 +3,7 @@ import {
   buildPaidProSourceFactProbe,
   buildPaidProValidationDiagnostics,
   rejectPremiumBodyForProRender,
+  rejectPremiumDegradedFiller,
   rejectProUpgradeSourceFactDrift,
 } from "./premiumFullDraftClientAcceptance";
 
@@ -54,6 +55,39 @@ Governing law: the laws of the **State of Oklahoma** (and not the laws of the St
     const b = padProBody(lead, 15_500);
     const r = rejectProUpgradeSourceFactDrift(b, { intakeLower: RICH_INTAKE });
     expect(r.ok, r.reasons.join(", ")).toBe(true);
+  });
+});
+
+describe("rejectPremiumDegradedFiller", () => {
+  it("rejects repeated operative-terms degraded template lines", () => {
+    const line =
+      "1. Operative terms. The parties intend to document the relationship described in the intake above; specifics follow.";
+    const body = `${line}\n${line}\n${line}\n${line}`;
+    const r = rejectPremiumDegradedFiller(body);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.some((x) => x.includes("repeated_operative_terms") || x.includes("degraded_filler"))).toBe(
+      true,
+    );
+  });
+
+  it("rejects legacy airlock / unavailable copy in body", () => {
+    const r = rejectPremiumDegradedFiller(
+      "Preamble\n\nThe automated full pass was not available for this run.\n\nMore text.",
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects summary-from-intake and commercial-framework shells", () => {
+    const r = rejectPremiumDegradedFiller("## Summary from your intake\n\nx\n\n## Commercial framework\n\ny");
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects repeated review-completion stub lines", () => {
+    const line =
+      "Operative terms. The parties intend to document the relationship; specific commercial, payment, and liability terms should be completed in review.";
+    const body = `${line}\n${line}\n${line}`;
+    const r = rejectPremiumDegradedFiller(body);
+    expect(r.ok).toBe(false);
   });
 });
 

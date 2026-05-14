@@ -268,6 +268,7 @@ import { computeSimpleCreatePaidProReviewReady } from "../../launch/simpleProduc
 import { type CreateFlowProductionPhase, isCreateFlowPastCapture } from "./createFlowTypes";
 import { CreateUiStage, createUiStagePrimaryCta } from "./createUiStage";
 import { getCanonicalAgreementTypeForCreate } from "./agreementTypeCanonical";
+import { applyDeterministicCommercialIntakeFallback } from "./intakeDeterministicFallback";
 import {
   buildIntakeClauseSuggestionRowItems,
   chipLabelForRowItem,
@@ -3380,10 +3381,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       "Independent Contractor Agreement",
       "Payment Plan Agreement",
     ]);
+    let out: ParsedDraftShape;
     if (safeSimplifiedTitles.has(priorTitle) && canon.headline === "Confidentiality Agreement") {
-      return { ...parsed, title: priorTitle };
+      out = { ...parsed, title: priorTitle };
+    } else {
+      out = { ...parsed, title: headline };
     }
-    return { ...parsed, title: headline };
+    return applyDeterministicCommercialIntakeFallback(raw, out);
   }, []);
 
   const resolveRawIntakeForPremiumCheckout = React.useCallback(

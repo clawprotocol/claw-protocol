@@ -130,6 +130,22 @@ def test_call_legal_llm_preserves_system_and_non_user_roles(monkeypatch: pytest.
     assert "plain greeting" in msgs[2]["content"]
 
 
+def test_call_legal_llm_agreement_outbound_allows_settlement_word_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_create = MagicMock()
+    mock_create.return_value = _stub_completion_response("ok")
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLAW_ALLOW_EXTERNAL_AI_LOCAL", "1")
+    out = call_legal_llm(
+        [{"role": "user", "content": "settlement allocation schedule for milestone vendor invoices."}],
+        airlock_profile="agreement_outbound",
+    )
+    assert out == "ok"
+    mock_create.assert_called_once()
+
+
 def test_embed_texts_blocked_skips_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_emb = MagicMock()
     mock_client = MagicMock()

@@ -13,6 +13,7 @@ import { applyDeterministicIntentToPremiumFullDraftContext } from "./determinist
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import { logDevPostPremiumFullDraftHttp } from "./premiumFullDraftPostResponseTrace";
+import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance";
 import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGuard";
 
 const MAX_CONTEXT_CHARS = 22_000;
@@ -204,14 +205,37 @@ export async function postPremiumFullDraftOnce(args: {
     parsed = {};
   }
   if (import.meta.env.MODE !== "test") {
-    // eslint-disable-next-line no-console
-    console.info("[CLAW] premium response", {
-      http_status: res.status,
-      http_ok: res.ok,
-      generation_outcome: parsed?.generation_outcome,
-      server_generation_failure_code: parsed?.server_generation_failure_code,
-      document_text_len: typeof parsed?.document_text === "string" ? parsed.document_text.length : 0,
-    });
+    const genOutLog = String(parsed?.generation_outcome || "").trim();
+    const failCodeLog = String(parsed?.server_generation_failure_code || "").trim();
+    const docStr = typeof parsed?.document_text === "string" ? (parsed.document_text as string) : "";
+    const dLen = docStr.length;
+    const fillerBad = docStr.trim().length > 0 && !rejectPremiumDegradedFiller(docStr).ok;
+    const hardIncomplete =
+      genOutLog === "degraded" &&
+      (failCodeLog === "airlock_blocked" ||
+        failCodeLog === "dev_context_leak" ||
+        dLen === 0 ||
+        fillerBad);
+    if (hardIncomplete) {
+      // eslint-disable-next-line no-console
+      console.warn("[CLAW] premium response", {
+        http_status: res.status,
+        http_ok: res.ok,
+        generation_outcome: parsed?.generation_outcome,
+        server_generation_failure_code: parsed?.server_generation_failure_code,
+        document_text_len: dLen,
+        note: "incomplete_or_blocked",
+      });
+    } else {
+      // eslint-disable-next-line no-console
+      console.info("[CLAW] premium response", {
+        http_status: res.status,
+        http_ok: res.ok,
+        generation_outcome: parsed?.generation_outcome,
+        server_generation_failure_code: parsed?.server_generation_failure_code,
+        document_text_len: dLen,
+      });
+    }
   }
   const genOut = String(parsed?.generation_outcome || "").trim();
   const degraded = genOut === "degraded";

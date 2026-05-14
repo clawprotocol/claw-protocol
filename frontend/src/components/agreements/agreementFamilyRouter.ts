@@ -175,6 +175,17 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
   }
 
   /**
+   * SaaS reseller / white-label B2B agreements: confidentiality clauses are ancillary;
+   * route as services so starter + Pro align with the stated deal type.
+   */
+  if (
+    /\b(saas\s+reseller|white[-\s]?label\s+services)\b/i.test(low) &&
+    /\b(?:agreement|contract)\b/i.test(low)
+  ) {
+    return "services_agreement";
+  }
+
+  /**
    * Software / tech / integration / implementation explicit titles (post-hardening polish #1).
    * Routes to `services_agreement` so existing services smart defaults still apply, but more
    * importantly so the canonical title resolver picks the precise heading instead of falling

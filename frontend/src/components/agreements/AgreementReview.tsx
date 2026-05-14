@@ -27,6 +27,7 @@ import { AgreementReadinessCard } from "./AgreementReadinessCard";
 import { SIMPLE_HOME_REVISION_COMPARE_ANCHOR_ID } from "./simpleHomeRevisionCompareAnchor";
 import { substitutePartyPlaceholdersInUserFacingText } from "../../agreement/partyPlaceholderDisplay";
 import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
+import { normalizeAgreementDisplayTitle } from "./canonicalAgreementTitle";
 import {
   appendVersion,
   applySigningLock,
@@ -868,6 +869,10 @@ const AgreementReview: React.FC<Props> = ({
   const [simpleFlowAdvanceBusy, setSimpleFlowAdvanceBusy] = useState(false);
   /** Workspace: finalize-for-signing in flight (server lock + follow-up mint/register). */
   const [signingLockBusy, setSigningLockBusy] = useState(false);
+  const draftTitleDisplay = useMemo(() => {
+    const raw = (draft?.title || "").trim();
+    return normalizeAgreementDisplayTitle(raw) || raw;
+  }, [draft?.title]);
   const relieveContactFieldError = useCallback((idx: number, field: "name" | "email" | "phone") => {
     setSimpleSendFieldErrors((prev) => {
       const k = `${idx}-${field}`;
@@ -5757,7 +5762,7 @@ const AgreementReview: React.FC<Props> = ({
       {showCompletedAgreementDashboard && completedAgreementDerived ? (
         <>
           <CompletedAgreementPanel
-            agreementTitle={(draft.title || "").trim() || "Untitled agreement"}
+            agreementTitle={(draftTitleDisplay || "Untitled agreement")}
             signersCompleteSummary={completedAgreementDerived.signersCompleteSummary}
             finalVersionLabel={completedAgreementDerived.meta.versionLabel}
             proofSummaryShort={proofSummaryLine(proofForDisplay)}
@@ -5781,7 +5786,7 @@ const AgreementReview: React.FC<Props> = ({
       {showPendingSignatureDashboard ? (
         <>
           <PendingSignaturePanel
-            agreementTitle={(draft.title || "").trim() || "Untitled agreement"}
+            agreementTitle={(draftTitleDisplay || "Untitled agreement")}
             lockedVersionId={lockVidPanel || "—"}
             versionLabel={lockedVersionLabel}
             finalizedAtLabel={finalizedAtLabelPanel}
@@ -6416,7 +6421,7 @@ const AgreementReview: React.FC<Props> = ({
                 <div className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-4 py-4 sm:px-5">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Agreement summary</p>
                   <p className="mt-2 text-base font-semibold tracking-tight text-slate-100">
-                    {(draft.title || "").trim() || "Agreement"}
+                    {(draftTitleDisplay || "Agreement")}
                   </p>
                   {authoritativePartyNamesList.length > 2 ? (
                     <div className="mt-2 text-sm text-slate-300">
@@ -7558,7 +7563,7 @@ const AgreementReview: React.FC<Props> = ({
                     <div className="mt-4 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3.5 py-3 text-left">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</p>
                       <p className="mt-1 text-sm font-medium text-slate-100">
-                        {(draft.title || "").trim() || "Agreement"}
+                        {(draftTitleDisplay || "Agreement")}
                       </p>
                       <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Agreement parties
@@ -7675,7 +7680,7 @@ const AgreementReview: React.FC<Props> = ({
               {draft ? (
                 <div className="mt-4 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3.5 py-3 text-left">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</p>
-                  <p className="mt-1 text-sm font-medium text-slate-100">{(draft.title || "").trim() || "Agreement"}</p>
+                  <p className="mt-1 text-sm font-medium text-slate-100">{(draftTitleDisplay || "Agreement")}</p>
                   <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                     Agreement parties
                   </p>

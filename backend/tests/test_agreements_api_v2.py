@@ -885,6 +885,62 @@ def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
     assert "server_full_document_text" in body
 
 
+def test_premium_full_draft_degraded_airlock_returns_empty_document(monkeypatch, tmp_path):
+    """Airlock failures must not inject fake Pro agreement text into document_text."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+    from backend.llm_router import ExternalAIBlockedError
+
+    def boom(*args, **kwargs):
+        raise ExternalAIBlockedError(
+            "PROTECTED_MODE_EXTERNAL_AI",
+            policy_reason_codes=("policy_test",),
+        )
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_ORG_H,
+        json={"intake_text": "SaaS services agreement between two LLCs. Fee $10,000. Delaware law."},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("generation_outcome") == "degraded"
+    assert body.get("server_generation_failure_code") == "airlock_blocked"
+    assert (body.get("document_text") or "").strip() == ""
+    assert (body.get("server_full_document_text") or "").strip() == ""
+    assert (body.get("server_repair_document_text") or "").strip() == ""
+    for bad in ("Operative terms", "Commercial framework", "automated full pass", "Summary from your intake"):
+        assert bad not in (body.get("document_text") or "")
+    reasons = body.get("schema_validation_reasons") or []
+    assert any(str(x).startswith("fallback_suppressed:") for x in reasons)
+
+
+def test_premium_full_draft_degraded_no_repeated_operative_filler(monkeypatch, tmp_path):
+    """Degraded fallback must not repeat the same generic 'Operative terms' clause many times."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("no_model")
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_ORG_H,
+        json={"intake_text": "Any intake text for testing failure path."},
+    )
+    assert res.status_code == 200
+    doc = (res.json().get("document_text") or "").strip()
+    assert doc
+    needle = "Operative terms. The parties intend to document"
+    assert doc.count(needle) <= 1
+
+
 def test_premium_full_draft_returns_503_structured_when_wire_encode_fails(monkeypatch, tmp_path):
     """Regression: serialization must return complete JSON (CORS-safe) instead of connection reset."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))

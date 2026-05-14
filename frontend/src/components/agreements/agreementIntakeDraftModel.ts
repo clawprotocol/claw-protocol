@@ -50,12 +50,19 @@ export function resolveGuidedFlowId(rawIntake: string, live: LivePreviewModel): 
       /\bconfidential\s+(?:information|materials|data|records)\b/i.test(low) ||
       (/\bconfidentiality\b/i.test(dt) && !dt.includes("consult")));
 
+  /** SaaS / B2B / reseller intakes often mention milestone payments — must not route to payment_plan. */
+  const primaryCommercialDraftingSignals =
+    /\b(saas|reseller|white[-\s]?label|services?\s+agreement|master\s+service|msa|vendor|supplier|b2b|software|workflow|subscription|license|partnership)\b/i.test(
+      low,
+    ) || /\bagreement\s+between\b/i.test(low);
+
   /** Commercial / consulting beats thin confidentiality substring matches (ranking: consulting → contractor → payment plan → NDA). */
   if (consultingSignals) return "consulting";
   if (contractorSignals) return "contractor";
   if (
     /\bpayment\s*plan\b|\binstallments?\b|\bmilestone\s+payments?\b|\bpayment\s+schedule\b/.test(low) &&
-    !consultingSignals
+    !consultingSignals &&
+    !primaryCommercialDraftingSignals
   ) {
     return "payment_plan";
   }
