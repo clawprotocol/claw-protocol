@@ -1933,9 +1933,20 @@ const AgreementReview: React.FC<Props> = ({
     return [draft.title, draft.purpose, draft.payment_terms, ...(draft.parties ?? []).map((p) => p.name)].join("\n");
   }, [draft]);
 
+  /** Ordered structured party names — authoritative for [ORG_n] / signature-block hydration. */
+  const authoritativePartyNames = useMemo(
+    () => (draft?.parties ?? []).map((p) => p.name),
+    [draft?.parties],
+  );
+
   const previewHtmlDisplay = useMemo(
-    () => substitutePartyPlaceholdersInUserFacingText(previewHtml || "", draftSanitizeContext),
-    [previewHtml, draftSanitizeContext],
+    () =>
+      substitutePartyPlaceholdersInUserFacingText(
+        previewHtml || "",
+        draftSanitizeContext,
+        authoritativePartyNames,
+      ),
+    [previewHtml, draftSanitizeContext, authoritativePartyNames],
   );
 
   useEffect(() => {
@@ -1960,8 +1971,13 @@ const AgreementReview: React.FC<Props> = ({
   }, [section, draft, agreementId, previewHtmlDisplay]);
 
   const renderedHtmlDisplay = useMemo(
-    () => substitutePartyPlaceholdersInUserFacingText(renderedHtml || "", draftSanitizeContext),
-    [renderedHtml, draftSanitizeContext],
+    () =>
+      substitutePartyPlaceholdersInUserFacingText(
+        renderedHtml || "",
+        draftSanitizeContext,
+        authoritativePartyNames,
+      ),
+    [renderedHtml, draftSanitizeContext, authoritativePartyNames],
   );
 
   const plainForDirectCompare = useMemo(
@@ -1974,8 +1990,9 @@ const AgreementReview: React.FC<Props> = ({
       substitutePartyPlaceholdersInUserFacingText(
         String(openRecipientProposal?.rendered_html || ""),
         draftSanitizeContext,
+        authoritativePartyNames,
       ),
-    [openRecipientProposal?.rendered_html, draftSanitizeContext],
+    [openRecipientProposal?.rendered_html, draftSanitizeContext, authoritativePartyNames],
   );
 
   const pendingRevBaselineDisplay = useMemo(
@@ -1983,14 +2000,19 @@ const AgreementReview: React.FC<Props> = ({
       substitutePartyPlaceholdersInUserFacingText(
         pendingRevision?.baselineRenderedHtml || "",
         draftSanitizeContext,
+        authoritativePartyNames,
       ),
-    [pendingRevision?.baselineRenderedHtml, draftSanitizeContext],
+    [pendingRevision?.baselineRenderedHtml, draftSanitizeContext, authoritativePartyNames],
   );
 
   const pendingRevProposedDisplay = useMemo(
     () =>
-      substitutePartyPlaceholdersInUserFacingText(pendingRevision?.proposedHtml || "", draftSanitizeContext),
-    [pendingRevision?.proposedHtml, draftSanitizeContext],
+      substitutePartyPlaceholdersInUserFacingText(
+        pendingRevision?.proposedHtml || "",
+        draftSanitizeContext,
+        authoritativePartyNames,
+      ),
+    [pendingRevision?.proposedHtml, draftSanitizeContext, authoritativePartyNames],
   );
 
   const previewMetaWhen = useMemo(() => {

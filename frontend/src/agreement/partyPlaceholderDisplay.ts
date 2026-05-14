@@ -1,6 +1,12 @@
 /**
  * Display-layer cleanup for internal party/org tokens (ORG_1, org1, [ORG_1], etc.).
  * Prefer real names inferred from intake-like context when substituting.
+ *
+ * When a structured authoritative party list is available (e.g. from the merged free
+ * draft or API `parties[]`), pass it as the third argument to
+ * {@link substitutePartyPlaceholdersInUserFacingText} so slot `n` maps to `parties[n-1]`.
+ * Context-only extraction (between-clause / LLC regex) is a fallback and can miss or
+ * mis-order multi-party Oxford lists — never rely on it alone for Pro body / export text.
  */
 
 import { extractBetweenPartyPair } from "../components/agreements/partyBetweenParse";
@@ -79,30 +85,85 @@ function slotFallback(idx: number): string {
 }
 
 /**
- * Replace ORG_n / PARTY_n / org1 / [ORG_1] style tokens using context-derived names.
- * Slot n (1-based) maps to candidate[n - 1] or a calm Party A/B fallback.
+ * Matches internal identity placeholders that must never appear in user-visible output.
+ * Used by {@link textContainsUnresolvedIdentityPlaceholders} for regression tests.
  */
-export function substitutePartyPlaceholdersInUserFacingText(text: string, context: string): string {
+export const UNRESOLVED_IDENTITY_PLACEHOLDER_RE =
+  /\[\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\]|\(\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\)|\b(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)[1-9]\d*\b|\b(?:ORG|PARTY|COMPANY)[1-9]\d*\b|\borg(?:[_\s\-]+)[1-9]\d*\b|\bparty(?:[_\s\-]+)[1-9]\d*\b|\borg[1-9]\d*\b|\bparty[1-9]\d*\b|\{\{\s*(?:party|entity|organization)(?:[_\s\-]+)?[1-9]\d*\s*\}\}|\b__(?:ORG|PERSON|PARTY|ENTITY)__\b/gi;
+
+export function textContainsUnresolvedIdentityPlaceholders(text: string | null | undefined): boolean {
+  const t = text || "";
+  if (!t.trim()) return false;
+  UNRESOLVED_IDENTITY_PLACEHOLDER_RE.lastIndex = 0;
+  return UNRESOLVED_IDENTITY_PLACEHOLDER_RE.test(t);
+}
+
+/**
+ * Replace ORG_n / PARTY_n / org1 / [ORG_1] style tokens using context-derived names,
+ * or — when provided — the authoritative ordered `parties[]` names from the structured draft.
+ *
+ * @param authoritativePartyNames When non-empty, slot `n` (1-based) maps to `authoritativePartyNames[n - 1]`.
+ *        This is the preferred path for Pro agreement body / signature / export text.
+ */
+export function substitutePartyPlaceholdersInUserFacingText(
+  text: string,
+  context: string,
+  authoritativePartyNames?: readonly (string | null | undefined)[] | null,
+): string {
   const t = (text || "").trim();
   if (!t) return t;
+
+  const auth = (authoritativePartyNames || [])
+    .map((n) => String(n ?? "").replace(/\s+/g, " ").trim())
+    .filter((n) => n.length > 0);
+
   const candidates = extractAgreementEntityCandidates(context);
-  return substitutePlaceholderTokensWithFn(t, (slot) => {
+
+  const replacer = (slot: number): string => {
     const idx = Math.max(0, slot - 1);
+    if (auth.length > 0) {
+      if (auth[idx]) return auth[idx];
+      // Out-of-range slot: calm fallback (never leak raw [ORG_n]).
+      return slotFallback(idx);
+    }
     return candidates[idx] ?? slotFallback(idx);
+  };
+
+  let out = substitutePlaceholderTokensWithFn(t, replacer);
+  // Second pass: catch any bracket / mustache forms the primary pass might miss, or
+  // mixed corruption (e.g. "Smith & [ORG_4]") after partial replacement.
+  if (textContainsUnresolvedIdentityPlaceholders(out)) {
+    out = substitutePlaceholderTokensWithFn(out, replacer);
+  }
+  return out;
+}
+
+function substitutePlaceholderTokensWithFn(text: string, replacer: (slot: number) => string): string {
+  const re =
+    /\[\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\]|\(\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\)|\b(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)[1-9]\d*\b|\b(?:ORG|PARTY|COMPANY)[1-9]\d*\b|\borg(?:[_\s\-]+)[1-9]\d*\b|\bparty(?:[_\s\-]+)[1-9]\d*\b|\borg[1-9]\d*\b|\bparty[1-9]\d*\b|\{\{\s*(?:party|entity|organization)(?:[_\s\-]+)?[1-9]\d*\s*\}\}|\b__(?:ORG|PERSON|PARTY|ENTITY)__(?:[_\s\-]+)?[1-9]\d*\b|\b__(?:ORG|PERSON|PARTY|ENTITY)__\b/gi;
+  return text.replace(re, (match, offset, whole) => {
+    const num = match.match(/([1-9]\d*)/);
+    const slot = num ? parseInt(num[1], 10) : 1;
+    const replacement = replacer(Number.isFinite(slot) && slot > 0 ? slot : 1);
+    return dedupeAmpersandPrefixBeforePlaceholder(whole.slice(0, offset), replacement);
   });
 }
 
-function substitutePlaceholderTokensWithFn(
-  text: string,
-  replacer: (slot: number) => string,
-): string {
-  const re =
-    /\[\s*(?:ORG|PARTY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\]|\(\s*(?:ORG|PARTY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\)|\b(?:ORG|PARTY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)[1-9]\d*\b|\b(?:ORG|PARTY|CLIENT|COMPANY)[1-9]\d*\b|\borg(?:[_\s\-]+)[1-9]\d*\b|\bparty(?:[_\s\-]+)[1-9]\d*\b|\borg[1-9]\d*\b|\bparty[1-9]\d*\b/gi;
-  return text.replace(re, (match) => {
-    const num = match.match(/([1-9]\d*)/);
-    const slot = num ? parseInt(num[1], 10) : 1;
-    return replacer(Number.isFinite(slot) && slot > 0 ? slot : 1);
-  });
+/**
+ * When the text before a placeholder already ends with "Acme & " and the replacement is
+ * "Acme & Co LLC", concatenating yields "Acme & Acme & Co LLC". Strip a leading duplicate
+ * `Word &` prefix from the replacement only when it exactly matches the end of `before`
+ * (case-insensitive). Conservative: requires `&` in the overlapping prefix.
+ */
+function dedupeAmpersandPrefixBeforePlaceholder(before: string, replacement: string): string {
+  const rep = (replacement || "").trim();
+  if (!rep || !before) return rep;
+  const m = before.match(/([\w'’.\-]+)\s*&\s*$/);
+  if (!m) return rep;
+  const head = m[1];
+  const headAmp = new RegExp(`^${head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*&\\s*`, "i");
+  if (headAmp.test(rep)) return rep.replace(headAmp, "").trimStart();
+  return rep;
 }
 
 /** Resolve a party row name from API/LLM output using optional intake/context text. */
@@ -110,11 +171,16 @@ export function resolvePartyNameForUserFacing(
   rawName: string,
   partyIndex: number,
   context: string,
+  authoritativePartyNames?: readonly (string | null | undefined)[] | null,
 ): string {
   const stripped = stripInternalPartyRefFragments(rawName);
   if (stripped.length >= 2) {
-    return substitutePartyPlaceholdersInUserFacingText(stripped, context);
+    return substitutePartyPlaceholdersInUserFacingText(stripped, context, authoritativePartyNames);
   }
+  const auth = (authoritativePartyNames || [])
+    .map((n) => String(n ?? "").trim())
+    .filter((n) => n.length > 0);
+  if (auth[partyIndex]) return auth[partyIndex];
   const candidates = extractAgreementEntityCandidates(context);
   return candidates[partyIndex] ?? slotFallback(partyIndex);
 }

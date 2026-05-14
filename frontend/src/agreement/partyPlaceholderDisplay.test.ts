@@ -3,6 +3,7 @@ import {
   extractAgreementEntityCandidates,
   resolvePartyNameForUserFacing,
   substitutePartyPlaceholdersInUserFacingText,
+  textContainsUnresolvedIdentityPlaceholders,
 } from "./partyPlaceholderDisplay";
 
 describe("partyPlaceholderDisplay", () => {
@@ -22,6 +23,21 @@ describe("partyPlaceholderDisplay", () => {
   it("strips bracketed refs from mixed names", () => {
     const ctx = "between Peaceful Journey and Acme LLC";
     expect(resolvePartyNameForUserFacing("Peaceful Journey [ORG_1]", 0, ctx)).toBe("Peaceful Journey");
+  });
+
+  it("substitutes using authoritative ordered party list when provided", () => {
+    const auth = ["Alpha LLC", "Beta LLC", "Gamma LLC"];
+    expect(substitutePartyPlaceholdersInUserFacingText("Signer: [ORG_2].", "ignored", auth)).toBe("Signer: Beta LLC.");
+    expect(substitutePartyPlaceholdersInUserFacingText("Mustache {{entity_3}}", "", auth)).toContain("Gamma");
+    expect(textContainsUnresolvedIdentityPlaceholders("Signer: [ORG_2].")).toBe(true);
+    expect(textContainsUnresolvedIdentityPlaceholders("Signer: Beta LLC.")).toBe(false);
+  });
+
+  it("dedupes Smith & prefix when token expands to full Smith & Wesson name", () => {
+    const auth = ["A", "B", "C", "Smith & Wesson Holdings LLC", "E"];
+    expect(substitutePartyPlaceholdersInUserFacingText("Line: Smith & [ORG_4].", "", auth)).toBe(
+      "Line: Smith & Wesson Holdings LLC.",
+    );
   });
 
   it("replaces bare ORG_1 with inferred party", () => {

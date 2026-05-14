@@ -2,8 +2,10 @@ import type { AgreementDraft, AgreementParty } from "./agreementTypes";
 import type { PaymentRequestPayload } from "./paymentRequestTypes";
 import { normalizePaymentRequestFromApi } from "./paymentRequestTypes";
 import {
+  extractAgreementEntityCandidates,
   resolvePartyNameForUserFacing,
   substitutePartyPlaceholdersInUserFacingText,
+  textContainsUnresolvedIdentityPlaceholders,
 } from "./partyPlaceholderDisplay";
 
 function coerceStr(v: unknown): string {
@@ -21,7 +23,7 @@ function isPlaceholderPartyRole(role: string): boolean {
   const s = (role || "").trim();
   if (!s) return false;
   return (
-    /^[\[(]?\s*(?:ORG|PARTY|CLIENT|COMPANY)[_\s]*\d+\s*[\])]?$/i.test(s) ||
+    /^[\[(]?\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY)[_\s]*\d+\s*[\])]?$/i.test(s) ||
     /^[\[(]?\s*party[_\s]*\d+\s*[\])]?$/i.test(s) ||
     /^[\[(]?\s*(?:org|party)\d+\s*[\])]?$/i.test(s)
   );
@@ -80,8 +82,27 @@ export function normalizeAgreementDraftFromApi(
     }
   }
 
+  // Re-hydrate party row names that are still internal identity tokens (e.g. [ORG_3])
+  // using ordered names from intake_text when available — never leave raw tokens on rows.
+  const intakeHeavy = [coerceStr((r as { intake_text?: unknown }).intake_text), partyNameContext]
+    .filter(Boolean)
+    .join("\n\n");
+  const intakeCandidates = extractAgreementEntityCandidates(intakeHeavy);
+  const authForRowHydration =
+    intakeCandidates.length >= parties.length ? intakeCandidates : undefined;
+  for (let i = 0; i < parties.length; i++) {
+    const row = parties[i];
+    if (!textContainsUnresolvedIdentityPlaceholders(row.name)) continue;
+    let next = substitutePartyPlaceholdersInUserFacingText(row.name, intakeHeavy, authForRowHydration);
+    if (textContainsUnresolvedIdentityPlaceholders(next) && intakeCandidates[i]) next = intakeCandidates[i];
+    if (textContainsUnresolvedIdentityPlaceholders(next))
+      next = substitutePartyPlaceholdersInUserFacingText(row.name, intakeHeavy, undefined);
+    parties[i] = { ...row, name: next };
+  }
+
   const enrichedContext = [partyNameContext, ...parties.map((p) => p.name)].join("\n");
-  const scrub = (s: string) => substitutePartyPlaceholdersInUserFacingText(s, enrichedContext);
+  const authPartyNames = parties.map((p) => p.name);
+  const scrub = (s: string) => substitutePartyPlaceholdersInUserFacingText(s, enrichedContext, authPartyNames);
 
   const normVersions: AgreementDraft["versions"] = [];
   if (Array.isArray(r.versions)) {
@@ -158,20 +179,20 @@ export function normalizeAgreementDraftFromApi(
     premium_full_document_text:
       r.premium_full_document_text == null || r.premium_full_document_text === ""
         ? null
-        : String(r.premium_full_document_text),
+        : scrub(String(r.premium_full_document_text)),
     premium_server_full_document_text:
       r.premium_server_full_document_text == null || r.premium_server_full_document_text === ""
         ? null
-        : String(r.premium_server_full_document_text),
+        : scrub(String(r.premium_server_full_document_text)),
     server_full_document_text:
       r.server_full_document_text == null || r.server_full_document_text === ""
         ? null
-        : String(r.server_full_document_text),
-    document_text: r.document_text == null || r.document_text === "" ? null : String(r.document_text),
+        : scrub(String(r.server_full_document_text)),
+    document_text: r.document_text == null || r.document_text === "" ? null : scrub(String(r.document_text)),
     rendered_document_text:
       r.rendered_document_text == null || r.rendered_document_text === ""
         ? null
-        : String(r.rendered_document_text),
+        : scrub(String(r.rendered_document_text)),
     pro_redline_v1:
       r.pro_redline_v1 != null && typeof r.pro_redline_v1 === "object"
         ? (r.pro_redline_v1 as Record<string, unknown>)

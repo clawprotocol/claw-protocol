@@ -12,6 +12,11 @@ import {
   stripPreviewEsignNoticeLines,
 } from "./premiumDeliverableDynamicSections";
 import { selectAgreementPreviewRoute } from "./agreementPreviewRoute";
+import type { AgreementFamily } from "./agreementFamilyRouter";
+import {
+  isGenericOrEmptyTitle,
+  resolveCanonicalAgreementTitle,
+} from "./canonicalAgreementTitle";
 import { PREMIUM_JURISDICTION_PLACEHOLDER } from "./premiumDraftTransform";
 import { emitPremiumRenderResolveLog, resolvePremiumRenderSource } from "./premiumRenderSourceResolver";
 import {
@@ -44,6 +49,83 @@ const NEUTRAL_TERMINATION_NOTE = "Termination terms to be agreed by the Parties.
 function nz(s: string | null | undefined): string {
   const t = (s || "").trim();
   return t ? t : MISSING;
+}
+
+/**
+ * Display-layer title resolution for starter / generic previews.
+ *
+ *   1. Substantive parsed title (non-generic per canonical-title rules) → keep as-is.
+ *   2. Generic / missing title + known family → `resolveCanonicalAgreementTitle`
+ *      (handles explicit-intent overrides like "lease agreement" / "event production
+ *      agreement" / "saas implementation agreement" and falls back to the family
+ *      canonical heading when no intent phrase is present in the intake text).
+ *   3. Otherwise → safe `MISSING` placeholder (preserves deterministic fallback).
+ *
+ * Pure presentation lookup — no parsing is performed here. The canonical resolver and
+ * family routing are already populated upstream by `runIntakeDefaultsAndRoles`; this
+ * function only exists to ensure the *display* layer never falls back to a bare
+ * "AGREEMENT" / "DOCUMENT" / "[NOT YET SPECIFIED]" heading when a canonical heading
+ * is computable from already-available metadata.
+ */
+function resolveStarterDisplayTitle(
+  draft: ParsedDraftShape,
+  options?: AgreementPreviewBuildOptions,
+): string {
+  const current = (draft.title || "").trim();
+  const family = draft.agreement_family as AgreementFamily | undefined;
+  if (current && !isGenericOrEmptyTitle(current, family)) return current;
+  if (family) {
+    const resolution = resolveCanonicalAgreementTitle({
+      currentTitle: current || null,
+      liveDocTitle: null,
+      family,
+      intakeText: options?.intakeText ?? null,
+    });
+    if (resolution.title) return resolution.title;
+  }
+  return MISSING;
+}
+
+/**
+ * Display-layer casing restoration for a single party name.
+ *
+ * When the canonicalizer normalized intentional intake casing (e.g. "FoundryCo Inc."
+ * → "Foundryco Inc.") and the original intake text is available, prefer the source-
+ * text variant ONLY when it has strictly more uppercase letters than the cleaned
+ * variant. This guards against demoting an upgraded canonical form (e.g. "Smith And
+ * Wesson Holdings LLC") back to a lowercase user variant — only deliberately-cased
+ * names like FoundryCo / MidCap / iCloud are restored.
+ *
+ * Returns the input unchanged whenever:
+ *   • the intake text is missing,
+ *   • the cleaned name does not appear (case-insensitive, word-boundary) in the intake,
+ *   • the intake variant has equal or fewer uppercase letters than the cleaned variant,
+ *   • or the regex compilation fails for any reason.
+ */
+function restorePartyCasingFromIntake(
+  name: string,
+  intakeText: string | null | undefined,
+): string {
+  const trimmed = (name || "").trim();
+  const intake = (intakeText || "").trim();
+  if (!trimmed || !intake) return name;
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Use character-class boundaries (not \b) because canonical names frequently end in
+  // a non-word character ("Inc.", "L.L.C.") where \b would not match against a trailing
+  // space. We accept any non-alphanumeric / non-period boundary on either side.
+  let m: RegExpExecArray | null = null;
+  try {
+    m = new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, "i").exec(intake);
+  } catch {
+    return name;
+  }
+  if (!m) return name;
+  const original = m[0];
+  if (original === trimmed) return name;
+  const upperOrig = (original.match(/[A-Z]/g) || []).length;
+  const upperClean = (trimmed.match(/[A-Z]/g) || []).length;
+  if (upperOrig <= upperClean) return name;
+  return original;
 }
 
 /** Collapses repeated LawDog e-sign footers to a single trailing notice (all preview modes). */
@@ -271,7 +353,11 @@ function partyEntryWithRoleConfidence(p: { name: string; role?: string }, starte
   return { name: p.name, role: p.role };
 }
 
-function partiesPreambleBlock(draft: ParsedDraftShape, starterPreview: boolean = false): string {
+function partiesPreambleBlock(
+  draft: ParsedDraftShape,
+  starterPreview: boolean = false,
+  intakeText: string | null | undefined = null,
+): string {
   const ps = draft.parties || [];
   const n0 = (ps[0]?.name || "").trim();
   const n1 = (ps[1]?.name || "").trim();
@@ -284,8 +370,8 @@ function partiesPreambleBlock(draft: ParsedDraftShape, starterPreview: boolean =
 
   if (extracted) {
     return formatLegalPartyPreamble([
-      { name: extracted.a, role: "party" },
-      { name: extracted.b, role: "party" },
+      { name: restorePartyCasingFromIntake(extracted.a, intakeText), role: "party" },
+      { name: restorePartyCasingFromIntake(extracted.b, intakeText), role: "party" },
     ]);
   }
 
@@ -294,6 +380,10 @@ function partiesPreambleBlock(draft: ParsedDraftShape, starterPreview: boolean =
     .map((p) => ({
       ...p,
       name: starterPreview ? sanitizeStarterPartyNameForDisplay(p.name) : p.name,
+    }))
+    .map((p) => ({
+      ...p,
+      name: restorePartyCasingFromIntake(p.name, intakeText),
     }))
     .map((p) => partyEntryWithRoleConfidence(p, starterPreview));
   if (validParties.length >= 2) {
@@ -362,7 +452,7 @@ function buildOperatingAgreementPreviewText(draft: ParsedDraftShape, options?: A
   const transfers = nz(draft.transfer_restrictions_summary);
   const dissolution = nz(draft.dissolution_summary);
   const more = sanitizeUserAdditionalTerms(draft.additional_terms, premiumDeliverable);
-  const title = nz(draft.title);
+  const title = resolveStarterDisplayTitle(draft, options);
 
   const lawLine =
     starterPreview && isJurisdictionDisplayLowConfidence((draft.jurisdiction || "").trim())
@@ -436,8 +526,8 @@ export function buildAgreementPreviewTextCore(
     return collapseDuplicateEsignNoticesInFullPreview(buildOperatingAgreementPreviewText(draft, options));
   }
 
-  const title = nz(draft.title);
-  const partiesBlock = partiesPreambleBlock(draft, starterPreview);
+  const title = resolveStarterDisplayTitle(draft, options);
+  const partiesBlock = partiesPreambleBlock(draft, starterPreview, options?.intakeText);
   const purposeRaw = (draft.purpose || "").trim();
   const purposePrepared = premiumDeliverable
     ? applyPremiumDeliverableWeakPhraseReplacements(stripPreviewEsignNoticeLines(purposeRaw))

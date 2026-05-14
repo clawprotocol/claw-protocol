@@ -1775,6 +1775,11 @@ export function AgreementRecipientReview({
     return [draft.title, draft.purpose, draft.payment_terms, ...draft.parties.map((p) => p.name)].join("\n");
   }, [draft]);
 
+  const authoritativePartyNames = useMemo(
+    () => (draft?.parties ?? []).map((p) => p.name),
+    [draft?.parties],
+  );
+
   /** Baseline agreement HTML only — never the recipient’s proposed/compare HTML. */
   const recipientBaselineHtmlSource = useMemo(
     () => (recipientPreview?.baselineHtml?.trim() ? recipientPreview.baselineHtml : renderedHtml),
@@ -1782,20 +1787,30 @@ export function AgreementRecipientReview({
   );
 
   const renderedHtmlDisplay = useMemo(
-    () => substitutePartyPlaceholdersInUserFacingText(renderedHtml, draftSanitizeContext),
-    [renderedHtml, draftSanitizeContext],
+    () =>
+      substitutePartyPlaceholdersInUserFacingText(
+        renderedHtml,
+        draftSanitizeContext,
+        authoritativePartyNames,
+      ),
+    [renderedHtml, draftSanitizeContext, authoritativePartyNames],
   );
 
   const scrubAgreementHtml = useCallback(
-    (html: string) => substitutePartyPlaceholdersInUserFacingText(html || "", draftSanitizeContext),
-    [draftSanitizeContext],
+    (html: string) =>
+      substitutePartyPlaceholdersInUserFacingText(html || "", draftSanitizeContext, authoritativePartyNames),
+    [draftSanitizeContext, authoritativePartyNames],
   );
 
   /** Original draft PDF / text / copy — no redline or revised-upload body. */
   const scrubbedOriginalDraftHtmlForPdfExport = useMemo(() => {
-    const inner = substitutePartyPlaceholdersInUserFacingText(recipientBaselineHtmlSource || "", draftSanitizeContext);
+    const inner = substitutePartyPlaceholdersInUserFacingText(
+      recipientBaselineHtmlSource || "",
+      draftSanitizeContext,
+      authoritativePartyNames,
+    );
     return stripCompareMarkupFromOriginalDraftHtml(inner);
-  }, [recipientBaselineHtmlSource, draftSanitizeContext]);
+  }, [recipientBaselineHtmlSource, draftSanitizeContext, authoritativePartyNames]);
 
   const directCompareDefault = useMemo(
     () => htmlToPlainText(scrubbedOriginalDraftHtmlForPdfExport || "").trim(),
