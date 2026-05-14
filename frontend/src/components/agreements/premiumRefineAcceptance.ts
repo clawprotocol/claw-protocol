@@ -85,7 +85,13 @@ export function pickAuthoritativeProCorpusForRefine(args: {
   return { text: best.text, chosenSource: best.source, len: best.text.length };
 }
 
-export type PremiumRefineApplyDecision = "accepted" | "rejected_short" | "rejected_empty" | "rejected_unchanged";
+export type PremiumRefineApplyDecision =
+  | "accepted"
+  | "rejected_short"
+  | "rejected_empty"
+  | "rejected_unchanged"
+  /** LLM output passed length gates but failed clause-local surgical outcome checks (e.g. convenience notice days). */
+  | "rejected_surgical_postcondition_failed";
 
 export type PremiumRefineRevisionIntent =
   | "surgical_revision"
@@ -884,6 +890,10 @@ export function isProRefineSurgicalExhaustedMessage(message: string | undefined)
 
 /** Shown inline after a premium refine is accepted and applied. */
 export const PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE = "Revision applied. Review before sending.";
+
+/** Model changed text but did not perform the requested termination-for-convenience notice edit. */
+export const PRO_REFINE_SURGICAL_POSTCONDITION_FAILED_MESSAGE =
+  "That change was not applied because the termination-for-convenience notice period in the draft still does not match your request. Try a narrower instruction or use Edit wording.";
 
 /** Success line for advisory / reviewer-note append (What changed + Latest update + toast). */
 export const PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY =

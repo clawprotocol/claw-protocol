@@ -430,6 +430,7 @@ import {
   PRO_REFINE_REVISE_HELPER,
   PRO_REFINE_REVISE_SECTION_HEADING,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
+  PRO_REFINE_SURGICAL_POSTCONDITION_FAILED_MESSAGE,
   shouldUseProRefineAdvisoryAppendSuccessCopy,
 } from "./premiumRefineAcceptance";
 import {
@@ -6086,6 +6087,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               ? PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED
               : formatProRefineRejectedShortInline(),
           );
+          return false;
+        }
+        if (acceptance.decision === "rejected_surgical_postcondition_failed") {
+          setHardError(null);
+          setReviewRefineUserMessage(PRO_REFINE_SURGICAL_POSTCONDITION_FAILED_MESSAGE);
           return false;
         }
         // eslint-disable-next-line no-console

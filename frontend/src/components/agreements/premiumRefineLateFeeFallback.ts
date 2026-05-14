@@ -15,6 +15,7 @@ import {
 } from "./premiumRefineAcceptance";
 import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
 import { applyDeterministicSurgicalRevisionFallback } from "./premiumRefineDeterministicSurgicalFallback";
+import { resolveTerminationConvenienceNoticeDaysPostconditionIfNeeded } from "./premiumRefineTerminationConveniencePostcondition";
 
 type PremiumRefineAcceptanceResult = ReturnType<typeof evaluatePremiumRefineCandidate>;
 
@@ -390,6 +391,15 @@ export function resolvePremiumRefineApplyOutcome(args: {
   }
 
   if (acc.decision === "accepted") {
+    const postBranch = resolveTerminationConvenienceNoticeDaysPostconditionIfNeeded({
+      apiCandidateText: out0,
+      baselineText,
+      baselineLen,
+      summaryChanges,
+      userInstruction: inst,
+      preliminaryAcceptance: acc,
+    });
+    if (postBranch) return postBranch;
     return {
       finalText: out0,
       acceptance: acc,

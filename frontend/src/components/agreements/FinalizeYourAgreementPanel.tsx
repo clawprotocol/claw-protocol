@@ -10,6 +10,7 @@ import {
   PRO_REFINE_REVISE_HELPER,
   PRO_REFINE_REVISE_SECTION_HEADING,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
+  PRO_REFINE_SURGICAL_POSTCONDITION_FAILED_MESSAGE,
   shouldUseProRefineAdvisoryAppendSuccessCopy,
 } from "./premiumRefineAcceptance";
 import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
@@ -334,6 +335,12 @@ export function FinalizeYourAgreementPanel({
           );
           return;
         }
+        if (acc.decision === "rejected_surgical_postcondition_failed") {
+          setLastRefine(null);
+          setRefineSuccessMessage(null);
+          setErr(PRO_REFINE_SURGICAL_POSTCONDITION_FAILED_MESSAGE);
+          return;
+        }
         if (acc.decision === "rejected_empty") {
           setLastRefine(null);
           setRefineSuccessMessage(null);
@@ -472,6 +479,12 @@ export function FinalizeYourAgreementPanel({
               ? PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED
               : formatProRefineRejectedShortInline(),
           );
+          return;
+        }
+        if (acc.decision === "rejected_surgical_postcondition_failed") {
+          setLastRefine(null);
+          setRefineSuccessMessage(null);
+          setErr(PRO_REFINE_SURGICAL_POSTCONDITION_FAILED_MESSAGE);
           return;
         }
         if (acc.decision === "rejected_empty") {

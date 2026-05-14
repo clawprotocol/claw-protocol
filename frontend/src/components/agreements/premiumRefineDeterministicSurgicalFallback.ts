@@ -54,7 +54,7 @@ export function looksLikeTerminationConvenienceNoticeDaysInstruction(instr: stri
   return true;
 }
 
-function parseTargetNoticePhrase(instr: string): string | null {
+export function parseTargetNoticePhrase(instr: string): string | null {
   const t = instr;
   if (/\bforty[-\s]?five\s*\(\s*45\s*\)/i.test(t) || /\(\s*45\s*\)\s*days?/i.test(t)) {
     return "forty-five (45) days' prior written notice";
@@ -126,6 +126,46 @@ function applyTerminationConvenienceNoticeToBlock(
     return r.next;
   });
   return { text: out.join(" "), hit: any, matched };
+}
+
+/**
+ * Sentences that both (a) describe termination for convenience / without cause and
+ * (b) contain an "upon … days' prior written notice" style operative notice period.
+ * Used by deterministic patch and by acceptance postcondition checks.
+ */
+export function extractConvenienceTerminationPriorNoticeSentences(doc: string): string[] {
+  const paras = doc.split(/\n\n+/);
+  const collected: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < paras.length; i++) {
+    const sliceEnd = Math.min(paras.length, i + 4);
+    const windowText = paras.slice(i, sliceEnd).join("\n\n");
+    const convTopic =
+      /for\s+convenience|termination\s+for\s+convenience|without\s+cause|terminate\s+(?:its\s+)?participation|terminate\s+this\s+Agreement\s+for\s+convenience/i.test(
+        windowText,
+      );
+    if (!convTopic) continue;
+    if (!UPON_DAYS_PRIOR_WRITTEN_NOTICE_RE.test(windowText)) continue;
+    for (let j = i; j < sliceEnd; j++) {
+      const parts = paras[j]!.split(/(?<=[.!?]["']?)\s+/);
+      for (const p of parts) {
+        const s = p.trim();
+        if (!s) continue;
+        if (
+          sentenceHasConvenienceTermination(s) &&
+          UPON_DAYS_PRIOR_WRITTEN_NOTICE_RE.test(s) &&
+          !sentenceIsCauseCureOnly(s)
+        ) {
+          const key = s.toLowerCase().replace(/\s+/g, " ");
+          if (!seen.has(key)) {
+            seen.add(key);
+            collected.push(s);
+          }
+        }
+      }
+    }
+  }
+  return collected;
 }
 
 function tryTerminationConvenienceNoticeFallback(

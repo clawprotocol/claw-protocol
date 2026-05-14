@@ -28,6 +28,10 @@ import {
   STRUCTURED_ADVISORY_KEY_ORDER,
 } from "./premiumRefineAcceptance";
 import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
+import { resolvePremiumRefineApplyOutcome } from "./premiumRefineLateFeeFallback";
+import {
+  candidatePassesTerminationConvenienceNoticeDaysPostcondition,
+} from "./premiumRefineTerminationConveniencePostcondition";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
 
@@ -445,5 +449,144 @@ describe("pickAuthoritativeProCorpusForRefine", () => {
 
   it("surfaces authoritative pipeline constant", () => {
     expect(PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE).toBe("server_full_document_text");
+  });
+});
+
+const TERMINATION_CONVENIENCE_45_INSTR =
+  "Revise the termination section to require forty-five (45) days' prior written notice for termination for convenience instead of thirty (30) days. Keep all other commercial, payment, ownership, confidentiality, governing law, dispute resolution, signature, party identity, and project scope terms unchanged.";
+
+function buildTerminationConvenienceDoc(uponInner: string, padTotal: number): string {
+  const core = `## Termination
+
+### Termination for Cause
+
+A party may terminate for material breach, subject to a cure period of twenty-one (21) calendar days following written notice of the breach.
+
+### Termination for Convenience
+
+Any Party may terminate its participation in this Agreement for convenience ${uponInner} to the other Parties.
+
+## Signatures
+
+IN WITNESS WHEREOF.
+`;
+  const pad = "p".repeat(Math.max(0, padTotal - core.length));
+  return `${core}\n${pad}`;
+}
+
+/** Non-`upon … prior written notice` phrasing so deterministic surgical fallback cannot patch. */
+function buildTerminationConvenienceDocNonDeterministic(noticeInner: string, padTotal: number): string {
+  const core = `## Termination
+
+### Termination for Convenience
+
+Any Party may terminate its participation in this Agreement for convenience ${noticeInner}
+
+## Signatures
+
+IN WITNESS WHEREOF.
+`;
+  const pad = "p".repeat(Math.max(0, padTotal - core.length));
+  return `${core}\n${pad}`;
+}
+
+describe("resolvePremiumRefineApplyOutcome — termination convenience notice surgical postcondition", () => {
+  it("does not accept when the model edits unrelated text but leaves fifteen (15) days prior written notice in the convenience sentence (and deterministic cannot patch this phrasing)", () => {
+    const notice =
+      "with at least fifteen (15) days written notice to the other Parties (nonstandard phrasing without the operative upon clause).";
+    const baseline = buildTerminationConvenienceDocNonDeterministic(notice, 9200);
+    const candidate = `${baseline}\n\n## Operational Note\n\nClarified internal cross-references in Article 1 headings only.\n`;
+    const resolved = resolvePremiumRefineApplyOutcome({
+      apiOut: candidate,
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      summaryChanges: ["Clarified internal cross-references in Article 1 headings only."],
+      userInstruction: TERMINATION_CONVENIENCE_45_INSTR,
+    });
+    expect(resolved.acceptance.decision).toBe("rejected_surgical_postcondition_failed");
+    expect(resolved.finalText.trim()).toBe(baseline.trim());
+    expect(resolved.appliedDeterministicSurgicalFallback).toBe(false);
+  });
+
+  it("does not accept when the model leaves thirty (30) days prior written notice when the baseline uses non-deterministic phrasing", () => {
+    const notice =
+      "with thirty (30) days written notice to the other Parties (nonstandard phrasing without the operative upon clause).";
+    const baseline = buildTerminationConvenienceDocNonDeterministic(notice, 9200);
+    const candidate = `${baseline}\n\n## Style\n\nNormalized dash usage in non-substantive headings.\n`;
+    const resolved = resolvePremiumRefineApplyOutcome({
+      apiOut: candidate,
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      summaryChanges: ["Normalized dash usage in non-substantive headings."],
+      userInstruction: TERMINATION_CONVENIENCE_45_INSTR,
+    });
+    expect(resolved.acceptance.decision).toBe("rejected_surgical_postcondition_failed");
+    expect(resolved.finalText.trim()).toBe(baseline.trim());
+  });
+
+  it("accepts when the convenience sentence contains forty-five (45) days' prior written notice", () => {
+    const baseline = buildTerminationConvenienceDoc("upon thirty (30) days' prior written notice", 9200);
+    const candidate = buildTerminationConvenienceDoc("upon forty-five (45) days' prior written notice", 9300);
+    const resolved = resolvePremiumRefineApplyOutcome({
+      apiOut: candidate,
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      summaryChanges: ["Updated termination-for-convenience notice period per instruction."],
+      userInstruction: TERMINATION_CONVENIENCE_45_INSTR,
+    });
+    expect(resolved.acceptance.decision).toBe("accepted");
+    expect(resolved.finalText).toContain("forty-five (45) days' prior written notice");
+    expect(resolved.appliedDeterministicSurgicalFallback).toBe(false);
+  });
+
+  it("does not accept the LLM-only edit when convenience still shows fifteen (15) but applies deterministic fallback from a patchable baseline (for-cause text may drift)", () => {
+    const baseline = buildTerminationConvenienceDoc("upon at least fifteen (15) days' prior written notice", 9200);
+    const cause45 = baseline.replace(
+      "twenty-one (21) calendar days",
+      "forty-five (45) days' prior written notice and twenty-one (21) calendar days",
+    );
+    expect(cause45).not.toBe(baseline);
+    const resolved = resolvePremiumRefineApplyOutcome({
+      apiOut: cause45,
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      summaryChanges: ["Adjusted cure-period notice framing in the for-cause paragraph."],
+      userInstruction: TERMINATION_CONVENIENCE_45_INSTR,
+    });
+    expect(resolved.acceptance.decision).toBe("accepted");
+    expect(resolved.appliedDeterministicSurgicalFallback).toBe(true);
+    expect(resolved.finalText).toMatch(/forty-five\s*\(\s*45\s*\)\s*days['']?\s+prior\s+written\s+notice/i);
+    expect(resolved.finalText).not.toMatch(/fifteen\s*\(\s*15\s*\)\s*days['']?\s+prior\s+written\s+notice/i);
+  });
+
+  it("applies deterministic fallback when the LLM candidate fails the postcondition but the baseline can be patched", () => {
+    const baseline = buildTerminationConvenienceDoc("upon thirty (30) days' prior written notice", 9200);
+    const bad = `${baseline}\n\n## Administrative\n\nReordered non-substantive bullet labels in the exhibits table of contents.\n`;
+    const resolved = resolvePremiumRefineApplyOutcome({
+      apiOut: bad,
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      summaryChanges: ["Reordered exhibit TOC labels."],
+      userInstruction: TERMINATION_CONVENIENCE_45_INSTR,
+    });
+    expect(resolved.acceptance.decision).toBe("accepted");
+    expect(resolved.appliedDeterministicSurgicalFallback).toBe(true);
+    expect(resolved.finalText).toMatch(/forty-five\s*\(\s*45\s*\)\s*days['']?\s+prior\s+written\s+notice/i);
+    expect(resolved.finalText).not.toMatch(/thirty\s*\(\s*30\s*\)\s*days['']?\s+prior\s+written\s+notice/i);
+  });
+
+  it("does not run the postcondition gate for instructions that are not termination-convenience notice-day surgical intents", () => {
+    const baseline = buildTerminationConvenienceDoc("upon thirty (30) days' prior written notice", 9200);
+    const candidate = `${baseline}\n\n## Exhibit Index\n\nNormalized numbering in the exhibit list only.\n`;
+    const instr = "Improve the exhibits cross-reference formatting in Section 1 only.";
+    const resolved = resolvePremiumRefineApplyOutcome({
+      apiOut: candidate,
+      baselineText: baseline,
+      baselineLen: baseline.length,
+      summaryChanges: ["Normalized exhibit numbering."],
+      userInstruction: instr,
+    });
+    expect(candidatePassesTerminationConvenienceNoticeDaysPostcondition(candidate, instr)).toBe(true);
+    expect(resolved.acceptance.decision).toBe("accepted");
   });
 });
