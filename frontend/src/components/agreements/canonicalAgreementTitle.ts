@@ -23,6 +23,52 @@ export const CANONICAL_TITLE_FOR_FAMILY: Record<AgreementFamily, string> = {
   generic_business_agreement: "Business Agreement",
 };
 
+/**
+ * Fixes clearly accidental title corruption (duplicate leading letter, repeated first word,
+ * duplicated full title string) without touching substantive custom headings or body text.
+ *
+ * Callers must pass **document title fields only** — not agreement body paragraphs.
+ */
+export function normalizeAgreementDisplayTitle(raw: string | null | undefined): string {
+  const input = (raw || "").replace(/\s+/g, " ").trim();
+  if (input.length < 4) return input;
+
+  let t = input;
+
+  // 1) Entire title duplicated back-to-back (case-insensitive), e.g. two pasted copies.
+  if (t.length >= 24 && t.length % 2 === 0) {
+    const h = t.length / 2;
+    const a = t.slice(0, h).trimEnd();
+    const b = t.slice(h).trimStart();
+    if (a.length >= 10 && a.toLowerCase() === b.toLowerCase()) {
+      t = a;
+    }
+  }
+
+  // 2) Repeated leading word before a document-type tail (e.g. "Services Services Agreement").
+  const wordDup = t.match(/^([\w&.'\-]{3,48})\s+\1(\s+(?:Agreement|Contract|Deal|Pact)\b[\s\S]*)$/i);
+  if (wordDup) {
+    t = `${wordDup[1]}${wordDup[2]}`;
+  }
+
+  // 3) Double leading alphabetic character (e.g. "SServices Agreement" → "Services Agreement").
+  // Never strip the first two letters of a genuine "LLC …" title start.
+  if (t.length >= 6 && /^([A-Za-z])\1/.test(t)) {
+    if (/^LLC\b/i.test(t)) {
+      return t;
+    }
+    const candidate = t.slice(1);
+    if (candidate.length >= 5 && /^[A-Za-z]/.test(candidate)) {
+      if (/^[a-z]/.test(candidate)) {
+        return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+      }
+      return candidate;
+    }
+  }
+
+  return t;
+}
+
 const GENERIC_TITLE_PATTERNS: RegExp[] = [
   /^\s*$/,
   /^agreement$/i,
@@ -183,7 +229,7 @@ function intakeSaysMutualNda(rawIntake: string | null | undefined): boolean {
   return /\bmutual\b/.test(low) || /\bbetween\s+\w/.test(low);
 }
 
-export function resolveCanonicalAgreementTitle(opts: {
+function resolveCanonicalAgreementTitleCore(opts: {
   currentTitle: string | null | undefined;
   liveDocTitle: string | null | undefined;
   family: AgreementFamily;
@@ -263,4 +309,19 @@ export function resolveCanonicalAgreementTitle(opts: {
     return { title: live, source: "live" };
   }
   return { title: CANONICAL_TITLE_FOR_FAMILY[opts.family] ?? "Business Agreement", source: "family" };
+}
+
+/**
+ * Single canonical title resolver for preview + draft.title persistence: applies
+ * {@link normalizeAgreementDisplayTitle} to every non-empty resolved heading so accidental
+ * duplicate leading characters (e.g. "SServices Agreement") never reach render surfaces.
+ */
+export function resolveCanonicalAgreementTitle(opts: {
+  currentTitle: string | null | undefined;
+  liveDocTitle: string | null | undefined;
+  family: AgreementFamily;
+  intakeText?: string | null;
+}): CanonicalTitleResolution {
+  const r = resolveCanonicalAgreementTitleCore(opts);
+  return { ...r, title: normalizeAgreementDisplayTitle(r.title) };
 }

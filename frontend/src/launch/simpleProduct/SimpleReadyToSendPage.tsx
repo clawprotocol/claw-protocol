@@ -16,6 +16,7 @@ import { ConversionPricingTriad } from "../ConversionPricingTriad";
 import { PAYWALL_DEFAULT_HEADLINE, PAYWALL_DEFAULT_SUB } from "../paywallMessaging";
 import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
 import { SimpleFlowShell } from "./SimpleFlowShell";
+import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
 
 const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
 
@@ -109,7 +110,7 @@ export function SimpleReadyToSendPage(props: { agreementId: string }) {
               <span className="text-emerald-500/90" aria-hidden>
                 ✓
               </span>
-              <span>Agreement drafted{draft?.title ? ` — “${draft.title.trim()}”` : ""}</span>
+              <span>Agreement drafted{draft?.title ? ` — “${normalizeAgreementDisplayTitle(draft.title.trim()) || draft.title.trim()}”` : ""}</span>
             </li>
             <li className="flex gap-2">
               <span className="text-emerald-500/90" aria-hidden>

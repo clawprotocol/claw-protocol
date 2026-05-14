@@ -15,6 +15,7 @@ import { selectAgreementPreviewRoute } from "./agreementPreviewRoute";
 import type { AgreementFamily } from "./agreementFamilyRouter";
 import {
   isGenericOrEmptyTitle,
+  normalizeAgreementDisplayTitle,
   resolveCanonicalAgreementTitle,
 } from "./canonicalAgreementTitle";
 import { PREMIUM_JURISDICTION_PLACEHOLDER } from "./premiumDraftTransform";
@@ -80,7 +81,9 @@ function resolveStarterDisplayTitle(
 ): string {
   const current = (draft.title || "").trim();
   const family = draft.agreement_family as AgreementFamily | undefined;
-  if (current && !isGenericOrEmptyTitle(current, family)) return current;
+  if (current && !isGenericOrEmptyTitle(current, family)) {
+    return normalizeAgreementDisplayTitle(current);
+  }
   if (family) {
     const resolution = resolveCanonicalAgreementTitle({
       currentTitle: current || null,

@@ -1,4 +1,5 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
+import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
@@ -293,7 +294,10 @@ export function buildAgreementVs01BridgeSession(params: {
   return {
     vs01DocumentId: params.vs01DocumentId.trim(),
     agreementId: params.agreementId.trim(),
-    agreementTitle: (params.draft?.title || "").trim() || "Agreement",
+    agreementTitle:
+      normalizeAgreementDisplayTitle((params.draft?.title || "").trim()) ||
+      (params.draft?.title || "").trim() ||
+      "Agreement",
     creatorName,
     creatorEmail,
     counterparties,

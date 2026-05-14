@@ -14,7 +14,7 @@ import { extractBetweenPartyPair } from "./partyBetweenParse";
 import { applyIntakePartyRoleOverlay, type IntakePartyRoleLabels } from "./partyRoleIntake";
 import { applySimpleFlowSmartDefaults, type ParsedDraftShape } from "./intakeSmartDefaults";
 import { preserveExtractedFacts } from "./draftFactPreservation";
-import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
+import { normalizeAgreementDisplayTitle, resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
 import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
 import { applyPartyNameCasingPassToDraft } from "../../agreement/partyNameDisplayCasing";
 
@@ -618,5 +618,6 @@ export function runIntakeDefaultsAndRoles(
   // Final P0 cardinality guard — runs AFTER role overlay so any path that downsized a 3+
   // structured list is restored.
   next = preserveLargestPartyListFromIntake(next, rawIntake);
-  return applyPartyNameCasingPassToDraft(next, rawIntake);
+  next = applyPartyNameCasingPassToDraft(next, rawIntake);
+  return { ...next, title: normalizeAgreementDisplayTitle(next.title) };
 }

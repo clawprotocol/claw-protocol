@@ -93,6 +93,7 @@ import { ClawTrustFooter } from "../components/claw/ClawTrustFooter";
 import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge";
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
 import { recipientExportBasenameFromTitle, recipientTextDownloadFilename } from "./recipientExportFilenames";
+import { normalizeAgreementDisplayTitle } from "../components/agreements/canonicalAgreementTitle";
 import {
   RECIPIENT_PUBLIC_HERO_SUBTITLE,
   RECIPIENT_PUBLIC_HERO_TITLE,
@@ -447,12 +448,20 @@ function formatPartiesLine(parties: AgreementDraft["parties"]): string {
 
 /** Short “Type” line for metadata — never the full agreement body (preview shows that). */
 function recipientMetadataTypeLine(draft: AgreementDraft): string {
-  const title = (draft.title || "").trim();
+  const rawTitle = (draft.title || "").trim();
+  const title = rawTitle ? normalizeAgreementDisplayTitle(rawTitle) || rawTitle : "";
   if (title) return title;
   const purpose = (draft.purpose || "").trim();
   if (!purpose) return "Agreement";
   if (purposeLooksLikeFullAgreementTextForRender(purpose)) return "Agreement";
   return purpose.length > 120 ? `${purpose.slice(0, 120)}…` : purpose;
+}
+
+/** Display-only title for recipient UI / PDF chrome; never rewrite stored `draft.title`. */
+function recipientAgreementTitleForDisplay(raw: string | null | undefined): string | null {
+  const t = (raw || "").trim();
+  if (!t) return null;
+  return normalizeAgreementDisplayTitle(t) || t;
 }
 
 export type AgreementRecipientEntry =
@@ -3173,7 +3182,7 @@ export function AgreementRecipientReview({
                       exportBasename: recipientExportBasenameFromTitle(draft?.title, agreementId),
                       reviewerDisplayName: proposerDisplayNameForApi,
                       reviewerEmail: reviewerEmailForExport,
-                      agreementTitleDisplay: draft?.title ?? null,
+                      agreementTitleDisplay: recipientAgreementTitleForDisplay(draft?.title),
                     }}
                   />
                 </div>
@@ -3334,7 +3343,7 @@ export function AgreementRecipientReview({
                 exportBasename: recipientExportBasenameFromTitle(draft?.title, agreementId),
                 reviewerDisplayName: proposerDisplayNameForApi,
                 reviewerEmail: reviewerEmailForExport,
-                agreementTitleDisplay: draft?.title ?? null,
+                agreementTitleDisplay: recipientAgreementTitleForDisplay(draft?.title),
               }}
             />
           </div>
@@ -3923,7 +3932,7 @@ export function AgreementRecipientReview({
           >
             <RecipientWantACopyStrip
               agreementId={agreementId}
-              agreementTitle={draft.title}
+              agreementTitle={recipientAgreementTitleForDisplay(draft.title)}
               readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
               scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
               plainDraftText={directCompareDefault}
@@ -3966,7 +3975,7 @@ export function AgreementRecipientReview({
         >
           <RecipientWantACopyStrip
             agreementId={agreementId}
-            agreementTitle={draft.title}
+            agreementTitle={recipientAgreementTitleForDisplay(draft.title)}
             readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
             scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
             plainDraftText={directCompareDefault}
@@ -4294,7 +4303,7 @@ export function AgreementRecipientReview({
         >
           <RecipientWantACopyStrip
             agreementId={agreementId}
-            agreementTitle={draft.title}
+            agreementTitle={recipientAgreementTitleForDisplay(draft.title)}
             readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
             scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
             plainDraftText={directCompareDefault}
@@ -5084,7 +5093,7 @@ export function AgreementRecipientReview({
                       bare
                       suppressBareDisclosure
                       agreementId={agreementId}
-                      agreementTitle={draft?.title}
+                      agreementTitle={recipientAgreementTitleForDisplay(draft?.title)}
                       readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
                       scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
                       pdfDownloadButtonLabel={RECIPIENT_BTN_DOWNLOAD_ORIGINAL_PDF}

@@ -56,6 +56,7 @@ import {
   formatAuthoritativeAgreementPartiesHeadline,
   orderedAuthoritativePartyDisplayNames,
 } from "../../agreement/handoffPartyDisplay";
+import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
 
 export function SimpleDonePage(props: { agreementId: string }) {
   const { agreementId } = props;
@@ -120,7 +121,10 @@ export function SimpleDonePage(props: { agreementId: string }) {
       if (cancel) return;
       const isSigned = Boolean(v?.signature_status?.fully_executed);
       setSigned(isSigned);
-      setTitle((v?.summary?.title || "").trim() || null);
+      setTitle((() => {
+        const raw = (v?.summary?.title || "").trim();
+        return raw ? normalizeAgreementDisplayTitle(raw) : null;
+      })());
       if (isSigned && !finalizeLoggedRef.current) {
         finalizeLoggedRef.current = true;
         trackAgreementFunnelEvent("agreement_completed", { surface: "simple_done" }, { agreementId });
@@ -399,7 +403,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   if (isPaidProReviewDonePath) {
     const agreementTitle =
-      (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement";
+      normalizeAgreementDisplayTitle(
+        (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement",
+      ) ||
+      (ownerHandoffDraft?.title || "").trim() ||
+      (title || "").trim() ||
+      "Agreement";
     const primaryReviewHref = (reviewHandoffRows[0]?.reviewHref || "").trim();
     const recipientApprovalDetected = Boolean(
       ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),

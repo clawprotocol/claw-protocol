@@ -13,6 +13,7 @@ import {
   structuredPartiesStructured,
 } from "./intakeStructuredAgreementModel";
 import { splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
+import { normalizeAgreementDisplayTitle } from "./canonicalAgreementTitle";
 
 export type LivePreviewModel = {
   docTitle: string;
@@ -197,9 +198,10 @@ export function buildLiveDraftPreview(raw: string): LivePreviewModel {
   const scrub = (s: string | null) =>
     s ? substitutePartyPlaceholdersInUserFacingText(s, text) : null;
   const titleScrubbed = scrub(docTitle) || docTitle;
+  const docTitleNormalized = normalizeAgreementDisplayTitle(titleScrubbed);
 
   return {
-    docTitle: titleScrubbed,
+    docTitle: docTitleNormalized,
     partiesLine: scrub(partiesLine),
     partiesStructured: partiesStructured
       ? {

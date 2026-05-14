@@ -1,4 +1,5 @@
 import type { RecipientPreviewPdfExportKind } from "./recipientPreviewPdfHtml";
+import { normalizeAgreementDisplayTitle } from "../components/agreements/canonicalAgreementTitle";
 
 /**
  * Slug for download filenames: lowercase, hyphenated, filesystem-safe, deterministic.
@@ -7,7 +8,7 @@ export function recipientExportBasenameFromTitle(
   agreementTitle: string | null | undefined,
   agreementIdFallback: string,
 ): string {
-  const raw = (agreementTitle || "").trim();
+  const raw = normalizeAgreementDisplayTitle((agreementTitle || "").trim());
   const slug = raw
     .toLowerCase()
     .normalize("NFKD")
