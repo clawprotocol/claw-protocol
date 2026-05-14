@@ -78,6 +78,7 @@ import {
 } from "./pendingSignatureDerive";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { substitutePartyPlaceholdersInUserFacingText } from "./partyPlaceholderDisplay";
+import { formatAuthoritativeAgreementPartiesInline } from "./handoffPartyDisplay";
 import { findOpenRecipientProposals } from "./recipientProposal";
 import {
   DEFAULT_NEGOTIATION_POSTURE,
@@ -410,7 +411,7 @@ function recipientAgreementSummaryCard(props: {
             <dd className="mt-0.5 font-medium leading-snug">{props.sharedBy}</dd>
           </div>
           <div className="min-w-0 sm:col-span-1">
-            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Parties</dt>
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Agreement parties</dt>
             <dd className="mt-0.5 font-medium leading-snug">{props.partiesLine}</dd>
           </div>
         </dl>
@@ -429,7 +430,7 @@ function recipientAgreementSummaryCard(props: {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-8">
         <div className="min-w-0 space-y-3">
           {row("Type", props.agreementType)}
-          {row("Parties", props.partiesLine)}
+          {row("Agreement parties", props.partiesLine)}
         </div>
         <div className="min-w-0 space-y-3">
           {row("Shared by", props.sharedBy)}
@@ -440,14 +441,8 @@ function recipientAgreementSummaryCard(props: {
   );
 }
 
-function formatPartiesLine(parties: AgreementDraft["parties"], maxNames = 4): string {
-  const names = (parties || [])
-    .map((p) => (p.name || "").trim())
-    .filter(Boolean);
-  if (names.length === 0) return "—";
-  const shown = names.slice(0, maxNames);
-  const extra = names.length > maxNames ? ` +${names.length - maxNames}` : "";
-  return `${shown.join(" · ")}${extra}`;
+function formatPartiesLine(parties: AgreementDraft["parties"]): string {
+  return formatAuthoritativeAgreementPartiesInline(parties, { maxShown: 48, separator: " · " });
 }
 
 /** Short “Type” line for metadata — never the full agreement body (preview shows that). */

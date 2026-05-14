@@ -10,6 +10,10 @@ import type { HeroDictationPhase } from "../../launch/useHeroMediaDictation";
 import type { AgreementCreatorPrepState } from "../../agreement/agreementLifecycle";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
+  formatAuthoritativeAgreementPartiesHeadline,
+  orderedAuthoritativePartyDisplayNames,
+} from "../../agreement/handoffPartyDisplay";
+import {
   isAgreementDetailsStepReady,
   normalizeAgreementDraftFromApi,
 } from "../../agreement/agreementDraftNormalize";
@@ -16096,26 +16100,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   : "Recipients receive the final version for signature. They can sign or request changes, but they cannot edit the agreement directly. Nothing reaches them until you share the link."}
               </p>
             ) : null}
-            {draft ? (
-              <div className="mt-4 rounded-lg border border-slate-700/60 bg-slate-950/70 px-3.5 py-3 text-left">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</p>
-                <p className="mt-1 text-sm font-medium text-slate-100">
-                  {(draft.title || "").trim() || "Your agreement"}
-                </p>
-                <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Parties</p>
-                <p className="mt-1 text-sm text-slate-200">
-                  <span className="font-medium text-slate-100">
-                    {(draft.parties?.[0]?.name || "").trim() || "Party A"}
-                  </span>
-                  <span className="mx-1.5 text-slate-500" aria-hidden>
-                    ↔
-                  </span>
-                  <span className="font-medium text-slate-100">
-                    {(draft.parties?.[1]?.name || "").trim() || "Party B"}
-                  </span>
-                </p>
-              </div>
-            ) : null}
+            {draft
+              ? (() => {
+                  const partyNames = orderedAuthoritativePartyDisplayNames(draft.parties);
+                  return (
+                    <div className="mt-4 rounded-lg border border-slate-700/60 bg-slate-950/70 px-3.5 py-3 text-left">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</p>
+                      <p className="mt-1 text-sm font-medium text-slate-100">
+                        {(draft.title || "").trim() || "Your agreement"}
+                      </p>
+                      <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Agreement parties
+                      </p>
+                      {partyNames.length > 2 ? (
+                        <ol className="mt-1.5 list-decimal space-y-0.5 pl-5 text-sm text-slate-200">
+                          {partyNames.map((n, i) => (
+                            <li key={`premium_confirm_party_${i}_${n}`}>{n}</li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="mt-1 text-sm text-slate-200">
+                          {formatAuthoritativeAgreementPartiesHeadline(draft.parties)}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()
+              : null}
             {effectivePremiumSendMode === "signature" ? (
               <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left text-sm text-slate-300">
                 <input

@@ -38,6 +38,10 @@ import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
 import { formatLegalPartyPreamble } from "./formatLegalPartyList";
 import { buildAgreementVs01BridgeSession } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
+import {
+  formatAuthoritativeAgreementPartiesHeadline,
+  orderedAuthoritativePartyDisplayNames,
+} from "../../agreement/handoffPartyDisplay";
 
 /* ─────────────────────────── Helpers (lightweight) ───────────────────────────── */
 
@@ -743,5 +747,33 @@ describe("Continuity I3 — order-preservation under repeated runs (no silent re
     expect(mikeIdx).toBeGreaterThanOrEqual(0);
     expect(betaIdx).toBeGreaterThanOrEqual(0);
     expect(mikeIdx).toBeLessThan(betaIdx);
+  });
+});
+
+/* ─────────────────── 9. Handoff summaries — never collapse to two-party ↔ ──────────── */
+
+describe("Continuity handoff summaries — five-party Foundry / Beacon / Apollo / Smith & Wesson / Coastal", () => {
+  const intake =
+    "Master services agreement between FoundryCo Inc., Beacon Operations And Logistics Group LLC, " +
+    "Apollo Data Services LLC, Smith & Wesson Holdings LLC, and Coastal Reserve Partners LP. " +
+    "Termination for convenience: 45 days written notice. Governing law: Delaware.";
+
+  it("handoff headline is never a two-party ↔ join; ordered list has length 5", () => {
+    const draft = runIntake(intake);
+    expect(draft.parties.length).toBeGreaterThanOrEqual(5);
+    const ad = toAgreementDraft(draft);
+    const names = orderedAuthoritativePartyDisplayNames(ad.parties);
+    expect(names.length).toBe(5);
+    expect(formatAuthoritativeAgreementPartiesHeadline(ad.parties)).not.toMatch(/↔/);
+    for (const expected of [
+      "FoundryCo Inc.",
+      "Beacon Operations And Logistics Group LLC",
+      "Apollo Data Services LLC",
+      "Smith & Wesson Holdings LLC",
+      "Coastal Reserve Partners LP",
+    ]) {
+      expectListContainsCaseInsensitive(names, expected);
+    }
+    expectNoDuplicateNames(names);
   });
 });

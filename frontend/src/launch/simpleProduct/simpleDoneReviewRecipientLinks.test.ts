@@ -55,6 +55,19 @@ describe("simpleDoneReviewRecipientLinks session handoff", () => {
     expect(read?.recipients.length).toBe(0);
     expect(read?.reviewLinksPending).toBe(true);
   });
+
+  it("round-trips agreementPartyDisplayNames alongside recipients", () => {
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId: "ag_parties_cache",
+      recipients: [{ displayName: "R", reviewHref: "https://example.com/r" }],
+      agreementPartyDisplayNames: ["FoundryCo Inc.", "Beacon Operations And Logistics Group LLC"],
+    });
+    const read = readSimpleDoneReviewRecipientLinks("ag_parties_cache");
+    expect(read?.agreementPartyDisplayNames).toEqual([
+      "FoundryCo Inc.",
+      "Beacon Operations And Logistics Group LLC",
+    ]);
+  });
 });
 
 describe("reviewLinkMintHasUsableUrls", () => {

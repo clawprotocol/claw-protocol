@@ -48,16 +48,10 @@ import { findOpenRecipientProposals } from "../../agreement/recipientProposal";
 import { readPremiumRecipientHandoff } from "../../components/agreements/premiumPartyNamesHandoff";
 import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./reviewLinkRecipientEmailMerge";
 import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
-
-function formatPartiesLineForDone(parties: AgreementDraft["parties"] | undefined, maxNames = 6): string {
-  const names = (parties || [])
-    .map((p) => String((p as { name?: string }).name ?? "").trim())
-    .filter(Boolean);
-  if (names.length === 0) return "—";
-  const shown = names.slice(0, maxNames);
-  const extra = names.length > maxNames ? ` +${names.length - maxNames}` : "";
-  return `${shown.join(", ")}${extra}`;
-}
+import {
+  formatAuthoritativeAgreementPartiesInline,
+  orderedAuthoritativePartyDisplayNames,
+} from "../../agreement/handoffPartyDisplay";
 
 export function SimpleDonePage(props: { agreementId: string }) {
   const { agreementId } = props;
@@ -154,6 +148,19 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const isPaidProReviewDonePath =
     Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
 
+  const cachedAgreementPartyDisplayNames = reviewRecipientHandoff?.agreementPartyDisplayNames;
+  const paidProDonePartiesLine = useMemo(() => {
+    const fromDraft = formatAuthoritativeAgreementPartiesInline(ownerHandoffDraft?.parties, {
+      maxShown: 48,
+      separator: ", ",
+    });
+    if (fromDraft !== "—") return fromDraft;
+    if (cachedAgreementPartyDisplayNames && cachedAgreementPartyDisplayNames.length > 0) {
+      return cachedAgreementPartyDisplayNames.join(", ");
+    }
+    return "—";
+  }, [ownerHandoffDraft?.parties, cachedAgreementPartyDisplayNames]);
+
   useEffect(() => {
     if (!isPaidProReviewDonePath) return;
     let cancel = false;
@@ -245,6 +252,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
       writeSimpleDoneReviewRecipientLinks({
         agreementId: id,
         recipients: linkRows,
+        agreementPartyDisplayNames: orderedAuthoritativePartyDisplayNames(draft.parties),
         ...(reviewLinksPendingLocal ? { reviewLinksPending: true } : {}),
       });
       setReviewLinksTick((t) => t + 1);
@@ -390,7 +398,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   if (isPaidProReviewDonePath) {
     const agreementTitle =
       (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement";
-    const partiesLine = formatPartiesLineForDone(ownerHandoffDraft?.parties);
+    const partiesLine = paidProDonePartiesLine;
     const primaryReviewHref = (reviewHandoffRows[0]?.reviewHref || "").trim();
     const recipientApprovalDetected = Boolean(
       ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
@@ -471,7 +479,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     <dd className="mt-0.5 font-medium text-slate-100">{agreementTitle}</dd>
                   </div>
                   <div>
-                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Parties</dt>
+                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement parties</dt>
                     <dd className="mt-0.5">{partiesLine}</dd>
                   </div>
                   {reviewHandoffRows.length > 0 ? (

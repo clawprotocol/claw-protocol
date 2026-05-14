@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { fetchAgreementDraft } from "../../agreement/agreementWorkspaceApi";
 import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
-import { participantDisplayName } from "../../agreement/participantModel";
+import {
+  formatAuthoritativeAgreementPartiesInline,
+} from "../../agreement/handoffPartyDisplay";
 import { useDynamicConfig } from "../../config/dynamicConfig/useDynamicConfig";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { useLaunchNav } from "../LaunchNavContext";
@@ -67,13 +69,10 @@ export function SimpleReadyToSendPage(props: { agreementId: string }) {
     };
   }, [agreementId]);
 
-  const parties = draft?.parties ?? [];
-  const partySummary =
-    parties.length >= 2
-      ? `${participantDisplayName(parties[0], 0)} & ${participantDisplayName(parties[1], 1)}`
-      : parties.length === 1
-        ? participantDisplayName(parties[0], 0)
-        : "Parties on your draft";
+  const partySummary = useMemo(() => {
+    if (!draft?.parties?.length) return "Parties on your draft";
+    return formatAuthoritativeAgreementPartiesInline(draft.parties, { maxShown: 48, separator: " · " });
+  }, [draft?.parties]);
   const rawJurisdiction = (draft?.jurisdiction ?? "").trim();
   const jurisdictionLine = rawJurisdiction ? normalizeJurisdictionDisplay(rawJurisdiction) : null;
 

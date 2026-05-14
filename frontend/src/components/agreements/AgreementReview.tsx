@@ -154,6 +154,10 @@ import {
   participantDisplayName,
 } from "../../agreement/participantModel";
 import {
+  formatAuthoritativeAgreementPartiesHeadline,
+  orderedAuthoritativePartyDisplayNames,
+} from "../../agreement/handoffPartyDisplay";
+import {
   emptyPaymentRequest,
   hydratePaymentFormFromApi,
   type PaymentRequestPayload,
@@ -1063,11 +1067,13 @@ const AgreementReview: React.FC<Props> = ({
 
   const streamlinedPartiesHeadline = useMemo(() => {
     if (!draft) return "—";
-    const parties = draft.parties || [];
-    const a = parties[0] ? participantDisplayName(parties[0], 0).trim() : "Party A";
-    const b = parties[1] ? participantDisplayName(parties[1], 1).trim() : "Party B";
-    return `${a} ↔ ${b}`;
+    return formatAuthoritativeAgreementPartiesHeadline(draft.parties);
   }, [draft]);
+
+  const authoritativePartyNamesList = useMemo(
+    () => orderedAuthoritativePartyDisplayNames(draft?.parties),
+    [draft?.parties],
+  );
 
   const agreementReadiness = useMemo(() => {
     if (!draft || section !== "simpleHomeReview") return null;
@@ -6412,10 +6418,24 @@ const AgreementReview: React.FC<Props> = ({
                   <p className="mt-2 text-base font-semibold tracking-tight text-slate-100">
                     {(draft.title || "").trim() || "Agreement"}
                   </p>
-                  <p className="mt-2 text-sm text-slate-300">
-                    <span className="font-medium text-slate-500">Parties: </span>
-                    {streamlinedPartiesHeadline}
-                  </p>
+                  {authoritativePartyNamesList.length > 2 ? (
+                    <div className="mt-2 text-sm text-slate-300">
+                      <p>
+                        <span className="font-medium text-slate-500">Agreement parties </span>
+                        <span className="text-slate-400">({authoritativePartyNamesList.length})</span>
+                      </p>
+                      <ol className="mt-1.5 list-decimal space-y-0.5 pl-5 text-slate-200">
+                        {authoritativePartyNamesList.map((n, i) => (
+                          <li key={`send_summary_${i}_${n}`}>{n}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-300">
+                      <span className="font-medium text-slate-500">Agreement parties: </span>
+                      {streamlinedPartiesHeadline}
+                    </p>
+                  )}
                   <p className="mt-2 text-xs text-slate-500">Review link only · Nothing is signed</p>
                 </div>
               ) : null}
@@ -6506,10 +6526,24 @@ const AgreementReview: React.FC<Props> = ({
                     </div>
                   ) : null}
                   {!simpleHomeReviewLinkSendStep ? (
-                    <p className="text-sm leading-snug text-slate-300">
-                      <span className="font-medium text-slate-500">Parties: </span>
-                      {streamlinedPartiesHeadline}
-                    </p>
+                    authoritativePartyNamesList.length > 2 ? (
+                      <div className="text-sm leading-snug text-slate-300">
+                        <p>
+                          <span className="font-medium text-slate-500">Agreement parties </span>
+                          <span className="text-slate-400">({authoritativePartyNamesList.length})</span>
+                        </p>
+                        <ol className="mt-1.5 list-decimal space-y-0.5 pl-5 text-slate-200">
+                          {authoritativePartyNamesList.map((n, i) => (
+                            <li key={`aside_party_${i}_${n}`}>{n}</li>
+                          ))}
+                        </ol>
+                      </div>
+                    ) : (
+                      <p className="text-sm leading-snug text-slate-300">
+                        <span className="font-medium text-slate-500">Agreement parties: </span>
+                        {streamlinedPartiesHeadline}
+                      </p>
+                    )
                   ) : null}
                   {simpleFlowPhase === "send" ? (
                     simpleSendActionsUnlocked ? (
@@ -7520,6 +7554,26 @@ const AgreementReview: React.FC<Props> = ({
                       ? "This creates a private link for the reviewer to suggest changes. Nothing is signed."
                       : PAYWALL_PAID_READY_SUB_SIGNATURE}
                   </p>
+                  {draft ? (
+                    <div className="mt-4 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3.5 py-3 text-left">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</p>
+                      <p className="mt-1 text-sm font-medium text-slate-100">
+                        {(draft.title || "").trim() || "Agreement"}
+                      </p>
+                      <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Agreement parties
+                      </p>
+                      {authoritativePartyNamesList.length > 2 ? (
+                        <ol className="mt-1.5 list-decimal space-y-0.5 pl-5 text-sm text-slate-200">
+                          {authoritativePartyNamesList.map((n, i) => (
+                            <li key={`wm_confirm_party_${i}_${n}`}>{n}</li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="mt-1 text-sm text-slate-200">{streamlinedPartiesHeadline}</p>
+                      )}
+                    </div>
+                  ) : null}
                   {simpleFlowPremiumHandoffIntent === "signature" ? (
                     <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left text-sm text-slate-300">
                       <input
@@ -7618,6 +7672,24 @@ const AgreementReview: React.FC<Props> = ({
               <p className="mt-2 text-sm leading-relaxed text-slate-400">
                 This creates a private link for the reviewer to suggest changes. Nothing is signed.
               </p>
+              {draft ? (
+                <div className="mt-4 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3.5 py-3 text-left">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</p>
+                  <p className="mt-1 text-sm font-medium text-slate-100">{(draft.title || "").trim() || "Agreement"}</p>
+                  <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Agreement parties
+                  </p>
+                  {authoritativePartyNamesList.length > 2 ? (
+                    <ol className="mt-1.5 list-decimal space-y-0.5 pl-5 text-sm text-slate-200">
+                      {authoritativePartyNamesList.map((n, i) => (
+                        <li key={`review_link_confirm_party_${i}_${n}`}>{n}</li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="mt-1 text-sm text-slate-200">{streamlinedPartiesHeadline}</p>
+                  )}
+                </div>
+              ) : null}
               <div className="mt-6 flex flex-col gap-3">
                 <button
                   type="button"

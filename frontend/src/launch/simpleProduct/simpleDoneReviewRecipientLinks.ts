@@ -25,6 +25,11 @@ export type SimpleDoneReviewLinksPayload = {
   savedAt: number;
   /** True when mint was attempted but no usable URLs were stored (e.g. 503). */
   reviewLinksPending?: boolean;
+  /**
+   * Ordered display names from authoritative `draft.parties` at handoff write time.
+   * Separate from `recipients` (review links / emails).
+   */
+  agreementPartyDisplayNames?: string[];
 };
 
 function shortAgreementId(id: string): string {
@@ -37,15 +42,18 @@ export function writeSimpleDoneReviewRecipientLinks(payload: {
   agreementId: string;
   recipients: SimpleDoneReviewRecipientLinkRow[];
   reviewLinksPending?: boolean;
+  agreementPartyDisplayNames?: string[];
 }): void {
   const id = payload.agreementId.trim();
   if (!id) return;
+  const partyNames = payload.agreementPartyDisplayNames?.filter((n) => typeof n === "string" && n.trim());
   const full: SimpleDoneReviewLinksPayload = {
     v: 1,
     intent: "review",
     recipients: payload.recipients,
     savedAt: Date.now(),
     ...(payload.reviewLinksPending === true ? { reviewLinksPending: true } : {}),
+    ...(partyNames && partyNames.length > 0 ? { agreementPartyDisplayNames: partyNames } : {}),
   };
   try {
     sessionStorage.setItem(simpleDoneReviewRecipientLinksStorageKey(id), JSON.stringify(full));
@@ -79,6 +87,11 @@ export function readSimpleDoneReviewRecipientLinks(agreementId: string): SimpleD
       savedAt: typeof o.savedAt === "number" ? o.savedAt : Date.now(),
     };
     if (o.reviewLinksPending === true) out.reviewLinksPending = true;
+    const cachedParties = (o as { agreementPartyDisplayNames?: unknown }).agreementPartyDisplayNames;
+    if (Array.isArray(cachedParties)) {
+      const names = cachedParties.filter((n): n is string => typeof n === "string" && n.trim().length > 0);
+      if (names.length > 0) out.agreementPartyDisplayNames = names;
+    }
     return out;
   } catch {
     return null;

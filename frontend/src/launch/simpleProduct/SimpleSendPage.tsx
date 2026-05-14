@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { orderedAuthoritativePartyDisplayNames } from "../../agreement/handoffPartyDisplay";
 import { AgreementReviewErrorBoundary } from "../../agreement/AgreementReviewErrorBoundary";
 import AgreementReview from "../../components/agreements/AgreementReview";
 import { JoyFlashBanner } from "../../joy/JoyFlashBanner";
@@ -767,7 +768,11 @@ export function SimpleSendPage(props: { agreementId: string }) {
                 recipientCount: linkRows.length,
               });
               clearPersistedSendPhase(agreementId);
-              writeSimpleDoneReviewRecipientLinks({ agreementId: id, recipients: linkRows });
+              writeSimpleDoneReviewRecipientLinks({
+                agreementId: id,
+                recipients: linkRows,
+                agreementPartyDisplayNames: draft ? orderedAuthoritativePartyDisplayNames(draft.parties) : undefined,
+              });
               markSimpleFlowSent(agreementId);
               emitActionCompleted("send", { agreementId });
               navigate(`/app/done/${encodeURIComponent(id || agreementId)}`);
