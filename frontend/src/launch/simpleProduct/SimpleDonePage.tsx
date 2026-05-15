@@ -33,6 +33,10 @@ import {
   writeSimpleDoneReviewRecipientLinks,
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
+import type { ReviewerLinkRowApprovalStatus } from "./reviewerLinkRowModel";
+import { deriveReviewerLinkRowApprovalStatus, normalizeHandoffToReviewerLinkRows } from "./reviewerLinkRowModel";
+import { PaidProReviewReviewerLinksTable } from "./PaidProReviewReviewerLinksTable";
+import { SimpleDoneReviewFlowDiagPanel } from "./SimpleDoneReviewFlowDiagPanel";
 import {
   computeReviewApprovalStatus,
   draftAuditHasRecipientRecordedApproval,
@@ -84,6 +88,8 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const [ownerHandoffDraft, setOwnerHandoffDraft] = useState<AgreementDraft | null>(null);
   const [ownerSigningLockVid, setOwnerSigningLockVid] = useState<string | null>(null);
   const [finalizeNavigating, setFinalizeNavigating] = useState(false);
+  const [rowCopyFlashByKey, setRowCopyFlashByKey] = useState<Record<string, boolean>>({});
+  const [reviewFlowDiagLocal, setReviewFlowDiagLocal] = useState(false);
   const ownerSuccessLoggedRef = useRef<string | null>(null);
   const ownerReviewLinkStatusDiagKeyRef = useRef("");
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
@@ -108,6 +114,14 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   useEffect(() => {
     setConfirmedSend(hasMarkedSimpleFlowSent(agreementId));
+  }, [agreementId]);
+
+  useEffect(() => {
+    try {
+      setReviewFlowDiagLocal(typeof window !== "undefined" && window.localStorage?.getItem("lawdogReviewFlowDiag") === "1");
+    } catch {
+      setReviewFlowDiagLocal(false);
+    }
   }, [agreementId]);
 
   useEffect(() => {
@@ -212,11 +226,16 @@ export function SimpleDonePage(props: { agreementId: string }) {
   useEffect(() => {
     if (!isPaidProReviewDonePath || !reviewLinksReady) return;
     const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
+    const multiMint = reviewHandoffRows.length > 1;
     const primaryCtaLabel = signingLockActive
       ? "Continue to signing"
       : reviewApprovalAgg.finalizeForSigningEnabled
         ? "Finalize for signing"
-        : "Copy review link";
+        : reviewApprovalAgg.hasOpenChangeRequests
+          ? "Resolve in workspace"
+          : multiMint
+            ? "Per-reviewer copy (table)"
+            : "Copy review link";
     const payload = {
       agreementId,
       recipientApprovalDetected: reviewApprovalAgg.anyReviewerApproval,
@@ -242,6 +261,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
     ownerHandoffDraft,
     ownerSigningLockVid,
     reviewApprovalAgg,
+    reviewHandoffRows.length,
   ]);
 
   useEffect(() => {
@@ -289,6 +309,21 @@ export function SimpleDonePage(props: { agreementId: string }) {
       setRemintBusy(false);
     }
   }, [agreementId, remintBusy]);
+
+  const copyRowReviewLink = useCallback((rowKey: string, href: string) => {
+    const t = href.trim();
+    if (!t) return;
+    void navigator.clipboard.writeText(t).then(() => {
+      setRowCopyFlashByKey((prev) => ({ ...prev, [rowKey]: true }));
+      window.setTimeout(() => {
+        setRowCopyFlashByKey((prev) => {
+          const n = { ...prev };
+          delete n[rowKey];
+          return n;
+        });
+      }, 2000);
+    });
+  }, []);
 
   const backToDraft = useCallback(async () => {
     const id = agreementId.trim();
@@ -437,36 +472,69 @@ export function SimpleDonePage(props: { agreementId: string }) {
       (ownerHandoffDraft?.title || "").trim() ||
       (title || "").trim() ||
       "Agreement";
-    const primaryReviewHref = (reviewHandoffRows[0]?.reviewHref || "").trim();
+    const normalizedReviewerRows = normalizeHandoffToReviewerLinkRows(reviewHandoffRows);
+    const multiReviewer = normalizedReviewerRows.length > 1;
+    const primaryReviewHref = (normalizedReviewerRows[0]?.reviewHref || "").trim();
+    const anyReviewHref = normalizedReviewerRows.some((r) => r.reviewHref.trim().length > 0);
+    const legacyGlobal = reviewApprovalAgg.legacyApprovalWithoutParticipantId;
+    const reviewerRowStatuses: ReviewerLinkRowApprovalStatus[] = normalizedReviewerRows.map((r, i) =>
+      deriveReviewerLinkRowApprovalStatus(ownerHandoffDraft, r, {
+        legacyGlobalApproval: legacyGlobal,
+        rowIndex: i,
+      }),
+    );
+    const linksStillLoading =
+      reviewApprovalAgg.requiredReviewerCount > 1 && Boolean(reviewLinksPending) && confirmedSend;
+    const linksIncomplete =
+      reviewApprovalAgg.requiredReviewerCount > 1 &&
+      !reviewLinksPending &&
+      normalizedReviewerRows.length > 0 &&
+      normalizedReviewerRows.length < reviewApprovalAgg.requiredReviewerCount;
     const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
     const noOpenChangeRequests =
       !ownerHandoffDraft || findOpenRecipientProposals(ownerHandoffDraft.audit_log).length === 0;
     const showAllReviewersApprovedNoEditsCopy =
       reviewApprovalAgg.allReviewersApproved && !signingLockActive && noOpenChangeRequests;
     const flowShellTitle =
-      !reviewLinksReady || !primaryReviewHref
+      !reviewLinksReady || !anyReviewHref
         ? "Review link could not be created"
         : signingLockActive
           ? "Ready to sign"
           : reviewApprovalAgg.flowShellTitle;
     const copyPrimaryReviewLink = () => {
-      const text =
-        reviewHandoffRows.length <= 1
-          ? primaryReviewHref
-          : reviewHandoffRows.map((r) => `${r.displayName}: ${r.reviewHref}`).join("\n");
+      if (multiReviewer) return;
+      const text = primaryReviewHref;
       if (!text.trim()) return;
       void navigator.clipboard.writeText(text).then(() => {
         setReviewBundleCopyFlash(true);
         window.setTimeout(() => setReviewBundleCopyFlash(false), 2000);
       });
     };
+    const showReviewFlowDiagPanel = Boolean(import.meta.env.DEV) || reviewFlowDiagLocal;
 
     return (
       <SimpleFlowShell title={flowShellTitle}>
         <div className="vs01-card vs01-card--envelope space-y-5 text-center sm:text-left">
           <div className="rounded-xl border border-emerald-900/35 bg-emerald-950/25 px-5 py-6">
-            {reviewLinksReady && primaryReviewHref ? (
+            {reviewLinksReady && anyReviewHref ? (
               <>
+                {linksStillLoading ? (
+                  <p
+                    className="mb-4 rounded-lg border border-amber-800/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-100"
+                    data-testid="simple-done-review-links-loading-warning"
+                  >
+                    Reviewer links are still loading. Refresh or try again.
+                  </p>
+                ) : null}
+                {linksIncomplete ? (
+                  <p
+                    className="mb-4 rounded-lg border border-amber-800/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-100"
+                    data-testid="simple-done-review-links-incomplete-warning"
+                  >
+                    Some reviewer links did not load ({normalizedReviewerRows.length} of{" "}
+                    {reviewApprovalAgg.requiredReviewerCount}). Try again from send or refresh this page.
+                  </p>
+                ) : null}
                 {signingLockActive ? (
                   <p className="text-sm leading-relaxed text-emerald-100/95">
                     This agreement is locked for signature. Open it in your workspace to continue signing or copy
@@ -539,7 +607,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       )}
                     </dd>
                   </div>
-                  {reviewHandoffRows.length > 0 ? (
+                  {!multiReviewer && reviewHandoffRows.length > 0 ? (
                     <div>
                       <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Reviewer{reviewHandoffRows.length > 1 ? "s" : ""}
@@ -557,6 +625,16 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     </div>
                   ) : null}
                 </dl>
+                <PaidProReviewReviewerLinksTable
+                  rows={normalizedReviewerRows}
+                  statuses={reviewerRowStatuses}
+                  rowCopyFlashByKey={rowCopyFlashByKey}
+                  onCopyRow={(k, href) => copyRowReviewLink(k, href)}
+                  onOpenRow={(href) => {
+                    if (href.trim()) window.open(href, "_blank", "noopener,noreferrer");
+                  }}
+                />
+                {!multiReviewer ? (
                 <label className="mt-5 block text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                   Review link
                   <input
@@ -567,6 +645,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     aria-label="Review link URL"
                   />
                 </label>
+                ) : null}
                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   {signingLockActive ? (
                     <button
@@ -597,34 +676,38 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     >
                       {finalizeNavigating ? "Opening…" : "Finalize for signing"}
                     </button>
-                  ) : (
+                  ) : !multiReviewer ? (
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                      data-testid="simple-done-copy-review-link-primary"
                       onClick={() => copyPrimaryReviewLink()}
                     >
-                      {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
+                      {reviewBundleCopyFlash ? "Copied." : "Copy review link"}
                     </button>
-                  )}
-                  {signingLockActive || reviewApprovalAgg.anyReviewerApproval ? (
+                  ) : null}
+                  {(signingLockActive || reviewApprovalAgg.anyReviewerApproval) && !multiReviewer ? (
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
                       data-testid="simple-done-copy-review-link-secondary"
                       onClick={() => copyPrimaryReviewLink()}
                     >
-                      {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
+                      {reviewBundleCopyFlash ? "Copied." : "Copy review link"}
                     </button>
                   ) : null}
+                  {!multiReviewer ? (
                   <button
                     type="button"
                     className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                    data-testid="simple-done-open-reviewer-view-global"
                     onClick={() => {
                       if (primaryReviewHref) window.open(primaryReviewHref, "_blank", "noopener,noreferrer");
                     }}
                   >
                     Open reviewer view
                   </button>
+                  ) : null}
                   <button
                     type="button"
                     className="text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-400 hover:underline sm:min-h-[2.5rem]"
@@ -634,14 +717,25 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   </button>
                 </div>
                 <p className="mt-4 text-left text-[11px] leading-relaxed text-slate-500">
-                  To test the reviewer experience, open the reviewer link in incognito or another browser.
+                  {multiReviewer
+                    ? "Each reviewer has a private link in the table above. Open each link in a separate browser or incognito window to test the full multi-reviewer flow."
+                    : "To test the reviewer experience, open the reviewer link in incognito or another browser."}
                 </p>
               </>
             ) : (
               <>
-                <p className="text-sm leading-relaxed text-slate-300">
-                  Review link could not be created. Please try again.
-                </p>
+                {reviewLinksPending && reviewApprovalAgg.requiredReviewerCount > 1 ? (
+                  <p
+                    className="text-sm leading-relaxed text-amber-100/95"
+                    data-testid="simple-done-review-links-loading-only"
+                  >
+                    Reviewer links are still loading. Refresh or try again.
+                  </p>
+                ) : (
+                  <p className="text-sm leading-relaxed text-slate-300">
+                    Review link could not be created. Please try again.
+                  </p>
+                )}
                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <button
                     type="button"
@@ -662,6 +756,16 @@ export function SimpleDonePage(props: { agreementId: string }) {
               </>
             )}
           </div>
+          {showReviewFlowDiagPanel ? (
+            <SimpleDoneReviewFlowDiagPanel
+              visible
+              agreementId={agreementId}
+              requiredReviewerCount={reviewApprovalAgg.requiredReviewerCount}
+              approvedReviewerCount={reviewApprovalAgg.approvedReviewerCount}
+              rows={normalizedReviewerRows}
+              statuses={reviewerRowStatuses}
+            />
+          ) : null}
         </div>
       </SimpleFlowShell>
     );

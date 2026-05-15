@@ -512,6 +512,8 @@ def test_public_agreement_verify_redacted(monkeypatch, tmp_path):
     assert "agreement_hash" in body["verification"]
     assert len(body["verification"]["agreement_hash"]) == 64
     assert body["version_history"] is not None
+    assert "?t=" not in raw.lower()
+    assert "recipient_access_token" not in raw.lower()
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "0")
     assert client.get(f"/api/agreements/public/{aid}/verify").status_code == 404
 
@@ -656,6 +658,41 @@ def test_workspace_index_multi_reviewer_partial_rollup(monkeypatch, tmp_path):
     assert mine.get("review_approvals_completed") == 1
     assert mine.get("review_approvals_required") == 4
     assert mine.get("all_reviewers_approved") is False
+
+
+def test_review_delivery_dry_run_payload_count(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Dry run title",
+            "jurisdiction": "TX",
+            "parties": [
+                {"name": "Owner Co", "role": "owner", "email": "owner@example.com"},
+                {"name": "R1", "role": "reviewer", "email": "r1@example.com"},
+                {"name": "R2", "role": "reviewer", "email": "r2@example.com"},
+            ],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    res = client.post(f"/api/agreements/{aid}/review-delivery-dry-run", headers=_ORG_H, json={})
+    assert res.status_code == 200
+    data = res.json()
+    assert data.get("review_delivery_mode") == "manual"
+    assert data.get("payload_count") == 2
+    payloads = data.get("payloads") or []
+    assert len(payloads) == 2
+    assert all(p.get("review_url") is None for p in payloads)
+    assert {p.get("to") for p in payloads} == {"r1@example.com", "r2@example.com"}
 
 
 def test_agreements_refine_alias_requires_instruction(monkeypatch, tmp_path):

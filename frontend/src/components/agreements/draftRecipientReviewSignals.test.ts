@@ -55,6 +55,12 @@ describe("draftRecipientReviewSignals", () => {
   });
 
   describe("computeReviewApprovalStatus", () => {
+    it("with 4 minted links and zero approvals → 0 of 4 owner line", () => {
+      const d = makeDraft({ audit_log: [], parties: [] });
+      const agg = computeReviewApprovalStatus(d, { mintedReviewerLinkCount: 4 });
+      expect(agg.ownerStatusLine).toBe("0 of 4 reviewers approved. Waiting for reviewer responses.");
+    });
+
     it("with 4 minted links and one legacy approval without participant_id → partial 1 of 4, not finalize", () => {
       const d = makeDraft({
         audit_log: [{ event_type: "recipient_approved", at: BASE_TS }],

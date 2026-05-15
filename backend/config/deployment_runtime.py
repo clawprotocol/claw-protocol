@@ -26,6 +26,7 @@ from backend.config.runtime_environment import (
     recipient_access_token_required,
     recipient_token_ttl_max_seconds,
     recipient_token_ttl_min_seconds,
+    review_delivery_mode,
     timeline_db_path,
 )
 from backend.config.storage_runtime import public_runtime_storage_summary
@@ -99,6 +100,7 @@ def public_runtime_summary() -> Dict[str, Any]:
         "settlement_anchor_network_hint": settlement_anchor_network_hint(),
         "feed_public_api_enabled": feed_public_api_enabled(),
         "recipient_access_token_required": recipient_access_token_required(),
+        "review_delivery_mode": review_delivery_mode(),
         "recipient_token_ttl_seconds": {
             "min": recipient_token_ttl_min_seconds(),
             "max": recipient_token_ttl_max_seconds(),

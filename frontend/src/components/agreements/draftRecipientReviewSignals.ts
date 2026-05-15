@@ -86,7 +86,10 @@ export function computeReviewApprovalStatus(
   if (allReviewersApproved) flowShellTitle = "All reviewers approved";
   else if (anyReviewerApproval) flowShellTitle = "Review in progress";
 
-  let ownerStatusLine = "Waiting for reviewer responses.";
+  let ownerStatusLine =
+    !anyReviewerApproval && required > 1
+      ? `0 of ${required} reviewers approved. Waiting for reviewer responses.`
+      : "Waiting for reviewer responses.";
   if (hasOpenChangeRequests) {
     ownerStatusLine = "Open change requests — resolve in workspace before finalizing.";
   } else if (allReviewersApproved) {

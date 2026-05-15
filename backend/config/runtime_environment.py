@@ -91,6 +91,17 @@ def recipient_access_token_required() -> bool:
     return os.getenv("CLAW_RECIPIENT_ACCESS_TOKEN_REQUIRED", "0").lower() in ("1", "true", "yes")
 
 
+def review_delivery_mode() -> str:
+    """
+    How review links are delivered: ``manual`` (copy/share), ``email`` (server sends),
+    or ``manual_and_email``. Default ``manual`` until email service is configured.
+    """
+    raw = os.getenv("CLAW_REVIEW_DELIVERY_MODE", "manual").strip().lower()
+    if raw in ("manual", "email", "manual_and_email"):
+        return raw
+    return "manual"
+
+
 def recipient_token_ttl_min_seconds() -> int:
     return max(60, int(os.getenv("CLAW_RECIPIENT_TOKEN_TTL_MIN_SECONDS", "300")))
 

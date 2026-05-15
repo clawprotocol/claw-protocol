@@ -4904,6 +4904,30 @@ def post_recipient_access_token(
     }
 
 
+@router.post("/{agreement_id}/review-delivery-dry-run")
+def post_agreement_review_delivery_dry_run(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Owner-only: count + structured email payloads without minting tokens (``review_url`` always null)."""
+    require_claw_org_id_header(request)
+    subject = resolve_subject_from_request(request)
+    aid = (agreement_id or "").strip()
+    if not aid or not workspace_lists_agreement_for_subject(aid, subject):
+        raise HTTPException(status_code=404, detail={"code": "agreement_not_found", "message": "Not found"})
+    draft_full = _load_or_404(aid)
+    d = draft_full.model_dump(mode="json")
+    from backend.config.runtime_environment import review_delivery_mode as _review_delivery_mode
+
+    mode = _review_delivery_mode()
+    payloads = _review_delivery_email_payload_rows_from_draft_dict(d)
+    aid_short = aid[:12] if len(aid) >= 12 else aid
+    log.info(
+        "[review-delivery-dry-run] agreement_id_short=%s payload_count=%s mode=%s",
+        aid_short,
+        len(payloads),
+        mode,
+    )
+    return {"review_delivery_mode": mode, "payload_count": len(payloads), "payloads": payloads}
+
+
 @router.post("/{agreement_id}/review-sent")
 def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str, Any]:
     if not _agreements_write_allowed():
@@ -6819,6 +6843,45 @@ def _approved_participant_ids(audit: Any) -> set:
         pid = str(val.get("participant_id") or "").strip()
         if pid:
             out.add(pid)
+    return out
+
+
+def _review_delivery_email_payload_rows_from_draft_dict(d: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Shape for future email sends; ``review_url`` is always None here (mint happens client-side today)."""
+    parties = d.get("parties") or []
+    if not isinstance(parties, list) or not parties:
+        return []
+    oi = next(
+        (
+            i
+            for i, p in enumerate(parties)
+            if isinstance(p, dict) and _normalize_workflow_role(str(p.get("role") or "")) == "owner"
+        ),
+        0,
+    )
+    title = str(d.get("title") or "").strip() or "Untitled agreement"
+    out: List[Dict[str, Any]] = []
+    for i, party in enumerate(parties):
+        if i == oi:
+            continue
+        if not isinstance(party, dict):
+            continue
+        name = str(party.get("name") or "").strip()
+        email = str(party.get("email") or "").strip().lower()
+        if not name or not email or "@" not in email:
+            continue
+        role = _normalize_workflow_role(str(party.get("role") or ""))
+        if role == "owner":
+            continue
+        out.append(
+            {
+                "to": email,
+                "party_name": name,
+                "reviewer_name": name,
+                "agreement_title": title,
+                "review_url": None,
+            }
+        )
     return out
 
 

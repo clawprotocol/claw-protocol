@@ -206,4 +206,40 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     expect(firstErrorStatus).toBe(200);
     expect(lastMintErrorCode).toBe("invalid_mint_payload");
   });
+
+  it("mints distinct review URLs for multiple ready parties", async () => {
+    let n = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        n += 1;
+        return {
+          ok: true,
+          json: async () => ({ token: `tok_party_${n}`, expires_in_seconds: 3600, locked_version_id: "lv1" }),
+        };
+      }) as unknown as typeof fetch,
+    );
+    const draft = {
+      id: "ag_multi",
+      parties: [
+        { id: "p_owner", name: "Owner", role: "owner", email: "o@example.com" },
+        { id: "p1", name: "R1", role: "reviewer", email: "r1@example.com" },
+        { id: "p2", name: "R2", role: "reviewer", email: "r2@example.com" },
+        { id: "p3", name: "R3", role: "reviewer", email: "r3@example.com" },
+        { id: "p4", name: "R4", role: "reviewer", email: "r4@example.com" },
+      ],
+    } as AgreementDraft;
+    const { rows, attemptedMintCount } = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: "ag_multi",
+      draft,
+    });
+    expect(attemptedMintCount).toBe(4);
+    expect(rows.length).toBe(4);
+    const hrefs = rows.map((r) => r.reviewHref);
+    expect(new Set(hrefs).size).toBe(4);
+    expect(hrefs[0]).toContain("tok_party_1");
+    expect(hrefs[3]).toContain("tok_party_4");
+    expect(rows[0]!.party_index).toBe(1);
+    expect(rows[3]!.party_index).toBe(4);
+  });
 });

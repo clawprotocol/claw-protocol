@@ -373,4 +373,55 @@ describe("SimpleDonePage owner approval UX", () => {
     const primaries = screen.getAllByRole("button", { name: /Copy review link/i });
     expect(primaries.some((b) => b.className.includes("vs01-btn--primary"))).toBe(true);
   });
+
+  it("multi-reviewer handoff shows per-row table and hides global copy review link", async () => {
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({ audit_log: [] }),
+      lockedVersionId: null,
+    });
+
+    markSimpleFlowSent(agreementId);
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId,
+      recipients: [
+        { displayName: "A", reviewHref: "https://example.com/review/a?t=1" },
+        { displayName: "B", reviewHref: "https://example.com/review/b?t=2" },
+      ],
+    });
+
+    render(<SimpleDonePage agreementId={agreementId} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("paid-pro-reviewer-links-table")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("simple-done-copy-review-link-primary")).toBeNull();
+    expect(screen.queryByTestId("simple-done-open-reviewer-view-global")).toBeNull();
+  });
+
+  it("shows loading-only copy when review links pending and multiple reviewers required", async () => {
+    const parties = [
+      { id: "o", name: "Owner", role: "owner" as const, email: "o@o.com" },
+      { id: "r1", name: "R1", role: "reviewer" as const, email: "r1@r.com" },
+      { id: "r2", name: "R2", role: "reviewer" as const, email: "r2@r.com" },
+    ];
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({ parties, audit_log: [] }),
+      lockedVersionId: null,
+    });
+
+    markSimpleFlowSent(agreementId);
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId,
+      recipients: [],
+      reviewLinksPending: true,
+    });
+
+    render(<SimpleDonePage agreementId={agreementId} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("simple-done-review-links-loading-only")).toBeTruthy();
+    });
+  });
 });

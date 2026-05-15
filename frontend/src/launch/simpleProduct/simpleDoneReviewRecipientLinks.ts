@@ -3,6 +3,8 @@ import { agreementMagicLinkPath } from "../../agreement/AgreementRecipientReview
 import type { MintRecipientAccessTokenSuccess } from "../../agreement/recipientAccessApi";
 import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
 import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } from "./reviewLinkRecipientEmailMerge";
+import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
+import { redactReviewUrlForLog } from "./reviewerLinkRowModel";
 
 /**
  * Session handoff: after simple-home review-link flow, `/app/done` can show copyable per-recipient magic links
@@ -11,12 +13,8 @@ import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } 
 export const simpleDoneReviewRecipientLinksStorageKey = (agreementId: string) =>
   `claw_simple_done_review_recipient_links_v1_${encodeURIComponent(agreementId.trim())}`;
 
-export type SimpleDoneReviewRecipientLinkRow = {
-  displayName: string;
-  reviewHref: string;
-  /** Counterparty email when present on the minted party row. */
-  recipientEmail?: string;
-};
+/** One minted reviewer-specific link row (session handoff). */
+export type SimpleDoneReviewRecipientLinkRow = ReviewerLinkRow;
 
 export type SimpleDoneReviewLinksPayload = {
   v: 1;
@@ -77,9 +75,41 @@ export function readSimpleDoneReviewRecipientLinks(agreementId: string): SimpleD
     if (!raw) return null;
     const o = JSON.parse(raw) as SimpleDoneReviewLinksPayload;
     if (o?.v !== 1 || o.intent !== "review" || !Array.isArray(o.recipients)) return null;
-    const recipients = o.recipients.filter(
-      (r) => r && typeof r.displayName === "string" && typeof r.reviewHref === "string" && r.reviewHref.trim(),
-    );
+    const recipients = o.recipients
+      .filter(
+        (r) => r && typeof r.displayName === "string" && typeof r.reviewHref === "string" && r.reviewHref.trim(),
+      )
+      .map((r) => {
+        const row = r as Record<string, unknown>;
+        const base: SimpleDoneReviewRecipientLinkRow = {
+          displayName: String(row.displayName || "").trim(),
+          reviewHref: String(row.reviewHref || "").trim(),
+        };
+        const em = String(row.recipientEmail ?? row.reviewer_email ?? "").trim();
+        if (em) {
+          base.recipientEmail = em;
+          base.reviewer_email = em;
+        }
+        const pid = String(row.recipientPartyId ?? row.reviewer_id ?? "").trim();
+        if (pid) {
+          base.recipientPartyId = pid;
+          base.reviewer_id = pid;
+        }
+        if (typeof row.party_index === "number" && Number.isFinite(row.party_index)) {
+          base.party_index = row.party_index;
+        }
+        const pn = String(row.party_name ?? "").trim();
+        if (pn) base.party_name = pn;
+        const rn = String(row.reviewer_name ?? "").trim();
+        if (rn) base.reviewer_name = rn;
+        const ts = String(row.token_status ?? "").trim();
+        if (ts === "active" || ts === "unknown" || ts === "expired") base.token_status = ts;
+        const ca = String(row.created_at ?? "").trim();
+        if (ca) base.created_at = ca;
+        const lo = String(row.last_opened_at ?? "").trim();
+        if (lo) base.last_opened_at = lo;
+        return base;
+      });
     const out: SimpleDoneReviewLinksPayload = {
       v: 1,
       intent: "review",
@@ -187,7 +217,27 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
     }
     const displayName = String(p.name || "").trim() || "Recipient";
     const recipientEmail = String((p as { email?: string }).email ?? "").trim() || undefined;
-    out.push({ displayName, reviewHref, ...(recipientEmail ? { recipientEmail } : {}) });
+    const createdAt = new Date().toISOString();
+    const row: SimpleDoneReviewRecipientLinkRow = {
+      displayName,
+      reviewHref,
+      party_index: i,
+      party_name: displayName,
+      reviewer_name: displayName,
+      token_status: "active",
+      created_at: createdAt,
+      ...(recipientEmail ? { recipientEmail, reviewer_email: recipientEmail } : {}),
+      ...(partyId ? { recipientPartyId: partyId, reviewer_id: partyId } : {}),
+    };
+    out.push(row);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[review-link-mint-row]", {
+        agreementIdShort: args.agreementId.trim().length <= 12 ? args.agreementId.trim() : `${args.agreementId.trim().slice(0, 8)}…`,
+        partyIndex: i,
+        reviewUrlForLog: redactReviewUrlForLog(reviewHref),
+      });
+    }
   }
   return { rows: out, attemptedMintCount, firstErrorStatus, lastMintErrorDetail, lastMintErrorCode };
 }
