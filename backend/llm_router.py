@@ -271,7 +271,7 @@ def embed_texts(
     if not texts:
         return []
     minimized_inputs: List[str] = []
-    for t in texts:
+    for user_message_index, t in enumerate(texts):
         airlock_result = run_ai_airlock(t)
         if airlock_result.blocked:
             codes = tuple(airlock_result.policy_decision.reason_codes)
@@ -285,10 +285,11 @@ def embed_texts(
             route = airlock_log_context or "embed_texts"
             log.warning(
                 "[claw-ai-airlock] embed_input_blocked block_reason=%s policy_reason_codes=%s "
-                "airlock_profile=default airlock_route=%s user_content_chars=%s%s",
+                "airlock_profile=default airlock_route=%s user_message_index=%s user_content_chars=%s%s",
                 airlock_result.block_reason,
                 ",".join(codes) if codes else "",
                 route,
+                user_message_index,
                 len(t),
                 diag_suffix,
             )

@@ -173,9 +173,41 @@ def test_opposing_counsel_subpoena_privileged_memo_lawsuit_strategy_blocked_outb
         "Respond to the subpoena for customer records.",
         "Privileged legal memo summarizing exposure.",
         "Outline lawsuit strategy for the board.",
+        "Notes from yesterday's deposition on the customer claim.",
     ):
         d = evaluate_privilege_policy(text, policy_profile="agreement_outbound")
         assert d.requires_protected_mode is True, text
+
+
+def test_litigation_and_lawsuit_standalone_allowed_under_agreement_outbound() -> None:
+    """Forum / fee-shifting boilerplate uses standalone litigation/lawsuit tokens."""
+    for text in (
+        "Disputes may be brought in any court of competent jurisdiction; the parties consent to litigation costs allocation.",
+        "Each party waives any right to a jury trial for disputes arising out of this agreement, including any lawsuit between the parties.",
+        "Governing law Delaware; exclusive venue in state or federal courts; mediation and arbitration as optional steps before litigation.",
+    ):
+        d = evaluate_privilege_policy(text, policy_profile="agreement_outbound")
+        assert d.requires_protected_mode is False, text
+        assert d.reason_codes == (), text
+
+
+def test_commercial_boilerplate_terms_allowed_agreement_outbound() -> None:
+    d = evaluate_privilege_policy(
+        "Include reasonable attorneys' fees for the prevailing party, indemnification, audit rights, "
+        "limitation of liability, termination for cause, governing law New York, dispute resolution, "
+        "mediation, arbitration, and jurisdiction in the courts of New York County.",
+        policy_profile="agreement_outbound",
+    )
+    assert d.requires_protected_mode is False
+    assert d.reason_codes == ()
+
+
+def test_deposition_still_blocks_under_agreement_outbound() -> None:
+    d = evaluate_privilege_policy(
+        "Prepare for the deposition next Tuesday and circulate the outline.",
+        policy_profile="agreement_outbound",
+    )
+    assert REASON_LITIGATION_SIGNAL in d.reason_codes
 
 
 def test_first_privilege_airlock_block_diagnostic_stable_ids() -> None:

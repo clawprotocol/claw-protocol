@@ -56,20 +56,33 @@ LITIGATION_SINGLE_TERMS: Final[frozenset[str]] = frozenset(
         "plaintiff",
         "defendant",
         "discovery",
+        "deposition",
     }
 )
 
 # Outbound commercial agreement drafting (JSON repair payloads, etc.): allow standalone
-# "settlement" / "discovery" (payment settlement, API discovery) while keeping hard litigation tokens.
+# "settlement" / "discovery" (payment settlement, API discovery), and generic "litigation" /
+# "lawsuit" (forum, fee-shifting, carve-outs) while keeping hard litigation-intake tokens.
 LITIGATION_SINGLE_TERMS_AGREEMENT_OUTBOUND: Final[frozenset[str]] = frozenset(
-    LITIGATION_SINGLE_TERMS - frozenset({"settlement", "discovery"})
+    LITIGATION_SINGLE_TERMS - frozenset({"settlement", "discovery", "litigation", "lawsuit"})
 )
 
 LITIGATION_PHRASES: Final[tuple[str, ...]] = (
-    "opposing counsel",
-    "witness interview",
+    "active lawsuit",
+    "active litigation",
+    "attorney client privilege",
+    "attorney-client privilege",
     "claim analysis",
+    "criminal defense",
     "defense strategy",
+    "file a lawsuit",
+    "filed a lawsuit",
+    "litigation hold",
+    "litigation strategy",
+    "lawsuit strategy",
+    "opposing counsel",
+    "pending litigation",
+    "witness interview",
 )
 
 # Explicit privilege / work-product style signals.

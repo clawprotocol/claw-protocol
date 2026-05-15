@@ -1322,7 +1322,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
       let effectiveFull: PremiumFullDraftResult = full;
       let doc = (effectiveFull.document_text || "").trim();
-      const serverGenDegraded = (full.generation_outcome || "").trim() === "degraded";
+      const firstCallOutcomeDegraded = (full.generation_outcome || "").trim() === "degraded";
+      let serverGenDegraded = firstCallOutcomeDegraded;
       if (serverGenDegraded) {
         const c0 = (full.server_generation_failure_code || "").trim();
         const hard0 = c0 === "airlock_blocked" || c0 === "dev_context_leak";
@@ -1334,7 +1335,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       let usedClientRetry = false;
       {
         const firstOk =
-          (full.generation_outcome || "ok") === "ok" && !serverGenDegraded && doc.length >= 400;
+          (full.generation_outcome || "ok") === "ok" && !firstCallOutcomeDegraded && doc.length >= 400;
         if (firstOk && import.meta.env.MODE !== "test") {
           const freeB = buildAgreementPreviewText(input.structuredDraft, { starterPreview: true });
           const sim0 = lexicalSimilarity(freeB, doc);
@@ -1363,54 +1364,12 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           }
         }
       }
-      const effGenNarrow: "ok" | "needs_details" | "degraded" | undefined = (() => {
+      let effGenNarrow: "ok" | "needs_details" | "degraded" | undefined = (() => {
         const t = (effectiveFull.generation_outcome ?? "").trim();
         if (t === "ok" || t === "needs_details" || t === "degraded") return t;
         return undefined;
       })();
-      const serverSchemaNeedsDetails = effGenNarrow === "needs_details" && !serverGenDegraded;
-      if (serverGenDegraded) {
-        const c = (full.server_generation_failure_code || "unknown").trim() || "unknown";
-        const m = (full.server_generation_failure_message || "").trim();
-        serverGenerationDegraded = {
-          code: c,
-          message: m || "Your agreement is ready. You can refine any wording below.",
-        };
-        if (
-          (c === "airlock_blocked" ||
-            c === "dev_context_leak" ||
-            !(full.document_text || "").trim() ||
-            !rejectPremiumDegradedFiller((full.document_text || "").trim()).ok) &&
-          (m || "").trim()
-        ) {
-          proIntentGateMessage = (m || "").trim();
-        }
-        if (import.meta.env.MODE !== "test") {
-          const hardBlock = c === "airlock_blocked" || c === "dev_context_leak";
-          const origBody = (full.document_text || "").trim();
-          const emptyDoc = !origBody;
-          const fillerBad = !rejectPremiumDegradedFiller(origBody).ok;
-          if (hardBlock || emptyDoc || fillerBad) {
-            // eslint-disable-next-line no-console
-            console.warn("[CLAW] premium generation incomplete", {
-              code: c,
-              document_empty: emptyDoc,
-              degraded_filler: fillerBad,
-              generation_outcome: (full.generation_outcome || "").trim(),
-            });
-          } else {
-            // eslint-disable-next-line no-console
-            console.info("[CLAW] premium degraded accepted", { code: c });
-          }
-        }
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.info("[premium-completion] server_generation_degraded", {
-            code: c,
-            reasons: (full.schema_validation_reasons || []).slice(0, 6),
-          });
-        }
-      }
+      let serverSchemaNeedsDetails = effGenNarrow === "needs_details" && !serverGenDegraded;
       const tierBEarlyNeedsDetails = shouldEarlyNeedsDetailsForTierB({
         policy: intentPreflightPolicy,
         generationOutcome: effGenNarrow,
@@ -1498,6 +1457,52 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
               tierADiag.serverTextClearReason = "dev_context_leak_after_rerun";
             }
           }
+        }
+      }
+      {
+        const t = (effectiveFull.generation_outcome ?? "").trim();
+        effGenNarrow = t === "ok" || t === "needs_details" || t === "degraded" ? t : undefined;
+        const fc = (effectiveFull.server_generation_failure_code || "").trim();
+        const hardFailure = fc === "airlock_blocked" || fc === "dev_context_leak";
+        const docTrim = (doc || "").trim();
+        const fillerBad = Boolean(docTrim) && !rejectPremiumDegradedFiller(docTrim).ok;
+        serverGenDegraded =
+          effGenNarrow === "degraded" && (hardFailure || !docTrim || fillerBad);
+        serverSchemaNeedsDetails = effGenNarrow === "needs_details" && !serverGenDegraded;
+        if (serverGenDegraded) {
+          const c = fc || "unknown";
+          const m = (effectiveFull.server_generation_failure_message || "").trim();
+          serverGenerationDegraded = {
+            code: c,
+            message: m || "Your agreement is ready. You can refine any wording below.",
+          };
+          if ((hardFailure || !docTrim || fillerBad) && m) {
+            proIntentGateMessage = m;
+          }
+          if (import.meta.env.MODE !== "test") {
+            const emptyDoc = !docTrim;
+            if (hardFailure || emptyDoc || fillerBad) {
+              // eslint-disable-next-line no-console
+              console.warn("[CLAW] premium generation incomplete", {
+                code: c,
+                document_empty: emptyDoc,
+                degraded_filler: fillerBad,
+                generation_outcome: (effectiveFull.generation_outcome || "").trim(),
+              });
+            } else {
+              // eslint-disable-next-line no-console
+              console.info("[CLAW] premium degraded accepted", { code: c });
+            }
+          }
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[premium-completion] server_generation_degraded", {
+              code: c,
+              reasons: (effectiveFull.schema_validation_reasons || []).slice(0, 6),
+            });
+          }
+        } else {
+          serverGenerationDegraded = null;
         }
       }
       let acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
@@ -1596,6 +1601,27 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           }
         }
       }
+      {
+        const t = (effectiveFull.generation_outcome ?? "").trim();
+        effGenNarrow = t === "ok" || t === "needs_details" || t === "degraded" ? t : undefined;
+        const fc = (effectiveFull.server_generation_failure_code || "").trim();
+        const hardFailure = fc === "airlock_blocked" || fc === "dev_context_leak";
+        const docTrim = (doc || "").trim();
+        const fillerBad = Boolean(docTrim) && !rejectPremiumDegradedFiller(docTrim).ok;
+        serverGenDegraded =
+          effGenNarrow === "degraded" && (hardFailure || !docTrim || fillerBad);
+        serverSchemaNeedsDetails = effGenNarrow === "needs_details" && !serverGenDegraded;
+        if (serverGenDegraded) {
+          const c = fc || "unknown";
+          const m = (effectiveFull.server_generation_failure_message || "").trim();
+          serverGenerationDegraded = {
+            code: c,
+            message: m || "Your agreement is ready. You can refine any wording below.",
+          };
+        } else {
+          serverGenerationDegraded = null;
+        }
+      }
       lastClientGateTrace = {
         accOk: acc.ok,
         accReasons: acc.reasons.slice(0, 20),
@@ -1644,7 +1670,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         });
         winningPremiumBodyText = doc;
         if (serverGenDegraded) {
-          const fc = (full.server_generation_failure_code || "").trim();
+          const fc = (effectiveFull.server_generation_failure_code || "").trim();
           if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {
             premiumRenderSource = "server_full_draft_degraded";
           } else {

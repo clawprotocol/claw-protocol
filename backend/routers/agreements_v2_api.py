@@ -6407,6 +6407,8 @@ def _negotiate_assist_llm(
             max_tokens=768,
             temperature=0.2,
             trace_context=trace_context,
+            airlock_profile="agreement_outbound",
+            airlock_log_context="negotiation_risk_triage",
         )
         parsed = _extract_json_object(text)
         out: Dict[str, Any] = {"options": []}
