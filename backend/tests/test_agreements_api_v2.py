@@ -604,6 +604,58 @@ def test_workspace_index_reviewer_approved_flag(monkeypatch, tmp_path):
     rows = idx.json()["agreements"]
     mine = next(r for r in rows if r["id"] == aid)
     assert mine.get("reviewer_approved") is True
+    assert mine.get("review_approvals_completed") == 1
+    assert mine.get("review_approvals_required") == 1
+    assert mine.get("all_reviewers_approved") is True
+
+
+def test_workspace_index_multi_reviewer_partial_rollup(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    from backend.services import agreement_draft_store as ads
+
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Multi reviewer",
+            "jurisdiction": "TX",
+            "parties": [
+                {"name": "O", "role": "owner"},
+                {"id": "r1", "name": "R1", "role": "reviewer"},
+                {"id": "r2", "name": "R2", "role": "reviewer"},
+                {"id": "r3", "name": "R3", "role": "reviewer"},
+                {"id": "r4", "name": "R4", "role": "reviewer"},
+            ],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    d = ads.load_draft(aid)
+    d["audit_log"] = list(d.get("audit_log") or [])
+    d["audit_log"].append(
+        {
+            "event_type": "participant_approved",
+            "at": "2026-01-02T00:00:00Z",
+            "value": {"participant_id": "r1"},
+        }
+    )
+    ads.save_draft(d)
+
+    idx = client.get("/api/agreements/workspace-index", headers=_ORG_H)
+    assert idx.status_code == 200
+    rows = idx.json()["agreements"]
+    mine = next(r for r in rows if r["id"] == aid)
+    assert mine.get("reviewer_approved") is True
+    assert mine.get("review_approvals_completed") == 1
+    assert mine.get("review_approvals_required") == 4
+    assert mine.get("all_reviewers_approved") is False
 
 
 def test_agreements_refine_alias_requires_instruction(monkeypatch, tmp_path):

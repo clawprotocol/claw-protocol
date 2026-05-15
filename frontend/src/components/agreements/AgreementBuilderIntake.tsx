@@ -458,6 +458,13 @@ import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPan
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
+  countDistinctValidRecipientEmails,
+  premiumReviewMintConfirmModalTitle,
+  premiumReviewMintPrimaryLabel,
+  premiumReviewMintStickyHeadline,
+} from "./reviewLinkCtaState";
+import { logReviewLinkCtaState } from "./reviewFlowDebugLog";
+import {
   POST_CHECKOUT_PREMIUM_SUPPORT_ARIA_LABEL,
   POST_CHECKOUT_PREMIUM_SUPPORT_BODY,
   POST_CHECKOUT_PREMIUM_SUPPORT_TITLE,
@@ -9156,6 +9163,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
   ]);
 
+  const paidProDistinctValidRecipientEmailCount = useMemo(() => {
+    const rows: { raw: string }[] = [
+      { raw: recipient1Email },
+      { raw: recipient2Email },
+      ...extraPartyReviewEmails.map((raw) => ({ raw })),
+    ];
+    if (draft?.parties?.length) {
+      for (const p of draft.parties) {
+        rows.push({ raw: String((p as { email?: string }).email ?? "") });
+      }
+    }
+    return countDistinctValidRecipientEmails(rows);
+  }, [recipient1Email, recipient2Email, extraPartyReviewEmails, draft]);
+
+  useEffect(() => {
+    if (!paidProRecipientSetupOnDraft) return;
+    if (effectivePremiumSendMode !== "review") return;
+    const label = premiumReviewMintPrimaryLabel(
+      paidProDistinctValidRecipientEmailCount,
+      recipientEmailsHaveValidationErrors,
+    );
+    let disabledReason: string | null = null;
+    if (premiumSendConfirmOpen) disabledReason = "premium_send_confirm_open";
+    else if (!hasAnyValidRecipientEmail) disabledReason = "no_valid_recipient_email";
+    else if (recipientEmailsHaveValidationErrors) disabledReason = "recipient_email_validation_errors";
+    logReviewLinkCtaState({
+      validEmailCount: paidProDistinctValidRecipientEmailCount,
+      mintedCount: 0,
+      label,
+      disabledReason,
+    });
+  }, [
+    paidProRecipientSetupOnDraft,
+    effectivePremiumSendMode,
+    paidProDistinctValidRecipientEmailCount,
+    recipientEmailsHaveValidationErrors,
+    hasAnyValidRecipientEmail,
+    premiumSendConfirmOpen,
+  ]);
+
   const createFlowRecipientPrimaryHelper = useMemo(() => {
     if (!premiumSendConfirmGateActive || recipientsDeferred) return null;
     const r1e = stripRecipientEmailNoise(recipient1Email);
@@ -11040,14 +11087,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   ? paidProAuthoritative
                     ? effectivePremiumSendMode === "signature"
                       ? "Confirm and send for signature"
-                      : "Create review link"
+                      : premiumReviewMintPrimaryLabel(
+                          paidProDistinctValidRecipientEmailCount,
+                          recipientEmailsHaveValidationErrors,
+                        )
                     : "Continue to confirmation"
                   : effectivePremiumSendMode === "review"
                     ? paidProAuthoritative
-                      ? "Create review link"
+                      ? premiumReviewMintPrimaryLabel(
+                          paidProDistinctValidRecipientEmailCount,
+                          recipientEmailsHaveValidationErrors,
+                        )
                       : premiumOutbox
                         ? "Continue to review link"
-                        : "Create review link"
+                        : premiumReviewMintPrimaryLabel(
+                            paidProDistinctValidRecipientEmailCount,
+                            recipientEmailsHaveValidationErrors,
+                          )
                     : paidProAuthoritative
                       ? "Create signing links"
                       : premiumOutbox
@@ -11287,6 +11343,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient2Email,
     hasAnyValidRecipientEmail,
     recipientEmailsHaveValidationErrors,
+    paidProDistinctValidRecipientEmailCount,
     streamlineFirstRunReviewUi,
     effectivePremiumSendMode,
     displayLivePreviewModel,
@@ -15395,7 +15452,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         }
                       >
                         {minimalProSendRecipientChrome && effectivePremiumSendMode === "review"
-                          ? "Add their email"
+                          ? premiumReviewMintStickyHeadline(
+                              paidProDistinctValidRecipientEmailCount,
+                              recipientEmailsHaveValidationErrors,
+                            )
                           : minimalProSendRecipientChrome
                             ? "Ready to create links"
                             : "Ready for final send"}
@@ -15408,7 +15468,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         }
                       >
                         {minimalProSendRecipientChrome && effectivePremiumSendMode === "review"
-                          ? "Then tap Create review link. Nothing is signed yet."
+                          ? recipientEmailsHaveValidationErrors || paidProDistinctValidRecipientEmailCount < 1
+                            ? "Add at least one valid recipient email, then create your private review link(s). Nothing is signed yet."
+                            : paidProDistinctValidRecipientEmailCount > 1
+                              ? "Tap Create review links below. Nothing is signed yet."
+                              : "Tap Create review link below. Nothing is signed yet."
                           : minimalProSendRecipientChrome
                             ? "Add recipients, then create a secure link. Nothing is emailed automatically."
                             : "Add recipients next, then confirm before anything is sent."}
@@ -16276,7 +16340,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           >
             <h2 id="premium-send-confirm-title" className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
               {effectivePremiumSendMode === "review"
-                ? "Create review link?"
+                ? premiumReviewMintConfirmModalTitle(
+                    paidProDistinctValidRecipientEmailCount,
+                    recipientEmailsHaveValidationErrors,
+                  )
                 : minimalProSendRecipientChrome
                   ? PAYWALL_PAID_READY_HEADLINE
                   : "Confirm before saving"}
@@ -16426,7 +16493,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 }}
               >
                 {effectivePremiumSendMode === "review"
-                  ? "Create review link"
+                  ? premiumReviewMintPrimaryLabel(
+                      paidProDistinctValidRecipientEmailCount,
+                      recipientEmailsHaveValidationErrors,
+                    )
                   : minimalProSendRecipientChrome
                     ? PAYWALL_PAID_READY_CTA
                     : "Confirm and continue"}

@@ -72,6 +72,12 @@ function formatRelativeUpdated(iso: string): string {
 export function workspaceAgreementStatusLabel(r: WorkspaceIndexAgreement): string {
   if (r.completed_signed) return "Signed";
   if (r.has_server_signing_lock) return "Ready to sign";
+  if (r.all_reviewers_approved) return "All reviewers approved — ready to sign";
+  const req = r.review_approvals_required ?? 0;
+  const done = r.review_approvals_completed ?? 0;
+  if (r.reviewer_approved && req > 1) {
+    return `${done} of ${req} reviewers approved`;
+  }
   if (r.reviewer_approved) return "Reviewer approved — ready to sign";
   if (r.review_sent_at) return "Sent";
   if (r.version_ledger_count > 0) return "Ready to send";

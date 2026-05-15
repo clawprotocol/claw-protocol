@@ -32,12 +32,32 @@ describe("workspaceAgreementStatusLabel", () => {
     ).toBe("Ready to sign");
   });
 
-  it("returns Reviewer approved — ready to sign when approved but not locked", () => {
+  it("returns Reviewer approved — ready to sign when single reviewer path approved but not locked", () => {
     expect(
       workspaceAgreementStatusLabel(
-        row({ reviewer_approved: true, review_sent_at: "2026-01-01T00:00:00Z" }),
+        row({
+          reviewer_approved: true,
+          review_sent_at: "2026-01-01T00:00:00Z",
+          review_approvals_required: 1,
+          review_approvals_completed: 1,
+          all_reviewers_approved: true,
+        }),
       ),
-    ).toBe("Reviewer approved — ready to sign");
+    ).toBe("All reviewers approved — ready to sign");
+  });
+
+  it("returns fractional status when some but not all reviewers approved", () => {
+    expect(
+      workspaceAgreementStatusLabel(
+        row({
+          reviewer_approved: true,
+          review_sent_at: "2026-01-01T00:00:00Z",
+          review_approvals_required: 4,
+          review_approvals_completed: 1,
+          all_reviewers_approved: false,
+        }),
+      ),
+    ).toBe("1 of 4 reviewers approved");
   });
 
   it("returns Sent when review sent but not approved", () => {

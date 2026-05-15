@@ -4600,6 +4600,7 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
             in ("recipient_approved", "participant_approved")
             for e in audit
         )
+        appr_done, appr_req, all_reviewers_approved = _workspace_review_approval_rollups(d)
         lock = read_signing_lock(aid)
         lv_raw = str((lock or {}).get("locked_version_id") or "").strip()
         lv: Optional[str] = lv_raw or None
@@ -4623,6 +4624,9 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                 "workspace_archived_at": d.get("workspace_archived_at"),
                 "review_sent_at": d.get("review_sent_at"),
                 "reviewer_approved": reviewer_approved,
+                "review_approvals_completed": appr_done,
+                "review_approvals_required": appr_req,
+                "all_reviewers_approved": all_reviewers_approved,
                 "workspace_folder_id": wfid,
                 "workspace_folder_name": (folder_names.get(wfid) if wfid else None),
                 "workspace_tags": tags_out,
@@ -6816,6 +6820,45 @@ def _approved_participant_ids(audit: Any) -> set:
         if pid:
             out.add(pid)
     return out
+
+
+def _workspace_review_approval_rollups(d: Dict[str, Any]) -> tuple[int, int, bool]:
+    """
+    Returns (approved_reviewer_count, required_reviewer_count, all_reviewers_approved).
+
+    ``required`` is max(len(reviewer party ids), 1). ``approved`` counts reviewer party ids present in
+    ``_approved_participant_ids``. Legacy approvals without ``participant_id`` count as one approval when
+    no reviewer ids matched (single-recipient flows).
+    """
+    parties = d.get("parties") or []
+    audit = d.get("audit_log") or []
+    approved_ids = _approved_participant_ids(audit)
+    reviewer_ids: List[str] = []
+    for p in parties:
+        if _normalize_workflow_role(str((p or {}).get("role") or "")) != "reviewer":
+            continue
+        pid = str((p or {}).get("id") or "").strip()
+        if pid:
+            reviewer_ids.append(pid)
+    required = len(reviewer_ids)
+    if required < 1:
+        required = 1
+    approved = sum(1 for pid in reviewer_ids if pid in approved_ids)
+    if approved == 0:
+        for e in audit or []:
+            if not isinstance(e, dict):
+                continue
+            et = str(e.get("event_type") or "")
+            if et not in ("recipient_approved", "participant_approved"):
+                continue
+            val = e.get("value") or {}
+            if isinstance(val, dict) and str(val.get("participant_id") or "").strip():
+                continue
+            approved = 1
+            break
+    open_props = len(_open_recipient_proposal_payloads(audit)) > 0
+    all_done = (not open_props) and approved >= required and approved > 0
+    return approved, required, all_done
 
 
 def _signing_approval_gate_errors(draft: AgreementDraft) -> List[str]:

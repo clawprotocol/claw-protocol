@@ -34,11 +34,13 @@ import {
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
 import {
+  computeReviewApprovalStatus,
   draftAuditHasRecipientRecordedApproval,
   logOwnerFinalizeRouteDecision,
   logOwnerReviewLinkStatus,
   shouldWritePaidProEditReturnHandoffAfterReview,
 } from "../../components/agreements/draftRecipientReviewSignals";
+import { logReviewApprovalStatus } from "../../components/agreements/reviewFlowDebugLog";
 import {
   clearPaidProEditReturnHandoff,
   paidProEditReturnHasRecoverableBody,
@@ -156,6 +158,14 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const isPaidProReviewDonePath =
     Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
 
+  const reviewApprovalAgg = useMemo(
+    () =>
+      computeReviewApprovalStatus(ownerHandoffDraft, {
+        mintedReviewerLinkCount: reviewHandoffRows.length,
+      }),
+    [ownerHandoffDraft, reviewHandoffRows.length],
+  );
+
   const cachedAgreementPartyDisplayNames = reviewRecipientHandoff?.agreementPartyDisplayNames;
   const paidProDoneAgreementPartyNames = useMemo(() => {
     const fromDraft = orderedAuthoritativePartyDisplayNames(ownerHandoffDraft?.parties);
@@ -201,18 +211,18 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   useEffect(() => {
     if (!isPaidProReviewDonePath || !reviewLinksReady) return;
-    const recipientApprovalDetected = Boolean(
-      ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
-    );
     const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
     const primaryCtaLabel = signingLockActive
       ? "Continue to signing"
-      : recipientApprovalDetected
+      : reviewApprovalAgg.finalizeForSigningEnabled
         ? "Finalize for signing"
         : "Copy review link";
     const payload = {
       agreementId,
-      recipientApprovalDetected,
+      recipientApprovalDetected: reviewApprovalAgg.anyReviewerApproval,
+      finalizeForSigningEnabled: reviewApprovalAgg.finalizeForSigningEnabled,
+      approvedReviewerCount: reviewApprovalAgg.approvedReviewerCount,
+      requiredReviewerCount: reviewApprovalAgg.requiredReviewerCount,
       signingLockActive,
       lockedVersionId: ownerSigningLockVid,
       finalizedVersionId: ownerSigningLockVid,
@@ -225,7 +235,24 @@ export function SimpleDonePage(props: { agreementId: string }) {
     if (key === ownerReviewLinkStatusDiagKeyRef.current) return;
     ownerReviewLinkStatusDiagKeyRef.current = key;
     logOwnerReviewLinkStatus(payload);
-  }, [agreementId, isPaidProReviewDonePath, reviewLinksReady, ownerHandoffDraft, ownerSigningLockVid]);
+  }, [
+    agreementId,
+    isPaidProReviewDonePath,
+    reviewLinksReady,
+    ownerHandoffDraft,
+    ownerSigningLockVid,
+    reviewApprovalAgg,
+  ]);
+
+  useEffect(() => {
+    if (!isPaidProReviewDonePath || !reviewLinksReady) return;
+    logReviewApprovalStatus({
+      agreementIdShort: agreementId.trim().slice(0, 12),
+      approvedCount: reviewApprovalAgg.approvedReviewerCount,
+      reviewerCount: reviewApprovalAgg.requiredReviewerCount,
+      status: reviewApprovalAgg.aggregateStatus,
+    });
+  }, [agreementId, isPaidProReviewDonePath, reviewLinksReady, reviewApprovalAgg]);
 
   const retryRemintReviewLink = useCallback(async () => {
     const id = agreementId.trim();
@@ -402,6 +429,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   }
 
   if (isPaidProReviewDonePath) {
+    const negotiationHref = `/app/agreements/${encodeURIComponent(agreementId)}`;
     const agreementTitle =
       normalizeAgreementDisplayTitle(
         (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement",
@@ -410,22 +438,17 @@ export function SimpleDonePage(props: { agreementId: string }) {
       (title || "").trim() ||
       "Agreement";
     const primaryReviewHref = (reviewHandoffRows[0]?.reviewHref || "").trim();
-    const recipientApprovalDetected = Boolean(
-      ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
-    );
     const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
     const noOpenChangeRequests =
       !ownerHandoffDraft || findOpenRecipientProposals(ownerHandoffDraft.audit_log).length === 0;
-    const showApprovedNoEditsCopy =
-      recipientApprovalDetected && !signingLockActive && noOpenChangeRequests;
+    const showAllReviewersApprovedNoEditsCopy =
+      reviewApprovalAgg.allReviewersApproved && !signingLockActive && noOpenChangeRequests;
     const flowShellTitle =
       !reviewLinksReady || !primaryReviewHref
         ? "Review link could not be created"
         : signingLockActive
           ? "Ready to sign"
-          : recipientApprovalDetected
-            ? "Reviewer approved"
-            : "Review link created";
+          : reviewApprovalAgg.flowShellTitle;
     const copyPrimaryReviewLink = () => {
       const text =
         reviewHandoffRows.length <= 1
@@ -449,40 +472,50 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     This agreement is locked for signature. Open it in your workspace to continue signing or copy
                     signing links.
                   </p>
-                ) : showApprovedNoEditsCopy ? (
+                ) : showAllReviewersApprovedNoEditsCopy ? (
                   <>
                     <p className="text-base font-semibold text-emerald-100">
-                      Reviewer approved this draft without requesting changes.
+                      All reviewers approved this draft without requesting changes.
                     </p>
                     <p className="mt-2 text-sm leading-relaxed text-slate-300">
                       Nothing is signed yet. Open the agreement workspace to finalize for signing when you are ready.
                     </p>
                   </>
-                ) : recipientApprovalDetected ? (
+                ) : reviewApprovalAgg.hasOpenChangeRequests ? (
                   <>
-                    <p className="text-base font-semibold text-emerald-100">Reviewer accepted this draft.</p>
+                    <p className="text-base font-semibold text-emerald-100">Open change requests on this draft.</p>
                     <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                      {noOpenChangeRequests
-                        ? "Open your agreement workspace to finalize for signing when you are ready."
-                        : "There are still open change requests on this agreement. Open the workspace to resolve them before finalizing."}
+                      There are still open change requests on this agreement. Open the workspace to resolve them before
+                      finalizing.
+                    </p>
+                  </>
+                ) : reviewApprovalAgg.anyReviewerApproval ? (
+                  <>
+                    <p className="text-base font-semibold text-emerald-100">
+                      {reviewApprovalAgg.requiredReviewerCount > 1
+                        ? `${reviewApprovalAgg.approvedReviewerCount} of ${reviewApprovalAgg.requiredReviewerCount} reviewers approved`
+                        : "Reviewer approved this draft without requesting changes."}
+                    </p>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                      {reviewApprovalAgg.requiredReviewerCount > 1
+                        ? "Each reviewer uses their own private link. When everyone has approved, you can finalize for signing here."
+                        : "Nothing is signed yet. Open the agreement workspace to finalize for signing when you are ready."}
                     </p>
                   </>
                 ) : (
                   <p className="text-sm leading-relaxed text-slate-300">
-                    Nothing has been signed. Copy this private link and send it to the reviewer.
+                    Nothing has been signed. Copy this private link and send it to each reviewer.
                   </p>
                 )}
-                {recipientApprovalDetected ? (
-                  <p
-                    className="mt-3 rounded-lg border border-emerald-800/40 bg-emerald-950/40 px-3 py-2 text-left text-xs font-medium text-emerald-50"
-                    data-testid="simple-done-owner-approval-status"
-                  >
-                    Status:{" "}
-                    {signingLockActive
-                      ? "Signing version locked — continue in workspace"
-                      : "Reviewer approved — ready to sign"}
-                  </p>
-                ) : null}
+                <p
+                  className="mt-3 rounded-lg border border-emerald-800/40 bg-emerald-950/40 px-3 py-2 text-left text-xs font-medium text-emerald-50"
+                  data-testid="simple-done-owner-approval-status"
+                >
+                  Status:{" "}
+                  {signingLockActive
+                    ? "Signing version locked — continue in workspace"
+                    : reviewApprovalAgg.ownerStatusLine}
+                </p>
                 <dl className="mt-5 space-y-3 text-left text-sm text-slate-300">
                   <div>
                     <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</dt>
@@ -545,7 +578,16 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     >
                       {finalizeNavigating ? "Opening…" : "Continue to signing"}
                     </button>
-                  ) : recipientApprovalDetected ? (
+                  ) : reviewApprovalAgg.hasOpenChangeRequests ? (
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                      data-testid="simple-done-resolve-in-workspace"
+                      onClick={() => void navigate(negotiationHref)}
+                    >
+                      Resolve in workspace
+                    </button>
+                  ) : reviewApprovalAgg.finalizeForSigningEnabled ? (
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
@@ -564,7 +606,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       {reviewBundleCopyFlash ? "Copied" : "Copy review link"}
                     </button>
                   )}
-                  {signingLockActive || recipientApprovalDetected ? (
+                  {signingLockActive || reviewApprovalAgg.anyReviewerApproval ? (
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"

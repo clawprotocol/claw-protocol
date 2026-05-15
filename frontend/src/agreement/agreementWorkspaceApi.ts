@@ -18,6 +18,11 @@ export type WorkspaceIndexAgreement = {
   review_sent_at: string | null;
   /** True when audit log includes recipient/participant approval (reviewer accepted on link). */
   reviewer_approved?: boolean;
+  /** Distinct reviewer approvals counted via participant ids (when present). */
+  review_approvals_completed?: number;
+  review_approvals_required?: number;
+  /** True when every required reviewer has approved and there are no open change requests. */
+  all_reviewers_approved?: boolean;
   workspace_folder_id?: string | null;
   workspace_folder_name?: string | null;
   workspace_tags?: string[];
