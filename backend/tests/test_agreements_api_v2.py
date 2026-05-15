@@ -1028,6 +1028,75 @@ def test_premium_full_draft_repair_pass_uses_agreement_outbound_airlock_profile(
     assert len((b.get("document_text") or "").strip()) > 1000
 
 
+def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypatch, tmp_path):
+    """Regression: ordinary commercial QA intake must reach the model (airlock must not pre-block)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
+    import backend.routers.agreements_v2_api as av2
+    from backend.tests.test_privilege_policy import LAWDOG_QA_SAAS_RESELLER_PROMPT
+
+    body_block = "\n\n".join(
+        [
+            "1. PARTIES. Five named entities enter this Reseller Agreement.",
+            "2. SCOPE. White-label software, APIs, onboarding, analytics, and maintenance.",
+            "3. FEES. $124,750 across five milestone payments as stated.",
+            "4. TERM. Eighteen months with month-to-month renewal and notice.",
+            "5. CONFIDENTIALITY AND SECURITY. Mutual duties and reasonable safeguards.",
+            "6. IP. Ownership and license scope for deliverables.",
+            "7. LIMITATION OF LIABILITY AND INDEMNITY. Commercial caps and defense obligations.",
+            "8. SLA. Uptime and service credit mechanics.",
+            "9. DISPUTES. Governing law Delaware; mediation optional; arbitration optional; venue.",
+            "10. MISCELLANEOUS. Notices, counterparts, electronic signatures.",
+        ]
+    )
+    doc = (
+        "WHEREAS the parties wish to document reseller and white-label services.\n\n"
+        + body_block
+        + "\n\n"
+        + ("Additional operative detail. " * 200)
+        + "\n\n"
+        + ("z" * 1200)
+    )
+    out_json = {
+        "title": "Reseller and White-Label Services Agreement",
+        "agreement_family": "SaaS / software services",
+        "document_text": doc,
+        "key_terms_found": ["Fees", "SLA"],
+        "missing_material_info": [],
+    }
+
+    def fake_llm(*args, **kwargs):
+        assert kwargs.get("airlock_profile") == "agreement_outbound"
+        return json.dumps(out_json)
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_ORG_H,
+        json={
+            "intake_text": LAWDOG_QA_SAAS_RESELLER_PROMPT,
+            "context": {
+                "title": "Web Development Agreement",
+                "jurisdiction": "Delaware",
+                "parties": [
+                    {"name": "Redwood Peak Ventures LLC", "role": "party"},
+                    {"name": "Atlas Harbor Technologies Inc.", "role": "party"},
+                ],
+                "purpose": "Reseller and white-label services",
+                "payment_terms": "$124,750 milestone payments",
+                "agreement_family": "services_agreement",
+                "material_asks": ["confidentiality", "indemnification", "dispute resolution"],
+            },
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("server_generation_failure_code") != "airlock_blocked"
+    assert len((body.get("document_text") or "").strip()) > 1000
+
+
 def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))

@@ -222,6 +222,39 @@ def test_airlock_default_profile_still_blocks_standalone_settlement_word() -> No
     assert r.blocked is True
 
 
+def test_airlock_agreement_outbound_blocks_litigation_strategy_memo() -> None:
+    r = run_ai_airlock(
+        "Draft litigation strategy and attorney-client privileged lawsuit analysis for the CFO.",
+        policy_profile="agreement_outbound",
+    )
+    assert r.blocked is True
+
+
+def test_airlock_agreement_outbound_allows_premium_full_draft_style_saas_wire() -> None:
+    import json
+
+    from backend.routers.agreements_v2_api import (
+        AgreementParty,
+        PremiumFullDraftContext,
+        PremiumFullDraftRequest,
+        build_premium_full_draft_user_payload_for_airlock,
+    )
+    from backend.tests.test_privilege_policy import LAWDOG_QA_SAAS_RESELLER_PROMPT
+
+    body = PremiumFullDraftRequest(
+        intake_text=LAWDOG_QA_SAAS_RESELLER_PROMPT,
+        context=PremiumFullDraftContext(
+            title="Web Development Agreement",
+            jurisdiction="Delaware",
+            parties=[AgreementParty(name="A LLC", role="party"), AgreementParty(name="B LLC", role="party")],
+            agreement_family="services_agreement",
+        ),
+    )
+    wire, _ = build_premium_full_draft_user_payload_for_airlock(body)
+    r = run_ai_airlock(json.dumps(wire, ensure_ascii=False), policy_profile="agreement_outbound")
+    assert r.blocked is False
+
+
 def test_airlock_result_is_typed() -> None:
     r = run_ai_airlock("x")
     assert isinstance(r, AIAirlockResult)

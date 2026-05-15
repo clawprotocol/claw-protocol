@@ -122,11 +122,113 @@ LAWDOG_QA_SAAS_RESELLER_PROMPT = (
 )
 
 
-def test_lawdog_qa_saas_reseller_prompt_allowed_under_agreement_outbound_profile() -> None:
+def test_agreement_outbound_allows_exact_saas_reseller_qa_prompt() -> None:
     d = evaluate_privilege_policy(LAWDOG_QA_SAAS_RESELLER_PROMPT, policy_profile="agreement_outbound")
     assert d.requires_protected_mode is False
     assert d.allow_external_ai is True
     assert d.reason_codes == ()
+
+
+def test_agreement_outbound_allows_commercial_dispute_boilerplate() -> None:
+    text = (
+        "SaaS agreement: indemnify, defend, and hold harmless; third-party claims, damages, and losses; "
+        "reasonable attorneys’ fees; exclusive jurisdiction and venue in Delaware courts; "
+        "dispute resolution through mediation then binding arbitration; limitation of liability; "
+        "governing law; litigation costs; any lawsuit between the parties shall be brought only in said courts; "
+        "each party may retain counsel of its choosing."
+    )
+    d = evaluate_privilege_policy(text, policy_profile="agreement_outbound")
+    assert d.requires_protected_mode is False
+    assert d.reason_codes == ()
+
+
+def test_agreement_outbound_still_blocks_high_signal_litigation_strategy() -> None:
+    for text in (
+        "Draft our litigation strategy for the board.",
+        "Prepare discovery strategy before we meet opposing counsel.",
+        "This is pending lawsuit material and active litigation notes.",
+        "Attorney-client privilege applies to this analysis.",
+        "Memo on the work product doctrine.",
+        "Follow the litigation hold and deposition preparation checklist.",
+    ):
+        d = evaluate_privilege_policy(text, policy_profile="agreement_outbound")
+        assert d.requires_protected_mode is True, text
+
+
+def test_agreement_outbound_allows_privileged_and_confidential_without_memo_phrase() -> None:
+    d = evaluate_privilege_policy(
+        "All information marked as privileged and confidential shall be protected.",
+        policy_profile="agreement_outbound",
+    )
+    assert d.requires_protected_mode is False
+    assert d.reason_codes == ()
+
+
+def test_defense_strategy_and_claim_analysis_still_block_default_profile() -> None:
+    for text in (
+        "We need a defense strategy before the witness interview.",
+        "Attach the claim analysis spreadsheet.",
+    ):
+        d = evaluate_privilege_policy(text, policy_profile="default")
+        assert d.requires_protected_mode is True, text
+
+
+def test_agreement_outbound_allows_defense_strategy_security_usage() -> None:
+    """“Defense strategy” alone is intake-heavy; outbound allows security / commercial phrasing."""
+    d = evaluate_privilege_policy(
+        "Vendor shall implement a layered defense strategy for endpoints and cloud configuration.",
+        policy_profile="agreement_outbound",
+    )
+    assert d.requires_protected_mode is False
+
+
+def test_agreement_outbound_allows_legal_memo_word_outbound() -> None:
+    d = evaluate_privilege_policy(
+        "The parties acknowledge this is not a legal memo or regulatory filing.",
+        policy_profile="agreement_outbound",
+    )
+    assert d.requires_protected_mode is False
+
+
+def test_premium_full_draft_user_wire_airlock_allows_qa_saas_prompt() -> None:
+    """Same JSON assembly as POST /premium-full-draft user message must pass agreement_outbound airlock."""
+    import json
+
+    from backend.routers.agreements_v2_api import (
+        AgreementParty,
+        PremiumFullDraftContext,
+        PremiumFullDraftRequest,
+        build_premium_full_draft_user_payload_for_airlock,
+    )
+    from backend.security.ai_airlock import run_ai_airlock
+
+    body = PremiumFullDraftRequest(
+        intake_text=LAWDOG_QA_SAAS_RESELLER_PROMPT,
+        context=PremiumFullDraftContext(
+            title="Web Development Agreement",
+            jurisdiction="Delaware",
+            parties=[
+                AgreementParty(name="Redwood Peak Ventures LLC", role="party"),
+                AgreementParty(name="Atlas Harbor Technologies Inc.", role="party"),
+            ],
+            purpose="Reseller and white-label services",
+            payment_terms="$124,750 milestones",
+            duration="18 months",
+            agreement_family="services_agreement",
+            material_asks=["confidentiality", "indemnification", "dispute resolution", "audit rights"],
+            deterministic_intent_id="web_presence",
+            intent_contract={
+                "intent_id": "software_web_dev",
+                "minimum_section_expectations": "Build scope, acceptance, change orders, IP, warranty/support, fees.",
+                "user_fact_summary": LAWDOG_QA_SAAS_RESELLER_PROMPT[:900],
+                "pro_strict": True,
+            },
+        ),
+    )
+    user_payload, _ctx = build_premium_full_draft_user_payload_for_airlock(body)
+    wire = json.dumps(user_payload, ensure_ascii=False)
+    r = run_ai_airlock(wire, policy_profile="agreement_outbound")
+    assert r.blocked is False
 
 
 def test_settlement_single_word_default_profile_triggers_litigation() -> None:

@@ -80,6 +80,7 @@ from backend.services.agreement_signing_lock_store import (
 )
 from backend.utils.timeline_store import TimelineStore
 from backend.llm_router import ExternalAIBlockedError, OPENAI_API_KEY, call_legal_llm, resolve_llm_model_for_access_class
+from backend.security.privilege_policy import first_privilege_airlock_block_diagnostic
 from backend.llm_usage_guard import (
     build_llm_trace_context,
     client_fingerprint,
@@ -3836,25 +3837,15 @@ def premium_missing_facts(request: Request, body: PremiumMissingFactsRequest) ->
         return PremiumMissingFactsResponse(questions=[])
 
 
-@router.post("/premium-full-draft", response_model=PremiumFullDraftResponse)
-def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Response:
+def build_premium_full_draft_user_payload_for_airlock(
+    body: PremiumFullDraftRequest,
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """
-    One-shot premium model: full agreement document (not stitched field transforms).
-    Returns JSON with `document_text` as the primary body for LawDog Pro read-only preview.
+    Build the ``user_payload`` dict serialized to the premium full-draft model user message
+    (the same text evaluated by ``run_ai_airlock(..., policy_profile="agreement_outbound")``).
+
+    Returns ``(user_payload, ctx_dict)``. Kept in sync with :func:`premium_full_draft` assembly.
     """
-    require_claw_org_id_header(request)
-    ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
-    if not ok_txt:
-        raise HTTPException(status_code=400, detail=msg_txt)
-    request_ip = request.client.host if request.client else "unknown"
-    max_out = max(2000, int(os.environ.get("CLAW_PREMIUM_FULL_DRAFT_MAX_TOKENS", "8000")))
-    sim_regen = bool(getattr(body, "similarity_regeneration", False))
-    llm_model = resolve_llm_model_for_access_class("premium_regen" if sim_regen else "premium")
-    if sim_regen:
-        log.info(
-            "[CLAW] premium similarity retry model=%s",
-            llm_model or "default",
-        )
     intake_s = (body.intake_text or "").strip()
     ctx_dict: Optional[Dict[str, Any]] = (
         body.context.model_dump(exclude_none=True, mode="json") if body.context else None
@@ -3875,6 +3866,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     uga = (body.user_gap_answers or "").strip()
     if uga:
         user_payload["user_gap_answers"] = uga
+    sim_regen = bool(getattr(body, "similarity_regeneration", False))
     if sim_regen:
         user_payload["regeneration"] = "similarity_distinct"
         user_payload["regeneration_directive"] = (
@@ -3885,6 +3877,37 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             "rounds, termination, governing law and venue from the user’s **stated** state (never replace Oklahoma with "
             "Delaware or swap states without intake support), notices, counterparts, e-sign, and full signature blocks."
         )
+    return user_payload, ctx_dict
+
+
+@router.post("/premium-full-draft", response_model=PremiumFullDraftResponse)
+def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Response:
+    """
+    One-shot premium model: full agreement document (not stitched field transforms).
+    Returns JSON with `document_text` as the primary body for LawDog Pro read-only preview.
+    """
+    require_claw_org_id_header(request)
+    ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
+    if not ok_txt:
+        raise HTTPException(status_code=400, detail=msg_txt)
+    request_ip = request.client.host if request.client else "unknown"
+    max_out = max(2000, int(os.environ.get("CLAW_PREMIUM_FULL_DRAFT_MAX_TOKENS", "8000")))
+    sim_regen = bool(getattr(body, "similarity_regeneration", False))
+    llm_model = resolve_llm_model_for_access_class("premium_regen" if sim_regen else "premium")
+    if sim_regen:
+        log.info(
+            "[CLAW] premium similarity retry model=%s",
+            llm_model or "default",
+        )
+    user_payload, ctx_dict = build_premium_full_draft_user_payload_for_airlock(body)
+    intake_s = (body.intake_text or "").strip()
+    intent_key = resolve_premium_intent_key(intake_s, ctx_dict)
+    intent_skeleton = build_premium_intent_skeleton(intent_key, intake_s)
+    uga = (body.user_gap_answers or "").strip()
+    airlock_wire_text = json.dumps(user_payload, ensure_ascii=False)
+    scen_cat = cast(str, user_payload.get("scenario_category") or "custom_mixed")
+    _raw_sigs = user_payload.get("scenario_category_signals")
+    scen_sigs: List[str] = list(_raw_sigs) if isinstance(_raw_sigs, list) else []
     if uga:
         uga_hash = canon_sha256_hex(uga)
         log.info(
@@ -4006,6 +4029,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             )
             if len(json.dumps(repair_payload, ensure_ascii=False)) > 260_000:
                 raise ValueError("repair_payload_too_large")
+            airlock_wire_text = json.dumps(repair_payload, ensure_ascii=False)
             llm_repair = call_legal_llm(
                 messages=[
                     {"role": "system", "content": premium_full_draft_repair_system_prompt()},
@@ -4045,6 +4069,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 up_clean["user_gap_answers"] = sanitize_premium_intake_for_retry(uga)
             if len(json.dumps(up_clean, ensure_ascii=False)) > 240_000:
                 raise ValueError("clean_premium_user_payload_too_large")
+            airlock_wire_text = json.dumps(up_clean, ensure_ascii=False)
             llm_clean = call_legal_llm(
                 messages=[
                     {"role": "system", "content": _premium_full_draft_system_prompt()},
@@ -4159,6 +4184,28 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         )
     except Exception as exc:
         code, log_detail = _classify_premium_full_draft_failure(exc)
+        if code == "airlock_blocked":
+            try:
+                diag = first_privilege_airlock_block_diagnostic(
+                    airlock_wire_text, policy_profile="agreement_outbound"
+                )
+                suffix = ""
+                if diag is not None:
+                    suffix = (
+                        f" first_block_reason={diag.reason_code} first_block_category={diag.rule_category}"
+                        f" first_block_rule_id={diag.matched_rule_id}"
+                    )
+                log.warning(
+                    "[premium-full-draft] event=airlock_blocked airlock_profile=agreement_outbound "
+                    "airlock_route=premium_full_draft:user_wire user_message_index=0 user_content_chars=%s%s",
+                    len(airlock_wire_text),
+                    suffix,
+                )
+            except Exception as adiag:
+                log.warning(
+                    "[premium-full-draft] event=airlock_blocked_diag_failed exc=%s",
+                    type(adiag).__name__,
+                )
         try:
             _pfd_degraded = {
                 "phase": "degraded",

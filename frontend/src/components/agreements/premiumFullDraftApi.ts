@@ -148,23 +148,6 @@ export function buildSanitizedPremiumFullDraftContext(
   return base;
 }
 
-/** When the server marks `degraded` but returned a substantial operative body with no hard failure, treat as OK for UX. */
-function normalizePremiumFullDraftHttpResult(result: PremiumFullDraftResult): PremiumFullDraftResult {
-  const gen = (result.generation_outcome || "").trim();
-  const fc = (result.server_generation_failure_code || "").trim();
-  const d = (result.document_text || "").trim();
-  const hard = fc === "airlock_blocked" || fc === "dev_context_leak";
-  if (gen === "degraded" && !hard && d.length >= 400 && rejectPremiumDegradedFiller(d).ok) {
-    return {
-      ...result,
-      generation_outcome: "ok",
-      server_generation_failure_code: "",
-      server_generation_failure_message: "",
-    };
-  }
-  return result;
-}
-
 function summarizePaymentForFullDraft(
   p: IntakePaymentField,
 ): { amount: number | null; cadence: string | null; valid: boolean } {
@@ -298,7 +281,7 @@ export async function postPremiumFullDraftOnce(args: {
     }
     throw new Error((msg as string) || "premium_full_draft_failed");
   }
-  return normalizePremiumFullDraftHttpResult(parsed as PremiumFullDraftResult);
+  return parsed as PremiumFullDraftResult;
 }
 
 /**

@@ -46,6 +46,12 @@ LEGAL_SENSITIVE_PHRASES: Final[tuple[str, ...]] = (
     "legal memo",
 )
 
+# ``agreement_outbound`` skips intake-style ``legal memo`` phrase matching: repair JSON and
+# adjacent privilege phrasing can contain ``legal`` + ``memo`` tokens without being an intake memo.
+LEGAL_SENSITIVE_PHRASES_AGREEMENT_OUTBOUND: Final[tuple[str, ...]] = tuple(
+    p for p in LEGAL_SENSITIVE_PHRASES if p != "legal memo"
+)
+
 # Terms that suggest litigation or dispute posture.
 LITIGATION_SINGLE_TERMS: Final[frozenset[str]] = frozenset(
     {
@@ -67,23 +73,36 @@ LITIGATION_SINGLE_TERMS_AGREEMENT_OUTBOUND: Final[frozenset[str]] = frozenset(
     LITIGATION_SINGLE_TERMS - frozenset({"settlement", "discovery", "litigation", "lawsuit"})
 )
 
-LITIGATION_PHRASES: Final[tuple[str, ...]] = (
+# High-signal litigation / intake posture phrases shared by both profiles.
+_LITIGATION_PHRASES_SHARED: Final[tuple[str, ...]] = (
     "active lawsuit",
     "active litigation",
     "attorney client privilege",
     "attorney-client privilege",
-    "claim analysis",
     "criminal defense",
-    "defense strategy",
-    "file a lawsuit",
-    "filed a lawsuit",
+    "deposition preparation",
+    "discovery strategy",
     "litigation hold",
     "litigation strategy",
     "lawsuit strategy",
     "opposing counsel",
     "pending litigation",
+    "pending lawsuit",
+)
+
+# Default profile only: investigation / intake phrasing uncommon in outbound agreement JSON.
+_LITIGATION_PHRASES_DEFAULT_ONLY: Final[tuple[str, ...]] = (
+    "claim analysis",
+    "defense strategy",
+    "file a lawsuit",
+    "filed a lawsuit",
     "witness interview",
 )
+
+LITIGATION_PHRASES_DEFAULT: Final[tuple[str, ...]] = tuple(
+    sorted(frozenset(_LITIGATION_PHRASES_SHARED + _LITIGATION_PHRASES_DEFAULT_ONLY))
+)
+LITIGATION_PHRASES_AGREEMENT_OUTBOUND: Final[tuple[str, ...]] = tuple(sorted(frozenset(_LITIGATION_PHRASES_SHARED)))
 
 # Explicit privilege / work-product style signals.
 PRIVILEGE_CANDIDATE_SINGLE_TERMS: Final[frozenset[str]] = frozenset(
@@ -91,6 +110,10 @@ PRIVILEGE_CANDIDATE_SINGLE_TERMS: Final[frozenset[str]] = frozenset(
         "privileged",
     }
 )
+
+# ``agreement_outbound``: do not treat standalone ``privileged`` as a block (e.g. “privileged
+# access”, “privileged and confidential”); keep explicit privilege-intake phrases only.
+PRIVILEGE_PHRASES_AGREEMENT_OUTBOUND: Final[tuple[str, ...]] = ("privileged legal memo",)
 
 # Legal-doctrine signals only. Plain "work product" appears in routine commercial/IP clauses
 # (deliverables, commissioned designs, software dev) and must not trip protected-mode by itself.
@@ -130,6 +153,9 @@ _LEGAL_SENSITIVE_WORD_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 _LEGAL_SENSITIVE_PHRASE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     _compile_phrase_patterns(LEGAL_SENSITIVE_PHRASES)
 )
+_LEGAL_SENSITIVE_PHRASE_PATTERNS_AGREEMENT_OUTBOUND: Final[tuple[re.Pattern[str], ...]] = (
+    _compile_phrase_patterns(LEGAL_SENSITIVE_PHRASES_AGREEMENT_OUTBOUND)
+)
 
 _LITIGATION_WORD_PATTERNS_DEFAULT: Final[tuple[re.Pattern[str], ...]] = (
     _compile_word_patterns(LITIGATION_SINGLE_TERMS)
@@ -137,12 +163,18 @@ _LITIGATION_WORD_PATTERNS_DEFAULT: Final[tuple[re.Pattern[str], ...]] = (
 _LITIGATION_WORD_PATTERNS_AGREEMENT_OUTBOUND: Final[tuple[re.Pattern[str], ...]] = (
     _compile_word_patterns(LITIGATION_SINGLE_TERMS_AGREEMENT_OUTBOUND)
 )
-_LITIGATION_PHRASE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    _compile_phrase_patterns(LITIGATION_PHRASES)
+_LITIGATION_PHRASE_PATTERNS_DEFAULT: Final[tuple[re.Pattern[str], ...]] = (
+    _compile_phrase_patterns(LITIGATION_PHRASES_DEFAULT)
+)
+_LITIGATION_PHRASE_PATTERNS_AGREEMENT_OUTBOUND: Final[tuple[re.Pattern[str], ...]] = (
+    _compile_phrase_patterns(LITIGATION_PHRASES_AGREEMENT_OUTBOUND)
 )
 
 _PRIVILEGE_WORD_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     _compile_word_patterns(PRIVILEGE_CANDIDATE_SINGLE_TERMS)
+)
+_PRIVILEGE_PHRASE_PATTERNS_AGREEMENT_OUTBOUND: Final[tuple[re.Pattern[str], ...]] = (
+    _compile_phrase_patterns(PRIVILEGE_PHRASES_AGREEMENT_OUTBOUND)
 )
 _WORK_PRODUCT_PHRASE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     _compile_phrase_patterns(WORK_PRODUCT_PHRASES)
@@ -164,6 +196,7 @@ class PrivilegeAirlockBlockDiagnostic:
         "litigation_word",
         "litigation_phrase",
         "privilege_word",
+        "privilege_phrase",
         "work_product_phrase",
     ]
     matched_rule_id: str
@@ -198,7 +231,12 @@ def _collect_reason_codes(
         policy_profile != "agreement_outbound"
         and _any_match(text, _LEGAL_SENSITIVE_WORD_PATTERNS)
     )
-    if legal_sensitive_words_hit or _any_match(text, _LEGAL_SENSITIVE_PHRASE_PATTERNS):
+    ls_phrase_patterns = (
+        _LEGAL_SENSITIVE_PHRASE_PATTERNS_AGREEMENT_OUTBOUND
+        if policy_profile == "agreement_outbound"
+        else _LEGAL_SENSITIVE_PHRASE_PATTERNS
+    )
+    if legal_sensitive_words_hit or _any_match(text, ls_phrase_patterns):
         codes.append(REASON_LEGAL_SENSITIVE_TERM)
 
     lit_word_patterns = (
@@ -206,11 +244,20 @@ def _collect_reason_codes(
         if policy_profile == "agreement_outbound"
         else _LITIGATION_WORD_PATTERNS_DEFAULT
     )
-    if _any_match(text, lit_word_patterns) or _any_match(text, _LITIGATION_PHRASE_PATTERNS):
+    lit_phrase_patterns = (
+        _LITIGATION_PHRASE_PATTERNS_AGREEMENT_OUTBOUND
+        if policy_profile == "agreement_outbound"
+        else _LITIGATION_PHRASE_PATTERNS_DEFAULT
+    )
+    if _any_match(text, lit_word_patterns) or _any_match(text, lit_phrase_patterns):
         codes.append(REASON_LITIGATION_SIGNAL)
 
-    if _any_match(text, _PRIVILEGE_WORD_PATTERNS):
-        codes.append(REASON_PRIVILEGE_CANDIDATE_TERM)
+    if policy_profile == "agreement_outbound":
+        if _any_match(text, _PRIVILEGE_PHRASE_PATTERNS_AGREEMENT_OUTBOUND):
+            codes.append(REASON_PRIVILEGE_CANDIDATE_TERM)
+    else:
+        if _any_match(text, _PRIVILEGE_WORD_PATTERNS):
+            codes.append(REASON_PRIVILEGE_CANDIDATE_TERM)
 
     if _any_match(text, _WORK_PRODUCT_PHRASE_PATTERNS):
         codes.append(REASON_WORK_PRODUCT_SIGNAL)
@@ -240,7 +287,12 @@ def first_privilege_airlock_block_diagnostic(
                     rule_category="legal_sensitive_word",
                     matched_rule_id=f"legal_sensitive_word:{term}",
                 )
-    for phrase in LEGAL_SENSITIVE_PHRASES:
+    ls_phrases = (
+        LEGAL_SENSITIVE_PHRASES_AGREEMENT_OUTBOUND
+        if policy_profile == "agreement_outbound"
+        else LEGAL_SENSITIVE_PHRASES
+    )
+    for phrase in ls_phrases:
         if _phrase_pattern(phrase).search(normalized):
             slug = re.sub(r"\s+", "_", phrase.strip().lower())
             return PrivilegeAirlockBlockDiagnostic(
@@ -261,7 +313,12 @@ def first_privilege_airlock_block_diagnostic(
                 rule_category="litigation_word",
                 matched_rule_id=f"litigation_word:{term}",
             )
-    for phrase in LITIGATION_PHRASES:
+    lit_phrases = (
+        LITIGATION_PHRASES_AGREEMENT_OUTBOUND
+        if policy_profile == "agreement_outbound"
+        else LITIGATION_PHRASES_DEFAULT
+    )
+    for phrase in lit_phrases:
         if _phrase_pattern(phrase).search(normalized):
             slug = re.sub(r"\s+", "_", phrase.strip().lower())
             return PrivilegeAirlockBlockDiagnostic(
@@ -270,13 +327,23 @@ def first_privilege_airlock_block_diagnostic(
                 matched_rule_id=f"litigation_phrase:{slug}",
             )
 
-    for term in sorted(PRIVILEGE_CANDIDATE_SINGLE_TERMS):
-        if _word_pattern(term).search(normalized):
-            return PrivilegeAirlockBlockDiagnostic(
-                reason_code=REASON_PRIVILEGE_CANDIDATE_TERM,
-                rule_category="privilege_word",
-                matched_rule_id=f"privilege_word:{term}",
-            )
+    if policy_profile == "agreement_outbound":
+        for phrase in PRIVILEGE_PHRASES_AGREEMENT_OUTBOUND:
+            if _phrase_pattern(phrase).search(normalized):
+                slug = re.sub(r"\s+", "_", phrase.strip().lower())
+                return PrivilegeAirlockBlockDiagnostic(
+                    reason_code=REASON_PRIVILEGE_CANDIDATE_TERM,
+                    rule_category="privilege_phrase",
+                    matched_rule_id=f"privilege_phrase:{slug}",
+                )
+    else:
+        for term in sorted(PRIVILEGE_CANDIDATE_SINGLE_TERMS):
+            if _word_pattern(term).search(normalized):
+                return PrivilegeAirlockBlockDiagnostic(
+                    reason_code=REASON_PRIVILEGE_CANDIDATE_TERM,
+                    rule_category="privilege_word",
+                    matched_rule_id=f"privilege_word:{term}",
+                )
     for phrase in WORK_PRODUCT_PHRASES:
         if _phrase_pattern(phrase).search(normalized):
             slug = re.sub(r"\s+", "_", phrase.strip().lower())
