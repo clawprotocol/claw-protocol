@@ -26,7 +26,37 @@ describe("applyDeterministicCommercialIntakeFallback", () => {
     expect(out.title).toBe("SaaS Reseller and White-Label Services Agreement");
     expect(out.purpose.toLowerCase()).toContain("workflow automation");
     expect(out.payment_terms).toMatch(/124,?750/);
+    expect(out.payment_terms.toLowerCase()).toContain("milestone");
     expect(out.duration?.toLowerCase() ?? "").toContain("18 months");
+    expect(out.duration?.toLowerCase() ?? "").toContain("renewal");
+    expect(out.duration?.toLowerCase() ?? "").toContain("30 days");
+    expect(out.jurisdiction.toLowerCase()).toContain("delaware");
+  });
+
+  it("replaces thin parser stubs after basic_parse_timeout-style partial parse (non-empty generic fields)", () => {
+    const thinParsed: ParsedDraftShape = {
+      title: "Independent Contractor Agreement",
+      jurisdiction: "To be selected in review.",
+      parties: [
+        { name: "Redwood Peak Ventures LLC", role: "party" },
+        { name: "Atlas Harbor Technologies Inc.", role: "party" },
+      ],
+      purpose: "Software development / technical services",
+      payment_terms: "$124,750",
+      duration: "18 months",
+      due_date: null,
+      effective_date: null,
+      payment: { amount: null, cadence: null, valid: true },
+      agreement_family: "independent_contractor_agreement",
+    };
+    const out = applyDeterministicCommercialIntakeFallback(QA, thinParsed);
+    expect(out.title).toBe("SaaS Reseller and White-Label Services Agreement");
+    expect(out.purpose.toLowerCase()).toContain("white-label");
+    expect(out.purpose.toLowerCase()).toContain("workflow automation");
+    expect(out.payment_terms).toMatch(/124,?750/);
+    expect(out.payment_terms.toLowerCase()).toContain("milestone");
+    expect(out.duration?.toLowerCase() ?? "").toContain("month-to-month");
+    expect(out.duration?.toLowerCase() ?? "").toContain("30 days");
     expect(out.jurisdiction.toLowerCase()).toContain("delaware");
   });
 });
