@@ -115,6 +115,58 @@ export function computeReviewApprovalStatus(
   };
 }
 
+/** Links minted and stable enough for signing / finalize CTAs on the owner done page. */
+export function signingHandoffLinksReadyForDonePage(input: {
+  reviewLinksReady: boolean;
+  anyReviewHref: boolean;
+  linksStillLoading: boolean;
+  linksIncomplete: boolean;
+}): boolean {
+  return (
+    input.reviewLinksReady &&
+    input.anyReviewHref &&
+    !input.linksStillLoading &&
+    !input.linksIncomplete
+  );
+}
+
+/**
+ * Pure gate: all required reviewers approved, no open change proposals, and review links are ready.
+ * Does not inspect signing lock — VS01 handoff runs after finalize until lock is set server-side.
+ */
+export function canFinalizeReviewForSigning(input: {
+  agreementIdTrimmed: string;
+  reviewLinksReady: boolean;
+  anyReviewHref: boolean;
+  linksStillLoading: boolean;
+  linksIncomplete: boolean;
+  reviewApprovalAggregate: Pick<
+    ReviewApprovalAggregate,
+    "requiredReviewerCount" | "allReviewersApproved" | "hasOpenChangeRequests"
+  >;
+}): boolean {
+  if (!(input.agreementIdTrimmed || "").trim()) return false;
+  if (!signingHandoffLinksReadyForDonePage(input)) return false;
+  if (input.reviewApprovalAggregate.requiredReviewerCount <= 0) return false;
+  if (!input.reviewApprovalAggregate.allReviewersApproved) return false;
+  if (input.reviewApprovalAggregate.hasOpenChangeRequests) return false;
+  return true;
+}
+
+/** Owner done page: signing version already locked — continue into VS01 / signing shell. */
+export function canContinueLockedSigningFromDonePage(input: {
+  agreementIdTrimmed: string;
+  signingLockActive: boolean;
+  reviewLinksReady: boolean;
+  anyReviewHref: boolean;
+  linksStillLoading: boolean;
+  linksIncomplete: boolean;
+}): boolean {
+  if (!(input.agreementIdTrimmed || "").trim()) return false;
+  if (!input.signingLockActive) return false;
+  return signingHandoffLinksReadyForDonePage(input);
+}
+
 /** When true, do not persist paid-pro edit-return snapshot on “Back to draft” (server draft is source of truth). */
 export function shouldWritePaidProEditReturnHandoffAfterReview(
   draft: AgreementDraft | null | undefined,

@@ -42,6 +42,8 @@ import {
 import { PaidProReviewReviewerLinksTable } from "./PaidProReviewReviewerLinksTable";
 import { SimpleDoneReviewFlowDiagPanel } from "./SimpleDoneReviewFlowDiagPanel";
 import {
+  canContinueLockedSigningFromDonePage,
+  canFinalizeReviewForSigning,
   computeReviewApprovalStatus,
   draftAuditHasRecipientRecordedApproval,
   logOwnerFinalizeRouteDecision,
@@ -279,6 +281,67 @@ export function SimpleDonePage(props: { agreementId: string }) {
     });
   }, [agreementId, isPaidProReviewDonePath, reviewLinksReady, reviewApprovalAgg]);
 
+  useEffect(() => {
+    if (!isPaidProReviewDonePath || !reviewLinksReady) return;
+    const normalized = normalizeHandoffToReviewerLinkRows(reviewHandoffRows);
+    const anyHref = normalized.some((r) => r.reviewHref.trim().length > 0);
+    const linksStillLoadingGate =
+      reviewApprovalAgg.requiredReviewerCount > 1 && Boolean(reviewLinksPending) && confirmedSend;
+    const linksIncompleteGate =
+      reviewApprovalAgg.requiredReviewerCount > 1 &&
+      !reviewLinksPending &&
+      normalized.length > 0 &&
+      normalized.length < reviewApprovalAgg.requiredReviewerCount;
+    const agreementIdTrimmed = agreementId.trim();
+    const openProposalCount = ownerHandoffDraft
+      ? findOpenRecipientProposals(ownerHandoffDraft.audit_log).length
+      : 0;
+    const signingHandoffBaseReadyGate =
+      reviewLinksReady && anyHref && !linksStillLoadingGate && !linksIncompleteGate;
+    const canFinalize = canFinalizeReviewForSigning({
+      agreementIdTrimmed,
+      reviewLinksReady,
+      anyReviewHref: anyHref,
+      linksStillLoading: linksStillLoadingGate,
+      linksIncomplete: linksIncompleteGate,
+      reviewApprovalAggregate: reviewApprovalAgg,
+    });
+    const signingLockActiveGate = Boolean((ownerSigningLockVid || "").trim());
+    let routeTarget = "none";
+    if (signingLockActiveGate && signingHandoffBaseReadyGate) routeTarget = "vs01_esign_bridge";
+    else if (reviewApprovalAgg.hasOpenChangeRequests && !signingLockActiveGate) {
+      routeTarget = `/app/agreements/${encodeURIComponent(agreementIdTrimmed)}`;
+    } else if (canFinalize && !signingLockActiveGate) routeTarget = "vs01_esign_bridge";
+    const diagOn =
+      (typeof import.meta !== "undefined" &&
+        import.meta.env?.MODE !== "test" &&
+        import.meta.env?.DEV) ||
+      (typeof window !== "undefined" && window.localStorage?.getItem("lawdogReviewFlowDiag") === "1");
+    if (!diagOn) return;
+    const short =
+      agreementIdTrimmed.length <= 12 ? agreementIdTrimmed : `${agreementIdTrimmed.slice(0, 8)}…`;
+    // eslint-disable-next-line no-console
+    console.info("[review-finalize-gate]", {
+      agreementIdShort: short,
+      requiredReviewerCount: reviewApprovalAgg.requiredReviewerCount,
+      approvedReviewerCount: reviewApprovalAgg.approvedReviewerCount,
+      allReviewersApproved: reviewApprovalAgg.allReviewersApproved,
+      openProposalCount,
+      canFinalize,
+      routeTarget,
+    });
+  }, [
+    agreementId,
+    confirmedSend,
+    isPaidProReviewDonePath,
+    ownerHandoffDraft,
+    ownerSigningLockVid,
+    reviewApprovalAgg,
+    reviewHandoffRows,
+    reviewLinksPending,
+    reviewLinksReady,
+  ]);
+
   const retryRemintReviewLink = useCallback(async () => {
     const id = agreementId.trim();
     if (!id || remintBusy) return;
@@ -500,6 +563,32 @@ export function SimpleDonePage(props: { agreementId: string }) {
       !ownerHandoffDraft || findOpenRecipientProposals(ownerHandoffDraft.audit_log).length === 0;
     const showAllReviewersApprovedNoEditsCopy =
       reviewApprovalAgg.allReviewersApproved && !signingLockActive && noOpenChangeRequests;
+    const agreementIdTrimmed = agreementId.trim();
+    const canFinalizeGate = canFinalizeReviewForSigning({
+      agreementIdTrimmed,
+      reviewLinksReady,
+      anyReviewHref,
+      linksStillLoading,
+      linksIncomplete,
+      reviewApprovalAggregate: reviewApprovalAgg,
+    });
+    const showTopContinueSigning = canContinueLockedSigningFromDonePage({
+      agreementIdTrimmed,
+      signingLockActive,
+      reviewLinksReady,
+      anyReviewHref,
+      linksStillLoading,
+      linksIncomplete,
+    });
+    const showTopResolveWorkspace = !signingLockActive && reviewApprovalAgg.hasOpenChangeRequests;
+    const showTopFinalizeForSigning = !signingLockActive && canFinalizeGate;
+    const showTopAnySigningPrimary =
+      showTopContinueSigning || showTopResolveWorkspace || showTopFinalizeForSigning;
+    const showBottomCopyPrimary =
+      !multiReviewer &&
+      reviewLinksReady &&
+      anyReviewHref &&
+      !showTopAnySigningPrimary;
     const flowShellTitle =
       !reviewLinksReady || !anyReviewHref
         ? "Review link could not be created"
@@ -546,14 +635,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     signing links.
                   </p>
                 ) : showAllReviewersApprovedNoEditsCopy ? (
-                  <>
-                    <p className="text-base font-semibold text-emerald-100">
-                      All reviewers approved this draft without requesting changes.
-                    </p>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                      Nothing is signed yet. Open the agreement workspace to finalize for signing when you are ready.
-                    </p>
-                  </>
+                  <p className="text-base font-semibold text-emerald-100">{reviewApprovalAgg.ownerStatusLine}</p>
                 ) : reviewApprovalAgg.hasOpenChangeRequests ? (
                   <>
                     <p className="text-base font-semibold text-emerald-100">Open change requests on this draft.</p>
@@ -563,18 +645,11 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     </p>
                   </>
                 ) : reviewApprovalAgg.anyReviewerApproval ? (
-                  <>
-                    <p className="text-base font-semibold text-emerald-100">
-                      {reviewApprovalAgg.requiredReviewerCount > 1
-                        ? `${reviewApprovalAgg.approvedReviewerCount} of ${reviewApprovalAgg.requiredReviewerCount} reviewers approved`
-                        : "Reviewer approved this draft without requesting changes."}
-                    </p>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                      {reviewApprovalAgg.requiredReviewerCount > 1
-                        ? "Each reviewer uses their own private link. When everyone has approved, you can finalize for signing here."
-                        : "Nothing is signed yet. Open the agreement workspace to finalize for signing when you are ready."}
-                    </p>
-                  </>
+                  <p className="text-sm leading-relaxed text-slate-300">
+                    {reviewApprovalAgg.requiredReviewerCount > 1
+                      ? "Track each reviewer in the table. When everyone has approved without open change requests, you can finalize for signing."
+                      : reviewApprovalAgg.ownerStatusLine}
+                  </p>
                 ) : (
                   <p className="text-sm leading-relaxed text-slate-300">
                     Nothing has been signed. Copy this private link and send it to each reviewer.
@@ -589,6 +664,45 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     ? "Signing version locked — continue in workspace"
                     : reviewApprovalAgg.ownerStatusLine}
                 </p>
+                {showTopAnySigningPrimary ? (
+                  <div
+                    className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
+                    data-testid="simple-done-review-primary-actions"
+                  >
+                    {showTopContinueSigning ? (
+                      <button
+                        type="button"
+                        className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                        data-testid="simple-done-continue-to-signing"
+                        disabled={finalizeNavigating}
+                        onClick={() => void handleOwnerFinalizeOrContinueSigning()}
+                      >
+                        {finalizeNavigating ? "Preparing signing packet…" : "Continue to signing"}
+                      </button>
+                    ) : null}
+                    {showTopResolveWorkspace ? (
+                      <button
+                        type="button"
+                        className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                        data-testid="simple-done-resolve-in-workspace"
+                        onClick={() => void navigate(negotiationHref)}
+                      >
+                        Resolve in workspace
+                      </button>
+                    ) : null}
+                    {showTopFinalizeForSigning ? (
+                      <button
+                        type="button"
+                        className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                        data-testid="simple-done-finalize-for-signing"
+                        disabled={finalizeNavigating}
+                        onClick={() => void handleOwnerFinalizeOrContinueSigning()}
+                      >
+                        {finalizeNavigating ? "Preparing signing packet…" : "Finalize for signing"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
                 <dl className="mt-5 space-y-3 text-left text-sm text-slate-300">
                   <div>
                     <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</dt>
@@ -662,36 +776,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                 </label>
                 ) : null}
                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  {signingLockActive ? (
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
-                      data-testid="simple-done-continue-to-signing"
-                      disabled={finalizeNavigating}
-                      onClick={() => void handleOwnerFinalizeOrContinueSigning()}
-                    >
-                      {finalizeNavigating ? "Opening…" : "Continue to signing"}
-                    </button>
-                  ) : reviewApprovalAgg.hasOpenChangeRequests ? (
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
-                      data-testid="simple-done-resolve-in-workspace"
-                      onClick={() => void navigate(negotiationHref)}
-                    >
-                      Resolve in workspace
-                    </button>
-                  ) : reviewApprovalAgg.finalizeForSigningEnabled ? (
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
-                      data-testid="simple-done-finalize-for-signing"
-                      disabled={finalizeNavigating}
-                      onClick={() => void handleOwnerFinalizeOrContinueSigning()}
-                    >
-                      {finalizeNavigating ? "Opening…" : "Finalize for signing"}
-                    </button>
-                  ) : !multiReviewer ? (
+                  {showBottomCopyPrimary ? (
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"

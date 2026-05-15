@@ -93,6 +93,7 @@ describe("SimpleDonePage owner approval UX", () => {
     const spyLock = vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,
       draft: baseDraft({
+        premium_full_document_text: "PRO_REVIEWED_BODY_FOR_SIGNING",
         audit_log: [{ event_type: "recipient_approved", at: "2026-01-02T00:00:00Z" }],
       }),
       lockedVersionId: null,
@@ -100,6 +101,7 @@ describe("SimpleDonePage owner approval UX", () => {
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
       ok: true,
       draft: baseDraft({
+        premium_full_document_text: "PRO_REVIEWED_BODY_FOR_SIGNING",
         audit_log: [{ event_type: "recipient_approved", at: "2026-01-02T00:00:00Z" }],
       }),
     });
@@ -116,10 +118,10 @@ describe("SimpleDonePage owner approval UX", () => {
       expect(spyLock).toHaveBeenCalled();
     });
 
-    expect(
-      screen.getByText("All reviewers approved this draft without requesting changes."),
-    ).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "All reviewers approved" })).toBeTruthy();
+    expect(screen.getByText("All reviewers approved — ready to sign.")).toBeTruthy();
     expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
+    expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
       "All reviewers approved — ready to sign",
     );
@@ -129,6 +131,9 @@ describe("SimpleDonePage owner approval UX", () => {
       expect.objectContaining({
         agreementId,
         logReason: "simple_done_finalize_clean",
+        draft: expect.objectContaining({
+          premium_full_document_text: "PRO_REVIEWED_BODY_FOR_SIGNING",
+        }),
       }),
     );
     expect(mockNavigate).toHaveBeenCalledWith("/app/esign/mock-vs01-doc?agreement_bridge=1");
@@ -217,7 +222,9 @@ describe("SimpleDonePage owner approval UX", () => {
     render(<SimpleDonePage agreementId={agreementId} />);
 
     await waitFor(() => {
-      expect(screen.getByText("1 of 4 reviewers approved")).toBeTruthy();
+      expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toMatch(
+        /1 of 4 reviewers approved/,
+      );
     });
     expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
@@ -264,9 +271,9 @@ describe("SimpleDonePage owner approval UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
     });
-    expect(
-      screen.getByText("All reviewers approved this draft without requesting changes."),
-    ).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "All reviewers approved" })).toBeTruthy();
+    expect(screen.getByText("All reviewers approved — ready to sign.")).toBeTruthy();
+    expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
       "All reviewers approved — ready to sign",
     );
@@ -423,5 +430,136 @@ describe("SimpleDonePage owner approval UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("simple-done-review-links-loading-only")).toBeTruthy();
     });
+  });
+
+  it("with 4 review links and zero approvals, does not show Finalize for signing", async () => {
+    const parties = [
+      { id: "r1", name: "R1", role: "reviewer" as const },
+      { id: "r2", name: "R2", role: "reviewer" as const },
+      { id: "r3", name: "R3", role: "reviewer" as const },
+      { id: "r4", name: "R4", role: "reviewer" as const },
+    ];
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({ parties, audit_log: [] }),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({ parties, audit_log: [] }),
+    });
+
+    markSimpleFlowSent(agreementId);
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId,
+      recipients: [
+        { displayName: "R1", reviewHref: "https://example.com/review/r1" },
+        { displayName: "R2", reviewHref: "https://example.com/review/r2" },
+        { displayName: "R3", reviewHref: "https://example.com/review/r3" },
+        { displayName: "R4", reviewHref: "https://example.com/review/r4" },
+      ],
+    });
+
+    render(<SimpleDonePage agreementId={agreementId} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain("0 of 4 reviewers approved");
+    });
+    expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
+  });
+
+  it("with 4 approvals and open proposals, hides Finalize and shows Resolve in workspace as primary", async () => {
+    const parties = [
+      { id: "r1", name: "R1", role: "reviewer" as const },
+      { id: "r2", name: "R2", role: "reviewer" as const },
+      { id: "r3", name: "R3", role: "reviewer" as const },
+      { id: "r4", name: "R4", role: "reviewer" as const },
+    ];
+    const audit_log = [
+      ...parties.map((p) => ({
+        event_type: "participant_approved" as const,
+        at: "2026-01-02T00:00:00Z",
+        value: { participant_id: p.id },
+      })),
+      {
+        event_type: "recipient_proposal_pending" as const,
+        at: "2026-01-02T01:00:00Z",
+        value: {
+          proposal_id: "p1",
+          instruction: "Change term X",
+          draft: { title: "Lease" },
+        },
+      },
+    ];
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({ parties, audit_log }),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({ parties, audit_log }),
+    });
+
+    markSimpleFlowSent(agreementId);
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId,
+      recipients: [
+        { displayName: "R1", reviewHref: "https://example.com/review/r1" },
+        { displayName: "R2", reviewHref: "https://example.com/review/r2" },
+        { displayName: "R3", reviewHref: "https://example.com/review/r3" },
+        { displayName: "R4", reviewHref: "https://example.com/review/r4" },
+      ],
+    });
+
+    render(<SimpleDonePage agreementId={agreementId} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("simple-done-resolve-in-workspace")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
+    expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
+  });
+
+  it("with 4 approvals but reviewLinksPending, hides Finalize until links settle", async () => {
+    const parties = [
+      { id: "r1", name: "R1", role: "reviewer" as const },
+      { id: "r2", name: "R2", role: "reviewer" as const },
+      { id: "r3", name: "R3", role: "reviewer" as const },
+      { id: "r4", name: "R4", role: "reviewer" as const },
+    ];
+    const audit_log = parties.map((p) => ({
+      event_type: "participant_approved" as const,
+      at: "2026-01-02T00:00:00Z",
+      value: { participant_id: p.id },
+    }));
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({ parties, audit_log }),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: baseDraft({ parties, audit_log }),
+    });
+
+    markSimpleFlowSent(agreementId);
+    writeSimpleDoneReviewRecipientLinks({
+      agreementId,
+      recipients: [
+        { displayName: "R1", reviewHref: "https://example.com/review/r1" },
+        { displayName: "R2", reviewHref: "https://example.com/review/r2" },
+        { displayName: "R3", reviewHref: "https://example.com/review/r3" },
+        { displayName: "R4", reviewHref: "https://example.com/review/r4" },
+      ],
+      reviewLinksPending: true,
+    });
+
+    render(<SimpleDonePage agreementId={agreementId} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("simple-done-review-links-loading-warning")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
   });
 });

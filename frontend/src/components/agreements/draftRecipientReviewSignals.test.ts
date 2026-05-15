@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  canFinalizeReviewForSigning,
   computeReviewApprovalStatus,
   draftAuditHasRecipientRecordedApproval,
   shouldWritePaidProEditReturnHandoffAfterReview,
+  signingHandoffLinksReadyForDonePage,
 } from "./draftRecipientReviewSignals";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 
@@ -155,6 +157,171 @@ describe("draftRecipientReviewSignals", () => {
       expect(agg.allReviewersApproved).toBe(false);
       expect(agg.finalizeForSigningEnabled).toBe(false);
       expect(agg.aggregateStatus).toBe("changes_pending");
+    });
+  });
+
+  describe("canFinalizeReviewForSigning", () => {
+    const aggBase = {
+      requiredReviewerCount: 4,
+      allReviewersApproved: true,
+      hasOpenChangeRequests: false,
+    };
+    const linksOk = {
+      reviewLinksReady: true,
+      anyReviewHref: true,
+      linksStillLoading: false,
+      linksIncomplete: false,
+    };
+
+    it("is false without agreement id", () => {
+      expect(
+        canFinalizeReviewForSigning({
+          agreementIdTrimmed: "",
+          ...linksOk,
+          reviewApprovalAggregate: aggBase,
+        }),
+      ).toBe(false);
+    });
+
+    it("is false when links still loading", () => {
+      expect(
+        canFinalizeReviewForSigning({
+          agreementIdTrimmed: "ag-1",
+          reviewLinksReady: true,
+          anyReviewHref: true,
+          linksStillLoading: true,
+          linksIncomplete: false,
+          reviewApprovalAggregate: aggBase,
+        }),
+      ).toBe(false);
+    });
+
+    it("is false when required reviewer count is 0", () => {
+      expect(
+        canFinalizeReviewForSigning({
+          agreementIdTrimmed: "ag-1",
+          ...linksOk,
+          reviewApprovalAggregate: { ...aggBase, requiredReviewerCount: 0 },
+        }),
+      ).toBe(false);
+    });
+
+    it("is false for 2 of 4 approved", () => {
+      const d = makeDraft({
+        parties: [
+          { id: "r1", name: "R1", role: "reviewer" },
+          { id: "r2", name: "R2", role: "reviewer" },
+          { id: "r3", name: "R3", role: "reviewer" },
+          { id: "r4", name: "R4", role: "reviewer" },
+        ],
+        audit_log: [
+          { event_type: "participant_approved" as const, at: BASE_TS, value: { participant_id: "r1" } },
+          { event_type: "participant_approved" as const, at: BASE_TS, value: { participant_id: "r2" } },
+        ],
+      });
+      const agg = computeReviewApprovalStatus(d, { mintedReviewerLinkCount: 4 });
+      expect(
+        canFinalizeReviewForSigning({
+          agreementIdTrimmed: "ag-1",
+          ...linksOk,
+          reviewApprovalAggregate: agg,
+        }),
+      ).toBe(false);
+    });
+
+    it("is false for 3 of 4 approved", () => {
+      const parties = [
+        { id: "r1", name: "R1", role: "reviewer" },
+        { id: "r2", name: "R2", role: "reviewer" },
+        { id: "r3", name: "R3", role: "reviewer" },
+        { id: "r4", name: "R4", role: "reviewer" },
+      ];
+      const audit_log = parties.slice(0, 3).map((p) => ({
+        event_type: "participant_approved" as const,
+        at: BASE_TS,
+        value: { participant_id: p.id },
+      }));
+      const d = makeDraft({ parties, audit_log });
+      const agg = computeReviewApprovalStatus(d, { mintedReviewerLinkCount: 4 });
+      expect(
+        canFinalizeReviewForSigning({
+          agreementIdTrimmed: "ag-1",
+          ...linksOk,
+          reviewApprovalAggregate: agg,
+        }),
+      ).toBe(false);
+    });
+
+    it("is true for 4 of 4 approved and links ready", () => {
+      const parties = [
+        { id: "r1", name: "R1", role: "reviewer" },
+        { id: "r2", name: "R2", role: "reviewer" },
+        { id: "r3", name: "R3", role: "reviewer" },
+        { id: "r4", name: "R4", role: "reviewer" },
+      ];
+      const audit_log = parties.map((p) => ({
+        event_type: "participant_approved" as const,
+        at: BASE_TS,
+        value: { participant_id: p.id },
+      }));
+      const d = makeDraft({ parties, audit_log });
+      const agg = computeReviewApprovalStatus(d, { mintedReviewerLinkCount: 4 });
+      expect(
+        canFinalizeReviewForSigning({
+          agreementIdTrimmed: "ag-1",
+          ...linksOk,
+          reviewApprovalAggregate: agg,
+        }),
+      ).toBe(true);
+    });
+
+    it("is false when open change requests exist despite full approvals", () => {
+      const parties = [
+        { id: "r1", name: "R1", role: "reviewer" },
+        { id: "r2", name: "R2", role: "reviewer" },
+      ];
+      const audit_log = [
+        ...parties.map((p) => ({
+          event_type: "participant_approved" as const,
+          at: BASE_TS,
+          value: { participant_id: p.id },
+        })),
+        {
+          event_type: "recipient_proposal_pending" as const,
+          at: BASE_TS,
+          value: { proposal_id: "p1", instruction: "x", draft: { title: "T" } },
+        },
+      ];
+      const d = makeDraft({ parties, audit_log });
+      const agg = computeReviewApprovalStatus(d, { mintedReviewerLinkCount: 2 });
+      expect(
+        canFinalizeReviewForSigning({
+          agreementIdTrimmed: "ag-1",
+          ...linksOk,
+          reviewApprovalAggregate: agg,
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("signingHandoffLinksReadyForDonePage", () => {
+    it("requires review hrefs and not loading/incomplete", () => {
+      expect(
+        signingHandoffLinksReadyForDonePage({
+          reviewLinksReady: true,
+          anyReviewHref: true,
+          linksStillLoading: false,
+          linksIncomplete: false,
+        }),
+      ).toBe(true);
+      expect(
+        signingHandoffLinksReadyForDonePage({
+          reviewLinksReady: true,
+          anyReviewHref: false,
+          linksStillLoading: false,
+          linksIncomplete: false,
+        }),
+      ).toBe(false);
     });
   });
 });
