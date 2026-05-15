@@ -49,6 +49,46 @@ export function approvedParticipantIds(audit: AgreementDraft["audit_log"] | unde
   return out;
 }
 
+/**
+ * Whether **this** participant has a recorded approval on the audit log.
+ *
+ * - If any approval event carries a non-empty ``participant_id``, the log is treated as
+ *   **multi-reviewer**: only an event whose ``participant_id`` matches ``participantId`` counts.
+ * - If no approval event has ``participant_id``, legacy single-recipient semantics apply: any
+ *   approval counts for every reviewer context (including when ``participantId`` is set).
+ * - When ``participantId`` is empty, only legacy events without ``participant_id`` count.
+ */
+export function auditHasRecipientApprovalForParticipant(
+  audit: AgreementDraft["audit_log"] | undefined,
+  participantId: string | null | undefined,
+): boolean {
+  const want = String(participantId || "").trim();
+  const log = audit || [];
+  const approvalEvents = log.filter((e) => {
+    const t = String(e?.event_type || "").trim();
+    return t === "recipient_approved" || t === "participant_approved";
+  });
+  const anyScopedApproval = approvalEvents.some((e) => {
+    const v = e?.value as { participant_id?: string } | undefined;
+    return Boolean(String(v?.participant_id || "").trim());
+  });
+  if (want) {
+    if (anyScopedApproval) {
+      return approvalEvents.some((e) => {
+        const v = e?.value as { participant_id?: string } | undefined;
+        return String(v?.participant_id || "").trim() === want;
+      });
+    }
+    return approvalEvents.length > 0;
+  }
+  for (const e of approvalEvents) {
+    const v = e?.value as { participant_id?: string } | undefined;
+    if (String(v?.participant_id || "").trim()) continue;
+    return true;
+  }
+  return false;
+}
+
 /** Signers (excluding implicit owner) who must approve before server signing lock when party ids exist. */
 export function missingSignerApprovals(draft: AgreementDraft | null): string[] {
   if (!draft?.parties?.length) return [];

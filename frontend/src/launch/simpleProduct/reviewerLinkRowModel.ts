@@ -34,6 +34,20 @@ export function reviewerLinkRowStatusLabel(s: ReviewerLinkRowApprovalStatus): st
 }
 
 /**
+ * Extract minted access token from a review URL (query ``t`` / ``token``).
+ */
+export function extractReviewLinkTokenFromHref(href: string): string {
+  const u = (href || "").trim();
+  if (!u) return "";
+  try {
+    const parsed = new URL(u, "https://placeholder.local");
+    return (parsed.searchParams.get("t") || parsed.searchParams.get("token") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Redact query token from a review URL for logs (never log full secrets).
  * Returns a short hint like ``https://host/.../review?...`` with ``t=(redacted)``.
  */

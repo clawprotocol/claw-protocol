@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { AgreementDraft } from "./agreementTypes";
-import { deriveParticipantRows, humanizePartyRoleForTable, participantDisplayName } from "./participantModel";
+import {
+  auditHasRecipientApprovalForParticipant,
+  deriveParticipantRows,
+  humanizePartyRoleForTable,
+  participantDisplayName,
+} from "./participantModel";
 
 describe("participantDisplayName", () => {
   it("uses trimmed name when present", () => {
@@ -20,6 +25,34 @@ describe("humanizePartyRoleForTable", () => {
     expect(humanizePartyRoleForTable("party_a")).toBe("Client");
     expect(humanizePartyRoleForTable("party_b")).toBe("Consultant");
     expect(humanizePartyRoleForTable("owner")).toBe("Owner");
+  });
+});
+
+describe("auditHasRecipientApprovalForParticipant", () => {
+  const ts = "2026-05-10T00:00:00.000Z";
+
+  it("when any approval is scoped, only matching participant_id counts", () => {
+    const audit = [
+      {
+        event_type: "recipient_approved" as const,
+        at: ts,
+        value: { participant_id: "p-atlas" },
+      },
+    ];
+    expect(auditHasRecipientApprovalForParticipant(audit, "p-meridian")).toBe(false);
+    expect(auditHasRecipientApprovalForParticipant(audit, "p-atlas")).toBe(true);
+  });
+
+  it("when no approval carries participant_id, any approval counts for a named participant (legacy)", () => {
+    const audit = [{ event_type: "recipient_approved" as const, at: ts }];
+    expect(auditHasRecipientApprovalForParticipant(audit, "p-bob")).toBe(true);
+  });
+
+  it("empty participantId only matches legacy unscoped approvals", () => {
+    const audit = [
+      { event_type: "recipient_approved" as const, at: ts, value: { participant_id: "p-x" } },
+    ];
+    expect(auditHasRecipientApprovalForParticipant(audit, "")).toBe(false);
   });
 });
 

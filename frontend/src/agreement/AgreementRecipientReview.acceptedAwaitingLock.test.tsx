@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 import { recipientPartyReviewCopy } from "./recipientReviewPartyActions";
+import { recipientLinkTokenFingerprint } from "./recipientLinkTokenFingerprint";
 import {
   RECIPIENT_UPLOAD_REVISED_PRIMARY_LABEL,
   RECIPIENT_WANT_COPY_HEADING,
@@ -130,7 +131,8 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
         if (agreementGetCount === 1) {
           return jsonResponse({ draft: draftAccepted, signing_lock: null });
         }
-        const raw = localStorage.getItem(`claw_agreement_versions_v1:${agreementId}`);
+        const scope = recipientLinkTokenFingerprint("tok_test");
+        const raw = localStorage.getItem(`claw_agreement_versions_v1:${agreementId}:r:${scope}`);
         const vid = raw ? (JSON.parse(raw) as { versions: { id: string }[] }).versions[0]?.id ?? "" : "";
         return jsonResponse({
           draft: draftAccepted,

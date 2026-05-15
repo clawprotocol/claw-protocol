@@ -77,6 +77,9 @@ import {
   pendingSignatureCount,
 } from "./pendingSignatureDerive";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
+import { auditHasRecipientApprovalForParticipant } from "./participantModel";
+import { recipientLinkTokenFingerprint } from "./recipientLinkTokenFingerprint";
+import { logReviewStateSource } from "../components/agreements/reviewFlowDebugLog";
 import { substitutePartyPlaceholdersInUserFacingText } from "./partyPlaceholderDisplay";
 import { formatAuthoritativeAgreementPartiesInline } from "./handoffPartyDisplay";
 import { findOpenRecipientProposals } from "./recipientProposal";
@@ -485,7 +488,7 @@ type Props = {
   participantPartyId?: string;
   /** When set (e.g. magic link metadata), shown as “invited by …” on the landing card. */
   inviterDisplayNameOverride?: string;
-  /** Minted link token for scoped draft GET/render (session also checked). */
+  /** Minted link token for scoped draft GET/render (must match this tab’s URL token). */
   recipientAccessToken?: string;
   /** Multi-round negotiation lineage (compare base / parent); defaults to first recipient round. */
   revisionLineage?: RecipientRevisionLineage;
@@ -634,6 +637,10 @@ export function AgreementRecipientReview({
     () => agreementId.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "agreement",
     [agreementId],
   );
+  const recipientVersionStoreScope = useMemo(() => {
+    const t = (recipientAccessToken || "").trim();
+    return t ? recipientLinkTokenFingerprint(t) : undefined;
+  }, [recipientAccessToken]);
   const revisionPlainFieldId = `recipient-revision-plain-${intakeFieldIdSuffix}`;
   const revisionPasteNoteFieldId = `recipient-revision-paste-note-${intakeFieldIdSuffix}`;
   const externalPasteFieldId = `recipient-external-paste-${intakeFieldIdSuffix}`;
@@ -889,8 +896,8 @@ export function AgreementRecipientReview({
     [draft, participantPid]
   );
   const recipientApprovedInAudit = useMemo(
-    () => (draft?.audit_log || []).some((e) => e.event_type === "recipient_approved"),
-    [draft?.audit_log]
+    () => auditHasRecipientApprovalForParticipant(draft?.audit_log, participantPid),
+    [draft?.audit_log, participantPid],
   );
 
   const signingLinkInvalidMessage = useMemo(() => {
@@ -931,7 +938,8 @@ export function AgreementRecipientReview({
     setFullyExecutedAtSign(false);
     setSendSuggestedEditsModalOpen(false);
     setRecipientSuggestedEditsSentAck(false);
-  }, [agreementId]);
+    setApprovedAck(false);
+  }, [agreementId, recipientAccessToken, participantPartyId]);
 
   useEffect(() => {
     if (!recipientPreview && sendSuggestedEditsModalOpen) {
@@ -1739,9 +1747,9 @@ export function AgreementRecipientReview({
       const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
       const html = String(rp?.rendered_html || "");
       setRenderedHtml(html);
-      let b = loadBundle(agreementId);
+      let b = loadBundle(agreementId, recipientVersionStoreScope);
       if (!b || b.versions.length === 0) {
-        b = ensureInitialVersion(agreementId, d, html);
+        b = ensureInitialVersion(agreementId, d, html, recipientVersionStoreScope);
       }
       const signingLockPresentInPayload = Object.prototype.hasOwnProperty.call(payload, "signing_lock");
       const sl = payload.signing_lock;
@@ -1757,22 +1765,32 @@ export function AgreementRecipientReview({
             lockedBy: "owner",
           },
         };
-        saveBundle(b);
+        saveBundle(b, recipientVersionStoreScope);
       } else if (signingLockPresentInPayload && b.signingLock?.locked) {
         b = {
           ...b,
           finalizedForSigning: false,
           signingLock: { locked: false },
         };
-        saveBundle(b);
+        saveBundle(b, recipientVersionStoreScope);
       }
       setBundle(b);
+      const aid = agreementId.trim();
+      logReviewStateSource({
+        source: "agreementRecipientReview.refresh",
+        agreementScoped: false,
+        tokenScoped: Boolean((recipientAccessToken || "").trim()),
+        agreementIdShort: aid.length <= 12 ? aid : `${aid.slice(0, 8)}…`,
+        tokenHashShort: recipientLinkTokenFingerprint(recipientAccessToken),
+        participantPartyId: participantPid || null,
+        recipientApprovedInAudit: auditHasRecipientApprovalForParticipant(d.audit_log, participantPid),
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not load agreement.");
     } finally {
       setLoading(false);
     }
-  }, [agreementId, recipientAccessToken]);
+  }, [agreementId, recipientAccessToken, recipientVersionStoreScope, participantPid]);
 
   const draftSanitizeContext = useMemo(() => {
     if (!draft) return "";
@@ -4233,8 +4251,8 @@ export function AgreementRecipientReview({
             type="button"
             className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
             onClick={() => {
-              clearPendingRecipientNotice(agreementId);
-              setBundle(loadBundle(agreementId));
+              clearPendingRecipientNotice(agreementId, recipientVersionStoreScope);
+              setBundle(loadBundle(agreementId, recipientVersionStoreScope));
             }}
           >
             Got it

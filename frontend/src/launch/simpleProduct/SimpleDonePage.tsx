@@ -34,7 +34,11 @@ import {
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
 import type { ReviewerLinkRowApprovalStatus } from "./reviewerLinkRowModel";
-import { deriveReviewerLinkRowApprovalStatus, normalizeHandoffToReviewerLinkRows } from "./reviewerLinkRowModel";
+import {
+  deriveReviewerLinkRowApprovalStatus,
+  extractReviewLinkTokenFromHref,
+  normalizeHandoffToReviewerLinkRows,
+} from "./reviewerLinkRowModel";
 import { PaidProReviewReviewerLinksTable } from "./PaidProReviewReviewerLinksTable";
 import { SimpleDoneReviewFlowDiagPanel } from "./SimpleDoneReviewFlowDiagPanel";
 import {
@@ -44,7 +48,8 @@ import {
   logOwnerReviewLinkStatus,
   shouldWritePaidProEditReturnHandoffAfterReview,
 } from "../../components/agreements/draftRecipientReviewSignals";
-import { logReviewApprovalStatus } from "../../components/agreements/reviewFlowDebugLog";
+import { logReviewApprovalStatus, logReviewLinkRowOpen } from "../../components/agreements/reviewFlowDebugLog";
+import { recipientLinkTokenFingerprint } from "../../agreement/recipientLinkTokenFingerprint";
 import {
   clearPaidProEditReturnHandoff,
   paidProEditReturnHasRecoverableBody,
@@ -630,7 +635,17 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   statuses={reviewerRowStatuses}
                   rowCopyFlashByKey={rowCopyFlashByKey}
                   onCopyRow={(k, href) => copyRowReviewLink(k, href)}
-                  onOpenRow={(href) => {
+                  onOpenRow={(href, ctx) => {
+                    const id = agreementId.trim();
+                    const agreementIdShort = id.length <= 12 ? id : `${id.slice(0, 8)}…`;
+                    const tok = extractReviewLinkTokenFromHref(href);
+                    logReviewLinkRowOpen({
+                      agreementIdShort,
+                      partyIndex: ctx.partyIndex ?? ctx.rowIndex,
+                      recipientId: (ctx.recipientId || "").trim() || "(none)",
+                      hasToken: Boolean(tok),
+                      tokenHashShort: recipientLinkTokenFingerprint(tok),
+                    });
                     if (href.trim()) window.open(href, "_blank", "noopener,noreferrer");
                   }}
                 />

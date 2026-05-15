@@ -61,6 +61,29 @@ describe("draftRecipientReviewSignals", () => {
       expect(agg.ownerStatusLine).toBe("0 of 4 reviewers approved. Waiting for reviewer responses.");
     });
 
+    it("with 4 minted links and one scoped approval → partial 1 of 4", () => {
+      const d = makeDraft({
+        parties: [
+          { id: "r1", name: "R1", role: "reviewer" },
+          { id: "r2", name: "R2", role: "reviewer" },
+          { id: "r3", name: "R3", role: "reviewer" },
+          { id: "r4", name: "R4", role: "reviewer" },
+        ],
+        audit_log: [
+          {
+            event_type: "recipient_approved",
+            at: BASE_TS,
+            value: { participant_id: "r1" },
+          },
+        ],
+      });
+      const agg = computeReviewApprovalStatus(d, { mintedReviewerLinkCount: 4 });
+      expect(agg.approvedReviewerCount).toBe(1);
+      expect(agg.anyReviewerApproval).toBe(true);
+      expect(agg.allReviewersApproved).toBe(false);
+      expect(agg.aggregateStatus).toBe("partial");
+    });
+
     it("with 4 minted links and one legacy approval without participant_id → partial 1 of 4, not finalize", () => {
       const d = makeDraft({
         audit_log: [{ event_type: "recipient_approved", at: BASE_TS }],

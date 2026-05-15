@@ -6,7 +6,10 @@ export type PaidProReviewReviewerLinksTableProps = {
   statuses: ReviewerLinkRowApprovalStatus[];
   rowCopyFlashByKey: Record<string, boolean>;
   onCopyRow: (rowKey: string, href: string) => void;
-  onOpenRow: (href: string) => void;
+  onOpenRow: (
+    href: string,
+    ctx: { rowIndex: number; partyIndex?: number; recipientId?: string },
+  ) => void;
 };
 
 function rowKey(i: number): string {
@@ -54,7 +57,13 @@ export function PaidProReviewReviewerLinksTable(props: PaidProReviewReviewerLink
                         type="button"
                         className="rounded-md border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-slate-200 hover:border-slate-600 hover:bg-slate-800/80"
                         data-testid={`paid-pro-reviewer-open-${i}`}
-                        onClick={() => onOpenRow(r.reviewHref)}
+                        onClick={() =>
+                          onOpenRow(r.reviewHref, {
+                            rowIndex: i,
+                            partyIndex: r.party_index,
+                            recipientId: r.recipientPartyId || r.reviewer_id,
+                          })
+                        }
                       >
                         Open reviewer view
                       </button>

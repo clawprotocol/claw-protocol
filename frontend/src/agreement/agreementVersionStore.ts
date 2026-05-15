@@ -131,7 +131,13 @@ export type AgreementVersionBundle = {
   signingLockAudit?: SigningLockAuditEntry[];
 };
 
-const storageKey = (agreementId: string) => `claw_agreement_versions_v1:${agreementId}`;
+/** When ``recipientLinkScope`` is set (per minted link fingerprint), versions are isolated per reviewer tab. */
+function versionBundleStorageKey(agreementId: string, recipientLinkScope?: string | null): string {
+  const aid = (agreementId || "").trim();
+  const scope = (recipientLinkScope || "").trim();
+  if (scope) return `claw_agreement_versions_v1:${aid}:r:${scope}`;
+  return `claw_agreement_versions_v1:${aid}`;
+}
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -259,10 +265,13 @@ export function migrateBundleSigningLock(bundle: AgreementVersionBundle): Agreem
   return bundle;
 }
 
-export function loadBundle(agreementId: string): AgreementVersionBundle | null {
+export function loadBundle(
+  agreementId: string,
+  recipientLinkScope?: string | null,
+): AgreementVersionBundle | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(storageKey(agreementId));
+    const raw = localStorage.getItem(versionBundleStorageKey(agreementId, recipientLinkScope));
     if (!raw) return null;
     const p = JSON.parse(raw) as AgreementVersionBundle;
     if (!p?.agreementId || p.agreementId !== agreementId || !Array.isArray(p.versions)) return null;
@@ -272,7 +281,7 @@ export function loadBundle(agreementId: string): AgreementVersionBundle | null {
       isSigningLockActive(migrated) &&
       !isSigningLockActive(p)
     ) {
-      saveBundle(migrated);
+      saveBundle(migrated, recipientLinkScope);
     }
     return migrated;
   } catch {
@@ -280,18 +289,19 @@ export function loadBundle(agreementId: string): AgreementVersionBundle | null {
   }
 }
 
-export function saveBundle(bundle: AgreementVersionBundle): void {
+export function saveBundle(bundle: AgreementVersionBundle, recipientLinkScope?: string | null): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(storageKey(bundle.agreementId), JSON.stringify(bundle));
+  localStorage.setItem(versionBundleStorageKey(bundle.agreementId, recipientLinkScope), JSON.stringify(bundle));
 }
 
 /** Ensure at least v0 from current server draft + render. */
 export function ensureInitialVersion(
   agreementId: string,
   draft: AgreementDraft,
-  renderedHtml: string
+  renderedHtml: string,
+  recipientLinkScope?: string | null,
 ): AgreementVersionBundle {
-  const existing = loadBundle(agreementId);
+  const existing = loadBundle(agreementId, recipientLinkScope);
   if (existing && existing.versions.length > 0) {
     return existing;
   }
@@ -312,7 +322,7 @@ export function ensureInitialVersion(
     versions: [v0],
     ownerLastSeenUpdatedAt: draft.updated_at,
   };
-  saveBundle(bundle);
+  saveBundle(bundle, recipientLinkScope);
   return bundle;
 }
 
@@ -324,8 +334,10 @@ export function appendVersion(args: {
   createdBy: AgreementVersionAuthor;
   label?: string;
   meta?: VersionMeta;
+  /** Per-recipient link scope (fingerprint); omit for owner workspace bundle. */
+  recipientLinkScope?: string | null;
 }): AgreementVersionBundle {
-  let cur = loadBundle(args.agreementId);
+  let cur = loadBundle(args.agreementId, args.recipientLinkScope);
   if (cur && isSigningLockActive(cur)) {
     return cur;
   }
@@ -351,7 +363,7 @@ export function appendVersion(args: {
       ownerLastSeenUpdatedAt: args.draft.updated_at,
       pendingRecipientNotice: args.createdBy === "recipient",
     };
-    saveBundle(cur);
+    saveBundle(cur, args.recipientLinkScope);
     return cur;
   }
   const vid = newId();
@@ -368,7 +380,7 @@ export function appendVersion(args: {
     ownerLastSeenUpdatedAt: args.draft.updated_at,
     pendingRecipientNotice: args.createdBy === "recipient",
   };
-  saveBundle(next);
+  saveBundle(next, args.recipientLinkScope);
   return next;
 }
 
@@ -380,10 +392,13 @@ export function setReviewSent(agreementId: string): AgreementVersionBundle | nul
   return next;
 }
 
-export function clearPendingRecipientNotice(agreementId: string): void {
-  const cur = loadBundle(agreementId);
+export function clearPendingRecipientNotice(
+  agreementId: string,
+  recipientLinkScope?: string | null,
+): void {
+  const cur = loadBundle(agreementId, recipientLinkScope);
   if (!cur) return;
-  saveBundle({ ...cur, pendingRecipientNotice: false });
+  saveBundle({ ...cur, pendingRecipientNotice: false }, recipientLinkScope);
 }
 
 export function setFinalizedForSigning(agreementId: string, value: boolean): void {

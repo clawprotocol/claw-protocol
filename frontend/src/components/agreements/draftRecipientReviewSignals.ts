@@ -72,7 +72,8 @@ export function computeReviewApprovalStatus(
   if (legacy && approved === 0) {
     approved = 1;
   }
-  const anyReviewerApproval = approved > 0 || Boolean(d && draftAuditHasRecipientRecordedApproval(d));
+  const anyReviewerApproval =
+    approved > 0 || (legacy && Boolean(d && draftAuditHasRecipientRecordedApproval(d)));
   const open = d ? findOpenRecipientProposals(d.audit_log).length > 0 : false;
   const allReviewersApproved = !open && approved >= required && anyReviewerApproval;
   const hasOpenChangeRequests = open;

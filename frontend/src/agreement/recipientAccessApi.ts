@@ -1,6 +1,4 @@
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
-import { loadRecipientMagicLinkSession } from "./recipientMagicLinkSession";
-
 import { resolveApiBase } from "../lib/clawApi";
 import {
   normalizeMintRecipientAccessTokenBody,
@@ -38,12 +36,10 @@ const DEFAULT_INVALID_MESSAGE =
 
 /** Headers for full draft GET/render when the caller has a minted recipient link token. */
 export function recipientAgreementReadHeaders(
-  agreementId: string,
+  _agreementId: string,
   explicitToken?: string | null,
 ): Record<string, string> {
-  const fromProp = (explicitToken || "").trim();
-  const fromSession = loadRecipientMagicLinkSession(agreementId)?.token?.trim() || "";
-  const t = fromProp || fromSession;
+  const t = (explicitToken || "").trim();
   if (!t) return {};
   return { "X-Claw-Recipient-Access-Token": t };
 }

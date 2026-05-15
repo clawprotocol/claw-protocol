@@ -47,6 +47,8 @@ import {
   loadRecipientMagicLinkSession,
   saveRecipientMagicLinkSession,
 } from "./agreement/recipientMagicLinkSession";
+import { recipientLinkTokenFingerprint } from "./agreement/recipientLinkTokenFingerprint";
+import { logRecipientReviewTokenResolved } from "./components/agreements/reviewFlowDebugLog";
 import { AccessAccountPanel } from "./components/access/AccessAccountPanel";
 import { Vs01Layout, type Vs01LayoutHero } from "./vs01/Vs01Layout";
 import { Vs01Wizard } from "./vs01/Vs01Wizard";
@@ -240,13 +242,18 @@ function AgreementReviewGate(props: {
   const [resolvedPartyId, setResolvedPartyId] = useState<string | undefined>(undefined);
   const [inviterName, setInviterName] = useState<string | undefined>(undefined);
   const [badMessage, setBadMessage] = useState<string | null>(null);
+  const [validatedAccessToken, setValidatedAccessToken] = useState("");
 
   useEffect(() => {
     let cancel = false;
     void (async () => {
+      setValidatedAccessToken("");
       const policy = await fetchRecipientAccessPolicy();
-      const fromSession = loadRecipientMagicLinkSession(agreementId);
-      const effectiveToken = (token || "").trim() || fromSession?.token?.trim() || "";
+      const urlTok = (token || "").trim();
+      const sessionForUrl = urlTok ? loadRecipientMagicLinkSession(agreementId, urlTok) : null;
+      const sessionLegacy = !urlTok ? loadRecipientMagicLinkSession(agreementId) : null;
+      const effectiveToken =
+        urlTok || sessionForUrl?.token?.trim() || sessionLegacy?.token?.trim() || "";
 
       if (effectiveToken) {
         const vr = await validateRecipientAccessToken(effectiveToken, agreementId);
@@ -270,6 +277,17 @@ function AgreementReviewGate(props: {
             recipientPartyId: pid || undefined,
             recipientLinkRole: mr,
             inviterDisplayName: inv || undefined,
+          });
+          setValidatedAccessToken(effectiveToken);
+          const aid = agreementId.trim();
+          const agreementIdShort = aid.length <= 12 ? aid : `${aid.slice(0, 8)}…`;
+          logRecipientReviewTokenResolved({
+            agreementIdShort,
+            reviewerRecipientId: pid || null,
+            partyIndex: null,
+            reviewerStatus: "validated",
+            tokenScopeValid: true,
+            tokenHashShort: recipientLinkTokenFingerprint(effectiveToken),
           });
           setPhase("ready");
         } else {
@@ -317,6 +335,7 @@ function AgreementReviewGate(props: {
       : { kind: "review" as const };
   const roleOut = resolvedRole ?? recipientLinkRole ?? "reviewer";
   const partyOut = (resolvedPartyId || participantPartyId || "").trim();
+  const urlTokPass = (token || "").trim();
   return (
     <AgreementRecipientReview
       agreementId={agreementId}
@@ -324,7 +343,7 @@ function AgreementReviewGate(props: {
       recipientLinkRole={roleOut}
       participantPartyId={partyOut}
       inviterDisplayNameOverride={inviterName || ""}
-      recipientAccessToken={(token || "").trim()}
+      recipientAccessToken={validatedAccessToken || urlTokPass}
       onClose={onClose}
     />
   );

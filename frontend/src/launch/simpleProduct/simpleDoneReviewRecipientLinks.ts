@@ -4,7 +4,8 @@ import type { MintRecipientAccessTokenSuccess } from "../../agreement/recipientA
 import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
 import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } from "./reviewLinkRecipientEmailMerge";
 import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
-import { redactReviewUrlForLog } from "./reviewerLinkRowModel";
+import { extractReviewLinkTokenFromHref, redactReviewUrlForLog } from "./reviewerLinkRowModel";
+import { recipientLinkTokenFingerprint } from "../../agreement/recipientLinkTokenFingerprint";
 
 /**
  * Session handoff: after simple-home review-link flow, `/app/done` can show copyable per-recipient magic links
@@ -236,6 +237,30 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
         agreementIdShort: args.agreementId.trim().length <= 12 ? args.agreementId.trim() : `${args.agreementId.trim().slice(0, 8)}…`,
         partyIndex: i,
         reviewUrlForLog: redactReviewUrlForLog(reviewHref),
+      });
+    }
+  }
+  if (import.meta.env.DEV && out.length > 1) {
+    const hrefSet = new Set(out.map((r) => r.reviewHref.trim()));
+    if (hrefSet.size !== out.length) {
+      const id = args.agreementId.trim();
+      // eslint-disable-next-line no-console
+      console.error("[review-link-mint-invariant]", {
+        kind: "duplicate_reviewHref",
+        agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,
+        rowCount: out.length,
+        uniqueHrefCount: hrefSet.size,
+      });
+    }
+    const fpList = out.map((r) => recipientLinkTokenFingerprint(extractReviewLinkTokenFromHref(r.reviewHref)));
+    const nonempty = fpList.filter(Boolean);
+    if (nonempty.length > 0 && new Set(nonempty).size !== nonempty.length) {
+      const id = args.agreementId.trim();
+      // eslint-disable-next-line no-console
+      console.error("[review-link-mint-invariant]", {
+        kind: "duplicate_token_fingerprint",
+        agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,
+        rowCount: out.length,
       });
     }
   }
