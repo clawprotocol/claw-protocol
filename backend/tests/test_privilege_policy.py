@@ -7,6 +7,7 @@ from backend.security.privilege_policy import (
     REASON_WORK_PRODUCT_SIGNAL,
     PrivilegePolicyDecision,
     evaluate_privilege_policy,
+    first_privilege_airlock_block_diagnostic,
 )
 
 
@@ -147,3 +148,46 @@ def test_plaintiff_still_blocks_under_agreement_outbound_profile() -> None:
     )
     assert REASON_LITIGATION_SIGNAL in d.reason_codes
     assert d.requires_protected_mode is True
+
+
+def test_standalone_attorney_word_still_blocks_default_profile() -> None:
+    d = evaluate_privilege_policy("We should discuss this with our attorney before filing.")
+    assert REASON_LEGAL_SENSITIVE_TERM in d.reason_codes
+    assert d.requires_protected_mode is True
+
+
+def test_reasonable_attorney_fees_boilerplate_allowed_agreement_outbound() -> None:
+    """Repair JSON often echoes operative fee-shifting language with a standalone 'attorney' token."""
+    d = evaluate_privilege_policy(
+        "The prevailing party shall recover reasonable attorney fees and costs.",
+        policy_profile="agreement_outbound",
+    )
+    assert d.requires_protected_mode is False
+    assert d.allow_external_ai is True
+    assert d.reason_codes == ()
+
+
+def test_opposing_counsel_subpoena_privileged_memo_lawsuit_strategy_blocked_outbound() -> None:
+    for text in (
+        "Include a meeting with opposing counsel next week.",
+        "Respond to the subpoena for customer records.",
+        "Privileged legal memo summarizing exposure.",
+        "Outline lawsuit strategy for the board.",
+    ):
+        d = evaluate_privilege_policy(text, policy_profile="agreement_outbound")
+        assert d.requires_protected_mode is True, text
+
+
+def test_first_privilege_airlock_block_diagnostic_stable_ids() -> None:
+    diag = first_privilege_airlock_block_diagnostic("contact my attorney", policy_profile="default")
+    assert diag is not None
+    assert diag.reason_code == REASON_LEGAL_SENSITIVE_TERM
+    assert diag.rule_category == "legal_sensitive_word"
+    assert diag.matched_rule_id == "legal_sensitive_word:attorney"
+
+    d2 = first_privilege_airlock_block_diagnostic(
+        "Meet opposing counsel next Tuesday.", policy_profile="agreement_outbound"
+    )
+    assert d2 is not None
+    assert d2.rule_category == "litigation_phrase"
+    assert d2.matched_rule_id == "litigation_phrase:opposing_counsel"

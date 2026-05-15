@@ -201,6 +201,22 @@ def test_airlock_agreement_outbound_allows_lawdog_qa_saas_reseller_prompt() -> N
     assert len((r.minimized_text or "").strip()) > 0
 
 
+def test_airlock_agreement_outbound_allows_repair_json_with_attorney_fees() -> None:
+    import json
+
+    blob = json.dumps(
+        {
+            "repair_task": "full_draft_rewrite_after_rejection",
+            "rejected_pro_draft": {
+                "document_text": "Fees. The prevailing party may recover reasonable attorney fees and costs."
+            },
+        },
+        ensure_ascii=False,
+    )
+    r = run_ai_airlock(blob, policy_profile="agreement_outbound")
+    assert r.blocked is False
+
+
 def test_airlock_default_profile_still_blocks_standalone_settlement_word() -> None:
     r = run_ai_airlock("settlement and mutual release for both parties.")
     assert r.blocked is True

@@ -146,6 +146,52 @@ def test_call_legal_llm_agreement_outbound_allows_settlement_word_in_production(
     mock_create.assert_called_once()
 
 
+def test_call_legal_llm_agreement_outbound_allows_attorney_fees_in_repair_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    payload = json.dumps(
+        {
+            "repair_task": "full_draft_rewrite_after_rejection",
+            "rejected_pro_draft": {
+                "document_text": (
+                    "The prevailing party may recover reasonable attorney fees and costs in any enforcement action."
+                ),
+            },
+        },
+        ensure_ascii=False,
+    )
+    mock_create = MagicMock()
+    mock_create.return_value = _stub_completion_response('{"title":"T","agreement_family":"x","document_text":"y","key_terms_found":[],"missing_material_info":[]}')
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    out = call_legal_llm(
+        [{"role": "user", "content": payload}],
+        airlock_profile="agreement_outbound",
+        airlock_log_context="test:repair_json",
+    )
+    assert "title" in out
+    mock_create.assert_called_once()
+
+
+def test_call_legal_llm_default_profile_blocks_attorney_fees_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    payload = json.dumps(
+        {"note": "The prevailing party may recover reasonable attorney fees."},
+        ensure_ascii=False,
+    )
+    mock_create = MagicMock()
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    with pytest.raises(ExternalAIBlockedError):
+        call_legal_llm([{"role": "user", "content": payload}])
+    mock_create.assert_not_called()
+
+
 def test_embed_texts_blocked_skips_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_emb = MagicMock()
     mock_client = MagicMock()

@@ -16,7 +16,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(dotenv_path=_REPO_ROOT / ".env", override=False)
 
 from backend.security.ai_airlock import run_ai_airlock
-from backend.security.privilege_policy import AirlockPolicyProfile
+from backend.security.privilege_policy import AirlockPolicyProfile, first_privilege_airlock_block_diagnostic
 
 
 class ExternalAIBlockedError(RuntimeError):
@@ -137,8 +137,10 @@ def _messages_after_user_airlock(
     messages: List[Dict[str, Any]],
     *,
     airlock_profile: AirlockPolicyProfile = "default",
+    airlock_log_context: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
+    user_idx = 0
     for msg in messages:
         if (msg.get("role") or "") != "user":
             out.append(msg)
@@ -147,13 +149,24 @@ def _messages_after_user_airlock(
         airlock_result = run_ai_airlock(raw, policy_profile=airlock_profile)
         if airlock_result.blocked:
             codes = tuple(airlock_result.policy_decision.reason_codes)
+            diag = first_privilege_airlock_block_diagnostic(raw, policy_profile=airlock_profile)
+            diag_suffix = ""
+            if diag is not None:
+                diag_suffix = (
+                    f" first_block_reason={diag.reason_code} first_block_category={diag.rule_category}"
+                    f" first_block_rule_id={diag.matched_rule_id}"
+                )
+            route = airlock_log_context or "call_legal_llm"
             log.warning(
                 "[claw-ai-airlock] user_message_blocked block_reason=%s policy_reason_codes=%s "
-                "airlock_profile=%s user_content_chars=%s",
+                "airlock_profile=%s airlock_route=%s user_message_index=%s user_content_chars=%s%s",
                 airlock_result.block_reason,
                 ",".join(codes) if codes else "",
                 airlock_profile,
+                route,
+                user_idx,
                 len(raw),
+                diag_suffix,
             )
             raise ExternalAIBlockedError(
                 airlock_result.block_reason,
@@ -161,6 +174,7 @@ def _messages_after_user_airlock(
             )
         new_content = _user_content_with_minimized(msg.get("content"), airlock_result.minimized_text)
         out.append({**msg, "content": new_content})
+        user_idx += 1
     return out
 
 
@@ -172,6 +186,7 @@ def call_legal_llm(
     *,
     usage_sink: Optional[List[Dict[str, Any]]] = None,
     airlock_profile: AirlockPolicyProfile = "default",
+    airlock_log_context: Optional[str] = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -189,7 +204,9 @@ def call_legal_llm(
         :mod:`backend.config.external_ai_policy`.
       - ``airlock_profile`` — ``default`` keeps strict litigation single-word matches; ``agreement_outbound``
         is for LawDog agreement JSON (drops false-positive singles like ``settlement`` / ``discovery`` while
-        retaining hard litigation tokens such as ``plaintiff`` / ``subpoena``).
+        retaining hard litigation tokens such as ``plaintiff`` / ``subpoena``). Under ``agreement_outbound``,
+        standalone ``attorney`` / ``lawyer`` tokens are also ignored so repair JSON may include routine fee clauses.
+      - ``airlock_log_context`` — optional short route label for blocked-airlock logs (no user substance).
     """
     kwargs.pop("trace_context", None)
     if kwargs:
@@ -198,7 +215,11 @@ def call_legal_llm(
             sorted(kwargs.keys()),
         )
     profile: AirlockPolicyProfile = airlock_profile
-    outbound_messages = _messages_after_user_airlock(messages, airlock_profile=profile)
+    outbound_messages = _messages_after_user_airlock(
+        messages,
+        airlock_profile=profile,
+        airlock_log_context=airlock_log_context,
+    )
     client = _get_client()
     resolved_model = model or DEFAULT_MODEL
     tokens_kwargs = build_chat_completion_tokens_kwargs(resolved_model, max_tokens)
@@ -241,6 +262,7 @@ def embed_texts(
     texts: List[str],
     *,
     model: Optional[str] = None,
+    airlock_log_context: Optional[str] = None,
 ) -> List[List[float]]:
     """
     OpenAI embeddings for Agreement Memory / RAG (assistive only — never proof).
@@ -253,11 +275,22 @@ def embed_texts(
         airlock_result = run_ai_airlock(t)
         if airlock_result.blocked:
             codes = tuple(airlock_result.policy_decision.reason_codes)
+            diag = first_privilege_airlock_block_diagnostic(t, policy_profile="default")
+            diag_suffix = ""
+            if diag is not None:
+                diag_suffix = (
+                    f" first_block_reason={diag.reason_code} first_block_category={diag.rule_category}"
+                    f" first_block_rule_id={diag.matched_rule_id}"
+                )
+            route = airlock_log_context or "embed_texts"
             log.warning(
-                "[claw-ai-airlock] embed_input_blocked block_reason=%s policy_reason_codes=%s user_content_chars=%s",
+                "[claw-ai-airlock] embed_input_blocked block_reason=%s policy_reason_codes=%s "
+                "airlock_profile=default airlock_route=%s user_content_chars=%s%s",
                 airlock_result.block_reason,
                 ",".join(codes) if codes else "",
+                route,
                 len(t),
+                diag_suffix,
             )
             raise ExternalAIBlockedError(
                 airlock_result.block_reason,

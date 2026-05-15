@@ -861,6 +861,84 @@ def test_premium_full_draft_ok(monkeypatch, tmp_path):
     assert isinstance(b.get("server_repair_document_text"), str)
 
 
+def test_premium_full_draft_repair_pass_uses_agreement_outbound_airlock_profile(monkeypatch, tmp_path):
+    """Primary + quality-triggered repair must both use agreement_outbound (no stricter default on repair)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
+    import backend.routers.agreements_v2_api as av2
+
+    body_block = "\n\n".join(
+        [
+            "1. PARTIES. Agency LLC and Client LLC enter this Agreement.",
+            "2. SCOPE. Paid media, spend approvals, CRM ownership, and performance reporting.",
+            "3. COMPENSATION. Monthly retainer; invoicing and net payment terms as stated.",
+            "4. CONFIDENTIALITY. Mutual protection of non-public business information.",
+            "5. TERM AND TERMINATION. Initial term with written notice for convenience.",
+            "6. LIABILITY. Commercially reasonable limitation except for gross negligence.",
+            "7. DISPUTES. Good-faith negotiation then courts of the selected jurisdiction.",
+            "8. NOTICES. Email and mailing to designated business addresses.",
+            "9. MISCELLANEOUS. Entire agreement; counterparts; electronic signatures valid.",
+            "10. GOVERNING LAW. As stated in the agreement header.",
+        ]
+    )
+    long_doc = (
+        "WHEREAS the parties wish to document paid media services.\n\n"
+        + body_block
+        + "\n\n"
+        + ("Additional operative detail. " * 200)
+        + "\n\n"
+        + ("z" * 1200)
+    )
+    long_json = {
+        "title": "Agency Services Agreement",
+        "agreement_family": "Marketing / agency retainer",
+        "document_text": long_doc,
+        "key_terms_found": ["Fees", "IP"],
+        "missing_material_info": [],
+    }
+    short_json = {
+        "title": "Agency Services Agreement",
+        "agreement_family": "Marketing / agency retainer",
+        "document_text": "TOO SHORT " * 20,
+        "key_terms_found": [],
+        "missing_material_info": [],
+    }
+
+    profiles: list[str | None] = []
+
+    def fake_llm(*args, **kwargs):
+        profiles.append(kwargs.get("airlock_profile"))
+        if len(profiles) == 1:
+            return json.dumps(short_json)
+        return json.dumps(long_json)
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_ORG_H,
+        json={
+            "intake_text": "Retainer for paid media between Agency LLC and Client LLC, spend pre-approval, CRM ownership.",
+            "context": {
+                "title": "T",
+                "jurisdiction": "New York",
+                "parties": [
+                    {"name": "Agency LLC", "role": "Agency"},
+                    {"name": "Client LLC", "role": "Client"},
+                ],
+                "purpose": "Run campaigns",
+                "payment_terms": "Monthly",
+                "material_asks": ["Own CRM exports"],
+            },
+        },
+    )
+    assert res.status_code == 200
+    assert profiles == ["agreement_outbound", "agreement_outbound"]
+    b = res.json()
+    assert len((b.get("document_text") or "").strip()) > 1000
+
+
 def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))

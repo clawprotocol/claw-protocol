@@ -3825,6 +3825,7 @@ def premium_missing_facts(request: Request, body: PremiumMissingFactsRequest) ->
             max_tokens=max_out,
             temperature=0.1,
             airlock_profile="agreement_outbound",
+            airlock_log_context="premium_missing_facts",
         )
         parsed = _extract_json_object(llm_text)
         out = _normalize_premium_missing_facts_result(parsed)
@@ -3944,6 +3945,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             max_tokens=max_out,
             temperature=0.2 if sim_regen else 0.15,
             airlock_profile="agreement_outbound",
+            airlock_log_context="premium_full_draft:primary",
         )
         log.info(
             "claw_premium route=premium_full_draft openai_response_chars=%s model=%s",
@@ -4013,6 +4015,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 max_tokens=max_out,
                 temperature=0.22,
                 airlock_profile="agreement_outbound",
+                airlock_log_context="premium_full_draft:repair",
             )
             parsed_repair = _extract_json_object(llm_repair)
             out = _normalize_premium_full_draft_result(parsed_repair)
@@ -4051,6 +4054,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 max_tokens=max_out,
                 temperature=0.12,
                 airlock_profile="agreement_outbound",
+                airlock_log_context="premium_full_draft:sanitized_retry",
             )
             parsed_c = _extract_json_object(llm_clean)
             out_clean = _normalize_premium_full_draft_result(parsed_c)

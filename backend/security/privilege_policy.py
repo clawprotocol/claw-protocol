@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Final, Iterable, Literal, Sequence
+from typing import Final, Iterable, Literal, Optional, Sequence
 
 AirlockPolicyProfile = Literal["default", "agreement_outbound"]
 
@@ -27,7 +27,10 @@ REASON_LITIGATION_SIGNAL: Final[str] = "LITIGATION_SIGNAL"
 # Expandable inventories (lowercase; matching is case-insensitive)
 # ---------------------------------------------------------------------------
 
-# Representation / general legal-adjacent vocabulary.
+# Representation / general legal-adjacent vocabulary (default / protected-mode profile).
+# For ``agreement_outbound``, standalone ``attorney`` / ``lawyer`` are **not** evaluated:
+# premium repair JSON often echoes operative boilerplate such as "reasonable attorney fees",
+# which must not trip the pre-LLM block for the second pass.
 LEGAL_SENSITIVE_SINGLE_TERMS: Final[frozenset[str]] = frozenset(
     {
         "attorney",
@@ -134,6 +137,26 @@ _WORK_PRODUCT_PHRASE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 
 
 @dataclass(frozen=True)
+class PrivilegeAirlockBlockDiagnostic:
+    """
+    Production-safe first-hit signal for logging when outbound AI is blocked.
+
+    ``matched_rule_id`` is a stable slug (no user-substance echo beyond a dictionary term).
+    """
+
+    reason_code: str
+    rule_category: Literal[
+        "legal_sensitive_word",
+        "legal_sensitive_phrase",
+        "litigation_word",
+        "litigation_phrase",
+        "privilege_word",
+        "work_product_phrase",
+    ]
+    matched_rule_id: str
+
+
+@dataclass(frozen=True)
 class PrivilegePolicyDecision:
     """Outcome of deterministic privilege-oriented workflow classification."""
 
@@ -158,9 +181,11 @@ def _collect_reason_codes(
 ) -> tuple[str, ...]:
     codes: list[str] = []
 
-    if _any_match(text, _LEGAL_SENSITIVE_WORD_PATTERNS) or _any_match(
-        text, _LEGAL_SENSITIVE_PHRASE_PATTERNS
-    ):
+    legal_sensitive_words_hit = (
+        policy_profile != "agreement_outbound"
+        and _any_match(text, _LEGAL_SENSITIVE_WORD_PATTERNS)
+    )
+    if legal_sensitive_words_hit or _any_match(text, _LEGAL_SENSITIVE_PHRASE_PATTERNS):
         codes.append(REASON_LEGAL_SENSITIVE_TERM)
 
     lit_word_patterns = (
@@ -179,6 +204,75 @@ def _collect_reason_codes(
 
     # Stable, de-duplicated ordering for determinism.
     return tuple(sorted(frozenset(codes)))
+
+
+def first_privilege_airlock_block_diagnostic(
+    text: str,
+    *,
+    policy_profile: AirlockPolicyProfile = "default",
+) -> Optional[PrivilegeAirlockBlockDiagnostic]:
+    """
+    Return the first policy signal that would contribute to a block, in the same relative
+    ordering as :func:`_collect_reason_codes` (for stable ops logging).
+    """
+    normalized = text.strip()
+    if not normalized:
+        return None
+
+    if policy_profile != "agreement_outbound":
+        for term in sorted(LEGAL_SENSITIVE_SINGLE_TERMS):
+            if _word_pattern(term).search(normalized):
+                return PrivilegeAirlockBlockDiagnostic(
+                    reason_code=REASON_LEGAL_SENSITIVE_TERM,
+                    rule_category="legal_sensitive_word",
+                    matched_rule_id=f"legal_sensitive_word:{term}",
+                )
+    for phrase in LEGAL_SENSITIVE_PHRASES:
+        if _phrase_pattern(phrase).search(normalized):
+            slug = re.sub(r"\s+", "_", phrase.strip().lower())
+            return PrivilegeAirlockBlockDiagnostic(
+                reason_code=REASON_LEGAL_SENSITIVE_TERM,
+                rule_category="legal_sensitive_phrase",
+                matched_rule_id=f"legal_sensitive_phrase:{slug}",
+            )
+
+    lit_terms: frozenset[str] = (
+        LITIGATION_SINGLE_TERMS_AGREEMENT_OUTBOUND
+        if policy_profile == "agreement_outbound"
+        else LITIGATION_SINGLE_TERMS
+    )
+    for term in sorted(lit_terms):
+        if _word_pattern(term).search(normalized):
+            return PrivilegeAirlockBlockDiagnostic(
+                reason_code=REASON_LITIGATION_SIGNAL,
+                rule_category="litigation_word",
+                matched_rule_id=f"litigation_word:{term}",
+            )
+    for phrase in LITIGATION_PHRASES:
+        if _phrase_pattern(phrase).search(normalized):
+            slug = re.sub(r"\s+", "_", phrase.strip().lower())
+            return PrivilegeAirlockBlockDiagnostic(
+                reason_code=REASON_LITIGATION_SIGNAL,
+                rule_category="litigation_phrase",
+                matched_rule_id=f"litigation_phrase:{slug}",
+            )
+
+    for term in sorted(PRIVILEGE_CANDIDATE_SINGLE_TERMS):
+        if _word_pattern(term).search(normalized):
+            return PrivilegeAirlockBlockDiagnostic(
+                reason_code=REASON_PRIVILEGE_CANDIDATE_TERM,
+                rule_category="privilege_word",
+                matched_rule_id=f"privilege_word:{term}",
+            )
+    for phrase in WORK_PRODUCT_PHRASES:
+        if _phrase_pattern(phrase).search(normalized):
+            slug = re.sub(r"\s+", "_", phrase.strip().lower())
+            return PrivilegeAirlockBlockDiagnostic(
+                reason_code=REASON_WORK_PRODUCT_SIGNAL,
+                rule_category="work_product_phrase",
+                matched_rule_id=f"work_product_phrase:{slug}",
+            )
+    return None
 
 
 def evaluate_privilege_policy(
