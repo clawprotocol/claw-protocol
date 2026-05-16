@@ -2656,7 +2656,7 @@ button.vs01-upload-btn:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: visible;
+  overflow: hidden;
   padding: 2px 3px;
   box-sizing: border-box;
   container-type: size;
@@ -2673,7 +2673,7 @@ button.vs01-upload-btn:disabled {
   display: block;
   text-align: center;
   object-fit: contain;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .vs01-sign-placement-signature-body .vs01-sign-placement-script {

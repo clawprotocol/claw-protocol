@@ -14,7 +14,7 @@ import { buildVs01PrepareSigningRoles, stampSenderFieldWithPrepareRole } from ".
 const AG = "agreement_role_authority";
 
 describe("Vs01PrepareRoleAuthority", () => {
-  it("stale closure regression: ref role wins over lagging visual id", () => {
+  it("stale closure regression: authority wins over lagging visual id", () => {
     const cps: Vs01Counterparty[] = [{ id: "c1", name: "Atlas LLC", email: "a@x.com" }];
     const roles = buildVs01PrepareSigningRoles({
       agreementId: AG,
@@ -32,16 +32,8 @@ describe("Vs01PrepareRoleAuthority", () => {
       page: 0,
       visualRoleId: roles[0]!.roleId,
     });
-    expect(resolved.ok).toBe(false);
-    if (!resolved.ok) expect(resolved.reason).toBe("role_authority_mismatch");
-
-    const ok = authority.resolveRoleForPlacement({
-      tool: "signature",
-      page: 0,
-      visualRoleId: authority.getActiveRoleId(),
-    });
-    expect(ok.ok).toBe(true);
-    if (ok.ok) expect(ok.role.partyId).toBe("c1");
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) expect(resolved.role.partyId).toBe("c1");
   });
 
   it("owner complete auto-advances to first counterparty", () => {
@@ -107,7 +99,7 @@ describe("createPrepareStampedSenderField", () => {
     const authority = createVs01PrepareRoleAuthority();
     authority.setRoles(roles);
     authority.setActiveRole(cp.roleId, "user_select");
-    const field = createPrepareStampedSenderField({
+    const placed = createPrepareStampedSenderField({
       authority,
       type: "signature",
       page: 0,
@@ -116,10 +108,11 @@ describe("createPrepareStampedSenderField", () => {
       valueCtx: { typedName: "X", initials: "X" },
       visualRoleId: authority.getActiveRoleId(),
     });
-    expect(field).not.toBeNull();
-    expect(field!.assignedPartyId).toBe("c1");
-    expect(field!.assignedSignerRoleKind).toBe("counterparty");
-    expect(field!.assignmentSource).toBe(PREPARE_FIELD_ASSIGNMENT_SOURCE);
+    expect(placed.ok).toBe(true);
+    if (!placed.ok) return;
+    expect(placed.field.assignedPartyId).toBe("c1");
+    expect(placed.field.assignedSignerRoleKind).toBe("counterparty");
+    expect(placed.field.assignmentSource).toBe(PREPARE_FIELD_ASSIGNMENT_SOURCE);
   });
 });
 

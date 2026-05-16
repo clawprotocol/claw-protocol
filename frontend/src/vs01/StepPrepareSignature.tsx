@@ -27,12 +27,23 @@ import type {
   Vs01RecipientPlacedField,
   Vs01SenderSignatureRef,
 } from "./types";
-import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
-import { evaluatePreparePacketGateFromRoles, logVs01RequiredProgress } from "./vs01SignerFieldAssignment";
+import {
+  evaluatePreparePacketGateFromRoles,
+  findPrepareSigningRole,
+  logVs01RequiredProgress,
+  type Vs01PrepareSigningRole,
+} from "./vs01SignerFieldAssignment";
 import {
   buildPrepareAutoInitialsEveryPage,
   createPrepareStampedSenderField,
 } from "./vs01PrepareFieldPlacement";
+import { PrepareSigningFieldBody } from "./vs01PrepareSigningFieldRender";
+import {
+  buildPrepareTemplateValueContext,
+  logVs01PlacementClickRole,
+  logVs01PlacementFieldRejected,
+  prepareTemplateCornerLabel,
+} from "./vs01PrepareTemplateField";
 import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 import {
   SIGNING_FIELD_TOOLS,
@@ -552,7 +563,7 @@ export function StepPrepareSignature({
     }
     if (numPages <= 0) return;
 
-    const valueCtx = {
+    const ownerValueCtx = {
       typedName: typedNameRef.current,
       initials: initialsRef.current,
       signerEmail: signerEmailForPlacement,
@@ -573,11 +584,11 @@ export function StepPrepareSignature({
           pageCount: numPages,
           skippedPages: skippedAutoPages,
           existingFields: prev,
-          valueCtx,
+          valueCtx: ownerValueCtx,
         });
         return [...manual, ...auto];
       }
-      const auto = buildAutoInitialsFields(numPages, valueCtx, skippedAutoPages, manual);
+      const auto = buildAutoInitialsFields(numPages, ownerValueCtx, skippedAutoPages, manual);
       return [...manual, ...auto];
     });
   }, [
@@ -595,20 +606,37 @@ export function StepPrepareSignature({
   useEffect(() => {
     if (!autoInitialsEveryPage) return;
     setFields((prev) =>
-      prev.map((f) =>
-        f.autoInitials && f.type === "initials"
-          ? {
-              ...f,
-              value: defaultValueForType("initials", {
-                typedName,
-                initials,
-                signerEmail: signerEmailForPlacement,
-              }),
-            }
-          : f
-      )
+      prev.map((f) => {
+        if (!f.autoInitials || f.type !== "initials") return f;
+        if (agreementBridgePlacementCopy) {
+          const roleId = (f.assignedSignerRoleId ?? "").trim();
+          const role = findPrepareSigningRole(prepareSignerRoles, roleId);
+          if (!role || role.kind !== "owner") return f;
+          const ctx = buildPrepareTemplateValueContext(role, {
+            typedName,
+            initials,
+            signerEmail: signerEmailForPlacement,
+          });
+          return { ...f, value: defaultValueForType("initials", ctx) };
+        }
+        return {
+          ...f,
+          value: defaultValueForType("initials", {
+            typedName,
+            initials,
+            signerEmail: signerEmailForPlacement,
+          }),
+        };
+      }),
     );
-  }, [autoInitialsEveryPage, typedName, initials, signerEmailForPlacement]);
+  }, [
+    autoInitialsEveryPage,
+    typedName,
+    initials,
+    signerEmailForPlacement,
+    agreementBridgePlacementCopy,
+    prepareSignerRoles,
+  ]);
 
   const onPagePlacementClick = useCallback(
     (pageIndex0: number, ev: React.MouseEvent<HTMLDivElement>) => {
@@ -647,16 +675,30 @@ export function StepPrepareSignature({
       };
       let nf: PlacedSigningField | null = null;
       if (agreementBridgePlacementCopy && prepareRoleCtx) {
-        nf = createPrepareStampedSenderField({
+        logVs01PlacementClickRole({
+          tool: armedTool,
+          page: pageIndex0,
+          authorityRoleId: prepareRoleCtx.authority.getActiveRoleId(),
+          displayRoleId,
+        });
+        const placed = createPrepareStampedSenderField({
           authority: prepareRoleCtx.authority,
           type: armedTool,
           page: pageIndex0,
           clickX: px,
           clickY: py,
           valueCtx,
-          visualRoleId: displayRoleId,
+          visualRoleId: prepareRoleCtx.authority.getActiveRoleId(),
         });
-        if (!nf) return;
+        if (!placed.ok) {
+          logVs01PlacementFieldRejected({
+            reason: placed.reason,
+            tool: armedTool,
+            page: pageIndex0,
+          });
+          return;
+        }
+        nf = placed.field;
       } else {
         nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, valueCtx);
       }
@@ -1261,7 +1303,36 @@ export function StepPrepareSignature({
                                           onPointerDown={(e) => onBoxPointerDown(e, field)}
                                           onClick={(e) => onPlacementBoxClick(e, field)}
                                         >
-                                          <span className="vs01-sign-placement-label">{signingPlacementCornerLabel(field.type, field)}</span>
+                                          <span className="vs01-sign-placement-label">
+                                            {agreementBridgePlacementCopy
+                                              ? prepareTemplateCornerLabel(
+                                                  field.type,
+                                                  findPrepareSigningRole(
+                                                    prepareSignerRoles,
+                                                    field.assignedSignerRoleId,
+                                                  ),
+                                                )
+                                              : signingPlacementCornerLabel(field.type, field)}
+                                          </span>
+                                          {agreementBridgePlacementCopy ? (
+                                            <PrepareSigningFieldBody
+                                              field={field}
+                                              role={findPrepareSigningRole(
+                                                prepareSignerRoles,
+                                                field.assignedSignerRoleId,
+                                              )}
+                                              ownerPreview={{
+                                                signatureMode,
+                                                typedName,
+                                                hasDrawn,
+                                                uploadPreviewUrl,
+                                              }}
+                                              isSelected={isSel}
+                                              busy={busy}
+                                              onValueChange={(value) => updateField(field.id, { value })}
+                                            />
+                                          ) : (
+                                            <>
                                           {field.type === "signature" ? (
                                             <div className="vs01-sign-placement-signature-body">
                                               {signatureMode === "type" && typedName.trim() ? (
@@ -1368,6 +1439,8 @@ export function StepPrepareSignature({
                                               </span>
                                             )
                                           ) : null}
+                                            </>
+                                          )}
                                           {isSel && !busy ? (
                                             <button
                                               type="button"

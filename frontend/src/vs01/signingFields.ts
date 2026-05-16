@@ -284,6 +284,21 @@ export function computeRectFromClick(
   return clampFieldRectToPage(cx, cy, width, height);
 }
 
+/** Prepare-mode placement: nudge by party index so multi-signer fields do not stack on identical clicks. */
+export function computePrepareRectFromClick(
+  type: SigningFieldType,
+  clickX: number,
+  clickY: number,
+  partyIndex: number,
+): { x: number; y: number; width: number; height: number } {
+  const { width, height } = getVs01DefaultFieldGeometry(type);
+  const colOffset = Math.min(0.14, partyIndex * 0.014);
+  const rowOffset = Math.min(0.08, partyIndex * 0.007);
+  const cx = Math.min(1, Math.max(0, clickX + colOffset));
+  const cy = Math.min(1, Math.max(0, clickY + rowOffset));
+  return clampFieldRectToPage(cx, cy, width, height);
+}
+
 /** Bottom-right auto initials: normalized margins from page edges (x = 1 - marginX - width). */
 const AUTO_INITIALS_MARGIN_X = 0.056;
 /** Bottom anchor: gray auto slots sit above draft footer band and clear typical signature rows. */

@@ -146,24 +146,20 @@ export class Vs01PrepareRoleAuthority {
           page: ctx.page,
           authorityRoleIdShort: authorityId.slice(0, 16),
           visualRoleIdShort: visual.slice(0, 16),
-        });
-        // eslint-disable-next-line no-console
-        console.warn("[vs01-prepare-field-rejected]", {
-          reason: "role_authority_mismatch",
-          tool: ctx.tool,
+          note: "authority_wins",
         });
       }
-      return { ok: false, reason: "role_authority_mismatch" };
     }
     if (vs01DiagnosticsEnabled()) {
       // eslint-disable-next-line no-console
-      console.info("[vs01-placement-role-resolved]", {
+      console.info("[vs01-placement-click-role]", {
         tool: ctx.tool,
         page: ctx.page,
         partyIndex: role.partyIndex,
         partyId: role.partyId,
         roleKind: role.kind,
         roleIdShort: role.roleId.slice(0, 16),
+        visualRoleIdShort: visual ? visual.slice(0, 16) : null,
       });
     }
     return { ok: true, role, authorityRoleId: authorityId };

@@ -1,5 +1,4 @@
 import {
-  buildPreparePlacementValueContext,
   stampPrepareRecipientFieldOrReject,
   stampPrepareSenderFieldOrReject,
   type Vs01PrepareSigningRole,
@@ -7,8 +6,8 @@ import {
 } from "./vs01SignerFieldAssignment";
 import {
   clampFieldRectToPage,
+  computePrepareRectFromClick,
   computeRecipientRectFromClick,
-  createPlacedFieldAtClick,
   defaultRecipientFieldValue,
   getVs01DefaultFieldGeometry,
   newSigningFieldId,
@@ -19,6 +18,12 @@ import {
 } from "./signingFields";
 import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareRoleAuthority } from "./vs01PrepareRoleAuthority";
+import {
+  buildPrepareTemplateValueContext,
+  defaultPrepareTemplateStoredValue,
+  logVs01PlacementFieldAdded,
+  logVs01PlacementFieldRejected,
+} from "./vs01PrepareTemplateField";
 
 export const PREPARE_FIELD_ASSIGNMENT_SOURCE = "prepare_active_role" as const;
 
@@ -40,6 +45,10 @@ export type PrepareStampedRecipientField = Vs01RecipientPlacedField & {
   assignmentSource: typeof PREPARE_FIELD_ASSIGNMENT_SOURCE;
 };
 
+export type PrepareSenderPlacementResult =
+  | { ok: true; field: PrepareStampedSenderField }
+  | { ok: false; reason: string };
+
 function assertPrepareSenderStamped(f: PlacedSigningField): PrepareStampedSenderField | null {
   if (
     !f.assignedPartyId?.trim() ||
@@ -49,13 +58,10 @@ function assertPrepareSenderStamped(f: PlacedSigningField): PrepareStampedSender
     !f.assignedSignerRoleLabel?.trim() ||
     f.assignmentSource !== PREPARE_FIELD_ASSIGNMENT_SOURCE
   ) {
-    if (vs01DiagnosticsEnabled()) {
-      // eslint-disable-next-line no-console
-      console.warn("[vs01-prepare-field-rejected]", {
-        reason: "incomplete_sender_stamp",
-        fieldType: f.type,
-      });
-    }
+    logVs01PlacementFieldRejected({
+      reason: "incomplete_sender_stamp",
+      fieldType: f.type,
+    });
     return null;
   }
   return f as PrepareStampedSenderField;
@@ -70,13 +76,10 @@ function assertPrepareRecipientStamped(f: Vs01RecipientPlacedField): PrepareStam
     !f.assignedSignerRoleLabel?.trim() ||
     f.assignmentSource !== PREPARE_FIELD_ASSIGNMENT_SOURCE
   ) {
-    if (vs01DiagnosticsEnabled()) {
-      // eslint-disable-next-line no-console
-      console.warn("[vs01-prepare-field-rejected]", {
-        reason: "incomplete_recipient_stamp",
-        fieldType: f.type,
-      });
-    }
+    logVs01PlacementFieldRejected({
+      reason: "incomplete_recipient_stamp",
+      fieldType: f.type,
+    });
     return null;
   }
   return f as PrepareStampedRecipientField;
@@ -85,6 +88,36 @@ function assertPrepareRecipientStamped(f: Vs01RecipientPlacedField): PrepareStam
 export function prepareAutoInitialsFieldId(roleId: string, page: number): string {
   const safe = roleId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48);
   return `prep_auto_${safe}_p${page}`;
+}
+
+function createPreparePlacedFieldAtClick(
+  type: SigningFieldType,
+  page: number,
+  clickX: number,
+  clickY: number,
+  role: Vs01PrepareSigningRole,
+  ownerValueCtx: SigningPlacementValueContext,
+  options?: { autoInitials?: boolean },
+): PlacedSigningField {
+  const templateCtx = buildPrepareTemplateValueContext(role, ownerValueCtx);
+  const { x, y, width, height } = computePrepareRectFromClick(
+    type,
+    clickX,
+    clickY,
+    role.partyIndex,
+  );
+  const auto = options?.autoInitials === true;
+  return {
+    id: newSigningFieldId(),
+    type,
+    page,
+    x,
+    y,
+    width,
+    height,
+    value: defaultPrepareTemplateStoredValue(type, role, templateCtx),
+    ...(auto ? { autoInitials: true } : {}),
+  };
 }
 
 /**
@@ -120,9 +153,25 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       skipped += 1;
       continue;
     }
-    const { x, y } = clampFieldRectToPage(1 - width - 0.02, 1 - height - 0.058, width, height);
-    const raw = createPlacedFieldAtClick("initials", p, x, y, args.valueCtx, { autoInitials: true });
-    raw.id = prepareAutoInitialsFieldId(roleId, p);
+    const colOffset = Math.min(0.12, args.role.partyIndex * 0.012);
+    const { x, y } = clampFieldRectToPage(
+      1 - width - 0.02 - colOffset,
+      1 - height - 0.058,
+      width,
+      height,
+    );
+    const templateCtx = buildPrepareTemplateValueContext(args.role, args.valueCtx);
+    const raw: PlacedSigningField = {
+      id: prepareAutoInitialsFieldId(roleId, p),
+      type: "initials",
+      page: p,
+      x,
+      y,
+      width,
+      height,
+      value: defaultPrepareTemplateStoredValue("initials", args.role, templateCtx),
+      autoInitials: true,
+    };
     const stamped = stampPrepareSenderFieldOrReject(raw, args.role, roleId, PREPARE_FIELD_ASSIGNMENT_SOURCE);
     if (!stamped) continue;
     const withSource = {
@@ -136,6 +185,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
   if (vs01DiagnosticsEnabled()) {
     // eslint-disable-next-line no-console
     console.info("[vs01-initials-every-page-added]", {
+      roleId: roleId,
       roleIdShort: roleId.slice(0, 16),
       pageCount: args.pageCount,
       addedCount: added,
@@ -154,20 +204,27 @@ export function createPrepareStampedSenderField(args: {
   valueCtx: SigningPlacementValueContext;
   visualRoleId?: string | null;
   autoInitials?: boolean;
-}): PrepareStampedSenderField | null {
+}): PrepareSenderPlacementResult {
   const resolved = args.authority.resolveRoleForPlacement({
     tool: args.type,
     page: args.page,
     visualRoleId: args.visualRoleId,
   });
-  if (!resolved.ok) return null;
-  const ctx = buildPreparePlacementValueContext(resolved.role, args.valueCtx);
-  const raw = createPlacedFieldAtClick(
+  if (!resolved.ok) {
+    logVs01PlacementFieldRejected({
+      reason: resolved.reason,
+      tool: args.type,
+      page: args.page,
+    });
+    return { ok: false, reason: resolved.reason };
+  }
+  const raw = createPreparePlacedFieldAtClick(
     args.type,
     args.page,
     args.clickX,
     args.clickY,
-    ctx,
+    resolved.role,
+    args.valueCtx,
     args.autoInitials ? { autoInitials: true } : undefined,
   );
   const stamped = stampPrepareSenderFieldOrReject(
@@ -176,24 +233,31 @@ export function createPrepareStampedSenderField(args: {
     resolved.authorityRoleId,
     PREPARE_FIELD_ASSIGNMENT_SOURCE,
   );
-  if (!stamped) return null;
+  if (!stamped) {
+    logVs01PlacementFieldRejected({
+      reason: "stamp_sender_rejected",
+      tool: args.type,
+      page: args.page,
+    });
+    return { ok: false, reason: "stamp_sender_rejected" };
+  }
   const withMeta = {
     ...stamped,
     assignmentSource: PREPARE_FIELD_ASSIGNMENT_SOURCE,
   };
   const { field } = normalizePlacedFieldGeometryIfBelowMinimum(withMeta);
   const ok = assertPrepareSenderStamped(field);
-  if (ok && vs01DiagnosticsEnabled()) {
-    // eslint-disable-next-line no-console
-    console.info("[vs01-prepare-field-added]", {
-      fieldType: ok.type,
-      partyIndex: ok.assignedPartyIndex,
-      partyId: ok.assignedPartyId,
-      roleKind: ok.assignedSignerRoleKind,
-      roleIdShort: ok.assignedSignerRoleId.slice(0, 16),
-    });
+  if (!ok) {
+    return { ok: false, reason: "incomplete_sender_stamp" };
   }
-  return ok;
+  logVs01PlacementFieldAdded({
+    fieldType: ok.type,
+    partyIndex: ok.assignedPartyIndex,
+    partyId: ok.assignedPartyId,
+    roleKind: ok.assignedSignerRoleKind,
+    roleIdShort: ok.assignedSignerRoleId.slice(0, 16),
+  });
+  return { ok: true, field: ok };
 }
 
 export function createPrepareStampedRecipientField(args: {
@@ -212,12 +276,16 @@ export function createPrepareStampedRecipientField(args: {
     page: args.page,
     visualRoleId: args.visualRoleId,
   });
-  if (!resolved.ok) return null;
+  if (!resolved.ok) {
+    logVs01PlacementFieldRejected({
+      reason: resolved.reason,
+      tool: args.type,
+      page: args.page,
+    });
+    return null;
+  }
   if (!resolved.role.vs01CounterpartyId) {
-    if (vs01DiagnosticsEnabled()) {
-      // eslint-disable-next-line no-console
-      console.warn("[vs01-prepare-field-rejected]", { reason: "owner_role_on_recipient_layer" });
-    }
+    logVs01PlacementFieldRejected({ reason: "owner_role_on_recipient_layer" });
     return null;
   }
   const { x, y, width, height } = computeRecipientRectFromClick(args.type, args.clickX, args.clickY);
@@ -238,16 +306,18 @@ export function createPrepareStampedRecipientField(args: {
     resolved.authorityRoleId,
     PREPARE_FIELD_ASSIGNMENT_SOURCE,
   );
-  if (!stamped) return null;
+  if (!stamped) {
+    logVs01PlacementFieldRejected({ reason: "stamp_recipient_rejected", tool: args.type });
+    return null;
+  }
   const withMeta = {
     ...stamped,
     assignmentSource: PREPARE_FIELD_ASSIGNMENT_SOURCE,
   };
   const { field } = normalizePlacedFieldGeometryIfBelowMinimum(withMeta);
   const ok = assertPrepareRecipientStamped(field);
-  if (ok && vs01DiagnosticsEnabled()) {
-    // eslint-disable-next-line no-console
-    console.info("[vs01-prepare-field-added]", {
+  if (ok) {
+    logVs01PlacementFieldAdded({
       surface: "recipient_assign",
       fieldType: ok.type,
       partyIndex: ok.assignedPartyIndex,

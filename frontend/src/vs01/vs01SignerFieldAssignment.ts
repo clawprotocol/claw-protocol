@@ -417,19 +417,21 @@ function initialsFromDisplayName(name: string): string {
     .toUpperCase();
 }
 
-/** Value context for a new field at click time — uses active role metadata, not prior placements. */
+/** @deprecated Prefer {@link buildPrepareTemplateValueContext} from vs01PrepareTemplateField for prepare placement. */
 export function buildPreparePlacementValueContext(
   role: Vs01PrepareSigningRole,
   fallback: PreparePlacementValueContext,
 ): PreparePlacementValueContext {
+  if (role.kind === "counterparty") {
+    return { typedName: "", initials: "", signerEmail: undefined };
+  }
   const signerName = (role.signerName ?? "").trim();
-  const typedName = signerName || (role.kind === "owner" ? fallback.typedName : "");
+  const typedName = signerName || fallback.typedName;
   const emailRaw = (role.signerEmail ?? role.reviewEmail ?? "").trim();
-  const email =
-    isPlausibleEmail(emailRaw) ? emailRaw : role.kind === "owner" ? fallback.signerEmail : undefined;
+  const email = isPlausibleEmail(emailRaw) ? emailRaw : fallback.signerEmail;
   const initials = typedName ? initialsFromDisplayName(typedName) : fallback.initials;
   return {
-    typedName: typedName || fallback.typedName,
+    typedName,
     initials: initials || fallback.initials,
     signerEmail: email,
   };
