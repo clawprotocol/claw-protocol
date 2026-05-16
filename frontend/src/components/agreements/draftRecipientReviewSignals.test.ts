@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   canFinalizeReviewForSigning,
+  computeOwnerDoneReviewApprovalPresentation,
   computeReviewApprovalStatus,
   draftAuditHasRecipientRecordedApproval,
   shouldWritePaidProEditReturnHandoffAfterReview,
   signingHandoffLinksReadyForDonePage,
 } from "./draftRecipientReviewSignals";
+import { normalizeHandoffToReviewerLinkRows } from "../../launch/simpleProduct/reviewerLinkRowModel";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 
 const BASE_TS = "2026-05-10T00:00:00.000Z";
@@ -301,6 +303,58 @@ describe("draftRecipientReviewSignals", () => {
           reviewApprovalAggregate: agg,
         }),
       ).toBe(false);
+    });
+  });
+
+  describe("computeOwnerDoneReviewApprovalPresentation", () => {
+    it("uses reviewer_rows for multi minted links and matches table approval counts", () => {
+      const parties = [
+        { id: "r1", name: "R1", role: "reviewer" },
+        { id: "r2", name: "R2", role: "reviewer" },
+      ];
+      const audit_log = parties.map((p) => ({
+        event_type: "participant_approved" as const,
+        at: BASE_TS,
+        value: { participant_id: p.id },
+      }));
+      const d = makeDraft({ parties, audit_log });
+      const rows = normalizeHandoffToReviewerLinkRows([
+        { displayName: "R1", reviewHref: "https://h/r1", recipientPartyId: "r1" },
+        { displayName: "R2", reviewHref: "https://h/r2", recipientPartyId: "r2" },
+      ]);
+      const pres = computeOwnerDoneReviewApprovalPresentation(d, rows);
+      expect(pres.approvalAggregateSource).toBe("reviewer_rows");
+      expect(pres.aggregate.approvedReviewerCount).toBe(2);
+      expect(pres.aggregate.allReviewersApproved).toBe(true);
+      expect(pres.aggregate.ownerStatusLine).toBe(
+        "2 of 2 reviewers approved. Ready to finalize for signing.",
+      );
+    });
+
+    it("prefers row-derived 4/4 when draft parties omit reviewer ids but audit + handoff ids align", () => {
+      const audit_log = (["r1", "r2", "r3", "r4"] as const).map((id) => ({
+        event_type: "participant_approved" as const,
+        at: BASE_TS,
+        value: { participant_id: id },
+      }));
+      const d = makeDraft({
+        parties: [{ id: "o", name: "Owner", role: "owner" }],
+        audit_log,
+      });
+      const rows = normalizeHandoffToReviewerLinkRows(
+        (["r1", "r2", "r3", "r4"] as const).map((id) => ({
+          displayName: id,
+          reviewHref: `https://h/${id}`,
+          recipientPartyId: id,
+        })),
+      );
+      const pres = computeOwnerDoneReviewApprovalPresentation(d, rows);
+      expect(pres.approvalAggregateSource).toBe("reviewer_rows");
+      expect(pres.draftSignalsBaseline.approvedReviewerCount).toBe(0);
+      expect(pres.aggregate.approvedReviewerCount).toBe(4);
+      expect(pres.aggregate.ownerStatusLine).toBe(
+        "4 of 4 reviewers approved. Ready to finalize for signing.",
+      );
     });
   });
 

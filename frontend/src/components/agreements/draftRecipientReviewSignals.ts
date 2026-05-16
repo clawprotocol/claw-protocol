@@ -1,6 +1,11 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { approvedParticipantIds, normalizeWorkflowRoleForNegotiation } from "../../agreement/participantModel";
 import { findOpenRecipientProposals } from "../../agreement/recipientProposal";
+import {
+  deriveReviewerLinkRowApprovalStatus,
+  type ReviewerLinkRow,
+  type ReviewerLinkRowApprovalStatus,
+} from "../../launch/simpleProduct/reviewerLinkRowModel";
 
 /** True when a recipient (or participant) approval event exists on the draft audit log. */
 export function draftAuditHasRecipientRecordedApproval(draft: unknown): boolean {
@@ -112,6 +117,118 @@ export function computeReviewApprovalStatus(
     flowShellTitle,
     ownerStatusLine,
     finalizeForSigningEnabled: allReviewersApproved,
+  };
+}
+
+/** Green panel copy when every required reviewer row is approved (owner Simple Done). */
+export const OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY = "All reviewers approved — ready to sign.";
+
+export type OwnerDoneReviewApprovalAggregateSource = "reviewer_rows" | "draft_signals" | "legacy";
+
+export type OwnerDoneReviewApprovalPresentation = {
+  aggregate: ReviewApprovalAggregate;
+  approvalAggregateSource: OwnerDoneReviewApprovalAggregateSource;
+  /** Same derivation as the reviewer links table (one status per minted row). */
+  rowStatuses: ReviewerLinkRowApprovalStatus[];
+  /** Normalized minted handoff rows (canonical count for multi-reviewer). */
+  normalizedReviewerRows: ReviewerLinkRow[];
+  /** Party/audit-based rollup (can diverge when draft.parties omit reviewer ids). */
+  draftSignalsBaseline: ReviewApprovalAggregate;
+};
+
+function buildMultiReviewerAggregateFromRowStatuses(
+  d: AgreementDraft | null | undefined,
+  normalizedRows: ReviewerLinkRow[],
+  rowStatuses: ReviewerLinkRowApprovalStatus[],
+  draftSignalsBaseline: ReviewApprovalAggregate,
+): ReviewApprovalAggregate {
+  const required = normalizedRows.length;
+  const approved = rowStatuses.filter((s) => s === "approved").length;
+  const hasRowLevelChangeRequest = rowStatuses.some((s) => s === "requested_changes");
+  const globalOpenProposals = d ? findOpenRecipientProposals(d.audit_log).length > 0 : false;
+  const hasOpenChangeRequests = hasRowLevelChangeRequest || globalOpenProposals;
+  const anyReviewerApproval = approved > 0 || hasOpenChangeRequests;
+  const allReviewersApproved =
+    required > 0 && approved === required && !hasOpenChangeRequests && approved > 0;
+
+  let aggregateStatus: ReviewApprovalAggregateStatus;
+  if (hasOpenChangeRequests) aggregateStatus = "changes_pending";
+  else if (allReviewersApproved) aggregateStatus = "all_approved";
+  else if (approved > 0) aggregateStatus = "partial";
+  else aggregateStatus = "waiting";
+
+  let flowShellTitle = "Review link created";
+  if (allReviewersApproved) flowShellTitle = "All reviewers approved";
+  else if (anyReviewerApproval) flowShellTitle = "Review in progress";
+
+  let ownerStatusLine =
+    approved === 0 && required > 1 && !hasOpenChangeRequests
+      ? `0 of ${required} reviewers approved. Waiting for reviewer responses.`
+      : "Waiting for reviewer responses.";
+  if (hasOpenChangeRequests) {
+    ownerStatusLine = "Open change requests — resolve in workspace before finalizing.";
+  } else if (allReviewersApproved) {
+    ownerStatusLine = `${required} of ${required} reviewers approved. Ready to finalize for signing.`;
+  } else if (approved > 0 && required > 1) {
+    ownerStatusLine = `${approved} of ${required} reviewers approved. Waiting for remaining reviewers.`;
+  } else if (approved > 0 && required === 1) {
+    ownerStatusLine = "Reviewer approved — ready to sign.";
+  }
+
+  return {
+    requiredReviewerCount: required,
+    approvedReviewerCount: approved,
+    legacyApprovalWithoutParticipantId: draftSignalsBaseline.legacyApprovalWithoutParticipantId,
+    anyReviewerApproval,
+    allReviewersApproved,
+    hasOpenChangeRequests,
+    aggregateStatus,
+    flowShellTitle,
+    ownerStatusLine,
+    finalizeForSigningEnabled: allReviewersApproved,
+  };
+}
+
+/**
+ * Canonical owner-done approval rollup: for **multiple** minted reviewer rows, counts and finalize
+ * gate follow {@link deriveReviewerLinkRowApprovalStatus} per row (same as the Reviewer Links table).
+ * For a single row, reuses {@link computeReviewApprovalStatus} (legacy single-recipient semantics).
+ */
+export function computeOwnerDoneReviewApprovalPresentation(
+  draft: unknown,
+  normalizedReviewerRows: ReviewerLinkRow[],
+): OwnerDoneReviewApprovalPresentation {
+  const d = draft as AgreementDraft | null | undefined;
+  const minted = Math.max(0, normalizedReviewerRows.length);
+  const draftSignalsBaseline = computeReviewApprovalStatus(draft, { mintedReviewerLinkCount: minted || 1 });
+  const legacyGlobal = draftSignalsBaseline.legacyApprovalWithoutParticipantId;
+  const rowStatuses: ReviewerLinkRowApprovalStatus[] = normalizedReviewerRows.map((r, i) =>
+    deriveReviewerLinkRowApprovalStatus(d, r, { legacyGlobalApproval: legacyGlobal, rowIndex: i }),
+  );
+
+  if (normalizedReviewerRows.length <= 1) {
+    const approvalAggregateSource: OwnerDoneReviewApprovalAggregateSource = legacyGlobal ? "legacy" : "draft_signals";
+    return {
+      aggregate: draftSignalsBaseline,
+      approvalAggregateSource,
+      rowStatuses,
+      normalizedReviewerRows,
+      draftSignalsBaseline,
+    };
+  }
+
+  const aggregate = buildMultiReviewerAggregateFromRowStatuses(
+    d,
+    normalizedReviewerRows,
+    rowStatuses,
+    draftSignalsBaseline,
+  );
+  return {
+    aggregate,
+    approvalAggregateSource: "reviewer_rows",
+    rowStatuses,
+    normalizedReviewerRows,
+    draftSignalsBaseline,
   };
 }
 

@@ -8850,6 +8850,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           productionResumeHydratedRef.current = false;
           return;
         }
+        if (typeof window !== "undefined" && /^\/app\/done\//.test(window.location.pathname)) {
+          productionResumeHydratedRef.current = false;
+          return;
+        }
         const lockVid = String(lockVidFromGet || "").trim();
         if (lockVid) setOwnerResumeServerLockVid(lockVid);
         const recipientApproved = draftAuditHasRecipientRecordedApproval(ad);

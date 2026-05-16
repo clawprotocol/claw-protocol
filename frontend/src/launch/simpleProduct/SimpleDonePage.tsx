@@ -27,24 +27,20 @@ import { PROOF_LADDER_SUBTITLE } from "../../components/proof/proofTrustLadder";
 import { LawdogOnRecordStamp } from "../../components/ui/LawdogOnRecordStamp";
 import { LawdogRecordedMark } from "../../components/ui/LawdogRecordedMark";
 import { PRODUCT_NOT_LAW_FIRM, RECORDS_DOWNLOAD_KEEP_COPY_SHORT } from "../../compliance/disclosureCopy";
+import type { SimpleDoneReviewRecipientLinkRow } from "./simpleDoneReviewRecipientLinks";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
   readSimpleDoneReviewRecipientLinks,
   writeSimpleDoneReviewRecipientLinks,
-  type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
-import type { ReviewerLinkRowApprovalStatus } from "./reviewerLinkRowModel";
-import {
-  deriveReviewerLinkRowApprovalStatus,
-  extractReviewLinkTokenFromHref,
-  normalizeHandoffToReviewerLinkRows,
-} from "./reviewerLinkRowModel";
+import { extractReviewLinkTokenFromHref, normalizeHandoffToReviewerLinkRows } from "./reviewerLinkRowModel";
 import { PaidProReviewReviewerLinksTable } from "./PaidProReviewReviewerLinksTable";
 import { SimpleDoneReviewFlowDiagPanel } from "./SimpleDoneReviewFlowDiagPanel";
 import {
+  OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY,
   canContinueLockedSigningFromDonePage,
   canFinalizeReviewForSigning,
-  computeReviewApprovalStatus,
+  computeOwnerDoneReviewApprovalPresentation,
   draftAuditHasRecipientRecordedApproval,
   logOwnerFinalizeRouteDecision,
   logOwnerReviewLinkStatus,
@@ -70,6 +66,8 @@ import {
   orderedAuthoritativePartyDisplayNames,
 } from "../../agreement/handoffPartyDisplay";
 import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
+
+const EMPTY_REVIEW_HANDOFF_RECIPIENTS: SimpleDoneReviewRecipientLinkRow[] = [];
 
 export function SimpleDonePage(props: { agreementId: string }) {
   const { agreementId } = props;
@@ -170,7 +168,23 @@ export function SimpleDonePage(props: { agreementId: string }) {
       ? "Share your review link so others can suggest edits. Use the public verify link only for status checks."
       : JOY_COPY.readyToSendSubline;
 
-  const reviewHandoffRows = reviewRecipientHandoff?.recipients ?? [];
+  const ownerReviewPresentationMismatchKeyRef = useRef("");
+
+  const reviewHandoffRows = useMemo(
+    () => reviewRecipientHandoff?.recipients ?? EMPTY_REVIEW_HANDOFF_RECIPIENTS,
+    [reviewRecipientHandoff],
+  );
+
+  const ownerReviewPresentation = useMemo(
+    () =>
+      computeOwnerDoneReviewApprovalPresentation(
+        ownerHandoffDraft,
+        normalizeHandoffToReviewerLinkRows(reviewHandoffRows),
+      ),
+    [ownerHandoffDraft, reviewHandoffRows],
+  );
+  const reviewApprovalAgg = ownerReviewPresentation.aggregate;
+
   const reviewLinksReady = confirmedSend && reviewHandoffRows.length > 0;
   const reviewLinksPending =
     confirmedSend &&
@@ -178,14 +192,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
     (reviewRecipientHandoff.reviewLinksPending === true || reviewHandoffRows.length === 0);
   const isPaidProReviewDonePath =
     Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
-
-  const reviewApprovalAgg = useMemo(
-    () =>
-      computeReviewApprovalStatus(ownerHandoffDraft, {
-        mintedReviewerLinkCount: reviewHandoffRows.length,
-      }),
-    [ownerHandoffDraft, reviewHandoffRows.length],
-  );
 
   const cachedAgreementPartyDisplayNames = reviewRecipientHandoff?.agreementPartyDisplayNames;
   const paidProDoneAgreementPartyNames = useMemo(() => {
@@ -220,6 +226,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   useEffect(() => {
     ownerSuccessLoggedRef.current = null;
     ownerReviewLinkStatusDiagKeyRef.current = "";
+    ownerReviewPresentationMismatchKeyRef.current = "";
   }, [agreementId]);
 
   useEffect(() => {
@@ -283,7 +290,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   useEffect(() => {
     if (!isPaidProReviewDonePath || !reviewLinksReady) return;
-    const normalized = normalizeHandoffToReviewerLinkRows(reviewHandoffRows);
+    const normalized = ownerReviewPresentation.normalizedReviewerRows;
     const anyHref = normalized.some((r) => r.reviewHref.trim().length > 0);
     const linksStillLoadingGate =
       reviewApprovalAgg.requiredReviewerCount > 1 && Boolean(reviewLinksPending) && confirmedSend;
@@ -323,6 +330,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
     // eslint-disable-next-line no-console
     console.info("[review-finalize-gate]", {
       agreementIdShort: short,
+      approvalAggregateSource: ownerReviewPresentation.approvalAggregateSource,
       requiredReviewerCount: reviewApprovalAgg.requiredReviewerCount,
       approvedReviewerCount: reviewApprovalAgg.approvedReviewerCount,
       allReviewersApproved: reviewApprovalAgg.allReviewersApproved,
@@ -335,12 +343,41 @@ export function SimpleDonePage(props: { agreementId: string }) {
     confirmedSend,
     isPaidProReviewDonePath,
     ownerHandoffDraft,
+    ownerReviewPresentation,
     ownerSigningLockVid,
     reviewApprovalAgg,
-    reviewHandoffRows,
     reviewLinksPending,
     reviewLinksReady,
   ]);
+
+  useEffect(() => {
+    if (!isPaidProReviewDonePath || !reviewLinksReady) return;
+    const pres = ownerReviewPresentation;
+    if (pres.normalizedReviewerRows.length <= 1) return;
+    const tableApproved = pres.rowStatuses.filter((s) => s === "approved").length;
+    const draftApproved = pres.draftSignalsBaseline.approvedReviewerCount;
+    if (tableApproved === draftApproved) return;
+    const key = `${tableApproved}|${draftApproved}|${pres.aggregate.requiredReviewerCount}`;
+    if (key === ownerReviewPresentationMismatchKeyRef.current) return;
+    ownerReviewPresentationMismatchKeyRef.current = key;
+    const diagOn =
+      (typeof import.meta !== "undefined" &&
+        import.meta.env?.MODE !== "test" &&
+        import.meta.env?.DEV) ||
+      (typeof window !== "undefined" && window.localStorage?.getItem("lawdogReviewFlowDiag") === "1");
+    if (!diagOn) return;
+    const id = agreementId.trim();
+    const agreementIdShort = id.length <= 12 ? id : `${id.slice(0, 8)}…`;
+    // eslint-disable-next-line no-console
+    console.warn("[review-approval-aggregate-mismatch]", {
+      agreementIdShort,
+      tableApprovedCount: tableApproved,
+      aggregateApprovedCount: pres.aggregate.approvedReviewerCount,
+      requiredReviewerCount: pres.aggregate.requiredReviewerCount,
+      draftSignalsApprovedCount: draftApproved,
+      approvalAggregateSource: pres.approvalAggregateSource,
+    });
+  }, [agreementId, isPaidProReviewDonePath, reviewLinksReady, ownerReviewPresentation]);
 
   const retryRemintReviewLink = useCallback(async () => {
     const id = agreementId.trim();
@@ -540,17 +577,11 @@ export function SimpleDonePage(props: { agreementId: string }) {
       (ownerHandoffDraft?.title || "").trim() ||
       (title || "").trim() ||
       "Agreement";
-    const normalizedReviewerRows = normalizeHandoffToReviewerLinkRows(reviewHandoffRows);
+    const normalizedReviewerRows = ownerReviewPresentation.normalizedReviewerRows;
     const multiReviewer = normalizedReviewerRows.length > 1;
     const primaryReviewHref = (normalizedReviewerRows[0]?.reviewHref || "").trim();
     const anyReviewHref = normalizedReviewerRows.some((r) => r.reviewHref.trim().length > 0);
-    const legacyGlobal = reviewApprovalAgg.legacyApprovalWithoutParticipantId;
-    const reviewerRowStatuses: ReviewerLinkRowApprovalStatus[] = normalizedReviewerRows.map((r, i) =>
-      deriveReviewerLinkRowApprovalStatus(ownerHandoffDraft, r, {
-        legacyGlobalApproval: legacyGlobal,
-        rowIndex: i,
-      }),
-    );
+    const reviewerRowStatuses = ownerReviewPresentation.rowStatuses;
     const linksStillLoading =
       reviewApprovalAgg.requiredReviewerCount > 1 && Boolean(reviewLinksPending) && confirmedSend;
     const linksIncomplete =
@@ -635,7 +666,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     signing links.
                   </p>
                 ) : showAllReviewersApprovedNoEditsCopy ? (
-                  <p className="text-base font-semibold text-emerald-100">{reviewApprovalAgg.ownerStatusLine}</p>
+                  <p
+                    className="text-base font-semibold text-emerald-100"
+                    data-testid="simple-done-all-approved-body"
+                  >
+                    {OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY}
+                  </p>
                 ) : reviewApprovalAgg.hasOpenChangeRequests ? (
                   <>
                     <p className="text-base font-semibold text-emerald-100">Open change requests on this draft.</p>
