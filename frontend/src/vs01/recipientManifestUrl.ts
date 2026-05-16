@@ -67,6 +67,24 @@ function parseField(raw: unknown): Vs01RecipientPlacedField | null {
   }
   const value = typeof raw.value === "string" ? raw.value : undefined;
   const autoInitials = raw.autoInitials === true;
+  const assignedPartyId = typeof raw.assignedPartyId === "string" ? raw.assignedPartyId.trim() : undefined;
+  const assignedPartyIndex =
+    typeof raw.assignedPartyIndex === "number" && Number.isFinite(raw.assignedPartyIndex)
+      ? raw.assignedPartyIndex
+      : undefined;
+  const assignedSignerEmail =
+    typeof raw.assignedSignerEmail === "string" ? raw.assignedSignerEmail.trim() : undefined;
+  const assignedSignerRoleId =
+    typeof raw.assignedSignerRoleId === "string" ? raw.assignedSignerRoleId.trim() : undefined;
+  const assignedSignerRoleLabel =
+    typeof raw.assignedSignerRoleLabel === "string" ? raw.assignedSignerRoleLabel.trim() : undefined;
+  const assignmentSource =
+    raw.assignmentSource === "active_role_selector" ||
+    raw.assignmentSource === "legacy" ||
+    raw.assignmentSource === "autoplace" ||
+    raw.assignmentSource === "migration"
+      ? raw.assignmentSource
+      : undefined;
   return {
     id,
     counterpartyId,
@@ -78,6 +96,12 @@ function parseField(raw: unknown): Vs01RecipientPlacedField | null {
     height,
     ...(value !== undefined ? { value } : {}),
     ...(autoInitials ? { autoInitials: true } : {}),
+    ...(assignedPartyId ? { assignedPartyId } : {}),
+    ...(assignedPartyIndex !== undefined ? { assignedPartyIndex } : {}),
+    ...(assignedSignerEmail ? { assignedSignerEmail } : {}),
+    ...(assignedSignerRoleId ? { assignedSignerRoleId } : {}),
+    ...(assignedSignerRoleLabel ? { assignedSignerRoleLabel } : {}),
+    ...(assignmentSource ? { assignmentSource } : {}),
   };
 }
 
@@ -134,6 +158,12 @@ export function encodeRecipientManifestForUrl(fields: Vs01RecipientPlacedField[]
     height: f.height,
     ...(typeof f.value === "string" ? { value: f.value } : {}),
     ...(f.autoInitials ? { autoInitials: true } : {}),
+    ...(f.assignedPartyId ? { assignedPartyId: f.assignedPartyId } : {}),
+    ...(f.assignedPartyIndex != null ? { assignedPartyIndex: f.assignedPartyIndex } : {}),
+    ...(f.assignedSignerEmail ? { assignedSignerEmail: f.assignedSignerEmail } : {}),
+    ...(f.assignedSignerRoleId ? { assignedSignerRoleId: f.assignedSignerRoleId } : {}),
+    ...(f.assignedSignerRoleLabel ? { assignedSignerRoleLabel: f.assignedSignerRoleLabel } : {}),
+    ...(f.assignmentSource ? { assignmentSource: f.assignmentSource } : {}),
   }));
   return utf8ToBase64Url(JSON.stringify(minimal));
 }
@@ -156,13 +186,18 @@ export function rebindRecipientFieldsToCounterparty(
 export function ensureRecipientFieldDefaults(
   fields: Vs01RecipientPlacedField[],
   recipientDisplayName: string,
-  recipientEmail?: string
+  recipientEmail?: string,
+  opts?: { signerName?: string },
 ): Vs01RecipientPlacedField[] {
   const name = recipientDisplayName.trim() || "Recipient";
   const email = (recipientEmail ?? "").trim() || undefined;
+  const sn = (opts?.signerName ?? "").trim();
   return fields.map((f) => {
     if (typeof f.value === "string" && f.value.length > 0) return f;
     if (f.type === "signature" || f.type === "initials") {
+      return { ...f, value: "" };
+    }
+    if (f.type === "printed_name" && !sn) {
       return { ...f, value: "" };
     }
     return { ...f, value: defaultRecipientFieldValue(f.type, name, email) };

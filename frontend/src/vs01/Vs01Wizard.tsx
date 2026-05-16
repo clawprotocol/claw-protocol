@@ -40,6 +40,12 @@ import {
 } from "./vs01PaidProPostSignHandoff";
 import { sha256Bytes } from "../utils/agreements/hash";
 import {
+  buildVs01PrepareSigningRoles,
+  mergeRecipientManifestFieldsForSignerRole,
+  migrateLegacyRecipientPlacedFields,
+  migrateLegacySenderPlacedFields,
+} from "./vs01SignerFieldAssignment";
+import {
   clearVs01DraftState,
   loadVs01DraftState,
   mergeBridgeEmailsIntoSavedCounterparties,
@@ -91,6 +97,8 @@ const VS01_URL_BOOT = typeof window !== "undefined" ? getVs01UrlBootstrap() : nu
 
 const RECIPIENT_SIGNER_DEEP_LINK = VS01_URL_BOOT?.recipientSignerMode === true;
 const RECIPIENT_LOCKED_CP_ID = VS01_URL_BOOT?.recipientLockedCounterpartyId ?? null;
+const RECIPIENT_AGREEMENT_ID = (VS01_URL_BOOT?.recipientAgreementId ?? "").trim();
+const RECIPIENT_LOCKED_SIGNER_ROLE_ID = VS01_URL_BOOT?.recipientLockedSignerRoleId ?? null;
 
 const INITIAL_RECIPIENT_FIELDS: Vs01RecipientPlacedField[] =
   RECIPIENT_SIGNER_DEEP_LINK && VS01_URL_BOOT?.recipientHydratedFields
@@ -150,6 +158,10 @@ export function Vs01Wizard({
   const [paidProAgreementBridgeSkip] = useState(() =>
     computePaidProAgreementBridgeSkip(seedDocumentId, hideStepper),
   );
+  const [vs01LinkedAgreementId, setVs01LinkedAgreementId] = useState<string | null>(() =>
+    RECIPIENT_AGREEMENT_ID || null,
+  );
+  const [prepareActiveSignerRoleId, setPrepareActiveSignerRoleId] = useState<string | null>(null);
   const bridgeHydratedSeedSid = useRef<string | null>(null);
   const bridgeHandoffSnapshotRef = useRef<AgreementVs01BridgeSession | null>(null);
   const [step, setStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.step ?? initialStep);
@@ -206,6 +218,10 @@ export function Vs01Wizard({
         manifestParamPresent: VS01_URL_BOOT?.recipientManifestParamPresent ?? false,
         manifestDecodeError: VS01_URL_BOOT?.recipientManifestDecodeError ?? null,
         documentId: VS01_URL_BOOT?.documentId ?? null,
+        hasAgreementId: Boolean(RECIPIENT_AGREEMENT_ID),
+        signerRoleIdShort: RECIPIENT_LOCKED_SIGNER_ROLE_ID
+          ? RECIPIENT_LOCKED_SIGNER_ROLE_ID.slice(0, 16)
+          : null,
       });
       if (INITIAL_RECIPIENT_FIELDS.length === 0 && VS01_URL_BOOT?.recipientManifestParamPresent) {
         // eslint-disable-next-line no-console
@@ -252,6 +268,26 @@ export function Vs01Wizard({
 
   const defaultSignerRef =
     [creatorName.trim(), creatorEmail.trim()].filter(Boolean).join(" · ") || "signer";
+
+  const prepareSignerRoles = useMemo(() => {
+    const aid = (vs01LinkedAgreementId ?? "").trim();
+    if (!paidProAgreementBridgeSkip || !aid) return null;
+    return buildVs01PrepareSigningRoles({
+      agreementId: aid,
+      creatorName,
+      creatorEmail,
+      counterparties,
+    });
+  }, [paidProAgreementBridgeSkip, vs01LinkedAgreementId, counterparties, creatorName, creatorEmail]);
+
+  useEffect(() => {
+    if (!prepareSignerRoles?.length) return;
+    const ownerId = prepareSignerRoles[0]!.roleId;
+    setPrepareActiveSignerRoleId((cur) => {
+      if (cur && prepareSignerRoles.some((r) => r.roleId === cur)) return cur;
+      return ownerId;
+    });
+  }, [prepareSignerRoles]);
 
   const detailsOk = useMemo(
     () => detailsStepIsValid(agreementTitle, creatorName, creatorEmail, counterparties),
@@ -354,10 +390,20 @@ export function Vs01Wizard({
             ? mergeBridgeEmailsIntoSavedCounterparties(saved.counterparties, bridgeCps)
             : bridgeCps;
           const titleForUi = (saved?.agreementTitle || bridge.agreementTitle || "").trim() || "Agreement";
+          const cn = saved?.creatorName || bridge.creatorName || "";
+          const ce = saved?.creatorEmail || bridge.creatorEmail || "";
+          const rolesForM = buildVs01PrepareSigningRoles({
+            agreementId: bridge.agreementId,
+            creatorName: cn,
+            creatorEmail: ce,
+            counterparties: cps,
+          });
+          const ownerR = rolesForM[0]!;
           flushSync(() => {
+            setVs01LinkedAgreementId(bridge.agreementId);
             setAgreementTitle(titleForUi);
-            setCreatorName(saved?.creatorName || bridge.creatorName || "");
-            setCreatorEmail(saved?.creatorEmail || bridge.creatorEmail || "");
+            setCreatorName(cn);
+            setCreatorEmail(ce);
             setCounterparties(cps);
             setAgreementTitleUserEdited(Boolean(titleForUi));
             setDocumentMeta({
@@ -365,10 +411,13 @@ export function Vs01Wizard({
               source: "upload",
             });
             if (saved) {
-              setSenderPlacedFields(saved.senderPlacedFields);
-              setRecipientPlacedFields(saved.recipientPlacedFields);
+              setSenderPlacedFields(migrateLegacySenderPlacedFields(saved.senderPlacedFields, ownerR));
+              setRecipientPlacedFields(migrateLegacyRecipientPlacedFields(saved.recipientPlacedFields, rolesForM));
               setSenderMessage(saved.senderMessage || "");
               if (saved.senderSignatureRef) setSenderSignatureRef(saved.senderSignatureRef);
+            } else {
+              setSenderPlacedFields((p) => migrateLegacySenderPlacedFields(p, ownerR));
+              setRecipientPlacedFields((p) => migrateLegacyRecipientPlacedFields(p, rolesForM));
             }
           });
           const nextStep: Vs01Step = saved ? saved.step : 2;
@@ -665,6 +714,8 @@ export function Vs01Wizard({
               documentId={documentId}
               counterparties={counterparties}
               lockedCounterpartyId={RECIPIENT_LOCKED_CP_ID}
+              recipientAgreementId={RECIPIENT_AGREEMENT_ID || null}
+              lockedSignerRoleId={RECIPIENT_LOCKED_SIGNER_ROLE_ID}
               recipientFields={recipientPlacedFields}
               senderPlacedFields={senderPlacedFields}
               senderSignatureRef={senderSignatureRef}
@@ -823,6 +874,9 @@ export function Vs01Wizard({
             creatorEmail={creatorEmail.trim() ? creatorEmail.trim() : undefined}
             senderMessage={senderMessage}
             agreementBridgePlacementCopy={paidProAgreementBridgeSkip}
+            prepareSignerRoles={prepareSignerRoles ?? undefined}
+            prepareActiveSignerRoleId={prepareActiveSignerRoleId ?? undefined}
+            onPrepareActiveSignerRoleChange={setPrepareActiveSignerRoleId}
             fields={senderPlacedFields}
             onFieldsChange={setSenderPlacedFields}
             onBack={() => goToStep(paidProAgreementBridgeSkip ? 0 : 1)}
@@ -840,6 +894,10 @@ export function Vs01Wizard({
             senderPlacedFields={senderPlacedFields}
             senderSignatureRef={senderSignatureRef}
             prepareSigningPacket={paidProAgreementBridgeSkip}
+            preparePacketAgreementId={vs01LinkedAgreementId}
+            prepareCreatorName={creatorName}
+            prepareCreatorEmail={creatorEmail}
+            prepareSignerRoles={prepareSignerRoles ?? undefined}
             onError={setError}
             onBack={() => goToStep(2)}
             onContinueToReceipt={() => {
@@ -861,8 +919,19 @@ export function Vs01Wizard({
                 return;
               }
 
+              const roles = buildVs01PrepareSigningRoles({
+                agreementId: linkedAgreementId,
+                creatorName,
+                creatorEmail,
+                counterparties,
+              });
+              const ownerRole = roles[0]!;
+
               if (!rid) {
                 const gate = canFinishPreparingSigningPacket({
+                  agreementId: linkedAgreementId,
+                  creatorName,
+                  creatorEmail,
                   counterparties,
                   senderPlacedFields,
                   recipientPlacedFields,
@@ -873,6 +942,17 @@ export function Vs01Wizard({
                   missingByParty: gate.missingByParty,
                   totalRequiredRoles: gate.totalRequiredRoles,
                   fieldsByRole: gate.fieldsByRole,
+                });
+                // eslint-disable-next-line no-console
+                console.info("[vs01-required-progress]", {
+                  canFinish: gate.canFinish,
+                  missingRoleCount: Object.keys(gate.missingByParty).length,
+                  roleProgress: roles.map((r) => ({
+                    roleKind: r.kind,
+                    partyIndex: r.partyIndex,
+                    tally: gate.fieldsByRole[r.roleId],
+                    missing: gate.missingByParty[r.roleId] ?? [],
+                  })),
                 });
                 if (!gate.canFinish) {
                   setError(
@@ -885,20 +965,36 @@ export function Vs01Wizard({
               const named = counterparties
                 .map((c, recipientIndex) => ({ c, recipientIndex }))
                 .filter(({ c }) => c.name.trim().length > 0);
-              const signers = named.map(({ c, recipientIndex }) => ({
-                counterpartyId: c.id,
-                displayName: c.name.trim(),
-                email: c.email.trim(),
-                signingUrl: buildVs01RecipientSigningUrl({
-                  recipientIndex,
-                  recipientName: c.name.trim(),
-                  recipientEmail: c.email.trim(),
+              const signers = named.map(({ c, recipientIndex }) => {
+                const role = roles.find((r) => r.vs01CounterpartyId === c.id);
+                const signerRoleId = role?.roleId ?? "";
+                const merged = role
+                  ? mergeRecipientManifestFieldsForSignerRole({
+                      ownerRole,
+                      roles,
+                      counterpartyId: c.id,
+                      signerRoleId: role.roleId,
+                      recipientPlacedFields,
+                      senderPlacedFields,
+                    })
+                  : recipientPlacedFields.filter((f) => f.counterpartyId === c.id);
+                return {
                   counterpartyId: c.id,
-                  documentId: did,
-                  receiptId: rid || null,
-                  recipientFieldsForSigner: recipientPlacedFields.filter((f) => f.counterpartyId === c.id),
-                }),
-              }));
+                  displayName: c.name.trim(),
+                  email: c.email.trim(),
+                  signingUrl: buildVs01RecipientSigningUrl({
+                    recipientIndex,
+                    recipientName: c.name.trim(),
+                    recipientEmail: c.email.trim(),
+                    counterpartyId: c.id,
+                    documentId: did,
+                    receiptId: rid || null,
+                    recipientFieldsForSigner: merged,
+                    agreementId: linkedAgreementId,
+                    signerRoleId: signerRoleId || null,
+                  }),
+                };
+              });
 
               if (rid && !blockSigTelemetry) {
                 const payload: PaidProVs01PostSignHandoffV1 = {

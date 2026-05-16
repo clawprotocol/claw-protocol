@@ -1,7 +1,5 @@
 import type { AgreementDraft, AgreementParty } from "./agreementTypes";
 import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
-import type { PlacedSigningField } from "../vs01/signingFields";
-import type { Vs01Counterparty, Vs01RecipientPlacedField } from "../vs01/types";
 
 export type PartySigningRoleSource = "intake" | "review_link" | "handoff" | "creator_profile" | "inferred";
 
@@ -114,72 +112,8 @@ export function buildPartySigningRolesFromAgreementHandoff(args: {
   return out;
 }
 
-export type SigningPacketPrepareGate = {
-  canFinish: boolean;
-  missingByParty: Record<string, string[]>;
-  totalRequiredRoles: number;
-  fieldsByRole: Record<string, { signature: number; printed_name: number; date: number; title: number }>;
-};
-
-function countTypes(
-  fields: Iterable<{ type: string }>,
-): { signature: number; printed_name: number; date: number; title: number } {
-  let signature = 0;
-  let printed_name = 0;
-  let date = 0;
-  let title = 0;
-  for (const f of fields) {
-    if (f.type === "signature") signature += 1;
-    else if (f.type === "printed_name") printed_name += 1;
-    else if (f.type === "date") date += 1;
-    else if (f.type === "text") title += 1;
-  }
-  return { signature, printed_name, date, title };
-}
-
-function missingForRole(
-  tallies: { signature: number; printed_name: number; date: number; title: number },
-  needsTitle: boolean,
-): string[] {
-  const m: string[] = [];
-  if (tallies.signature < 1) m.push("signature");
-  if (tallies.printed_name < 1) m.push("printed_name");
-  if (tallies.date < 1) m.push("date");
-  if (needsTitle && tallies.title < 1) m.push("title");
-  return m;
-}
-
-/**
- * Gate “finish preparing packet”: owner template fields + per–named-counterparty recipient placements.
- */
-export function canFinishPreparingSigningPacket(args: {
-  counterparties: Vs01Counterparty[];
-  senderPlacedFields: PlacedSigningField[];
-  recipientPlacedFields: Vs01RecipientPlacedField[];
-}): SigningPacketPrepareGate {
-  const named = args.counterparties.filter((c) => c.name.trim().length > 0);
-  const ownerTallies = countTypes(args.senderPlacedFields);
-  const fieldsByRole: SigningPacketPrepareGate["fieldsByRole"] = {
-    __owner__: ownerTallies,
-  };
-  const missingByParty: Record<string, string[]> = {};
-  const ownerMissing = missingForRole(ownerTallies, false);
-  if (ownerMissing.length) missingByParty.__owner__ = ownerMissing;
-
-  for (const c of named) {
-    const cpFields = args.recipientPlacedFields.filter((f) => f.counterpartyId === c.id);
-    const t = countTypes(cpFields);
-    fieldsByRole[c.id] = t;
-    const needsTitle = looksLikeLegalEntityPartyName(c.name);
-    const miss = missingForRole(t, needsTitle);
-    if (miss.length) missingByParty[c.id] = miss;
-  }
-
-  const totalRequiredRoles = 1 + named.length;
-  const canFinish = Object.keys(missingByParty).length === 0;
-
-  return { canFinish, missingByParty, totalRequiredRoles, fieldsByRole };
-}
+export type { SigningPacketPrepareGate } from "../vs01/vs01SignerFieldAssignment";
+export { canFinishPreparePacketSignerCentric as canFinishPreparingSigningPacket } from "../vs01/vs01SignerFieldAssignment";
 
 /** True only when a real signer-execute session (receipt) is allowed — never during packet preparation. */
 export function isActualSignerCompletionAllowed(args: {

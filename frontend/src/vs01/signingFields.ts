@@ -2,7 +2,7 @@
  * VS01 signing step — placed field model (client). Maps to API field_manifest on submit.
  */
 import { firstPlausibleEmailInSignerRef, isPlausibleEmail } from "./detailsStepValidation";
-import type { Vs01Counterparty, Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
+import type { Vs01Counterparty, Vs01RecipientFieldType, Vs01RecipientPlacedField, Vs01SignerFieldAssignmentSource } from "./types";
 import type { FieldManifestEntry } from "./vs01Api";
 
 export type SigningFieldType = "signature" | "initials" | "printed_name" | "text" | "email" | "date";
@@ -29,6 +29,13 @@ export type PlacedSigningField = {
   value?: string;
   /** True for per-page auto initials from “Put my initials on every page” */
   autoInitials?: boolean;
+  /** Signer-centric placement (prepare packet / execution scope). */
+  assignedPartyId?: string;
+  assignedPartyIndex?: number;
+  assignedSignerEmail?: string;
+  assignedSignerRoleId?: string;
+  assignedSignerRoleLabel?: string;
+  assignmentSource?: Vs01SignerFieldAssignmentSource;
 };
 
 export const SIGNING_FIELD_TOOLS: { type: SigningFieldType; label: string }[] = [

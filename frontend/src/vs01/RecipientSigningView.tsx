@@ -26,6 +26,10 @@ import {
 } from "../compliance/disclosureCopy";
 import { labelForFieldType, labelForRecipientFieldType, type PlacedSigningField } from "./signingFields";
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
+import {
+  hideSenderTemplateFieldForRecipientSigner,
+  recipientFieldBelongsToLockedSigner,
+} from "./vs01SignerFieldAssignment";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -33,6 +37,10 @@ export type RecipientSigningViewProps = {
   documentId: string | null;
   counterparties: Vs01Counterparty[];
   lockedCounterpartyId: string;
+  /** Agreement id from signing URL — scopes sender reference overlay vs signer fields. */
+  recipientAgreementId?: string | null;
+  /** Stable role id from signing URL; optional for legacy links. */
+  lockedSignerRoleId?: string | null;
   recipientFields: Vs01RecipientPlacedField[];
   senderPlacedFields: PlacedSigningField[];
   senderSignatureRef: Vs01SenderSignatureRef | null;
@@ -125,7 +133,7 @@ function fieldIsComplete(f: Vs01RecipientPlacedField): boolean {
     case "initials":
       return v.length > 0;
     case "printed_name":
-      return true;
+      return v.length > 0;
     case "text":
       return v.length > 0;
     case "email":
@@ -144,6 +152,8 @@ export function RecipientSigningView({
   documentId,
   counterparties,
   lockedCounterpartyId,
+  recipientAgreementId = null,
+  lockedSignerRoleId = null,
   recipientFields,
   senderPlacedFields,
   senderSignatureRef,
@@ -163,11 +173,28 @@ export function RecipientSigningView({
   const signer = cpById.get(lockedCp);
   const signerName = signer?.name.trim() || "Signer";
   const signerEmail = signer?.email.trim() || "";
-
+  const explicitSignerName = (signer?.signerName ?? "").trim();
   const myFields = useMemo(
-    () => recipientFields.filter((f) => f.counterpartyId === lockedCp),
-    [recipientFields, lockedCp]
+    () =>
+      recipientFields.filter((f) =>
+        recipientFieldBelongsToLockedSigner(f, lockedCp, lockedSignerRoleId ?? null),
+      ),
+    [recipientFields, lockedCp, lockedSignerRoleId],
   );
+
+  useEffect(() => {
+    const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
+    const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+    if (!diag && !dev) return;
+    // eslint-disable-next-line no-console
+    console.info("[vs01-recipient-field-scope]", {
+      lockedCounterpartyId: lockedCp,
+      totalRecipientFields: recipientFields.length,
+      scopedFieldCount: myFields.length,
+      hasAgreementScope: Boolean((recipientAgreementId ?? "").trim()),
+      signerRoleIdShort: lockedSignerRoleId ? lockedSignerRoleId.slice(0, 16) : null,
+    });
+  }, [lockedCp, recipientFields.length, myFields.length, recipientAgreementId, lockedSignerRoleId]);
 
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
@@ -246,6 +273,18 @@ export function RecipientSigningView({
     (id: string, patch: Partial<Vs01RecipientPlacedField>) => {
       onRecipientFieldsChange((prev) => {
         const target = prev.find((f) => f.id === id);
+        if (!target || !recipientFieldBelongsToLockedSigner(target, lockedCp, lockedSignerRoleId ?? null)) {
+          const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
+          const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+          if (diag || dev) {
+            // eslint-disable-next-line no-console
+            console.warn("[vs01-cross-signer-field-blocked]", {
+              fieldIdShort: id.slice(0, 8),
+              reason: "not_assigned_to_locked_signer",
+            });
+          }
+          return prev;
+        }
         if (
           target?.autoInitials &&
           target.type === "initials" &&
@@ -261,7 +300,7 @@ export function RecipientSigningView({
         return prev.map((f) => (f.id === id ? { ...f, ...patch } : f));
       });
     },
-    [onRecipientFieldsChange]
+    [onRecipientFieldsChange, lockedCp, lockedSignerRoleId]
   );
 
   const goPrev = useCallback(() => {
@@ -444,7 +483,15 @@ export function RecipientSigningView({
                       {pdfDocReady && numPages > 0
                         ? Array.from({ length: numPages }, (_, p) => {
                             const fieldsHere = myFields.filter((f) => f.page === p);
-                            const senderFieldsHere = senderPlacedFields.filter((f) => f.page === p);
+                            const senderFieldsHere = senderPlacedFields.filter(
+                              (f) =>
+                                f.page === p &&
+                                !hideSenderTemplateFieldForRecipientSigner(
+                                  f,
+                                  recipientAgreementId,
+                                  lockedSignerRoleId,
+                                ),
+                            );
                             const hasRecipientOnPage = fieldsHere.length > 0;
                             const hasSenderOnPage = senderFieldsHere.length > 0;
                             return (
@@ -559,19 +606,32 @@ export function RecipientSigningView({
                                                 />
                                               ) : null}
                                               {field.type === "printed_name" ? (
-                                                <RecipientPrintedNameFieldBody displayName={forName} />
+                                                explicitSignerName ? (
+                                                  <RecipientPrintedNameFieldBody displayName={explicitSignerName} />
+                                                ) : (
+                                                  <input
+                                                    type="text"
+                                                    className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                    value={textVal}
+                                                    placeholder="Authorized Signer Name"
+                                                    autoComplete="name"
+                                                    aria-label="Authorized signer printed name"
+                                                    onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                    onPointerDown={(ev) => ev.stopPropagation()}
+                                                  />
+                                                )
                                               ) : null}
                                               {field.type === "text" ? (
-                                                <input
-                                                  type="text"
-                                                  className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-                                                  value={textVal}
-                                                  placeholder="Text (title, email, custom blank…)"
-                                                  autoComplete="off"
-                                                  aria-label="Text field"
-                                                  onChange={(ev) => updateField(field.id, { value: ev.target.value })}
-                                                  onPointerDown={(ev) => ev.stopPropagation()}
-                                                />
+                                                  <input
+                                                    type="text"
+                                                    className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
+                                                    value={textVal}
+                                                    placeholder="Title"
+                                                    autoComplete="organization-title"
+                                                    aria-label="Title"
+                                                    onChange={(ev) => updateField(field.id, { value: ev.target.value })}
+                                                    onPointerDown={(ev) => ev.stopPropagation()}
+                                                  />
                                               ) : null}
                                               {field.type === "email" ? (
                                                 <input

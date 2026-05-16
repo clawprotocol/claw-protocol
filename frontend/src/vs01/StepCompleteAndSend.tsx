@@ -39,6 +39,8 @@ import {
 } from "./signingFields";
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
 import { canFinishPreparingSigningPacket } from "../agreement/partySigningRoles";
+import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { stampRecipientFieldForPrepareRole } from "./vs01SignerFieldAssignment";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -51,6 +53,11 @@ export type StepCompleteAndSendProps = {
   senderSignatureRef?: Vs01SenderSignatureRef | null;
   /** Paid Pro agreement bridge: recipient placement completes a signing packet (not VS01 receipt step). */
   prepareSigningPacket?: boolean;
+  /** Paid Pro packet prep: agreement id for per-role finish gate. */
+  preparePacketAgreementId?: string | null;
+  prepareCreatorName?: string;
+  prepareCreatorEmail?: string;
+  prepareSignerRoles?: Vs01PrepareSigningRole[];
   onRecipientFieldsChange: Dispatch<SetStateAction<Vs01RecipientPlacedField[]>>;
   onError: (message: string | null) => void;
   onBack?: () => void;
@@ -175,6 +182,10 @@ export function StepCompleteAndSend({
   senderPlacedFields = [],
   senderSignatureRef = null,
   prepareSigningPacket = false,
+  preparePacketAgreementId = null,
+  prepareCreatorName = "",
+  prepareCreatorEmail = "",
+  prepareSignerRoles,
   onRecipientFieldsChange,
   onError,
   onBack,
@@ -452,9 +463,17 @@ export function StepCompleteAndSend({
   const pageIndex0 = currentPage - 1;
   const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
   const placementArmed = armedTool != null && namedCps.length > 0 && Boolean(selectedCounterpartyId);
-  const prepareGate = prepareSigningPacket
-    ? canFinishPreparingSigningPacket({ counterparties, senderPlacedFields, recipientPlacedFields: recipientFields })
-    : null;
+  const prepareGate =
+    prepareSigningPacket && (preparePacketAgreementId ?? "").trim()
+      ? canFinishPreparingSigningPacket({
+          agreementId: (preparePacketAgreementId ?? "").trim(),
+          creatorName: (prepareCreatorName ?? "").trim(),
+          creatorEmail: (prepareCreatorEmail ?? "").trim(),
+          counterparties,
+          senderPlacedFields,
+          recipientPlacedFields: recipientFields,
+        })
+      : null;
   const namedCounterparties = counterparties.filter((c) => c.name.trim().length > 0);
   const hasRecipientWork = namedCounterparties.length === 0 || recipientFields.length > 0;
   const canContinue = prepareSigningPacket
@@ -525,7 +544,7 @@ export function StepCompleteAndSend({
       const px = (ev.clientX - rect.left) / rect.width;
       const py = (ev.clientY - rect.top) / rect.height;
       const cpRow = cpById.get(selectedCounterpartyId);
-      const nf = createRecipientFieldAtClick(
+      const nfRaw = createRecipientFieldAtClick(
         armedTool,
         pageIndex0,
         px,
@@ -534,6 +553,22 @@ export function StepCompleteAndSend({
         counterpartyName(cpById, selectedCounterpartyId),
         resolveRecipientEmailForEmailFieldPlacement(cpRow?.email) || undefined
       );
+      const role = prepareSignerRoles?.find((r) => r.vs01CounterpartyId === selectedCounterpartyId);
+      const nf =
+        prepareSigningPacket && role ? stampRecipientFieldForPrepareRole(nfRaw, role) : nfRaw;
+      const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
+      const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+      if ((diag || dev) && prepareSigningPacket && role) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-field-assigned]", {
+          surface: "recipient_assign",
+          fieldType: nf.type,
+          roleKind: role.kind,
+          partyIndex: role.partyIndex,
+          assignmentSource: nf.assignmentSource,
+          roleIdShort: role.roleId.slice(0, 16),
+        });
+      }
       onRecipientFieldsChange((prev) => [...prev, nf]);
       setSelectedFieldId(nf.id);
       setCurrentPage(pageIndex0 + 1);
@@ -547,7 +582,7 @@ export function StepCompleteAndSend({
         dragHintTimerRef.current = null;
       }, 2200);
     },
-    [armedTool, busy, cpById, selectedCounterpartyId, onRecipientFieldsChange]
+    [armedTool, busy, cpById, selectedCounterpartyId, onRecipientFieldsChange, prepareSigningPacket, prepareSignerRoles]
   );
 
   useEffect(() => {

@@ -22,6 +22,8 @@ import { completeSignSession, createSignSession, fetchDocumentContent } from "./
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 import { firstPlausibleEmailInSignerRef, isPlausibleEmail } from "./detailsStepValidation";
 import type { Vs01Counterparty, Vs01LoadingState, Vs01SenderSignatureRef } from "./types";
+import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { stampSenderFieldWithPrepareRole } from "./vs01SignerFieldAssignment";
 import {
   SIGNING_FIELD_TOOLS,
   buildAutoInitialsFields,
@@ -58,6 +60,10 @@ export type StepPrepareSignatureProps = {
   senderMessage: string;
   /** Paid Pro agreement → VS01 bridge: placement-first framing (not “sign your document” yet). */
   agreementBridgePlacementCopy?: boolean;
+  /** Paid Pro prepare flow: roles for signer-bound placement (sidebar). */
+  prepareSignerRoles?: Vs01PrepareSigningRole[];
+  prepareActiveSignerRoleId?: string;
+  onPrepareActiveSignerRoleChange?: (roleId: string) => void;
   /** Pre-populate placed fields (e.g. from saved draft state on refresh). */
   /** Controlled placed-fields array — parent is source of truth. */
   fields: PlacedSigningField[];
@@ -70,23 +76,33 @@ export type StepPrepareSignatureProps = {
 const STEP_ID = "prepare-sign" as const;
 
 /** Corner label on placed fields (Step 3, first person). */
-function signingPlacementCornerLabel(t: SigningFieldType): string {
+function signingPlacementCornerLabel(t: SigningFieldType, field?: PlacedSigningField): string {
+  let base: string;
   switch (t) {
     case "signature":
-      return "Your signature";
+      base = "Your signature";
+      break;
     case "initials":
-      return "Your initials";
+      base = "Your initials";
+      break;
     case "printed_name":
-      return "Printed name";
+      base = "Printed name";
+      break;
     case "text":
-      return "Text";
+      base = "Text";
+      break;
     case "email":
-      return "Email";
+      base = "Email";
+      break;
     case "date":
-      return "Date";
+      base = "Date";
+      break;
     default:
-      return labelForFieldType(t);
+      base = labelForFieldType(t);
   }
+  const sub = field?.assignedSignerRoleLabel?.trim();
+  if (sub) return `${base} · ${sub}`;
+  return base;
 }
 
 type SignatureMode = "type" | "draw" | "upload";
@@ -142,6 +158,9 @@ export function StepPrepareSignature({
   creatorEmail,
   senderMessage,
   agreementBridgePlacementCopy = false,
+  prepareSignerRoles,
+  prepareActiveSignerRoleId,
+  onPrepareActiveSignerRoleChange,
   fields,
   onFieldsChange,
   onBack,
@@ -149,6 +168,22 @@ export function StepPrepareSignature({
 }: StepPrepareSignatureProps) {
   const signerEmailForPlacement =
     resolveSenderEmailForEmailFieldPlacement(creatorEmail, defaultSignerRef) || undefined;
+
+  useEffect(() => {
+    if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length || !prepareActiveSignerRoleId) return;
+    const role = prepareSignerRoles.find((r) => r.roleId === prepareActiveSignerRoleId);
+    if (!role) return;
+    const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
+    const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+    if (!diag && !dev) return;
+    // eslint-disable-next-line no-console
+    console.info("[vs01-active-placement-role]", {
+      partyIndex: role.partyIndex,
+      roleKind: role.kind,
+      label: role.entityName,
+      roleIdShort: role.roleId.slice(0, 16),
+    });
+  }, [agreementBridgePlacementCopy, prepareSignerRoles, prepareActiveSignerRoleId]);
 
   const busySession = loading === "session";
   const busyComplete = loading === "complete";
@@ -476,10 +511,23 @@ export function StepPrepareSignature({
     const ctx = { typedName: typedNameRef.current, initials: initialsRef.current };
     setFields((prev) => {
       const manual = prev.filter((f) => !f.autoInitials);
-      const auto = buildAutoInitialsFields(numPages, ctx, skippedAutoPages, manual);
+      const auto = buildAutoInitialsFields(numPages, ctx, skippedAutoPages, manual).map((f) => {
+        if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length) return f;
+        const role =
+          prepareSignerRoles.find((r) => r.roleId === prepareActiveSignerRoleId) ?? prepareSignerRoles[0];
+        return role ? stampSenderFieldWithPrepareRole(f, role) : f;
+      });
       return [...manual, ...auto];
     });
-  }, [autoInitialsEveryPage, numPages, skippedAutoPages, fieldsOverlapKey]);
+  }, [
+    autoInitialsEveryPage,
+    numPages,
+    skippedAutoPages,
+    fieldsOverlapKey,
+    agreementBridgePlacementCopy,
+    prepareSignerRoles,
+    prepareActiveSignerRoleId,
+  ]);
 
   /** Keep auto-initials text in sync when the user edits initials/name, without rebuilding positions. */
   useEffect(() => {
@@ -535,15 +583,34 @@ export function StepPrepareSignature({
         initials,
         signerEmail: signerEmailForPlacement,
       };
-      const nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, ctx);
+      let nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, ctx);
+      if (agreementBridgePlacementCopy && prepareSignerRoles?.length) {
+        const role =
+          prepareSignerRoles.find((r) => r.roleId === prepareActiveSignerRoleId) ?? prepareSignerRoles[0];
+        if (role) {
+          nf = stampSenderFieldWithPrepareRole(nf, role);
+          const diag =
+            typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
+          const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+          if (diag || dev) {
+            // eslint-disable-next-line no-console
+            console.info("[vs01-field-assigned]", {
+              fieldType: nf.type,
+              roleKind: role.kind,
+              partyIndex: role.partyIndex,
+              assignmentSource: nf.assignmentSource,
+              roleIdShort: role.roleId.slice(0, 16),
+            });
+          }
+        }
+      }
       setFields((prev) => {
         const next = [...prev, nf];
         // eslint-disable-next-line no-console
         console.info("[vs01-placement-field-added]", {
-          assignedPartyId: "__owner__",
-          assignedRoleIndex: 0,
+          assignedPartyId: nf.assignedPartyId ?? null,
+          assignedPartyIndex: nf.assignedPartyIndex ?? null,
           fieldType: armedTool,
-          requiredProgress: null,
           tool: armedTool,
           prevCount: prev.length,
           nextCount: next.length,
@@ -563,7 +630,7 @@ export function StepPrepareSignature({
         dragHintTimerRef.current = null;
       }, 2200);
     },
-    [armedTool, busy, typedName, initials, signerEmailForPlacement]
+    [armedTool, busy, typedName, initials, signerEmailForPlacement, agreementBridgePlacementCopy, prepareSignerRoles, prepareActiveSignerRoleId]
   );
 
   useEffect(() => {
@@ -1128,7 +1195,7 @@ export function StepPrepareSignature({
                                           onPointerDown={(e) => onBoxPointerDown(e, field)}
                                           onClick={(e) => onPlacementBoxClick(e, field.id)}
                                         >
-                                          <span className="vs01-sign-placement-label">{signingPlacementCornerLabel(field.type)}</span>
+                                          <span className="vs01-sign-placement-label">{signingPlacementCornerLabel(field.type, field)}</span>
                                           {field.type === "signature" ? (
                                             <>
                                               {signatureMode === "type" && typedName.trim() ? (
@@ -1288,6 +1355,33 @@ export function StepPrepareSignature({
         </div>
 
         <aside className="vs01-sign-rail" aria-label="Signing controls">
+          {agreementBridgePlacementCopy && prepareSignerRoles && prepareSignerRoles.length > 0 ? (
+            <div className="vs01-prepare-role-picker mb-3" role="group" aria-label="Signer role for field placement">
+              <p className="vs01-sign-rail-line text-xs font-medium text-slate-500 dark:text-slate-400">
+                Placing fields for
+              </p>
+              <div className="mt-1 flex flex-col gap-1">
+                {prepareSignerRoles.map((r) => {
+                  const activeId = prepareActiveSignerRoleId ?? prepareSignerRoles[0]!.roleId;
+                  const sel = activeId === r.roleId;
+                  return (
+                    <button
+                      key={r.roleId}
+                      type="button"
+                      className={
+                        sel
+                          ? "vs01-btn vs01-btn--primary text-left text-sm"
+                          : "vs01-btn vs01-btn--secondary text-left text-sm"
+                      }
+                      onClick={() => onPrepareActiveSignerRoleChange?.(r.roleId)}
+                    >
+                      {r.entityName?.trim() || (r.kind === "owner" ? "Owner" : "Signer")}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           <div className="vs01-sign-rail-brief vs01-sign-rail-brief--compact">
             <p className="vs01-sign-rail-line">
               <span className="vs01-sign-rail-k">You</span>

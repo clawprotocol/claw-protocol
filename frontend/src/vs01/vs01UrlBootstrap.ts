@@ -25,6 +25,10 @@ export type Vs01UrlBootstrapResult = {
   furthestStep: Vs01Step;
   recipientSignerMode: boolean;
   recipientLockedCounterpartyId: string;
+  /** From `agreement_id` query — used with {@link recipientLockedSignerRoleId} for field scoping. */
+  recipientAgreementId: string;
+  /** From `signer_role_id` query — optional; legacy links omit this. */
+  recipientLockedSignerRoleId: string | null;
   /** Fields from {@link VS01_RECIPIENT_MANIFEST_QUERY}, rebound to the URL counterparty id. */
   recipientHydratedFields: Vs01RecipientPlacedField[];
   /** True when the manifest query param was present (may decode to zero fields). */
@@ -70,6 +74,9 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   const recipientName = (params.get("recipient_name") ?? "").trim();
   const recipientEmail = (params.get("recipient_email") ?? "").trim();
   const counterpartyIdFromUrl = (params.get("counterparty_id") ?? "").trim();
+  const recipientAgreementId = (params.get("agreement_id") ?? "").trim();
+  const recipientLockedSignerRoleIdRaw = (params.get("signer_role_id") ?? "").trim();
+  const recipientLockedSignerRoleId = recipientLockedSignerRoleIdRaw || null;
 
   const counterparties: Vs01Counterparty[] = [];
   for (let i = 0; i < recipientIndex; i++) {
@@ -91,13 +98,16 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   let recipientManifestDecodeError: string | null = null;
   let hydrationSource: "url_manifest" | "stored_manifest" | "none" = "none";
 
+  const defaultsSignerOpts = { signerName: counterparties[recipientIndex]?.signerName };
+
   if (manifestRaw) {
     const decoded = decodeRecipientManifestParam(manifestRaw);
     if (decoded.ok) {
       recipientHydratedFields = ensureRecipientFieldDefaults(
         rebindRecipientFieldsToCounterparty(decoded.fields, lockedId),
         recipientName || "Recipient",
-        recipientEmail || undefined
+        recipientEmail || undefined,
+        defaultsSignerOpts,
       );
       hydrationSource = "url_manifest";
     } else {
@@ -110,7 +120,8 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
       recipientHydratedFields = ensureRecipientFieldDefaults(
         rebindRecipientFieldsToCounterparty(stored, lockedId),
         recipientName || "Recipient",
-        recipientEmail || undefined
+        recipientEmail || undefined,
+        defaultsSignerOpts,
       );
       hydrationSource = "stored_manifest";
     }
@@ -131,6 +142,8 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
       manifestParamPresent: recipientManifestParamPresent,
       manifestDecodeError: recipientManifestDecodeError,
       urlCounterpartyId: counterpartyIdFromUrl || null,
+      hasAgreementId: Boolean(recipientAgreementId),
+      signerRoleIdShort: recipientLockedSignerRoleId ? recipientLockedSignerRoleId.slice(0, 16) : null,
     });
   }
 
@@ -152,6 +165,8 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     furthestStep: RECIPIENT_SIGNER_STEP,
     recipientSignerMode: true,
     recipientLockedCounterpartyId: lockedId,
+    recipientAgreementId,
+    recipientLockedSignerRoleId,
     recipientHydratedFields,
     recipientManifestParamPresent,
     recipientManifestDecodeError,

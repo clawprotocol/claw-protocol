@@ -63,6 +63,10 @@ export function buildVs01RecipientSigningUrl(opts: {
   receiptId: string | null;
   /** Fields assigned to this counterparty only; stored in sessionStorage and referenced by token. */
   recipientFieldsForSigner?: Vs01RecipientPlacedField[];
+  /** LawDog agreement id — scopes signer role ids for recipient execution (query only). */
+  agreementId?: string | null;
+  /** Stable role id from prepare flow; recipient UI hides other signers’ fields. */
+  signerRoleId?: string | null;
 }): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
@@ -83,6 +87,11 @@ export function buildVs01RecipientSigningUrl(opts: {
   params.set("document_id", did);
   params.set("receipt_id", opts.receiptId?.trim() ?? "");
 
+  const aid = opts.agreementId?.trim() ?? "";
+  if (aid) params.set("agreement_id", aid);
+  const srid = opts.signerRoleId?.trim() ?? "";
+  if (srid) params.set("signer_role_id", srid);
+
   if (forSigner.length > 0) {
     const encoded = encodeRecipientManifestForUrl(forSigner);
     if (encoded.length <= 800) {
@@ -102,6 +111,8 @@ export function buildVs01RecipientSigningUrl(opts: {
       fieldCount: forSigner.length,
       urlLength: url.length,
       usesToken: !params.has(VS01_RECIPIENT_MANIFEST_QUERY),
+      hasAgreementId: Boolean(aid),
+      signerRoleIdShort: srid ? srid.slice(0, 16) : null,
     });
   }
 

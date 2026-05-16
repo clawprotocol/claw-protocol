@@ -52,6 +52,24 @@ describe("Recipient signing pipeline — field persistence", () => {
 });
 
 describe("Recipient signing pipeline — manifest hydration", () => {
+  it("encodeRecipientManifestForUrl round-trips assignment metadata", () => {
+    const fields: Vs01RecipientPlacedField[] = [
+      {
+        ...makeField("f1", "cp1"),
+        assignedSignerRoleId: "vs01r:abc:i1:cp1",
+        assignedPartyIndex: 1,
+        assignmentSource: "active_role_selector",
+      },
+    ];
+    const encoded = encodeRecipientManifestForUrl(fields);
+    const decoded = decodeRecipientManifestParam(encoded);
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) {
+      expect(decoded.fields[0].assignedSignerRoleId).toBe("vs01r:abc:i1:cp1");
+      expect(decoded.fields[0].assignmentSource).toBe("active_role_selector");
+    }
+  });
+
   it("encodeRecipientManifestForUrl round-trips through decodeRecipientManifestParam", () => {
     const fields = [makeField("f1", "cp1"), makeField("f2", "cp1", "printed_name")];
     const encoded = encodeRecipientManifestForUrl(fields);
@@ -110,9 +128,17 @@ describe("Recipient signing pipeline — multi-signer routing", () => {
     expect(loadedB![0].id).toBe("b1");
   });
 
-  it("ensureRecipientFieldDefaults fills printed_name with display name", () => {
+  it("ensureRecipientFieldDefaults leaves printed_name empty when signer name unknown", () => {
     const fields = [makeField("f1", "cp1", "printed_name")];
-    const filled = ensureRecipientFieldDefaults(fields, "Alice Jones", "alice@example.com");
+    const filled = ensureRecipientFieldDefaults(fields, "Entity LLC", "x@y.com");
+    expect(filled[0].value).toBe("");
+  });
+
+  it("ensureRecipientFieldDefaults fills printed_name when signer name is known", () => {
+    const fields = [makeField("f1", "cp1", "printed_name")];
+    const filled = ensureRecipientFieldDefaults(fields, "Alice Jones", "alice@example.com", {
+      signerName: "Alice Jones",
+    });
     expect(filled[0].value).toContain("Alice");
   });
 

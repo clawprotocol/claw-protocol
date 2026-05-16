@@ -38,6 +38,12 @@ export type Vs01Counterparty = {
 /** Field type for recipient assignment (Step 4). `printed_name` is a fixed label; `text` / `email` are freeform (email prefills when known). */
 export type Vs01RecipientFieldType = "signature" | "initials" | "printed_name" | "text" | "email" | "date";
 
+export type Vs01SignerFieldAssignmentSource =
+  | "active_role_selector"
+  | "legacy"
+  | "autoplace"
+  | "migration";
+
 /**
  * A field placed for a specific counterparty on the PDF (normalized coords, client-only until backend exists).
  */
@@ -54,6 +60,12 @@ export type Vs01RecipientPlacedField = {
   value?: string;
   /** Per-page initials for “initials on every page” for this counterparty (Step 4). */
   autoInitials?: boolean;
+  assignedPartyId?: string;
+  assignedPartyIndex?: number;
+  assignedSignerEmail?: string;
+  assignedSignerRoleId?: string;
+  assignedSignerRoleLabel?: string;
+  assignmentSource?: Vs01SignerFieldAssignmentSource;
 };
 
 /** Snapshot of sender signature UI for read-only reference on the recipient-fields step (client-only). */
