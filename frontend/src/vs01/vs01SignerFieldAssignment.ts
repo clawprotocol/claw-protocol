@@ -1,3 +1,4 @@
+import { isPlausibleEmail } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import type { Vs01Counterparty, Vs01RecipientPlacedField, Vs01SignerFieldAssignmentSource } from "./types";
 
@@ -222,6 +223,212 @@ export function stampRecipientFieldForPrepareRole(
     assignedSignerEmail: role.signerEmail ?? role.reviewEmail,
     assignedSignerRoleLabel: role.entityName,
     assignmentSource: source,
+  };
+}
+
+export function findPrepareSigningRole(
+  roles: Vs01PrepareSigningRole[] | undefined | null,
+  roleId: string | null | undefined,
+): Vs01PrepareSigningRole | null {
+  if (!roles?.length) return null;
+  const id = (roleId ?? "").trim();
+  if (id) {
+    const hit = roles.find((r) => r.roleId === id);
+    if (hit) return hit;
+  }
+  return roles[0] ?? null;
+}
+
+export type PreparePlacementValueContext = {
+  typedName: string;
+  initials: string;
+  signerEmail?: string;
+};
+
+function initialsFromDisplayName(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 4)
+    .toUpperCase();
+}
+
+/** Value context for a new field at click time — uses active role metadata, not prior placements. */
+export function buildPreparePlacementValueContext(
+  role: Vs01PrepareSigningRole,
+  fallback: PreparePlacementValueContext,
+): PreparePlacementValueContext {
+  const signerName = (role.signerName ?? "").trim();
+  const typedName = signerName || (role.kind === "owner" ? fallback.typedName : "");
+  const emailRaw = (role.signerEmail ?? role.reviewEmail ?? "").trim();
+  const email =
+    isPlausibleEmail(emailRaw) ? emailRaw : role.kind === "owner" ? fallback.signerEmail : undefined;
+  const initials = typedName ? initialsFromDisplayName(typedName) : fallback.initials;
+  return {
+    typedName: typedName || fallback.typedName,
+    initials: initials || fallback.initials,
+    signerEmail: email,
+  };
+}
+
+export function resolvePlacedFieldSignerRoleId(
+  field: { assignedSignerRoleId?: string },
+  ownerRole: Vs01PrepareSigningRole,
+): string {
+  const rid = (field.assignedSignerRoleId ?? "").trim();
+  return rid || ownerRole.roleId;
+}
+
+export function placedFieldMatchesPrepareRole(
+  field: { assignedSignerRoleId?: string },
+  activeRoleId: string,
+  ownerRole: Vs01PrepareSigningRole,
+): boolean {
+  return resolvePlacedFieldSignerRoleId(field, ownerRole) === activeRoleId.trim();
+}
+
+export function vs01DiagnosticsEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (window.localStorage?.getItem("lawdogVs01FieldDiag") === "1") return true;
+  } catch {
+    /* ignore */
+  }
+  return typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
+}
+
+export function logVs01ActiveRoleChange(role: Vs01PrepareSigningRole, prevRoleId?: string | null): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-active-role-change]", {
+    partyIndex: role.partyIndex,
+    roleKind: role.kind,
+    label: role.entityName,
+    roleIdShort: role.roleId.slice(0, 16),
+    prevRoleIdShort: prevRoleId?.trim() ? prevRoleId.trim().slice(0, 16) : null,
+  });
+}
+
+export function logVs01RequiredProgress(gate: SigningPacketPrepareGate, roles: Vs01PrepareSigningRole[]): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-required-progress]", {
+    canFinish: gate.canFinish,
+    missingRoleCount: Object.keys(gate.missingByParty).length,
+    roleProgress: roles.map((r) => ({
+      roleKind: r.kind,
+      partyIndex: r.partyIndex,
+      tally: gate.fieldsByRole[r.roleId],
+      missing: gate.missingByParty[r.roleId] ?? [],
+    })),
+  });
+}
+
+export function stampAndLogSenderFieldForPrepareRole(
+  field: PlacedSigningField,
+  role: Vs01PrepareSigningRole,
+  expectedRoleId: string,
+  source: Vs01SignerFieldAssignmentSource = "active_role_selector",
+): PlacedSigningField {
+  const stamped = stampSenderFieldWithPrepareRole(field, role, source);
+  if (vs01DiagnosticsEnabled()) {
+    // eslint-disable-next-line no-console
+    console.info("[vs01-field-assigned]", {
+      fieldType: stamped.type,
+      roleKind: role.kind,
+      partyIndex: role.partyIndex,
+      partyId: role.partyId,
+      assignmentSource: stamped.assignmentSource,
+      roleIdShort: role.roleId.slice(0, 16),
+    });
+    const expected = expectedRoleId.trim();
+    const mismatch =
+      (stamped.assignedSignerRoleId ?? "").trim() !== expected ||
+      stamped.assignedPartyIndex !== role.partyIndex ||
+      (stamped.assignedPartyId ?? "").trim() !== role.partyId.trim();
+    if (mismatch) {
+      // eslint-disable-next-line no-console
+      console.warn("[vs01-field-assignment-mismatch]", {
+        expectedRoleIdShort: expected.slice(0, 16),
+        actualRoleIdShort: (stamped.assignedSignerRoleId ?? "").slice(0, 16),
+        expectedPartyIndex: role.partyIndex,
+        actualPartyIndex: stamped.assignedPartyIndex ?? null,
+        expectedPartyId: role.partyId,
+        actualPartyId: stamped.assignedPartyId ?? null,
+      });
+    }
+  }
+  return stamped;
+}
+
+export function stampAndLogRecipientFieldForPrepareRole(
+  field: Vs01RecipientPlacedField,
+  role: Vs01PrepareSigningRole,
+  expectedRoleId: string,
+  source: Vs01SignerFieldAssignmentSource = "active_role_selector",
+): Vs01RecipientPlacedField {
+  const stamped = stampRecipientFieldForPrepareRole(field, role, source);
+  if (vs01DiagnosticsEnabled()) {
+    // eslint-disable-next-line no-console
+    console.info("[vs01-field-assigned]", {
+      surface: "recipient_assign",
+      fieldType: stamped.type,
+      roleKind: role.kind,
+      partyIndex: role.partyIndex,
+      partyId: role.partyId,
+      assignmentSource: stamped.assignmentSource,
+      roleIdShort: role.roleId.slice(0, 16),
+    });
+    const expected = expectedRoleId.trim();
+    const mismatch =
+      (stamped.assignedSignerRoleId ?? "").trim() !== expected ||
+      stamped.assignedPartyIndex !== role.partyIndex ||
+      (stamped.assignedPartyId ?? "").trim() !== role.partyId.trim();
+    if (mismatch) {
+      // eslint-disable-next-line no-console
+      console.warn("[vs01-field-assignment-mismatch]", {
+        expectedRoleIdShort: expected.slice(0, 16),
+        actualRoleIdShort: (stamped.assignedSignerRoleId ?? "").slice(0, 16),
+        expectedPartyIndex: role.partyIndex,
+        actualPartyIndex: stamped.assignedPartyIndex ?? null,
+      });
+    }
+  }
+  return stamped;
+}
+
+/** Gate from already-built roles (prepare UI progress without re-deriving parties). */
+export function evaluatePreparePacketGateFromRoles(
+  roles: Vs01PrepareSigningRole[],
+  senderPlacedFields: PlacedSigningField[],
+  recipientPlacedFields: Vs01RecipientPlacedField[],
+): SigningPacketPrepareGate {
+  const owner = roles[0];
+  if (!owner || owner.kind !== "owner") {
+    return {
+      canFinish: false,
+      missingByParty: { __owner__: ["no_owner_role"] },
+      totalRequiredRoles: 0,
+      fieldsByRole: {},
+    };
+  }
+  const fieldsByRole: SigningPacketPrepareGate["fieldsByRole"] = {};
+  const missingByParty: Record<string, string[]> = {};
+  for (const role of roles) {
+    if (!role.requiresSignature) continue;
+    const bucket = collectFieldsForRole(role, owner, roles, senderPlacedFields, recipientPlacedFields);
+    const t = countTypes(bucket);
+    fieldsByRole[role.roleId] = t;
+    const miss = missingForRole(t, role.isEntityParty);
+    if (miss.length) missingByParty[role.roleId] = miss;
+  }
+  return {
+    canFinish: Object.keys(missingByParty).length === 0,
+    missingByParty,
+    totalRequiredRoles: roles.length,
+    fieldsByRole,
   };
 }
 

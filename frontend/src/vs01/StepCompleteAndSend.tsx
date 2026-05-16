@@ -40,7 +40,14 @@ import {
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
 import { canFinishPreparingSigningPacket } from "../agreement/partySigningRoles";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
-import { stampRecipientFieldForPrepareRole } from "./vs01SignerFieldAssignment";
+import {
+  evaluatePreparePacketGateFromRoles,
+  findPrepareSigningRole,
+  logVs01ActiveRoleChange,
+  logVs01RequiredProgress,
+  placedFieldMatchesPrepareRole,
+  stampAndLogRecipientFieldForPrepareRole,
+} from "./vs01SignerFieldAssignment";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -58,6 +65,8 @@ export type StepCompleteAndSendProps = {
   prepareCreatorName?: string;
   prepareCreatorEmail?: string;
   prepareSignerRoles?: Vs01PrepareSigningRole[];
+  prepareActiveSignerRoleId?: string;
+  onPrepareActiveSignerRoleChange?: (roleId: string) => void;
   onRecipientFieldsChange: Dispatch<SetStateAction<Vs01RecipientPlacedField[]>>;
   onError: (message: string | null) => void;
   onBack?: () => void;
@@ -186,12 +195,51 @@ export function StepCompleteAndSend({
   prepareCreatorName = "",
   prepareCreatorEmail = "",
   prepareSignerRoles,
+  prepareActiveSignerRoleId,
+  onPrepareActiveSignerRoleChange,
   onRecipientFieldsChange,
   onError,
   onBack,
   onContinueToReceipt,
 }: StepCompleteAndSendProps) {
   const busy = false;
+
+  const prepareSignerRolesRef = useRef(prepareSignerRoles);
+  prepareSignerRolesRef.current = prepareSignerRoles;
+  const prepareActiveRoleIdRef = useRef((prepareActiveSignerRoleId ?? "").trim());
+  useEffect(() => {
+    const next = (prepareActiveSignerRoleId ?? "").trim();
+    if (next) prepareActiveRoleIdRef.current = next;
+  }, [prepareActiveSignerRoleId]);
+
+  const ownerPrepareRole = useMemo(
+    () => (prepareSignerRoles?.length ? prepareSignerRoles[0]! : null),
+    [prepareSignerRoles],
+  );
+
+  const activePrepareRole = useMemo(
+    () => findPrepareSigningRole(prepareSignerRoles, prepareActiveSignerRoleId),
+    [prepareSignerRoles, prepareActiveSignerRoleId],
+  );
+
+  const selectPrepareRole = useCallback(
+    (roleId: string) => {
+      const prevId = prepareActiveRoleIdRef.current;
+      prepareActiveRoleIdRef.current = roleId.trim();
+      const role = findPrepareSigningRole(prepareSignerRolesRef.current, roleId);
+      if (role) logVs01ActiveRoleChange(role, prevId);
+      onPrepareActiveSignerRoleChange?.(roleId);
+      const cpId = role?.vs01CounterpartyId ?? "";
+      if (cpId) setSelectedCounterpartyId(cpId);
+      setSelectedFieldId(null);
+      setArmedTool(null);
+    },
+    [onPrepareActiveSignerRoleChange],
+  );
+
+  const resolveRoleAtPlacement = useCallback((): Vs01PrepareSigningRole | null => {
+    return findPrepareSigningRole(prepareSignerRolesRef.current, prepareActiveRoleIdRef.current);
+  }, []);
 
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
@@ -462,22 +510,32 @@ export function StepCompleteAndSend({
   })();
   const pageIndex0 = currentPage - 1;
   const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
-  const placementArmed = armedTool != null && namedCps.length > 0 && Boolean(selectedCounterpartyId);
+  const placementArmed =
+    armedTool != null &&
+    (prepareSigningPacket && prepareSignerRoles?.length
+      ? Boolean(activePrepareRole?.vs01CounterpartyId)
+      : namedCps.length > 0 && Boolean(selectedCounterpartyId));
   const prepareGate =
-    prepareSigningPacket && (preparePacketAgreementId ?? "").trim()
-      ? canFinishPreparingSigningPacket({
-          agreementId: (preparePacketAgreementId ?? "").trim(),
-          creatorName: (prepareCreatorName ?? "").trim(),
-          creatorEmail: (prepareCreatorEmail ?? "").trim(),
-          counterparties,
-          senderPlacedFields,
-          recipientPlacedFields: recipientFields,
-        })
-      : null;
-  const namedCounterparties = counterparties.filter((c) => c.name.trim().length > 0);
-  const hasRecipientWork = namedCounterparties.length === 0 || recipientFields.length > 0;
+    prepareSigningPacket && prepareSignerRoles?.length
+      ? evaluatePreparePacketGateFromRoles(prepareSignerRoles, senderPlacedFields, recipientFields)
+      : prepareSigningPacket && (preparePacketAgreementId ?? "").trim()
+        ? canFinishPreparingSigningPacket({
+            agreementId: (preparePacketAgreementId ?? "").trim(),
+            creatorName: (prepareCreatorName ?? "").trim(),
+            creatorEmail: (prepareCreatorEmail ?? "").trim(),
+            counterparties,
+            senderPlacedFields,
+            recipientPlacedFields: recipientFields,
+          })
+        : null;
+
+  useEffect(() => {
+    if (!prepareGate || !prepareSignerRoles?.length) return;
+    logVs01RequiredProgress(prepareGate, prepareSignerRoles);
+  }, [prepareGate, prepareSignerRoles]);
+
   const canContinue = prepareSigningPacket
-    ? hasRecipientWork && Boolean(prepareGate?.canFinish)
+    ? Boolean(prepareGate?.canFinish)
     : recipientFields.length > 0;
 
   const recipientOverlapKey = useMemo(() => {
@@ -531,9 +589,24 @@ export function StepCompleteAndSend({
     recipientOverlapKey,
   ]);
 
+  useEffect(() => {
+    if (!prepareSigningPacket || !prepareSignerRoles?.length) return;
+    const role = findPrepareSigningRole(prepareSignerRoles, prepareActiveSignerRoleId);
+    const cpId = role?.vs01CounterpartyId ?? "";
+    if (cpId && cpId !== selectedCounterpartyId) {
+      setSelectedCounterpartyId(cpId);
+    }
+  }, [prepareSigningPacket, prepareSignerRoles, prepareActiveSignerRoleId, selectedCounterpartyId]);
+
   const onPagePlacementClick = useCallback(
     (pageIndex0: number, ev: MouseEvent<HTMLDivElement>) => {
-      if (busy || armedTool == null || !selectedCounterpartyId) return;
+      if (busy || armedTool == null) return;
+      if (prepareSigningPacket) {
+        const role = resolveRoleAtPlacement();
+        if (!role?.vs01CounterpartyId) return;
+      } else if (!selectedCounterpartyId) {
+        return;
+      }
       const t = ev.target as HTMLElement;
       if (t.closest?.(".vs01-sign-placement-box")) return;
       const surface = ev.currentTarget.parentElement as HTMLElement | null;
@@ -543,32 +616,38 @@ export function StepCompleteAndSend({
 
       const px = (ev.clientX - rect.left) / rect.width;
       const py = (ev.clientY - rect.top) / rect.height;
-      const cpRow = cpById.get(selectedCounterpartyId);
+      const roleAtClick = prepareSigningPacket
+        ? resolveRoleAtPlacement()
+        : prepareSignerRoles?.find((r) => r.vs01CounterpartyId === selectedCounterpartyId) ?? null;
+      const cpId =
+        prepareSigningPacket && roleAtClick?.vs01CounterpartyId
+          ? roleAtClick.vs01CounterpartyId
+          : selectedCounterpartyId;
+      const cpRow = cpById.get(cpId);
+      const displayName =
+        (roleAtClick?.signerName ?? "").trim() ||
+        counterpartyName(cpById, cpId);
+      const emailForField =
+        (roleAtClick?.signerEmail ?? roleAtClick?.reviewEmail ?? "").trim() ||
+        resolveRecipientEmailForEmailFieldPlacement(cpRow?.email) ||
+        undefined;
       const nfRaw = createRecipientFieldAtClick(
         armedTool,
         pageIndex0,
         px,
         py,
-        selectedCounterpartyId,
-        counterpartyName(cpById, selectedCounterpartyId),
-        resolveRecipientEmailForEmailFieldPlacement(cpRow?.email) || undefined
+        cpId,
+        displayName,
+        emailForField,
       );
-      const role = prepareSignerRoles?.find((r) => r.vs01CounterpartyId === selectedCounterpartyId);
       const nf =
-        prepareSigningPacket && role ? stampRecipientFieldForPrepareRole(nfRaw, role) : nfRaw;
-      const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
-      const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
-      if ((diag || dev) && prepareSigningPacket && role) {
-        // eslint-disable-next-line no-console
-        console.info("[vs01-field-assigned]", {
-          surface: "recipient_assign",
-          fieldType: nf.type,
-          roleKind: role.kind,
-          partyIndex: role.partyIndex,
-          assignmentSource: nf.assignmentSource,
-          roleIdShort: role.roleId.slice(0, 16),
-        });
-      }
+        prepareSigningPacket && roleAtClick
+          ? stampAndLogRecipientFieldForPrepareRole(
+              nfRaw,
+              roleAtClick,
+              prepareActiveRoleIdRef.current,
+            )
+          : nfRaw;
       onRecipientFieldsChange((prev) => [...prev, nf]);
       setSelectedFieldId(nf.id);
       setCurrentPage(pageIndex0 + 1);
@@ -582,7 +661,16 @@ export function StepCompleteAndSend({
         dragHintTimerRef.current = null;
       }, 2200);
     },
-    [armedTool, busy, cpById, selectedCounterpartyId, onRecipientFieldsChange, prepareSigningPacket, prepareSignerRoles]
+    [
+      armedTool,
+      busy,
+      cpById,
+      selectedCounterpartyId,
+      onRecipientFieldsChange,
+      prepareSigningPacket,
+      prepareSignerRoles,
+      resolveRoleAtPlacement,
+    ]
   );
 
   useEffect(() => {
@@ -594,6 +682,16 @@ export function StepCompleteAndSend({
   const onBoxPointerDown = useCallback(
     (ev: PointerEvent<HTMLDivElement>, field: Vs01RecipientPlacedField) => {
       if (busy || resizing) return;
+      if (
+        prepareSigningPacket &&
+        ownerPrepareRole &&
+        activePrepareRole &&
+        !placedFieldMatchesPrepareRole(field, activePrepareRole.roleId, ownerPrepareRole)
+      ) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
       if ((ev.target as HTMLElement).closest(".vs01-sign-placement-resize-handle")) return;
       if ((ev.target as HTMLElement).closest(".vs01-sign-field-inline-input")) return;
       if (
@@ -620,13 +718,26 @@ export function StepCompleteAndSend({
       setDragging(true);
       (ev.currentTarget as HTMLDivElement).setPointerCapture(ev.pointerId);
     },
-    [busy, resizing, selectedFieldId]
+    [busy, resizing, selectedFieldId, prepareSigningPacket, ownerPrepareRole, activePrepareRole]
   );
 
-  const onPlacementBoxClick = useCallback((ev: MouseEvent<HTMLDivElement>, fieldId: string) => {
-    ev.stopPropagation();
-    setSelectedFieldId(fieldId);
-  }, []);
+  const onPlacementBoxClick = useCallback(
+    (ev: MouseEvent<HTMLDivElement>, field: Vs01RecipientPlacedField) => {
+      if (
+        prepareSigningPacket &&
+        ownerPrepareRole &&
+        activePrepareRole &&
+        !placedFieldMatchesPrepareRole(field, activePrepareRole.roleId, ownerPrepareRole)
+      ) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      ev.stopPropagation();
+      setSelectedFieldId(field.id);
+    },
+    [prepareSigningPacket, ownerPrepareRole, activePrepareRole],
+  );
 
   useEffect(() => {
     if (!dragging || !dragStartRef.current) return;
@@ -960,7 +1071,18 @@ export function StepCompleteAndSend({
                                             const isSel = selectedFieldId === field.id;
                                             const pop = placementPopId === field.id;
                                             const textVal = typeof field.value === "string" ? field.value : "";
-                                            const forName = counterpartyName(cpById, field.counterpartyId);
+                                            const forName =
+                                              field.assignedSignerRoleLabel?.trim() ||
+                                              counterpartyName(cpById, field.counterpartyId);
+                                            const isActiveRoleField =
+                                              !prepareSigningPacket ||
+                                              !ownerPrepareRole ||
+                                              !activePrepareRole ||
+                                              placedFieldMatchesPrepareRole(
+                                                field,
+                                                activePrepareRole.roleId,
+                                                ownerPrepareRole,
+                                              );
                                             return (
                                               <div
                                                 key={field.id}
@@ -974,7 +1096,7 @@ export function StepCompleteAndSend({
                                                     : ""
                                                 }${isSel ? " vs01-sign-placement-box--selected" : ""}${
                                                   pop ? " vs01-sign-placement-box--pop" : ""
-                                                }`}
+                                                }${!isActiveRoleField ? " vs01-sign-placement-box--other-role" : ""}`}
                                                 style={{
                                                   left: `${xFit * 100}%`,
                                                   top: `${yFit * 100}%`,
@@ -983,10 +1105,11 @@ export function StepCompleteAndSend({
                                                   zIndex: isSel ? 4 : 3,
                                                 }}
                                                 onPointerDown={(e) => onBoxPointerDown(e, field)}
-                                                onClick={(e) => onPlacementBoxClick(e, field.id)}
+                                                onClick={(e) => onPlacementBoxClick(e, field)}
                                               >
                                                 <span className="vs01-sign-placement-label">
                                                   {labelForRecipientFieldType(field.type)}
+                                                  {forName ? ` · ${forName}` : ""}
                                                 </span>
                                                 {field.type === "signature" || field.type === "printed_name" ? null : (
                                                   <span className="vs01-recipient-assign-for">{forName}</span>
@@ -1143,42 +1266,109 @@ export function StepCompleteAndSend({
 
         <aside className="vs01-sign-rail" aria-label="Recipient field controls">
           <div className="vs01-recipient-rail-panel">
-            <span className="vs01-recipient-rail-heading" id="vs01-assign-recipient-heading">
-              Who signs next?
-            </span>
-            {namedCps.length === 0 ? (
-              <p className="vs01-recipient-assign-warning">
-                Add at least one counterparty with a name in Details before placing fields.
-              </p>
+            {prepareSigningPacket && prepareSignerRoles && prepareSignerRoles.length > 0 ? (
+              <div className="vs01-prepare-role-picker" role="group" aria-label="Signer role for field placement">
+                <span className="vs01-recipient-rail-heading" id="vs01-assign-recipient-heading">
+                  Placing fields for
+                </span>
+                <div className="mt-1 flex flex-col gap-1">
+                  {prepareSignerRoles.map((r) => {
+                    const activeId = prepareActiveSignerRoleId ?? prepareSignerRoles[0]!.roleId;
+                    const sel = activeId === r.roleId;
+                    return (
+                      <button
+                        key={r.roleId}
+                        type="button"
+                        className={
+                          sel
+                            ? "vs01-btn vs01-btn--primary text-left text-sm"
+                            : "vs01-btn vs01-btn--secondary text-left text-sm"
+                        }
+                        onClick={() => selectPrepareRole(r.roleId)}
+                      >
+                        {r.entityName?.trim() || (r.kind === "owner" ? "Owner" : "Signer")}
+                        {r.kind === "owner" ? " (you)" : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+                {activePrepareRole?.kind === "owner" ? (
+                  <p className="vs01-recipient-rail-helper-copy mt-2">
+                    Place owner/sender fields on the previous step. This step is for counterparty signers only.
+                  </p>
+                ) : null}
+                {prepareGate ? (
+                  <ul className="vs01-prepare-role-progress mt-2 text-xs" aria-label="Required fields per signer">
+                    {prepareSignerRoles.map((r) => {
+                      const miss = prepareGate.missingByParty[r.roleId] ?? [];
+                      const done = miss.length === 0;
+                      return (
+                        <li
+                          key={r.roleId}
+                          className={
+                            done
+                              ? "vs01-prepare-role-progress-item vs01-prepare-role-progress-item--done"
+                              : "vs01-prepare-role-progress-item"
+                          }
+                        >
+                          <span className="font-medium">{r.entityName}</span>
+                          {done ? " — complete" : ` — needs: ${miss.join(", ")}`}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+              </div>
             ) : (
               <>
-                <select
-                  id="vs01-assign-recipient-select"
-                  className="vs01-input"
-                  aria-labelledby="vs01-assign-recipient-heading"
-                  value={selectedCounterpartyId}
-                  disabled={busy}
-                  onChange={(e) => setSelectedCounterpartyId(e.target.value)}
-                >
-                  {namedCps.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name.trim()}
-                      {c.email.trim() ? ` (${c.email.trim()})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <p className="vs01-recipient-rail-helper-copy">
-                  These spots are for the next signer.
-                  <br />
-                  Signature and initials stay blank until they sign.
-                  <br />
-                  Printed name shows where their name should appear.
-                </p>
+                <span className="vs01-recipient-rail-heading" id="vs01-assign-recipient-heading">
+                  Who signs next?
+                </span>
+                {namedCps.length === 0 ? (
+                  <p className="vs01-recipient-assign-warning">
+                    Add at least one counterparty with a name in Details before placing fields.
+                  </p>
+                ) : (
+                  <>
+                    <select
+                      id="vs01-assign-recipient-select"
+                      className="vs01-input"
+                      aria-labelledby="vs01-assign-recipient-heading"
+                      value={selectedCounterpartyId}
+                      disabled={busy}
+                      onChange={(e) => setSelectedCounterpartyId(e.target.value)}
+                    >
+                      {namedCps.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name.trim()}
+                          {c.email.trim() ? ` (${c.email.trim()})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="vs01-recipient-rail-helper-copy">
+                      These spots are for the next signer.
+                      <br />
+                      Signature and initials stay blank until they sign.
+                      <br />
+                      Printed name shows where their name should appear.
+                    </p>
+                  </>
+                )}
               </>
             )}
           </div>
 
           <div className="vs01-sign-toolbar" role="toolbar" aria-labelledby="vs01-assign-tools-heading">
+            {prepareSigningPacket && activePrepareRole ? (
+              <p className="vs01-sign-placing-for-role" role="status">
+                Placing fields for: <strong>{activePrepareRole.entityName}</strong>
+                {activePrepareRole.kind === "owner" ? (
+                  <span className="vs01-sign-placing-for-role-tag"> (use previous step)</span>
+                ) : (
+                  <span className="vs01-sign-placing-for-role-tag"> (counterparty)</span>
+                )}
+              </p>
+            ) : null}
             <p id="vs01-assign-tools-heading" className="vs01-sign-toolbar-hint vs01-recipient-rail-heading">
               Choose what to place
             </p>

@@ -2649,10 +2649,52 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-placement-box--signature .vs01-sign-placement-meta {
   flex: 1 1 auto;
   min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
+  overflow: hidden;
+  object-fit: contain;
+}
+
+.vs01-sign-placement-box--signature .vs01-sign-placement-img {
+  object-fit: contain;
+}
+
+.vs01-sign-placement-box--other-role {
+  opacity: 0.42;
+  pointer-events: none;
+  filter: grayscale(0.15);
+}
+
+.vs01-sign-placing-for-role {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--vs01-color-text);
+}
+
+.vs01-sign-placing-for-role-tag {
+  font-weight: 400;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-prepare-role-progress {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.vs01-prepare-role-progress-item {
+  color: var(--vs01-color-text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.vs01-prepare-role-progress-item--done {
+  color: color-mix(in srgb, var(--vs01-color-accent) 70%, var(--vs01-color-text-muted));
 }
 
 .vs01-sign-placement-box--initials {

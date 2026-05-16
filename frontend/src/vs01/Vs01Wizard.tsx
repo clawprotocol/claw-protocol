@@ -877,6 +877,7 @@ export function Vs01Wizard({
             prepareSignerRoles={prepareSignerRoles ?? undefined}
             prepareActiveSignerRoleId={prepareActiveSignerRoleId ?? undefined}
             onPrepareActiveSignerRoleChange={setPrepareActiveSignerRoleId}
+            prepareRecipientPlacedFields={recipientPlacedFields}
             fields={senderPlacedFields}
             onFieldsChange={setSenderPlacedFields}
             onBack={() => goToStep(paidProAgreementBridgeSkip ? 0 : 1)}
@@ -898,11 +899,19 @@ export function Vs01Wizard({
             prepareCreatorName={creatorName}
             prepareCreatorEmail={creatorEmail}
             prepareSignerRoles={prepareSignerRoles ?? undefined}
+            prepareActiveSignerRoleId={prepareActiveSignerRoleId ?? undefined}
+            onPrepareActiveSignerRoleChange={setPrepareActiveSignerRoleId}
             onError={setError}
             onBack={() => goToStep(2)}
             onContinueToReceipt={() => {
               const namedCounterparties = counterparties.filter((c) => c.name.trim().length > 0);
-              if (recipientPlacedFields.length === 0 && namedCounterparties.length > 0) return;
+              if (
+                !paidProAgreementBridgeSkip &&
+                recipientPlacedFields.length === 0 &&
+                namedCounterparties.length > 0
+              ) {
+                return;
+              }
               const linkedAgreementId = bridgeHandoffSnapshotRef.current?.agreementId?.trim();
               const rid = receiptId?.trim() ?? "";
               const did = documentId?.trim();
@@ -914,7 +923,7 @@ export function Vs01Wizard({
               });
 
               if (!paidProAgreementBridgeSkip || !linkedAgreementId || !did) {
-                if (recipientPlacedFields.length === 0) return;
+                if (!paidProAgreementBridgeSkip && recipientPlacedFields.length === 0) return;
                 goToStep(4);
                 return;
               }

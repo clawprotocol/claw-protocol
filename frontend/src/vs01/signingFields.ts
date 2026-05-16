@@ -85,7 +85,7 @@ export function resolveRecipientEmailForEmailFieldPlacement(counterpartyEmail: s
  * Compact, line-aligned defaults for e-sign UX; gray auto-initials use {@link autoInitialsPlacementDims} only.
  */
 export const VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM: Record<SigningFieldType, { width: number; height: number }> = {
-  signature: { width: 0.21, height: 0.046 },
+  signature: { width: 0.32, height: 0.072 },
   initials: { width: 0.074, height: 0.034 },
   printed_name: { width: 0.21, height: 0.032 },
   text: { width: 0.22, height: 0.032 },
@@ -104,7 +104,7 @@ export type Vs01FieldResizeBoundsNorm = {
 };
 
 const VS01_MANUAL_FIELD_RESIZE_BOUNDS_NORM: Record<SigningFieldType, Vs01FieldResizeBoundsNorm> = {
-  signature: { minW: 0.14, minH: 0.038, maxW: 0.92, maxH: 0.22 },
+  signature: { minW: 0.18, minH: 0.05, maxW: 0.92, maxH: 0.28 },
   initials: { minW: 0.048, minH: 0.026, maxW: 0.2, maxH: 0.11 },
   printed_name: { minW: 0.14, minH: 0.028, maxW: 0.55, maxH: 0.09 },
   text: { minW: 0.14, minH: 0.026, maxW: 0.92, maxH: 0.45 },

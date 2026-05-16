@@ -66,6 +66,6 @@ describe("starter Pro VS01 regression (source locks)", () => {
     expect(prepare).not.toContain("Printed name / Text");
     expect(prepare).toContain('labelForFieldType(type)');
     expect(prepare).toContain('case "text":');
-    expect(prepare).toContain('return "Text"');
+    expect(prepare).toContain('base = "Text"');
   });
 });
