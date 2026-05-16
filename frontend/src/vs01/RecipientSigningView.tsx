@@ -278,7 +278,8 @@ export function RecipientSigningView({
           const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
           if (diag || dev) {
             // eslint-disable-next-line no-console
-            console.warn("[vs01-cross-signer-field-blocked]", {
+            console.warn("[vs01-recipient-role-scope]", {
+          event: "cross_signer_field_blocked",
               fieldIdShort: id.slice(0, 8),
               reason: "not_assigned_to_locked_signer",
             });

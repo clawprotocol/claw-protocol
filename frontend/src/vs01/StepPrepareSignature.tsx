@@ -28,15 +28,12 @@ import type {
   Vs01SenderSignatureRef,
 } from "./types";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { evaluatePreparePacketGateFromRoles, logVs01RequiredProgress } from "./vs01SignerFieldAssignment";
 import {
-  buildPreparePlacementValueContext,
-  evaluatePreparePacketGateFromRoles,
-  findNextIncompletePrepareRole,
-  logVs01RequiredProgress,
-  placedFieldMatchesPrepareRole,
-  stampPrepareSenderFieldOrReject,
-} from "./vs01SignerFieldAssignment";
-import { useVs01PrepareActiveRole } from "./useVs01PrepareActiveRole";
+  buildPrepareAutoInitialsEveryPage,
+  createPrepareStampedSenderField,
+} from "./vs01PrepareFieldPlacement";
+import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 import {
   SIGNING_FIELD_TOOLS,
   buildAutoInitialsFields,
@@ -175,7 +172,6 @@ export function StepPrepareSignature({
   agreementBridgePlacementCopy = false,
   prepareSignerRoles,
   prepareActiveSignerRoleId,
-  onPrepareActiveSignerRoleChange,
   prepareRecipientPlacedFields = [],
   fields,
   onFieldsChange,
@@ -185,21 +181,22 @@ export function StepPrepareSignature({
   const signerEmailForPlacement =
     resolveSenderEmailForEmailFieldPlacement(creatorEmail, defaultSignerRef) || undefined;
 
-  const {
-    rolesRef: prepareSignerRolesRef,
-    activeRoleIdRef: prepareActiveRoleIdRef,
-    activePrepareRole,
-    ownerPrepareRole,
-    selectPrepareRole,
-    resolveRoleAtPlacement,
-  } = useVs01PrepareActiveRole({
-    prepareSignerRoles,
-    prepareActiveSignerRoleId,
-    onPrepareActiveSignerRoleChange,
-  });
-
+  const prepareRoleCtx = useVs01PrepareRoleAuthorityOptional();
   const prepareRecipientPlacedFieldsRef = useRef(prepareRecipientPlacedFields);
   prepareRecipientPlacedFieldsRef.current = prepareRecipientPlacedFields;
+
+  const displayRoleId =
+    agreementBridgePlacementCopy && prepareRoleCtx
+      ? prepareRoleCtx.displayRoleId
+      : (prepareActiveSignerRoleId ?? "").trim();
+  const activePrepareRole =
+    agreementBridgePlacementCopy && prepareRoleCtx
+      ? prepareRoleCtx.activeRole
+      : prepareSignerRoles?.find((r) => r.roleId === displayRoleId) ?? prepareSignerRoles?.[0] ?? null;
+  const ownerPrepareRole =
+    agreementBridgePlacementCopy && prepareRoleCtx
+      ? prepareRoleCtx.ownerRole
+      : prepareSignerRoles?.[0] ?? null;
 
   const preparePacketGate = useMemo(() => {
     if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length) return null;
@@ -209,39 +206,27 @@ export function StepPrepareSignature({
   useEffect(() => {
     if (!preparePacketGate || !prepareSignerRoles?.length) return;
     logVs01RequiredProgress(preparePacketGate, prepareSignerRoles);
-  }, [preparePacketGate, prepareSignerRoles]);
-
-  const maybeAutoAdvancePrepareRole = useCallback(
-    (nextSenderFields: PlacedSigningField[]) => {
-      const roles = prepareSignerRolesRef.current;
-      if (!agreementBridgePlacementCopy || !roles?.length) return;
-      const gate = evaluatePreparePacketGateFromRoles(
-        roles,
-        nextSenderFields,
-        prepareRecipientPlacedFieldsRef.current,
-      );
-      const curId = prepareActiveRoleIdRef.current.trim();
-      const curMiss = gate.missingByParty[curId];
-      if (curMiss?.length) return;
-      const nextRole = findNextIncompletePrepareRole(roles, gate);
-      if (nextRole && nextRole.roleId !== curId) {
-        selectPrepareRole(nextRole.roleId);
-      }
-    },
-    [agreementBridgePlacementCopy, prepareSignerRolesRef, prepareActiveRoleIdRef, selectPrepareRole],
-  );
+    prepareRoleCtx?.authority.logRoleProgress(
+      preparePacketGate,
+      fields,
+      prepareRecipientPlacedFields,
+    );
+  }, [preparePacketGate, prepareSignerRoles, fields, prepareRecipientPlacedFields, prepareRoleCtx]);
 
   const advanceToNextIncompleteSigner = useCallback(() => {
-    const roles = prepareSignerRolesRef.current;
-    if (!roles?.length) return;
-    const gate = evaluatePreparePacketGateFromRoles(
-      roles,
-      fieldsRef.current,
-      prepareRecipientPlacedFieldsRef.current,
-    );
-    const nextRole = findNextIncompletePrepareRole(roles, gate);
-    if (nextRole) selectPrepareRole(nextRole.roleId);
-  }, [prepareSignerRolesRef, selectPrepareRole]);
+    if (!prepareRoleCtx) return;
+    prepareRoleCtx.advanceToNextSigner(fieldsRef.current, prepareRecipientPlacedFieldsRef.current);
+  }, [prepareRoleCtx]);
+
+  const fieldMatchesActive = useCallback(
+    (field: PlacedSigningField) => {
+      if (!agreementBridgePlacementCopy || !ownerPrepareRole || !displayRoleId) return true;
+      return prepareRoleCtx
+        ? prepareRoleCtx.fieldMatchesActiveRole(field)
+        : field.assignedSignerRoleId === displayRoleId;
+    },
+    [agreementBridgePlacementCopy, ownerPrepareRole, displayRoleId, prepareRoleCtx],
+  );
 
   const busySession = loading === "session";
   const busyComplete = loading === "complete";
@@ -567,17 +552,32 @@ export function StepPrepareSignature({
     }
     if (numPages <= 0) return;
 
-    const ctx = { typedName: typedNameRef.current, initials: initialsRef.current };
+    const valueCtx = {
+      typedName: typedNameRef.current,
+      initials: initialsRef.current,
+      signerEmail: signerEmailForPlacement,
+    };
+
     setFields((prev) => {
-      const manual = prev.filter((f) => !f.autoInitials);
-      const auto = buildAutoInitialsFields(numPages, ctx, skippedAutoPages, manual).map((f) => {
-        if (!agreementBridgePlacementCopy || !prepareSignerRolesRef.current?.length) return f;
-        const role = resolveRoleAtPlacement();
-        const expectedId = prepareActiveRoleIdRef.current;
-        return role && expectedId
-          ? stampPrepareSenderFieldOrReject(f, role, expectedId, "active_role_selector") ?? f
-          : f;
-      });
+      const activeRoleId = displayRoleId;
+      const manual = prev.filter(
+        (f) =>
+          !f.autoInitials ||
+          (agreementBridgePlacementCopy &&
+            activeRoleId &&
+            (f.assignedSignerRoleId ?? "").trim() !== activeRoleId),
+      );
+      if (agreementBridgePlacementCopy && prepareRoleCtx?.activeRole) {
+        const auto = buildPrepareAutoInitialsEveryPage({
+          role: prepareRoleCtx.activeRole,
+          pageCount: numPages,
+          skippedPages: skippedAutoPages,
+          existingFields: prev,
+          valueCtx,
+        });
+        return [...manual, ...auto];
+      }
+      const auto = buildAutoInitialsFields(numPages, valueCtx, skippedAutoPages, manual);
       return [...manual, ...auto];
     });
   }, [
@@ -586,7 +586,9 @@ export function StepPrepareSignature({
     skippedAutoPages,
     fieldsOverlapKey,
     agreementBridgePlacementCopy,
-    resolveRoleAtPlacement,
+    displayRoleId,
+    prepareRoleCtx,
+    signerEmailForPlacement,
   ]);
 
   /** Keep auto-initials text in sync when the user edits initials/name, without rebuilding positions. */
@@ -638,36 +640,33 @@ export function StepPrepareSignature({
       const py = (ev.clientY - rect.top) / rect.height;
       // eslint-disable-next-line no-console
       console.info("[vs01-placement-page-click]", { tool: armedTool, page: pageIndex0, x: px.toFixed(3), y: py.toFixed(3) });
-      const baseCtx = {
+      const valueCtx = {
         typedName: typedNameRef.current,
         initials: initialsRef.current,
         signerEmail: signerEmailForPlacement,
       };
-      const roleAtClick = agreementBridgePlacementCopy ? resolveRoleAtPlacement() : null;
-      if (agreementBridgePlacementCopy && !roleAtClick) return;
-      const ctx =
-        roleAtClick != null ? buildPreparePlacementValueContext(roleAtClick, baseCtx) : baseCtx;
-      let nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, ctx);
-      if (agreementBridgePlacementCopy && roleAtClick) {
-        const expectedId = prepareActiveRoleIdRef.current.trim();
-        const stamped = stampPrepareSenderFieldOrReject(nf, roleAtClick, expectedId);
-        if (!stamped) return;
-        nf = stamped;
+      let nf: PlacedSigningField | null = null;
+      if (agreementBridgePlacementCopy && prepareRoleCtx) {
+        nf = createPrepareStampedSenderField({
+          authority: prepareRoleCtx.authority,
+          type: armedTool,
+          page: pageIndex0,
+          clickX: px,
+          clickY: py,
+          valueCtx,
+          visualRoleId: displayRoleId,
+        });
+        if (!nf) return;
+      } else {
+        nf = createPlacedFieldAtClick(armedTool, pageIndex0, px, py, valueCtx);
       }
       setFields((prev) => {
-        const next = [...prev, nf];
-        // eslint-disable-next-line no-console
-        console.info("[vs01-placement-field-added]", {
-          assignedPartyId: nf.assignedPartyId ?? null,
-          assignedPartyIndex: nf.assignedPartyIndex ?? null,
-          assignedSignerRoleKind: nf.assignedSignerRoleKind ?? null,
-          fieldType: armedTool,
-          tool: armedTool,
-          prevCount: prev.length,
-          nextCount: next.length,
-          fieldId: nf.id,
-        });
-        queueMicrotask(() => maybeAutoAdvancePrepareRole(next));
+        const next = [...prev, nf!];
+        if (prepareRoleCtx) {
+          queueMicrotask(() =>
+            prepareRoleCtx.afterPlacement(next, prepareRecipientPlacedFieldsRef.current),
+          );
+        }
         return next;
       });
       setSelectedFieldId(nf.id);
@@ -682,15 +681,7 @@ export function StepPrepareSignature({
         dragHintTimerRef.current = null;
       }, 2200);
     },
-    [
-      armedTool,
-      busy,
-      signerEmailForPlacement,
-      agreementBridgePlacementCopy,
-      resolveRoleAtPlacement,
-      maybeAutoAdvancePrepareRole,
-      prepareActiveRoleIdRef,
-    ]
+    [armedTool, busy, signerEmailForPlacement, agreementBridgePlacementCopy, prepareRoleCtx, displayRoleId]
   );
 
   useEffect(() => {
@@ -702,12 +693,7 @@ export function StepPrepareSignature({
   const onBoxPointerDown = useCallback(
     (ev: PointerEvent<HTMLDivElement>, field: PlacedSigningField) => {
       if (busy || resizing) return;
-      if (
-        agreementBridgePlacementCopy &&
-        ownerPrepareRole &&
-        activePrepareRole &&
-        !placedFieldMatchesPrepareRole(field, activePrepareRole.roleId, ownerPrepareRole)
-      ) {
+      if (agreementBridgePlacementCopy && !fieldMatchesActive(field)) {
         ev.preventDefault();
         ev.stopPropagation();
         return;
@@ -737,17 +723,12 @@ export function StepPrepareSignature({
       setDragging(true);
       (ev.currentTarget as HTMLDivElement).setPointerCapture(ev.pointerId);
     },
-    [busy, resizing, selectedFieldId, agreementBridgePlacementCopy, ownerPrepareRole, activePrepareRole]
+    [busy, resizing, selectedFieldId, agreementBridgePlacementCopy, fieldMatchesActive]
   );
 
   const onPlacementBoxClick = useCallback(
     (ev: MouseEvent<HTMLDivElement>, field: PlacedSigningField) => {
-      if (
-        agreementBridgePlacementCopy &&
-        ownerPrepareRole &&
-        activePrepareRole &&
-        !placedFieldMatchesPrepareRole(field, activePrepareRole.roleId, ownerPrepareRole)
-      ) {
+      if (agreementBridgePlacementCopy && !fieldMatchesActive(field)) {
         ev.preventDefault();
         ev.stopPropagation();
         return;
@@ -755,7 +736,7 @@ export function StepPrepareSignature({
       ev.stopPropagation();
       setSelectedFieldId(field.id);
     },
-    [agreementBridgePlacementCopy, ownerPrepareRole, activePrepareRole],
+    [agreementBridgePlacementCopy, fieldMatchesActive],
   );
 
   useEffect(() => {
@@ -1260,14 +1241,7 @@ export function StepPrepareSignature({
                                       const pop = placementPopId === field.id;
                                       const textVal = typeof field.value === "string" ? field.value : "";
                                       const isActiveRoleField =
-                                        !agreementBridgePlacementCopy ||
-                                        !ownerPrepareRole ||
-                                        !activePrepareRole ||
-                                        placedFieldMatchesPrepareRole(
-                                          field,
-                                          activePrepareRole.roleId,
-                                          ownerPrepareRole,
-                                        );
+                                        !agreementBridgePlacementCopy || fieldMatchesActive(field);
                                       return (
                                         <div
                                           key={field.id}
@@ -1454,8 +1428,7 @@ export function StepPrepareSignature({
               </p>
               <div className="mt-1 flex flex-col gap-1">
                 {prepareSignerRoles.map((r) => {
-                  const activeId = prepareActiveSignerRoleId ?? prepareSignerRoles[0]!.roleId;
-                  const sel = activeId === r.roleId;
+                  const sel = displayRoleId === r.roleId;
                   return (
                     <button
                       key={r.roleId}
@@ -1466,7 +1439,7 @@ export function StepPrepareSignature({
                           : "vs01-btn vs01-btn--secondary text-left text-sm"
                       }
                       onClick={() => {
-                        selectPrepareRole(r.roleId);
+                        prepareRoleCtx?.setActiveRole(r.roleId, "user_select");
                         setSelectedFieldId(null);
                         setArmedTool(null);
                       }}

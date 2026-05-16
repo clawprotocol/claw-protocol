@@ -45,6 +45,7 @@ import {
   migrateLegacyRecipientPlacedFields,
   migrateLegacySenderPlacedFields,
 } from "./vs01SignerFieldAssignment";
+import { Vs01PrepareRoleAuthorityProvider } from "./Vs01PrepareRoleAuthorityContext";
 import {
   clearVs01DraftState,
   loadVs01DraftState,
@@ -860,34 +861,38 @@ export function Vs01Wizard({
             hidePhoneFields={hideStepper}
           />
         ) : null}
-        {step === 2 ? (
-          <StepPrepareSignature
-            defaultSignerRef={defaultSignerRef}
-            documentId={documentId}
-            contentSha256={contentSha256}
-            receiptId={receiptId}
-            loading={loading}
-            setLoading={setLoading}
-            onError={setError}
-            onSigned={handleSigned}
-            counterparties={counterparties}
-            creatorEmail={creatorEmail.trim() ? creatorEmail.trim() : undefined}
-            senderMessage={senderMessage}
-            agreementBridgePlacementCopy={paidProAgreementBridgeSkip}
-            prepareSignerRoles={prepareSignerRoles ?? undefined}
+        {paidProAgreementBridgeSkip && prepareSignerRoles?.length ? (
+          <Vs01PrepareRoleAuthorityProvider
+            prepareSignerRoles={prepareSignerRoles}
             prepareActiveSignerRoleId={prepareActiveSignerRoleId ?? undefined}
             onPrepareActiveSignerRoleChange={setPrepareActiveSignerRoleId}
-            prepareRecipientPlacedFields={recipientPlacedFields}
-            fields={senderPlacedFields}
-            onFieldsChange={setSenderPlacedFields}
-            onBack={() => goToStep(paidProAgreementBridgeSkip ? 0 : 1)}
-            onContinue={() => {
-              if (receiptId || paidProAgreementBridgeSkip) goToStep(3);
-            }}
-          />
-        ) : null}
-        {step === 3 ? (
-          <StepCompleteAndSend
+          >
+            {step === 2 ? (
+              <StepPrepareSignature
+                defaultSignerRef={defaultSignerRef}
+                documentId={documentId}
+                contentSha256={contentSha256}
+                receiptId={receiptId}
+                loading={loading}
+                setLoading={setLoading}
+                onError={setError}
+                onSigned={handleSigned}
+                counterparties={counterparties}
+                creatorEmail={creatorEmail.trim() ? creatorEmail.trim() : undefined}
+                senderMessage={senderMessage}
+                agreementBridgePlacementCopy={paidProAgreementBridgeSkip}
+                prepareSignerRoles={prepareSignerRoles}
+                prepareRecipientPlacedFields={recipientPlacedFields}
+                fields={senderPlacedFields}
+                onFieldsChange={setSenderPlacedFields}
+                onBack={() => goToStep(0)}
+                onContinue={() => {
+                  if (receiptId || paidProAgreementBridgeSkip) goToStep(3);
+                }}
+              />
+            ) : null}
+            {step === 3 ? (
+              <StepCompleteAndSend
             documentId={documentId}
             counterparties={counterparties}
             recipientFields={recipientPlacedFields}
@@ -898,9 +903,7 @@ export function Vs01Wizard({
             preparePacketAgreementId={vs01LinkedAgreementId}
             prepareCreatorName={creatorName}
             prepareCreatorEmail={creatorEmail}
-            prepareSignerRoles={prepareSignerRoles ?? undefined}
-            prepareActiveSignerRoleId={prepareActiveSignerRoleId ?? undefined}
-            onPrepareActiveSignerRoleChange={setPrepareActiveSignerRoleId}
+            prepareSignerRoles={prepareSignerRoles}
             onError={setError}
             onBack={() => goToStep(2)}
             onContinueToReceipt={() => {
@@ -1079,8 +1082,52 @@ export function Vs01Wizard({
               clearVs01DraftState(did, "packet_ready_navigate");
               navigate(`/app/agreements/${encodeURIComponent(linkedAgreementId)}?vs01_packet_ready=1`);
             }}
-          />
-        ) : null}
+              />
+            ) : null}
+          </Vs01PrepareRoleAuthorityProvider>
+        ) : (
+          <>
+            {step === 2 ? (
+              <StepPrepareSignature
+                defaultSignerRef={defaultSignerRef}
+                documentId={documentId}
+                contentSha256={contentSha256}
+                receiptId={receiptId}
+                loading={loading}
+                setLoading={setLoading}
+                onError={setError}
+                onSigned={handleSigned}
+                counterparties={counterparties}
+                creatorEmail={creatorEmail.trim() ? creatorEmail.trim() : undefined}
+                senderMessage={senderMessage}
+                agreementBridgePlacementCopy={false}
+                fields={senderPlacedFields}
+                onFieldsChange={setSenderPlacedFields}
+                onBack={() => goToStep(1)}
+                onContinue={() => {
+                  if (receiptId) goToStep(3);
+                }}
+              />
+            ) : null}
+            {step === 3 ? (
+              <StepCompleteAndSend
+                documentId={documentId}
+                counterparties={counterparties}
+                recipientFields={recipientPlacedFields}
+                onRecipientFieldsChange={setRecipientPlacedFields}
+                senderPlacedFields={senderPlacedFields}
+                senderSignatureRef={senderSignatureRef}
+                prepareSigningPacket={false}
+                onError={setError}
+                onBack={() => goToStep(2)}
+                onContinueToReceipt={() => {
+                  if (recipientPlacedFields.length === 0) return;
+                  goToStep(4);
+                }}
+              />
+            ) : null}
+          </>
+        )}
         {step === 4 ? (
           <StepDone
             counterparties={counterparties}

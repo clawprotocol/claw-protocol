@@ -97,7 +97,7 @@ export function getVs01DefaultFieldGeometry(
     case "email":
       return { width: 0.3, height: 0.045 };
     case "initials":
-      return { width: 0.074, height: 0.034 };
+      return { width: 0.1, height: 0.045 };
     default:
       return { width: 0.28, height: 0.045 };
   }
@@ -128,7 +128,7 @@ export type Vs01FieldResizeBoundsNorm = {
 
 const VS01_MANUAL_FIELD_RESIZE_BOUNDS_NORM: Record<SigningFieldType, Vs01FieldResizeBoundsNorm> = {
   signature: { minW: 0.22, minH: 0.055, maxW: 0.92, maxH: 0.32 },
-  initials: { minW: 0.048, minH: 0.026, maxW: 0.2, maxH: 0.11 },
+  initials: { minW: 0.08, minH: 0.035, maxW: 0.2, maxH: 0.11 },
   printed_name: { minW: 0.14, minH: 0.028, maxW: 0.55, maxH: 0.09 },
   text: { minW: 0.14, minH: 0.026, maxW: 0.92, maxH: 0.45 },
   email: { minW: 0.14, minH: 0.026, maxW: 0.92, maxH: 0.45 },

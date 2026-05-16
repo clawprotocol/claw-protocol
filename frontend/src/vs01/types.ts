@@ -40,6 +40,7 @@ export type Vs01RecipientFieldType = "signature" | "initials" | "printed_name" |
 
 export type Vs01SignerFieldAssignmentSource =
   | "active_role_selector"
+  | "prepare_active_role"
   | "legacy"
   | "autoplace"
   | "migration";
