@@ -46,7 +46,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
   }, [agreementId, visible]);
 
   useEffect(() => {
-    if (!handoff?.receiptId?.trim()) return;
+    if (!handoff?.receiptId?.trim() || handoff.packetPrepareOnly) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -70,8 +70,11 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
     if (!handoff) return;
     if (typeof window === "undefined") return;
     const sp = new URLSearchParams(window.location.search);
-    if (sp.get("vs01_saved") !== "1") return;
-    sp.delete("vs01_saved");
+    const saved = sp.get("vs01_saved") === "1";
+    const packet = sp.get("vs01_packet_ready") === "1";
+    if (!saved && !packet) return;
+    if (saved) sp.delete("vs01_saved");
+    if (packet) sp.delete("vs01_packet_ready");
     const qs = sp.toString();
     const path = window.location.pathname;
     nav.navigate(qs ? `${path}?${qs}` : path);
@@ -99,11 +102,17 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
   const signers = handoff.signers;
   const primaryForLink = signers.find((s) => s.signingUrl?.trim()) ?? signers[0];
   const firstSigningUrl = primaryForLink?.signingUrl?.trim() ?? "";
+  const packetPrepare = Boolean(handoff.packetPrepareOnly) || !handoff.receiptId?.trim();
 
   const namedPending = signers.filter((s) => s.displayName?.trim().length);
   const firstNamed = namedPending[0];
-  const completionLine =
-    signers.length === 0
+  const completionLine = packetPrepare
+    ? signers.length === 0
+      ? "Signing packet ready. Add signing recipients from the workspace when you have their details."
+      : signers.length === 1
+        ? "Signing packet ready. 0 of 1 signers have signed — share the signing link below."
+        : `Signing packet ready. 0 of ${signers.length} signers have signed — share each signing link below.`
+    : signers.length === 0
       ? "Your signature is complete. Add recipients from the workspace when you are ready to collect remaining signatures."
       : namedPending.length === 1
         ? `Your signature is complete. ${firstNamed!.displayName.trim()} still needs to sign.`
@@ -120,7 +129,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
         <LawdogRecordedMark size="sm" />
         <div className="min-w-0 flex-1 space-y-2">
           <h3 id={`${panelId}-title`} className="text-base font-semibold tracking-tight text-emerald-100">
-            Saved in LawDog
+            {packetPrepare ? "Signing packet ready" : "Saved in LawDog"}
           </h3>
           <p className="text-sm font-medium text-slate-100">{completionLine}</p>
           <p className="text-xs text-slate-500">{title}</p>
@@ -138,7 +147,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
                 className="vs01-btn vs01-btn--secondary vs01-btn--auto min-h-[2.5rem] px-4 text-sm"
                 onClick={() => window.open(firstSigningUrl, "_blank", "noopener,noreferrer")}
               >
-                Open signing link
+                {packetPrepare ? "Open my signing link" : "Open signing link"}
               </button>
               <button
                 type="button"
@@ -187,7 +196,9 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
       ) : null}
 
       <p className="mt-3 border-t border-slate-800/60 pt-3 text-[11px] text-slate-300">
-        Proof record saved. Verification package available.
+        {packetPrepare
+          ? "Packet prepared. Proof downloads become available after signers complete their sessions."
+          : "Proof record saved. Verification package available."}
       </p>
       <p className="mt-1 text-[11px] text-slate-500">
         Optional public timestamp &middot; Not requested yet
@@ -197,22 +208,29 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
         <details ref={proofDetailsRef} className="mt-4 border-t border-slate-800/60 pt-4">
           <summary className="cursor-pointer text-xs font-medium text-slate-400">Proof status and receipt details</summary>
           <div className="mt-3">
-            <ProofStatus
-              {...vs01ReceiptToProofStatusData({
-                receipt,
-                receiptId: handoff.receiptId,
-                receiptHashSha256: handoff.receiptHashSha256,
-              })}
-              exportReceiptId={handoff.receiptId.trim()}
-              className="mt-0"
-            />
+            {handoff.receiptId?.trim() ? (
+              <ProofStatus
+                {...vs01ReceiptToProofStatusData({
+                  receipt,
+                  receiptId: handoff.receiptId,
+                  receiptHashSha256: handoff.receiptHashSha256,
+                })}
+                exportReceiptId={handoff.receiptId.trim()}
+                className="mt-0"
+              />
+            ) : (
+              <p className="text-xs text-slate-400">
+                No signer-session receipt yet. Proof and verification exports appear after the first completed signing
+                session.
+              </p>
+            )}
             {receiptLoadError ? (
               <p className="mt-2 text-xs text-amber-200/90">Could not refresh receipt payload: {receiptLoadError}</p>
             ) : null}
             <dl className="mt-3 space-y-1 text-xs text-slate-400">
               <div className="flex gap-2">
                 <dt className="shrink-0 text-slate-500">Receipt ID</dt>
-                <dd className="min-w-0 break-all font-mono text-slate-300">{handoff.receiptId}</dd>
+                <dd className="min-w-0 break-all font-mono text-slate-300">{handoff.receiptId?.trim() || "—"}</dd>
               </div>
               <div className="flex gap-2">
                 <dt className="shrink-0 text-slate-500">SHA-256</dt>

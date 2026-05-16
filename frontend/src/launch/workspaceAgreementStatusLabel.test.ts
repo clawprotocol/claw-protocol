@@ -32,7 +32,7 @@ describe("workspaceAgreementStatusLabel", () => {
     ).toBe("Ready to sign");
   });
 
-  it("returns Reviewer approved — ready to sign when single reviewer path approved but not locked", () => {
+  it("returns Reviewer approved — ready to prepare signing when single reviewer path approved but not locked", () => {
     expect(
       workspaceAgreementStatusLabel(
         row({
@@ -43,7 +43,7 @@ describe("workspaceAgreementStatusLabel", () => {
           all_reviewers_approved: true,
         }),
       ),
-    ).toBe("All reviewers approved — ready to sign");
+    ).toBe("All reviewers approved — ready to prepare signing");
   });
 
   it("returns fractional status when some but not all reviewers approved", () => {

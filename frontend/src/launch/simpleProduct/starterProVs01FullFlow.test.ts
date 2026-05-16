@@ -18,6 +18,7 @@ describe("starter Pro VS01 full flow (canonical dashboard path)", () => {
   it("workspace shell prioritizes post-sign banner and hides advanced workspace in post-sign state", () => {
     const shell = readFileSync(join(__dirname, "../../agreement/AgreementWizardShell.tsx"), "utf8");
     expect(shell).toContain("[flow] dashboard_landing_post_sign");
+    expect(shell).toContain("[flow] dashboard_landing_packet_ready");
     expect(shell).toContain("data-vs01-post-sign-landing=");
     expect(shell).not.toContain("vs01-agreement-advanced-workspace");
     expect(shell).not.toContain("Advanced workspace details");
@@ -36,11 +37,12 @@ describe("starter Pro VS01 full flow (canonical dashboard path)", () => {
     expect(intake).toContain('console.debug("[review-handoff]"');
   });
 
-  it("logs VS01 signature complete then workspace navigate", () => {
+  it("logs VS01 packet prepared and packet-ready workspace navigate (prepare mode)", () => {
     const wizard = readFileSync(join(__dirname, "../../vs01/Vs01Wizard.tsx"), "utf8");
-    expect(wizard).toContain("[flow] vs01_signature_complete");
+    expect(wizard).toContain("[vs01-packet-prepared]");
+    expect(wizard).toContain("vs01_packet_ready=1");
     expect(wizard).toContain("[vs01-paid-pro-workspace-navigate]");
-    expect(wizard).toContain("/app/agreements/");
+    expect(wizard).toContain("[flow] vs01_signature_complete");
     expect(wizard).toContain("vs01_saved=1");
   });
 

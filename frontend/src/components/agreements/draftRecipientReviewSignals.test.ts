@@ -117,7 +117,7 @@ describe("draftRecipientReviewSignals", () => {
       const agg = computeReviewApprovalStatus(d, { mintedReviewerLinkCount: 4 });
       expect(agg.allReviewersApproved).toBe(true);
       expect(agg.finalizeForSigningEnabled).toBe(true);
-      expect(agg.ownerStatusLine).toBe("All reviewers approved — ready to sign.");
+      expect(agg.ownerStatusLine).toBe("All reviewers approved — ready to prepare signing.");
       expect(agg.aggregateStatus).toBe("all_approved");
     });
 
@@ -129,7 +129,7 @@ describe("draftRecipientReviewSignals", () => {
       expect(agg.requiredReviewerCount).toBe(1);
       expect(agg.allReviewersApproved).toBe(true);
       expect(agg.finalizeForSigningEnabled).toBe(true);
-      expect(agg.ownerStatusLine).toBe("All reviewers approved — ready to sign.");
+      expect(agg.ownerStatusLine).toBe("All reviewers approved — ready to prepare signing.");
     });
 
     it("open recipient proposals block finalize even when all ids approved", () => {
@@ -327,7 +327,7 @@ describe("draftRecipientReviewSignals", () => {
       expect(pres.aggregate.approvedReviewerCount).toBe(2);
       expect(pres.aggregate.allReviewersApproved).toBe(true);
       expect(pres.aggregate.ownerStatusLine).toBe(
-        "2 of 2 reviewers approved. Ready to finalize for signing.",
+        "2 of 2 reviewers approved. Ready to prepare signing.",
       );
     });
 
@@ -353,7 +353,7 @@ describe("draftRecipientReviewSignals", () => {
       expect(pres.draftSignalsBaseline.approvedReviewerCount).toBe(0);
       expect(pres.aggregate.approvedReviewerCount).toBe(4);
       expect(pres.aggregate.ownerStatusLine).toBe(
-        "4 of 4 reviewers approved. Ready to finalize for signing.",
+        "4 of 4 reviewers approved. Ready to prepare signing.",
       );
     });
   });

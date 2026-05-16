@@ -66,7 +66,7 @@ export function resolveVs01EsignShellCopy(args: {
     return {
       title: "Prepare for e-signing",
       subtitle:
-        "Place required signature fields, then continue to signing. Your reviewer already approved this draft.",
+        "Place required signature fields for each party. Reviewers already approved this draft — you are preparing the signing packet, not signing yet.",
       agreementBridgeEffective: true,
       copyVariant: "bridge_reviewer_approved",
       navVariant: "esign_bridge_focused",
@@ -76,7 +76,7 @@ export function resolveVs01EsignShellCopy(args: {
   return {
     title: "Prepare for e-signing",
     subtitle:
-      "Place required signature fields, then continue to signing. Signer details from your LawDog send apply to this packet.",
+      "Place required signature fields for each party. Signer details from your LawDog send apply to this packet.",
     agreementBridgeEffective: true,
     copyVariant: "bridge_sender_first",
     navVariant: "esign_bridge_focused",

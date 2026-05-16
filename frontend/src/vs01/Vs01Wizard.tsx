@@ -20,6 +20,11 @@ import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
 import { prepareFreshMarketingEntry } from "../launch/marketingSession";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import {
+  canFinishPreparingSigningPacket,
+  logVs01PartySigningRolesForBridgeSession,
+  shouldBlockVs01SignatureCompleteTelemetry,
+} from "../agreement/partySigningRoles";
+import {
   clearAgreementVs01BridgeSession,
   clearPaidProAgreementBridgeSkipMarker,
   computePaidProAgreementBridgeSkip,
@@ -260,7 +265,7 @@ export function Vs01Wizard({
       if (id === 0) return true;
       if (id === 1) return docFinalized;
       if (id === 2) return docFinalized && (paidProAgreementBridgeSkip || detailsOk);
-      if (id === 3) return !!receiptId;
+      if (id === 3) return docFinalized && (paidProAgreementBridgeSkip || detailsOk) && (!!receiptId || paidProAgreementBridgeSkip);
       if (id === 4) {
         return (
           !!receiptId &&
@@ -332,6 +337,16 @@ export function Vs01Wizard({
         if (paidProAgreementHandoff && bridge && bridge.vs01DocumentId.trim() === sid) {
           bridgeHandoffSnapshotRef.current = bridge;
           bridgeHydratedSeedSid.current = sid;
+          // eslint-disable-next-line no-console
+          console.info("[vs01-mode-resolved]", {
+            mode: bridge.agreementBridgeMode ?? null,
+            bridgeSource: bridge.source ?? null,
+            signerFirst: bridge.signerFirst ?? null,
+            ownerIsPreparingPacket: bridge.ownerIsPreparingPacket ?? null,
+            agreementIdShort: bridge.agreementId.trim().slice(0, 8),
+            documentIdShort: sid.slice(0, 8),
+          });
+          logVs01PartySigningRolesForBridgeSession(bridge);
           const saved = loadVs01DraftState(sid);
           const bridgeCps =
             bridge.counterparties?.length > 0 ? bridge.counterparties : initialCounterparties();
@@ -812,7 +827,7 @@ export function Vs01Wizard({
             onFieldsChange={setSenderPlacedFields}
             onBack={() => goToStep(paidProAgreementBridgeSkip ? 0 : 1)}
             onContinue={() => {
-              if (receiptId) goToStep(3);
+              if (receiptId || paidProAgreementBridgeSkip) goToStep(3);
             }}
           />
         ) : null}
@@ -824,31 +839,68 @@ export function Vs01Wizard({
             onRecipientFieldsChange={setRecipientPlacedFields}
             senderPlacedFields={senderPlacedFields}
             senderSignatureRef={senderSignatureRef}
+            prepareSigningPacket={paidProAgreementBridgeSkip}
             onError={setError}
             onBack={() => goToStep(2)}
             onContinueToReceipt={() => {
-              if (recipientPlacedFields.length === 0) return;
+              const namedCounterparties = counterparties.filter((c) => c.name.trim().length > 0);
+              if (recipientPlacedFields.length === 0 && namedCounterparties.length > 0) return;
               const linkedAgreementId = bridgeHandoffSnapshotRef.current?.agreementId?.trim();
-              const rid = receiptId?.trim();
+              const rid = receiptId?.trim() ?? "";
               const did = documentId?.trim();
-              if (paidProAgreementBridgeSkip && linkedAgreementId && rid && did) {
-                const named = counterparties
-                  .map((c, recipientIndex) => ({ c, recipientIndex }))
-                  .filter(({ c }) => c.name.trim().length > 0);
-                const signers = named.map(({ c, recipientIndex }) => ({
+              const bridgeMode = bridgeHandoffSnapshotRef.current?.agreementBridgeMode ?? null;
+              const ownerPrep = bridgeHandoffSnapshotRef.current?.ownerIsPreparingPacket ?? false;
+              const blockSigTelemetry = shouldBlockVs01SignatureCompleteTelemetry({
+                agreementBridgeMode: bridgeMode,
+                ownerIsPreparingPacket: ownerPrep,
+              });
+
+              if (!paidProAgreementBridgeSkip || !linkedAgreementId || !did) {
+                if (recipientPlacedFields.length === 0) return;
+                goToStep(4);
+                return;
+              }
+
+              if (!rid) {
+                const gate = canFinishPreparingSigningPacket({
+                  counterparties,
+                  senderPlacedFields,
+                  recipientPlacedFields,
+                });
+                // eslint-disable-next-line no-console
+                console.info("[vs01-packet-prepare-gate]", {
+                  canFinish: gate.canFinish,
+                  missingByParty: gate.missingByParty,
+                  totalRequiredRoles: gate.totalRequiredRoles,
+                  fieldsByRole: gate.fieldsByRole,
+                });
+                if (!gate.canFinish) {
+                  setError(
+                    "Add signature, printed name, and date fields for each signer. Entity parties also need a title (text) field on the document.",
+                  );
+                  return;
+                }
+              }
+
+              const named = counterparties
+                .map((c, recipientIndex) => ({ c, recipientIndex }))
+                .filter(({ c }) => c.name.trim().length > 0);
+              const signers = named.map(({ c, recipientIndex }) => ({
+                counterpartyId: c.id,
+                displayName: c.name.trim(),
+                email: c.email.trim(),
+                signingUrl: buildVs01RecipientSigningUrl({
+                  recipientIndex,
+                  recipientName: c.name.trim(),
+                  recipientEmail: c.email.trim(),
                   counterpartyId: c.id,
-                  displayName: c.name.trim(),
-                  email: c.email.trim(),
-                  signingUrl: buildVs01RecipientSigningUrl({
-                    recipientIndex,
-                    recipientName: c.name.trim(),
-                    recipientEmail: c.email.trim(),
-                    counterpartyId: c.id,
-                    documentId: did,
-                    receiptId: rid,
-                    recipientFieldsForSigner: recipientPlacedFields.filter((f) => f.counterpartyId === c.id),
-                  }),
-                }));
+                  documentId: did,
+                  receiptId: rid || null,
+                  recipientFieldsForSigner: recipientPlacedFields.filter((f) => f.counterpartyId === c.id),
+                }),
+              }));
+
+              if (rid && !blockSigTelemetry) {
                 const payload: PaidProVs01PostSignHandoffV1 = {
                   v: 1,
                   agreementId: linkedAgreementId,
@@ -878,7 +930,49 @@ export function Vs01Wizard({
                 navigate(`/app/agreements/${encodeURIComponent(linkedAgreementId)}?vs01_saved=1`);
                 return;
               }
-              goToStep(4);
+
+              if (rid && blockSigTelemetry) {
+                // eslint-disable-next-line no-console
+                console.warn("[vs01-obsolete-navigation-blocked]", {
+                  reason: "prepare_mode_with_receipt_id",
+                  receiptIdShort: rid.slice(0, 8),
+                });
+              }
+
+              const payload: PaidProVs01PostSignHandoffV1 = {
+                v: 1,
+                agreementId: linkedAgreementId,
+                agreementTitle: agreementTitle.trim() || "Agreement",
+                vs01DocumentId: did,
+                receiptId: "",
+                receiptHashSha256: null,
+                packetPrepareOnly: true,
+                savedAt: new Date().toISOString(),
+                signers,
+              };
+              writePaidProVs01PostSignHandoff(payload);
+              // eslint-disable-next-line no-console
+              console.info("[vs01-packet-prepared]", {
+                agreementId: linkedAgreementId,
+                documentIdShort: did.slice(0, 8),
+                signerCount: signers.length,
+                signingLinkCount: signers.filter((s) => s.signingUrl?.trim()).length,
+              });
+              // eslint-disable-next-line no-console
+              console.info("[vs01-signing-links-created]", {
+                agreementId: linkedAgreementId,
+                vs01DocumentId: did,
+                signerCount: signers.length,
+              });
+              // eslint-disable-next-line no-console
+              console.info("[vs01-paid-pro-workspace-navigate]", {
+                agreementId: linkedAgreementId,
+                packetPrepareOnly: true,
+                signerCount: signers.length,
+                vs01DocumentId: did,
+              });
+              clearVs01DraftState(did, "packet_ready_navigate");
+              navigate(`/app/agreements/${encodeURIComponent(linkedAgreementId)}?vs01_packet_ready=1`);
             }}
           />
         ) : null}

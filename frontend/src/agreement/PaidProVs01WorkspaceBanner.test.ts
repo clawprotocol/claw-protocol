@@ -54,7 +54,9 @@ describe("PaidProVs01WorkspaceBanner (static)", () => {
 
   it("displays compact proof line and optional public timestamp copy", () => {
     const s = bannerSrc();
-    expect(s).toContain("Proof record saved. Verification package available.");
+    expect(
+      s.includes("Proof record saved. Verification package available.") || s.includes("Packet prepared. Proof downloads"),
+    ).toBe(true);
     expect(s).toContain("Optional public timestamp");
     expect(s).toContain("Not requested yet");
   });
@@ -70,9 +72,10 @@ describe("PaidProVs01WorkspaceBanner (static)", () => {
     expect(s).not.toContain("Anchored externally");
   });
 
-  it("banner surfaces saved state headline", () => {
+  it("banner surfaces saved or packet-ready headline", () => {
     const s = bannerSrc();
     expect(s).toContain("Saved in LawDog");
-    expect(s).toContain("readPaidProVs01PostSignHandoff");
+    expect(s).toContain("Signing packet ready");
+    expect(s).toContain("vs01_packet_ready");
   });
 });

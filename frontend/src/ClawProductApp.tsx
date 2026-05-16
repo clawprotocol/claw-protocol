@@ -364,6 +364,8 @@ function AppEsignDocumentShell(props: { seed: string; search: string }) {
       agreementBridge: sc.agreementBridgeEffective,
       bridgeSource: b?.source ?? null,
       signerFirst: b?.signerFirst ?? null,
+      agreementBridgeMode: b?.agreementBridgeMode ?? null,
+      ownerIsPreparingPacket: b?.ownerIsPreparingPacket ?? null,
       navVariant: sc.navVariant,
       titleCopy: sc.title,
       copyVariant: sc.copyVariant,

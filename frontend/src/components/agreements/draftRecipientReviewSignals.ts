@@ -99,11 +99,11 @@ export function computeReviewApprovalStatus(
   if (hasOpenChangeRequests) {
     ownerStatusLine = "Open change requests — resolve in workspace before finalizing.";
   } else if (allReviewersApproved) {
-    ownerStatusLine = "All reviewers approved — ready to sign.";
+    ownerStatusLine = "All reviewers approved — ready to prepare signing.";
   } else if (anyReviewerApproval && required > 1) {
     ownerStatusLine = `${approved} of ${required} reviewers approved. Waiting for remaining reviewers.`;
   } else if (anyReviewerApproval) {
-    ownerStatusLine = "Reviewer approved — ready to sign.";
+    ownerStatusLine = "Reviewer approved — ready to prepare signing.";
   }
 
   return {
@@ -121,7 +121,7 @@ export function computeReviewApprovalStatus(
 }
 
 /** Green panel copy when every required reviewer row is approved (owner Simple Done). */
-export const OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY = "All reviewers approved — ready to sign.";
+export const OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY = "All reviewers approved — ready to prepare signing.";
 
 export type OwnerDoneReviewApprovalAggregateSource = "reviewer_rows" | "draft_signals" | "legacy";
 
@@ -168,11 +168,11 @@ function buildMultiReviewerAggregateFromRowStatuses(
   if (hasOpenChangeRequests) {
     ownerStatusLine = "Open change requests — resolve in workspace before finalizing.";
   } else if (allReviewersApproved) {
-    ownerStatusLine = `${required} of ${required} reviewers approved. Ready to finalize for signing.`;
+    ownerStatusLine = `${required} of ${required} reviewers approved. Ready to prepare signing.`;
   } else if (approved > 0 && required > 1) {
     ownerStatusLine = `${approved} of ${required} reviewers approved. Waiting for remaining reviewers.`;
   } else if (approved > 0 && required === 1) {
-    ownerStatusLine = "Reviewer approved — ready to sign.";
+    ownerStatusLine = "Reviewer approved — ready to prepare signing.";
   }
 
   return {

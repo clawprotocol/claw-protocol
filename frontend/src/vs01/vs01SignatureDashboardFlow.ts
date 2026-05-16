@@ -37,6 +37,7 @@ export function shouldSuppressReviewPipelineTelemetry(): boolean {
   const q = readUrlSearch();
   if (q?.get("agreement_bridge") === "1") return true;
   if (q?.get("vs01_saved") === "1") return true;
+  if (q?.get("vs01_packet_ready") === "1") return true;
   const br = readAgreementVs01BridgeSession();
   if (br?.source === "paid_pro_sender_first") return true;
   if (hasActivePaidProVs01PostSignHandoffSession()) return true;

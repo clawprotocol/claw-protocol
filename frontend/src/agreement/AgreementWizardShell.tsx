@@ -122,7 +122,7 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
   const postVs01SignatureFirstLanding = useMemo(() => {
     try {
       const q = new URLSearchParams(search || (typeof window !== "undefined" ? window.location.search : ""));
-      if (q.get("vs01_saved") === "1") return true;
+      if (q.get("vs01_saved") === "1" || q.get("vs01_packet_ready") === "1") return true;
     } catch {
       /* ignore */
     }
@@ -133,9 +133,21 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
 
   useEffect(() => {
     if (!postVs01SignatureFirstLanding || !agreementId?.trim() || wizardBoot !== "ready") return;
-    // eslint-disable-next-line no-console
-    console.info("[flow] dashboard_landing_post_sign", { agreementId: agreementId.trim() });
-  }, [postVs01SignatureFirstLanding, agreementId, wizardBoot]);
+    let packet = false;
+    try {
+      const q = new URLSearchParams(search || (typeof window !== "undefined" ? window.location.search : ""));
+      packet = q.get("vs01_packet_ready") === "1";
+    } catch {
+      /* ignore */
+    }
+    if (packet) {
+      // eslint-disable-next-line no-console
+      console.info("[flow] dashboard_landing_packet_ready", { agreementId: agreementId.trim() });
+    } else {
+      // eslint-disable-next-line no-console
+      console.info("[flow] dashboard_landing_post_sign", { agreementId: agreementId.trim() });
+    }
+  }, [postVs01SignatureFirstLanding, agreementId, wizardBoot, search]);
 
   const stepCount = STEPS.length;
 

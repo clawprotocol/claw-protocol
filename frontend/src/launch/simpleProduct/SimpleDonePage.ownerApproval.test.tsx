@@ -126,7 +126,7 @@ describe("SimpleDonePage owner approval UX", () => {
     expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
     expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
-      "All reviewers approved — ready to sign",
+      "All reviewers approved — ready to prepare signing.",
     );
 
     await userEvent.click(screen.getByTestId("simple-done-finalize-for-signing"));
@@ -279,7 +279,7 @@ describe("SimpleDonePage owner approval UX", () => {
     );
     expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
-      "4 of 4 reviewers approved. Ready to finalize for signing.",
+      "4 of 4 reviewers approved. Ready to prepare signing.",
     );
   });
 
@@ -605,7 +605,7 @@ describe("SimpleDonePage owner approval UX", () => {
       expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
     });
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
-      "4 of 4 reviewers approved. Ready to finalize for signing.",
+      "4 of 4 reviewers approved. Ready to prepare signing.",
     );
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).not.toContain("0 of 4");
     expect(spyDraft).not.toHaveBeenCalled();

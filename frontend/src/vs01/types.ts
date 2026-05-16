@@ -29,6 +29,10 @@ export type Vs01Counterparty = {
   email: string;
   /** Mobile / text number (optional). */
   phone?: string;
+  signerName?: string;
+  signerTitle?: string;
+  signerEmail?: string;
+  reviewEmail?: string;
 };
 
 /** Field type for recipient assignment (Step 4). `printed_name` is a fixed label; `text` / `email` are freeform (email prefills when known). */

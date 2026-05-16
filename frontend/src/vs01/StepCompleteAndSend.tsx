@@ -38,6 +38,7 @@ import {
   type PlacedSigningField,
 } from "./signingFields";
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
+import { canFinishPreparingSigningPacket } from "../agreement/partySigningRoles";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -48,6 +49,8 @@ export type StepCompleteAndSendProps = {
   /** Sender fields from the signing step (read-only reference on the PDF). */
   senderPlacedFields?: PlacedSigningField[];
   senderSignatureRef?: Vs01SenderSignatureRef | null;
+  /** Paid Pro agreement bridge: recipient placement completes a signing packet (not VS01 receipt step). */
+  prepareSigningPacket?: boolean;
   onRecipientFieldsChange: Dispatch<SetStateAction<Vs01RecipientPlacedField[]>>;
   onError: (message: string | null) => void;
   onBack?: () => void;
@@ -171,6 +174,7 @@ export function StepCompleteAndSend({
   recipientFields,
   senderPlacedFields = [],
   senderSignatureRef = null,
+  prepareSigningPacket = false,
   onRecipientFieldsChange,
   onError,
   onBack,
@@ -448,7 +452,14 @@ export function StepCompleteAndSend({
   const pageIndex0 = currentPage - 1;
   const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
   const placementArmed = armedTool != null && namedCps.length > 0 && Boolean(selectedCounterpartyId);
-  const canContinue = recipientFields.length > 0;
+  const prepareGate = prepareSigningPacket
+    ? canFinishPreparingSigningPacket({ counterparties, senderPlacedFields, recipientPlacedFields: recipientFields })
+    : null;
+  const namedCounterparties = counterparties.filter((c) => c.name.trim().length > 0);
+  const hasRecipientWork = namedCounterparties.length === 0 || recipientFields.length > 0;
+  const canContinue = prepareSigningPacket
+    ? hasRecipientWork && Boolean(prepareGate?.canFinish)
+    : recipientFields.length > 0;
 
   const recipientOverlapKey = useMemo(() => {
     const id = selectedCounterpartyId.trim();
@@ -1230,7 +1241,7 @@ export function StepCompleteAndSend({
                 }
               }}
             >
-              Continue to receipt
+              {prepareSigningPacket ? "Finish preparing packet" : "Continue to receipt"}
             </button>
           </div>
         </aside>

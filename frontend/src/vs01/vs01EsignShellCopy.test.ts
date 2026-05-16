@@ -55,7 +55,7 @@ describe("resolveVs01EsignShellCopy", () => {
       bridge: bridge({ reviewerApprovedCleanHandoff: true }),
     });
     expect(r.title).toBe("Prepare for e-signing");
-    expect(r.subtitle).toContain("reviewer already approved");
+    expect(r.subtitle).toMatch(/reviewers already approved/i);
     expect(r.subtitle).not.toContain("prior step");
     expect(r.copyVariant).toBe("bridge_reviewer_approved");
     expect(r.navVariant).toBe("esign_bridge_focused");
@@ -94,7 +94,7 @@ describe("resolveVs01EsignShellCopy", () => {
     expect(r.agreementBridgeEffective).toBe(true);
     expect(r.copyVariant).toBe("bridge_reviewer_approved");
     expect(r.title).toBe("Prepare for e-signing");
-    expect(r.subtitle).toContain("reviewer already approved");
+    expect(r.subtitle).toMatch(/reviewers already approved/i);
     expect(r.navVariant).toBe("esign_bridge_focused");
   });
 
@@ -141,7 +141,7 @@ describe("resolveVs01EsignShellCopy", () => {
       vs01Step: 2,
     });
     expect(r.title).toBe("Prepare for e-signing");
-    expect(r.subtitle).toContain("reviewer already approved");
+    expect(r.subtitle).toMatch(/reviewers already approved/i);
   });
 });
 

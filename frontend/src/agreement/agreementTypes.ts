@@ -2,7 +2,19 @@
 
 import type { PaymentRequestPayload } from "./paymentRequestTypes";
 
-export type AgreementParty = { id?: string; name: string; role: string; email?: string; phone?: string };
+export type AgreementParty = {
+  id?: string;
+  name: string;
+  role: string;
+  email?: string;
+  phone?: string;
+  /** Human authorized signer (never implied from {@link name} / entity). */
+  signerName?: string;
+  signerTitle?: string;
+  signerEmail?: string;
+  /** Review / comment thread email when distinct from signing. */
+  reviewEmail?: string;
+};
 
 export type AgreementDraft = {
   id: string;

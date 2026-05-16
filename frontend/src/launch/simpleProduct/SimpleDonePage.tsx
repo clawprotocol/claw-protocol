@@ -244,7 +244,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
     const primaryCtaLabel = signingLockActive
       ? "Continue to signing"
       : reviewApprovalAgg.finalizeForSigningEnabled
-        ? "Finalize for signing"
+        ? "Prepare signing packet"
         : reviewApprovalAgg.hasOpenChangeRequests
           ? "Resolve in workspace"
           : multiMint
@@ -473,7 +473,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
       ownerHandoffDraft && draftAuditHasRecipientRecordedApproval(ownerHandoffDraft),
     );
     const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
-    const primaryCtaLabel = signingLockActive ? "Continue to signing" : "Finalize for signing";
+    const primaryCtaLabel = signingLockActive ? "Continue to signing" : "Prepare signing packet";
     const negotiationHref = `/app/agreements/${encodeURIComponent(id)}`;
 
     if (openCount > 0) {
@@ -734,7 +734,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                         disabled={finalizeNavigating}
                         onClick={() => void handleOwnerFinalizeOrContinueSigning()}
                       >
-                        {finalizeNavigating ? "Preparing signing packet…" : "Finalize for signing"}
+                        {finalizeNavigating ? "Preparing signing packet…" : "Prepare signing packet"}
                       </button>
                     ) : null}
                   </div>

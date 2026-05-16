@@ -405,6 +405,7 @@ export function StepPrepareSignature({
 
   const hasSignatureOnDoc = fields.some((f) => f.type === "signature");
   const flowStep3Ready = signReady && hasSignatureOnDoc;
+  const flowStep3ReadyEffective = agreementBridgePlacementCopy ? hasSignatureOnDoc : flowStep3Ready;
 
   const fieldsOverlapKey = useMemo(
     () =>
@@ -538,7 +539,16 @@ export function StepPrepareSignature({
       setFields((prev) => {
         const next = [...prev, nf];
         // eslint-disable-next-line no-console
-        console.info("[vs01-placement-field-added]", { tool: armedTool, prevCount: prev.length, nextCount: next.length, fieldId: nf.id });
+        console.info("[vs01-placement-field-added]", {
+          assignedPartyId: "__owner__",
+          assignedRoleIndex: 0,
+          fieldType: armedTool,
+          requiredProgress: null,
+          tool: armedTool,
+          prevCount: prev.length,
+          nextCount: next.length,
+          fieldId: nf.id,
+        });
         return next;
       });
       setSelectedFieldId(nf.id);
@@ -788,12 +798,21 @@ export function StepPrepareSignature({
   }, []);
 
   const handleSign = useCallback(async () => {
+    if (agreementBridgePlacementCopy) {
+      onError(null);
+      onContinue?.();
+      return;
+    }
     if (!documentId?.trim() || !contentSha256?.trim()) {
       onError("Finalize a document first (missing document id or content hash).");
       return;
     }
-    if (!flowStep3Ready || fields.length === 0) {
-      onError("Create your signature and place a signature field on the document first.");
+    if (!flowStep3ReadyEffective || fields.length === 0) {
+      onError(
+        agreementBridgePlacementCopy
+          ? "Place at least one signature field on the document before continuing."
+          : "Create your signature and place a signature field on the document first.",
+      );
       return;
     }
     onError(null);
@@ -874,12 +893,14 @@ export function StepPrepareSignature({
       setLoading("idle");
     }
   }, [
+    agreementBridgePlacementCopy,
     contentSha256,
     documentId,
     fields,
-    flowStep3Ready,
+    flowStep3ReadyEffective,
     hasDrawn,
     intent,
+    onContinue,
     onError,
     onSigned,
     setLoading,
@@ -894,7 +915,7 @@ export function StepPrepareSignature({
 
   const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
 
-  const primaryDisabled = busy || Boolean(receiptId) || !flowStep3Ready;
+  const primaryDisabled = busy || Boolean(receiptId) || !flowStep3ReadyEffective;
 
   const placementArmed = armedTool != null;
 
@@ -949,11 +970,11 @@ export function StepPrepareSignature({
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title" className="vs01-sign-step">
       <header className="vs01-sign-step-header">
         <h2 id="vs01-step-prepare-title" className="vs01-card-title">
-          {agreementBridgePlacementCopy ? "Place signature fields" : "Sign your document"}
+          {agreementBridgePlacementCopy ? "Prepare for e-signing" : "Sign your document"}
         </h2>
         <p className="vs01-card-help vs01-sign-step-lead">
           {agreementBridgePlacementCopy
-            ? 'Choose a field type, click "Place on document," then click where it belongs.'
+            ? "Place required signature fields for each party. Reviewers already approved this draft — you are preparing the signing packet, not signing yet."
             : "Choose a field type, use Place on document, then click once where it should go."}
         </p>
       </header>
@@ -1281,6 +1302,12 @@ export function StepPrepareSignature({
                   {named.map((c) => (
                     <li key={c.id} className="vs01-sign-rail-recipient-item">
                       <span className="vs01-sign-rail-recipient-name">{c.name.trim()}</span>
+                      {agreementBridgePlacementCopy ? (
+                        <span className="vs01-sign-rail-recipient-email">
+                          Signer: {c.signerName?.trim() || "Signer name needed"}
+                          {c.signerTitle?.trim() ? ` · ${c.signerTitle.trim()}` : ""}
+                        </span>
+                      ) : null}
                       {c.email.trim() ? (
                         <span className="vs01-sign-rail-recipient-email">{c.email.trim()}</span>
                       ) : null}
@@ -1371,12 +1398,13 @@ export function StepPrepareSignature({
             <input
               type="checkbox"
               checked={autoInitialsEveryPage}
-              disabled={busy || numPages <= 0}
+              disabled={busy || numPages <= 0 || agreementBridgePlacementCopy}
               onChange={(e) => onAutoInitialsToggle(e.target.checked)}
             />
             <span>Add my initials box to every page</span>
           </label>
 
+          {!agreementBridgePlacementCopy ? (
           <div className="vs01-sign-signature-panel">
             <div className="vs01-sign-signature-panel-title">Your signature</div>
             <div className="vs01-sign-style-tabs" role="tablist" aria-label="Signature style">
@@ -1470,14 +1498,15 @@ export function StepPrepareSignature({
               </div>
             ) : null}
           </div>
+          ) : null}
 
-          {flowStep3Ready && !receiptId ? (
+          {flowStep3ReadyEffective && !receiptId ? (
             <p className="vs01-sign-status-ready" role="status">
-              Ready to sign
+              {agreementBridgePlacementCopy ? "Ready to continue" : "Ready to sign"}
             </p>
           ) : null}
 
-          {!receiptId ? (
+          {!receiptId && !agreementBridgePlacementCopy ? (
             <div className="vs01-sign-intent-hint" role="note">
               <p className="vs01-sign-intent-hint__primary">{ESIGN_INTENT_SIGN_DOCUMENT_ACTION}</p>
               <p className="vs01-sign-intent-hint__secondary">{RECORDS_DOWNLOAD_KEEP_COPY_SHORT}</p>
@@ -1485,6 +1514,13 @@ export function StepPrepareSignature({
                 {PRODUCT_NOT_LAW_FIRM} {NOT_LEGAL_ADVICE}
               </p>
             </div>
+          ) : null}
+
+          {!receiptId && agreementBridgePlacementCopy ? (
+            <p className="vs01-sign-rail-helper" role="note">
+              You are placing template fields only. The sender does not sign here — each signer completes their own
+              signing session from their link.
+            </p>
           ) : null}
 
           <div className="vs01-sign-actions">
@@ -1495,15 +1531,24 @@ export function StepPrepareSignature({
               type="button"
               className={`vs01-btn vs01-btn--primary${receiptId ? " vs01-btn--signed-done" : ""}`}
               disabled={primaryDisabled}
-              onClick={() => void handleSign()}
+              onClick={() => {
+                if (agreementBridgePlacementCopy) {
+                  onError(null);
+                  onContinue?.();
+                  return;
+                }
+                void handleSign();
+              }}
             >
               {receiptId
                 ? "Signature added ✓"
-                : busySession
-                  ? "Working…"
-                  : busyComplete
-                    ? "Signing…"
-                    : "Sign document"}
+                : agreementBridgePlacementCopy
+                  ? "Continue to recipient fields"
+                  : busySession
+                    ? "Working…"
+                    : busyComplete
+                      ? "Signing…"
+                      : "Sign document"}
             </button>
             {canContinueToHandoff ? (
               <button type="button" className="vs01-btn vs01-btn--next-step" disabled={busy} onClick={() => onContinue?.()}>

@@ -29,6 +29,12 @@ export type AgreementVs01BridgeSession = {
   /** Mirrors premium sender-first intent on the LawDog send surface. */
   signerFirst?: boolean;
   /**
+   * Paid Pro: sender starts the workflow first — field placement / packet prep, not an executed signature.
+   */
+  ownerIsPreparingPacket?: boolean;
+  /** Explicit VS01 bridge mode for diagnostics and gating. */
+  agreementBridgeMode?: "prepare_signing_packet";
+  /**
    * Set when bridging from reviewer-approved “Finalize for signing” (not Simple Send intake).
    * Drives VS01 shell copy (“reviewer already approved”) vs generic agreement bridge.
    */
@@ -286,6 +292,10 @@ export function buildAgreementVs01BridgeSession(params: {
             name: (p.name || "").trim(),
             email,
             phone: (p.phone || "").trim(),
+            signerName: (p.signerName || "").trim() || undefined,
+            signerTitle: (p.signerTitle || "").trim() || undefined,
+            signerEmail: (p.signerEmail || "").trim() || undefined,
+            reviewEmail: (p.reviewEmail || "").trim() || undefined,
           };
         })
       : [{ id: newCpId(), name: "", email: "", phone: "" }];
@@ -304,7 +314,12 @@ export function buildAgreementVs01BridgeSession(params: {
     targetStep: 2,
     senderFirstLawdogHandoff: senderFirst,
     ...(senderFirst
-      ? ({ source: "paid_pro_sender_first" as const, signerFirst: true } as const)
+      ? ({
+          source: "paid_pro_sender_first" as const,
+          signerFirst: true,
+          ownerIsPreparingPacket: true,
+          agreementBridgeMode: "prepare_signing_packet" as const,
+        } as const)
       : {}),
     ...(reviewerApproved ? { reviewerApprovedCleanHandoff: true as const } : {}),
   };
@@ -459,6 +474,8 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     seedDocumentId: vs01Seed.documentId,
     route,
     reason: options.logReason,
+    agreementBridgeMode: bridge.agreementBridgeMode ?? null,
+    ownerIsPreparingPacket: bridge.ownerIsPreparingPacket ?? null,
   });
   void options.navigate(route);
   return true;

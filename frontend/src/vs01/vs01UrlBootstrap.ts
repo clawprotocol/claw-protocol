@@ -59,7 +59,6 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   if (
     !explicitRecipientSign ||
     !documentId ||
-    !receiptId ||
     !Number.isFinite(recipientIndex) ||
     recipientIndex < 0 ||
     idxRaw === ""

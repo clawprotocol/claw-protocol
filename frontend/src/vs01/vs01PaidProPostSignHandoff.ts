@@ -16,8 +16,11 @@ export type PaidProVs01PostSignHandoffV1 = {
   agreementId: string;
   agreementTitle: string;
   vs01DocumentId: string;
+  /** Empty when the sender finished packet preparation without a VS01 signer-session receipt. */
   receiptId: string;
   receiptHashSha256: string | null;
+  /** True after “prepare signing packet” — no sender signature session yet. */
+  packetPrepareOnly?: boolean;
   savedAt: string;
   signers: PaidProVs01PostSignSignerRow[];
 };
@@ -38,7 +41,10 @@ export function readPaidProVs01PostSignHandoff(agreementId: string): PaidProVs01
     if (!raw) return null;
     const o = JSON.parse(raw) as Partial<PaidProVs01PostSignHandoffV1>;
     if (o?.v !== 1 || String(o.agreementId || "").trim() !== id) return null;
-    if (!String(o.receiptId || "").trim() || !String(o.vs01DocumentId || "").trim()) return null;
+    if (!String(o.vs01DocumentId || "").trim()) return null;
+    const rid = String(o.receiptId ?? "").trim();
+    const packetPrepare = Boolean(o.packetPrepareOnly);
+    if (!rid && !packetPrepare) return null;
     if (!Array.isArray(o.signers)) return null;
     return o as PaidProVs01PostSignHandoffV1;
   } catch {
