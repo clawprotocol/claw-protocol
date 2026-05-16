@@ -1,6 +1,8 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { apiUrl } from "../../lib/clawApi";
+import { waitForBrowserOnline } from "./premiumBackendHealth";
+import { logPremiumSessionConsistency, shortIdForPremiumLog } from "./premiumSessionDiagnostics";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { IntakePaymentField } from "./intakeCurrencyParse";
 import {
@@ -88,6 +90,8 @@ export type PremiumFullDraftApiSuccess = {
 export type PremiumFullDraftApiResult = PremiumFullDraftApiSuccess | PremiumFullDraftApiFailure;
 
 /** True when fetch failed before a normal HTTP response (transient browser/network). */
+export const PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS = 4;
+
 export function isPremiumFullDraftNetworkFailure(error: unknown): boolean {
   if (error == null) return false;
   if (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") {
@@ -96,9 +100,24 @@ export function isPremiumFullDraftNetworkFailure(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   const name = error instanceof Error ? error.name : "";
   if (/ERR_NETWORK_CHANGED|network changed/i.test(msg)) return true;
+  if (/ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT/i.test(msg)) return true;
   if (/Failed to fetch|NetworkError|Load failed|ERR_INTERNET_DISCONNECTED|net::ERR_/i.test(msg)) return true;
+  if (/network error|connection.*(lost|reset|closed|aborted)/i.test(msg)) return true;
+  if (/browser offline/i.test(msg)) return true;
   if (name === "TypeError" && /fetch|network/i.test(msg)) return true;
   return false;
+}
+
+function premiumRetryBackoffMs(attemptIndex: number): number {
+  const base = 600 * 2 ** attemptIndex;
+  const jitter = Math.floor(Math.random() * 220);
+  return base + jitter;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 export function premiumFullDraftNetworkErrorCode(error: unknown): PremiumFullDraftNetworkErrorCode {
@@ -107,25 +126,34 @@ export function premiumFullDraftNetworkErrorCode(error: unknown): PremiumFullDra
 }
 
 export function logPremiumNetworkError(args: {
-  agreementIdShort?: string | null;
+  agreementId?: string | null;
+  agreementGenerationId?: string | null;
   intakeLen: number;
   attemptCount: number;
   browserErrorName?: string;
   browserErrorMessage?: string;
   retryable: boolean;
   errorCode: string;
+  retryAttempt?: number;
 }): void {
   if (import.meta.env.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[premium-network-error]", {
-    agreementIdShort: args.agreementIdShort ?? null,
+    agreementIdShort: shortIdForPremiumLog(args.agreementId),
+    sessionGenerationIdShort: shortIdForPremiumLog(args.agreementGenerationId),
     intakeLen: args.intakeLen,
     attemptCount: args.attemptCount,
+    retryAttempt: args.retryAttempt ?? null,
     browserErrorName: args.browserErrorName ?? null,
     browserErrorMessage: (args.browserErrorMessage ?? "").slice(0, 160) || null,
     retryable: args.retryable,
     error_code: args.errorCode,
   });
+}
+
+/** @deprecated Use agreementId + agreementGenerationId on logPremiumNetworkError. */
+export function legacyAgreementIdShortFromGenerationId(generationId: string | null | undefined): string | null {
+  return shortIdForPremiumLog(generationId);
 }
 
 export function buildPremiumFullDraftContext(draft: ParsedDraftShape): PremiumFullDraftContextPayload {
@@ -357,9 +385,24 @@ export async function postPremiumFullDraftWithRetry(
     context: PremiumFullDraftContextPayload;
     userGapAnswers?: string | null;
     signal?: AbortSignal;
+    /** Persisted LawDog agreement id (review workspace). */
+    agreementId?: string | null;
+    /** Session generation id for stale-response guards — not the agreement id. */
+    agreementGenerationId?: string | null;
+    /** @deprecated Use agreementGenerationId */
     agreementIdShort?: string | null;
   },
 ): Promise<PremiumFullDraftApiResult> {
+  const agreementId = (args.agreementId ?? "").trim() || null;
+  const agreementGenerationId =
+    (args.agreementGenerationId ?? args.agreementIdShort ?? "").trim() || null;
+  logPremiumSessionConsistency({
+    context: "postPremiumFullDraftWithRetry_start",
+    agreementId,
+    agreementGenerationId,
+    intakeFingerprint: shortIntakeFingerprint(args.intakeText),
+  });
+
   // Vitest runs in `test` mode — never block on real HTTP (local backend may be absent).
   if (import.meta.env.MODE === "test") {
     console.info("[gap-trace] stage=frontend_full_draft_skipped_test_mode", {
@@ -378,7 +421,33 @@ export async function postPremiumFullDraftWithRetry(
   }
   let lastErr: unknown;
   const intakeLen = (args.intakeText || "").length;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  let networkAttempt = 0;
+  let totalAttempts = 0;
+
+  while (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
+    if (args.signal?.aborted) {
+      return {
+        ok: false,
+        failure_kind: "network",
+        retryable: false,
+        error_code: "aborted",
+        document_text: "",
+        attemptCount: totalAttempts,
+      };
+    }
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const backOnline = await waitForBrowserOnline(12_000);
+      if (!backOnline) {
+        lastErr = new TypeError("Failed to fetch: browser offline");
+        networkAttempt += 1;
+        totalAttempts += 1;
+        if (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
+          await sleepMs(premiumRetryBackoffMs(networkAttempt - 1));
+        }
+        continue;
+      }
+    }
+    totalAttempts += 1;
     try {
       const result = await postPremiumFullDraftOnce({
         intakeText: args.intakeText,
@@ -386,33 +455,74 @@ export async function postPremiumFullDraftWithRetry(
         userGapAnswers: args.userGapAnswers,
         signal: args.signal,
       });
+      if (import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.info("[premium-network-retry-success]", {
+          agreementIdShort: shortIdForPremiumLog(agreementId),
+          sessionGenerationIdShort: shortIdForPremiumLog(agreementGenerationId),
+          attemptCount: totalAttempts,
+          networkAttempts: networkAttempt + 1,
+        });
+      }
       return { ok: true, result };
     } catch (e) {
       lastErr = e;
-      if (isPremiumFullDraftNetworkFailure(e)) {
+      if (!isPremiumFullDraftNetworkFailure(e)) {
         if (import.meta.env.DEV) {
           const msg = e instanceof Error ? e.message : String(e);
           // eslint-disable-next-line no-console
-          console.warn("[premium-full-draft] network_attempt_failed", { attempt: attempt + 1, message: msg });
+          console.warn("[premium-full-draft] non_network_failure", { message: msg });
         }
-        continue;
+        const msg = e instanceof Error ? e.message : String(e ?? "premium_full_draft_failed");
+        return {
+          ok: false,
+          failure_kind: "exception",
+          retryable: false,
+          error_code: "premium_full_draft_failed",
+          document_text: "",
+          attemptCount: totalAttempts,
+          browserErrorName: e instanceof Error ? e.name : undefined,
+          browserErrorMessage: msg.slice(0, 200),
+        };
       }
+      networkAttempt += 1;
+      const msg = e instanceof Error ? e.message : String(e);
       if (import.meta.env.DEV) {
-        const msg = e instanceof Error ? e.message : String(e);
         // eslint-disable-next-line no-console
-        console.warn("[premium-full-draft] attempt_failed", { attempt: attempt + 1, message: msg });
+        console.warn("[premium-full-draft] network_attempt_failed", {
+          networkAttempt,
+          totalAttempts,
+          message: msg,
+        });
+      }
+      logPremiumNetworkError({
+        agreementId,
+        agreementGenerationId,
+        intakeLen,
+        attemptCount: totalAttempts,
+        retryAttempt: networkAttempt,
+        browserErrorName: e instanceof Error ? e.name : undefined,
+        browserErrorMessage: msg,
+        retryable: networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS,
+        errorCode: premiumFullDraftNetworkErrorCode(e),
+      });
+      if (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
+        await sleepMs(premiumRetryBackoffMs(networkAttempt - 1));
       }
     }
   }
-  const attemptCount = 2;
+
+  const attemptCount = totalAttempts;
   if (isPremiumFullDraftNetworkFailure(lastErr)) {
     const errorCode = premiumFullDraftNetworkErrorCode(lastErr);
     const browserErrorName = lastErr instanceof Error ? lastErr.name : undefined;
     const browserErrorMessage = lastErr instanceof Error ? lastErr.message : String(lastErr);
     logPremiumNetworkError({
-      agreementIdShort: args.agreementIdShort ?? null,
+      agreementId,
+      agreementGenerationId,
       intakeLen,
       attemptCount,
+      retryAttempt: networkAttempt,
       browserErrorName,
       browserErrorMessage,
       retryable: true,
@@ -431,7 +541,7 @@ export async function postPremiumFullDraftWithRetry(
   }
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.warn("[premium-full-draft] both attempts failed", { lastError: lastErr });
+    console.warn("[premium-full-draft] attempts_exhausted", { lastError: lastErr });
   }
   const msg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "premium_full_draft_failed");
   return {

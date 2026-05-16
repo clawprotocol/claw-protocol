@@ -10,6 +10,8 @@ describe("AgreementBuilderIntake premium network recovery UI", () => {
     expect(intake).toContain("Your draft is safe. LawDog lost connection while building the Pro agreement.");
     expect(intake).toContain('premiumPostCheckoutPhase === "network_retry"');
     expect(intake).toContain("Try Pro again");
+    expect(intake).toContain("Trying again…");
+    expect(intake).toContain("We'll retry the Pro build without losing this draft.");
     expect(intake).toContain("Back to draft");
   });
 

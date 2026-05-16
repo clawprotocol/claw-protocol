@@ -402,6 +402,8 @@ import {
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
 } from "../../lib/postCheckoutModalTimeout";
 import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraftApi";
+import { preflightPremiumBackendHealth } from "./premiumBackendHealth";
+import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import {
   buildPremiumDetailsGateCopy,
   isPaidProFinishedAgreement,
@@ -1468,6 +1470,10 @@ const PAID_PREMIUM_CONNECTION_RECOVERY_COPY =
 const PREMIUM_NETWORK_MODAL_TITLE = "Connection interrupted";
 const PREMIUM_NETWORK_MODAL_BODY =
   "Your draft is safe. LawDog lost connection while building the Pro agreement.";
+const PREMIUM_NETWORK_MODAL_RETRY_HINT =
+  "We'll retry the Pro build without losing this draft.";
+const PREMIUM_NETWORK_MODAL_STILL_RECONNECTING =
+  "Still reconnecting — try again in a moment.";
 
 type PremiumPostCheckoutPhase = null | "awaiting_gaps" | "processing" | "network_retry";
 
@@ -1765,6 +1771,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   /** UI-only: longer-wait copy after PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS without closing the modal. */
   const [premiumCheckoutModalExtendedWait, setPremiumCheckoutModalExtendedWait] = useState(false);
+  const [premiumNetworkRetryInFlight, setPremiumNetworkRetryInFlight] = useState(false);
+  const [premiumNetworkStillReconnecting, setPremiumNetworkStillReconnecting] = useState(false);
   const [premiumGapQuestions, setPremiumGapQuestions] = useState<string[]>([]);
   const [premiumGapOneField, setPremiumGapOneField] = useState("");
   /** Background missing-facts (non-blocking); shown as optional post-Pro tips. */
@@ -3651,7 +3659,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setHardError(null);
     await finalizeIntakeCapture();
     const mergedIntake = buildPremiumMergedIntakeWithUserNotes(raw, pendingUpgradePromptRef.current.trim());
+    premiumGapBaseIntakeRef.current = mergedIntake;
     const sessionGenForPass = getOrInitSessionAgreementGenerationId();
+    const agreementIdForPass =
+      (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null;
     const guidedFlowId = resolveGuidedFlowId(mergedIntake, buildLiveDraftPreview(mergedIntake));
     const originalMergeHint = pickLongestPremiumIntakeCorpus(
       48,
@@ -3673,6 +3684,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         userGapAnswers: null,
         gapResolverSkippedWithDefaults: true,
         agreementGenerationId: sessionGenForPass,
+        agreementId: agreementIdForPass,
         premiumRequestIntakeFingerprint: shortIntakeFingerprint(mergedIntake),
         isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
       });
@@ -3683,6 +3695,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       if (isPremiumNetworkRetryablePipelineResult(result)) {
+        logPremiumSessionConsistency({
+          context: "entitled_rewrite_network_retryable",
+          agreementId: agreementIdForPass,
+          agreementGenerationId: sessionGenForPass,
+          intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+        });
         setProFullDraftCustomGateMessage(null);
         setProFullDraftQualityRetry(false);
         setHardError(null);
@@ -4067,6 +4085,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
 
       const mergedIntake = buildPremiumMergedIntakeWithUserNotes(rawIntakeBase, pendCaptured);
+      premiumGapBaseIntakeRef.current = mergedIntake;
+      logPremiumSessionConsistency({
+        context: "post_checkout_premium_intake_preserved",
+        agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+        agreementGenerationId: getOrInitSessionAgreementGenerationId(),
+        intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+      });
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.info("[premium-upgrade-source] post_checkout", {
@@ -4271,6 +4296,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
         if (isPremiumNetworkRetryablePipelineResult(result)) {
+          if (!premiumGapBaseIntakeRef.current.trim()) {
+            premiumGapBaseIntakeRef.current = mergedIntake;
+          }
+          logPremiumSessionConsistency({
+            context: "applySuccess_network_retryable",
+            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+            agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+            intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+          });
           setPremiumServerGenerationDegraded(null);
           setHardError(null);
           setProFullDraftCustomGateMessage(null);
@@ -5259,6 +5293,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (!runIsCurrent()) return;
           premiumProRunInFlightRef.current = true;
           try {
+          if (!premiumGapBaseIntakeRef.current.trim()) {
+            premiumGapBaseIntakeRef.current = stripPremiumUserNotesFromMergedIntake(args.intakeText) || args.intakeText;
+          }
           const intakeFpGuard = shortIntakeFingerprint(args.intakeText);
           if (
             shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative({
@@ -5348,6 +5385,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       userGapAnswers: args.userGapAnswers,
                       gapResolverSkippedWithDefaults: args.gapResolverSkippedWithDefaults,
                       agreementGenerationId: sessionGenForPass,
+                      agreementId:
+                        (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
                       premiumRequestIntakeFingerprint: sessionFpForPass,
                       isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
                     }),
@@ -5580,11 +5619,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumPostCheckoutPhase(null);
           }
           setPremiumPipelineUserMessage(null);
-          if (result != null || !hasPaidPremiumCompletionSession()) {
+          const networkRetryableResult =
+            result != null && isPremiumNetworkRetryablePipelineResult(result);
+          if (!networkRetryableResult && (result != null || !hasPaidPremiumCompletionSession())) {
             runPremiumModelPassRef.current = null;
           }
         } finally {
             premiumProRunInFlightRef.current = false;
+            setPremiumNetworkRetryInFlight(false);
+            setPremiumNetworkStillReconnecting(false);
           }
         };
 
@@ -13220,41 +13263,95 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
                         {PREMIUM_NETWORK_MODAL_BODY}
                       </p>
+                      <p className="mt-2 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
+                        {premiumNetworkStillReconnecting
+                          ? PREMIUM_NETWORK_MODAL_STILL_RECONNECTING
+                          : PREMIUM_NETWORK_MODAL_RETRY_HINT}
+                      </p>
                       <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center sm:gap-3">
                         <button
                           type="button"
                           className="vs01-btn vs01-btn--primary w-full sm:w-auto"
+                          disabled={premiumNetworkRetryInFlight}
                           onClick={() => {
                             const m = runPremiumModelPassRef.current;
-                            if (!m) {
-                              setHardError(
-                                "We couldn’t start a retry from this state. Refresh the page, then try again.",
-                              );
+                            if (!m || premiumNetworkRetryInFlight) {
+                              if (!m) {
+                                setHardError(
+                                  "We couldn’t start a retry from this state. Refresh the page, then try again.",
+                                );
+                              }
                               return;
                             }
-                            setHardError(null);
-                            setProFullDraftCustomGateMessage(null);
-                            setProFullDraftQualityRetry(false);
-                            const base = premiumGapBaseIntakeRef.current.trim();
-                            if (!base) {
-                              setHardError("We need your intake to retry. Confirm your text above, then try again.");
-                              return;
-                            }
-                            const notes = pendingUpgradePromptRef.current.trim();
-                            const it = buildPremiumMergedIntakeWithUserNotes(base, notes);
-                            const ga = (premiumLastGapAnswersRef.current || "").trim();
-                            setPremiumPostCheckoutPhase("processing");
-                            setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
-                            void m({
-                              intakeText: ga
-                                ? `${base}\n\n— Finish your agreement (user details):\n${ga}`
-                                : it,
-                              userGapAnswers: ga || null,
-                              gapResolverSkippedWithDefaults: !ga,
-                            });
+                            void (async () => {
+                              setPremiumNetworkRetryInFlight(true);
+                              setPremiumNetworkStillReconnecting(false);
+                              setHardError(null);
+                              setProFullDraftCustomGateMessage(null);
+                              setProFullDraftQualityRetry(false);
+                              const base = premiumGapBaseIntakeRef.current.trim();
+                              if (!base) {
+                                setHardError(
+                                  "We need your intake to retry. Confirm your text above, then try again.",
+                                );
+                                setPremiumNetworkRetryInFlight(false);
+                                return;
+                              }
+                              const agreementIdForRetry =
+                                (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
+                                null;
+                              logPremiumSessionConsistency({
+                                context: "premium_network_retry_click",
+                                agreementId: agreementIdForRetry,
+                                agreementGenerationId: getOrInitSessionAgreementGenerationId(),
+                                intakeFingerprint: shortIntakeFingerprint(base),
+                              });
+                              const health = await preflightPremiumBackendHealth();
+                              if (!health.ok) {
+                                setPremiumNetworkStillReconnecting(true);
+                                setPremiumNetworkRetryInFlight(false);
+                                if (import.meta.env.MODE !== "test") {
+                                  // eslint-disable-next-line no-console
+                                  console.info("[premium-network-retry-preflight-failed]", {
+                                    latencyMs: health.latencyMs,
+                                    status: health.status ?? null,
+                                  });
+                                }
+                                return;
+                              }
+                              const notes = pendingUpgradePromptRef.current.trim();
+                              const it = buildPremiumMergedIntakeWithUserNotes(base, notes);
+                              const ga = (premiumLastGapAnswersRef.current || "").trim();
+                              if (import.meta.env.MODE !== "test") {
+                                // eslint-disable-next-line no-console
+                                console.info("[premium-network-retry-user]", {
+                                  agreementIdShort: agreementIdForRetry
+                                    ? agreementIdForRetry.slice(0, 8)
+                                    : null,
+                                  intakeLen: base.length,
+                                  hasGapAnswers: Boolean(ga),
+                                });
+                              }
+                              setPremiumPostCheckoutPhase("processing");
+                              setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
+                              try {
+                                await m({
+                                  intakeText: ga
+                                    ? `${base}\n\n— Finish your agreement (user details):\n${ga}`
+                                    : it,
+                                  userGapAnswers: ga || null,
+                                  gapResolverSkippedWithDefaults: !ga,
+                                });
+                              } catch (e) {
+                                if (import.meta.env.DEV) {
+                                  // eslint-disable-next-line no-console
+                                  console.warn("[premium-network-retry-user] runModelPass_failed", e);
+                                }
+                              }
+                            })();
                           }}
                         >
-                          Try Pro again
+                          {premiumNetworkRetryInFlight ? "Trying again…" : "Try Pro again"}
                         </button>
                         <button
                           type="button"

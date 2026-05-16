@@ -82,6 +82,7 @@ import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourc
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
+import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 
@@ -100,6 +101,8 @@ export type PremiumCompletionInput = {
   /** True if the user skipped the gap step and accepted neutral defaults for open items. */
   gapResolverSkippedWithDefaults?: boolean;
   agreementGenerationId?: string;
+  /** Persisted agreement workspace id (distinct from session generation id). */
+  agreementId?: string | null;
   premiumRequestIntakeFingerprint?: string;
   isPremiumRequestStillValid?: () => boolean;
 };
@@ -865,6 +868,12 @@ function amplifyPremiumMaterialityRepair(
  */
 export async function runPremiumCompletion(input: PremiumCompletionInput): Promise<PremiumCompletionResult> {
   const rawIntake = input.intakeText.trim();
+  logPremiumSessionConsistency({
+    context: "runPremiumCompletion_start",
+    agreementId: input.agreementId,
+    agreementGenerationId: input.agreementGenerationId,
+    intakeFingerprint: input.premiumRequestIntakeFingerprint ?? shortIntakeFingerprint(rawIntake),
+  });
   const upgradeNotes = extractPremiumUserUpgradeNotes(rawIntake);
   const baseWithoutNotes = stripPremiumUserNotesFromMergedIntake(rawIntake);
   const structuredCorpus = buildReviewCoercionRawIntakeFromDraft(
@@ -1301,7 +1310,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       intakeText: soT,
       context: fullCtx,
       userGapAnswers: gapAns || null,
-      agreementIdShort: (input.agreementGenerationId || "").trim().slice(0, 8) || null,
+      agreementId: input.agreementId ?? null,
+      agreementGenerationId: input.agreementGenerationId ?? null,
     });
     if (!fullResp.ok) {
       if (fullResp.failure_kind === "network" && fullResp.retryable) {
