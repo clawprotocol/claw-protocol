@@ -8,18 +8,18 @@ import {
   clampFieldRectToPage,
   computePrepareRectFromClick,
   computeRecipientRectFromClick,
-  defaultRecipientFieldValue,
   getVs01DefaultFieldGeometry,
+  logVs01FieldOverlapAdjusted,
   newSigningFieldId,
   normalizePlacedFieldGeometryIfBelowMinimum,
   type PlacedSigningField,
   type SigningFieldType,
   type SigningPlacementValueContext,
 } from "./signingFields";
+import { ownerPadFromPlacementContext, resolveVs01FieldValueForRole } from "./vs01FieldValueResolution";
 import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareRoleAuthority } from "./vs01PrepareRoleAuthority";
 import {
-  buildPrepareTemplateValueContext,
   defaultPrepareTemplateStoredValue,
   logVs01PlacementFieldAdded,
   logVs01PlacementFieldRejected,
@@ -97,15 +97,26 @@ function createPreparePlacedFieldAtClick(
   clickY: number,
   role: Vs01PrepareSigningRole,
   ownerValueCtx: SigningPlacementValueContext,
+  existingOnPage: PlacedSigningField[],
   options?: { autoInitials?: boolean },
 ): PlacedSigningField {
-  const templateCtx = buildPrepareTemplateValueContext(role, ownerValueCtx);
+  const before = computePrepareRectFromClick(type, clickX, clickY, [], role.roleId);
   const { x, y, width, height } = computePrepareRectFromClick(
     type,
     clickX,
     clickY,
-    role.partyIndex,
+    existingOnPage,
+    role.roleId,
   );
+  if (before.y !== y || before.x !== x) {
+    logVs01FieldOverlapAdjusted({
+      fieldType: type,
+      roleIdShort: role.roleId.slice(0, 16),
+      page,
+      fromY: before.y,
+      toY: y,
+    });
+  }
   const auto = options?.autoInitials === true;
   return {
     id: newSigningFieldId(),
@@ -115,7 +126,7 @@ function createPreparePlacedFieldAtClick(
     y,
     width,
     height,
-    value: defaultPrepareTemplateStoredValue(type, role, templateCtx),
+    value: defaultPrepareTemplateStoredValue(type, role, ownerValueCtx),
     ...(auto ? { autoInitials: true } : {}),
   };
 }
@@ -160,7 +171,6 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       width,
       height,
     );
-    const templateCtx = buildPrepareTemplateValueContext(args.role, args.valueCtx);
     const raw: PlacedSigningField = {
       id: prepareAutoInitialsFieldId(roleId, p),
       type: "initials",
@@ -169,7 +179,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       y,
       width,
       height,
-      value: defaultPrepareTemplateStoredValue("initials", args.role, templateCtx),
+      value: defaultPrepareTemplateStoredValue("initials", args.role, args.valueCtx),
       autoInitials: true,
     };
     const stamped = stampPrepareSenderFieldOrReject(raw, args.role, roleId, PREPARE_FIELD_ASSIGNMENT_SOURCE);
@@ -202,6 +212,7 @@ export function createPrepareStampedSenderField(args: {
   clickX: number;
   clickY: number;
   valueCtx: SigningPlacementValueContext;
+  existingFields?: PlacedSigningField[];
   visualRoleId?: string | null;
   autoInitials?: boolean;
 }): PrepareSenderPlacementResult {
@@ -218,6 +229,7 @@ export function createPrepareStampedSenderField(args: {
     });
     return { ok: false, reason: resolved.reason };
   }
+  const onPage = (args.existingFields ?? []).filter((f) => f.page === args.page);
   const raw = createPreparePlacedFieldAtClick(
     args.type,
     args.page,
@@ -225,6 +237,7 @@ export function createPrepareStampedSenderField(args: {
     args.clickY,
     resolved.role,
     args.valueCtx,
+    onPage,
     args.autoInitials ? { autoInitials: true } : undefined,
   );
   const stamped = stampPrepareSenderFieldOrReject(
@@ -289,6 +302,11 @@ export function createPrepareStampedRecipientField(args: {
     return null;
   }
   const { x, y, width, height } = computeRecipientRectFromClick(args.type, args.clickX, args.clickY);
+  const ownerPad = ownerPadFromPlacementContext({
+    typedName: args.displayName,
+    initials: "",
+    signerEmail: args.email,
+  });
   const raw: Vs01RecipientPlacedField = {
     id: newSigningFieldId(),
     counterpartyId: args.counterpartyId,
@@ -298,7 +316,12 @@ export function createPrepareStampedRecipientField(args: {
     y,
     width,
     height,
-    value: defaultRecipientFieldValue(args.type, args.displayName, args.email),
+    value: resolveVs01FieldValueForRole({
+      fieldType: args.type,
+      role: resolved.role,
+      mode: "prepare_stored",
+      ownerPad,
+    }),
   };
   const stamped = stampPrepareRecipientFieldOrReject(
     raw,

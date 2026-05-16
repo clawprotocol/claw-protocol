@@ -68,6 +68,9 @@ export function buildVs01PrepareSigningRoles(args: {
   for (const c of args.counterparties) {
     if (!c.name.trim()) continue;
     const roleId = buildStableSignerRoleId(aid, idx, c.id);
+    const rowEmail = [c.signerEmail, c.reviewEmail, c.email]
+      .map((x) => (x ?? "").trim())
+      .find((x) => isPlausibleEmail(x));
     out.push({
       roleId,
       partyIndex: idx,
@@ -75,7 +78,7 @@ export function buildVs01PrepareSigningRoles(args: {
       entityName: c.name.trim(),
       signerName: c.signerName?.trim() || undefined,
       signerTitle: c.signerTitle?.trim() || undefined,
-      signerEmail: c.signerEmail?.trim() || undefined,
+      signerEmail: rowEmail || undefined,
       reviewEmail: c.reviewEmail?.trim() || undefined,
       isEntityParty: looksLikeLegalEntityPartyNameLocal(c.name),
       requiresSignature: true,
@@ -659,6 +662,19 @@ export function mergeRecipientManifestFieldsForSignerRole(args: {
     out.push(conv);
   }
   return out;
+}
+
+export function findPrepareRoleForCounterparty(
+  roles: Vs01PrepareSigningRole[],
+  counterpartyId: string,
+  signerRoleId?: string | null,
+): Vs01PrepareSigningRole | null {
+  const lock = (signerRoleId ?? "").trim();
+  if (lock) {
+    const hit = roles.find((r) => r.roleId === lock);
+    if (hit) return hit;
+  }
+  return roles.find((r) => r.vs01CounterpartyId === counterpartyId) ?? null;
 }
 
 export function canFinishPreparePacketSignerCentric(args: {

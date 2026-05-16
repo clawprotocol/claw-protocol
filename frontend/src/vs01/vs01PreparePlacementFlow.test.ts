@@ -46,7 +46,7 @@ describe("vs01 prepare placement flow", () => {
     if (!placed.ok) return;
     expect(placed.field.assignedPartyId).toBe("c1");
     expect(placed.field.assignedSignerRoleKind).toBe("counterparty");
-    expect(String(placed.field.value ?? "")).toBe("");
+    expect(String(placed.field.value ?? "")).toBe(""); // signature template empty
   });
 
   it("role advances owner through four counterparties when each bucket completes", () => {
@@ -154,6 +154,12 @@ describe("vs01 prepare placement flow", () => {
       recipientPlacedFields: [],
     });
     expect(gate.canFinish).toBe(true);
+  });
+
+  it("initials every page checkbox is enabled in prepare_signing_packet mode", () => {
+    const src = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
+    expect(src).toContain("autoInitialsEveryPage");
+    expect(src).not.toMatch(/disabled=\{busy \|\| numPages <= 0 \|\| agreementBridgePlacementCopy\}/);
   });
 
   it("prepare path does not call createSignSession before onContinue", () => {

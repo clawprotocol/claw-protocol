@@ -38,8 +38,10 @@ import {
   createPrepareStampedSenderField,
 } from "./vs01PrepareFieldPlacement";
 import { PrepareSigningFieldBody } from "./vs01PrepareSigningFieldRender";
+import { ownerPadFromPlacementContext } from "./vs01FieldValueResolution";
 import {
   buildPrepareTemplateValueContext,
+  logVs01FieldInputFocus,
   logVs01PlacementClickRole,
   logVs01PlacementFieldRejected,
   prepareTemplateCornerLabel,
@@ -497,13 +499,14 @@ export function StepPrepareSignature({
   const flowStep3Ready = signReady && hasSignatureOnDoc;
   const flowStep3ReadyEffective = agreementBridgePlacementCopy ? hasSignatureOnDoc : flowStep3Ready;
 
-  const fieldsOverlapKey = useMemo(
+  const ownerPadForFields = useMemo(
     () =>
-      fields
-        .filter((f) => !f.autoInitials)
-        .map((f) => `${f.page},${roundNorm(f.x)},${roundNorm(f.y)},${roundNorm(f.width)},${roundNorm(f.height)}`)
-        .join(";"),
-    [fields]
+      ownerPadFromPlacementContext({
+        typedName: typedNameRef.current,
+        initials: initialsRef.current,
+        signerEmail: signerEmailForPlacement,
+      }),
+    [typedName, initials, signerEmailForPlacement],
   );
 
   const signerForApi = defaultSignerRef.trim() || "signer";
@@ -578,15 +581,19 @@ export function StepPrepareSignature({
             activeRoleId &&
             (f.assignedSignerRoleId ?? "").trim() !== activeRoleId),
       );
-      if (agreementBridgePlacementCopy && prepareRoleCtx?.activeRole) {
-        const auto = buildPrepareAutoInitialsEveryPage({
-          role: prepareRoleCtx.activeRole,
-          pageCount: numPages,
-          skippedPages: skippedAutoPages,
-          existingFields: prev,
-          valueCtx: ownerValueCtx,
-        });
-        return [...manual, ...auto];
+      if (agreementBridgePlacementCopy) {
+        const activeRole =
+          prepareRoleCtx?.activeRole ?? findPrepareSigningRole(prepareSignerRoles, displayRoleId);
+        if (activeRole) {
+          const auto = buildPrepareAutoInitialsEveryPage({
+            role: activeRole,
+            pageCount: numPages,
+            skippedPages: skippedAutoPages,
+            existingFields: prev,
+            valueCtx: ownerValueCtx,
+          });
+          return [...manual, ...auto];
+        }
       }
       const auto = buildAutoInitialsFields(numPages, ownerValueCtx, skippedAutoPages, manual);
       return [...manual, ...auto];
@@ -595,10 +602,10 @@ export function StepPrepareSignature({
     autoInitialsEveryPage,
     numPages,
     skippedAutoPages,
-    fieldsOverlapKey,
     agreementBridgePlacementCopy,
     displayRoleId,
     prepareRoleCtx,
+    prepareSignerRoles,
     signerEmailForPlacement,
   ]);
 
@@ -688,6 +695,7 @@ export function StepPrepareSignature({
           clickX: px,
           clickY: py,
           valueCtx,
+          existingFields: fieldsRef.current,
           visualRoleId: prepareRoleCtx.authority.getActiveRoleId(),
         });
         if (!placed.ok) {
@@ -1239,7 +1247,14 @@ export function StepPrepareSignature({
                     >
                       {pdfDocReady && numPages > 0
                         ? Array.from({ length: numPages }, (_, p) => {
-                            const fieldsHere = fields.filter((f) => f.page === p);
+                            const fieldsHere = fields
+                              .filter((f) => f.page === p)
+                              .slice()
+                              .sort((a, b) => {
+                                if (a.id === selectedFieldId) return 1;
+                                if (b.id === selectedFieldId) return -1;
+                                return 0;
+                              });
                             return (
                               <div
                                 key={p}
@@ -1327,9 +1342,16 @@ export function StepPrepareSignature({
                                                 hasDrawn,
                                                 uploadPreviewUrl,
                                               }}
+                                              ownerPad={ownerPadForFields}
                                               isSelected={isSel}
                                               busy={busy}
                                               onValueChange={(value) => updateField(field.id, { value })}
+                                              onInputFocus={() =>
+                                                logVs01FieldInputFocus({
+                                                  fieldId: field.id.slice(0, 12),
+                                                  fieldType: field.type,
+                                                })
+                                              }
                                             />
                                           ) : (
                                             <>
@@ -1675,7 +1697,7 @@ export function StepPrepareSignature({
             <input
               type="checkbox"
               checked={autoInitialsEveryPage}
-              disabled={busy || numPages <= 0 || agreementBridgePlacementCopy}
+              disabled={busy || numPages <= 0}
               onChange={(e) => onAutoInitialsToggle(e.target.checked)}
             />
             <span>Add my initials box to every page</span>

@@ -1,21 +1,28 @@
 import type { PlacedSigningField, SigningFieldType, SigningPlacementValueContext } from "./signingFields";
-import { defaultValueForType } from "./signingFields";
+import {
+  ownerPadFromPlacementContext,
+  resolveRolePlausibleEmail,
+  resolveVs01FieldValueForRole,
+  type Vs01SignerRuntimeContext,
+} from "./vs01FieldValueResolution";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { vs01DiagnosticsEnabled, type PreparePlacementValueContext } from "./vs01SignerFieldAssignment";
 
-/** Stored field values at prepare placement — templates only; never owner signature on counterparty fields. */
+/** Stored field value at prepare placement time. */
 export function defaultPrepareTemplateStoredValue(
   type: SigningFieldType,
   role: Vs01PrepareSigningRole,
   ownerCtx: SigningPlacementValueContext,
 ): string {
-  if (role.kind === "counterparty") {
-    return "";
-  }
-  return defaultValueForType(type, ownerCtx);
+  return resolveVs01FieldValueForRole({
+    fieldType: type,
+    role,
+    mode: "prepare_stored",
+    ownerPad: ownerPadFromPlacementContext(ownerCtx),
+  });
 }
 
-/** Value context for stamping new prepare fields — owner may use pad defaults; counterparties stay empty. */
+/** @deprecated Use ownerPadFromPlacementContext + resolveVs01FieldValueForRole. */
 export function buildPrepareTemplateValueContext(
   role: Vs01PrepareSigningRole,
   ownerFallback: PreparePlacementValueContext,
@@ -30,10 +37,23 @@ export function buildPrepareTemplateValueContext(
   return { typedName: "", initials: "", signerEmail: undefined };
 }
 
+export function resolvePrepareFieldDisplayValue(
+  field: PlacedSigningField,
+  role: Vs01PrepareSigningRole | null,
+  ownerPad?: Vs01SignerRuntimeContext,
+): string {
+  if (!role) return typeof field.value === "string" ? field.value : "";
+  return resolveVs01FieldValueForRole({
+    fieldType: field.type,
+    role,
+    mode: "prepare_display",
+    storedValue: typeof field.value === "string" ? field.value : "",
+    ownerPad,
+  });
+}
+
 export type PrepareTemplateDisplay = {
-  /** Primary line inside the field box (placeholder when empty). */
   body: string;
-  /** Secondary assignee line for signature slots. */
   assigneeLine: string;
   isPlaceholder: boolean;
 };
@@ -41,65 +61,65 @@ export type PrepareTemplateDisplay = {
 export function prepareTemplateDisplayForField(
   field: PlacedSigningField,
   role: Vs01PrepareSigningRole | null,
+  ownerPad?: Vs01SignerRuntimeContext,
 ): PrepareTemplateDisplay {
-  const textVal = typeof field.value === "string" ? field.value : "";
   const entity = (role?.entityName ?? field.assignedSignerRoleLabel ?? "").trim() || "Signer";
   const kind = role?.kind ?? field.assignedSignerRoleKind ?? "owner";
+  const resolved = resolvePrepareFieldDisplayValue(field, role, ownerPad);
 
   switch (field.type) {
     case "signature": {
-      if (textVal.trim()) {
-        return { body: textVal.trim(), assigneeLine: entity, isPlaceholder: false };
-      }
       if (kind === "counterparty") {
         return {
-          body: "Signer signs here",
+          body: resolved.trim() || "Signer signs here",
           assigneeLine: entity,
-          isPlaceholder: true,
+          isPlaceholder: !resolved.trim(),
         };
       }
       return {
-        body: "Your signature",
+        body: resolved.trim() || "Your signature",
         assigneeLine: entity,
-        isPlaceholder: true,
+        isPlaceholder: !resolved.trim(),
       };
     }
-    case "initials": {
-      if (textVal.trim()) {
-        return { body: textVal.trim().slice(0, 8), assigneeLine: entity, isPlaceholder: false };
-      }
+    case "initials":
       return {
-        body: kind === "owner" ? "Your initials" : "Initials",
+        body: resolved.trim().slice(0, 8) || (kind === "owner" ? "Your initials" : "Initials"),
         assigneeLine: entity,
-        isPlaceholder: true,
+        isPlaceholder: !resolved.trim(),
       };
-    }
     case "printed_name":
       return {
-        body: textVal.trim() || "Printed name",
+        body: resolved.trim() || "Printed name",
         assigneeLine: entity,
-        isPlaceholder: !textVal.trim(),
+        isPlaceholder: !resolved.trim(),
       };
     case "text":
       return {
-        body: textVal.trim() || (kind === "counterparty" ? "Title" : "Add text"),
+        body: resolved.trim() || (kind === "counterparty" ? "Title" : "Add text"),
         assigneeLine: entity,
-        isPlaceholder: !textVal.trim(),
+        isPlaceholder: !resolved.trim(),
       };
-    case "email":
+    case "email": {
+      const emailHint = role ? resolveRolePlausibleEmail(role) : "";
       return {
-        body: textVal.trim() || "Email",
+        body: resolved.trim() || emailHint || "Email",
         assigneeLine: entity,
-        isPlaceholder: !textVal.trim(),
+        isPlaceholder: !resolved.trim() && !emailHint,
       };
+    }
     case "date":
       return {
-        body: textVal.trim() || "Date",
+        body: resolved.trim() || "Date",
         assigneeLine: entity,
-        isPlaceholder: !textVal.trim(),
+        isPlaceholder: !resolved.trim(),
       };
     default:
-      return { body: textVal.trim() || "Field", assigneeLine: entity, isPlaceholder: !textVal.trim() };
+      return {
+        body: resolved.trim() || "Field",
+        assigneeLine: entity,
+        isPlaceholder: !resolved.trim(),
+      };
   }
 }
 
@@ -148,4 +168,10 @@ export function logVs01TemplateRenderValue(payload: Record<string, unknown>): vo
   if (!vs01DiagnosticsEnabled()) return;
   // eslint-disable-next-line no-console
   console.info("[vs01-template-render-value]", payload);
+}
+
+export function logVs01FieldInputFocus(payload: Record<string, unknown>): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-field-input-focus]", payload);
 }

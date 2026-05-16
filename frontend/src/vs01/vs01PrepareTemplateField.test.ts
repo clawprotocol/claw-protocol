@@ -34,7 +34,8 @@ describe("prepare template values", () => {
     expect(ctx.typedName).toBe("");
     expect(ctx.initials).toBe("");
     expect(defaultPrepareTemplateStoredValue("signature", cp, ctx)).toBe("");
-    expect(defaultPrepareTemplateStoredValue("printed_name", cp, ctx)).toBe("");
+    expect(defaultPrepareTemplateStoredValue("email", cp, ctx)).toBe("a@x.com");
+    expect(defaultPrepareTemplateStoredValue("date", cp, ctx)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it("counterparty signature render uses entity placeholder, not owner name", () => {
@@ -95,8 +96,14 @@ describe("prepare placement tools", () => {
     if (!placed.ok) return;
     expect(placed.field.assignedSignerRoleId).toBe(cp.roleId);
     expect(placed.field.assignedPartyId).toBe("c1");
-    if (tool !== "date") {
+    if (tool === "signature" || tool === "initials" || tool === "text") {
       expect(String(placed.field.value ?? "")).toBe("");
+    }
+    if (tool === "email") {
+      expect(String(placed.field.value ?? "")).toBe("a@x.com");
+    }
+    if (tool === "date") {
+      expect(String(placed.field.value ?? "")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
   });
 });

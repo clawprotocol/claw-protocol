@@ -284,19 +284,59 @@ export function computeRectFromClick(
   return clampFieldRectToPage(cx, cy, width, height);
 }
 
-/** Prepare-mode placement: nudge by party index so multi-signer fields do not stack on identical clicks. */
+export function fieldRectsOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+  pad = 0.008,
+): boolean {
+  return !(
+    a.x + a.width + pad <= b.x ||
+    b.x + b.width + pad <= a.x ||
+    a.y + a.height + pad <= b.y ||
+    b.y + b.height + pad <= a.y
+  );
+}
+
+/** Prepare-mode placement: anchor at click; small downward nudge only when same-role fields overlap. */
 export function computePrepareRectFromClick(
   type: SigningFieldType,
   clickX: number,
   clickY: number,
-  partyIndex: number,
+  existingOnPage: ReadonlyArray<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    assignedSignerRoleId?: string;
+  }>,
+  roleId: string,
 ): { x: number; y: number; width: number; height: number } {
   const { width, height } = getVs01DefaultFieldGeometry(type);
-  const colOffset = Math.min(0.14, partyIndex * 0.014);
-  const rowOffset = Math.min(0.08, partyIndex * 0.007);
-  const cx = Math.min(1, Math.max(0, clickX + colOffset));
-  const cy = Math.min(1, Math.max(0, clickY + rowOffset));
-  return clampFieldRectToPage(cx, cy, width, height);
+  let cx = Math.min(1, Math.max(0, clickX));
+  let cy = Math.min(1, Math.max(0, clickY));
+  const rid = roleId.trim();
+  const peers = existingOnPage.filter((f) => (f.assignedSignerRoleId ?? "").trim() === rid);
+  let rect = clampFieldRectToPage(cx, cy, width, height);
+  let attempts = 0;
+  while (attempts < 10 && peers.some((p) => fieldRectsOverlap(rect, p))) {
+    cy = Math.min(1 - height, cy + 0.022);
+    rect = clampFieldRectToPage(cx, cy, width, height);
+    attempts += 1;
+  }
+  return rect;
+}
+
+export function logVs01FieldOverlapAdjusted(payload: Record<string, unknown>): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (window.localStorage?.getItem("lawdogVs01FieldDiag") !== "1") {
+      if (!(typeof import.meta !== "undefined" && import.meta.env?.DEV)) return;
+    }
+  } catch {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.info("[vs01-field-overlap-adjusted]", payload);
 }
 
 /** Bottom-right auto initials: normalized margins from page edges (x = 1 - marginX - width). */

@@ -1,4 +1,12 @@
 import type { PlacedSigningField } from "./signingFields";
+import type { Vs01SignerRuntimeContext } from "./vs01FieldValueResolution";
+import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import {
+  logVs01TemplateRenderValue,
+  prepareTemplateDisplayForField,
+  prepareTemplateCornerLabel,
+  resolvePrepareFieldDisplayValue,
+} from "./vs01PrepareTemplateField";
 
 function formatIsoDateDisplay(iso: string): string {
   const t = iso.trim();
@@ -7,12 +15,6 @@ function formatIsoDateDisplay(iso: string): string {
   if (!m) return t;
   return `${m[2]}/${m[3]}/${m[1]}`;
 }
-import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
-import {
-  logVs01TemplateRenderValue,
-  prepareTemplateDisplayForField,
-  prepareTemplateCornerLabel,
-} from "./vs01PrepareTemplateField";
 
 export type PrepareOwnerSignaturePreview = {
   signatureMode: "type" | "draw" | "upload";
@@ -25,22 +27,28 @@ export type PrepareSigningFieldBodyProps = {
   field: PlacedSigningField;
   role: Vs01PrepareSigningRole | null;
   ownerPreview: PrepareOwnerSignaturePreview;
+  ownerPad: Vs01SignerRuntimeContext;
   isSelected: boolean;
   busy: boolean;
   onValueChange: (value: string) => void;
+  onInputFocus?: () => void;
 };
 
 export function PrepareSigningFieldBody({
   field,
   role,
   ownerPreview,
+  ownerPad,
   isSelected,
   busy,
   onValueChange,
+  onInputFocus,
 }: PrepareSigningFieldBodyProps) {
-  const display = prepareTemplateDisplayForField(field, role);
+  const display = prepareTemplateDisplayForField(field, role, ownerPad);
   const isOwnerField = (role?.kind ?? field.assignedSignerRoleKind) === "owner";
-  const textVal = typeof field.value === "string" ? field.value : "";
+  const stored = typeof field.value === "string" ? field.value : "";
+  const resolved = resolvePrepareFieldDisplayValue(field, role, ownerPad);
+  const editValue = stored || resolved;
 
   logVs01TemplateRenderValue({
     fieldId: field.id.slice(0, 12),
@@ -53,8 +61,8 @@ export function PrepareSigningFieldBody({
 
   if (field.type === "signature") {
     if (isOwnerField) {
-      return (
-        <div className="vs01-sign-placement-signature-body">
+    return (
+      <div className="vs01-sign-placement-signature-body">
           {ownerPreview.signatureMode === "type" && ownerPreview.typedName.trim() ? (
             <span className="vs01-sign-placement-script">{ownerPreview.typedName.trim()}</span>
           ) : null}
@@ -78,7 +86,7 @@ export function PrepareSigningFieldBody({
       );
     }
     return (
-      <div className="vs01-sign-placement-signature-body">
+      <div className="vs01-sign-placement-signature-body vs01-sign-placement-body--noninteractive">
         <span className="vs01-recipient-field-assignee">{display.assigneeLine}</span>
         <span
           className={`vs01-recipient-field-placeholder-text${display.isPlaceholder ? "" : " vs01-sign-placement-script"}`}
@@ -91,7 +99,9 @@ export function PrepareSigningFieldBody({
 
   if (field.type === "initials") {
     return (
-      <span className={`vs01-sign-placement-initials${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}>
+      <span
+        className={`vs01-sign-placement-initials vs01-sign-placement-body--noninteractive${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}
+      >
         {display.body}
       </span>
     );
@@ -111,10 +121,11 @@ export function PrepareSigningFieldBody({
         <input
           type={field.type === "email" ? "email" : "text"}
           className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-          value={textVal}
+          value={editValue}
           placeholder={placeholder}
           autoComplete={field.type === "email" ? "email" : field.type === "printed_name" ? "name" : "off"}
           aria-label={prepareTemplateCornerLabel(field.type, role)}
+          onFocus={() => onInputFocus?.()}
           onChange={(ev) => onValueChange(ev.target.value)}
           onPointerDown={(ev) => ev.stopPropagation()}
           onClick={(ev) => ev.stopPropagation()}
@@ -122,7 +133,9 @@ export function PrepareSigningFieldBody({
       );
     }
     return (
-      <span className={`vs01-sign-placement-text${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}>
+      <span
+        className={`vs01-sign-placement-text vs01-sign-placement-body--noninteractive${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}
+      >
         {display.body}
       </span>
     );
@@ -134,8 +147,9 @@ export function PrepareSigningFieldBody({
         <input
           type="date"
           className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-          value={textVal}
+          value={editValue}
           aria-label="Date on document"
+          onFocus={() => onInputFocus?.()}
           onChange={(ev) => onValueChange(ev.target.value)}
           onPointerDown={(ev) => ev.stopPropagation()}
           onClick={(ev) => ev.stopPropagation()}
@@ -143,11 +157,14 @@ export function PrepareSigningFieldBody({
       );
     }
     return (
-      <span className={`vs01-sign-placement-text${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}>
-        {textVal.trim() ? formatIsoDateDisplay(textVal) : "Date"}
+      <span
+        className={`vs01-sign-placement-text vs01-sign-placement-body--noninteractive${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}
+      >
+        {editValue.trim() ? formatIsoDateDisplay(editValue) : display.body}
       </span>
     );
   }
 
   return null;
 }
+

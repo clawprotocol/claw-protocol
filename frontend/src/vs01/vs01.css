@@ -2700,6 +2700,20 @@ button.vs01-upload-btn:disabled {
   filter: grayscale(0.15);
 }
 
+.vs01-sign-placement-body--noninteractive {
+  pointer-events: none;
+}
+
+.vs01-sign-placement-box .vs01-sign-field-inline-input {
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
+}
+
+.vs01-sign-placement-box--selected {
+  z-index: 5;
+}
+
 .vs01-sign-placing-for-role {
   margin: 0 0 0.5rem;
   font-size: 0.82rem;
