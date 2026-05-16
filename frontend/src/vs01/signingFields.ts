@@ -35,6 +35,7 @@ export type PlacedSigningField = {
   assignedSignerEmail?: string;
   assignedSignerRoleId?: string;
   assignedSignerRoleLabel?: string;
+  assignedSignerRoleKind?: "owner" | "counterparty";
   assignmentSource?: Vs01SignerFieldAssignmentSource;
 };
 
@@ -80,17 +81,39 @@ export function resolveRecipientEmailForEmailFieldPlacement(counterpartyEmail: s
   return isPlausibleEmail(raw) ? raw : "";
 }
 
+/** Canonical default geometry (normalized 0..1) for all manual sender/recipient placements. */
+export function getVs01DefaultFieldGeometry(
+  fieldType: SigningFieldType | Vs01RecipientFieldType,
+): { width: number; height: number } {
+  switch (fieldType) {
+    case "signature":
+      return { width: 0.34, height: 0.075 };
+    case "printed_name":
+      return { width: 0.28, height: 0.045 };
+    case "text":
+      return { width: 0.28, height: 0.045 };
+    case "date":
+      return { width: 0.18, height: 0.04 };
+    case "email":
+      return { width: 0.3, height: 0.045 };
+    case "initials":
+      return { width: 0.074, height: 0.034 };
+    default:
+      return { width: 0.28, height: 0.045 };
+  }
+}
+
 /**
  * Single source of truth for **manual** signing-field default footprint (normalized 0..1 on the page).
- * Compact, line-aligned defaults for e-sign UX; gray auto-initials use {@link autoInitialsPlacementDims} only.
+ * Derived from {@link getVs01DefaultFieldGeometry}; gray auto-initials use {@link autoInitialsPlacementDims} only.
  */
 export const VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM: Record<SigningFieldType, { width: number; height: number }> = {
-  signature: { width: 0.32, height: 0.072 },
-  initials: { width: 0.074, height: 0.034 },
-  printed_name: { width: 0.21, height: 0.032 },
-  text: { width: 0.22, height: 0.032 },
-  email: { width: 0.22, height: 0.032 },
-  date: { width: 0.14, height: 0.032 },
+  signature: getVs01DefaultFieldGeometry("signature"),
+  initials: getVs01DefaultFieldGeometry("initials"),
+  printed_name: getVs01DefaultFieldGeometry("printed_name"),
+  text: getVs01DefaultFieldGeometry("text"),
+  email: getVs01DefaultFieldGeometry("email"),
+  date: getVs01DefaultFieldGeometry("date"),
 };
 
 /** Hard page caps for resize (geometry stays on-page). */
@@ -104,7 +127,7 @@ export type Vs01FieldResizeBoundsNorm = {
 };
 
 const VS01_MANUAL_FIELD_RESIZE_BOUNDS_NORM: Record<SigningFieldType, Vs01FieldResizeBoundsNorm> = {
-  signature: { minW: 0.18, minH: 0.05, maxW: 0.92, maxH: 0.28 },
+  signature: { minW: 0.22, minH: 0.055, maxW: 0.92, maxH: 0.32 },
   initials: { minW: 0.048, minH: 0.026, maxW: 0.2, maxH: 0.11 },
   printed_name: { minW: 0.14, minH: 0.028, maxW: 0.55, maxH: 0.09 },
   text: { minW: 0.14, minH: 0.026, maxW: 0.92, maxH: 0.45 },
@@ -126,7 +149,7 @@ export function labelForRecipientFieldType(t: Vs01RecipientFieldType): string {
 }
 
 export function defaultSizeForRecipientField(t: Vs01RecipientFieldType): { width: number; height: number } {
-  return VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM[t];
+  return getVs01DefaultFieldGeometry(t);
 }
 
 export function signingFieldResizeBoundsNorm(t: SigningFieldType): Vs01FieldResizeBoundsNorm {
@@ -167,12 +190,10 @@ export function computeRecipientRectFromClick(
   clickX: number,
   clickY: number
 ): { x: number; y: number; width: number; height: number } {
-  const { width, height } = defaultSizeForRecipientField(type);
+  const { width, height } = getVs01DefaultFieldGeometry(type);
   const cx = Math.min(1, Math.max(0, clickX));
   const cy = Math.min(1, Math.max(0, clickY));
-  const x = Math.max(0, Math.min(cx, 1 - width));
-  const y = Math.max(0, Math.min(cy, 1 - height));
-  return { x, y, width, height };
+  return clampFieldRectToPage(cx, cy, width, height);
 }
 
 export function newSigningFieldId(): string {
@@ -184,7 +205,68 @@ export function newSigningFieldId(): string {
 
 /** Normalized defaults for sender manual tools (same map as recipient manual fields). */
 export function defaultSizeForType(t: SigningFieldType): { width: number; height: number } {
-  return VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM[t];
+  return getVs01DefaultFieldGeometry(t);
+}
+
+export function clampFieldRectToPage(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): { x: number; y: number; width: number; height: number } {
+  const w = Math.min(Math.max(width, 0.01), VS01_FIELD_RESIZE_PAGE_CAP_NORM.maxW);
+  const h = Math.min(Math.max(height, 0.01), VS01_FIELD_RESIZE_PAGE_CAP_NORM.maxH);
+  const xClamped = Math.max(0, Math.min(x, 1 - w));
+  const yClamped = Math.max(0, Math.min(y, 1 - h));
+  return { x: xClamped, y: yClamped, width: w, height: h };
+}
+
+type FieldWithGeometry = {
+  type: SigningFieldType | Vs01RecipientFieldType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  autoInitials?: boolean;
+};
+
+/**
+ * Bump legacy/tiny fields up to minimum geometry without shrinking user-resized fields above minimum.
+ */
+export function normalizePlacedFieldGeometryIfBelowMinimum<T extends FieldWithGeometry>(
+  field: T,
+): { field: T; normalized: boolean } {
+  if (field.autoInitials && field.type === "initials") {
+    return { field, normalized: false };
+  }
+  const def = getVs01DefaultFieldGeometry(field.type);
+  const bounds = signingFieldResizeBoundsNorm(field.type as SigningFieldType);
+  const minW = Math.max(bounds.minW, def.width * 0.85);
+  const minH = Math.max(bounds.minH, def.height * 0.85);
+  let normalized = false;
+  let { width, height, x, y } = field;
+  if (width < minW) {
+    width = def.width;
+    normalized = true;
+  }
+  if (height < minH) {
+    height = def.height;
+    normalized = true;
+  }
+  const clamped = clampFieldRectToPage(x, y, width, height);
+  if (
+    clamped.x !== field.x ||
+    clamped.y !== field.y ||
+    clamped.width !== field.width ||
+    clamped.height !== field.height
+  ) {
+    normalized = true;
+  }
+  if (!normalized) return { field, normalized: false };
+  return {
+    field: { ...field, ...clamped },
+    normalized: true,
+  };
 }
 
 /**
@@ -196,12 +278,10 @@ export function computeRectFromClick(
   clickX: number,
   clickY: number
 ): { x: number; y: number; width: number; height: number } {
-  const { width, height } = defaultSizeForType(type);
+  const { width, height } = getVs01DefaultFieldGeometry(type);
   const cx = Math.min(1, Math.max(0, clickX));
   const cy = Math.min(1, Math.max(0, clickY));
-  const x = Math.max(0, Math.min(cx, 1 - width));
-  const y = Math.max(0, Math.min(cy, 1 - height));
-  return { x, y, width, height };
+  return clampFieldRectToPage(cx, cy, width, height);
 }
 
 /** Bottom-right auto initials: normalized margins from page edges (x = 1 - marginX - width). */

@@ -42,12 +42,12 @@ import { canFinishPreparingSigningPacket } from "../agreement/partySigningRoles"
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import {
   evaluatePreparePacketGateFromRoles,
-  findPrepareSigningRole,
-  logVs01ActiveRoleChange,
+  findNextIncompletePrepareRole,
   logVs01RequiredProgress,
   placedFieldMatchesPrepareRole,
-  stampAndLogRecipientFieldForPrepareRole,
+  stampPrepareRecipientFieldOrReject,
 } from "./vs01SignerFieldAssignment";
+import { useVs01PrepareActiveRole } from "./useVs01PrepareActiveRole";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -204,42 +204,65 @@ export function StepCompleteAndSend({
 }: StepCompleteAndSendProps) {
   const busy = false;
 
-  const prepareSignerRolesRef = useRef(prepareSignerRoles);
-  prepareSignerRolesRef.current = prepareSignerRoles;
-  const prepareActiveRoleIdRef = useRef((prepareActiveSignerRoleId ?? "").trim());
-  useEffect(() => {
-    const next = (prepareActiveSignerRoleId ?? "").trim();
-    if (next) prepareActiveRoleIdRef.current = next;
-  }, [prepareActiveSignerRoleId]);
+  const {
+    rolesRef: prepareSignerRolesRef,
+    activeRoleIdRef: prepareActiveRoleIdRef,
+    activePrepareRole,
+    ownerPrepareRole,
+    selectPrepareRole: selectPrepareRoleBase,
+    resolveRoleAtPlacement,
+  } = useVs01PrepareActiveRole({
+    prepareSignerRoles,
+    prepareActiveSignerRoleId,
+    onPrepareActiveSignerRoleChange,
+  });
 
-  const ownerPrepareRole = useMemo(
-    () => (prepareSignerRoles?.length ? prepareSignerRoles[0]! : null),
-    [prepareSignerRoles],
-  );
-
-  const activePrepareRole = useMemo(
-    () => findPrepareSigningRole(prepareSignerRoles, prepareActiveSignerRoleId),
-    [prepareSignerRoles, prepareActiveSignerRoleId],
-  );
+  const senderPlacedFieldsForGateRef = useRef(senderPlacedFields);
+  senderPlacedFieldsForGateRef.current = senderPlacedFields;
 
   const selectPrepareRole = useCallback(
     (roleId: string) => {
-      const prevId = prepareActiveRoleIdRef.current;
-      prepareActiveRoleIdRef.current = roleId.trim();
-      const role = findPrepareSigningRole(prepareSignerRolesRef.current, roleId);
-      if (role) logVs01ActiveRoleChange(role, prevId);
-      onPrepareActiveSignerRoleChange?.(roleId);
+      selectPrepareRoleBase(roleId);
+      const role = prepareSignerRolesRef.current?.find((r) => r.roleId === roleId.trim());
       const cpId = role?.vs01CounterpartyId ?? "";
       if (cpId) setSelectedCounterpartyId(cpId);
       setSelectedFieldId(null);
       setArmedTool(null);
     },
-    [onPrepareActiveSignerRoleChange],
+    [selectPrepareRoleBase, prepareSignerRolesRef],
   );
 
-  const resolveRoleAtPlacement = useCallback((): Vs01PrepareSigningRole | null => {
-    return findPrepareSigningRole(prepareSignerRolesRef.current, prepareActiveRoleIdRef.current);
-  }, []);
+  const maybeAutoAdvancePrepareRole = useCallback(
+    (nextRecipientFields: Vs01RecipientPlacedField[]) => {
+      const roles = prepareSignerRolesRef.current;
+      if (!prepareSigningPacket || !roles?.length) return;
+      const gate = evaluatePreparePacketGateFromRoles(
+        roles,
+        senderPlacedFieldsForGateRef.current,
+        nextRecipientFields,
+      );
+      const curId = prepareActiveRoleIdRef.current.trim();
+      const curMiss = gate.missingByParty[curId];
+      if (curMiss?.length) return;
+      const nextRole = findNextIncompletePrepareRole(roles, gate);
+      if (nextRole?.vs01CounterpartyId && nextRole.roleId !== curId) {
+        selectPrepareRole(nextRole.roleId);
+      }
+    },
+    [prepareSigningPacket, prepareSignerRolesRef, prepareActiveRoleIdRef, selectPrepareRole],
+  );
+
+  const advanceToNextIncompleteSigner = useCallback(() => {
+    const roles = prepareSignerRolesRef.current;
+    if (!roles?.length) return;
+    const gate = evaluatePreparePacketGateFromRoles(
+      roles,
+      senderPlacedFieldsForGateRef.current,
+      fieldsRef.current,
+    );
+    const nextRole = findNextIncompletePrepareRole(roles, gate);
+    if (nextRole) selectPrepareRole(nextRole.roleId);
+  }, [prepareSignerRolesRef, selectPrepareRole]);
 
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
@@ -590,13 +613,10 @@ export function StepCompleteAndSend({
   ]);
 
   useEffect(() => {
-    if (!prepareSigningPacket || !prepareSignerRoles?.length) return;
-    const role = findPrepareSigningRole(prepareSignerRoles, prepareActiveSignerRoleId);
-    const cpId = role?.vs01CounterpartyId ?? "";
-    if (cpId && cpId !== selectedCounterpartyId) {
-      setSelectedCounterpartyId(cpId);
-    }
-  }, [prepareSigningPacket, prepareSignerRoles, prepareActiveSignerRoleId, selectedCounterpartyId]);
+    if (!prepareSigningPacket || !activePrepareRole?.vs01CounterpartyId) return;
+    const cpId = activePrepareRole.vs01CounterpartyId;
+    if (cpId !== selectedCounterpartyId) setSelectedCounterpartyId(cpId);
+  }, [prepareSigningPacket, activePrepareRole, selectedCounterpartyId]);
 
   const onPagePlacementClick = useCallback(
     (pageIndex0: number, ev: MouseEvent<HTMLDivElement>) => {
@@ -640,15 +660,21 @@ export function StepCompleteAndSend({
         displayName,
         emailForField,
       );
-      const nf =
-        prepareSigningPacket && roleAtClick
-          ? stampAndLogRecipientFieldForPrepareRole(
-              nfRaw,
-              roleAtClick,
-              prepareActiveRoleIdRef.current,
-            )
-          : nfRaw;
-      onRecipientFieldsChange((prev) => [...prev, nf]);
+      let nf: Vs01RecipientPlacedField = nfRaw;
+      if (prepareSigningPacket && roleAtClick) {
+        const stamped = stampPrepareRecipientFieldOrReject(
+          nfRaw,
+          roleAtClick,
+          prepareActiveRoleIdRef.current.trim(),
+        );
+        if (!stamped) return;
+        nf = stamped;
+      }
+      onRecipientFieldsChange((prev) => {
+        const next = [...prev, nf];
+        queueMicrotask(() => maybeAutoAdvancePrepareRole(next));
+        return next;
+      });
       setSelectedFieldId(nf.id);
       setCurrentPage(pageIndex0 + 1);
       setArmedTool(null);
@@ -670,6 +696,8 @@ export function StepCompleteAndSend({
       prepareSigningPacket,
       prepareSignerRoles,
       resolveRoleAtPlacement,
+      maybeAutoAdvancePrepareRole,
+      prepareActiveRoleIdRef,
     ]
   );
 
@@ -1317,6 +1345,16 @@ export function StepCompleteAndSend({
                       );
                     })}
                   </ul>
+                ) : null}
+                {prepareGate && !prepareGate.canFinish ? (
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--secondary vs01-btn--auto mt-2 text-sm"
+                    disabled={busy}
+                    onClick={advanceToNextIncompleteSigner}
+                  >
+                    Next signer
+                  </button>
                 ) : null}
               </div>
             ) : (

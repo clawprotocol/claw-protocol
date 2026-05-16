@@ -2679,7 +2679,7 @@ export function AgreementRecipientReview({
     }
     if (
       !window.confirm(
-        "You are confirming this version is acceptable and ready for signing."
+        "You are confirming this version is acceptable for review. Nothing is signed yet."
       )
     ) {
       return;

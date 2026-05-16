@@ -65,6 +65,7 @@ export type Vs01RecipientPlacedField = {
   assignedSignerEmail?: string;
   assignedSignerRoleId?: string;
   assignedSignerRoleLabel?: string;
+  assignedSignerRoleKind?: "owner" | "counterparty";
   assignmentSource?: Vs01SignerFieldAssignmentSource;
 };
 
