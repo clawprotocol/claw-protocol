@@ -1465,6 +1465,16 @@ const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = PRO_UPGRADE_WAIT_MODAL_TITLE;
 const PAID_PREMIUM_CONNECTION_RECOVERY_COPY =
   "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.";
 
+const PREMIUM_NETWORK_MODAL_TITLE = "Connection interrupted";
+const PREMIUM_NETWORK_MODAL_BODY =
+  "Your draft is safe. LawDog lost connection while building the Pro agreement.";
+
+type PremiumPostCheckoutPhase = null | "awaiting_gaps" | "processing" | "network_retry";
+
+function isPremiumNetworkRetryablePipelineResult(result: PremiumCompletionResult): boolean {
+  return Boolean(result.premiumNetworkRetryable) || result.premiumRenderSource === "premium_network_retryable";
+}
+
 function devTracePremiumSendIntent(source: string, mode: PremiumSendIntent | null, senderFirst?: boolean) {
   if (!import.meta.env.DEV) return;
   // eslint-disable-next-line no-console
@@ -1750,7 +1760,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [recipientsDeferred, setRecipientsDeferred] = useState(false);
   const [agreementTypeAccepted, setAgreementTypeAccepted] = useState(false);
   /** Post-checkout: optional gap form → processing → reveal before recipients. */
-  const [premiumPostCheckoutPhase, setPremiumPostCheckoutPhase] = useState<null | "awaiting_gaps" | "processing">(
+  const [premiumPostCheckoutPhase, setPremiumPostCheckoutPhase] = useState<PremiumPostCheckoutPhase>(
     () => readInitialPremiumReturnFromWindow().phase,
   );
   /** UI-only: longer-wait copy after PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS without closing the modal. */
@@ -1770,7 +1780,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumLastGapAnswersRef = useRef<string>("");
   const premiumGapBaseIntakeRef = useRef<string>("");
   const premiumModalEscapeHandlerRef = useRef<null | (() => void)>(null);
-  const premiumModalPrevPhaseRef = useRef<null | "awaiting_gaps" | "processing">(null);
+  const premiumModalPrevPhaseRef = useRef<PremiumPostCheckoutPhase>(null);
   /** True while `runModelPass` is in flight (post-checkout or retry). */
   const premiumProRunInFlightRef = useRef(false);
   /** Post-checkout `applySuccess` may run in an effect declared above `scheduleAgreementDocSync`; use a ref. */
@@ -3672,6 +3682,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumPipelineUserMessage(null);
         return;
       }
+      if (isPremiumNetworkRetryablePipelineResult(result)) {
+        setProFullDraftCustomGateMessage(null);
+        setProFullDraftQualityRetry(false);
+        setHardError(null);
+        setPremiumPostCheckoutPhase("network_retry");
+        setPremiumPipelineUserMessage(null);
+        lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+        setPremiumTruthPipelineSource(result.premiumRenderSource);
+        return;
+      }
       if (result.proIntentGateMessage || result.founderDetailsGateMessage) {
         setProFullDraftCustomGateMessage(result.proIntentGateMessage || result.founderDetailsGateMessage || null);
         setProFullDraftQualityRetry(true);
@@ -4248,6 +4268,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setProFullDraftQualityRetry(true);
           setPremiumPostCheckoutPhase(null);
           setPremiumPipelineUserMessage(null);
+          return;
+        }
+        if (isPremiumNetworkRetryablePipelineResult(result)) {
+          setPremiumServerGenerationDegraded(null);
+          setHardError(null);
+          setProFullDraftCustomGateMessage(null);
+          setProFullDraftQualityRetry(false);
+          clearPremiumForkUserSendMode();
+          paidProPremiumSendIntentRef.current = null;
+          clearPremiumSendIntent();
+          setPremiumSendModeUserChoice(null);
+          setPremiumSendModeTouched(false);
+          if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
+          lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+          setPremiumTruthPipelineSource(result.premiumRenderSource);
+          premiumPipelineOutputBodyRef.current = "";
+          setPremiumRefineReview(null);
+          setPremiumFinalizeAudit(null);
+          setPremiumReviewRoute(null);
+          setPremiumPostCheckoutPhase("network_retry");
+          setPremiumPipelineUserMessage(null);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[premium-modal-stage]", { to: "network_retry", ts: new Date().toISOString() });
+          }
           return;
         }
         if (result.proIntentGateMessage || result.founderDetailsGateMessage) {
@@ -11136,12 +11181,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         };
       }
       if (createUiStage === CreateUiStage.DRAFT) {
-        if (premiumPostCheckoutPhase === "awaiting_gaps" || premiumPostCheckoutPhase === "processing") {
+        if (
+          premiumPostCheckoutPhase === "awaiting_gaps" ||
+          premiumPostCheckoutPhase === "processing" ||
+          premiumPostCheckoutPhase === "network_retry"
+        ) {
           return {
             label:
               premiumPostCheckoutPhase === "awaiting_gaps"
                 ? "Finish a few details…"
-                : "Finalizing upgrade…",
+                : premiumPostCheckoutPhase === "network_retry"
+                  ? "Connection interrupted"
+                  : "Finalizing upgrade…",
             action: "continue_to_recipients",
             disabled: true,
             reason: "draft_pre_commit",
@@ -13074,7 +13125,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 aria-labelledby={
                   premiumPostCheckoutPhase === "awaiting_gaps"
                     ? "claw-premium-finish-facts-title"
-                    : "claw-premium-processing-title"
+                    : premiumPostCheckoutPhase === "network_retry"
+                      ? "claw-premium-network-retry-title"
+                      : "claw-premium-processing-title"
                 }
               >
                 <div className="w-full max-w-2xl rounded-2xl border border-emerald-500/25 bg-slate-950/95 p-8 shadow-2xl shadow-black/60 sm:p-10">
@@ -13156,6 +13209,66 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       }}
                       continueDisabled={false}
                     />
+                  ) : premiumPostCheckoutPhase === "network_retry" ? (
+                    <>
+                      <h2
+                        id="claw-premium-network-retry-title"
+                        className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
+                      >
+                        {PREMIUM_NETWORK_MODAL_TITLE}
+                      </h2>
+                      <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
+                        {PREMIUM_NETWORK_MODAL_BODY}
+                      </p>
+                      <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center sm:gap-3">
+                        <button
+                          type="button"
+                          className="vs01-btn vs01-btn--primary w-full sm:w-auto"
+                          onClick={() => {
+                            const m = runPremiumModelPassRef.current;
+                            if (!m) {
+                              setHardError(
+                                "We couldn’t start a retry from this state. Refresh the page, then try again.",
+                              );
+                              return;
+                            }
+                            setHardError(null);
+                            setProFullDraftCustomGateMessage(null);
+                            setProFullDraftQualityRetry(false);
+                            const base = premiumGapBaseIntakeRef.current.trim();
+                            if (!base) {
+                              setHardError("We need your intake to retry. Confirm your text above, then try again.");
+                              return;
+                            }
+                            const notes = pendingUpgradePromptRef.current.trim();
+                            const it = buildPremiumMergedIntakeWithUserNotes(base, notes);
+                            const ga = (premiumLastGapAnswersRef.current || "").trim();
+                            setPremiumPostCheckoutPhase("processing");
+                            setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
+                            void m({
+                              intakeText: ga
+                                ? `${base}\n\n— Finish your agreement (user details):\n${ga}`
+                                : it,
+                              userGapAnswers: ga || null,
+                              gapResolverSkippedWithDefaults: !ga,
+                            });
+                          }}
+                        >
+                          Try Pro again
+                        </button>
+                        <button
+                          type="button"
+                          className="vs01-btn vs01-btn--secondary w-full sm:w-auto"
+                          onClick={() => {
+                            setPremiumPostCheckoutPhase(null);
+                            setPremiumPipelineUserMessage(null);
+                            setHardError(null);
+                          }}
+                        >
+                          Back to draft
+                        </button>
+                      </div>
+                    </>
                   ) : (
                     <>
                       <h2

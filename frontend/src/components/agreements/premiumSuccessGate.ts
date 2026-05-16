@@ -16,7 +16,8 @@ function pipelineIsIneligible(s: string | null | undefined): boolean {
     s === "fallback_preview_error" ||
     s === "snapshot_fallback" ||
     s === "stale_intake" ||
-    s === "rejected_paid_corpus"
+    s === "rejected_paid_corpus" ||
+    s === "premium_network_retryable"
   );
 }
 

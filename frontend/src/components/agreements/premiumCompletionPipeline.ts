@@ -115,7 +115,8 @@ export type PremiumRenderSource =
   | "snapshot_server_full_draft"
   | "snapshot_fallback"
   | "stale_intake"
-  | "rejected_paid_corpus";
+  | "rejected_paid_corpus"
+  | "premium_network_retryable";
 
 export type PremiumCompletionResult = {
   premiumDraft: ParsedDraftShape;
@@ -155,6 +156,8 @@ export type PremiumCompletionResult = {
   };
   /** When the API returned 200 with a non-model structured fallback (checkout still valid). */
   serverGenerationDegraded?: { code: string; message: string } | null;
+  /** Transient browser/network failure during premium-full-draft — free draft must stay visible; retry in modal. */
+  premiumNetworkRetryable?: boolean;
 };
 
 /** @deprecated — positive stitched body is built in {@link buildPremiumPostCheckoutStitchedBody}. */
@@ -1294,26 +1297,42 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       stage: "premium_full_draft_with_retry_start",
       intakeLen: soT.length,
     });
-    const full = await postPremiumFullDraftWithRetry({
+    const fullResp = await postPremiumFullDraftWithRetry({
       intakeText: soT,
       context: fullCtx,
       userGapAnswers: gapAns || null,
+      agreementIdShort: (input.agreementGenerationId || "").trim().slice(0, 8) || null,
     });
-    if (!full) {
-      logPremiumCompletionDebug({
-        stage: "premium_full_draft_client_null",
-        intakeLen: soT.length,
-        accepted: false,
-        rejectedReason: "postPremiumFullDraftWithRetry_returned_null",
-      });
-      if (import.meta.env.MODE !== "test" && intentContract.pro_strict) {
-        proIntentGateMessage = proIntentMessageWhenServerFullDraftFailed(intentContract);
-        premiumRenderSource = "rejected_paid_corpus";
-      }
-      if (tierAEnabled) {
-        tierADiag.backendGenerationOutcome = "no_response";
+    if (!fullResp.ok) {
+      if (fullResp.failure_kind === "network" && fullResp.retryable) {
+        logPremiumCompletionDebug({
+          stage: "premium_full_draft_network_retryable",
+          intakeLen: soT.length,
+          accepted: false,
+          rejectedReason: fullResp.error_code,
+          premiumRenderSource: "premium_network_retryable",
+        });
+        premiumRenderSource = "premium_network_retryable";
+        if (tierAEnabled) {
+          tierADiag.backendGenerationOutcome = "network_error";
+        }
+      } else {
+        logPremiumCompletionDebug({
+          stage: "premium_full_draft_client_null",
+          intakeLen: soT.length,
+          accepted: false,
+          rejectedReason: fullResp.error_code || "postPremiumFullDraftWithRetry_failed",
+        });
+        if (import.meta.env.MODE !== "test" && intentContract.pro_strict) {
+          proIntentGateMessage = proIntentMessageWhenServerFullDraftFailed(intentContract);
+          premiumRenderSource = "rejected_paid_corpus";
+        }
+        if (tierAEnabled) {
+          tierADiag.backendGenerationOutcome = "no_response";
+        }
       }
     } else {
+      const full = fullResp.result;
       if (tierAEnabled) {
         tierADiag.backendReturnedDocumentText = Boolean((full.document_text || "").trim());
         tierADiag.backendDocumentTextLen = (full.document_text || "").trim().length;
@@ -1767,7 +1786,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       console.warn("[premium-full-draft] call failed, using dynamic sections", e);
     }
   }
-  if (!(winningPremiumBodyText || "").trim() && premiumRenderSource !== "rejected_paid_corpus") {
+  if (
+    !(winningPremiumBodyText || "").trim() &&
+    premiumRenderSource !== "rejected_paid_corpus" &&
+    premiumRenderSource !== "premium_network_retryable"
+  ) {
     const stripped = stripClientPremiumArtifactBlocksFromDraft(outMerged);
     const rawSoT = rawForSoT || rawIntake;
     let fb =
@@ -1882,6 +1905,33 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   void input.guidedFlowId;
 
   const finalWinning = (winningPremiumBodyText || "").trim();
+  if (premiumRenderSource === "premium_network_retryable") {
+    if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+    logPremiumCompletionDebug({
+      stage: "pipeline_return_premium_network_retryable",
+      accepted: false,
+      rejectedReason: "network_retryable",
+      premiumRenderSource: "premium_network_retryable",
+    });
+    return {
+      premiumDraft: outMerged,
+      premiumParties,
+      recipientCandidates,
+      winningPremiumBodyText: "",
+      premiumRenderSource,
+      premiumReview,
+      premiumFinalizeAudit,
+      premiumReviewRoute,
+      staleIntakeOrGeneration: false,
+      agreementGenerationId: input.agreementGenerationId,
+      premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+      founderDetailsGateMessage: null,
+      proIntentGateMessage: null,
+      serverGenerationDegraded: null,
+      premiumNetworkRetryable: true,
+      tierADiagnostic: tierADiag,
+    };
+  }
   if (premiumRenderSource === "rejected_paid_corpus") {
     if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
     logPremiumCompletionDebug({

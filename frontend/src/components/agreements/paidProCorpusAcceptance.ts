@@ -27,6 +27,7 @@ export type PipelineProSourceString =
   | "snapshot_fallback"
   | "stale_intake"
   | "rejected_paid_corpus"
+  | "premium_network_retryable"
   | string;
 
 /** Pipeline sources where the model already returned an accepted full draft; intent title stems are hints, not Pro truth. */
@@ -85,7 +86,8 @@ export function isUnacceptablePipelineProSource(
     s === "fallback_preview_error" ||
     s === "snapshot_fallback" ||
     s === "stale_intake" ||
-    s === "rejected_paid_corpus"
+    s === "rejected_paid_corpus" ||
+    s === "premium_network_retryable"
   )
     return true;
   return false;

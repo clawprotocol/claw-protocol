@@ -64,6 +64,70 @@ export type PremiumFullDraftResult = {
   server_generation_failure_message?: string;
 };
 
+export type PremiumFullDraftFailureKind = "network" | "http" | "exception";
+
+export type PremiumFullDraftNetworkErrorCode = "network_changed" | "network_error";
+
+export type PremiumFullDraftApiFailure = {
+  ok: false;
+  failure_kind: PremiumFullDraftFailureKind;
+  retryable: boolean;
+  error_code: string;
+  document_text: "";
+  attemptCount: number;
+  httpStatus?: number;
+  browserErrorName?: string;
+  browserErrorMessage?: string;
+};
+
+export type PremiumFullDraftApiSuccess = {
+  ok: true;
+  result: PremiumFullDraftResult;
+};
+
+export type PremiumFullDraftApiResult = PremiumFullDraftApiSuccess | PremiumFullDraftApiFailure;
+
+/** True when fetch failed before a normal HTTP response (transient browser/network). */
+export function isPremiumFullDraftNetworkFailure(error: unknown): boolean {
+  if (error == null) return false;
+  if (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") {
+    return false;
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : "";
+  if (/ERR_NETWORK_CHANGED|network changed/i.test(msg)) return true;
+  if (/Failed to fetch|NetworkError|Load failed|ERR_INTERNET_DISCONNECTED|net::ERR_/i.test(msg)) return true;
+  if (name === "TypeError" && /fetch|network/i.test(msg)) return true;
+  return false;
+}
+
+export function premiumFullDraftNetworkErrorCode(error: unknown): PremiumFullDraftNetworkErrorCode {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /ERR_NETWORK_CHANGED|network changed/i.test(msg) ? "network_changed" : "network_error";
+}
+
+export function logPremiumNetworkError(args: {
+  agreementIdShort?: string | null;
+  intakeLen: number;
+  attemptCount: number;
+  browserErrorName?: string;
+  browserErrorMessage?: string;
+  retryable: boolean;
+  errorCode: string;
+}): void {
+  if (import.meta.env.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-network-error]", {
+    agreementIdShort: args.agreementIdShort ?? null,
+    intakeLen: args.intakeLen,
+    attemptCount: args.attemptCount,
+    browserErrorName: args.browserErrorName ?? null,
+    browserErrorMessage: (args.browserErrorMessage ?? "").slice(0, 160) || null,
+    retryable: args.retryable,
+    error_code: args.errorCode,
+  });
+}
+
 export function buildPremiumFullDraftContext(draft: ParsedDraftShape): PremiumFullDraftContextPayload {
   return {
     title: draft.title || "",
@@ -285,7 +349,7 @@ export async function postPremiumFullDraftOnce(args: {
 }
 
 /**
- * Retry once; returns null on failure (caller must fall back to legacy premium preview build).
+ * Retry once. Returns a typed failure for network/HTTP errors (never `null` for transient network).
  */
 export async function postPremiumFullDraftWithRetry(
   args: {
@@ -293,8 +357,9 @@ export async function postPremiumFullDraftWithRetry(
     context: PremiumFullDraftContextPayload;
     userGapAnswers?: string | null;
     signal?: AbortSignal;
+    agreementIdShort?: string | null;
   },
-): Promise<PremiumFullDraftResult | null> {
+): Promise<PremiumFullDraftApiResult> {
   // Vitest runs in `test` mode — never block on real HTTP (local backend may be absent).
   if (import.meta.env.MODE === "test") {
     console.info("[gap-trace] stage=frontend_full_draft_skipped_test_mode", {
@@ -302,19 +367,36 @@ export async function postPremiumFullDraftWithRetry(
       has_user_gap_answers: Boolean((args.userGapAnswers || "").trim()),
       user_gap_answers_len: (args.userGapAnswers || "").trim().length,
     });
-    return null;
+    return {
+      ok: false,
+      failure_kind: "http",
+      retryable: false,
+      error_code: "test_mode_skipped",
+      document_text: "",
+      attemptCount: 0,
+    };
   }
   let lastErr: unknown;
+  const intakeLen = (args.intakeText || "").length;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      return await postPremiumFullDraftOnce({
+      const result = await postPremiumFullDraftOnce({
         intakeText: args.intakeText,
         context: args.context,
         userGapAnswers: args.userGapAnswers,
         signal: args.signal,
       });
+      return { ok: true, result };
     } catch (e) {
       lastErr = e;
+      if (isPremiumFullDraftNetworkFailure(e)) {
+        if (import.meta.env.DEV) {
+          const msg = e instanceof Error ? e.message : String(e);
+          // eslint-disable-next-line no-console
+          console.warn("[premium-full-draft] network_attempt_failed", { attempt: attempt + 1, message: msg });
+        }
+        continue;
+      }
       if (import.meta.env.DEV) {
         const msg = e instanceof Error ? e.message : String(e);
         // eslint-disable-next-line no-console
@@ -322,9 +404,44 @@ export async function postPremiumFullDraftWithRetry(
       }
     }
   }
+  const attemptCount = 2;
+  if (isPremiumFullDraftNetworkFailure(lastErr)) {
+    const errorCode = premiumFullDraftNetworkErrorCode(lastErr);
+    const browserErrorName = lastErr instanceof Error ? lastErr.name : undefined;
+    const browserErrorMessage = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    logPremiumNetworkError({
+      agreementIdShort: args.agreementIdShort ?? null,
+      intakeLen,
+      attemptCount,
+      browserErrorName,
+      browserErrorMessage,
+      retryable: true,
+      errorCode,
+    });
+    return {
+      ok: false,
+      failure_kind: "network",
+      retryable: true,
+      error_code: errorCode,
+      document_text: "",
+      attemptCount,
+      browserErrorName,
+      browserErrorMessage: browserErrorMessage.slice(0, 200),
+    };
+  }
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
     console.warn("[premium-full-draft] both attempts failed", { lastError: lastErr });
   }
-  return null;
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "premium_full_draft_failed");
+  return {
+    ok: false,
+    failure_kind: "exception",
+    retryable: false,
+    error_code: "premium_full_draft_failed",
+    document_text: "",
+    attemptCount,
+    browserErrorName: lastErr instanceof Error ? lastErr.name : undefined,
+    browserErrorMessage: msg.slice(0, 200),
+  };
 }

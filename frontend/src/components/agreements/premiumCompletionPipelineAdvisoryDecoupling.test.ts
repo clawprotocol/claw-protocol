@@ -32,8 +32,18 @@ vi.mock("./premiumFullDraftApi", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./premiumFullDraftApi")>();
   return {
     ...mod,
-    postPremiumFullDraftWithRetry: () => (h.mockFull ? Promise.resolve(h.mockFull) : Promise.resolve(null)),
-    postPremiumFullDraftOnce: () => (h.mockFull ? Promise.resolve(h.mockFull) : Promise.resolve(null)),
+    postPremiumFullDraftWithRetry: () =>
+      h.mockFull
+        ? Promise.resolve({ ok: true as const, result: h.mockFull })
+        : Promise.resolve({
+            ok: false as const,
+            failure_kind: "http" as const,
+            retryable: false,
+            error_code: "test_no_mock",
+            document_text: "" as const,
+            attemptCount: 0,
+          }),
+    postPremiumFullDraftOnce: () => (h.mockFull ? Promise.resolve(h.mockFull) : Promise.reject(new Error("no_mock"))),
   };
 });
 
