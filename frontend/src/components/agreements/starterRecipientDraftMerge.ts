@@ -10,7 +10,18 @@ import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormal
 const PROMPT_POLLUTION_HINT =
   /\b(make|include|need|want|please|for\s+\d+\s+(?:day|days|week|weeks|month|months|year|years))\b/i;
 
-type PartyRow = ParsedDraftShape["parties"][number] & { email?: string };
+type PartyRow = ParsedDraftShape["parties"][number] & {
+  email?: string;
+  signerName?: string;
+  signerTitle?: string;
+};
+
+function explicitSignerNameForEntity(signerName: string, entityName: string): string | undefined {
+  const sn = signerName.trim();
+  if (!sn) return undefined;
+  if (sn.toLowerCase() === entityName.trim().toLowerCase()) return undefined;
+  return sn;
+}
 
 export type StarterRecipientHandoffOpts = {
   recipient1Name: string;
@@ -22,6 +33,8 @@ export type StarterRecipientHandoffOpts = {
    * When provided with matching length, merges all indices; slots 0–1 still honor name overrides from the legacy fields.
    */
   recipientPartyEmails?: string[];
+  recipientPartySignerNames?: string[];
+  recipientPartySignerTitles?: string[];
   stripRecipientEmailNoise: (s: string) => string;
   looksLikeEmail: (s: string) => boolean;
 };
@@ -115,6 +128,8 @@ export function applyStarterRecipientUiToDraftParties(
     recipient2Name,
     recipient2Email,
     recipientPartyEmails,
+    recipientPartySignerNames,
+    recipientPartySignerTitles,
     stripRecipientEmailNoise,
     looksLikeEmail,
   } = opts;
@@ -128,24 +143,39 @@ export function applyStarterRecipientUiToDraftParties(
 
   const fullPartyEmails =
     Array.isArray(recipientPartyEmails) && recipientPartyEmails.length === out.length ? recipientPartyEmails : null;
+  const fullPartySignerNames =
+    Array.isArray(recipientPartySignerNames) && recipientPartySignerNames.length === out.length
+      ? recipientPartySignerNames
+      : null;
+  const fullPartySignerTitles =
+    Array.isArray(recipientPartySignerTitles) && recipientPartySignerTitles.length === out.length
+      ? recipientPartySignerTitles
+      : null;
 
-  const mergeSlot = (idx: number, name: string, email: string) => {
+  const mergeSlot = (idx: number, name: string, email: string, signerName?: string, signerTitle?: string) => {
     const prev = out[idx];
     const cleanName = name ? cleanStarterPartyName(name, idx === 0 ? 0 : 1, parsed.agreement_family ?? null) : "";
+    const entityForSigner = (cleanName || prev?.name || "").trim();
+    const nextSignerName = explicitSignerNameForEntity(String(signerName ?? "").trim(), entityForSigner);
+    const nextSignerTitle = String(signerTitle ?? "").trim() || undefined;
     if (prev) {
       out[idx] = {
         ...prev,
         ...(cleanName ? { name: cleanName } : {}),
         ...(email ? { email } : {}),
+        ...(nextSignerName ? { signerName: nextSignerName } : { signerName: undefined }),
+        ...(nextSignerTitle ? { signerTitle: nextSignerTitle } : { signerTitle: undefined }),
         role: cleanRole(prev.role),
       };
       return;
     }
-    if (!cleanName && !email) return;
+    if (!cleanName && !email && !nextSignerName && !nextSignerTitle) return;
     out[idx] = {
       name: cleanName || coercePartyNameForRecipientAutoFill("", idx === 0 ? 0 : 1, parsed.agreement_family ?? null),
       role: "party",
       ...(email ? { email } : {}),
+      ...(nextSignerName ? { signerName: nextSignerName } : {}),
+      ...(nextSignerTitle ? { signerTitle: nextSignerTitle } : {}),
     };
   };
 
@@ -154,11 +184,17 @@ export function applyStarterRecipientUiToDraftParties(
       const raw = fullPartyEmails[i] ?? "";
       const email = looksLikeEmail(raw) ? stripRecipientEmailNoise(raw) : "";
       const nameOv = i === 0 ? n1 : i === 1 ? n2 : "";
-      mergeSlot(i, nameOv, email);
+      const sn = fullPartySignerNames?.[i] ?? "";
+      const st = fullPartySignerTitles?.[i] ?? "";
+      mergeSlot(i, nameOv, email, sn, st);
     }
   } else {
-    mergeSlot(0, n1, e1);
-    mergeSlot(1, n2, e2);
+    const sn0 = fullPartySignerNames?.[0] ?? "";
+    const sn1 = fullPartySignerNames?.[1] ?? "";
+    const st0 = fullPartySignerTitles?.[0] ?? "";
+    const st1 = fullPartySignerTitles?.[1] ?? "";
+    mergeSlot(0, n1, e1, sn0, st0);
+    mergeSlot(1, n2, e2, sn1, st1);
   }
 
   return { ...parsed, parties: out };

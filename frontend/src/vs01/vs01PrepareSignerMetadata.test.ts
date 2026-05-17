@@ -60,4 +60,26 @@ describe("prepare signer metadata sync", () => {
     expect(cpField.value).toBe("Jordan Lee");
     expect(ownerField.value).toBe("");
   });
+
+  it("owner representative edit does not replace entity partyName", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_owner_meta",
+      creatorName: "Redwood Peak Ventures LLC",
+      creatorEmail: "o@x.com",
+      ownerSignerName: "",
+      counterparties: [],
+    });
+    const owner = roles[0]!;
+    expect(owner.partyName).toBe("Redwood Peak Ventures LLC");
+    const rebuilt = buildVs01PrepareSigningRoles({
+      agreementId: "ag_owner_meta",
+      creatorName: "Redwood Peak Ventures LLC",
+      creatorEmail: "o@x.com",
+      ownerSignerName: "j",
+      counterparties: [],
+    });
+    const ownerAfter = rebuilt[0]!;
+    expect(ownerAfter.partyName).toBe("Redwood Peak Ventures LLC");
+    expect(ownerAfter.signerName).toBe("j");
+  });
 });

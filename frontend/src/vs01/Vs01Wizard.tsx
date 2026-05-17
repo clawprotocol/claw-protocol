@@ -189,6 +189,8 @@ export function Vs01Wizard({
   const [agreementTitleUserEdited, setAgreementTitleUserEdited] = useState(false);
   const [creatorName, setCreatorName] = useState("");
   const [creatorEmail, setCreatorEmail] = useState("");
+  const [creatorSignerName, setCreatorSignerName] = useState("");
+  const [creatorSignerTitle, setCreatorSignerTitle] = useState("");
   const [senderMessage, setSenderMessage] = useState("");
   const [counterparties, setCounterparties] = useState<Vs01Counterparty[]>(
     () => VS01_URL_BOOT?.counterparties ?? initialCounterparties()
@@ -284,9 +286,19 @@ export function Vs01Wizard({
       agreementId: aid,
       creatorName,
       creatorEmail,
+      ownerSignerName: creatorSignerName,
+      ownerSignerTitle: creatorSignerTitle,
       counterparties,
     });
-  }, [paidProAgreementBridgeSkip, vs01LinkedAgreementId, counterparties, creatorName, creatorEmail]);
+  }, [
+    paidProAgreementBridgeSkip,
+    vs01LinkedAgreementId,
+    counterparties,
+    creatorName,
+    creatorEmail,
+    creatorSignerName,
+    creatorSignerTitle,
+  ]);
 
   const handlePrepareSignerMetadataChange = useCallback(
     (args: { roleId: string; signerName?: string; signerTitle?: string }) => {
@@ -298,20 +310,26 @@ export function Vs01Wizard({
       let nextRole: (typeof roles)[number] = role;
       const aid = (vs01LinkedAgreementId ?? "").trim();
       if (role.kind === "owner") {
-        const nextCreator = args.signerName !== undefined ? args.signerName : creatorName;
-        if (args.signerName !== undefined) setCreatorName(args.signerName);
+        const nextOwnerSigner =
+          args.signerName !== undefined ? args.signerName : creatorSignerName;
+        const nextOwnerTitle =
+          args.signerTitle !== undefined ? args.signerTitle : creatorSignerTitle;
+        if (args.signerName !== undefined) setCreatorSignerName(args.signerName);
+        if (args.signerTitle !== undefined) setCreatorSignerTitle(args.signerTitle);
         if (aid) {
           const rebuilt = buildVs01PrepareSigningRoles({
             agreementId: aid,
-            creatorName: nextCreator,
+            creatorName,
             creatorEmail,
+            ownerSignerName: nextOwnerSigner,
+            ownerSignerTitle: nextOwnerTitle,
             counterparties,
           });
           const rebuiltRole = rebuilt.find((r) => r.roleId === args.roleId);
           if (rebuiltRole) {
             nextRole = rebuiltRole;
             const ctx = buildOwnerPlacementValueContext({
-              creatorName: nextCreator,
+              creatorName,
               creatorEmail,
             });
             setSenderPlacedFields((fields) =>
@@ -334,6 +352,8 @@ export function Vs01Wizard({
               agreementId: aid,
               creatorName,
               creatorEmail,
+              ownerSignerName: creatorSignerName,
+              ownerSignerTitle: creatorSignerTitle,
               counterparties: nextCps,
             });
             const rebuiltRole = rebuilt.find((r) => r.roleId === args.roleId);
@@ -357,7 +377,7 @@ export function Vs01Wizard({
         signerTitle: nextRole.signerTitle ?? null,
       });
     },
-    [prepareSignerRoles, creatorName, creatorEmail, vs01LinkedAgreementId],
+    [prepareSignerRoles, creatorName, creatorEmail, creatorSignerName, creatorSignerTitle, vs01LinkedAgreementId],
   );
 
   useEffect(() => {
@@ -472,10 +492,14 @@ export function Vs01Wizard({
           const titleForUi = (saved?.agreementTitle || bridge.agreementTitle || "").trim() || "Agreement";
           const cn = saved?.creatorName || bridge.creatorName || "";
           const ce = saved?.creatorEmail || bridge.creatorEmail || "";
+          const csn = saved?.creatorSignerName || bridge.creatorSignerName || "";
+          const cst = saved?.creatorSignerTitle || bridge.creatorSignerTitle || "";
           const rolesForM = buildVs01PrepareSigningRoles({
             agreementId: bridge.agreementId,
             creatorName: cn,
             creatorEmail: ce,
+            ownerSignerName: csn,
+            ownerSignerTitle: cst,
             counterparties: cps,
           });
           const ownerR = rolesForM[0]!;
@@ -484,6 +508,8 @@ export function Vs01Wizard({
             setAgreementTitle(titleForUi);
             setCreatorName(cn);
             setCreatorEmail(ce);
+            setCreatorSignerName(csn);
+            setCreatorSignerTitle(cst);
             setCounterparties(cps);
             setAgreementTitleUserEdited(Boolean(titleForUi));
             setDocumentMeta({
@@ -558,6 +584,8 @@ export function Vs01Wizard({
             if (saved.agreementTitle) setAgreementTitle(saved.agreementTitle);
             if (saved.creatorName) setCreatorName(saved.creatorName);
             if (saved.creatorEmail) setCreatorEmail(saved.creatorEmail);
+            if (saved.creatorSignerName) setCreatorSignerName(saved.creatorSignerName);
+            if (saved.creatorSignerTitle) setCreatorSignerTitle(saved.creatorSignerTitle);
             if (saved.senderMessage) setSenderMessage(saved.senderMessage);
             if (saved.counterparties.length > 0) setCounterparties(saved.counterparties);
             setSenderPlacedFields(saved.senderPlacedFields);
@@ -668,6 +696,8 @@ export function Vs01Wizard({
     setDocumentMeta(null);
     setCreatorName("");
     setCreatorEmail("");
+    setCreatorSignerName("");
+    setCreatorSignerTitle("");
     setSenderMessage("");
     setCounterparties(initialCounterparties());
     setDocumentId(null);
@@ -699,6 +729,8 @@ export function Vs01Wizard({
         agreementTitle,
         creatorName,
         creatorEmail,
+        creatorSignerName: creatorSignerName.trim() || undefined,
+        creatorSignerTitle: creatorSignerTitle.trim() || undefined,
         senderMessage,
         counterparties,
         senderPlacedFields,
@@ -717,6 +749,8 @@ export function Vs01Wizard({
     agreementTitle,
     creatorName,
     creatorEmail,
+    creatorSignerName,
+    creatorSignerTitle,
     senderMessage,
     counterparties,
     senderPlacedFields,
@@ -1015,6 +1049,8 @@ export function Vs01Wizard({
                 agreementId: linkedAgreementId,
                 creatorName,
                 creatorEmail,
+                ownerSignerName: creatorSignerName,
+                ownerSignerTitle: creatorSignerTitle,
                 counterparties,
               });
               const ownerRole = roles[0]!;

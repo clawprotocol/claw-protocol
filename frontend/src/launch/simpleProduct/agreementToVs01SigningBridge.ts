@@ -14,8 +14,12 @@ export type AgreementVs01BridgeSession = {
   vs01DocumentId: string;
   agreementId: string;
   agreementTitle: string;
+  /** Legal entity / party name for the owner row (never a human representative name). */
   creatorName: string;
   creatorEmail: string;
+  /** Optional human representative for the owner entity (from intake or draft parties). */
+  creatorSignerName?: string;
+  creatorSignerTitle?: string;
   counterparties: Vs01Counterparty[];
   /** VS01 step index: 2 = Signing (field placement); step 3 requires receipt from step 2. */
   targetStep: 1 | 2;
@@ -133,6 +137,10 @@ export type RecipientSetupEmailInput = {
   recipient2Email?: string | null | undefined;
   /** When set, merges plausible emails onto `draft.parties[i]` for every index (preferred for multi-party). */
   recipientPartyEmails?: readonly (string | null | undefined)[] | undefined;
+  /** Optional per-party representative names (by party index). */
+  recipientPartySignerNames?: readonly (string | null | undefined)[] | undefined;
+  /** Optional per-party representative titles (by party index). */
+  recipientPartySignerTitles?: readonly (string | null | undefined)[] | undefined;
 };
 
 function normalizeRecipientSetupSlot(raw: string | null | undefined): string | undefined {
@@ -186,6 +194,62 @@ export function logAgreementVs01RecipientEmailMergeDiagnostics(
   });
 }
 
+function normalizeSignerMetadataSlot(raw: string | null | undefined): string | undefined {
+  const s = String(raw ?? "").trim();
+  return s || undefined;
+}
+
+function explicitSignerNameForEntity(
+  signerName: string | undefined,
+  entityName: string,
+): string | undefined {
+  const sn = (signerName || "").trim();
+  if (!sn) return undefined;
+  if (sn.toLowerCase() === entityName.trim().toLowerCase()) return undefined;
+  return sn;
+}
+
+/**
+ * Merges optional representative name/title from recipient setup onto `draft.parties[i]` by index.
+ */
+export function mergePaidProRecipientSetupSignerMetadataIntoDraft(
+  draft: AgreementDraft | null,
+  setup: Pick<RecipientSetupEmailInput, "recipientPartySignerNames" | "recipientPartySignerTitles"> | null | undefined,
+): AgreementDraft | null {
+  if (!draft || !setup) return draft;
+  const arrN = setup.recipientPartySignerNames;
+  const arrT = setup.recipientPartySignerTitles;
+  if (!Array.isArray(arrN) && !Array.isArray(arrT)) return draft;
+  const len = Math.max(Array.isArray(arrN) ? arrN.length : 0, Array.isArray(arrT) ? arrT.length : 0);
+  if (len === 0) return draft;
+  const names = Array.from({ length: len }, (_, i) =>
+    normalizeSignerMetadataSlot(Array.isArray(arrN) ? arrN[i] : undefined),
+  );
+  const titleSlots = Array.from({ length: len }, (_, i) =>
+    normalizeSignerMetadataSlot(Array.isArray(arrT) ? arrT[i] : undefined),
+  );
+  if (!names.some(Boolean) && !titleSlots.some(Boolean)) return draft;
+
+  const parties = [...(draft.parties ?? [])] as AgreementParty[];
+  let changed = false;
+  const max = Math.max(names.length, titleSlots.length, parties.length);
+  for (let i = 0; i < max && i < parties.length; i++) {
+    const entityName = (parties[i].name || "").trim();
+    const nextSignerName = explicitSignerNameForEntity(names[i], entityName);
+    const nextSignerTitle = titleSlots[i];
+    const prevSignerName = (parties[i].signerName || "").trim() || undefined;
+    const prevSignerTitle = (parties[i].signerTitle || "").trim() || undefined;
+    if (prevSignerName === nextSignerName && prevSignerTitle === nextSignerTitle) continue;
+    parties[i] = {
+      ...parties[i],
+      signerName: nextSignerName,
+      signerTitle: nextSignerTitle,
+    };
+    changed = true;
+  }
+  return changed ? { ...draft, parties } : draft;
+}
+
 /** Last-mile merge for Paid Pro VS01 bridge: live draft + optional recipient-setup slots (by party index). */
 export function mergeLiveDraftWithRecipientSetupForVs01Bridge(
   liveDraft: AgreementDraft | null,
@@ -193,8 +257,9 @@ export function mergeLiveDraftWithRecipientSetupForVs01Bridge(
 ): AgreementDraft | null {
   if (!liveDraft) return null;
   if (!recipientSetup) return liveDraft;
-  const next = mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, recipientSetup);
-  return next ?? liveDraft;
+  const withEmails = mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, recipientSetup) ?? liveDraft;
+  const withSigner = mergePaidProRecipientSetupSignerMetadataIntoDraft(withEmails, recipientSetup) ?? withEmails;
+  return withSigner;
 }
 
 /**
@@ -282,6 +347,8 @@ export function buildAgreementVs01BridgeSession(params: {
     parties.find((p) => (p.role || "").toLowerCase() === "owner") ?? parties[0] ?? null;
   const others = owner ? parties.filter((p) => p !== owner) : parties.slice(1);
   const creatorName = (owner?.name || "").trim() || "Sender";
+  const creatorSignerName = explicitSignerNameForEntity((owner?.signerName || "").trim() || undefined, creatorName);
+  const creatorSignerTitle = (owner?.signerTitle || "").trim() || undefined;
   const creatorEmail = inferBridgeCreatorEmail(params.draft, owner, creatorName);
   const counterparties: Vs01Counterparty[] =
     others.length > 0
@@ -292,7 +359,7 @@ export function buildAgreementVs01BridgeSession(params: {
             name: (p.name || "").trim(),
             email,
             phone: (p.phone || "").trim(),
-            signerName: (p.signerName || "").trim() || undefined,
+            signerName: explicitSignerNameForEntity((p.signerName || "").trim() || undefined, (p.name || "").trim()),
             signerTitle: (p.signerTitle || "").trim() || undefined,
             signerEmail: (p.signerEmail || "").trim() || undefined,
             reviewEmail: (p.reviewEmail || "").trim() || undefined,
@@ -310,6 +377,8 @@ export function buildAgreementVs01BridgeSession(params: {
       "Agreement",
     creatorName,
     creatorEmail,
+    ...(creatorSignerName ? { creatorSignerName } : {}),
+    ...(creatorSignerTitle ? { creatorSignerTitle } : {}),
     counterparties,
     targetStep: 2,
     senderFirstLawdogHandoff: senderFirst,

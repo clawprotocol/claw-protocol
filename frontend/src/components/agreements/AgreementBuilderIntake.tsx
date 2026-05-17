@@ -1031,6 +1031,10 @@ type CreateFlowSendRecipientsPanelProps = {
   setRecipient2Email: React.Dispatch<React.SetStateAction<string>>;
   extraPartyReviewEmails: string[];
   setExtraPartyReviewEmails: React.Dispatch<React.SetStateAction<string[]>>;
+  partySignerNames: string[];
+  setPartySignerNames: React.Dispatch<React.SetStateAction<string[]>>;
+  partySignerTitles: string[];
+  setPartySignerTitles: React.Dispatch<React.SetStateAction<string[]>>;
   recipientSignerLabels: string;
   setRecipientSignerLabels: React.Dispatch<React.SetStateAction<string>>;
   reviewHandoffAgreementEcho: string | null | undefined;
@@ -1074,6 +1078,10 @@ function CreateFlowSendRecipientsPanel({
   setRecipient2Email,
   extraPartyReviewEmails,
   setExtraPartyReviewEmails,
+  partySignerNames,
+  setPartySignerNames,
+  partySignerTitles,
+  setPartySignerTitles,
   recipientSignerLabels,
   setRecipientSignerLabels,
   reviewHandoffAgreementEcho,
@@ -1175,6 +1183,22 @@ function CreateFlowSendRecipientsPanel({
                     next[idx - 2] = v;
                     return next;
                   });
+        const signerNameVal = (partySignerNames[idx] ?? "").trim();
+        const signerTitleVal = (partySignerTitles[idx] ?? "").trim();
+        const onSignerNameChange = (v: string) =>
+          setPartySignerNames((prev) => {
+            const next = [...prev];
+            while (next.length <= idx) next.push("");
+            next[idx] = v;
+            return next;
+          });
+        const onSignerTitleChange = (v: string) =>
+          setPartySignerTitles((prev) => {
+            const next = [...prev];
+            while (next.length <= idx) next.push("");
+            next[idx] = v;
+            return next;
+          });
         return (
           <div
             key={`ag_party_recipient_${idx}`}
@@ -1230,6 +1254,32 @@ function CreateFlowSendRecipientsPanel({
                 onChange={(e) => onEmailChange(e.target.value)}
                 className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
                 autoComplete={idx === 0 ? "email" : "off"}
+              />
+            </label>
+            <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+              <span className="block">Representative name (optional)</span>
+              <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
+                For entity parties, this is the human who will sign. If blank, the signer can enter it from their
+                private link.
+              </span>
+              <input
+                type="text"
+                data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-signer-name" : "r2-signer-name") : `party-${idx}-signer-name`}
+                value={signerNameVal}
+                onChange={(e) => onSignerNameChange(e.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                autoComplete="name"
+              />
+            </label>
+            <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+              Title / role (optional)
+              <input
+                type="text"
+                data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-signer-title" : "r2-signer-title") : `party-${idx}-signer-title`}
+                value={signerTitleVal}
+                onChange={(e) => onSignerTitleChange(e.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                autoComplete="organization-title"
               />
             </label>
           </div>
@@ -1782,11 +1832,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [recipient2Email, setRecipient2Email] = useState("");
   const [recipientSignerLabels, setRecipientSignerLabels] = useState("");
   const [extraPartyReviewEmails, setExtraPartyReviewEmails] = useState<string[]>([]);
+  const [partySignerNames, setPartySignerNames] = useState<string[]>([]);
+  const [partySignerTitles, setPartySignerTitles] = useState<string[]>([]);
   const recipient1NameRef = useRef("");
   const recipient2NameRef = useRef("");
   const recipient1EmailRef = useRef("");
   const recipient2EmailRef = useRef("");
   const extraPartyReviewEmailsRef = useRef<string[]>([]);
+  const partySignerNamesRef = useRef<string[]>([]);
+  const partySignerTitlesRef = useRef<string[]>([]);
   const recipientSignerLabelsRef = useRef("");
   const [recipientsDeferred, setRecipientsDeferred] = useState(false);
   const [agreementTypeAccepted, setAgreementTypeAccepted] = useState(false);
@@ -2046,6 +2100,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       return next;
     });
+    const resizeSignerRow = (
+      setter: React.Dispatch<React.SetStateAction<string[]>>,
+      pickFromParty: (pIdx: number) => string,
+    ) => {
+      setter((prev) => {
+        const next = prev.slice(0, capped);
+        while (next.length < capped) {
+          const pIdx = next.length;
+          next.push(pickFromParty(pIdx).trim());
+        }
+        return next;
+      });
+    };
+    resizeSignerRow(setPartySignerNames, (pIdx) =>
+      String((parties[pIdx] as { signerName?: string })?.signerName ?? ""),
+    );
+    resizeSignerRow(setPartySignerTitles, (pIdx) =>
+      String((parties[pIdx] as { signerTitle?: string })?.signerTitle ?? ""),
+    );
   }, [draft?.parties?.length]);
   const paidProAuthoritativeRef = useRef(false);
   useLayoutEffect(() => {
@@ -2063,6 +2136,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     extraPartyReviewEmailsRef.current = extraPartyReviewEmails;
   }, [extraPartyReviewEmails]);
+  useLayoutEffect(() => {
+    partySignerNamesRef.current = partySignerNames;
+  }, [partySignerNames]);
+  useLayoutEffect(() => {
+    partySignerTitlesRef.current = partySignerTitles;
+  }, [partySignerTitles]);
   useLayoutEffect(() => {
     recipientSignerLabelsRef.current = recipientSignerLabels;
   }, [recipientSignerLabels]);
@@ -2108,11 +2187,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (draftSnapshotRef.current?.parties ?? []).length,
       MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
     );
+    const slots = linearPremiumRecipientSlots(ho, Math.max(partiesLen, 2));
     if (partiesLen > 2) {
-      const slots = linearPremiumRecipientSlots(ho, partiesLen);
       setExtraPartyReviewEmails(slots.slice(2).map((s) => String(s.email ?? "").trim()));
     } else {
       setExtraPartyReviewEmails([]);
+    }
+    if (partiesLen > 0) {
+      setPartySignerNames(slots.slice(0, partiesLen).map((s) => String(s.signerName ?? "").trim()));
+      setPartySignerTitles(slots.slice(0, partiesLen).map((s) => String(s.signerTitle ?? "").trim()));
     }
   }, [premiumSendConfirmOpen]);
 
@@ -2130,11 +2213,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (draftSnapshotRef.current?.parties ?? []).length,
       MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
     );
+    const slots = linearPremiumRecipientSlots(ho, Math.max(partiesLen, 2));
     if (partiesLen > 2) {
-      const slots = linearPremiumRecipientSlots(ho, partiesLen);
       setExtraPartyReviewEmails(slots.slice(2).map((s) => String(s.email ?? "").trim()));
     } else {
       setExtraPartyReviewEmails([]);
+    }
+    if (partiesLen > 0) {
+      setPartySignerNames(slots.slice(0, partiesLen).map((s) => String(s.signerName ?? "").trim()));
+      setPartySignerTitles(slots.slice(0, partiesLen).map((s) => String(s.signerTitle ?? "").trim()));
     }
   }, [
     createUiStage,
@@ -3326,6 +3413,63 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return out;
   }
 
+  function partySignerMetaAtIndex(
+    parties:
+      | readonly ({ signerName?: string; signerTitle?: string; name?: string; role?: string; email?: string } | null)[]
+      | null
+      | undefined,
+    idx: number,
+    uiNames: readonly string[],
+    uiTitles: readonly string[],
+    field: "signerName" | "signerTitle",
+  ): string {
+    const ui = (field === "signerName" ? uiNames[idx] : uiTitles[idx]) ?? "";
+    const fromUi = String(ui).trim();
+    if (fromUi) return fromUi;
+    const fromDraft = String(
+      (field === "signerName"
+        ? parties?.[idx]?.signerName
+        : parties?.[idx]?.signerTitle) ?? "",
+    ).trim();
+    return fromDraft;
+  }
+
+  function buildRecipientPartySignerNamesArrayForHandoff(d: ParsedDraftShape | null): string[] | undefined {
+    const parties = d?.parties ?? [];
+    const n = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+    if (n === 0) return undefined;
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      out.push(
+        partySignerMetaAtIndex(parties, i, partySignerNamesRef.current, partySignerTitlesRef.current, "signerName"),
+      );
+    }
+    return out;
+  }
+
+  function buildRecipientPartySignerTitlesArrayForHandoff(d: ParsedDraftShape | null): string[] | undefined {
+    const parties = d?.parties ?? [];
+    const n = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+    if (n === 0) return undefined;
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      out.push(
+        partySignerMetaAtIndex(parties, i, partySignerNamesRef.current, partySignerTitlesRef.current, "signerTitle"),
+      );
+    }
+    return out;
+  }
+
+  function buildRecipientSetupForVs01Bridge(d: ParsedDraftShape | null) {
+    return {
+      recipient1Email: recipient1EmailRef.current,
+      recipient2Email: recipient2EmailRef.current,
+      recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(d),
+      recipientPartySignerNames: buildRecipientPartySignerNamesArrayForHandoff(d),
+      recipientPartySignerTitles: buildRecipientPartySignerTitlesArrayForHandoff(d),
+    };
+  }
+
   const persistPremiumRecipientHandoffFromDraftAndUi = React.useCallback(
     (
       d: ParsedDraftShape,
@@ -3338,9 +3482,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const n = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
       const slots: PremiumRecipientHandoffSlot[] = [];
       const extraRef = extraPartyReviewEmailsRef.current;
+      const signerNamesRef = partySignerNamesRef.current;
+      const signerTitlesRef = partySignerTitlesRef.current;
       for (let i = 0; i < n; i++) {
         const p = parties[i]!;
         const draftEm = partyEmailAtIndex(d.parties, i);
+        const signerName = partySignerMetaAtIndex(d.parties, i, signerNamesRef, signerTitlesRef, "signerName");
+        const signerTitle = partySignerMetaAtIndex(d.parties, i, signerNamesRef, signerTitlesRef, "signerTitle");
         if (i === 0) {
           const n1 =
             (opts?.displayName1 ?? "").trim() ||
@@ -3352,6 +3500,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             name: n1,
             email: e1,
             role: String(p?.role || "party").trim() || "party",
+            signerName,
+            signerTitle,
           });
           continue;
         }
@@ -3367,6 +3517,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             name: n2,
             email: e2,
             role: String(p1?.role || "party").trim() || "party",
+            signerName,
+            signerTitle,
           });
           continue;
         }
@@ -3376,6 +3528,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           name: String(p?.name || "").trim(),
           email: em,
           role: String(p?.role || "party").trim() || "party",
+          signerName,
+          signerTitle,
         });
       }
       if (slots.length === 0) return;
@@ -6849,9 +7003,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       };
 
       const primedForHandoff =
-        mergeLiveDraftWithRecipientSetupForVs01Bridge(normalized as unknown as AgreementDraft, {
-          recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(normalized as unknown as ParsedDraftShape),
-        }) ?? (normalized as unknown as AgreementDraft);
+        mergeLiveDraftWithRecipientSetupForVs01Bridge(
+          normalized as unknown as AgreementDraft,
+          buildRecipientSetupForVs01Bridge(normalized as unknown as ParsedDraftShape),
+        ) ?? (normalized as unknown as AgreementDraft);
 
       if (premiumSendAnotherSkipOnCreatedRef.current) {
         premiumSendAnotherSkipOnCreatedRef.current = false;
@@ -6991,6 +7146,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         recipient2Name,
         recipient2Email,
         recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(draft),
+        recipientPartySignerNames: buildRecipientPartySignerNamesArrayForHandoff(draft),
+        recipientPartySignerTitles: buildRecipientPartySignerTitlesArrayForHandoff(draft),
         stripRecipientEmailNoise,
         looksLikeEmail,
       });
@@ -7086,6 +7243,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         recipient2Name,
         recipient2Email,
         recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(d),
+        recipientPartySignerNames: buildRecipientPartySignerNamesArrayForHandoff(d),
+        recipientPartySignerTitles: buildRecipientPartySignerTitlesArrayForHandoff(d),
         stripRecipientEmailNoise,
         looksLikeEmail,
       });
@@ -8926,6 +9085,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const e2 = String(p1?.email ?? "").trim();
     if (e1) setRecipient1Email((prev) => (prev.trim() ? prev : e1));
     if (e2) setRecipient2Email((prev) => (prev.trim() ? prev : e2));
+    const parties = draft.parties ?? [];
+    const cap = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+    if (cap > 0) {
+      setPartySignerNames((prev) => {
+        const next = prev.slice(0, cap);
+        while (next.length < cap) {
+          const i = next.length;
+          const fromDraft = String((parties[i] as { signerName?: string })?.signerName ?? "").trim();
+          const cur = (next[i] ?? "").trim();
+          next.push(cur || fromDraft);
+        }
+        return next;
+      });
+      setPartySignerTitles((prev) => {
+        const next = prev.slice(0, cap);
+        while (next.length < cap) {
+          const i = next.length;
+          const fromDraft = String((parties[i] as { signerTitle?: string })?.signerTitle ?? "").trim();
+          const cur = (next[i] ?? "").trim();
+          next.push(cur || fromDraft);
+        }
+        return next;
+      });
+    }
     setRecipientSignerLabels((prev) =>
       pickRecipientSignerLabelsForHandoff(prev, n1, n2, {
         role1: draft.parties?.[0]?.role,
@@ -11685,10 +11868,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementId: id,
         draft: draft as unknown as AgreementDraft,
         logReason: "intake_inline_send_success_cta",
-        recipientSetup: {
-          recipient1Email: recipient1EmailRef.current,
-          recipient2Email: recipient2EmailRef.current,
-        },
+        recipientSetup: buildRecipientSetupForVs01Bridge(draft as unknown as ParsedDraftShape),
       });
       if (ok) {
         clearPaidProStarterSignatureSendFromCreateFlow();
@@ -11702,9 +11882,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
     }
     const primedForSendShell =
-      mergeLiveDraftWithRecipientSetupForVs01Bridge(draft as unknown as AgreementDraft, {
-        recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(draft),
-      }) ?? (draft as unknown as AgreementDraft);
+      mergeLiveDraftWithRecipientSetupForVs01Bridge(
+        draft as unknown as AgreementDraft,
+        buildRecipientSetupForVs01Bridge(draft),
+      ) ?? (draft as unknown as AgreementDraft);
     navigate(`/app/send/${encodeURIComponent(id)}`, {
       simpleSendHandoff: buildSimpleSendHandoff({
         agreementId: id,
@@ -13140,6 +13321,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setRecipient2Email={setRecipient2Email}
           extraPartyReviewEmails={extraPartyReviewEmails}
           setExtraPartyReviewEmails={setExtraPartyReviewEmails}
+          partySignerNames={partySignerNames}
+          setPartySignerNames={setPartySignerNames}
+          partySignerTitles={partySignerTitles}
+          setPartySignerTitles={setPartySignerTitles}
           recipientSignerLabels={recipientSignerLabels}
           setRecipientSignerLabels={setRecipientSignerLabels}
           reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -15288,6 +15473,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       setRecipient2Email={setRecipient2Email}
                                       extraPartyReviewEmails={extraPartyReviewEmails}
                                       setExtraPartyReviewEmails={setExtraPartyReviewEmails}
+                                      partySignerNames={partySignerNames}
+                                      setPartySignerNames={setPartySignerNames}
+                                      partySignerTitles={partySignerTitles}
+                                      setPartySignerTitles={setPartySignerTitles}
                                       recipientSignerLabels={recipientSignerLabels}
                                       setRecipientSignerLabels={setRecipientSignerLabels}
                                       reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -15574,6 +15763,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         setRecipient2Email={setRecipient2Email}
                         extraPartyReviewEmails={extraPartyReviewEmails}
                         setExtraPartyReviewEmails={setExtraPartyReviewEmails}
+                        partySignerNames={partySignerNames}
+                        setPartySignerNames={setPartySignerNames}
+                        partySignerTitles={partySignerTitles}
+                        setPartySignerTitles={setPartySignerTitles}
                         recipientSignerLabels={recipientSignerLabels}
                         setRecipientSignerLabels={setRecipientSignerLabels}
                         reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}

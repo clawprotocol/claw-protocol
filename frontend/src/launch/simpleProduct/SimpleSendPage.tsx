@@ -420,6 +420,8 @@ export function SimpleSendPage(props: { agreementId: string }) {
           live != null && ho && partyCap > 0
             ? {
                 recipientPartyEmails: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.email || ""),
+                recipientPartySignerNames: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.signerName || ""),
+                recipientPartySignerTitles: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.signerTitle || ""),
               }
             : live != null
               ? {

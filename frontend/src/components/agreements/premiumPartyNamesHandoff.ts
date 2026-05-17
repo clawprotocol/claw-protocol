@@ -10,6 +10,9 @@ export type PremiumRecipientHandoffSlot = {
   name: string;
   email: string;
   role: string;
+  /** Human authorized signer (optional; never implied from entity {@link name}). */
+  signerName?: string;
+  signerTitle?: string;
 };
 
 export type PremiumRecipientHandoffV2 = {
@@ -24,7 +27,7 @@ export type PremiumRecipientHandoffV2 = {
 };
 
 function emptySlot(): PremiumRecipientHandoffSlot {
-  return { name: "", email: "", role: "" };
+  return { name: "", email: "", role: "", signerName: "", signerTitle: "" };
 }
 
 function readLegacyPartyNamesOnly(): { party1: string; party2: string } | null {
@@ -55,6 +58,8 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
               name: String((x as PremiumRecipientHandoffSlot).name || "").trim(),
               email: String((x as PremiumRecipientHandoffSlot).email || "").trim(),
               role: String((x as PremiumRecipientHandoffSlot).role || "").trim() || "party",
+              signerName: String((x as PremiumRecipientHandoffSlot).signerName || "").trim(),
+              signerTitle: String((x as PremiumRecipientHandoffSlot).signerTitle || "").trim(),
             }));
           if (cleaned.length > 0) partyIndexSlots = cleaned;
         }
@@ -64,11 +69,15 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
             name: String(parsed.party1.name || "").trim(),
             email: String(parsed.party1.email || "").trim(),
             role: String(parsed.party1.role || "").trim(),
+            signerName: String(parsed.party1.signerName || "").trim(),
+            signerTitle: String(parsed.party1.signerTitle || "").trim(),
           },
           party2: {
             name: String(parsed.party2.name || "").trim(),
             email: String(parsed.party2.email || "").trim(),
             role: String(parsed.party2.role || "").trim(),
+            signerName: String(parsed.party2.signerName || "").trim(),
+            signerTitle: String(parsed.party2.signerTitle || "").trim(),
           },
           savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : Date.now(),
           ...(partyIndexSlots ? { partyIndexSlots } : {}),
@@ -97,7 +106,7 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
 
 function mergeSlot(
   prev: PremiumRecipientHandoffSlot,
-  patch: Partial<{ name: string; email: string; role: string }>,
+  patch: Partial<{ name: string; email: string; role: string; signerName: string; signerTitle: string }>,
 ): PremiumRecipientHandoffSlot {
   const name = patch.name !== undefined ? String(patch.name || "").trim() || prev.name : prev.name;
   const email =
@@ -108,7 +117,11 @@ function mergeSlot(
     patch.role !== undefined
       ? String(patch.role || "").trim() || prev.role || "party"
       : prev.role || "party";
-  return { name, email, role };
+  const signerName =
+    patch.signerName !== undefined ? String(patch.signerName || "").trim() : String(prev.signerName || "").trim();
+  const signerTitle =
+    patch.signerTitle !== undefined ? String(patch.signerTitle || "").trim() : String(prev.signerTitle || "").trim();
+  return { name, email, role, signerName, signerTitle };
 }
 
 /**
@@ -116,9 +129,11 @@ function mergeSlot(
  * Emails: blank patch never clears a previously stored non-blank email.
  */
 export function persistPremiumRecipientHandoff(patch: {
-  party1?: Partial<{ name: string; email: string; role: string }>;
-  party2?: Partial<{ name: string; email: string; role: string }>;
-  partyIndexSlots?: Array<Partial<{ name: string; email: string; role: string }> | null | undefined>;
+  party1?: Partial<{ name: string; email: string; role: string; signerName: string; signerTitle: string }>;
+  party2?: Partial<{ name: string; email: string; role: string; signerName: string; signerTitle: string }>;
+  partyIndexSlots?: Array<
+    Partial<{ name: string; email: string; role: string; signerName: string; signerTitle: string }> | null | undefined
+  >;
 }): void {
   const cur = readPremiumRecipientHandoff();
   const base1 = cur?.party1 ?? emptySlot();
@@ -199,11 +214,15 @@ export function writePremiumRecipientHandoffExact(
         name: String(party1.name ?? "").trim(),
         email: String(party1.email ?? "").trim(),
         role: String(party1.role ?? "").trim() || "party",
+        signerName: String(party1.signerName ?? "").trim(),
+        signerTitle: String(party1.signerTitle ?? "").trim(),
       },
       party2: {
         name: String(party2.name ?? "").trim(),
         email: String(party2.email ?? "").trim(),
         role: String(party2.role ?? "").trim() || "party",
+        signerName: String(party2.signerName ?? "").trim(),
+        signerTitle: String(party2.signerTitle ?? "").trim(),
       },
       savedAt: Date.now(),
       ...(extra.length > 0 ? { partyIndexSlots: extra } : {}),

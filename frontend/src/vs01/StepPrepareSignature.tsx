@@ -353,7 +353,7 @@ export function StepPrepareSignature({
   } | null>(null);
 
   const emailDefaultLogKeyRef = useRef("");
-  useEffect(() => {
+  const emailDefaultSourceDiag = useMemo(() => {
     const se = resolveSenderEmailForEmailFieldPlacement(creatorEmail, defaultSignerRef);
     const ce = (creatorEmail ?? "").trim();
     const refParsed = (firstPlausibleEmailInSignerRef(defaultSignerRef) ?? "").trim();
@@ -370,7 +370,20 @@ export function StepPrepareSignature({
           : se
             ? "resolved_other"
             : "none";
-    const key = `${ce}|${defaultSignerRef}|${resolvedSource}`;
+    return {
+      se,
+      ce,
+      refParsed,
+      resolvedSource,
+      creatorEmailDomain: domainHint(ce),
+      signerRefEmailDomain: domainHint(refParsed),
+    };
+  }, [creatorEmail, defaultSignerRef]);
+
+  useEffect(() => {
+    const { ce, refParsed, resolvedSource, creatorEmailDomain, signerRefEmailDomain, se } =
+      emailDefaultSourceDiag;
+    const key = `${resolvedSource}|${creatorEmailDomain ?? ""}|${signerRefEmailDomain ?? ""}|${Boolean(se)}`;
     if (emailDefaultLogKeyRef.current === key) return;
     emailDefaultLogKeyRef.current = key;
     // eslint-disable-next-line no-console
@@ -378,12 +391,12 @@ export function StepPrepareSignature({
       hasCreatorEmail: isPlausibleEmail(ce),
       hasSignerRefEmail: isPlausibleEmail(refParsed),
       resolvedSource,
-      creatorEmailDomain: domainHint(ce) ?? null,
-      signerRefEmailDomain: domainHint(refParsed) ?? null,
+      creatorEmailDomain,
+      signerRefEmailDomain,
       selectedType: armedToolForEmailLogRef.current ?? activeToolForEmailLogRef.current,
       resolvedHasValue: Boolean(se),
     });
-  }, [creatorEmail, defaultSignerRef]);
+  }, [emailDefaultSourceDiag]);
 
   useEffect(() => {
     if (agreementBridgePlacementCopy) return;

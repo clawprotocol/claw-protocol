@@ -18,6 +18,7 @@ import {
   logAgreementVs01SeedBlocked,
   mergeLiveDraftWithRecipientSetupForVs01Bridge,
   mergePaidProRecipientSetupEmailsIntoDraft,
+  mergePaidProRecipientSetupSignerMetadataIntoDraft,
   readPaidProAgreementBridgeSkipMarker,
   recipientSetupPlausibleInputFlags,
   setPaidProAgreementBridgeSkipMarker,
@@ -254,6 +255,46 @@ describe("mergePaidProRecipientSetupEmailsIntoDraft + paid Pro sender-first brid
     });
     expect((merged?.parties?.[0] as { email?: string })?.email).toBe("ok@valid.com");
     expect((merged?.parties?.[1] as { email?: string })?.email).toBe("");
+  });
+
+  it("mergeLiveDraft applies recipientPartySignerNames by party index", () => {
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "p0", name: "Redwood Peak Ventures LLC", role: "owner", email: "" },
+        { id: "p1", name: "Atlas Harbor Technologies Inc.", role: "signer", email: "" },
+      ],
+    } as AgreementDraft;
+    const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(draft, {
+      recipientPartySignerNames: ["Jordan Lee", "Sam Rivera"],
+      recipientPartySignerTitles: ["Managing Member", "CEO"],
+    });
+    expect((merged?.parties?.[0] as { signerName?: string })?.signerName).toBe("Jordan Lee");
+    expect((merged?.parties?.[1] as { signerName?: string })?.signerName).toBe("Sam Rivera");
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "ag-signer",
+      vs01DocumentId: "doc-signer",
+      draft: merged,
+    });
+    expect(b.creatorSignerName).toBe("Jordan Lee");
+    expect(b.counterparties[0]?.signerName).toBe("Sam Rivera");
+  });
+
+  it("does not treat entity name as signerName when equal", () => {
+    const draft = {
+      title: "T",
+      parties: [{ id: "p0", name: "Acme LLC", role: "owner", email: "o@x.com", signerName: "Acme LLC" }],
+    } as AgreementDraft;
+    const merged = mergePaidProRecipientSetupSignerMetadataIntoDraft(draft, {
+      recipientPartySignerNames: ["Acme LLC"],
+    });
+    expect((merged?.parties?.[0] as { signerName?: string })?.signerName).toBeUndefined();
+    const b = buildAgreementVs01BridgeSession({
+      agreementId: "a",
+      vs01DocumentId: "d",
+      draft: merged,
+    });
+    expect(b.creatorSignerName).toBeUndefined();
   });
 
   it("mergeLiveDraft applies recipientPartyEmails by party index for five parties", () => {

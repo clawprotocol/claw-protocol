@@ -44,10 +44,24 @@ export type Vs01PrepareSigningRole = {
 /**
  * Roles used for paid Pro prepare-mode placement + packet gate (owner + named counterparties only).
  */
+function explicitPrepareSignerName(
+  signerName: string | undefined,
+  entityName: string,
+): string | undefined {
+  const sn = (signerName || "").trim();
+  if (!sn) return undefined;
+  if (sn.toLowerCase() === entityName.trim().toLowerCase()) return undefined;
+  return sn;
+}
+
 export function buildVs01PrepareSigningRoles(args: {
   agreementId: string;
+  /** Owner legal entity / party name only. */
   creatorName: string;
   creatorEmail: string;
+  /** Optional human representative for owner (never initials or signature typed text). */
+  ownerSignerName?: string;
+  ownerSignerTitle?: string;
   counterparties: Vs01Counterparty[];
 }): Vs01PrepareSigningRole[] {
   const aid = args.agreementId.trim();
@@ -62,8 +76,8 @@ export function buildVs01PrepareSigningRoles(args: {
       entityName: ownerName,
       partyName: ownerName,
       roleLabel: "Owner",
-      signerName: undefined,
-      signerTitle: undefined,
+      signerName: explicitPrepareSignerName(args.ownerSignerName, ownerName),
+      signerTitle: (args.ownerSignerTitle || "").trim() || undefined,
       signerEmail: (args.creatorEmail || "").trim() || undefined,
       reviewEmail: undefined,
       isEntityParty: looksLikeLegalEntityPartyNameLocal(ownerName),
@@ -87,7 +101,7 @@ export function buildVs01PrepareSigningRoles(args: {
       entityName: partyName,
       partyName,
       roleLabel: partyName,
-      signerName: c.signerName?.trim() || undefined,
+      signerName: explicitPrepareSignerName(c.signerName, partyName),
       signerTitle: c.signerTitle?.trim() || undefined,
       signerEmail: rowEmail || undefined,
       reviewEmail: c.reviewEmail?.trim() || undefined,
@@ -421,16 +435,6 @@ export type PreparePlacementValueContext = {
   signerEmail?: string;
 };
 
-function initialsFromDisplayName(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 4)
-    .toUpperCase();
-}
-
 /** @deprecated Prefer {@link buildPrepareTemplateValueContext} from vs01PrepareTemplateField for prepare placement. */
 export function buildPreparePlacementValueContext(
   role: Vs01PrepareSigningRole,
@@ -439,14 +443,11 @@ export function buildPreparePlacementValueContext(
   if (role.kind === "counterparty") {
     return { typedName: "", initials: "", signerEmail: undefined };
   }
-  const signerName = (role.signerName ?? "").trim();
-  const typedName = signerName || fallback.typedName;
   const emailRaw = (role.signerEmail ?? role.reviewEmail ?? "").trim();
   const email = isPlausibleEmail(emailRaw) ? emailRaw : fallback.signerEmail;
-  const initials = typedName ? initialsFromDisplayName(typedName) : fallback.initials;
   return {
-    typedName,
-    initials: initials || fallback.initials,
+    typedName: fallback.typedName,
+    initials: fallback.initials,
     signerEmail: email,
   };
 }

@@ -15,6 +15,9 @@ export type Vs01DraftState = {
   agreementTitle: string;
   creatorName: string;
   creatorEmail: string;
+  /** Owner human representative (optional; separate from entity {@link creatorName}). */
+  creatorSignerName?: string;
+  creatorSignerTitle?: string;
   senderMessage: string;
   counterparties: Vs01Counterparty[];
   senderPlacedFields: PlacedSigningField[];
