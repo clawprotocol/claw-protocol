@@ -64,7 +64,7 @@ describe("prepare template values", () => {
     if (!placed.ok) return;
     const display = prepareTemplateDisplayForField(placed.field, cp);
     expect(display.isPlaceholder).toBe(true);
-    expect(display.body).toBe("Signer signs here");
+    expect(display.body).toBe("Signer will sign here");
     expect(display.assigneeLine).toContain("Atlas");
   });
 });

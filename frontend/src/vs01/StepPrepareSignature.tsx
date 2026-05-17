@@ -37,7 +37,11 @@ import {
   buildPrepareAutoInitialsEveryPage,
   createPrepareStampedSenderField,
 } from "./vs01PrepareFieldPlacement";
-import { PrepareSigningFieldBody } from "./vs01PrepareSigningFieldRender";
+import {
+  PrepareSigningFieldBody,
+  prepareFieldDataAttributes,
+} from "./vs01PrepareSigningFieldRender";
+import { Vs01PrepareSignerMetadataPanel } from "./vs01PrepareSignerMetadataPanel";
 import { ownerPadFromPlacementContext } from "./vs01FieldValueResolution";
 import {
   buildPrepareTemplateValueContext,
@@ -45,7 +49,9 @@ import {
   logVs01PlacementClickRole,
   logVs01PlacementFieldRejected,
   prepareTemplateCornerLabel,
+  prepareTemplateDisplayForField,
 } from "./vs01PrepareTemplateField";
+import { resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
 import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 import {
   SIGNING_FIELD_TOOLS,
@@ -87,6 +93,12 @@ export type StepPrepareSignatureProps = {
   prepareSignerRoles?: Vs01PrepareSigningRole[];
   prepareActiveSignerRoleId?: string;
   onPrepareActiveSignerRoleChange?: (roleId: string) => void;
+  /** Optional: persist representative signer name/title for a prepare role. */
+  onPrepareSignerMetadataChange?: (args: {
+    roleId: string;
+    signerName?: string;
+    signerTitle?: string;
+  }) => void;
   /** Recipient-layer fields (step 3) included in prepare packet gate on this step. */
   prepareRecipientPlacedFields?: Vs01RecipientPlacedField[];
   /** Pre-populate placed fields (e.g. from saved draft state on refresh). */
@@ -185,6 +197,7 @@ export function StepPrepareSignature({
   agreementBridgePlacementCopy = false,
   prepareSignerRoles,
   prepareActiveSignerRoleId,
+  onPrepareSignerMetadataChange,
   prepareRecipientPlacedFields = [],
   fields,
   onFieldsChange,
@@ -1298,6 +1311,13 @@ export function StepPrepareSignature({
                                       const yFit = Math.min(field.y, 1 - field.height);
                                       const isSel = selectedFieldId === field.id;
                                       const pop = placementPopId === field.id;
+                                      const fieldRole = findPrepareSigningRole(
+                                        prepareSignerRoles,
+                                        field.assignedSignerRoleId,
+                                      );
+                                      const fieldDisplay = agreementBridgePlacementCopy
+                                        ? prepareTemplateDisplayForField(field, fieldRole, ownerPadForFields)
+                                        : null;
                                       const textVal = typeof field.value === "string" ? field.value : "";
                                       const isActiveRoleField =
                                         !agreementBridgePlacementCopy || fieldMatchesActive(field);
@@ -1305,6 +1325,9 @@ export function StepPrepareSignature({
                                         <div
                                           key={field.id}
                                           data-field-id={field.id}
+                                          {...(fieldDisplay
+                                            ? prepareFieldDataAttributes(field, fieldRole, fieldDisplay)
+                                            : {})}
                                           className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
                                             field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
                                           }${
@@ -1584,6 +1607,18 @@ export function StepPrepareSignature({
                   Next signer
                 </button>
               ) : null}
+              {onPrepareSignerMetadataChange && activePrepareRole ? (
+                <Vs01PrepareSignerMetadataPanel
+                  role={activePrepareRole}
+                  busy={busy}
+                  onPatch={(patch) =>
+                    onPrepareSignerMetadataChange({
+                      roleId: activePrepareRole.roleId,
+                      ...patch,
+                    })
+                  }
+                />
+              ) : null}
             </div>
           ) : null}
           <div className="vs01-sign-rail-brief vs01-sign-rail-brief--compact">
@@ -1690,6 +1725,35 @@ export function StepPrepareSignature({
                   Remove selected field
                 </button>
               </div>
+              {agreementBridgePlacementCopy ? (
+                (() => {
+                  const selRole = findPrepareSigningRole(
+                    prepareSignerRoles,
+                    selectedField.assignedSignerRoleId,
+                  );
+                  const party = selRole ? resolvePreparePartyEntityLabel(selRole) : "";
+                  const isOwnerSel = selRole?.kind === "owner";
+                  return (
+                    <>
+                      {party ? (
+                        <p className="vs01-sign-selected-note">
+                          Assigned to: <strong>{party}</strong>
+                        </p>
+                      ) : null}
+                      {isOwnerSel ? (
+                        <p className="vs01-sign-selected-note">You complete this field.</p>
+                      ) : (
+                        <p className="vs01-sign-selected-note">
+                          Completed by signer from private link.
+                          {selectedField.type === "printed_name"
+                            ? " Signer name will be collected unless you enter it now."
+                            : null}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()
+              ) : null}
               <p className="vs01-sign-selected-note">
                 Drag to move; drag the bottom-right corner to resize.
               </p>

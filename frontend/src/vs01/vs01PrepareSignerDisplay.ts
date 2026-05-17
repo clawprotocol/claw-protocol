@@ -6,6 +6,49 @@ import { vs01DiagnosticsEnabled } from "./vs01SignerFieldAssignment";
 export const VS01_PREPARE_SIGNER_NAME_PLACEHOLDER = "Signer name";
 export const VS01_PREPARE_TITLE_PLACEHOLDER = "Title";
 export const VS01_PREPARE_INITIALS_PLACEHOLDER = "Initials";
+export const VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY = "Signer will sign here";
+export const VS01_PREPARE_SIGNATURE_COLLECTED_AT_SIGNING = "Name collected when signer opens link";
+
+export type PreparePrintedNameDisplay = {
+  primary: string;
+  sublabel?: string;
+  isPlaceholder: boolean;
+};
+
+/** Party/entity label for prepare UI — never treated as human signer name. */
+export function resolvePreparePartyEntityLabel(role: Vs01PrepareSigningRole): string {
+  return (role.partyName ?? role.entityName ?? role.roleLabel ?? "").trim();
+}
+
+/**
+ * Printed-name display separates entity from human signer.
+ * Unknown signerName + known party → placeholder + "for {entity}" sublabel.
+ */
+export function resolvePreparePrintedNameDisplay(
+  role: Vs01PrepareSigningRole,
+  mode: Vs01FieldValueMode,
+  ownerPad?: Vs01SignerRuntimeContext,
+): PreparePrintedNameDisplay {
+  const party = resolvePreparePartyEntityLabel(role);
+  const name = resolvePrepareSignerDisplayName(role, mode, ownerPad);
+  if (!name.isPlaceholder) {
+    return { primary: name.value, isPlaceholder: false };
+  }
+  if (role.kind === "counterparty" && party) {
+    return {
+      primary: VS01_PREPARE_SIGNER_NAME_PLACEHOLDER,
+      sublabel:
+        mode === "prepare_display"
+          ? `for ${party}`
+          : undefined,
+      isPlaceholder: true,
+    };
+  }
+  return {
+    primary: role.kind === "owner" ? "Printed name" : VS01_PREPARE_SIGNER_NAME_PLACEHOLDER,
+    isPlaceholder: true,
+  };
+}
 
 /** True when intake explicitly provided a human signer representative name (not entity-only). */
 export function isKnownPrepareSignerName(role: Vs01PrepareSigningRole): boolean {

@@ -47,6 +47,13 @@ import {
 } from "./vs01SignerFieldAssignment";
 import { Vs01PrepareRoleAuthorityProvider } from "./Vs01PrepareRoleAuthorityContext";
 import {
+  buildOwnerPlacementValueContext,
+  logVs01PrepareSignerMetadataUpdated,
+  patchCounterpartySignerMetadata,
+  syncRecipientFieldsForRoleSignerMetadata,
+  syncSenderFieldsForRoleSignerMetadata,
+} from "./vs01PrepareSignerMetadata";
+import {
   clearVs01DraftState,
   loadVs01DraftState,
   mergeBridgeEmailsIntoSavedCounterparties,
@@ -280,6 +287,78 @@ export function Vs01Wizard({
       counterparties,
     });
   }, [paidProAgreementBridgeSkip, vs01LinkedAgreementId, counterparties, creatorName, creatorEmail]);
+
+  const handlePrepareSignerMetadataChange = useCallback(
+    (args: { roleId: string; signerName?: string; signerTitle?: string }) => {
+      const roles = prepareSignerRoles;
+      if (!roles?.length) return;
+      const role = roles.find((r) => r.roleId === args.roleId);
+      if (!role) return;
+      const valueCtx = buildOwnerPlacementValueContext({ creatorName, creatorEmail });
+      let nextRole: (typeof roles)[number] = role;
+      const aid = (vs01LinkedAgreementId ?? "").trim();
+      if (role.kind === "owner") {
+        const nextCreator = args.signerName !== undefined ? args.signerName : creatorName;
+        if (args.signerName !== undefined) setCreatorName(args.signerName);
+        if (aid) {
+          const rebuilt = buildVs01PrepareSigningRoles({
+            agreementId: aid,
+            creatorName: nextCreator,
+            creatorEmail,
+            counterparties,
+          });
+          const rebuiltRole = rebuilt.find((r) => r.roleId === args.roleId);
+          if (rebuiltRole) {
+            nextRole = rebuiltRole;
+            const ctx = buildOwnerPlacementValueContext({
+              creatorName: nextCreator,
+              creatorEmail,
+            });
+            setSenderPlacedFields((fields) =>
+              syncSenderFieldsForRoleSignerMetadata(fields, rebuiltRole, ctx),
+            );
+            setRecipientPlacedFields((fields) =>
+              syncRecipientFieldsForRoleSignerMetadata(fields, rebuiltRole, ctx),
+            );
+          }
+        }
+      } else if (role.vs01CounterpartyId) {
+        const cpId = role.vs01CounterpartyId;
+        setCounterparties((prev) => {
+          const nextCps = patchCounterpartySignerMetadata(prev, cpId, {
+            signerName: args.signerName,
+            signerTitle: args.signerTitle,
+          });
+          if (aid) {
+            const rebuilt = buildVs01PrepareSigningRoles({
+              agreementId: aid,
+              creatorName,
+              creatorEmail,
+              counterparties: nextCps,
+            });
+            const rebuiltRole = rebuilt.find((r) => r.roleId === args.roleId);
+            if (rebuiltRole) {
+              nextRole = rebuiltRole;
+              setSenderPlacedFields((fields) =>
+                syncSenderFieldsForRoleSignerMetadata(fields, rebuiltRole, valueCtx),
+              );
+              setRecipientPlacedFields((fields) =>
+                syncRecipientFieldsForRoleSignerMetadata(fields, rebuiltRole, valueCtx),
+              );
+            }
+          }
+          return nextCps;
+        });
+      }
+      logVs01PrepareSignerMetadataUpdated({
+        roleId: args.roleId,
+        partyName: nextRole.partyName,
+        signerName: nextRole.signerName ?? null,
+        signerTitle: nextRole.signerTitle ?? null,
+      });
+    },
+    [prepareSignerRoles, creatorName, creatorEmail, vs01LinkedAgreementId],
+  );
 
   useEffect(() => {
     if (!prepareSignerRoles?.length) return;
@@ -883,6 +962,7 @@ export function Vs01Wizard({
                 agreementBridgePlacementCopy={paidProAgreementBridgeSkip}
                 prepareSignerRoles={prepareSignerRoles}
                 prepareRecipientPlacedFields={recipientPlacedFields}
+                onPrepareSignerMetadataChange={handlePrepareSignerMetadataChange}
                 fields={senderPlacedFields}
                 onFieldsChange={setSenderPlacedFields}
                 onBack={() => goToStep(0)}

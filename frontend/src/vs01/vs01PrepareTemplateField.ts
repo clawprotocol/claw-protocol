@@ -9,9 +9,12 @@ import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { vs01DiagnosticsEnabled, type PreparePlacementValueContext } from "./vs01SignerFieldAssignment";
 import {
   resolvePrepareInitialsDisplayLabel,
-  resolvePrepareSignerDisplayName,
+  resolvePreparePartyEntityLabel,
+  resolvePreparePrintedNameDisplay,
   resolvePrepareSignerTitleDisplay,
   VS01_PREPARE_INITIALS_PLACEHOLDER,
+  VS01_PREPARE_SIGNATURE_COLLECTED_AT_SIGNING,
+  VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
   VS01_PREPARE_SIGNER_NAME_PLACEHOLDER,
   VS01_PREPARE_TITLE_PLACEHOLDER,
 } from "./vs01PrepareSignerDisplay";
@@ -63,7 +66,9 @@ export function resolvePrepareFieldDisplayValue(
 export type PrepareTemplateDisplay = {
   body: string;
   assigneeLine: string;
+  sublabel?: string;
   isPlaceholder: boolean;
+  awaitsSignerInput?: boolean;
 };
 
 export function prepareTemplateDisplayForField(
@@ -78,11 +83,14 @@ export function prepareTemplateDisplayForField(
   switch (field.type) {
     case "signature": {
       if (kind === "counterparty") {
-        const party = (role?.partyName ?? role?.entityName ?? entity).trim() || "Signer";
+        const party = resolvePreparePartyEntityLabel(role!) || entity || "Signer";
+        const knownSigner = Boolean((role?.signerName ?? "").trim());
         return {
-          body: "Signer signs here",
+          body: VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
           assigneeLine: `SIGNATURE — ${party}`,
+          sublabel: knownSigner ? undefined : VS01_PREPARE_SIGNATURE_COLLECTED_AT_SIGNING,
           isPlaceholder: true,
+          awaitsSignerInput: true,
         };
       }
       return {
@@ -106,17 +114,19 @@ export function prepareTemplateDisplayForField(
       };
     }
     case "printed_name": {
-      const nameDisp = role
-        ? resolvePrepareSignerDisplayName(role, "prepare_display", ownerPad)
-        : null;
-      const body =
-        resolved.trim() ||
-        nameDisp?.value ||
-        (kind === "counterparty" ? VS01_PREPARE_SIGNER_NAME_PLACEHOLDER : "Printed name");
+      const printed = role
+        ? resolvePreparePrintedNameDisplay(role, "prepare_display", ownerPad)
+        : {
+            primary: resolved.trim() || VS01_PREPARE_SIGNER_NAME_PLACEHOLDER,
+            isPlaceholder: !resolved.trim(),
+          };
+      const body = resolved.trim() || printed.primary;
       return {
         body,
         assigneeLine: entity,
-        isPlaceholder: nameDisp?.isPlaceholder ?? !resolved.trim(),
+        sublabel: resolved.trim() ? undefined : printed.sublabel,
+        isPlaceholder: printed.isPlaceholder && !resolved.trim(),
+        awaitsSignerInput: printed.isPlaceholder && !resolved.trim(),
       };
     }
     case "text": {
@@ -208,4 +218,28 @@ export function logVs01FieldInputFocus(payload: Record<string, unknown>): void {
   if (!vs01DiagnosticsEnabled()) return;
   // eslint-disable-next-line no-console
   console.info("[vs01-field-input-focus]", payload);
+}
+
+export function logVs01PlacementRectComputed(payload: Record<string, unknown>): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-placement-rect-computed]", payload);
+}
+
+export function logVs01PlacementRectSnapped(payload: Record<string, unknown>): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-placement-rect-snapped]", payload);
+}
+
+export function logVs01PlacementRectNudged(payload: Record<string, unknown>): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-placement-rect-nudged]", payload);
+}
+
+export function logVs01PlacementRectFinal(payload: Record<string, unknown>): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-placement-rect-final]", payload);
 }

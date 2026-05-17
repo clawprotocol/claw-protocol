@@ -53,7 +53,7 @@ describe("PrepareSigningFieldBody counterparty signature", () => {
       />,
     );
     expect(screen.getByText("SIGNATURE — Atlas LLC")).toBeTruthy();
-    expect(screen.getByText("Signer signs here")).toBeTruthy();
+    expect(screen.getByText("Signer will sign here")).toBeTruthy();
     expect(screen.queryByText("Redwood Script Name")).toBeNull();
     expect(screen.queryByText("Redwood Owner")).toBeNull();
   });

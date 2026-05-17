@@ -6,7 +6,6 @@ import {
 } from "./vs01SignerFieldAssignment";
 import {
   computePrepareRectFromClick,
-  computeRecipientRectFromClick,
   findNonOverlappingPrepareRect,
   isRectInPrepareAutoInitialsSafeZone,
   layoutPrepareAutoInitialsRectOnPage,
@@ -14,18 +13,23 @@ import {
   newSigningFieldId,
   normalizePlacedFieldGeometryIfBelowMinimum,
   prepareAutoInitialsPlacementDims,
+  snapPreparePlacementClickY,
   type PlacedSigningField,
   type SigningFieldType,
   type SigningPlacementValueContext,
 } from "./signingFields";
-import { ownerPadFromPlacementContext, resolveVs01FieldValueForRole } from "./vs01FieldValueResolution";
 import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareRoleAuthority } from "./vs01PrepareRoleAuthority";
 import {
   defaultPrepareTemplateStoredValue,
   logVs01PlacementFieldAdded,
   logVs01PlacementFieldRejected,
+  logVs01PlacementRectComputed,
+  logVs01PlacementRectFinal,
+  logVs01PlacementRectNudged,
+  logVs01PlacementRectSnapped,
 } from "./vs01PrepareTemplateField";
+import { resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
 
 export const PREPARE_FIELD_ASSIGNMENT_SOURCE = "prepare_active_role" as const;
 
@@ -93,7 +97,7 @@ export function prepareAutoInitialsFieldId(roleId: string, page: number): string
 }
 
 function createPreparePlacedFieldAtClick(
-  type: SigningFieldType,
+  type: SigningFieldType | Vs01RecipientFieldType,
   page: number,
   clickX: number,
   clickY: number,
@@ -102,15 +106,50 @@ function createPreparePlacedFieldAtClick(
   existingOnPage: PlacedSigningField[],
   options?: { autoInitials?: boolean },
 ): PlacedSigningField {
-  const clicked = computePrepareRectFromClick(type, clickX, clickY, existingOnPage, role.roleId);
+  const fieldType = type as SigningFieldType;
+  const snap = snapPreparePlacementClickY(clickY, fieldType, existingOnPage, role.roleId);
+  const clicked = computePrepareRectFromClick(fieldType, clickX, snap.clickY, existingOnPage, role.roleId);
+  logVs01PlacementRectComputed({
+    clickX,
+    clickY,
+    snappedY: snap.clickY,
+    proposedX: clicked.x,
+    proposedY: clicked.y,
+    proposedW: clicked.width,
+    proposedH: clicked.height,
+    roleId: role.roleId,
+    partyName: resolvePreparePartyEntityLabel(role),
+    fieldType: type,
+    page,
+  });
+  if (snap.snapped) {
+    logVs01PlacementRectSnapped({
+      clickY,
+      snappedY: snap.clickY,
+      reason: snap.reason,
+      roleId: role.roleId,
+      fieldType: type,
+      page,
+    });
+  }
   const resolved = findNonOverlappingPrepareRect({
     desiredRect: clicked,
     page,
     roleId: role.roleId,
     existingFields: existingOnPage,
+    placementMode: options?.autoInitials ? "auto_initials" : "manual",
   });
   const { x, y, width, height } = resolved;
   if (resolved.adjusted) {
+    logVs01PlacementRectNudged({
+      fieldType: type,
+      roleIdShort: role.roleId.slice(0, 16),
+      page,
+      fromY: clicked.y,
+      toY: y,
+      fromX: clicked.x,
+      toX: x,
+    });
     logVs01FieldOverlapAdjusted({
       fieldType: type,
       roleIdShort: role.roleId.slice(0, 16),
@@ -120,19 +159,20 @@ function createPreparePlacedFieldAtClick(
       fromX: clicked.x,
       toX: x,
     });
-    if (resolved.adjusted && vs01DiagnosticsEnabled()) {
-      // eslint-disable-next-line no-console
-      console.info("[vs01-initials-overlap-resolved]", {
-        fieldType: type,
-        page,
-        roleIdShort: role.roleId.slice(0, 16),
-        fromX: clicked.x,
-        fromY: clicked.y,
-        toX: x,
-        toY: y,
-      });
-    }
   }
+  logVs01PlacementRectFinal({
+    clickX,
+    clickY,
+    finalX: x,
+    finalY: y,
+    finalW: width,
+    finalH: height,
+    roleId: role.roleId,
+    partyName: resolvePreparePartyEntityLabel(role),
+    fieldType: type,
+    page,
+    adjusted: resolved.adjusted,
+  });
   const auto = options?.autoInitials === true;
   return {
     id: newSigningFieldId(),
@@ -221,6 +261,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       page: p,
       roleId,
       existingFields: onPage,
+      placementMode: "auto_initials",
     });
     if (resolved.adjusted && vs01DiagnosticsEnabled()) {
       // eslint-disable-next-line no-console
@@ -363,6 +404,7 @@ export function createPrepareStampedRecipientField(args: {
   displayName: string;
   email?: string;
   visualRoleId?: string | null;
+  existingFields?: Vs01RecipientPlacedField[];
 }): PrepareStampedRecipientField | null {
   const resolved = args.authority.resolveRoleForPlacement({
     tool: args.type,
@@ -381,27 +423,34 @@ export function createPrepareStampedRecipientField(args: {
     logVs01PlacementFieldRejected({ reason: "owner_role_on_recipient_layer" });
     return null;
   }
-  const { x, y, width, height } = computeRecipientRectFromClick(args.type, args.clickX, args.clickY);
-  const ownerPad = ownerPadFromPlacementContext({
-    typedName: args.displayName,
-    initials: "",
-    signerEmail: args.email,
-  });
+  const onPage = (args.existingFields ?? []).map((f) => ({
+    ...f,
+    assignedSignerRoleId: f.assignedSignerRoleId,
+    type: f.type as SigningFieldType,
+  }));
+  const placed = createPreparePlacedFieldAtClick(
+    args.type,
+    args.page,
+    args.clickX,
+    args.clickY,
+    resolved.role,
+    {
+      typedName: (resolved.role.signerName ?? "").trim() || "",
+      initials: "",
+      signerEmail: args.email,
+    },
+    onPage as PlacedSigningField[],
+  );
   const raw: Vs01RecipientPlacedField = {
-    id: newSigningFieldId(),
+    id: placed.id,
     counterpartyId: args.counterpartyId,
     type: args.type,
-    page: args.page,
-    x,
-    y,
-    width,
-    height,
-    value: resolveVs01FieldValueForRole({
-      fieldType: args.type,
-      role: resolved.role,
-      mode: "prepare_stored",
-      ownerPad,
-    }),
+    page: placed.page,
+    x: placed.x,
+    y: placed.y,
+    width: placed.width,
+    height: placed.height,
+    value: placed.value,
   };
   const stamped = stampPrepareRecipientFieldOrReject(
     raw,

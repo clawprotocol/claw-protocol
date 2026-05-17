@@ -38,6 +38,13 @@ import {
   type PlacedSigningField,
 } from "./signingFields";
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
+import {
+  PrepareSigningFieldBody,
+  prepareFieldDataAttributes,
+} from "./vs01PrepareSigningFieldRender";
+import { ownerPadFromPlacementContext } from "./vs01FieldValueResolution";
+import { findPrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { prepareTemplateCornerLabel, prepareTemplateDisplayForField } from "./vs01PrepareTemplateField";
 import { canFinishPreparingSigningPacket } from "../agreement/partySigningRoles";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { evaluatePreparePacketGateFromRoles, logVs01RequiredProgress } from "./vs01SignerFieldAssignment";
@@ -250,6 +257,15 @@ export function StepCompleteAndSend({
     prepareSigningPacket && prepareRoleCtx
       ? prepareRoleCtx.activeRole
       : prepareSignerRoles?.find((r) => r.vs01CounterpartyId === selectedCounterpartyId) ?? null;
+  const prepareOwnerPad = useMemo(
+    () =>
+      ownerPadFromPlacementContext({
+        typedName: prepareCreatorName.trim(),
+        initials: "",
+        signerEmail: prepareCreatorEmail.trim() || undefined,
+      }),
+    [prepareCreatorName, prepareCreatorEmail],
+  );
   const [recipientAutoInitialsEveryPage, setRecipientAutoInitialsEveryPage] = useState(false);
   const [skippedRecipientAutoByCp, setSkippedRecipientAutoByCp] = useState<Map<string, Set<number>>>(
     () => new Map()
@@ -620,6 +636,7 @@ export function StepCompleteAndSend({
           displayName,
           email: emailForField,
           visualRoleId: displayRoleId,
+          existingFields: fieldsRef.current,
         });
         if (!nf) return;
       } else {
@@ -1059,19 +1076,44 @@ export function StepCompleteAndSend({
                                             const forName =
                                               field.assignedSignerRoleLabel?.trim() ||
                                               counterpartyName(cpById, field.counterpartyId);
+                                            const fieldRole = prepareSigningPacket
+                                              ? findPrepareSigningRole(
+                                                  prepareSignerRoles,
+                                                  field.assignedSignerRoleId,
+                                                )
+                                              : null;
+                                            const fieldDisplay =
+                                              prepareSigningPacket && fieldRole
+                                                ? prepareTemplateDisplayForField(
+                                                    field as PlacedSigningField,
+                                                    fieldRole,
+                                                    prepareOwnerPad,
+                                                  )
+                                                : null;
                                             const isActiveRoleField =
                                               !prepareSigningPacket || fieldMatchesActive(field);
                                             return (
                                               <div
                                                 key={field.id}
                                                 data-field-id={field.id}
+                                                {...(fieldDisplay
+                                                  ? prepareFieldDataAttributes(
+                                                      field as PlacedSigningField,
+                                                      fieldRole,
+                                                      fieldDisplay,
+                                                    )
+                                                  : {})}
                                                 className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
                                                   field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
                                                 }${
-                                                  field.type === "signature" ||
-                                                  (field.type === "initials" && !field.autoInitials)
-                                                    ? " vs01-recipient-pending-slot"
-                                                    : ""
+                                                  field.type === "signature" &&
+                                                  (fieldRole?.kind ?? field.assignedSignerRoleKind) ===
+                                                    "counterparty"
+                                                    ? " vs01-sign-placement-box--counterparty-signature"
+                                                    : field.type === "signature" ||
+                                                        (field.type === "initials" && !field.autoInitials)
+                                                      ? " vs01-recipient-pending-slot"
+                                                      : ""
                                                 }${isSel ? " vs01-sign-placement-box--selected" : ""}${
                                                   pop ? " vs01-sign-placement-box--pop" : ""
                                                 }${!isActiveRoleField ? " vs01-sign-placement-box--other-role" : ""}`}
@@ -1085,6 +1127,30 @@ export function StepCompleteAndSend({
                                                 onPointerDown={(e) => onBoxPointerDown(e, field)}
                                                 onClick={(e) => onPlacementBoxClick(e, field)}
                                               >
+                                                {prepareSigningPacket && prepareSignerRoles ? (
+                                                  <>
+                                                    <span className="vs01-sign-placement-label">
+                                                      {prepareTemplateCornerLabel(field.type, fieldRole)}
+                                                    </span>
+                                                    <PrepareSigningFieldBody
+                                                      field={field as PlacedSigningField}
+                                                      role={fieldRole}
+                                                      ownerPreview={{
+                                                        signatureMode: "type",
+                                                        typedName: prepareCreatorName.trim(),
+                                                        hasDrawn: false,
+                                                        uploadPreviewUrl: null,
+                                                      }}
+                                                      ownerPad={prepareOwnerPad}
+                                                      isSelected={isSel}
+                                                      busy={busy}
+                                                      onValueChange={(value) =>
+                                                        updateField(field.id, { value })
+                                                      }
+                                                    />
+                                                  </>
+                                                ) : (
+                                                  <>
                                                 <span className="vs01-sign-placement-label">
                                                   {labelForRecipientFieldType(field.type)}
                                                   {forName ? ` · ${forName}` : ""}
@@ -1187,6 +1253,8 @@ export function StepCompleteAndSend({
                                                     </span>
                                                   )
                                                 ) : null}
+                                                  </>
+                                                )}
                                                 {isSel && !busy ? (
                                                   <button
                                                     type="button"

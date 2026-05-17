@@ -1,11 +1,13 @@
 import type { PlacedSigningField } from "./signingFields";
 import type { Vs01SignerRuntimeContext } from "./vs01FieldValueResolution";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
 import {
   logVs01TemplateRenderValue,
   prepareTemplateDisplayForField,
   prepareTemplateCornerLabel,
   resolvePrepareFieldDisplayValue,
+  type PrepareTemplateDisplay,
 } from "./vs01PrepareTemplateField";
 import { VS01_PREPARE_SIGNER_NAME_PLACEHOLDER, VS01_PREPARE_TITLE_PLACEHOLDER } from "./vs01PrepareSignerDisplay";
 
@@ -35,6 +37,20 @@ export type PrepareSigningFieldBodyProps = {
   onInputFocus?: () => void;
 };
 
+export function prepareFieldDataAttributes(
+  field: PlacedSigningField,
+  role: Vs01PrepareSigningRole | null,
+  display: PrepareTemplateDisplay,
+): Record<string, string> {
+  const kind = role?.kind ?? field.assignedSignerRoleKind ?? "owner";
+  const party = role ? resolvePreparePartyEntityLabel(role) : (field.assignedSignerRoleLabel ?? "").trim();
+  return {
+    "data-vs01-field-role-kind": kind,
+    "data-vs01-field-party-name": party,
+    "data-vs01-field-awaits-signer-input": display.awaitsSignerInput ? "true" : "false",
+  };
+}
+
 export function PrepareSigningFieldBody({
   field,
   role,
@@ -59,12 +75,13 @@ export function PrepareSigningFieldBody({
     roleIdShort: (role?.roleId ?? field.assignedSignerRoleId ?? "").slice(0, 16),
     isPlaceholder: display.isPlaceholder,
     bodyPreview: display.body.slice(0, 40),
+    hasSublabel: Boolean(display.sublabel),
   });
 
   if (field.type === "signature") {
     if (isOwnerField) {
-    return (
-      <div className="vs01-sign-placement-signature-body">
+      return (
+        <div className="vs01-sign-placement-signature-body">
           {ownerPreview.signatureMode === "type" && ownerPreview.typedName.trim() ? (
             <span className="vs01-sign-placement-script">{ownerPreview.typedName.trim()}</span>
           ) : null}
@@ -88,9 +105,14 @@ export function PrepareSigningFieldBody({
       );
     }
     return (
-      <div className="vs01-sign-placement-signature-body vs01-sign-placement-signature-body--counterparty vs01-sign-placement-body--noninteractive">
+      <div
+        className="vs01-sign-placement-signature-body vs01-sign-placement-signature-body--counterparty vs01-sign-placement-signature-body--pending vs01-sign-placement-body--noninteractive"
+      >
         <span className="vs01-prepare-signature-heading">{display.assigneeLine}</span>
         <span className="vs01-prepare-signature-placeholder">{display.body}</span>
+        {display.sublabel ? (
+          <span className="vs01-prepare-signature-sublabel">{display.sublabel}</span>
+        ) : null}
       </div>
     );
   }
@@ -134,9 +156,12 @@ export function PrepareSigningFieldBody({
     }
     return (
       <span
-        className={`vs01-sign-placement-text vs01-sign-placement-body--noninteractive${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}
+        className={`vs01-sign-placement-text vs01-sign-placement-text--stacked vs01-sign-placement-body--noninteractive${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}
       >
-        {display.body}
+        <span className="vs01-prepare-field-primary">{display.body}</span>
+        {display.sublabel ? (
+          <span className="vs01-prepare-field-sublabel">{display.sublabel}</span>
+        ) : null}
       </span>
     );
   }
@@ -167,4 +192,3 @@ export function PrepareSigningFieldBody({
 
   return null;
 }
-

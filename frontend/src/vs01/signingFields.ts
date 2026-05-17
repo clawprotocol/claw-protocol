@@ -297,7 +297,140 @@ export function fieldRectsOverlap(
   );
 }
 
-/** Prepare-mode placement: anchor at click; small downward nudge only when same-role fields overlap. */
+const PREPARE_ROW_FIELD_TYPES = new Set<SigningFieldType>([
+  "signature",
+  "printed_name",
+  "text",
+  "date",
+]);
+
+/** Center the field on the click point (predictable anchor). */
+export function centerPrepareRectOnClick(
+  clickX: number,
+  clickY: number,
+  width: number,
+  height: number,
+): { x: number; y: number; width: number; height: number } {
+  const cx = Math.min(1, Math.max(0, clickX));
+  const cy = Math.min(1, Math.max(0, clickY));
+  return clampFieldRectToPage(cx - width / 2, cy - height / 2, width, height);
+}
+
+/**
+ * Vertical snap for signature-row tools: align to same-role row on page or common line bands.
+ * Horizontal position is preserved from the click.
+ */
+export function snapPreparePlacementClickY(
+  clickY: number,
+  fieldType: SigningFieldType,
+  existingOnPage: ReadonlyArray<{
+    y: number;
+    height: number;
+    type?: SigningFieldType;
+    assignedSignerRoleId?: string;
+  }>,
+  roleId: string,
+): { clickY: number; snapped: boolean; reason?: string } {
+  if (!PREPARE_ROW_FIELD_TYPES.has(fieldType)) {
+    return { clickY, snapped: false };
+  }
+  const rid = roleId.trim();
+  const peers = existingOnPage.filter(
+    (f) =>
+      (f.assignedSignerRoleId ?? "").trim() === rid &&
+      f.type &&
+      PREPARE_ROW_FIELD_TYPES.has(f.type),
+  );
+  for (const p of peers) {
+    const centerY = p.y + p.height / 2;
+    if (Math.abs(clickY - centerY) < 0.04) {
+      return { clickY: centerY, snapped: true, reason: "same_role_row" };
+    }
+  }
+  const bands = [0.32, 0.38, 0.41, 0.45, 0.48, 0.52, 0.55, 0.62, 0.68, 0.74, 0.78];
+  for (const band of bands) {
+    if (Math.abs(clickY - band) < 0.02) {
+      return { clickY: band, snapped: true, reason: "line_band" };
+    }
+  }
+  return { clickY, snapped: false };
+}
+
+function intersectionArea(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): number {
+  const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  return ix * iy;
+}
+
+/** True only when overlap area exceeds a small threshold (ignore hairline touches). */
+export function prepareRectsHaveSignificantOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+  minArea = 0.00065,
+): boolean {
+  return intersectionArea(a, b) > minArea;
+}
+
+const PREPARE_MANUAL_NUDGE_STEP = 0.009;
+const PREPARE_MANUAL_MAX_NUDGES = 8;
+
+/**
+ * Conservative deconflict: preserve click anchor; nudge vertically first, then minimally horizontally.
+ */
+export function findConservativeNonOverlappingPrepareRect(args: {
+  desiredRect: { x: number; y: number; width: number; height: number };
+  page: number;
+  existingFields: ReadonlyArray<PrepareRectObstacle>;
+  excludeFieldId?: string;
+}): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  adjusted: boolean;
+  nudgeSteps: number;
+} {
+  const { width, height } = args.desiredRect;
+  const obstacles = args.existingFields
+    .filter((f) => (f.page == null || f.page === args.page) && f.id !== args.excludeFieldId)
+    .map((f) => ({ x: f.x, y: f.y, width: f.width, height: f.height }));
+  let rect = clampFieldRectToPage(args.desiredRect.x, args.desiredRect.y, width, height);
+  const overlaps = () => obstacles.some((o) => prepareRectsHaveSignificantOverlap(rect, o));
+  if (!overlaps()) {
+    return { ...rect, adjusted: false, nudgeSteps: 0 };
+  }
+  const anchorX = rect.x;
+  const anchorY = rect.y;
+  let steps = 0;
+  const deltas: Array<{ dx: number; dy: number }> = [
+    { dx: 0, dy: PREPARE_MANUAL_NUDGE_STEP },
+    { dx: 0, dy: -PREPARE_MANUAL_NUDGE_STEP },
+    { dx: PREPARE_MANUAL_NUDGE_STEP, dy: 0 },
+    { dx: -PREPARE_MANUAL_NUDGE_STEP, dy: 0 },
+    { dx: 0, dy: PREPARE_MANUAL_NUDGE_STEP * 2 },
+    { dx: 0, dy: -PREPARE_MANUAL_NUDGE_STEP * 2 },
+    { dx: PREPARE_MANUAL_NUDGE_STEP * 2, dy: 0 },
+    { dx: -PREPARE_MANUAL_NUDGE_STEP * 2, dy: 0 },
+  ];
+  for (const d of deltas) {
+    if (steps >= PREPARE_MANUAL_MAX_NUDGES) break;
+    const candidate = clampFieldRectToPage(anchorX + d.dx, anchorY + d.dy, width, height);
+    if (!obstacles.some((o) => prepareRectsHaveSignificantOverlap(candidate, o))) {
+      rect = candidate;
+      steps += 1;
+      break;
+    }
+    steps += 1;
+  }
+  const adjusted =
+    Math.abs(rect.x - args.desiredRect.x) > 1e-6 || Math.abs(rect.y - args.desiredRect.y) > 1e-6;
+  return { ...rect, adjusted, nudgeSteps: steps };
+}
+
+/** Prepare-mode placement: center on click; same-role peer nudge only when significantly overlapping. */
 export function computePrepareRectFromClick(
   type: SigningFieldType,
   clickX: number,
@@ -308,19 +441,21 @@ export function computePrepareRectFromClick(
     width: number;
     height: number;
     assignedSignerRoleId?: string;
+    type?: SigningFieldType;
   }>,
   roleId: string,
 ): { x: number; y: number; width: number; height: number } {
   const { width, height } = getVs01DefaultFieldGeometry(type);
+  const snappedY = snapPreparePlacementClickY(clickY, type, existingOnPage, roleId);
   let cx = Math.min(1, Math.max(0, clickX));
-  let cy = Math.min(1, Math.max(0, clickY));
+  let cy = Math.min(1, Math.max(0, snappedY.clickY));
   const rid = roleId.trim();
   const peers = existingOnPage.filter((f) => (f.assignedSignerRoleId ?? "").trim() === rid);
-  let rect = clampFieldRectToPage(cx, cy, width, height);
+  let rect = centerPrepareRectOnClick(cx, cy, width, height);
   let attempts = 0;
-  while (attempts < 10 && peers.some((p) => fieldRectsOverlap(rect, p))) {
-    cy = Math.min(1 - height, cy + 0.022);
-    rect = clampFieldRectToPage(cx, cy, width, height);
+  while (attempts < 6 && peers.some((p) => prepareRectsHaveSignificantOverlap(rect, p))) {
+    cy = Math.min(1 - height / 2, cy + 0.018);
+    rect = centerPrepareRectOnClick(cx, cy, width, height);
     attempts += 1;
   }
   return rect;
@@ -525,7 +660,18 @@ export function findNonOverlappingPrepareRect(args: {
   roleId?: string;
   existingFields: ReadonlyArray<PrepareRectObstacle>;
   excludeFieldId?: string;
+  /** Manual click placement uses conservative nudge; auto-initials keeps legacy sweep. */
+  placementMode?: "manual" | "auto_initials";
 }): { x: number; y: number; width: number; height: number; adjusted: boolean } {
+  if (args.placementMode === "manual") {
+    const conservative = findConservativeNonOverlappingPrepareRect({
+      desiredRect: args.desiredRect,
+      page: args.page,
+      existingFields: args.existingFields,
+      excludeFieldId: args.excludeFieldId,
+    });
+    return { ...conservative, adjusted: conservative.adjusted };
+  }
   const { width, height } = args.desiredRect;
   const obstacles = args.existingFields
     .filter((f) => (f.page == null || f.page === args.page) && f.id !== args.excludeFieldId)
