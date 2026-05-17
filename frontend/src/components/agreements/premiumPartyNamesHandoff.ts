@@ -3,6 +3,11 @@
  * Continue / checkout / modal remounts. Merge rules never replace a valid email with blank.
  */
 
+import {
+  normalizeSignerMetadataForSave,
+  signerMetadataInputRaw,
+} from "../../agreement/signerMetadataNormalize";
+
 const LEGACY_KEY = "claw_premium_party_names_handoff_v1";
 const KEY_V2 = "claw_premium_recipient_handoff_v2";
 
@@ -63,25 +68,27 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
             }));
           if (cleaned.length > 0) partyIndexSlots = cleaned;
         }
-        return {
+        const handoff: PremiumRecipientHandoffV2 = {
           v: 2,
           party1: {
             name: String(parsed.party1.name || "").trim(),
             email: String(parsed.party1.email || "").trim(),
             role: String(parsed.party1.role || "").trim(),
-            signerName: String(parsed.party1.signerName || "").trim(),
-            signerTitle: String(parsed.party1.signerTitle || "").trim(),
+            signerName: signerMetadataInputRaw(parsed.party1.signerName),
+            signerTitle: signerMetadataInputRaw(parsed.party1.signerTitle),
           },
           party2: {
             name: String(parsed.party2.name || "").trim(),
             email: String(parsed.party2.email || "").trim(),
             role: String(parsed.party2.role || "").trim(),
-            signerName: String(parsed.party2.signerName || "").trim(),
-            signerTitle: String(parsed.party2.signerTitle || "").trim(),
+            signerName: signerMetadataInputRaw(parsed.party2.signerName),
+            signerTitle: signerMetadataInputRaw(parsed.party2.signerTitle),
           },
           savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : Date.now(),
           ...(partyIndexSlots ? { partyIndexSlots } : {}),
         };
+        logReviewLinkSignerMetadataHandoffRead(handoff);
+        return handoff;
       }
     }
   } catch {
@@ -118,10 +125,39 @@ function mergeSlot(
       ? String(patch.role || "").trim() || prev.role || "party"
       : prev.role || "party";
   const signerName =
-    patch.signerName !== undefined ? String(patch.signerName || "").trim() : String(prev.signerName || "").trim();
+    patch.signerName !== undefined
+      ? normalizeSignerMetadataForSave(patch.signerName) ?? ""
+      : signerMetadataInputRaw(prev.signerName);
   const signerTitle =
-    patch.signerTitle !== undefined ? String(patch.signerTitle || "").trim() : String(prev.signerTitle || "").trim();
+    patch.signerTitle !== undefined
+      ? normalizeSignerMetadataForSave(patch.signerTitle) ?? ""
+      : signerMetadataInputRaw(prev.signerTitle);
   return { name, email, role, signerName, signerTitle };
+}
+
+function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoffV2): void {
+  const slots = linearPremiumRecipientSlots(handoff, 2 + (handoff.partyIndexSlots?.length ?? 0));
+  const withSignerName = slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length;
+  const withSignerTitle = slots.filter((s) => signerMetadataInputRaw(s.signerTitle).length > 0).length;
+  // eslint-disable-next-line no-console
+  console.info("[review-link-signer-metadata-handoff-read]", {
+    partySlots: slots.length,
+    slotsWithSignerName: withSignerName,
+    slotsWithSignerTitle: withSignerTitle,
+  });
+}
+
+function logReviewLinkSignerMetadataHandoffWrite(payload: PremiumRecipientHandoffV2): void {
+  const slots = linearPremiumRecipientSlots(payload, 2 + (payload.partyIndexSlots?.length ?? 0));
+  const withSignerName = slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length;
+  const withSignerTitle = slots.filter((s) => signerMetadataInputRaw(s.signerTitle).length > 0).length;
+  if (!withSignerName && !withSignerTitle) return;
+  // eslint-disable-next-line no-console
+  console.info("[review-link-signer-metadata-handoff-write]", {
+    partySlots: slots.length,
+    slotsWithSignerName: withSignerName,
+    slotsWithSignerTitle: withSignerTitle,
+  });
 }
 
 /**
@@ -161,6 +197,7 @@ export function persistPremiumRecipientHandoff(patch: {
     };
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
+    logReviewLinkSignerMetadataHandoffWrite(payload);
     const p1e = Boolean(String(party1.email || "").trim());
     const p2e = Boolean(String(party2.email || "").trim());
     if (p1e || p2e) {
@@ -237,6 +274,7 @@ export function writePremiumRecipientHandoffExact(
       return;
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
+    logReviewLinkSignerMetadataHandoffWrite(payload);
     const p1e = Boolean(String(payload.party1.email || "").trim());
     const p2e = Boolean(String(payload.party2.email || "").trim());
     if (p1e || p2e) {
@@ -299,7 +337,13 @@ export function writePremiumRecipientHandoffLinear(slots: PremiumRecipientHandof
 
 /** Build `partyIndexSlots` for indices ≥2 from authoritative parties + optional checkout candidates. */
 export function buildPartyIndexSlotsFromPartiesAndCandidates(
-  parties: readonly { name?: string | null; role?: string | null; email?: string | null }[],
+  parties: readonly {
+    name?: string | null;
+    role?: string | null;
+    email?: string | null;
+    signerName?: string | null;
+    signerTitle?: string | null;
+  }[],
   candidates: readonly { email?: string | null }[],
 ): PremiumRecipientHandoffSlot[] | undefined {
   const max = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
@@ -312,7 +356,29 @@ export function buildPartyIndexSlotsFromPartiesAndCandidates(
       name: String(p.name || "").trim(),
       email: em,
       role: String(p.role || "party").trim() || "party",
+      signerName: signerMetadataInputRaw(p.signerName),
+      signerTitle: signerMetadataInputRaw(p.signerTitle),
     });
   }
   return out.length ? out : undefined;
+}
+
+/** Build handoff slots from draft parties (indices 0–1 + optional extra). */
+export function premiumHandoffSlotFromParty(
+  p: {
+    name?: string | null;
+    role?: string | null;
+    email?: string | null;
+    signerName?: string | null;
+    signerTitle?: string | null;
+  },
+  nameOverride?: string,
+): PremiumRecipientHandoffSlot {
+  return {
+    name: (nameOverride ?? p.name ?? "").trim(),
+    email: String(p.email ?? "").trim(),
+    role: String(p.role ?? "party").trim() || "party",
+    signerName: signerMetadataInputRaw(p.signerName),
+    signerTitle: signerMetadataInputRaw(p.signerTitle),
+  };
 }

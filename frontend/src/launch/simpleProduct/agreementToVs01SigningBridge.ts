@@ -1,4 +1,8 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
+import {
+  explicitSignerNameForEntity,
+  normalizeSignerMetadataForSave,
+} from "../../agreement/signerMetadataNormalize";
 import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
@@ -194,21 +198,6 @@ export function logAgreementVs01RecipientEmailMergeDiagnostics(
   });
 }
 
-function normalizeSignerMetadataSlot(raw: string | null | undefined): string | undefined {
-  const s = String(raw ?? "").trim();
-  return s || undefined;
-}
-
-function explicitSignerNameForEntity(
-  signerName: string | undefined,
-  entityName: string,
-): string | undefined {
-  const sn = (signerName || "").trim();
-  if (!sn) return undefined;
-  if (sn.toLowerCase() === entityName.trim().toLowerCase()) return undefined;
-  return sn;
-}
-
 /**
  * Merges optional representative name/title from recipient setup onto `draft.parties[i]` by index.
  */
@@ -223,10 +212,10 @@ export function mergePaidProRecipientSetupSignerMetadataIntoDraft(
   const len = Math.max(Array.isArray(arrN) ? arrN.length : 0, Array.isArray(arrT) ? arrT.length : 0);
   if (len === 0) return draft;
   const names = Array.from({ length: len }, (_, i) =>
-    normalizeSignerMetadataSlot(Array.isArray(arrN) ? arrN[i] : undefined),
+    normalizeSignerMetadataForSave(Array.isArray(arrN) ? arrN[i] : undefined),
   );
   const titleSlots = Array.from({ length: len }, (_, i) =>
-    normalizeSignerMetadataSlot(Array.isArray(arrT) ? arrT[i] : undefined),
+    normalizeSignerMetadataForSave(Array.isArray(arrT) ? arrT[i] : undefined),
   );
   if (!names.some(Boolean) && !titleSlots.some(Boolean)) return draft;
 
@@ -237,8 +226,8 @@ export function mergePaidProRecipientSetupSignerMetadataIntoDraft(
     const entityName = (parties[i].name || "").trim();
     const nextSignerName = explicitSignerNameForEntity(names[i], entityName);
     const nextSignerTitle = titleSlots[i];
-    const prevSignerName = (parties[i].signerName || "").trim() || undefined;
-    const prevSignerTitle = (parties[i].signerTitle || "").trim() || undefined;
+    const prevSignerName = normalizeSignerMetadataForSave(parties[i].signerName);
+    const prevSignerTitle = normalizeSignerMetadataForSave(parties[i].signerTitle);
     if (prevSignerName === nextSignerName && prevSignerTitle === nextSignerTitle) continue;
     parties[i] = {
       ...parties[i],
@@ -347,8 +336,8 @@ export function buildAgreementVs01BridgeSession(params: {
     parties.find((p) => (p.role || "").toLowerCase() === "owner") ?? parties[0] ?? null;
   const others = owner ? parties.filter((p) => p !== owner) : parties.slice(1);
   const creatorName = (owner?.name || "").trim() || "Sender";
-  const creatorSignerName = explicitSignerNameForEntity((owner?.signerName || "").trim() || undefined, creatorName);
-  const creatorSignerTitle = (owner?.signerTitle || "").trim() || undefined;
+  const creatorSignerName = explicitSignerNameForEntity(owner?.signerName, creatorName);
+  const creatorSignerTitle = normalizeSignerMetadataForSave(owner?.signerTitle);
   const creatorEmail = inferBridgeCreatorEmail(params.draft, owner, creatorName);
   const counterparties: Vs01Counterparty[] =
     others.length > 0
@@ -359,8 +348,8 @@ export function buildAgreementVs01BridgeSession(params: {
             name: (p.name || "").trim(),
             email,
             phone: (p.phone || "").trim(),
-            signerName: explicitSignerNameForEntity((p.signerName || "").trim() || undefined, (p.name || "").trim()),
-            signerTitle: (p.signerTitle || "").trim() || undefined,
+            signerName: explicitSignerNameForEntity(p.signerName, (p.name || "").trim()),
+            signerTitle: normalizeSignerMetadataForSave(p.signerTitle),
             signerEmail: (p.signerEmail || "").trim() || undefined,
             reviewEmail: (p.reviewEmail || "").trim() || undefined,
           };
@@ -392,6 +381,23 @@ export function buildAgreementVs01BridgeSession(params: {
       : {}),
     ...(reviewerApproved ? { reviewerApprovedCleanHandoff: true as const } : {}),
   };
+}
+
+export function logVs01BridgeSignerMetadata(bridge: AgreementVs01BridgeSession): void {
+  const rolesWithSignerName = 1 + (bridge.counterparties ?? []).filter((c) => c.signerName?.trim()).length;
+  const rolesWithSignerTitle =
+    (bridge.creatorSignerTitle ? 1 : 0) +
+    (bridge.counterparties ?? []).filter((c) => c.signerTitle?.trim()).length;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-bridge-signer-metadata]", {
+    hasCreatorSignerName: Boolean(bridge.creatorSignerName?.trim()),
+    hasCreatorSignerTitle: Boolean(bridge.creatorSignerTitle?.trim()),
+    counterpartyCount: bridge.counterparties?.length ?? 0,
+    counterpartiesWithSignerName: (bridge.counterparties ?? []).filter((c) => c.signerName?.trim()).length,
+    counterpartiesWithSignerTitle: (bridge.counterparties ?? []).filter((c) => c.signerTitle?.trim()).length,
+    rolesWithSignerName,
+    rolesWithSignerTitle,
+  });
 }
 
 export function writeAgreementVs01BridgeSession(payload: AgreementVs01BridgeSession): void {
@@ -535,6 +541,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
   });
   logAgreementVs01BridgePreflight(bridge);
+  logVs01BridgeSignerMetadata(bridge);
   writeAgreementVs01BridgeSession(bridge);
   setPaidProAgreementBridgeSkipMarker(vs01Seed.documentId);
   const route = `/app/esign/${encodeURIComponent(vs01Seed.documentId)}?agreement_bridge=1`;

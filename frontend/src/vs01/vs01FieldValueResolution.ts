@@ -52,6 +52,18 @@ export function logVs01FieldDefaultApplied(payload: Record<string, unknown>): vo
   console.info("[vs01-field-default-applied]", payload);
 }
 
+export function logVs01RoleSignerMetadataResolved(payload: Record<string, unknown>): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-role-signer-metadata-resolved]", payload);
+}
+
+export function logVs01FieldSignerValueApplied(payload: Record<string, unknown>): void {
+  if (!vs01DiagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-field-signer-value-applied]", payload);
+}
+
 export function logVs01RecipientRuntimeValueResolved(payload: Record<string, unknown>): void {
   if (!vs01DiagnosticsEnabled()) return;
   // eslint-disable-next-line no-console
@@ -100,7 +112,6 @@ export function resolveVs01FieldValueForRole(args: {
       }
       case "text": {
         if (stored) return stored;
-        if (isOwner) return stored;
         return resolvePrepareSignerTitleDisplay(args.role, "prepare_stored").value;
       }
       case "email": {
@@ -130,7 +141,7 @@ export function resolveVs01FieldValueForRole(args: {
       } else {
         out = resolvePrepareSignerDisplayName(args.role, "prepare_display", ownerPad).value;
       }
-    } else if (args.fieldType === "text" && !isOwner) {
+    } else if (args.fieldType === "text") {
       out = stored || resolvePrepareSignerTitleDisplay(args.role, "prepare_display").value;
     } else {
       out = stored || resolveStored();
@@ -170,13 +181,21 @@ export function resolveVs01FieldValueForRole(args: {
     });
   }
 
-  logVs01RoleValueResolved({
+  logVs01RoleSignerMetadataResolved({
     mode: args.mode,
     fieldType: args.fieldType,
     roleKind: args.role.kind,
     partyId: args.role.partyId,
     roleIdShort: args.role.roleId.slice(0, 16),
+    hasSignerName: Boolean((args.role.signerName ?? "").trim()),
+    hasSignerTitle: Boolean((args.role.signerTitle ?? "").trim()),
     valueLen: out.length,
+    isPlaceholder:
+      args.fieldType === "printed_name"
+        ? !out && !stored
+        : args.fieldType === "text" && !isOwner
+          ? !out && !stored
+          : false,
   });
 
   if (!stored && out && args.mode === "prepare_stored") {
@@ -185,6 +204,14 @@ export function resolveVs01FieldValueForRole(args: {
       roleKind: args.role.kind,
       partyId: args.role.partyId,
     });
+    if (args.fieldType === "printed_name" || (args.fieldType === "text" && !isOwner)) {
+      logVs01FieldSignerValueApplied({
+        fieldType: args.fieldType,
+        roleKind: args.role.kind,
+        partyId: args.role.partyId,
+        valueLen: out.length,
+      });
+    }
   }
 
   return out;

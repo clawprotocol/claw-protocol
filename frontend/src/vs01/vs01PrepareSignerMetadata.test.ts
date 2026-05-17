@@ -61,6 +61,36 @@ describe("prepare signer metadata sync", () => {
     expect(ownerField.value).toBe("");
   });
 
+  it("owner printed_name seeds from role signerName not entity", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_owner_pn",
+      creatorName: "Redwood Peak Ventures LLC",
+      creatorEmail: "o@x.com",
+      ownerSignerName: "Jane Doe",
+      ownerSignerTitle: "Managing Member",
+      counterparties: [],
+    });
+    const owner = roles[0]!;
+    const seeded = syncSenderFieldsForRoleSignerMetadata(
+      [
+        {
+          id: "pn-owner",
+          type: "printed_name",
+          page: 0,
+          x: 0.1,
+          y: 0.1,
+          width: 0.2,
+          height: 0.04,
+          value: "",
+          assignedSignerRoleId: owner.roleId,
+        },
+      ],
+      owner,
+      { typedName: "j", initials: "J", signerEmail: "o@x.com" },
+    );
+    expect(seeded[0]!.value).toBe("Jane Doe");
+  });
+
   it("owner representative edit does not replace entity partyName", () => {
     const roles = buildVs01PrepareSigningRoles({
       agreementId: "ag_owner_meta",

@@ -1,3 +1,9 @@
+import {
+  logSignerMetadataInputChange,
+  logSignerMetadataNormalizedForSave,
+  normalizeSignerMetadataForSave,
+  signerMetadataInputRaw,
+} from "../agreement/signerMetadataNormalize";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { isKnownPrepareSignerName, resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
 
@@ -14,8 +20,8 @@ export function Vs01PrepareSignerMetadataPanel({
 }: Vs01PrepareSignerMetadataPanelProps) {
   const party = resolvePreparePartyEntityLabel(role);
   const known = isKnownPrepareSignerName(role);
-  const signerName = (role.signerName ?? "").trim();
-  const signerTitle = (role.signerTitle ?? "").trim();
+  const signerName = signerMetadataInputRaw(role.signerName);
+  const signerTitle = signerMetadataInputRaw(role.signerTitle);
 
   return (
     <div className="vs01-prepare-signer-metadata-panel" role="group" aria-label="Signer details">
@@ -36,7 +42,27 @@ export function Vs01PrepareSignerMetadataPanel({
           disabled={busy}
           placeholder="Human signer name"
           autoComplete="name"
-          onChange={(ev) => onPatch({ signerName: ev.target.value })}
+          onChange={(ev) => {
+            logSignerMetadataInputChange({
+              surface: "vs01_prepare_rail",
+              field: "signerName",
+              raw: ev.target.value,
+            });
+            onPatch({ signerName: ev.target.value });
+          }}
+          onBlur={(ev) => {
+            const before = ev.target.value;
+            const after = normalizeSignerMetadataForSave(before) ?? "";
+            if (after !== before) {
+              logSignerMetadataNormalizedForSave({
+                surface: "vs01_prepare_rail",
+                field: "signerName",
+                beforeLen: before.length,
+                afterLen: after.length,
+              });
+              onPatch({ signerName: after });
+            }
+          }}
           onPointerDown={(ev) => ev.stopPropagation()}
           onClick={(ev) => ev.stopPropagation()}
         />
@@ -50,7 +76,27 @@ export function Vs01PrepareSignerMetadataPanel({
           disabled={busy}
           placeholder="Title or role"
           autoComplete="organization-title"
-          onChange={(ev) => onPatch({ signerTitle: ev.target.value })}
+          onChange={(ev) => {
+            logSignerMetadataInputChange({
+              surface: "vs01_prepare_rail",
+              field: "signerTitle",
+              raw: ev.target.value,
+            });
+            onPatch({ signerTitle: ev.target.value });
+          }}
+          onBlur={(ev) => {
+            const before = ev.target.value;
+            const after = normalizeSignerMetadataForSave(before) ?? "";
+            if (after !== before) {
+              logSignerMetadataNormalizedForSave({
+                surface: "vs01_prepare_rail",
+                field: "signerTitle",
+                beforeLen: before.length,
+                afterLen: after.length,
+              });
+              onPatch({ signerTitle: after });
+            }
+          }}
           onPointerDown={(ev) => ev.stopPropagation()}
           onClick={(ev) => ev.stopPropagation()}
         />

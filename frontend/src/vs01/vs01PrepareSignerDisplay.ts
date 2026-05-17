@@ -78,6 +78,17 @@ export function resolvePrepareSignerDisplayName(
   ownerPad?: Vs01SignerRuntimeContext,
 ): { value: string; source: string; isPlaceholder: boolean } {
   if (role.kind === "owner") {
+    const known = (role.signerName ?? "").trim();
+    if (known) {
+      logVs01SignerNameSource({
+        mode,
+        roleKind: role.kind,
+        partyId: role.partyId,
+        source: "role_signer_name",
+        knownSignerName: true,
+      });
+      return { value: known, source: "role_signer_name", isPlaceholder: false };
+    }
     const fromPad = (ownerPad?.typedName ?? "").trim();
     const source = fromPad ? "owner_pad" : "empty";
     logVs01SignerNameSource({
@@ -169,6 +180,14 @@ export function resolvePrepareInitialsDisplayLabel(
   ownerPad?: Vs01SignerRuntimeContext,
 ): { label: string; isPlaceholder: boolean; source: string } {
   if (role.kind === "owner") {
+    const fromRole = (role.signerName ?? "").trim();
+    if (fromRole) {
+      return {
+        label: initialsFromSignerName(fromRole).slice(0, 8),
+        isPlaceholder: false,
+        source: "role_signer_name",
+      };
+    }
     const fromPad = (ownerPad?.initials ?? "").trim();
     if (fromPad) return { label: fromPad.slice(0, 8), isPlaceholder: false, source: "owner_pad" };
     const fromName = (ownerPad?.typedName ?? "").trim();

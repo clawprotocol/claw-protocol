@@ -49,14 +49,15 @@ import { Vs01PrepareRoleAuthorityProvider } from "./Vs01PrepareRoleAuthorityCont
 import {
   buildOwnerPlacementValueContext,
   logVs01PrepareSignerMetadataUpdated,
-  patchCounterpartySignerMetadata,
+  patchCounterpartySignerMetadataRaw,
+  seedPrepareFieldsFromRoleSignerMetadata,
   syncRecipientFieldsForRoleSignerMetadata,
   syncSenderFieldsForRoleSignerMetadata,
 } from "./vs01PrepareSignerMetadata";
 import {
   clearVs01DraftState,
   loadVs01DraftState,
-  mergeBridgeEmailsIntoSavedCounterparties,
+  mergeBridgeMetadataIntoSavedCounterparties,
   saveVs01DraftState,
 } from "./vs01DraftStatePersist";
 import type {
@@ -343,7 +344,7 @@ export function Vs01Wizard({
       } else if (role.vs01CounterpartyId) {
         const cpId = role.vs01CounterpartyId;
         setCounterparties((prev) => {
-          const nextCps = patchCounterpartySignerMetadata(prev, cpId, {
+          const nextCps = patchCounterpartySignerMetadataRaw(prev, cpId, {
             signerName: args.signerName,
             signerTitle: args.signerTitle,
           });
@@ -487,7 +488,7 @@ export function Vs01Wizard({
           const bridgeCps =
             bridge.counterparties?.length > 0 ? bridge.counterparties : initialCounterparties();
           const cps = saved && saved.counterparties.length > 0
-            ? mergeBridgeEmailsIntoSavedCounterparties(saved.counterparties, bridgeCps)
+            ? mergeBridgeMetadataIntoSavedCounterparties(saved.counterparties, bridgeCps)
             : bridgeCps;
           const titleForUi = (saved?.agreementTitle || bridge.agreementTitle || "").trim() || "Agreement";
           const cn = saved?.creatorName || bridge.creatorName || "";
@@ -516,14 +517,35 @@ export function Vs01Wizard({
               fileName: `${titleForUi.replace(/[/\\]/g, "-")}.pdf`,
               source: "upload",
             });
+            const ownerCtxForSeed = buildOwnerPlacementValueContext({ creatorName: cn, creatorEmail: ce });
+            const seedValueCtx = (role: (typeof rolesForM)[number]) =>
+              role.kind === "owner"
+                ? ownerCtxForSeed
+                : { typedName: "", initials: "", signerEmail: undefined };
             if (saved) {
-              setSenderPlacedFields(migrateLegacySenderPlacedFields(saved.senderPlacedFields, ownerR));
-              setRecipientPlacedFields(migrateLegacyRecipientPlacedFields(saved.recipientPlacedFields, rolesForM));
+              const migratedSender = migrateLegacySenderPlacedFields(saved.senderPlacedFields, ownerR);
+              const migratedRecipient = migrateLegacyRecipientPlacedFields(saved.recipientPlacedFields, rolesForM);
+              setSenderPlacedFields(seedPrepareFieldsFromRoleSignerMetadata(migratedSender, rolesForM, seedValueCtx));
+              setRecipientPlacedFields(
+                seedPrepareFieldsFromRoleSignerMetadata(migratedRecipient, rolesForM, seedValueCtx),
+              );
               setSenderMessage(saved.senderMessage || "");
               if (saved.senderSignatureRef) setSenderSignatureRef(saved.senderSignatureRef);
             } else {
-              setSenderPlacedFields((p) => migrateLegacySenderPlacedFields(p, ownerR));
-              setRecipientPlacedFields((p) => migrateLegacyRecipientPlacedFields(p, rolesForM));
+              setSenderPlacedFields((p) =>
+                seedPrepareFieldsFromRoleSignerMetadata(
+                  migrateLegacySenderPlacedFields(p, ownerR),
+                  rolesForM,
+                  seedValueCtx,
+                ),
+              );
+              setRecipientPlacedFields((p) =>
+                seedPrepareFieldsFromRoleSignerMetadata(
+                  migrateLegacyRecipientPlacedFields(p, rolesForM),
+                  rolesForM,
+                  seedValueCtx,
+                ),
+              );
             }
           });
           const nextStep: Vs01Step = saved ? saved.step : 2;

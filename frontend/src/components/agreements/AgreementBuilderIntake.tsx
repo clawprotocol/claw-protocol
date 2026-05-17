@@ -239,6 +239,7 @@ import {
   linearPremiumRecipientSlots,
   persistPremiumRecipientHandoff,
   readPremiumRecipientHandoff,
+  premiumHandoffSlotFromParty,
   writePremiumRecipientHandoffExact,
   writePremiumRecipientHandoffLinear,
   MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
@@ -349,6 +350,12 @@ import {
   mergeLiveDraftWithRecipientSetupForVs01Bridge,
   tryNavigatePaidProAgreementSenderFirstVs01Esign,
 } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
+import {
+  logSignerMetadataInputChange,
+  logSignerMetadataNormalizedForSave,
+  normalizeSignerMetadataForSave,
+  signerMetadataInputRaw,
+} from "../../agreement/signerMetadataNormalize";
 import {
   shouldBlockIntakeReviewDisplayPhaseForVs01,
   shouldSuppressReviewPipelineTelemetry,
@@ -1183,22 +1190,62 @@ function CreateFlowSendRecipientsPanel({
                     next[idx - 2] = v;
                     return next;
                   });
-        const signerNameVal = (partySignerNames[idx] ?? "").trim();
-        const signerTitleVal = (partySignerTitles[idx] ?? "").trim();
-        const onSignerNameChange = (v: string) =>
+        const signerNameVal = signerMetadataInputRaw(partySignerNames[idx]);
+        const signerTitleVal = signerMetadataInputRaw(partySignerTitles[idx]);
+        const onSignerNameChange = (v: string) => {
+          logSignerMetadataInputChange({ surface: "recipient_setup", field: "signerName", partyIndex: idx, raw: v });
           setPartySignerNames((prev) => {
             const next = [...prev];
             while (next.length <= idx) next.push("");
             next[idx] = v;
             return next;
           });
-        const onSignerTitleChange = (v: string) =>
+        };
+        const onSignerNameBlur = () => {
+          const before = signerMetadataInputRaw(partySignerNames[idx]);
+          const after = normalizeSignerMetadataForSave(before) ?? "";
+          if (after === before) return;
+          logSignerMetadataNormalizedForSave({
+            surface: "recipient_setup",
+            field: "signerName",
+            partyIndex: idx,
+            beforeLen: before.length,
+            afterLen: after.length,
+          });
+          setPartySignerNames((prev) => {
+            const next = [...prev];
+            while (next.length <= idx) next.push("");
+            next[idx] = after;
+            return next;
+          });
+        };
+        const onSignerTitleChange = (v: string) => {
+          logSignerMetadataInputChange({ surface: "recipient_setup", field: "signerTitle", partyIndex: idx, raw: v });
           setPartySignerTitles((prev) => {
             const next = [...prev];
             while (next.length <= idx) next.push("");
             next[idx] = v;
             return next;
           });
+        };
+        const onSignerTitleBlur = () => {
+          const before = signerMetadataInputRaw(partySignerTitles[idx]);
+          const after = normalizeSignerMetadataForSave(before) ?? "";
+          if (after === before) return;
+          logSignerMetadataNormalizedForSave({
+            surface: "recipient_setup",
+            field: "signerTitle",
+            partyIndex: idx,
+            beforeLen: before.length,
+            afterLen: after.length,
+          });
+          setPartySignerTitles((prev) => {
+            const next = [...prev];
+            while (next.length <= idx) next.push("");
+            next[idx] = after;
+            return next;
+          });
+        };
         return (
           <div
             key={`ag_party_recipient_${idx}`}
@@ -1267,6 +1314,7 @@ function CreateFlowSendRecipientsPanel({
                 data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-signer-name" : "r2-signer-name") : `party-${idx}-signer-name`}
                 value={signerNameVal}
                 onChange={(e) => onSignerNameChange(e.target.value)}
+                onBlur={onSignerNameBlur}
                 className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
                 autoComplete="name"
               />
@@ -1278,6 +1326,7 @@ function CreateFlowSendRecipientsPanel({
                 data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-signer-title" : "r2-signer-title") : `party-${idx}-signer-title`}
                 value={signerTitleVal}
                 onChange={(e) => onSignerTitleChange(e.target.value)}
+                onBlur={onSignerTitleBlur}
                 className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
                 autoComplete="organization-title"
               />
@@ -3423,15 +3472,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     uiTitles: readonly string[],
     field: "signerName" | "signerTitle",
   ): string {
-    const ui = (field === "signerName" ? uiNames[idx] : uiTitles[idx]) ?? "";
-    const fromUi = String(ui).trim();
-    if (fromUi) return fromUi;
-    const fromDraft = String(
-      (field === "signerName"
-        ? parties?.[idx]?.signerName
-        : parties?.[idx]?.signerTitle) ?? "",
-    ).trim();
-    return fromDraft;
+    const fromUi = signerMetadataInputRaw(field === "signerName" ? uiNames[idx] : uiTitles[idx]);
+    if (fromUi) return normalizeSignerMetadataForSave(fromUi) ?? "";
+    const fromDraft = normalizeSignerMetadataForSave(
+      field === "signerName" ? parties?.[idx]?.signerName : parties?.[idx]?.signerTitle,
+    );
+    return fromDraft ?? "";
   }
 
   function buildRecipientPartySignerNamesArrayForHandoff(d: ParsedDraftShape | null): string[] | undefined {
@@ -3804,16 +3850,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     markPremiumCompletionDoneInLocalStorage();
     writePremiumRecipientHandoffExact(
-      {
-        name: (merged.draft.parties?.[0]?.name || merged.displayName1 || "").trim(),
-        email: (c0?.email || "").trim(),
-        role: (merged.draft.parties?.[0]?.role || "party").trim() || "party",
-      },
-      {
-        name: (merged.draft.parties?.[1]?.name || merged.displayName2 || "").trim(),
-        email: (c1?.email || "").trim(),
-        role: (merged.draft.parties?.[1]?.role || "party").trim() || "party",
-      },
+      premiumHandoffSlotFromParty(
+        merged.draft.parties?.[0] ?? { role: "party" },
+        (merged.draft.parties?.[0]?.name || merged.displayName1 || "").trim(),
+      ),
+      premiumHandoffSlotFromParty(
+        merged.draft.parties?.[1] ?? { role: "party" },
+        (merged.draft.parties?.[1]?.name || merged.displayName2 || "").trim(),
+      ),
       buildPartyIndexSlotsFromPartiesAndCandidates(merged.draft.parties ?? [], snap.recipientCandidates ?? []),
     );
     bumpPremiumSurfaceGateTick();
@@ -5242,16 +5286,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
         writePremiumRecipientHandoffExact(
-          {
-            name: (merged.draft.parties?.[0]?.name || merged.displayName1 || "").trim(),
-            email: (rc0.email || "").trim(),
-            role: (merged.draft.parties?.[0]?.role || "party").trim() || "party",
-          },
-          {
-            name: (merged.draft.parties?.[1]?.name || merged.displayName2 || "").trim(),
-            email: (rc1.email || "").trim(),
-            role: (merged.draft.parties?.[1]?.role || "party").trim() || "party",
-          },
+          premiumHandoffSlotFromParty(
+            merged.draft.parties?.[0] ?? { role: "party", email: rc0.email },
+            (merged.draft.parties?.[0]?.name || merged.displayName1 || "").trim(),
+          ),
+          premiumHandoffSlotFromParty(
+            merged.draft.parties?.[1] ?? { role: "party", email: rc1.email },
+            (merged.draft.parties?.[1]?.name || merged.displayName2 || "").trim(),
+          ),
           buildPartyIndexSlotsFromPartiesAndCandidates(merged.draft.parties ?? [], result.recipientCandidates ?? []),
         );
         try {
@@ -5408,16 +5450,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         bumpPremiumSurfaceGateTick();
         setHardError(null);
         writePremiumRecipientHandoffExact(
-          {
-            name: (merged.draft.parties?.[0]?.name || merged.displayName1 || "").trim(),
-            email: "",
-            role: (merged.draft.parties?.[0]?.role || "party").trim() || "party",
-          },
-          {
-            name: (merged.draft.parties?.[1]?.name || merged.displayName2 || "").trim(),
-            email: "",
-            role: (merged.draft.parties?.[1]?.role || "party").trim() || "party",
-          },
+          premiumHandoffSlotFromParty(merged.draft.parties?.[0] ?? { role: "party" }, (merged.draft.parties?.[0]?.name || merged.displayName1 || "").trim()),
+          premiumHandoffSlotFromParty(merged.draft.parties?.[1] ?? { role: "party" }, (merged.draft.parties?.[1]?.name || merged.displayName2 || "").trim()),
           buildPartyIndexSlotsFromPartiesAndCandidates(merged.draft.parties ?? [], []),
         );
         try {

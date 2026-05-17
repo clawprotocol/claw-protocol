@@ -1,3 +1,4 @@
+import { prepareRoleSignerName, signerMetadataInputRaw } from "../agreement/signerMetadataNormalize";
 import { isPlausibleEmail } from "./detailsStepValidation";
 import {
   normalizePlacedFieldGeometryIfBelowMinimum,
@@ -44,16 +45,6 @@ export type Vs01PrepareSigningRole = {
 /**
  * Roles used for paid Pro prepare-mode placement + packet gate (owner + named counterparties only).
  */
-function explicitPrepareSignerName(
-  signerName: string | undefined,
-  entityName: string,
-): string | undefined {
-  const sn = (signerName || "").trim();
-  if (!sn) return undefined;
-  if (sn.toLowerCase() === entityName.trim().toLowerCase()) return undefined;
-  return sn;
-}
-
 export function buildVs01PrepareSigningRoles(args: {
   agreementId: string;
   /** Owner legal entity / party name only. */
@@ -76,8 +67,8 @@ export function buildVs01PrepareSigningRoles(args: {
       entityName: ownerName,
       partyName: ownerName,
       roleLabel: "Owner",
-      signerName: explicitPrepareSignerName(args.ownerSignerName, ownerName),
-      signerTitle: (args.ownerSignerTitle || "").trim() || undefined,
+      signerName: prepareRoleSignerName(args.ownerSignerName, ownerName),
+      signerTitle: signerMetadataInputRaw(args.ownerSignerTitle) || undefined,
       signerEmail: (args.creatorEmail || "").trim() || undefined,
       reviewEmail: undefined,
       isEntityParty: looksLikeLegalEntityPartyNameLocal(ownerName),
@@ -101,8 +92,8 @@ export function buildVs01PrepareSigningRoles(args: {
       entityName: partyName,
       partyName,
       roleLabel: partyName,
-      signerName: explicitPrepareSignerName(c.signerName, partyName),
-      signerTitle: c.signerTitle?.trim() || undefined,
+      signerName: prepareRoleSignerName(c.signerName, partyName),
+      signerTitle: signerMetadataInputRaw(c.signerTitle) || undefined,
       signerEmail: rowEmail || undefined,
       reviewEmail: c.reviewEmail?.trim() || undefined,
       isEntityParty: looksLikeLegalEntityPartyNameLocal(c.name),

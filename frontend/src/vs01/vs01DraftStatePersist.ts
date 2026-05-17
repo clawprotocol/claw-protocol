@@ -127,13 +127,30 @@ export function mergeBridgeEmailsIntoSavedCounterparties(
   saved: Vs01Counterparty[],
   bridge: Vs01Counterparty[],
 ): Vs01Counterparty[] {
+  return mergeBridgeMetadataIntoSavedCounterparties(saved, bridge);
+}
+
+/**
+ * Merge bridge emails and signer metadata into saved counterparties (fill blanks only).
+ */
+export function mergeBridgeMetadataIntoSavedCounterparties(
+  saved: Vs01Counterparty[],
+  bridge: Vs01Counterparty[],
+): Vs01Counterparty[] {
+  const bridgeById = new Map(bridge.map((b) => [b.id, b]));
   return saved.map((s, i) => {
-    const b = bridge[i];
+    const b = bridgeById.get(s.id) ?? bridge[i];
     if (!b) return s;
+    let next: Vs01Counterparty = { ...s };
     const existingEmail = (s.email || "").trim();
     const bridgeEmail = (b.email || "").trim();
-    if (existingEmail) return s;
-    if (!bridgeEmail) return s;
-    return { ...s, email: bridgeEmail };
+    if (!existingEmail && bridgeEmail) next = { ...next, email: bridgeEmail };
+    if (!(s.signerName || "").trim() && (b.signerName || "").trim()) {
+      next = { ...next, signerName: b.signerName };
+    }
+    if (!(s.signerTitle || "").trim() && (b.signerTitle || "").trim()) {
+      next = { ...next, signerTitle: b.signerTitle };
+    }
+    return next;
   });
 }

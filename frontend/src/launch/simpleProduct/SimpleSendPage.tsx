@@ -55,6 +55,7 @@ import {
   fetchAgreementVs01SigningSeed,
   logAgreementToVs01EsignRoute,
   logAgreementVs01BridgePreflight,
+  logVs01BridgeSignerMetadata,
   logAgreementVs01RecipientEmailMergeDiagnostics,
   logAgreementVs01SeedBlocked,
   mergeLiveDraftWithRecipientSetupForVs01Bridge,
@@ -441,6 +442,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
           senderFirstLawdogHandoff: true,
         });
         logAgreementVs01BridgePreflight(bridge);
+        logVs01BridgeSignerMetadata(bridge);
         writeAgreementVs01BridgeSession(bridge);
         setPaidProAgreementBridgeSkipMarker(vs01Seed.documentId);
         // eslint-disable-next-line no-console

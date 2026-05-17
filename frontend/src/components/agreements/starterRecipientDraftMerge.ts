@@ -1,3 +1,7 @@
+import {
+  explicitSignerNameForEntity,
+  normalizeSignerMetadataForSave,
+} from "../../agreement/signerMetadataNormalize";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   coercePartyNameForRecipientAutoFill,
@@ -15,13 +19,6 @@ type PartyRow = ParsedDraftShape["parties"][number] & {
   signerName?: string;
   signerTitle?: string;
 };
-
-function explicitSignerNameForEntity(signerName: string, entityName: string): string | undefined {
-  const sn = signerName.trim();
-  if (!sn) return undefined;
-  if (sn.toLowerCase() === entityName.trim().toLowerCase()) return undefined;
-  return sn;
-}
 
 export type StarterRecipientHandoffOpts = {
   recipient1Name: string;
@@ -156,8 +153,8 @@ export function applyStarterRecipientUiToDraftParties(
     const prev = out[idx];
     const cleanName = name ? cleanStarterPartyName(name, idx === 0 ? 0 : 1, parsed.agreement_family ?? null) : "";
     const entityForSigner = (cleanName || prev?.name || "").trim();
-    const nextSignerName = explicitSignerNameForEntity(String(signerName ?? "").trim(), entityForSigner);
-    const nextSignerTitle = String(signerTitle ?? "").trim() || undefined;
+    const nextSignerName = explicitSignerNameForEntity(signerName, entityForSigner);
+    const nextSignerTitle = normalizeSignerMetadataForSave(signerTitle);
     if (prev) {
       out[idx] = {
         ...prev,
