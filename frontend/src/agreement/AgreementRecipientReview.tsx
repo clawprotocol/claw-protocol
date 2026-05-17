@@ -2706,6 +2706,13 @@ export function AgreementRecipientReview({
         if (merged) setDraft(merged);
       }
       setApprovedAck(true);
+      if (import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.info("[reviewer-approval-authoritative-server-success]", {
+          agreementIdShort: agreementId.length <= 12 ? agreementId : `${agreementId.slice(0, 8)}…`,
+          participantPartyId: participantPid || null,
+        });
+      }
       recipientAcceptTransitionDiag("approve_mutation_success", {
         agreementId,
         participantPid: participantPid || null,

@@ -1,9 +1,20 @@
 /**
  * Client-side version history for Agreement Workspace (mirrors future backend schema).
  * Full snapshots + rendered HTML per version for read-only timeline / recipient flow.
+ *
+ * Recipient-scoped keys are compact and best-effort only — server draft/render is authoritative.
  */
 
 import type { AgreementDraft } from "./agreementTypes";
+import {
+  AGREEMENT_VERSIONS_KEY_PREFIX,
+  DEFAULT_AGREEMENT_VERSION_CACHE_KEEP,
+  DEFAULT_MAX_STORAGE_BYTES,
+  approxUtf8Bytes,
+  safeStorageGetItem,
+  safeStorageSetItem,
+  storageKeyPrefixForLog,
+} from "../lib/safeBrowserStorage";
 import { postureLabelForHistory, type NegotiationPosture } from "./negotiationPostures";
 import {
   riskLabelForHistory,
@@ -115,6 +126,8 @@ export type AgreementVersionBundle = {
   agreementId: string;
   currentVersionId: string;
   versions: AgreementVersionRecord[];
+  /** Best-effort cache bookkeeping for localStorage pruning (not sent to server). */
+  _cacheUpdatedAt?: string;
   /** ISO timestamp when owner clicked Send for review. */
   reviewSentAt?: string;
   /** Draft updated_at last acknowledged by owner (server sync). */
@@ -132,11 +145,129 @@ export type AgreementVersionBundle = {
 };
 
 /** When ``recipientLinkScope`` is set (per minted link fingerprint), versions are isolated per reviewer tab. */
-function versionBundleStorageKey(agreementId: string, recipientLinkScope?: string | null): string {
+export function versionBundleStorageKey(agreementId: string, recipientLinkScope?: string | null): string {
   const aid = (agreementId || "").trim();
   const scope = (recipientLinkScope || "").trim();
-  if (scope) return `claw_agreement_versions_v1:${aid}:r:${scope}`;
-  return `claw_agreement_versions_v1:${aid}`;
+  if (scope) return `${AGREEMENT_VERSIONS_KEY_PREFIX}${aid}:r:${scope}`;
+  return `${AGREEMENT_VERSIONS_KEY_PREFIX}${aid}`;
+}
+
+const RECIPIENT_SCOPE_MAX_VERSION_ROWS = 2;
+const RECIPIENT_SCOPE_INSTRUCTION_MAX = 240;
+
+/** Strip heavy model HTML from recipient-scoped cache; server render is authoritative. */
+export function compactBundleForRecipientScopeStorage(
+  bundle: AgreementVersionBundle,
+): AgreementVersionBundle {
+  const versions = bundle.versions.slice(-RECIPIENT_SCOPE_MAX_VERSION_ROWS).map((v) => {
+    const ins = String(v.instruction ?? "");
+    const trimmed =
+      ins.length > RECIPIENT_SCOPE_INSTRUCTION_MAX
+        ? `${ins.slice(0, RECIPIENT_SCOPE_INSTRUCTION_MAX)}…`
+        : ins;
+    return {
+      ...v,
+      instruction: trimmed,
+      rendered_html: "",
+    };
+  });
+  return {
+    ...bundle,
+    versions,
+    _cacheUpdatedAt: new Date().toISOString(),
+  };
+}
+
+function compactBundleForSizeLimit(bundle: AgreementVersionBundle): AgreementVersionBundle {
+  const versions = bundle.versions.map((v) => ({
+    ...v,
+    rendered_html: "",
+    meta: v.meta
+      ? {
+          ...v.meta,
+          negotiation_memory: undefined,
+          suggestion_context: undefined,
+        }
+      : v.meta,
+  }));
+  return { ...bundle, versions, _cacheUpdatedAt: new Date().toISOString() };
+}
+
+function minimalRecipientScopeBundle(bundle: AgreementVersionBundle): AgreementVersionBundle {
+  const last = bundle.versions[bundle.versions.length - 1];
+  return {
+    agreementId: bundle.agreementId,
+    currentVersionId: bundle.currentVersionId,
+    versions: last
+      ? [
+          {
+            ...last,
+            instruction: safeVersionInstructionSummary(last.instruction) || "Draft",
+            rendered_html: "",
+            snapshot: {
+              title: last.snapshot?.title ?? "",
+              jurisdiction: last.snapshot?.jurisdiction ?? "",
+              parties: [],
+              purpose: "",
+              payment_terms: "",
+              duration: last.snapshot?.duration ?? "",
+              due_date: last.snapshot?.due_date ?? null,
+              effective_date: last.snapshot?.effective_date ?? null,
+            },
+          },
+        ]
+      : [],
+    reviewSentAt: bundle.reviewSentAt,
+    ownerLastSeenUpdatedAt: bundle.ownerLastSeenUpdatedAt,
+    pendingRecipientNotice: bundle.pendingRecipientNotice,
+    finalizedForSigning: bundle.finalizedForSigning,
+    signingLock: bundle.signingLock,
+    signingLockAudit: bundle.signingLockAudit?.slice(-4),
+    _cacheUpdatedAt: new Date().toISOString(),
+  };
+}
+
+function prepareBundleForLocalStorage(
+  bundle: AgreementVersionBundle,
+  recipientLinkScope?: string | null,
+): { payload: AgreementVersionBundle; serialized: string } {
+  const withTs: AgreementVersionBundle = {
+    ...bundle,
+    _cacheUpdatedAt: new Date().toISOString(),
+  };
+  let payload = recipientLinkScope
+    ? compactBundleForRecipientScopeStorage(withTs)
+    : withTs;
+  let serialized = JSON.stringify(payload);
+  if (approxUtf8Bytes(serialized) > DEFAULT_MAX_STORAGE_BYTES) {
+    payload = recipientLinkScope
+      ? minimalRecipientScopeBundle(payload)
+      : compactBundleForSizeLimit(payload);
+    serialized = JSON.stringify(payload);
+  }
+  if (approxUtf8Bytes(serialized) > DEFAULT_MAX_STORAGE_BYTES && recipientLinkScope) {
+    payload = minimalRecipientScopeBundle(payload);
+    serialized = JSON.stringify(payload);
+  }
+  return { payload, serialized };
+}
+
+function logReviewerCacheWrite(
+  ok: boolean,
+  key: string,
+  approxBytes: number,
+  recipientLinkScope?: string | null,
+  reason?: string,
+): void {
+  if (!recipientLinkScope || import.meta.env.MODE === "test") return;
+  const tag = ok ? "[reviewer-local-cache-write]" : "[reviewer-local-cache-skipped]";
+  // eslint-disable-next-line no-console
+  console.info(tag, {
+    keyPrefix: key.split(":r:")[0] ? `${key.split(":r:")[0]}:r:` : key.slice(0, 40),
+    approxBytes,
+    ok,
+    reason: reason ?? (ok ? undefined : "write_failed"),
+  });
 }
 
 function newId(): string {
@@ -271,7 +402,10 @@ export function loadBundle(
 ): AgreementVersionBundle | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(versionBundleStorageKey(agreementId, recipientLinkScope));
+    const raw = safeStorageGetItem(
+      localStorage,
+      versionBundleStorageKey(agreementId, recipientLinkScope),
+    );
     if (!raw) return null;
     const p = JSON.parse(raw) as AgreementVersionBundle;
     if (!p?.agreementId || p.agreementId !== agreementId || !Array.isArray(p.versions)) return null;
@@ -289,9 +423,33 @@ export function loadBundle(
   }
 }
 
-export function saveBundle(bundle: AgreementVersionBundle, recipientLinkScope?: string | null): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(versionBundleStorageKey(bundle.agreementId, recipientLinkScope), JSON.stringify(bundle));
+export function saveBundle(bundle: AgreementVersionBundle, recipientLinkScope?: string | null): boolean {
+  if (typeof window === "undefined") return false;
+  const key = versionBundleStorageKey(bundle.agreementId, recipientLinkScope);
+  const { serialized } = prepareBundleForLocalStorage(bundle, recipientLinkScope);
+  const approxBytes = approxUtf8Bytes(serialized);
+  if (approxBytes > DEFAULT_MAX_STORAGE_BYTES) {
+    logReviewerCacheWrite(false, key, approxBytes, recipientLinkScope, "payload_over_max_after_compact");
+    if (import.meta.env.MODE !== "test") {
+      // eslint-disable-next-line no-console
+      console.info("[safe-storage-write-skipped]", {
+        keyPrefix: storageKeyPrefixForLog(key),
+        reason: "payload_over_max_after_compact",
+        approxBytes,
+        surface: "localStorage",
+      });
+    }
+    return false;
+  }
+  const ok = safeStorageSetItem(localStorage, key, serialized, {
+    surface: "localStorage",
+    maxBytes: DEFAULT_MAX_STORAGE_BYTES,
+    prunePrefixOnQuota: AGREEMENT_VERSIONS_KEY_PREFIX,
+    pruneKeep: DEFAULT_AGREEMENT_VERSION_CACHE_KEEP,
+    retainKey: key,
+  });
+  logReviewerCacheWrite(ok, key, approxBytes, recipientLinkScope, ok ? undefined : "quota_or_blocked");
+  return ok;
 }
 
 /** Ensure at least v0 from current server draft + render. */

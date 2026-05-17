@@ -31,8 +31,12 @@ describe("agreementVersionStore recipient link scope", () => {
     const ba = ensureInitialVersion(agreementId, draft, "<p>a</p>", scopeA);
     saveBundle({ ...ba, pendingRecipientNotice: true }, scopeA);
     ensureInitialVersion(agreementId, { ...draft, title: "Other" }, "<p>b</p>", scopeB);
-    expect(loadBundle(agreementId, scopeA)?.versions[0]?.rendered_html).toBe("<p>a</p>");
-    expect(loadBundle(agreementId, scopeB)?.versions[0]?.rendered_html).toBe("<p>b</p>");
+    const a = loadBundle(agreementId, scopeA);
+    const b = loadBundle(agreementId, scopeB);
+    expect(a?.versions[0]?.rendered_html).toBe("");
+    expect(b?.versions[0]?.rendered_html).toBe("");
+    expect(a?.versions[0]?.snapshot.title).toBe("T");
+    expect(b?.versions[0]?.snapshot.title).toBe("Other");
     clearPendingRecipientNotice(agreementId, scopeA);
     expect(loadBundle(agreementId, scopeA)?.pendingRecipientNotice).toBe(false);
     expect(loadBundle(agreementId, scopeB)?.pendingRecipientNotice).toBeUndefined();
