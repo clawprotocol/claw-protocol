@@ -1,4 +1,5 @@
 import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
+import { markAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
 
 export type Vs01SignerPacketStatus = "waiting" | "opened" | "signed";
 
@@ -68,6 +69,7 @@ export function ensureSigningPacketStatusFromHandoff(
     fullySigned: false,
   };
   writeSigningPacketStatus(snap);
+  markAgreementPacketPrepared(handoff.agreementId);
   return snap;
 }
 

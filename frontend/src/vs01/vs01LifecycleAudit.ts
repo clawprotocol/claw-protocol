@@ -17,22 +17,15 @@ export type Vs01LifecycleAuditPayload = {
   signerRoleId?: string | null;
   partyIndex?: number | null;
   fieldType?: string | null;
+  /** Optional status for persistence row (e.g. waiting, signed). */
+  status?: string | null;
   timestamp?: string;
 };
 
-function diagEnabled(): boolean {
-  return typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test";
-}
+import { persistVs01LifecycleEvent } from "./vs01LifecycleAuditPersist";
+
+export { persistVs01LifecycleEvent, type Vs01LifecyclePersistRow } from "./vs01LifecycleAuditPersist";
 
 export function logVs01LifecycleEvent(payload: Vs01LifecycleAuditPayload): void {
-  if (!diagEnabled()) return;
-  const row = {
-    ...payload,
-    timestamp: payload.timestamp ?? new Date().toISOString(),
-    agreementIdShort: payload.agreementId?.trim().slice(0, 16) ?? null,
-    documentIdShort: payload.documentId?.trim().slice(0, 16) ?? null,
-    signerRoleIdShort: payload.signerRoleId?.trim().slice(0, 16) ?? null,
-  };
-  // eslint-disable-next-line no-console
-  console.info(`[${payload.event}]`, row);
+  persistVs01LifecycleEvent(payload, payload.status ?? null);
 }

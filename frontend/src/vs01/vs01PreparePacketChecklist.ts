@@ -69,6 +69,16 @@ export function logVs01PrepareContinueAllowed(payload: {
   console.info("[vs01-prepare-continue-allowed]", payload);
 }
 
+/** Dev-only: show “Mark signed” on packet status screen. */
+export function vs01DevMarkSignedEnabled(): boolean {
+  if (typeof import.meta === "undefined" || !import.meta.env?.DEV) return false;
+  try {
+    return localStorage.getItem("vs01_dev_mark_signed") === "1";
+  } catch {
+    return false;
+  }
+}
+
 /** Dev-only: allow repeat placement when Shift held or localStorage flag set. */
 export function vs01DevKeepPlacingEnabled(): boolean {
   if (typeof import.meta === "undefined" || !import.meta.env?.DEV) return false;

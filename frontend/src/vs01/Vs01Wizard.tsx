@@ -1142,6 +1142,8 @@ export function Vs01Wizard({
               <StepSigningPacketStatus
                 handoff={packetHandoff}
                 prepareSignerRoles={prepareSignerRoles}
+                senderPlacedFields={senderPlacedFields}
+                recipientPlacedFields={recipientPlacedFields}
                 creatorDisplayName={creatorName}
                 onBack={() => goToStep(2)}
               />

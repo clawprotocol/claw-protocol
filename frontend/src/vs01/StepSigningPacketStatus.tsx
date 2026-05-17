@@ -1,34 +1,124 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
+import { vs01DevMarkSignedEnabled } from "./vs01PreparePacketChecklist";
+import type { PlacedSigningField } from "./signingFields";
 import { writePaidProVs01PostSignHandoff, type PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
-import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import type { Vs01RecipientPlacedField } from "./types";
+import { buildSigningUrlForPrepareRole } from "./vs01SigningPacketManifest";
+import {
+  buildPacketStatusCards,
+  countSignedSigners,
+  type PacketStatusCardRow,
+} from "./vs01SigningPacketStatusCards";
 import {
   patchSignerPacketStatus,
   readSigningPacketStatus,
-  signerKeyForHandoffRow,
-  type Vs01SignerPacketStatus,
   type Vs01SigningPacketStatusSnapshot,
 } from "./vs01SigningPacketStatusStore";
+import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 
 export type StepSigningPacketStatusProps = {
   handoff: PaidProVs01PostSignHandoffV1;
   prepareSignerRoles: Vs01PrepareSigningRole[];
+  senderPlacedFields: PlacedSigningField[];
+  recipientPlacedFields: Vs01RecipientPlacedField[];
   creatorDisplayName: string;
   onBack?: () => void;
   onRefresh?: () => void;
 };
 
-function statusLabel(s: Vs01SignerPacketStatus): string {
-  if (s === "signed") return "Signed";
-  if (s === "opened") return "In progress";
-  return "Waiting";
+function SignerMetaLine({ label, value }: { label: string; value: string }) {
+  return (
+    <p className="vs01-packet-status-meta-line">
+      <span className="vs01-packet-status-meta-k">{label}</span>
+      <span className="vs01-packet-status-meta-v">{value}</span>
+    </p>
+  );
+}
+
+function PacketStatusCard({
+  card,
+  copiedKey,
+  showDevMark,
+  onCopy,
+  onOpen,
+  onMarkSignedDev,
+}: {
+  card: PacketStatusCardRow;
+  copiedKey: string | null;
+  showDevMark: boolean;
+  onCopy: (key: string, url: string) => void;
+  onOpen: (card: PacketStatusCardRow) => void;
+  onMarkSignedDev: (key: string) => void;
+}) {
+  const hasUrl = Boolean(card.signingUrl.trim());
+  return (
+    <li
+      className={`vs01-packet-status-card vs01-packet-status-card--${card.status}${card.isOwner ? " vs01-packet-status-card--owner" : ""}`}
+    >
+      <div className="vs01-packet-status-card-top">
+        <div className="vs01-packet-status-card-title-block">
+          {card.isOwner ? (
+            <span className="vs01-packet-status-owner-tag">You / sender</span>
+          ) : null}
+          <h2 className="vs01-packet-status-party-name">{card.partyName}</h2>
+        </div>
+        <span
+          className={`vs01-packet-status-pill vs01-packet-status-pill--${card.status}`}
+          aria-label={`Status: ${card.statusPill}`}
+        >
+          {card.statusPill}
+        </span>
+      </div>
+      <div className="vs01-packet-status-card-body">
+        {card.signerName ? <SignerMetaLine label="Signer" value={card.signerName} /> : null}
+        {card.signerTitle ? <SignerMetaLine label="Title" value={card.signerTitle} /> : null}
+        {card.signerEmail ? <SignerMetaLine label="Email" value={card.signerEmail} /> : null}
+        {card.hint ? <p className="vs01-packet-status-hint">{card.hint}</p> : null}
+      </div>
+      <div className="vs01-packet-status-card-actions">
+        {hasUrl ? (
+          <>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--primary vs01-btn--auto"
+              onClick={() => onOpen(card)}
+            >
+              {card.primaryLabel}
+            </button>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--auto"
+              disabled={!hasUrl}
+              onClick={() => onCopy(card.key, card.signingUrl)}
+            >
+              {copiedKey === card.key ? "Copied" : card.secondaryLabel}
+            </button>
+          </>
+        ) : (
+          <p className="vs01-packet-status-hint">Signing link is not available for this party yet.</p>
+        )}
+        {showDevMark ? (
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--secondary vs01-btn--auto vs01-packet-status-dev-btn"
+            onClick={() => onMarkSignedDev(card.key)}
+          >
+            Mark signed (dev)
+          </button>
+        ) : null}
+      </div>
+    </li>
+  );
 }
 
 export function StepSigningPacketStatus({
   handoff,
   prepareSignerRoles,
-  creatorDisplayName,
+  senderPlacedFields,
+  recipientPlacedFields,
+  creatorDisplayName: _creatorDisplayName,
   onBack,
   onRefresh,
 }: StepSigningPacketStatusProps) {
@@ -37,36 +127,49 @@ export function StepSigningPacketStatus({
     readSigningPacketStatus(handoff.agreementId),
   );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const showDevMark = vs01DevMarkSignedEnabled();
 
   const ownerRole = prepareSignerRoles[0] ?? null;
-  const ownerKey = handoff.ownerSignerRoleId ?? ownerRole?.roleId ?? "owner";
-  const ownerName =
-    ownerRole?.entityName?.trim() || creatorDisplayName.trim() || "Sender";
+  const ownerSigningUrl = useMemo(() => {
+    const fromHandoff = (handoff.ownerSigningUrl ?? "").trim();
+    if (fromHandoff) return fromHandoff;
+    if (!ownerRole) return "";
+    return buildSigningUrlForPrepareRole({
+      role: ownerRole,
+      ownerRole,
+      roles: prepareSignerRoles,
+      senderPlacedFields,
+      recipientPlacedFields,
+      documentId: handoff.vs01DocumentId,
+      agreementId: handoff.agreementId,
+      receiptId: handoff.receiptId || null,
+      recipientIndex: 0,
+    });
+  }, [
+    handoff.ownerSigningUrl,
+    handoff.vs01DocumentId,
+    handoff.agreementId,
+    handoff.receiptId,
+    ownerRole,
+    prepareSignerRoles,
+    senderPlacedFields,
+    recipientPlacedFields,
+  ]);
 
-  const rows = useMemo(() => {
-    const out: {
-      key: string;
-      label: string;
-      signingUrl: string;
-      isOwner: boolean;
-    }[] = [
-      {
-        key: ownerKey,
-        label: ownerName,
-        signingUrl: "",
-        isOwner: true,
-      },
-    ];
-    for (const s of handoff.signers) {
-      out.push({
-        key: signerKeyForHandoffRow(s, s.signerRoleId),
-        label: s.displayName.trim() || "Signer",
-        signingUrl: s.signingUrl?.trim() ?? "",
-        isOwner: false,
-      });
-    }
-    return out;
-  }, [handoff.signers, ownerKey, ownerName]);
+  const cards = useMemo(() => {
+    if (!prepareSignerRoles.length) return [];
+    return buildPacketStatusCards({
+      handoff,
+      roles: prepareSignerRoles,
+      statusByKey: statusSnap?.bySignerKey ?? {},
+      ownerSigningUrl,
+    });
+  }, [handoff, prepareSignerRoles, statusSnap, ownerSigningUrl]);
+
+  const { signed, total } = useMemo(
+    () => countSignedSigners(statusSnap?.bySignerKey ?? {}, cards.map((c) => c.key)),
+    [statusSnap, cards],
+  );
 
   const refreshStatus = useCallback(() => {
     setStatusSnap(readSigningPacketStatus(handoff.agreementId));
@@ -78,7 +181,21 @@ export function StepSigningPacketStatus({
     refreshStatus();
   }, [handoff, refreshStatus]);
 
+  useEffect(() => {
+    const onStorage = (ev: StorageEvent) => {
+      if (!ev.key?.includes(handoff.agreementId)) return;
+      refreshStatus();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", refreshStatus);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", refreshStatus);
+    };
+  }, [handoff.agreementId, refreshStatus]);
+
   const copyText = useCallback(async (key: string, text: string) => {
+    if (!text.trim()) return;
     try {
       await navigator.clipboard.writeText(text);
       setCopiedKey(key);
@@ -89,14 +206,17 @@ export function StepSigningPacketStatus({
   }, []);
 
   const openSigner = useCallback(
-    (key: string, url: string) => {
+    (card: PacketStatusCardRow) => {
+      const url = card.signingUrl.trim();
       if (!url) return;
-      patchSignerPacketStatus(handoff.agreementId, key, "opened");
+      patchSignerPacketStatus(handoff.agreementId, card.key, "opened");
       logVs01LifecycleEvent({
         event: "vs01_signer_opened",
         agreementId: handoff.agreementId,
         documentId: handoff.vs01DocumentId,
-        signerRoleId: key,
+        signerRoleId: card.roleId,
+        partyIndex: card.partyIndex,
+        status: "opened",
       });
       refreshStatus();
       window.open(url, "_blank", "noopener,noreferrer");
@@ -112,12 +232,14 @@ export function StepSigningPacketStatus({
         agreementId: handoff.agreementId,
         documentId: handoff.vs01DocumentId,
         signerRoleId: key,
+        status: "signed",
       });
       if (next?.fullySigned) {
         logVs01LifecycleEvent({
           event: "vs01_packet_fully_signed",
           agreementId: handoff.agreementId,
           documentId: handoff.vs01DocumentId,
+          status: "fully_signed",
         });
       }
       refreshStatus();
@@ -126,73 +248,57 @@ export function StepSigningPacketStatus({
   );
 
   const fullySigned = Boolean(statusSnap?.fullySigned);
-  const senderMustSignFirst = Boolean(handoff.senderMustSignFirst && handoff.packetPrepareOnly);
-  const ownerStatus = statusSnap?.bySignerKey[ownerKey] ?? "waiting";
-  const ownerNeedsSign = senderMustSignFirst && ownerStatus !== "signed";
+  const ownerCard = cards.find((c) => c.isOwner);
+  const counterpartyCards = cards.filter((c) => !c.isOwner);
 
   return (
     <section className="vs01-step vs01-signing-packet-status" aria-labelledby="vs01-packet-status-title">
-      <header className="vs01-step-header">
+      <header className="vs01-step-header vs01-packet-status-header">
         <h1 id="vs01-packet-status-title" className="vs01-step-title">
           Signing packet ready
         </h1>
+        <p className="vs01-packet-status-summary" role="status">
+          {signed} / {total} signed
+        </p>
         <p className="vs01-step-lead">
           {fullySigned
             ? "Fully signed — download the final PDF and proof record from your agreement workspace."
-            : ownerNeedsSign
+            : ownerCard?.hint
               ? "Sign as the sender first, then share each counterparty link."
               : "Share each signing link and track progress below."}
         </p>
       </header>
 
-      <ul className="vs01-packet-status-cards" aria-label="Signer status">
-        {rows.map((row) => {
-          const st = statusSnap?.bySignerKey[row.key] ?? "waiting";
-          return (
-            <li key={row.key} className={`vs01-packet-status-card vs01-packet-status-card--${st}`}>
-              <div className="vs01-packet-status-card-head">
-                <strong>{row.label}</strong>
-                <span className="vs01-packet-status-badge">{statusLabel(st)}</span>
-              </div>
-              <div className="vs01-packet-status-card-actions">
-                {row.signingUrl ? (
-                  <>
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--secondary vs01-btn--auto"
-                      onClick={() => copyText(row.key, row.signingUrl)}
-                    >
-                      {copiedKey === row.key ? "Copied" : "Copy signer link"}
-                    </button>
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--primary vs01-btn--auto"
-                      onClick={() => openSigner(row.key, row.signingUrl)}
-                    >
-                      Open signer view
-                    </button>
-                  </>
-                ) : row.isOwner && ownerNeedsSign ? (
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Complete sender signing from the agreement workspace when you are ready.
-                  </p>
-                ) : null}
-                {import.meta.env.DEV ? (
-                  <button
-                    type="button"
-                    className="vs01-btn vs01-btn--secondary vs01-btn--auto text-xs"
-                    onClick={() => markSignedDev(row.key)}
-                  >
-                    Mark signed (dev)
-                  </button>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      {ownerCard ? (
+        <ul className="vs01-packet-status-cards vs01-packet-status-cards--owner" aria-label="Sender">
+          <PacketStatusCard
+            card={ownerCard}
+            copiedKey={copiedKey}
+            showDevMark={showDevMark}
+            onCopy={copyText}
+            onOpen={openSigner}
+            onMarkSignedDev={markSignedDev}
+          />
+        </ul>
+      ) : null}
 
-      <div className="vs01-sign-actions mt-4">
+      {counterpartyCards.length > 0 ? (
+        <ul className="vs01-packet-status-cards" aria-label="Counterparty signers">
+          {counterpartyCards.map((card) => (
+            <PacketStatusCard
+              key={card.key}
+              card={card}
+              copiedKey={copiedKey}
+              showDevMark={showDevMark}
+              onCopy={copyText}
+              onOpen={openSigner}
+              onMarkSignedDev={markSignedDev}
+            />
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="vs01-sign-actions vs01-packet-status-footer">
         <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--auto" onClick={() => onBack?.()}>
           Back to prepare
         </button>

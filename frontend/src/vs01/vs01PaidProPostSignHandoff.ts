@@ -30,6 +30,8 @@ export type PaidProVs01PostSignHandoffV1 = {
   ownerSignerRoleId?: string;
   /** When true, sender should sign before sharing counterparty links. */
   senderMustSignFirst?: boolean;
+  /** Owner/sender deep link for packet-prepare-only flows. */
+  ownerSigningUrl?: string;
 };
 
 export function writePaidProVs01PostSignHandoff(payload: PaidProVs01PostSignHandoffV1): void {

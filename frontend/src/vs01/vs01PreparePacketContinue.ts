@@ -1,6 +1,6 @@
 import type { PlacedSigningField } from "./signingFields";
 import type { Vs01Counterparty, Vs01RecipientPlacedField } from "./types";
-import { buildVs01RecipientSigningUrl } from "./StepReceipt";
+import { buildSigningUrlForPrepareRole } from "./vs01SigningPacketManifest";
 import {
   evaluatePrepareFinishClick,
   type PrepareFinishClickResult,
@@ -13,7 +13,6 @@ import {
 import {
   buildVs01PrepareSigningRoles,
   evaluatePreparePacketGateFromRoles,
-  mergeRecipientManifestFieldsForSignerRole,
   type SigningPacketPrepareGate,
   type Vs01PrepareSigningRole,
 } from "./vs01SignerFieldAssignment";
@@ -78,36 +77,39 @@ export function handlePreparePacketContinue(
     .map((c, recipientIndex) => ({ c, recipientIndex }))
     .filter(({ c }) => c.name.trim().length > 0);
 
-  const signers = named.map(({ c, recipientIndex }) => {
+  const signers = named.flatMap(({ c, recipientIndex }) => {
     const role = roles.find((r) => r.vs01CounterpartyId === c.id);
-    const signerRoleId = role?.roleId ?? "";
-    const merged = role
-      ? mergeRecipientManifestFieldsForSignerRole({
-          ownerRole,
-          roles,
-          counterpartyId: c.id,
-          signerRoleId: role.roleId,
-          recipientPlacedFields: input.recipientPlacedFields,
-          senderPlacedFields: input.senderPlacedFields,
-        })
-      : input.recipientPlacedFields.filter((f) => f.counterpartyId === c.id);
-    return {
+    if (!role) return [];
+    const signerRoleId = role.roleId;
+    return [{
       counterpartyId: c.id,
       displayName: c.name.trim(),
       email: c.email.trim(),
-      signingUrl: buildVs01RecipientSigningUrl({
-        recipientIndex,
-        recipientName: c.name.trim(),
-        recipientEmail: c.email.trim(),
-        counterpartyId: c.id,
+      signingUrl: buildSigningUrlForPrepareRole({
+        role,
+        ownerRole,
+        roles,
+        senderPlacedFields: input.senderPlacedFields,
+        recipientPlacedFields: input.recipientPlacedFields,
         documentId: input.documentId,
-        receiptId: rid || null,
-        recipientFieldsForSigner: merged,
         agreementId: input.agreementId,
-        signerRoleId: signerRoleId || null,
+        receiptId: rid || null,
+        recipientIndex,
       }),
-      signerRoleId: signerRoleId || undefined,
-    };
+      signerRoleId,
+    }];
+  });
+
+  const ownerSigningUrl = buildSigningUrlForPrepareRole({
+    role: ownerRole,
+    ownerRole,
+    roles,
+    senderPlacedFields: input.senderPlacedFields,
+    recipientPlacedFields: input.recipientPlacedFields,
+    documentId: input.documentId,
+    agreementId: input.agreementId,
+    receiptId: rid || null,
+    recipientIndex: 0,
   });
 
   const handoff: PaidProVs01PostSignHandoffV1 = {
@@ -122,6 +124,7 @@ export function handlePreparePacketContinue(
     signers,
     ownerSignerRoleId: ownerRole.roleId,
     senderMustSignFirst: !rid,
+    ownerSigningUrl,
   };
 
   ensureSigningPacketStatusFromHandoff(handoff, ownerRole.roleId);

@@ -1,0 +1,104 @@
+import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
+import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { signerKeyForHandoffRow, type Vs01SignerPacketStatus } from "./vs01SigningPacketStatusStore";
+
+export type PacketStatusCardRow = {
+  key: string;
+  roleId: string;
+  partyIndex: number;
+  isOwner: boolean;
+  partyName: string;
+  signerName: string | null;
+  signerTitle: string | null;
+  signerEmail: string | null;
+  signingUrl: string;
+  status: Vs01SignerPacketStatus;
+  statusPill: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+  hint: string | null;
+};
+
+export function statusPillLabel(status: Vs01SignerPacketStatus): string {
+  if (status === "signed") return "Signed";
+  if (status === "opened") return "In progress";
+  return "Waiting";
+}
+
+export function buildPacketStatusCards(args: {
+  handoff: PaidProVs01PostSignHandoffV1;
+  roles: Vs01PrepareSigningRole[];
+  statusByKey: Record<string, Vs01SignerPacketStatus>;
+  ownerSigningUrl: string;
+}): PacketStatusCardRow[] {
+  const ownerRole = args.roles[0];
+  if (!ownerRole || ownerRole.kind !== "owner") return [];
+
+  const ownerKey = args.handoff.ownerSignerRoleId ?? ownerRole.roleId;
+  const ownerUrl = (args.handoff.ownerSigningUrl ?? args.ownerSigningUrl).trim();
+  const ownerStatus = args.statusByKey[ownerKey] ?? "waiting";
+  const senderMustSignFirst = Boolean(args.handoff.senderMustSignFirst && args.handoff.packetPrepareOnly);
+
+  const out: PacketStatusCardRow[] = [
+    {
+      key: ownerKey,
+      roleId: ownerRole.roleId,
+      partyIndex: ownerRole.partyIndex,
+      isOwner: true,
+      partyName: ownerRole.entityName?.trim() || "Sender",
+      signerName: ownerRole.signerName?.trim() || null,
+      signerTitle: ownerRole.signerTitle?.trim() || null,
+      signerEmail: ownerRole.signerEmail?.trim() || null,
+      signingUrl: ownerUrl,
+      status: ownerStatus,
+      statusPill: statusPillLabel(ownerStatus),
+      primaryLabel: "Open my signing view",
+      secondaryLabel: "Copy my signing link",
+      hint: senderMustSignFirst && ownerStatus !== "signed"
+        ? "Sign first from your sender link."
+        : null,
+    },
+  ];
+
+  for (const row of args.handoff.signers) {
+    const role = args.roles.find(
+      (r) => r.roleId === row.signerRoleId || r.vs01CounterpartyId === row.counterpartyId,
+    );
+    const key = signerKeyForHandoffRow(row, row.signerRoleId);
+    const st = args.statusByKey[key] ?? "waiting";
+    out.push({
+      key,
+      roleId: role?.roleId ?? row.signerRoleId ?? key,
+      partyIndex: role?.partyIndex ?? 0,
+      isOwner: false,
+      partyName: row.displayName?.trim() || role?.entityName?.trim() || "Signer",
+      signerName: role?.signerName?.trim() || null,
+      signerTitle: role?.signerTitle?.trim() || null,
+      signerEmail: row.email?.trim() || role?.signerEmail?.trim() || null,
+      signingUrl: row.signingUrl?.trim() ?? "",
+      status: st,
+      statusPill: statusPillLabel(st),
+      primaryLabel: "Open signer view",
+      secondaryLabel: "Copy signer link",
+      hint: null,
+    });
+  }
+  return out;
+}
+
+export function countSignedSigners(statusByKey: Record<string, Vs01SignerPacketStatus>, keys: string[]): {
+  signed: number;
+  total: number;
+} {
+  const total = keys.length;
+  let signed = 0;
+  for (const k of keys) {
+    if (statusByKey[k] === "signed") signed += 1;
+  }
+  return { signed, total };
+}
+
+/** Guard against accidental string concatenation in tests (e.g. PartyWaiting). */
+export function cardHeadlineText(card: PacketStatusCardRow): string {
+  return `${card.partyName} ${card.statusPill}`;
+}

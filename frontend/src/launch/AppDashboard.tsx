@@ -4,6 +4,7 @@ import { useLaunchNav } from "./LaunchNavContext";
 import { getOrgId } from "./orgContext";
 import { fetchSubscription } from "./billingApi";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
+import { workspaceSigningStatusLabel } from "../vs01/vs01WorkspaceSigningStatus";
 import {
   fetchAgreementUsageSummary,
   fetchWorkspaceIndex,
@@ -70,18 +71,7 @@ function formatRelativeUpdated(iso: string): string {
 
 /** Status line for recent-agreement rows (workspace index). */
 export function workspaceAgreementStatusLabel(r: WorkspaceIndexAgreement): string {
-  if (r.completed_signed) return "Fully signed";
-  if (r.has_server_signing_lock) return "Signing in progress";
-  if (r.all_reviewers_approved) return "All reviewers approved — ready to prepare signing";
-  const req = r.review_approvals_required ?? 0;
-  const done = r.review_approvals_completed ?? 0;
-  if (r.reviewer_approved && req > 1) {
-    return `${done} of ${req} reviewers approved`;
-  }
-  if (r.reviewer_approved) return "Reviewer approved — ready to prepare signing";
-  if (r.review_sent_at) return "Sent";
-  if (r.version_ledger_count > 0) return "Ready to send";
-  return "Draft";
+  return workspaceSigningStatusLabel(r);
 }
 
 function displayAgreementTitle(title: string): string {

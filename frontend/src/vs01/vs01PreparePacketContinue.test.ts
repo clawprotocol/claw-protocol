@@ -82,5 +82,7 @@ describe("handlePreparePacketContinue", () => {
     expect(result.handoff.signers.length).toBe(1);
     expect(result.handoff.signers[0]?.signingUrl).toContain("doc1");
     expect(result.handoff.packetPrepareOnly).toBe(true);
+    expect(result.handoff.ownerSigningUrl).toContain("vs01_recipient_sign=1");
+    expect(result.handoff.ownerSigningUrl).toContain("doc1");
   });
 });
