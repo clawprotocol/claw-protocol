@@ -2720,6 +2720,80 @@ button.vs01-upload-btn:disabled {
   text-align: left;
 }
 
+.vs01-sign-placement-signature-body--prepare-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.12rem;
+  padding: 0.2rem 0.28rem;
+  min-height: 100%;
+  box-sizing: border-box;
+  border: 1px dashed color-mix(in srgb, var(--vs01-color-accent) 60%, var(--vs01-color-border-subtle));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 92%, var(--vs01-color-accent) 8%);
+}
+
+.vs01-prepare-signature-kicker {
+  font-size: min(0.58rem, 9cqh);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-prepare-signature-party {
+  font-size: min(0.62rem, 9.5cqh);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--vs01-color-text-primary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vs01-prepare-signature-footer {
+  font-size: min(0.56rem, 8.5cqh);
+  line-height: 1.15;
+  color: var(--vs01-color-text-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vs01-prepare-finish-blocked-panel {
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--vs01-color-warning, #b45309) 45%, var(--vs01-color-border-subtle));
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 90%, var(--vs01-color-warning, #b45309) 10%);
+}
+
+.vs01-prepare-finish-blocked-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--vs01-color-text-primary);
+}
+
+.vs01-prepare-finish-blocked-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-prepare-initials-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.65rem;
+  line-height: 1.35;
+  color: var(--vs01-color-text-muted);
+}
+
 .vs01-prepare-signature-heading {
   font-size: min(0.58rem, 9cqh);
   font-weight: 700;

@@ -191,7 +191,7 @@ describe("prepare signer name / title resolution", () => {
     expect(titleDisp.value).not.toMatch(/Manager|Partner|Managing Member/i);
   });
 
-  it("owner printed name behavior unchanged", () => {
+  it("owner printed name uses role signerName not signature pad typedName", () => {
     const roles = fivePartyRoles();
     const owner = roles[0]!;
     expect(
@@ -201,7 +201,22 @@ describe("prepare signer name / title resolution", () => {
         mode: "prepare_stored",
         ownerPad: { typedName: "Redwood Signer" },
       }),
-    ).toBe("Redwood Signer");
+    ).toBe("");
+    const withSigner = buildVs01PrepareSigningRoles({
+      agreementId: "ag_owner_pn",
+      creatorName: "Redwood Peak Ventures LLC",
+      creatorEmail: "o@x.com",
+      ownerSignerName: "Redwood Santa",
+      counterparties: [],
+    });
+    expect(
+      resolveVs01FieldValueForRole({
+        fieldType: "printed_name",
+        role: withSigner[0]!,
+        mode: "prepare_stored",
+        ownerPad: { typedName: "Redwood Signer" },
+      }),
+    ).toBe("Redwood Santa");
   });
 
   it("recipient runtime can fill printed name from signer session", () => {

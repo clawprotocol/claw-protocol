@@ -1,5 +1,6 @@
 import { isPlausibleEmail } from "./detailsStepValidation";
-import type { SigningFieldType, SigningPlacementValueContext } from "./signingFields";
+import type { SigningFieldType, SigningPlacementValueContext, Vs01TextFieldPurpose } from "./signingFields";
+import { fieldCountsAsCustomText } from "./vs01PreparePacketCompletion";
 import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { vs01DiagnosticsEnabled } from "./vs01SignerFieldAssignment";
@@ -82,6 +83,7 @@ export function resolveVs01FieldValueForRole(args: {
   storedValue?: string;
   ownerPad?: Vs01SignerRuntimeContext;
   signerRuntime?: Vs01SignerRuntimeContext;
+  textPurpose?: Vs01TextFieldPurpose;
 }): string {
   const stored = (args.storedValue ?? "").trim();
   const ownerPad = args.ownerPad ?? {};
@@ -99,13 +101,15 @@ export function resolveVs01FieldValueForRole(args: {
         if (isOwner) return (ownerPad.typedName ?? "").trim();
         return "";
       case "initials": {
+        if (stored) return stored;
         if (isOwner) {
           const fromPad = (ownerPad.initials ?? "").trim();
           if (fromPad) return fromPad;
           const fromName = (ownerPad.typedName ?? "").trim();
           return fromName ? initialsFromName(fromName) : "";
         }
-        return "";
+        const signer = (args.role.signerName ?? "").trim();
+        return signer ? initialsFromName(signer) : "";
       }
       case "printed_name": {
         if (stored) return stored;
@@ -114,6 +118,9 @@ export function resolveVs01FieldValueForRole(args: {
         return "";
       }
       case "text": {
+        if (fieldCountsAsCustomText({ type: "text", textPurpose: args.textPurpose })) {
+          return stored;
+        }
         if (stored) return stored;
         return resolvePrepareSignerTitleDisplay(args.role, "prepare_stored").value;
       }
@@ -146,7 +153,11 @@ export function resolveVs01FieldValueForRole(args: {
         out = printed.primary;
       }
     } else if (args.fieldType === "text") {
-      out = stored || resolvePrepareSignerTitleDisplay(args.role, "prepare_display").value;
+      if (fieldCountsAsCustomText({ type: "text", textPurpose: args.textPurpose })) {
+        out = stored || "Custom text";
+      } else {
+        out = stored || resolvePrepareSignerTitleDisplay(args.role, "prepare_display").value;
+      }
     } else {
       out = stored || resolveStored();
     }

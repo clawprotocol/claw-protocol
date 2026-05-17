@@ -55,6 +55,11 @@ import {
   syncSenderFieldsForRoleSignerMetadata,
 } from "./vs01PrepareSignerMetadata";
 import {
+  buildPrepareMissingBySignerSummary,
+  formatPrepareFinishBlockedMessage,
+  logVs01PrepareFinishBlocked,
+} from "./vs01PreparePacketCompletion";
+import {
   clearVs01DraftState,
   loadVs01DraftState,
   mergeBridgeMetadataIntoSavedCounterparties,
@@ -1113,9 +1118,9 @@ export function Vs01Wizard({
                   })),
                 });
                 if (!gate.canFinish) {
-                  setError(
-                    "Add signature, printed name, and date fields for each signer. Entity parties also need a title (text) field on the document.",
-                  );
+                  const rows = buildPrepareMissingBySignerSummary(gate, roles);
+                  logVs01PrepareFinishBlocked(rows);
+                  setError(formatPrepareFinishBlockedMessage(rows));
                   return;
                 }
               }

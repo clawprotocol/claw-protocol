@@ -31,6 +31,8 @@ export type PrepareSigningFieldBodyProps = {
   role: Vs01PrepareSigningRole | null;
   ownerPreview: PrepareOwnerSignaturePreview;
   ownerPad: Vs01SignerRuntimeContext;
+  /** When true, signatures render as readable placeholders (prepare_signing_packet). */
+  preparePacketMode?: boolean;
   isSelected: boolean;
   busy: boolean;
   onValueChange: (value: string) => void;
@@ -50,7 +52,19 @@ export function prepareFieldDataAttributes(
     "data-vs01-field-party-name": party,
     "data-vs01-field-signer-known": role && isKnownPrepareSignerName(role) ? "true" : "false",
     "data-vs01-field-awaits-signer-input": display.awaitsSignerInput ? "true" : "false",
+    ...(field.textPurpose ? { "data-vs01-field-text-purpose": field.textPurpose } : {}),
   };
+}
+
+function PrepareSignaturePlaceholderBody({ display }: { display: PrepareTemplateDisplay }) {
+  return (
+    <div className="vs01-sign-placement-signature-body vs01-sign-placement-signature-body--prepare-pending vs01-sign-placement-body--noninteractive">
+      <span className="vs01-prepare-signature-kicker">{display.assigneeLine}</span>
+      {display.partyLine ? <span className="vs01-prepare-signature-party">{display.partyLine}</span> : null}
+      <span className="vs01-prepare-signature-placeholder">{display.body}</span>
+      {display.footer ? <span className="vs01-prepare-signature-footer">{display.footer}</span> : null}
+    </div>
+  );
 }
 
 export function PrepareSigningFieldBody({
@@ -58,12 +72,15 @@ export function PrepareSigningFieldBody({
   role,
   ownerPreview,
   ownerPad,
+  preparePacketMode = false,
   isSelected,
   busy,
   onValueChange,
   onInputFocus,
 }: PrepareSigningFieldBodyProps) {
-  const display = prepareTemplateDisplayForField(field, role, ownerPad);
+  const display = prepareTemplateDisplayForField(field, role, ownerPad, {
+    preparePacket: preparePacketMode,
+  });
   const fieldRoleKind = role?.kind ?? field.assignedSignerRoleKind ?? "owner";
   const isOwnerField = fieldRoleKind === "owner";
   const stored = typeof field.value === "string" ? field.value : "";
@@ -81,16 +98,10 @@ export function PrepareSigningFieldBody({
   });
 
   if (field.type === "signature") {
+    if (preparePacketMode || display.prepareSignaturePlaceholder) {
+      return <PrepareSignaturePlaceholderBody display={display} />;
+    }
     if (isOwnerField) {
-      const ownerSigner = (role?.signerName ?? "").trim();
-      if (ownerSigner && display.assigneeLine) {
-        return (
-          <div className="vs01-sign-placement-signature-body vs01-sign-placement-signature-body--owner">
-            <span className="vs01-prepare-signature-heading">{display.assigneeLine}</span>
-            <span className="vs01-prepare-signature-placeholder">{ownerSigner}</span>
-          </div>
-        );
-      }
       return (
         <div className="vs01-sign-placement-signature-body">
           {ownerPreview.signatureMode === "type" && ownerPreview.typedName.trim() ? (
@@ -116,9 +127,7 @@ export function PrepareSigningFieldBody({
       );
     }
     return (
-      <div
-        className="vs01-sign-placement-signature-body vs01-sign-placement-signature-body--counterparty vs01-sign-placement-signature-body--pending vs01-sign-placement-body--noninteractive"
-      >
+      <div className="vs01-sign-placement-signature-body vs01-sign-placement-signature-body--counterparty vs01-sign-placement-signature-body--pending vs01-sign-placement-body--noninteractive">
         <span className="vs01-prepare-signature-heading">{display.assigneeLine}</span>
         <span className="vs01-prepare-signature-placeholder">{display.body}</span>
         {display.sublabel ? (
@@ -146,9 +155,11 @@ export function PrepareSigningFieldBody({
           : "Printed name"
         : field.type === "email"
           ? "Email"
-          : role?.kind === "counterparty"
-            ? VS01_PREPARE_TITLE_PLACEHOLDER
-            : "Add text";
+          : field.textPurpose === "custom"
+            ? "Custom text"
+            : role?.kind === "counterparty"
+              ? VS01_PREPARE_TITLE_PLACEHOLDER
+              : "Title";
     if (isSelected && !busy) {
       return (
         <input
@@ -157,7 +168,7 @@ export function PrepareSigningFieldBody({
           value={editValue}
           placeholder={placeholder}
           autoComplete={field.type === "email" ? "email" : field.type === "printed_name" ? "name" : "off"}
-          aria-label={prepareTemplateCornerLabel(field.type, role)}
+          aria-label={prepareTemplateCornerLabel(field.type, role, field.textPurpose)}
           onFocus={() => onInputFocus?.()}
           onChange={(ev) => onValueChange(ev.target.value)}
           onPointerDown={(ev) => ev.stopPropagation()}
@@ -170,36 +181,23 @@ export function PrepareSigningFieldBody({
         className={`vs01-sign-placement-text vs01-sign-placement-text--stacked vs01-sign-placement-body--noninteractive${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}
       >
         <span className="vs01-prepare-field-primary">{display.body}</span>
-        {display.sublabel ? (
-          <span className="vs01-prepare-field-sublabel">{display.sublabel}</span>
-        ) : null}
+        {display.sublabel ? <span className="vs01-prepare-field-sublabel">{display.sublabel}</span> : null}
       </span>
     );
   }
 
   if (field.type === "date") {
-    if (isSelected && !busy) {
-      return (
-        <input
-          type="date"
-          className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-          value={editValue}
-          aria-label="Date on document"
-          onFocus={() => onInputFocus?.()}
-          onChange={(ev) => onValueChange(ev.target.value)}
-          onPointerDown={(ev) => ev.stopPropagation()}
-          onClick={(ev) => ev.stopPropagation()}
-        />
-      );
-    }
+    const show = formatIsoDateDisplay(resolved) || display.body;
     return (
       <span
         className={`vs01-sign-placement-text vs01-sign-placement-body--noninteractive${display.isPlaceholder ? " vs01-sign-placement-ph" : ""}`}
       >
-        {editValue.trim() ? formatIsoDateDisplay(editValue) : display.body}
+        {show}
       </span>
     );
   }
 
-  return null;
+  return (
+    <span className="vs01-sign-placement-text vs01-sign-placement-body--noninteractive">{display.body}</span>
+  );
 }

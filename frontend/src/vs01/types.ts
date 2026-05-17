@@ -61,6 +61,8 @@ export type Vs01RecipientPlacedField = {
   value?: string;
   /** Per-page initials for “initials on every page” for this counterparty (Step 4). */
   autoInitials?: boolean;
+  /** For `type: "text"` — title vs custom (prepare packet). */
+  textPurpose?: import("./signingFields").Vs01TextFieldPurpose;
   assignedPartyId?: string;
   assignedPartyIndex?: number;
   assignedSignerEmail?: string;

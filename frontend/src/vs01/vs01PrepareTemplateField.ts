@@ -1,4 +1,9 @@
-import type { PlacedSigningField, SigningFieldType, SigningPlacementValueContext } from "./signingFields";
+import type {
+  PlacedSigningField,
+  SigningFieldType,
+  SigningPlacementValueContext,
+  Vs01TextFieldPurpose,
+} from "./signingFields";
 import {
   ownerPadFromPlacementContext,
   resolveRolePlausibleEmail,
@@ -14,7 +19,6 @@ import {
   resolvePrepareSignerTitleDisplay,
   VS01_PREPARE_INITIALS_PLACEHOLDER,
   VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
-  VS01_PREPARE_SIGNATURE_COUNTERPARTY_SUBLABEL,
   VS01_PREPARE_SIGNER_NAME_PLACEHOLDER,
   VS01_PREPARE_TITLE_PLACEHOLDER,
 } from "./vs01PrepareSignerDisplay";
@@ -24,12 +28,14 @@ export function defaultPrepareTemplateStoredValue(
   type: SigningFieldType,
   role: Vs01PrepareSigningRole,
   ownerCtx: SigningPlacementValueContext,
+  textPurpose?: Vs01TextFieldPurpose,
 ): string {
   return resolveVs01FieldValueForRole({
     fieldType: type,
     role,
     mode: "prepare_stored",
     ownerPad: ownerPadFromPlacementContext(ownerCtx),
+    textPurpose,
   });
 }
 
@@ -60,6 +66,7 @@ export function resolvePrepareFieldDisplayValue(
     mode: "prepare_display",
     storedValue: typeof field.value === "string" ? field.value : "",
     ownerPad,
+    textPurpose: field.textPurpose,
   });
 }
 
@@ -67,38 +74,51 @@ export type PrepareTemplateDisplay = {
   body: string;
   assigneeLine: string;
   sublabel?: string;
+  partyLine?: string;
+  footer?: string;
   isPlaceholder: boolean;
   awaitsSignerInput?: boolean;
+  prepareSignaturePlaceholder?: boolean;
 };
 
 export function prepareTemplateDisplayForField(
   field: PlacedSigningField,
   role: Vs01PrepareSigningRole | null,
   ownerPad?: Vs01SignerRuntimeContext,
+  options?: { preparePacket?: boolean },
 ): PrepareTemplateDisplay {
+  const preparePacket = options?.preparePacket === true;
   const entity = (role?.roleLabel ?? role?.partyName ?? role?.entityName ?? field.assignedSignerRoleLabel ?? "").trim() || "Signer";
   const kind = role?.kind ?? field.assignedSignerRoleKind ?? "owner";
   const resolved = resolvePrepareFieldDisplayValue(field, role, ownerPad);
 
   switch (field.type) {
     case "signature": {
-      if (kind === "counterparty") {
-        const party = resolvePreparePartyEntityLabel(role!) || entity || "Signer";
-        const signer = (role?.signerName ?? "").trim();
-        const knownSigner = Boolean(signer);
+      const party = resolvePreparePartyEntityLabel(role!) || entity || "Signer";
+      const signer = (role?.signerName ?? "").trim();
+      if (preparePacket) {
         return {
-          body: knownSigner ? `${signer} will sign here` : VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
+          assigneeLine: "SIGNATURE FIELD",
+          partyLine: `For: ${party}`,
+          body: signer ? `${signer} will sign here` : VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
+          footer: "Completed from private link",
+          isPlaceholder: true,
+          awaitsSignerInput: true,
+          prepareSignaturePlaceholder: true,
+        };
+      }
+      if (kind === "counterparty") {
+        return {
+          body: signer ? `${signer} will sign here` : VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
           assigneeLine: `SIGNATURE — ${party}`,
-          sublabel: VS01_PREPARE_SIGNATURE_COUNTERPARTY_SUBLABEL,
           isPlaceholder: true,
           awaitsSignerInput: true,
         };
       }
-      const ownerSigner = (role?.signerName ?? "").trim();
-      const ownerParty = resolvePreparePartyEntityLabel(role!) || entity;
+      const ownerSigner = signer;
       return {
         body: ownerSigner || resolved.trim() || "Your signature",
-        assigneeLine: ownerParty ? `SIGNATURE — ${ownerParty}` : "Your signature",
+        assigneeLine: party ? `SIGNATURE — ${party}` : "Your signature",
         isPlaceholder: !ownerSigner && !resolved.trim(),
       };
     }
@@ -133,14 +153,19 @@ export function prepareTemplateDisplayForField(
       };
     }
     case "text": {
-      const titleDisp =
-        role && kind === "counterparty"
-          ? resolvePrepareSignerTitleDisplay(role, "prepare_display")
-          : null;
+      const isCustom = field.textPurpose === "custom";
+      if (isCustom) {
+        return {
+          body: resolved.trim() || "Custom text",
+          assigneeLine: entity,
+          isPlaceholder: !resolved.trim(),
+        };
+      }
+      const titleDisp = role ? resolvePrepareSignerTitleDisplay(role, "prepare_display") : null;
       const body =
         resolved.trim() ||
         titleDisp?.value ||
-        (kind === "counterparty" ? VS01_PREPARE_TITLE_PLACEHOLDER : "Add text");
+        (kind === "counterparty" ? VS01_PREPARE_TITLE_PLACEHOLDER : "Title");
       return {
         body,
         assigneeLine: entity,
@@ -173,6 +198,7 @@ export function prepareTemplateDisplayForField(
 export function prepareTemplateCornerLabel(
   type: SigningFieldType,
   role: Vs01PrepareSigningRole | null,
+  textPurpose?: Vs01TextFieldPurpose,
 ): string {
   const entity = (role?.entityName ?? "").trim();
   switch (type) {
@@ -183,7 +209,7 @@ export function prepareTemplateCornerLabel(
     case "printed_name":
       return "Printed name";
     case "text":
-      return "Title";
+      return textPurpose === "custom" ? "Custom text" : "Title";
     case "email":
       return "Email";
     case "date":

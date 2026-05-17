@@ -5,6 +5,12 @@ import {
   type PlacedSigningField,
 } from "./signingFields";
 import type { Vs01Counterparty, Vs01RecipientPlacedField, Vs01SignerFieldAssignmentSource } from "./types";
+import {
+  fieldCountsAsTitle,
+  fieldForPrepareGate,
+  logVs01PrepareRequiredFields,
+  logVs01PrepareRoleCompletion,
+} from "./vs01PreparePacketCompletion";
 
 function looksLikeLegalEntityPartyNameLocal(name: string): boolean {
   const t = name.trim();
@@ -494,6 +500,10 @@ export function logVs01RequiredProgress(gate: SigningPacketPrepareGate, roles: V
       missing: gate.missingByParty[r.roleId] ?? [],
     })),
   });
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+    logVs01PrepareRequiredFields(gate, roles);
+    logVs01PrepareRoleCompletion(gate, roles);
+  }
 }
 
 /** @deprecated Use {@link stampPrepareSenderFieldOrReject}. */
@@ -557,17 +567,18 @@ export type SigningPacketPrepareGate = {
 };
 
 function countTypes(
-  fields: Iterable<{ type: string }>,
+  fields: Iterable<{ type: string; textPurpose?: import("./signingFields").Vs01TextFieldPurpose; autoInitials?: boolean }>,
 ): { signature: number; printed_name: number; date: number; title: number } {
   let signature = 0;
   let printed_name = 0;
   let date = 0;
   let title = 0;
   for (const f of fields) {
+    if (f.autoInitials) continue;
     if (f.type === "signature") signature += 1;
     else if (f.type === "printed_name") printed_name += 1;
     else if (f.type === "date") date += 1;
-    else if (f.type === "text") title += 1;
+    else if (fieldCountsAsTitle(f)) title += 1;
   }
   return { signature, printed_name, date, title };
 }
@@ -590,14 +601,14 @@ function collectFieldsForRole(
   roles: Vs01PrepareSigningRole[],
   senderPlacedFields: PlacedSigningField[],
   recipientPlacedFields: Vs01RecipientPlacedField[],
-): { type: string }[] {
-  const out: { type: string }[] = [];
+): { type: string; textPurpose?: import("./signingFields").Vs01TextFieldPurpose; autoInitials?: boolean }[] {
+  const out: { type: string; textPurpose?: import("./signingFields").Vs01TextFieldPurpose; autoInitials?: boolean }[] = [];
   for (const f of senderPlacedFields) {
-    if (resolveSenderFieldRoleId(f, ownerRole, roles) === role.roleId) out.push(f);
+    if (resolveSenderFieldRoleId(f, ownerRole, roles) === role.roleId) out.push(fieldForPrepareGate(f));
   }
   for (const f of recipientPlacedFields) {
     const rid = resolveRecipientFieldRoleId(f, roles);
-    if (rid === role.roleId) out.push(f);
+    if (rid === role.roleId) out.push(fieldForPrepareGate(f));
   }
   return out;
 }
@@ -629,6 +640,7 @@ export function senderSigningFieldToRecipientExecutionField(
     height: f.height,
     ...(typeof f.value === "string" ? { value: f.value } : {}),
     ...(f.autoInitials ? { autoInitials: true } : {}),
+    ...(f.textPurpose ? { textPurpose: f.textPurpose } : {}),
     ...(f.assignedPartyId ? { assignedPartyId: f.assignedPartyId } : {}),
     ...(f.assignedPartyIndex != null ? { assignedPartyIndex: f.assignedPartyIndex } : {}),
     ...(f.assignedSignerEmail ? { assignedSignerEmail: f.assignedSignerEmail } : {}),

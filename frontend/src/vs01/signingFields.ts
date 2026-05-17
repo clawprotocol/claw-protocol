@@ -7,6 +7,9 @@ import type { FieldManifestEntry } from "./vs01Api";
 
 export type SigningFieldType = "signature" | "initials" | "printed_name" | "text" | "email" | "date";
 
+/** When {@link SigningFieldType} is `text`, distinguishes role title vs freeform custom copy. */
+export type Vs01TextFieldPurpose = "title" | "custom";
+
 /** Context for default values when placing sender signing fields. */
 export type SigningPlacementValueContext = {
   typedName: string;
@@ -29,6 +32,8 @@ export type PlacedSigningField = {
   value?: string;
   /** True for per-page auto initials from “Put my initials on every page” */
   autoInitials?: boolean;
+  /** For `type: "text"` — title (signer role) vs custom freeform copy. Legacy rows omit → title. */
+  textPurpose?: Vs01TextFieldPurpose;
   /** Signer-centric placement (prepare packet / execution scope). */
   assignedPartyId?: string;
   assignedPartyIndex?: number;
@@ -47,6 +52,37 @@ export const SIGNING_FIELD_TOOLS: { type: SigningFieldType; label: string }[] = 
   { type: "email", label: "Email" },
   { type: "date", label: "Date" },
 ];
+
+export type PreparePacketFieldTool = {
+  type: SigningFieldType;
+  label: string;
+  textPurpose?: Vs01TextFieldPurpose;
+};
+
+/** Prepare_signing_packet toolbar — Title and Custom text are separate tools (both stored as `text`). */
+export const PREPARE_PACKET_FIELD_TOOLS: PreparePacketFieldTool[] = [
+  { type: "signature", label: "Signature" },
+  { type: "initials", label: "Initials" },
+  { type: "printed_name", label: "Printed name" },
+  { type: "text", label: "Title", textPurpose: "title" },
+  { type: "email", label: "Email" },
+  { type: "date", label: "Date" },
+  { type: "text", label: "Custom text", textPurpose: "custom" },
+];
+
+export function preparePacketToolKey(tool: Pick<PreparePacketFieldTool, "type" | "textPurpose">): string {
+  return tool.textPurpose ? `${tool.type}:${tool.textPurpose}` : tool.type;
+}
+
+export function matchesPreparePacketTool(
+  activeType: SigningFieldType,
+  activeTextPurpose: Vs01TextFieldPurpose | undefined,
+  tool: PreparePacketFieldTool,
+): boolean {
+  if (activeType !== tool.type) return false;
+  if (tool.textPurpose) return activeTextPurpose === tool.textPurpose;
+  return !activeTextPurpose;
+}
 
 /** Step 4 only — “Printed name” replaces generic text for recipients. */
 export const RECIPIENT_FIELD_TOOLS: { type: Vs01RecipientFieldType; label: string }[] = [
@@ -1230,8 +1266,12 @@ export function labelForFieldType(t: SigningFieldType): string {
   return m?.label ?? t;
 }
 
-/** Prepare-mode toolbar labels (`text` → Title for representative role fields). */
-export function labelForPrepareFieldType(t: SigningFieldType): string {
+/** Prepare-mode corner label for a placed field (respects {@link Vs01TextFieldPurpose}). */
+export function labelForPreparePlacedField(
+  t: SigningFieldType,
+  textPurpose?: Vs01TextFieldPurpose,
+): string {
+  if (t === "text" && textPurpose === "custom") return "Custom text";
   if (t === "text") return "Title";
   return labelForFieldType(t);
 }

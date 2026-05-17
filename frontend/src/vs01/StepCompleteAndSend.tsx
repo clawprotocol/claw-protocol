@@ -22,6 +22,7 @@ import type {
   Vs01SenderSignatureRef,
 } from "./types";
 import {
+  PREPARE_PACKET_FIELD_TOOLS,
   RECIPIENT_FIELD_TOOLS,
   autoInitialsColumnIndexOnPage,
   autoInitialsPlacementDims,
@@ -29,7 +30,10 @@ import {
   defaultRecipientFieldValue,
   findAutoInitialsMarginSlotOrNull,
   labelForFieldType,
+  labelForPreparePlacedField,
   labelForRecipientFieldType,
+  matchesPreparePacketTool,
+  preparePacketToolKey,
   newSigningFieldId,
   rebuildRecipientAutoInitialsEveryPage,
   repositionAllRecipientAutoInitialsNonOverlapping,
@@ -48,6 +52,13 @@ import { prepareTemplateCornerLabel, prepareTemplateDisplayForField } from "./vs
 import { canFinishPreparingSigningPacket } from "../agreement/partySigningRoles";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { evaluatePreparePacketGateFromRoles, logVs01RequiredProgress } from "./vs01SignerFieldAssignment";
+import {
+  buildPrepareMissingBySignerSummary,
+  evaluatePrepareFinishClick,
+  formatPrepareMissingFieldLabel,
+  logVs01PrepareFinishClick,
+} from "./vs01PreparePacketCompletion";
+import type { Vs01TextFieldPurpose } from "./signingFields";
 import { createPrepareStampedRecipientField } from "./vs01PrepareFieldPlacement";
 import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 
@@ -238,7 +249,10 @@ export function StepCompleteAndSend({
 
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<Vs01RecipientFieldType>("signature");
+  const [activeTextPurpose, setActiveTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
   const [armedTool, setArmedTool] = useState<Vs01RecipientFieldType | null>(null);
+  const [armedTextPurpose, setArmedTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
+  const [, setFinishBlockedVisible] = useState(false);
 
   const [placementPopId, setPlacementPopId] = useState<string | null>(null);
   const [showDragHint, setShowDragHint] = useState(false);
@@ -540,6 +554,32 @@ export function StepCompleteAndSend({
     ? Boolean(prepareGate?.canFinish)
     : recipientFields.length > 0;
 
+  const prepareMissingSummary = useMemo(() => {
+    if (!prepareGate || !prepareSignerRoles?.length) return [];
+    return buildPrepareMissingBySignerSummary(prepareGate, prepareSignerRoles);
+  }, [prepareGate, prepareSignerRoles]);
+
+  const handleFinishPreparePacket = useCallback(() => {
+    const result = evaluatePrepareFinishClick(prepareGate, prepareSignerRoles ?? []);
+    logVs01PrepareFinishClick({
+      canFinish: result.allowed,
+      incompleteSignerCount: result.allowed ? 0 : result.rows.length,
+    });
+    if (!result.allowed) {
+      setFinishBlockedVisible(true);
+      onError(result.message);
+      if (result.focusRoleId) {
+        prepareRoleCtx?.setActiveRole(result.focusRoleId, "auto_advance");
+        const role = prepareSignerRoles?.find((r) => r.roleId === result.focusRoleId);
+        if (role?.vs01CounterpartyId) setSelectedCounterpartyId(role.vs01CounterpartyId);
+      }
+      return;
+    }
+    setFinishBlockedVisible(false);
+    onError(null);
+    onContinueToReceipt?.();
+  }, [prepareGate, prepareSignerRoles, prepareRoleCtx, onError, onContinueToReceipt]);
+
   const recipientOverlapKey = useMemo(() => {
     const id = selectedCounterpartyId.trim();
     if (!id) return "";
@@ -637,6 +677,7 @@ export function StepCompleteAndSend({
           email: emailForField,
           visualRoleId: displayRoleId,
           existingFields: fieldsRef.current,
+          textPurpose: armedTool === "text" ? armedTextPurpose : undefined,
         });
         if (!nf) return;
       } else {
@@ -673,6 +714,7 @@ export function StepCompleteAndSend({
     },
     [
       armedTool,
+      armedTextPurpose,
       busy,
       cpById,
       selectedCounterpartyId,
@@ -1088,6 +1130,7 @@ export function StepCompleteAndSend({
                                                     field as PlacedSigningField,
                                                     fieldRole,
                                                     prepareOwnerPad,
+                                                    { preparePacket: true },
                                                   )
                                                 : null;
                                             const isActiveRoleField =
@@ -1130,7 +1173,11 @@ export function StepCompleteAndSend({
                                                 {prepareSigningPacket && prepareSignerRoles ? (
                                                   <>
                                                     <span className="vs01-sign-placement-label">
-                                                      {prepareTemplateCornerLabel(field.type, fieldRole)}
+                                                      {prepareTemplateCornerLabel(
+                                                        field.type,
+                                                        fieldRole,
+                                                        (field as PlacedSigningField).textPurpose,
+                                                      )}
                                                     </span>
                                                     <PrepareSigningFieldBody
                                                       field={field as PlacedSigningField}
@@ -1142,6 +1189,7 @@ export function StepCompleteAndSend({
                                                         uploadPreviewUrl: null,
                                                       }}
                                                       ownerPad={prepareOwnerPad}
+                                                      preparePacketMode={prepareSigningPacket}
                                                       isSelected={isSel}
                                                       busy={busy}
                                                       onValueChange={(value) =>
@@ -1357,7 +1405,7 @@ export function StepCompleteAndSend({
                           }
                         >
                           <span className="font-medium">{r.entityName}</span>
-                          {done ? " — complete" : ` — needs: ${miss.join(", ")}`}
+                          {done ? " — complete" : ` — needs: ${miss.map(formatPrepareMissingFieldLabel).join(", ")}`}
                         </li>
                       );
                     })}
@@ -1428,20 +1476,31 @@ export function StepCompleteAndSend({
               Choose what to place
             </p>
             <div className="vs01-sign-toolbar-btns">
-              {RECIPIENT_FIELD_TOOLS.map(({ type, label }) => (
-                <button
-                  key={type}
-                  type="button"
-                  className={`vs01-sign-tool-btn${activeTool === type ? " vs01-sign-tool-btn--active" : ""}`}
-                  disabled={busy || namedCps.length === 0}
-                  onClick={() => {
-                    setActiveTool(type);
-                    setArmedTool(null);
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+              {(prepareSigningPacket ? PREPARE_PACKET_FIELD_TOOLS : RECIPIENT_FIELD_TOOLS).map((tool) => {
+                const t = tool.type;
+                const purpose =
+                  "textPurpose" in tool ? (tool.textPurpose as Vs01TextFieldPurpose | undefined) : undefined;
+                const key = prepareSigningPacket ? preparePacketToolKey(tool) : t;
+                const selected = prepareSigningPacket
+                  ? matchesPreparePacketTool(activeTool, activeTextPurpose, tool)
+                  : activeTool === t;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`vs01-sign-tool-btn${selected ? " vs01-sign-tool-btn--active" : ""}`}
+                    disabled={busy || (!prepareSigningPacket && namedCps.length === 0)}
+                    onClick={() => {
+                      setActiveTool(t);
+                      setActiveTextPurpose(purpose);
+                      setArmedTool(null);
+                      setArmedTextPurpose(undefined);
+                    }}
+                  >
+                    {prepareSigningPacket ? tool.label : tool.label}
+                  </button>
+                );
+              })}
             </div>
             <div className="vs01-sign-placement-mode" aria-labelledby="vs01-assign-place-heading">
               <p id="vs01-assign-place-heading" className="vs01-recipient-rail-heading">
@@ -1455,13 +1514,20 @@ export function StepCompleteAndSend({
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--auto vs01-sign-place-cta"
                 disabled={busy || !placementSurface || previewLoading || namedCps.length === 0}
-                onClick={() => setArmedTool(activeTool)}
+                onClick={() => {
+                  setArmedTool(activeTool);
+                  setArmedTextPurpose(activeTextPurpose);
+                }}
               >
                 Place on document
               </button>
               {placementArmed ? (
                 <p className="vs01-sign-placement-mode-hint">
-                  Click once on the document to add a {labelForRecipientFieldType(armedTool)} marker for them.
+                  Click once on the document to add a{" "}
+                  {prepareSigningPacket && armedTool
+                    ? labelForPreparePlacedField(armedTool, armedTextPurpose)
+                    : labelForRecipientFieldType(armedTool)}{" "}
+                  marker for them.
                 </p>
               ) : (
                 <p className="vs01-sign-placement-mode-hint vs01-sign-placement-mode-hint--muted">
@@ -1478,8 +1544,30 @@ export function StepCompleteAndSend({
               disabled={busy || numPages <= 0 || !selectedCounterpartyId}
               onChange={(e) => setRecipientAutoInitialsEveryPage(e.target.checked)}
             />
-            <span>Initials box on every page</span>
+            <span>
+              {prepareSigningPacket
+                ? "Add initials for this signer on every page"
+                : "Initials box on every page"}
+            </span>
           </label>
+          {prepareSigningPacket ? (
+            <p className="vs01-prepare-initials-hint">
+              Applies to the signer selected above. Repeat for each signer as you move through roles.
+            </p>
+          ) : null}
+
+          {prepareSigningPacket && prepareGate && !prepareGate.canFinish ? (
+            <div className="vs01-prepare-finish-blocked-panel" role="alert">
+              <p className="vs01-prepare-finish-blocked-title">Required fields still missing</p>
+              <ul className="vs01-prepare-finish-blocked-list">
+                {prepareMissingSummary.map((row) => (
+                  <li key={row.roleId}>
+                    <strong>{row.entityName}</strong> still needs: {row.missingLabels.join(", ")}.
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {selectedField ? (
             <div className="vs01-sign-selected-panel">
@@ -1513,8 +1601,12 @@ export function StepCompleteAndSend({
             <button
               type="button"
               className="vs01-btn vs01-btn--primary"
-              disabled={!canContinue}
+              disabled={prepareSigningPacket ? busy : !canContinue}
               onClick={() => {
+                if (prepareSigningPacket) {
+                  handleFinishPreparePacket();
+                  return;
+                }
                 if (canContinue) {
                   onError(null);
                   onContinueToReceipt?.();

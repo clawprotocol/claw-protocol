@@ -67,6 +67,8 @@ function parseField(raw: unknown): Vs01RecipientPlacedField | null {
   }
   const value = typeof raw.value === "string" ? raw.value : undefined;
   const autoInitials = raw.autoInitials === true;
+  const textPurpose =
+    raw.textPurpose === "title" || raw.textPurpose === "custom" ? raw.textPurpose : undefined;
   const assignedPartyId = typeof raw.assignedPartyId === "string" ? raw.assignedPartyId.trim() : undefined;
   const assignedPartyIndex =
     typeof raw.assignedPartyIndex === "number" && Number.isFinite(raw.assignedPartyIndex)
@@ -96,6 +98,7 @@ function parseField(raw: unknown): Vs01RecipientPlacedField | null {
     height,
     ...(value !== undefined ? { value } : {}),
     ...(autoInitials ? { autoInitials: true } : {}),
+    ...(textPurpose ? { textPurpose } : {}),
     ...(assignedPartyId ? { assignedPartyId } : {}),
     ...(assignedPartyIndex !== undefined ? { assignedPartyIndex } : {}),
     ...(assignedSignerEmail ? { assignedSignerEmail } : {}),
@@ -158,6 +161,7 @@ export function encodeRecipientManifestForUrl(fields: Vs01RecipientPlacedField[]
     height: f.height,
     ...(typeof f.value === "string" ? { value: f.value } : {}),
     ...(f.autoInitials ? { autoInitials: true } : {}),
+    ...(f.textPurpose ? { textPurpose: f.textPurpose } : {}),
     ...(f.assignedPartyId ? { assignedPartyId: f.assignedPartyId } : {}),
     ...(f.assignedPartyIndex != null ? { assignedPartyIndex: f.assignedPartyIndex } : {}),
     ...(f.assignedSignerEmail ? { assignedSignerEmail: f.assignedSignerEmail } : {}),

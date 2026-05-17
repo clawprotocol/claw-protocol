@@ -55,14 +55,16 @@ describe("PrepareSigningFieldBody counterparty signature", () => {
           uploadPreviewUrl: null,
         }}
         ownerPad={ownerPad}
+        preparePacketMode
         isSelected={false}
         busy={false}
         onValueChange={() => {}}
       />,
     );
-    expect(screen.getByText("SIGNATURE — Atlas Harbor Technologies Inc.")).toBeTruthy();
+    expect(screen.getByText("SIGNATURE FIELD")).toBeTruthy();
+    expect(screen.getByText("For: Atlas Harbor Technologies Inc.")).toBeTruthy();
     expect(screen.getByText("Jim Atlas will sign here")).toBeTruthy();
-    expect(screen.getByText("Private link signer · not signed yet")).toBeTruthy();
+    expect(screen.getByText("Completed from private link")).toBeTruthy();
     expect(screen.queryByText("Redwood Script Name")).toBeNull();
     expect(screen.queryByText("Redwood Owner")).toBeNull();
   });
@@ -91,13 +93,15 @@ describe("PrepareSigningFieldBody counterparty signature", () => {
           uploadPreviewUrl: null,
         }}
         ownerPad={{ typedName: "Script From Pad", initials: "SP" }}
+        preparePacketMode
         isSelected={false}
         busy={false}
         onValueChange={() => {}}
       />,
     );
-    expect(screen.getByText("SIGNATURE — Redwood Peak Ventures LLC")).toBeTruthy();
-    expect(screen.getByText("Redwood Santa")).toBeTruthy();
+    expect(screen.getByText("SIGNATURE FIELD")).toBeTruthy();
+    expect(screen.getByText("For: Redwood Peak Ventures LLC")).toBeTruthy();
+    expect(screen.getByText("Redwood Santa will sign here")).toBeTruthy();
     expect(screen.queryByText("Script From Pad")).toBeNull();
     expect(container.querySelector("[data-vs01-field-kind]")).toBeNull();
   });

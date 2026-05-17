@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { Vs01PrepareSignerMetadataPanel } from "./vs01PrepareSignerMetadataPanel";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
-import { labelForPrepareFieldType } from "./signingFields";
+import { labelForPreparePlacedField } from "./signingFields";
 
 describe("Vs01PrepareSignerMetadataPanel", () => {
   it("shows compact summary when signer metadata is already known", () => {
@@ -45,9 +45,10 @@ describe("Vs01PrepareSignerMetadataPanel", () => {
   });
 });
 
-describe("labelForPrepareFieldType", () => {
-  it("maps text tool to Title in prepare mode", () => {
-    expect(labelForPrepareFieldType("text")).toBe("Title");
-    expect(labelForPrepareFieldType("signature")).toBe("Signature");
+describe("labelForPreparePlacedField", () => {
+  it("distinguishes title and custom text", () => {
+    expect(labelForPreparePlacedField("text", "title")).toBe("Title");
+    expect(labelForPreparePlacedField("text", "custom")).toBe("Custom text");
+    expect(labelForPreparePlacedField("signature")).toBe("Signature");
   });
 });

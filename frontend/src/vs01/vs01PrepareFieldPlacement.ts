@@ -104,7 +104,7 @@ function createPreparePlacedFieldAtClick(
   role: Vs01PrepareSigningRole,
   ownerValueCtx: SigningPlacementValueContext,
   existingOnPage: PlacedSigningField[],
-  options?: { autoInitials?: boolean },
+  options?: { autoInitials?: boolean; textPurpose?: import("./signingFields").Vs01TextFieldPurpose },
 ): PlacedSigningField {
   const fieldType = type as SigningFieldType;
   const snap = snapPreparePlacementClickY(clickY, fieldType, existingOnPage, role.roleId);
@@ -174,6 +174,7 @@ function createPreparePlacedFieldAtClick(
     adjusted: resolved.adjusted,
   });
   const auto = options?.autoInitials === true;
+  const textPurpose = options?.textPurpose;
   return {
     id: newSigningFieldId(),
     type,
@@ -182,8 +183,9 @@ function createPreparePlacedFieldAtClick(
     y,
     width,
     height,
-    value: defaultPrepareTemplateStoredValue(type, role, ownerValueCtx),
+    value: defaultPrepareTemplateStoredValue(type, role, ownerValueCtx, textPurpose),
     ...(auto ? { autoInitials: true } : {}),
+    ...(type === "text" && textPurpose ? { textPurpose } : {}),
   };
 }
 
@@ -336,6 +338,7 @@ export function createPrepareStampedSenderField(args: {
   existingFields?: PlacedSigningField[];
   visualRoleId?: string | null;
   autoInitials?: boolean;
+  textPurpose?: import("./signingFields").Vs01TextFieldPurpose;
 }): PrepareSenderPlacementResult {
   const resolved = args.authority.resolveRoleForPlacement({
     tool: args.type,
@@ -359,7 +362,7 @@ export function createPrepareStampedSenderField(args: {
     resolved.role,
     args.valueCtx,
     onPage,
-    args.autoInitials ? { autoInitials: true } : undefined,
+    args.autoInitials ? { autoInitials: true, textPurpose: args.textPurpose } : { textPurpose: args.textPurpose },
   );
   const stamped = stampPrepareSenderFieldOrReject(
     raw,
@@ -405,6 +408,7 @@ export function createPrepareStampedRecipientField(args: {
   email?: string;
   visualRoleId?: string | null;
   existingFields?: Vs01RecipientPlacedField[];
+  textPurpose?: import("./signingFields").Vs01TextFieldPurpose;
 }): PrepareStampedRecipientField | null {
   const resolved = args.authority.resolveRoleForPlacement({
     tool: args.type,
@@ -440,6 +444,7 @@ export function createPrepareStampedRecipientField(args: {
       signerEmail: args.email,
     },
     onPage as PlacedSigningField[],
+    args.type === "text" && args.textPurpose ? { textPurpose: args.textPurpose } : undefined,
   );
   const raw: Vs01RecipientPlacedField = {
     id: placed.id,
@@ -451,6 +456,7 @@ export function createPrepareStampedRecipientField(args: {
     width: placed.width,
     height: placed.height,
     value: placed.value,
+    ...(args.type === "text" && args.textPurpose ? { textPurpose: args.textPurpose } : {}),
   };
   const stamped = stampPrepareRecipientFieldOrReject(
     raw,

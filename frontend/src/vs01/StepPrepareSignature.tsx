@@ -54,18 +54,28 @@ import {
 import { isKnownPrepareSignerName, resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
 import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 import {
+  PREPARE_PACKET_FIELD_TOOLS,
   SIGNING_FIELD_TOOLS,
   buildAutoInitialsFields,
   createPlacedFieldAtClick,
   defaultValueForType,
   fieldsToManifest,
   labelForFieldType,
-  labelForPrepareFieldType,
+  labelForPreparePlacedField,
+  matchesPreparePacketTool,
+  preparePacketToolKey,
   resizeBoundsForPlacementField,
   resolveSenderEmailForEmailFieldPlacement,
   type PlacedSigningField,
   type SigningFieldType,
+  type Vs01TextFieldPurpose,
 } from "./signingFields";
+import {
+  buildPrepareMissingBySignerSummary,
+  evaluatePrepareFinishClick,
+  formatPrepareMissingFieldLabel,
+  logVs01PrepareFinishClick,
+} from "./vs01PreparePacketCompletion";
 
 const INTENT_OPTIONS = ["agree_and_sign"] as const;
 
@@ -113,10 +123,6 @@ export type StepPrepareSignatureProps = {
 
 const STEP_ID = "prepare-sign" as const;
 
-function prepareToolbarFieldLabel(t: SigningFieldType, prepareMode: boolean): string {
-  return prepareMode ? labelForPrepareFieldType(t) : labelForFieldType(t);
-}
-
 /** Corner label on placed fields (Step 3, first person). */
 function signingPlacementCornerLabel(t: SigningFieldType, field?: PlacedSigningField): string {
   let base: string;
@@ -131,7 +137,7 @@ function signingPlacementCornerLabel(t: SigningFieldType, field?: PlacedSigningF
       base = "Printed name";
       break;
     case "text":
-      base = "Text";
+      base = field?.textPurpose === "custom" ? "Custom text" : "Title";
       break;
     case "email":
       base = "Email";
@@ -202,6 +208,7 @@ export function StepPrepareSignature({
   agreementBridgePlacementCopy = false,
   prepareSignerRoles,
   prepareActiveSignerRoleId,
+  onPrepareActiveSignerRoleChange,
   onPrepareSignerMetadataChange,
   prepareRecipientPlacedFields = [],
   fields,
@@ -301,8 +308,11 @@ export function StepPrepareSignature({
 
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<SigningFieldType>("signature");
+  const [activeTextPurpose, setActiveTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
   /** When set, the next click on the document places this field type once, then clears. */
   const [armedTool, setArmedTool] = useState<SigningFieldType | null>(null);
+  const [armedTextPurpose, setArmedTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
+  const [prepareContinueBlockedVisible, setPrepareContinueBlockedVisible] = useState(false);
   const activeToolForEmailLogRef = useRef(activeTool);
   const armedToolForEmailLogRef = useRef(armedTool);
   activeToolForEmailLogRef.current = activeTool;
@@ -728,6 +738,7 @@ export function StepPrepareSignature({
           valueCtx,
           existingFields: fieldsRef.current,
           visualRoleId: prepareRoleCtx.authority.getActiveRoleId(),
+          textPurpose: armedTool === "text" ? armedTextPurpose : undefined,
         });
         if (!placed.ok) {
           logVs01PlacementFieldRejected({
@@ -762,8 +773,40 @@ export function StepPrepareSignature({
         dragHintTimerRef.current = null;
       }, 2200);
     },
-    [armedTool, busy, signerEmailForPlacement, agreementBridgePlacementCopy, prepareRoleCtx, displayRoleId]
+    [armedTool, armedTextPurpose, busy, signerEmailForPlacement, agreementBridgePlacementCopy, prepareRoleCtx, displayRoleId]
   );
+
+  const prepareMissingSummary = useMemo(() => {
+    if (!preparePacketGate || !prepareSignerRoles?.length) return [];
+    return buildPrepareMissingBySignerSummary(preparePacketGate, prepareSignerRoles);
+  }, [preparePacketGate, prepareSignerRoles]);
+
+  const handlePrepareContinue = useCallback(() => {
+    const result = evaluatePrepareFinishClick(preparePacketGate, prepareSignerRoles ?? []);
+    logVs01PrepareFinishClick({
+      canFinish: result.allowed,
+      incompleteSignerCount: result.allowed ? 0 : result.rows.length,
+    });
+    if (!result.allowed) {
+      setPrepareContinueBlockedVisible(true);
+      onError(result.message);
+      if (result.focusRoleId) {
+        prepareRoleCtx?.setActiveRole(result.focusRoleId, "auto_advance");
+        onPrepareActiveSignerRoleChange?.(result.focusRoleId);
+      }
+      return;
+    }
+    setPrepareContinueBlockedVisible(false);
+    onError(null);
+    onContinue?.();
+  }, [
+    preparePacketGate,
+    prepareSignerRoles,
+    prepareRoleCtx,
+    onPrepareActiveSignerRoleChange,
+    onError,
+    onContinue,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -1197,7 +1240,13 @@ export function StepPrepareSignature({
         <div className="vs01-sign-doc-col">
           {placementArmed && placementSurface && !previewLoading ? (
             <div className="vs01-sign-armed-banner" role="status">
-              Click once on the document to place your {prepareToolbarFieldLabel(armedTool, Boolean(agreementBridgePlacementCopy))}.
+              Click once on the document to place your{" "}
+              {agreementBridgePlacementCopy && armedTool
+                ? labelForPreparePlacedField(armedTool, armedTextPurpose)
+                : armedTool
+                  ? labelForFieldType(armedTool)
+                  : "field"}
+              .
             </div>
           ) : null}
 
@@ -1334,7 +1383,9 @@ export function StepPrepareSignature({
                                         field.assignedSignerRoleId,
                                       );
                                       const fieldDisplay = agreementBridgePlacementCopy
-                                        ? prepareTemplateDisplayForField(field, fieldRole, ownerPadForFields)
+                                        ? prepareTemplateDisplayForField(field, fieldRole, ownerPadForFields, {
+                                            preparePacket: true,
+                                          })
                                         : null;
                                       const textVal = typeof field.value === "string" ? field.value : "";
                                       const isActiveRoleField =
@@ -1376,6 +1427,7 @@ export function StepPrepareSignature({
                                                     prepareSignerRoles,
                                                     field.assignedSignerRoleId,
                                                   ),
+                                                  field.textPurpose,
                                                 )
                                               : signingPlacementCornerLabel(field.type, field)}
                                           </span>
@@ -1393,6 +1445,7 @@ export function StepPrepareSignature({
                                                 uploadPreviewUrl,
                                               }}
                                               ownerPad={ownerPadForFields}
+                                              preparePacketMode={Boolean(agreementBridgePlacementCopy)}
                                               isSelected={isSel}
                                               busy={busy}
                                               onValueChange={(value) => updateField(field.id, { value })}
@@ -1609,7 +1662,7 @@ export function StepPrepareSignature({
                         }
                       >
                         <span className="font-medium">{r.entityName}</span>
-                        {done ? " — complete" : ` — needs: ${miss.join(", ")}`}
+                        {done ? " — complete" : ` — needs: ${miss.map(formatPrepareMissingFieldLabel).join(", ")}`}
                       </li>
                     );
                   })}
@@ -1685,22 +1738,33 @@ export function StepPrepareSignature({
             ) : null}
             <p className="vs01-sign-toolbar-hint">Choose what to place</p>
             <div className="vs01-sign-toolbar-btns">
-              {SIGNING_FIELD_TOOLS.map(({ type }) => (
-                <button
-                  key={type}
-                  type="button"
-                  className={`vs01-sign-tool-btn${activeTool === type ? " vs01-sign-tool-btn--active" : ""}`}
-                  disabled={busy}
-                  onClick={() => {
-                    setActiveTool(type);
-                    setArmedTool(null);
-                    // eslint-disable-next-line no-console
-                    console.info("[vs01-placement-tool-selected]", { tool: type, placementMode: "off" });
-                  }}
-                >
-                  {prepareToolbarFieldLabel(type, Boolean(agreementBridgePlacementCopy))}
-                </button>
-              ))}
+              {(agreementBridgePlacementCopy ? PREPARE_PACKET_FIELD_TOOLS : SIGNING_FIELD_TOOLS).map((tool) => {
+                const t = tool.type;
+                const purpose =
+                  "textPurpose" in tool ? (tool.textPurpose as Vs01TextFieldPurpose | undefined) : undefined;
+                const key = agreementBridgePlacementCopy ? preparePacketToolKey(tool) : t;
+                const selected = agreementBridgePlacementCopy
+                  ? matchesPreparePacketTool(activeTool, activeTextPurpose, tool)
+                  : activeTool === t;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`vs01-sign-tool-btn${selected ? " vs01-sign-tool-btn--active" : ""}`}
+                    disabled={busy}
+                    onClick={() => {
+                      setActiveTool(t);
+                      setActiveTextPurpose(purpose);
+                      setArmedTool(null);
+                      setArmedTextPurpose(undefined);
+                      // eslint-disable-next-line no-console
+                      console.info("[vs01-placement-tool-selected]", { tool: t, textPurpose: purpose, placementMode: "off" });
+                    }}
+                  >
+                    {agreementBridgePlacementCopy ? tool.label : labelForFieldType(t)}
+                  </button>
+                );
+              })}
             </div>
             <div className="vs01-sign-placement-mode">
               <p className="vs01-sign-placement-mode-status">
@@ -1712,15 +1776,26 @@ export function StepPrepareSignature({
                 disabled={busy || !placementSurface || previewLoading}
                 onClick={() => {
                   setArmedTool(activeTool);
+                  setArmedTextPurpose(activeTextPurpose);
                   // eslint-disable-next-line no-console
-                  console.info("[vs01-placement-tool-selected]", { tool: activeTool, placementMode: "on" });
+                  console.info("[vs01-placement-tool-selected]", { tool: activeTool, textPurpose: activeTextPurpose, placementMode: "on" });
                 }}
               >
-                Place {prepareToolbarFieldLabel(activeTool, Boolean(agreementBridgePlacementCopy))} on document
+                Place{" "}
+                {agreementBridgePlacementCopy
+                  ? labelForPreparePlacedField(activeTool, activeTextPurpose)
+                  : labelForFieldType(activeTool)}{" "}
+                on document
               </button>
               {placementArmed ? (
                 <p className="vs01-sign-placement-mode-hint">
-                  Click once on the document to place your {prepareToolbarFieldLabel(armedTool, Boolean(agreementBridgePlacementCopy))}.
+                  Click once on the document to place your{" "}
+                  {agreementBridgePlacementCopy && armedTool
+                    ? labelForPreparePlacedField(armedTool, armedTextPurpose)
+                    : armedTool
+                      ? labelForFieldType(armedTool)
+                      : "field"}
+                  .
                 </p>
               ) : (
                 <p className="vs01-sign-placement-mode-hint vs01-sign-placement-mode-hint--muted">
@@ -1760,15 +1835,19 @@ export function StepPrepareSignature({
                       ) : null}
                       {isOwnerSel ? (
                         <p className="vs01-sign-selected-note">
-                          {selectedField.type === "text"
-                            ? "You complete this title field."
-                            : "You complete this field."}
+                          {selectedField.type === "text" && selectedField.textPurpose === "custom"
+                            ? "You complete this custom text field."
+                            : selectedField.type === "text"
+                              ? "You complete this title field."
+                              : "You complete this field."}
                         </p>
                       ) : (
                         <p className="vs01-sign-selected-note">
-                          {selectedField.type === "text"
-                            ? "Completed by signer from private link."
-                            : "Completed by signer from private link."}
+                          {selectedField.type === "text" && selectedField.textPurpose === "custom"
+                            ? "Completed by signer from private link (custom text)."
+                            : selectedField.type === "text"
+                              ? "Completed by signer from private link."
+                              : "Completed by signer from private link."}
                           {selectedField.type === "printed_name" && selRole && !isKnownPrepareSignerName(selRole)
                             ? " Signer name will be collected unless you enter it now."
                             : null}
@@ -1797,8 +1876,33 @@ export function StepPrepareSignature({
               disabled={busy || numPages <= 0}
               onChange={(e) => onAutoInitialsToggle(e.target.checked)}
             />
-            <span>Add my initials box to every page</span>
+            <span>
+              {agreementBridgePlacementCopy
+                ? "Add initials for this signer on every page"
+                : "Add my initials box to every page"}
+            </span>
           </label>
+          {agreementBridgePlacementCopy ? (
+            <p className="vs01-prepare-initials-hint">
+              Applies to the signer selected above. Repeat for each signer as you move through roles.
+            </p>
+          ) : null}
+
+          {agreementBridgePlacementCopy &&
+          preparePacketGate &&
+          !preparePacketGate.canFinish &&
+          (prepareContinueBlockedVisible || prepareMissingSummary.length > 0) ? (
+            <div className="vs01-prepare-finish-blocked-panel" role="alert">
+              <p className="vs01-prepare-finish-blocked-title">Required fields still missing</p>
+              <ul className="vs01-prepare-finish-blocked-list">
+                {prepareMissingSummary.map((row) => (
+                  <li key={row.roleId}>
+                    <strong>{row.entityName}</strong> still needs: {row.missingLabels.join(", ")}.
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {!agreementBridgePlacementCopy ? (
           <div className="vs01-sign-signature-panel">
@@ -1926,11 +2030,10 @@ export function StepPrepareSignature({
             <button
               type="button"
               className={`vs01-btn vs01-btn--primary${receiptId ? " vs01-btn--signed-done" : ""}`}
-              disabled={primaryDisabled}
+              disabled={agreementBridgePlacementCopy ? busy : primaryDisabled}
               onClick={() => {
                 if (agreementBridgePlacementCopy) {
-                  onError(null);
-                  onContinue?.();
+                  handlePrepareContinue();
                   return;
                 }
                 void handleSign();
