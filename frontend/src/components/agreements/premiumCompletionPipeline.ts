@@ -83,6 +83,7 @@ import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedB
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
+import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 
@@ -119,7 +120,8 @@ export type PremiumRenderSource =
   | "snapshot_fallback"
   | "stale_intake"
   | "rejected_paid_corpus"
-  | "premium_network_retryable";
+  | "premium_network_retryable"
+  | "premium_generation_retryable";
 
 export type PremiumCompletionResult = {
   premiumDraft: ParsedDraftShape;
@@ -161,6 +163,8 @@ export type PremiumCompletionResult = {
   serverGenerationDegraded?: { code: string; message: string } | null;
   /** Transient browser/network failure during premium-full-draft — free draft must stay visible; retry in modal. */
   premiumNetworkRetryable?: boolean;
+  /** Recoverable server generation failure (e.g. airlock_blocked with empty document) — retry in modal. */
+  premiumGenerationRetryable?: boolean;
 };
 
 /** @deprecated — positive stitched body is built in {@link buildPremiumPostCheckoutStitchedBody}. */
@@ -1326,6 +1330,24 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         if (tierAEnabled) {
           tierADiag.backendGenerationOutcome = "network_error";
         }
+      } else if (fullResp.failure_kind === "generation" && fullResp.retryable) {
+        logPremiumGenerationRetryableFailure({
+          stage: "premium_full_draft_generation_retryable",
+          error_code: fullResp.error_code,
+          intakeLen: soT.length,
+          agreementId: input.agreementId ?? null,
+        });
+        logPremiumCompletionDebug({
+          stage: "premium_full_draft_generation_retryable",
+          intakeLen: soT.length,
+          accepted: false,
+          rejectedReason: fullResp.error_code,
+          premiumRenderSource: "premium_generation_retryable",
+        });
+        premiumRenderSource = "premium_generation_retryable";
+        if (tierAEnabled) {
+          tierADiag.backendGenerationOutcome = "generation_retryable";
+        }
       } else {
         logPremiumCompletionDebug({
           stage: "premium_full_draft_client_null",
@@ -1799,7 +1821,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   if (
     !(winningPremiumBodyText || "").trim() &&
     premiumRenderSource !== "rejected_paid_corpus" &&
-    premiumRenderSource !== "premium_network_retryable"
+    premiumRenderSource !== "premium_network_retryable" &&
+    premiumRenderSource !== "premium_generation_retryable"
   ) {
     const stripped = stripClientPremiumArtifactBlocksFromDraft(outMerged);
     const rawSoT = rawForSoT || rawIntake;
@@ -1939,6 +1962,33 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       proIntentGateMessage: null,
       serverGenerationDegraded: null,
       premiumNetworkRetryable: true,
+      tierADiagnostic: tierADiag,
+    };
+  }
+  if (premiumRenderSource === "premium_generation_retryable") {
+    if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+    logPremiumCompletionDebug({
+      stage: "pipeline_return_premium_generation_retryable",
+      accepted: false,
+      rejectedReason: "generation_retryable",
+      premiumRenderSource: "premium_generation_retryable",
+    });
+    return {
+      premiumDraft: outMerged,
+      premiumParties,
+      recipientCandidates,
+      winningPremiumBodyText: "",
+      premiumRenderSource,
+      premiumReview,
+      premiumFinalizeAudit,
+      premiumReviewRoute,
+      staleIntakeOrGeneration: false,
+      agreementGenerationId: input.agreementGenerationId,
+      premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+      founderDetailsGateMessage: null,
+      proIntentGateMessage: null,
+      serverGenerationDegraded: null,
+      premiumGenerationRetryable: true,
       tierADiagnostic: tierADiag,
     };
   }

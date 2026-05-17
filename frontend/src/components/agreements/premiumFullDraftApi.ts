@@ -3,6 +3,11 @@ import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { apiUrl } from "../../lib/clawApi";
 import { waitForBrowserOnline } from "./premiumBackendHealth";
 import { logPremiumSessionConsistency, shortIdForPremiumLog } from "./premiumSessionDiagnostics";
+import {
+  classifyPremiumFullDraftGenerationRetryable,
+  logPremiumAirlockEmptyOutput,
+  logPremiumGenerationRetryableFailure,
+} from "./premiumGenerationRetryable";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { IntakePaymentField } from "./intakeCurrencyParse";
 import {
@@ -64,9 +69,13 @@ export type PremiumFullDraftResult = {
   schema_validation_reasons?: string[];
   server_generation_failure_code?: string;
   server_generation_failure_message?: string;
+  /** When false, HTTP 200 still means generation did not produce an acceptable Pro document. */
+  generation_ok?: boolean;
+  /** Client may retry premium-full-draft without losing checkout or free draft. */
+  retryable?: boolean;
 };
 
-export type PremiumFullDraftFailureKind = "network" | "http" | "exception";
+export type PremiumFullDraftFailureKind = "network" | "http" | "exception" | "generation";
 
 export type PremiumFullDraftNetworkErrorCode = "network_changed" | "network_error";
 
@@ -308,6 +317,13 @@ export async function postPremiumFullDraftOnce(args: {
         failCodeLog === "dev_context_leak" ||
         dLen === 0 ||
         fillerBad);
+    if (failCodeLog === "airlock_blocked" && dLen === 0) {
+      logPremiumAirlockEmptyOutput({
+        http_status: res.status,
+        generation_outcome: genOutLog,
+        document_text_len: dLen,
+      });
+    }
     if (hardIncomplete) {
       // eslint-disable-next-line no-console
       console.warn("[CLAW] premium response", {
@@ -373,7 +389,35 @@ export async function postPremiumFullDraftOnce(args: {
     }
     throw new Error((msg as string) || "premium_full_draft_failed");
   }
-  return parsed as PremiumFullDraftResult;
+  const wire = parsed as PremiumFullDraftResult;
+  const genRetry = classifyPremiumFullDraftGenerationRetryable(wire);
+  if (genRetry.retryable) {
+    logPremiumGenerationRetryableFailure({
+      error_code: genRetry.errorCode,
+      reason: genRetry.reason,
+      generation_outcome: wire.generation_outcome,
+      document_text_len: (wire.document_text || "").trim().length,
+      generation_ok: wire.generation_ok ?? false,
+      retryable: wire.retryable ?? true,
+    });
+  }
+  return wire;
+}
+
+function premiumFullDraftApiFailureFromRetryableGeneration(
+  parsed: PremiumFullDraftResult,
+  classification: ReturnType<typeof classifyPremiumFullDraftGenerationRetryable>,
+  attemptCount: number,
+): PremiumFullDraftApiFailure {
+  return {
+    ok: false,
+    failure_kind: "generation",
+    retryable: true,
+    error_code: classification.errorCode,
+    document_text: "",
+    attemptCount,
+    browserErrorMessage: (parsed.server_generation_failure_message || "").slice(0, 200) || undefined,
+  };
 }
 
 /**
@@ -455,6 +499,10 @@ export async function postPremiumFullDraftWithRetry(
         userGapAnswers: args.userGapAnswers,
         signal: args.signal,
       });
+      const genRetry = classifyPremiumFullDraftGenerationRetryable(result);
+      if (genRetry.retryable) {
+        return premiumFullDraftApiFailureFromRetryableGeneration(result, genRetry, totalAttempts);
+      }
       if (import.meta.env.MODE !== "test") {
         // eslint-disable-next-line no-console
         console.info("[premium-network-retry-success]", {

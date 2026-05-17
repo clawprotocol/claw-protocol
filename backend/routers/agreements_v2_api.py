@@ -614,6 +614,10 @@ class PremiumFullDraftResponse(BaseModel):
     server_generation_failure_code: str = ""
     """Operator-safe short text; no secrets."""
     server_generation_failure_message: str = ""
+    """False when degraded/empty output must not be treated as a successful Pro generation."""
+    generation_ok: bool = True
+    """True when the client may retry premium-full-draft without a new free draft."""
+    retryable: bool = False
 
 
 def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
@@ -754,6 +758,8 @@ def _premium_full_draft_degraded_response(
         ),
         server_generation_failure_code=failure_code,
         server_generation_failure_message=failure_message,
+        generation_ok=bool(doc.strip()),
+        retryable=suppress_body,
     )
 
 
@@ -4178,6 +4184,8 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             missing_material_info=out.missing_material_info,
             generation_outcome=generation_outcome,
             schema_validation_reasons=final_reasons,
+            generation_ok=bool(doc.strip()),
+            retryable=False,
         )
         return _premium_full_draft_finalize_http_response(
             ok_model, intake_len=len(intake_s), session_hint=session_hint

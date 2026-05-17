@@ -404,6 +404,7 @@ import {
 import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraftApi";
 import { preflightPremiumBackendHealth } from "./premiumBackendHealth";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
+import { logPremiumRetryPreservedContext } from "./premiumGenerationRetryable";
 import {
   buildPremiumDetailsGateCopy,
   isPaidProFinishedAgreement,
@@ -1474,11 +1475,35 @@ const PREMIUM_NETWORK_MODAL_RETRY_HINT =
   "We'll retry the Pro build without losing this draft.";
 const PREMIUM_NETWORK_MODAL_STILL_RECONNECTING =
   "Still reconnecting — try again in a moment.";
+const PREMIUM_GENERATION_MODAL_TITLE = "Pro build paused";
+const PREMIUM_GENERATION_MODAL_BODY =
+  "LawDog couldn't build the Pro version yet. Your draft is safe.";
+const PREMIUM_GENERATION_MODAL_RETRY_HINT =
+  "We'll retry with the same details — nothing was lost.";
 
-type PremiumPostCheckoutPhase = null | "awaiting_gaps" | "processing" | "network_retry";
+type PremiumPostCheckoutPhase =
+  | null
+  | "awaiting_gaps"
+  | "processing"
+  | "network_retry"
+  | "generation_retry";
 
 function isPremiumNetworkRetryablePipelineResult(result: PremiumCompletionResult): boolean {
   return Boolean(result.premiumNetworkRetryable) || result.premiumRenderSource === "premium_network_retryable";
+}
+
+function isPremiumGenerationRetryablePipelineResult(result: PremiumCompletionResult): boolean {
+  return (
+    Boolean(result.premiumGenerationRetryable) ||
+    result.premiumRenderSource === "premium_generation_retryable"
+  );
+}
+
+function isPremiumRetryablePipelineResult(result: PremiumCompletionResult): boolean {
+  return (
+    isPremiumNetworkRetryablePipelineResult(result) ||
+    isPremiumGenerationRetryablePipelineResult(result)
+  );
 }
 
 function devTracePremiumSendIntent(source: string, mode: PremiumSendIntent | null, senderFirst?: boolean) {
@@ -3694,6 +3719,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumPipelineUserMessage(null);
         return;
       }
+      if (isPremiumGenerationRetryablePipelineResult(result)) {
+        logPremiumRetryPreservedContext({
+          context: "entitled_rewrite_generation_retryable",
+          agreementId: agreementIdForPass,
+          agreementGenerationId: sessionGenForPass,
+          intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+        });
+        setProFullDraftCustomGateMessage(null);
+        setProFullDraftQualityRetry(false);
+        setHardError(null);
+        setPremiumPostCheckoutPhase("generation_retry");
+        setPremiumPipelineUserMessage(null);
+        lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+        setPremiumTruthPipelineSource(result.premiumRenderSource);
+        return;
+      }
       if (isPremiumNetworkRetryablePipelineResult(result)) {
         logPremiumSessionConsistency({
           context: "entitled_rewrite_network_retryable",
@@ -4293,6 +4334,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setProFullDraftQualityRetry(true);
           setPremiumPostCheckoutPhase(null);
           setPremiumPipelineUserMessage(null);
+          return;
+        }
+        if (isPremiumGenerationRetryablePipelineResult(result)) {
+          if (!premiumGapBaseIntakeRef.current.trim()) {
+            premiumGapBaseIntakeRef.current = mergedIntake;
+          }
+          logPremiumRetryPreservedContext({
+            context: "applySuccess_generation_retryable",
+            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+            agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+            intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+          });
+          setPremiumServerGenerationDegraded(null);
+          setHardError(null);
+          setProFullDraftCustomGateMessage(null);
+          setProFullDraftQualityRetry(false);
+          clearPremiumForkUserSendMode();
+          paidProPremiumSendIntentRef.current = null;
+          clearPremiumSendIntent();
+          setPremiumSendModeUserChoice(null);
+          setPremiumSendModeTouched(false);
+          if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
+          lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+          setPremiumTruthPipelineSource(result.premiumRenderSource);
+          premiumPipelineOutputBodyRef.current = "";
+          setPremiumRefineReview(null);
+          setPremiumFinalizeAudit(null);
+          setPremiumReviewRoute(null);
+          setPremiumPostCheckoutPhase("generation_retry");
+          setPremiumPipelineUserMessage(null);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[premium-modal-stage]", { to: "generation_retry", ts: new Date().toISOString() });
+          }
           return;
         }
         if (isPremiumNetworkRetryablePipelineResult(result)) {
@@ -5619,9 +5694,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumPostCheckoutPhase(null);
           }
           setPremiumPipelineUserMessage(null);
-          const networkRetryableResult =
-            result != null && isPremiumNetworkRetryablePipelineResult(result);
-          if (!networkRetryableResult && (result != null || !hasPaidPremiumCompletionSession())) {
+          const retryableResult = result != null && isPremiumRetryablePipelineResult(result);
+          if (!retryableResult && (result != null || !hasPaidPremiumCompletionSession())) {
             runPremiumModelPassRef.current = null;
           }
         } finally {
@@ -11227,7 +11301,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (
           premiumPostCheckoutPhase === "awaiting_gaps" ||
           premiumPostCheckoutPhase === "processing" ||
-          premiumPostCheckoutPhase === "network_retry"
+          premiumPostCheckoutPhase === "network_retry" ||
+          premiumPostCheckoutPhase === "generation_retry"
         ) {
           return {
             label:
@@ -11235,7 +11310,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 ? "Finish a few details…"
                 : premiumPostCheckoutPhase === "network_retry"
                   ? "Connection interrupted"
-                  : "Finalizing upgrade…",
+                  : premiumPostCheckoutPhase === "generation_retry"
+                    ? "Pro build paused"
+                    : "Finalizing upgrade…",
             action: "continue_to_recipients",
             disabled: true,
             reason: "draft_pre_commit",
@@ -13170,7 +13247,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     ? "claw-premium-finish-facts-title"
                     : premiumPostCheckoutPhase === "network_retry"
                       ? "claw-premium-network-retry-title"
-                      : "claw-premium-processing-title"
+                      : premiumPostCheckoutPhase === "generation_retry"
+                        ? "claw-premium-generation-retry-title"
+                        : "claw-premium-processing-title"
                 }
               >
                 <div className="w-full max-w-2xl rounded-2xl border border-emerald-500/25 bg-slate-950/95 p-8 shadow-2xl shadow-black/60 sm:p-10">
@@ -13252,21 +13331,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       }}
                       continueDisabled={false}
                     />
-                  ) : premiumPostCheckoutPhase === "network_retry" ? (
+                  ) : premiumPostCheckoutPhase === "network_retry" ||
+                    premiumPostCheckoutPhase === "generation_retry" ? (
                     <>
                       <h2
-                        id="claw-premium-network-retry-title"
+                        id={
+                          premiumPostCheckoutPhase === "generation_retry"
+                            ? "claw-premium-generation-retry-title"
+                            : "claw-premium-network-retry-title"
+                        }
                         className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
                       >
-                        {PREMIUM_NETWORK_MODAL_TITLE}
+                        {premiumPostCheckoutPhase === "generation_retry"
+                          ? PREMIUM_GENERATION_MODAL_TITLE
+                          : PREMIUM_NETWORK_MODAL_TITLE}
                       </h2>
                       <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
-                        {PREMIUM_NETWORK_MODAL_BODY}
+                        {premiumPostCheckoutPhase === "generation_retry"
+                          ? PREMIUM_GENERATION_MODAL_BODY
+                          : PREMIUM_NETWORK_MODAL_BODY}
                       </p>
                       <p className="mt-2 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
-                        {premiumNetworkStillReconnecting
-                          ? PREMIUM_NETWORK_MODAL_STILL_RECONNECTING
-                          : PREMIUM_NETWORK_MODAL_RETRY_HINT}
+                        {premiumPostCheckoutPhase === "generation_retry"
+                          ? PREMIUM_GENERATION_MODAL_RETRY_HINT
+                          : premiumNetworkStillReconnecting
+                            ? PREMIUM_NETWORK_MODAL_STILL_RECONNECTING
+                            : PREMIUM_NETWORK_MODAL_RETRY_HINT}
                       </p>
                       <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center sm:gap-3">
                         <button
@@ -13275,6 +13365,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           disabled={premiumNetworkRetryInFlight}
                           onClick={() => {
                             const m = runPremiumModelPassRef.current;
+                            const generationRetry = premiumPostCheckoutPhase === "generation_retry";
                             if (!m || premiumNetworkRetryInFlight) {
                               if (!m) {
                                 setHardError(
@@ -13300,37 +13391,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               const agreementIdForRetry =
                                 (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
                                 null;
-                              logPremiumSessionConsistency({
-                                context: "premium_network_retry_click",
-                                agreementId: agreementIdForRetry,
-                                agreementGenerationId: getOrInitSessionAgreementGenerationId(),
-                                intakeFingerprint: shortIntakeFingerprint(base),
-                              });
-                              const health = await preflightPremiumBackendHealth();
-                              if (!health.ok) {
-                                setPremiumNetworkStillReconnecting(true);
-                                setPremiumNetworkRetryInFlight(false);
-                                if (import.meta.env.MODE !== "test") {
-                                  // eslint-disable-next-line no-console
-                                  console.info("[premium-network-retry-preflight-failed]", {
-                                    latencyMs: health.latencyMs,
-                                    status: health.status ?? null,
-                                  });
+                              if (generationRetry) {
+                                logPremiumRetryPreservedContext({
+                                  context: "premium_generation_retry_click",
+                                  agreementId: agreementIdForRetry,
+                                  agreementGenerationId: getOrInitSessionAgreementGenerationId(),
+                                  intakeFingerprint: shortIntakeFingerprint(base),
+                                });
+                              } else {
+                                logPremiumSessionConsistency({
+                                  context: "premium_network_retry_click",
+                                  agreementId: agreementIdForRetry,
+                                  agreementGenerationId: getOrInitSessionAgreementGenerationId(),
+                                  intakeFingerprint: shortIntakeFingerprint(base),
+                                });
+                                const health = await preflightPremiumBackendHealth();
+                                if (!health.ok) {
+                                  setPremiumNetworkStillReconnecting(true);
+                                  setPremiumNetworkRetryInFlight(false);
+                                  if (import.meta.env.MODE !== "test") {
+                                    // eslint-disable-next-line no-console
+                                    console.info("[premium-network-retry-preflight-failed]", {
+                                      latencyMs: health.latencyMs,
+                                      status: health.status ?? null,
+                                    });
+                                  }
+                                  return;
                                 }
-                                return;
                               }
                               const notes = pendingUpgradePromptRef.current.trim();
                               const it = buildPremiumMergedIntakeWithUserNotes(base, notes);
                               const ga = (premiumLastGapAnswersRef.current || "").trim();
                               if (import.meta.env.MODE !== "test") {
                                 // eslint-disable-next-line no-console
-                                console.info("[premium-network-retry-user]", {
-                                  agreementIdShort: agreementIdForRetry
-                                    ? agreementIdForRetry.slice(0, 8)
-                                    : null,
-                                  intakeLen: base.length,
-                                  hasGapAnswers: Boolean(ga),
-                                });
+                                console.info(
+                                  generationRetry ? "[premium-generation-retry-user]" : "[premium-network-retry-user]",
+                                  {
+                                    agreementIdShort: agreementIdForRetry
+                                      ? agreementIdForRetry.slice(0, 8)
+                                      : null,
+                                    intakeLen: base.length,
+                                    hasGapAnswers: Boolean(ga),
+                                  },
+                                );
                               }
                               setPremiumPostCheckoutPhase("processing");
                               setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
@@ -13345,7 +13448,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               } catch (e) {
                                 if (import.meta.env.DEV) {
                                   // eslint-disable-next-line no-console
-                                  console.warn("[premium-network-retry-user] runModelPass_failed", e);
+                                  console.warn(
+                                    generationRetry
+                                      ? "[premium-generation-retry-user] runModelPass_failed"
+                                      : "[premium-network-retry-user] runModelPass_failed",
+                                    e,
+                                  );
                                 }
                               }
                             })();

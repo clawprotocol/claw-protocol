@@ -1148,6 +1148,8 @@ def test_premium_full_draft_degraded_airlock_returns_empty_document(monkeypatch,
     assert (body.get("document_text") or "").strip() == ""
     assert (body.get("server_full_document_text") or "").strip() == ""
     assert (body.get("server_repair_document_text") or "").strip() == ""
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
     for bad in ("Operative terms", "Commercial framework", "automated full pass", "Summary from your intake"):
         assert bad not in (body.get("document_text") or "")
     reasons = body.get("schema_validation_reasons") or []
