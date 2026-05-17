@@ -1,7 +1,7 @@
 import type { PlacedSigningField } from "./signingFields";
 import type { Vs01SignerRuntimeContext } from "./vs01FieldValueResolution";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
-import { resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
+import { isKnownPrepareSignerName, resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
 import {
   logVs01TemplateRenderValue,
   prepareTemplateDisplayForField,
@@ -45,8 +45,10 @@ export function prepareFieldDataAttributes(
   const kind = role?.kind ?? field.assignedSignerRoleKind ?? "owner";
   const party = role ? resolvePreparePartyEntityLabel(role) : (field.assignedSignerRoleLabel ?? "").trim();
   return {
+    "data-vs01-field-kind": field.type,
     "data-vs01-field-role-kind": kind,
     "data-vs01-field-party-name": party,
+    "data-vs01-field-signer-known": role && isKnownPrepareSignerName(role) ? "true" : "false",
     "data-vs01-field-awaits-signer-input": display.awaitsSignerInput ? "true" : "false",
   };
 }
@@ -80,6 +82,15 @@ export function PrepareSigningFieldBody({
 
   if (field.type === "signature") {
     if (isOwnerField) {
+      const ownerSigner = (role?.signerName ?? "").trim();
+      if (ownerSigner && display.assigneeLine) {
+        return (
+          <div className="vs01-sign-placement-signature-body vs01-sign-placement-signature-body--owner">
+            <span className="vs01-prepare-signature-heading">{display.assigneeLine}</span>
+            <span className="vs01-prepare-signature-placeholder">{ownerSigner}</span>
+          </div>
+        );
+      }
       return (
         <div className="vs01-sign-placement-signature-body">
           {ownerPreview.signatureMode === "type" && ownerPreview.typedName.trim() ? (

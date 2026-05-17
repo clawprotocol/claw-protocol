@@ -7,6 +7,7 @@ export const VS01_PREPARE_SIGNER_NAME_PLACEHOLDER = "Signer name";
 export const VS01_PREPARE_TITLE_PLACEHOLDER = "Title";
 export const VS01_PREPARE_INITIALS_PLACEHOLDER = "Initials";
 export const VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY = "Signer will sign here";
+export const VS01_PREPARE_SIGNATURE_COUNTERPARTY_SUBLABEL = "Private link signer · not signed yet";
 export const VS01_PREPARE_SIGNATURE_COLLECTED_AT_SIGNING = "Name collected when signer opens link";
 
 export type PreparePrintedNameDisplay = {
@@ -75,7 +76,7 @@ export function logVs01TitleSource(payload: Record<string, unknown>): void {
 export function resolvePrepareSignerDisplayName(
   role: Vs01PrepareSigningRole,
   mode: Vs01FieldValueMode,
-  ownerPad?: Vs01SignerRuntimeContext,
+  _ownerPad?: Vs01SignerRuntimeContext,
 ): { value: string; source: string; isPlaceholder: boolean } {
   if (role.kind === "owner") {
     const known = (role.signerName ?? "").trim();
@@ -89,16 +90,14 @@ export function resolvePrepareSignerDisplayName(
       });
       return { value: known, source: "role_signer_name", isPlaceholder: false };
     }
-    const fromPad = (ownerPad?.typedName ?? "").trim();
-    const source = fromPad ? "owner_pad" : "empty";
     logVs01SignerNameSource({
       mode,
       roleKind: role.kind,
       partyId: role.partyId,
-      source,
-      knownSignerName: Boolean(fromPad),
+      source: "empty",
+      knownSignerName: false,
     });
-    return { value: fromPad, source, isPlaceholder: !fromPad };
+    return { value: "", source: "empty", isPlaceholder: true };
   }
 
   const known = (role.signerName ?? "").trim();

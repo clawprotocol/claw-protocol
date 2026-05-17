@@ -1229,3 +1229,9 @@ export function labelForFieldType(t: SigningFieldType): string {
   const m = SIGNING_FIELD_TOOLS.find((x) => x.type === t);
   return m?.label ?? t;
 }
+
+/** Prepare-mode toolbar labels (`text` → Title for representative role fields). */
+export function labelForPrepareFieldType(t: SigningFieldType): string {
+  if (t === "text") return "Title";
+  return labelForFieldType(t);
+}

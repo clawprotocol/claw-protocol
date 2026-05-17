@@ -503,6 +503,14 @@ export function Vs01Wizard({
             ownerSignerTitle: cst,
             counterparties: cps,
           });
+          if (import.meta.env.MODE !== "test") {
+            // eslint-disable-next-line no-console
+            console.info("[vs01-role-signer-metadata-resolved]", {
+              roleCount: rolesForM.length,
+              withSignerName: rolesForM.filter((r) => Boolean((r.signerName ?? "").trim())).length,
+              withSignerTitle: rolesForM.filter((r) => Boolean((r.signerTitle ?? "").trim())).length,
+            });
+          }
           const ownerR = rolesForM[0]!;
           flushSync(() => {
             setVs01LinkedAgreementId(bridge.agreementId);

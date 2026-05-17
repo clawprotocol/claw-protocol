@@ -13,8 +13,8 @@ import {
   resolvePreparePrintedNameDisplay,
   resolvePrepareSignerTitleDisplay,
   VS01_PREPARE_INITIALS_PLACEHOLDER,
-  VS01_PREPARE_SIGNATURE_COLLECTED_AT_SIGNING,
   VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
+  VS01_PREPARE_SIGNATURE_COUNTERPARTY_SUBLABEL,
   VS01_PREPARE_SIGNER_NAME_PLACEHOLDER,
   VS01_PREPARE_TITLE_PLACEHOLDER,
 } from "./vs01PrepareSignerDisplay";
@@ -84,19 +84,22 @@ export function prepareTemplateDisplayForField(
     case "signature": {
       if (kind === "counterparty") {
         const party = resolvePreparePartyEntityLabel(role!) || entity || "Signer";
-        const knownSigner = Boolean((role?.signerName ?? "").trim());
+        const signer = (role?.signerName ?? "").trim();
+        const knownSigner = Boolean(signer);
         return {
-          body: VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
+          body: knownSigner ? `${signer} will sign here` : VS01_PREPARE_SIGNATURE_COUNTERPARTY_BODY,
           assigneeLine: `SIGNATURE — ${party}`,
-          sublabel: knownSigner ? undefined : VS01_PREPARE_SIGNATURE_COLLECTED_AT_SIGNING,
+          sublabel: VS01_PREPARE_SIGNATURE_COUNTERPARTY_SUBLABEL,
           isPlaceholder: true,
           awaitsSignerInput: true,
         };
       }
+      const ownerSigner = (role?.signerName ?? "").trim();
+      const ownerParty = resolvePreparePartyEntityLabel(role!) || entity;
       return {
-        body: resolved.trim() || "Your signature",
-        assigneeLine: entity,
-        isPlaceholder: !resolved.trim(),
+        body: ownerSigner || resolved.trim() || "Your signature",
+        assigneeLine: ownerParty ? `SIGNATURE — ${ownerParty}` : "Your signature",
+        isPlaceholder: !ownerSigner && !resolved.trim(),
       };
     }
     case "initials": {

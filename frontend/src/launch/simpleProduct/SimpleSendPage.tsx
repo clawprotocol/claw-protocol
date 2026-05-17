@@ -59,7 +59,9 @@ import {
   logAgreementVs01RecipientEmailMergeDiagnostics,
   logAgreementVs01SeedBlocked,
   mergeLiveDraftWithRecipientSetupForVs01Bridge,
+  logSignerMetadataBeforeVs01Bridge,
   recipientSetupPlausibleInputFlags,
+  resolveRecipientSetupForVs01Bridge,
   setPaidProAgreementBridgeSkipMarker,
   writeAgreementVs01BridgeSession,
 } from "./agreementToVs01SigningBridge";
@@ -417,7 +419,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
         const live = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
         const ho = readPremiumRecipientHandoff();
         const partyCap = Math.min((live?.parties ?? []).length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
-        const recipientSetup =
+        const explicitSetup =
           live != null && ho && partyCap > 0
             ? {
                 recipientPartyEmails: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.email || ""),
@@ -430,7 +432,9 @@ export function SimpleSendPage(props: { agreementId: string }) {
                   recipient2Email: (live.parties?.[1] as { email?: string } | undefined)?.email,
                 }
               : null;
+        const recipientSetup = resolveRecipientSetupForVs01Bridge(live, explicitSetup);
         const finalBridgeDraft = mergeLiveDraftWithRecipientSetupForVs01Bridge(live, recipientSetup);
+        logSignerMetadataBeforeVs01Bridge(finalBridgeDraft, recipientSetup);
         logAgreementVs01RecipientEmailMergeDiagnostics(
           finalBridgeDraft,
           recipientSetupPlausibleInputFlags(recipientSetup),

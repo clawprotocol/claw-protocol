@@ -1,0 +1,53 @@
+/** @vitest-environment jsdom */
+import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { Vs01PrepareSignerMetadataPanel } from "./vs01PrepareSignerMetadataPanel";
+import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
+import { labelForPrepareFieldType } from "./signingFields";
+
+describe("Vs01PrepareSignerMetadataPanel", () => {
+  it("shows compact summary when signer metadata is already known", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_panel",
+      creatorName: "Redwood Peak Ventures LLC",
+      creatorEmail: "o@x.com",
+      ownerSignerName: "Redwood Santa",
+      ownerSignerTitle: "Honcho",
+      counterparties: [],
+    });
+    render(
+      <Vs01PrepareSignerMetadataPanel
+        role={roles[0]!}
+        onPatch={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Representative:/)).toBeTruthy();
+    expect(screen.getByText("Redwood Santa")).toBeTruthy();
+    expect(screen.queryByText("Signer name not set")).toBeNull();
+    cleanup();
+  });
+
+  it("shows editor when signer name is missing", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_panel_missing",
+      creatorName: "Atlas Harbor Technologies Inc.",
+      creatorEmail: "a@x.com",
+      counterparties: [{ id: "cp", name: "Atlas Harbor Technologies Inc.", email: "a@x.com" }],
+    });
+    render(
+      <Vs01PrepareSignerMetadataPanel
+        role={roles[1]!}
+        onPatch={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Signer name not set")).toBeTruthy();
+    cleanup();
+  });
+});
+
+describe("labelForPrepareFieldType", () => {
+  it("maps text tool to Title in prepare mode", () => {
+    expect(labelForPrepareFieldType("text")).toBe("Title");
+    expect(labelForPrepareFieldType("signature")).toBe("Signature");
+  });
+});

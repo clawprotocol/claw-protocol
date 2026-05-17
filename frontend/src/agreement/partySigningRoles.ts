@@ -164,6 +164,8 @@ export function logVs01PartySigningRolesForBridgeSession(bridge: AgreementVs01Br
       name: bridge.creatorName || "Sender",
       role: "owner",
       email: bridge.creatorEmail,
+      signerName: bridge.creatorSignerName,
+      signerTitle: bridge.creatorSignerTitle,
     },
     ...(bridge.counterparties ?? []).map((c) => ({
       id: c.id,

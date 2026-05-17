@@ -16,13 +16,17 @@ import {
   logAgreementVs01BridgePreflight,
   logAgreementVs01RecipientEmailMergeDiagnostics,
   logAgreementVs01SeedBlocked,
+  countRecipientSetupSignerMetadata,
+  logVs01BridgeSignerMetadata,
   mergeLiveDraftWithRecipientSetupForVs01Bridge,
   mergePaidProRecipientSetupEmailsIntoDraft,
   mergePaidProRecipientSetupSignerMetadataIntoDraft,
   readPaidProAgreementBridgeSkipMarker,
   recipientSetupPlausibleInputFlags,
+  resolveRecipientSetupForVs01Bridge,
   setPaidProAgreementBridgeSkipMarker,
 } from "./agreementToVs01SigningBridge";
+import { writePremiumRecipientHandoffLinear } from "../../components/agreements/premiumPartyNamesHandoff";
 
 describe("buildAgreementVs01BridgeSession", () => {
   it("maps owner to creator and other parties to counterparties", () => {
@@ -295,6 +299,84 @@ describe("mergePaidProRecipientSetupEmailsIntoDraft + paid Pro sender-first brid
       draft: merged,
     });
     expect(b.creatorSignerName).toBeUndefined();
+  });
+
+  it("resolveRecipientSetupForVs01Bridge reads session handoff when draft lacks signer fields", () => {
+    const ssStore: Record<string, string> = {};
+    const mockSessionStorage = {
+      getItem: (k: string) => (k in ssStore ? ssStore[k] : null),
+      setItem: (k: string, v: string) => {
+        ssStore[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete ssStore[k];
+      },
+      clear: () => {
+        Object.keys(ssStore).forEach((k) => delete ssStore[k]);
+      },
+      key: () => null,
+      get length() {
+        return Object.keys(ssStore).length;
+      },
+    } as Storage;
+    vi.stubGlobal("sessionStorage", mockSessionStorage);
+    const entities = [
+      "Redwood Peak Ventures LLC",
+      "Atlas Harbor Technologies Inc.",
+      "Beta Corp",
+      "Gamma LLC",
+      "Delta Inc.",
+    ];
+    const signers = ["Redwood Santa", "Jim Atlas", "Signer Three", "Signer Four", "Signer Five"];
+    const titles = ["Honcho", "CEO", "CFO", "COO", "VP"];
+    writePremiumRecipientHandoffLinear(
+      entities.map((name, i) => ({
+        name,
+        email: `party${i}@example.com`,
+        role: i === 0 ? "owner" : "signer",
+        signerName: signers[i]!,
+        signerTitle: titles[i]!,
+      })),
+    );
+    const draft = {
+      title: "Five-party",
+      parties: entities.map((name, i) => ({
+        id: `p${i}`,
+        name,
+        role: i === 0 ? "owner" : "signer",
+        email: `party${i}@example.com`,
+      })),
+    } as AgreementDraft;
+    const resolved = resolveRecipientSetupForVs01Bridge(draft, null);
+    const counts = countRecipientSetupSignerMetadata(resolved);
+    expect(counts.slotsWithSignerName).toBe(5);
+    expect(counts.slotsWithSignerTitle).toBe(5);
+    const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(draft, null);
+    const bridge = buildAgreementVs01BridgeSession({
+      agreementId: "ag-five",
+      vs01DocumentId: "doc-five",
+      draft: merged,
+    });
+    expect(bridge.creatorSignerName).toBe("Redwood Santa");
+    expect(bridge.creatorSignerTitle).toBe("Honcho");
+    expect(bridge.counterparties[0]?.signerName).toBe("Jim Atlas");
+    expect(bridge.counterparties[0]?.signerTitle).toBe("CEO");
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+    logVs01BridgeSignerMetadata(bridge);
+    const row = spy.mock.calls.find((c) => c[0] === "[vs01-bridge-signer-metadata]")?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(row).toEqual(
+      expect.objectContaining({
+        hasCreatorSignerName: true,
+        hasCreatorSignerTitle: true,
+        counterpartiesWithSignerName: 4,
+        counterpartiesWithSignerTitle: 4,
+      }),
+    );
+    spy.mockRestore();
+    vi.unstubAllGlobals();
   });
 
   it("mergeLiveDraft applies recipientPartyEmails by party index for five parties", () => {

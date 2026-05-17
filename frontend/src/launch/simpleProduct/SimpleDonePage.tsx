@@ -513,6 +513,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
         handoff && partyCap > 0
           ? {
               recipientPartyEmails: linearPremiumRecipientSlots(handoff, partyCap).map((s) => s.email || ""),
+              recipientPartySignerNames: linearPremiumRecipientSlots(handoff, partyCap).map(
+                (s) => s.signerName || "",
+              ),
+              recipientPartySignerTitles: linearPremiumRecipientSlots(handoff, partyCap).map(
+                (s) => s.signerTitle || "",
+              ),
             }
           : null;
       const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({

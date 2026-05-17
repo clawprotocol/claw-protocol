@@ -2823,6 +2823,25 @@ button.vs01-upload-btn:disabled {
   color: var(--vs01-color-text-muted);
 }
 
+.vs01-prepare-signer-metadata-compact {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--vs01-color-border-subtle);
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 96%, var(--vs01-color-accent) 4%);
+}
+
+.vs01-prepare-signer-metadata-compact-line {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-prepare-signer-metadata-edit-btn {
+  font-size: 0.72rem;
+}
+
 .vs01-sign-placement-box--counterparty-signature {
   border-color: color-mix(in srgb, var(--vs01-color-accent) 42%, var(--vs01-color-border-subtle));
   background: color-mix(in srgb, var(--vs01-color-bg-card) 92%, var(--vs01-color-accent) 8%);

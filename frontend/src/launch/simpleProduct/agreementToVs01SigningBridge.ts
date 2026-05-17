@@ -3,6 +3,11 @@ import {
   explicitSignerNameForEntity,
   normalizeSignerMetadataForSave,
 } from "../../agreement/signerMetadataNormalize";
+import {
+  linearPremiumRecipientSlots,
+  MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
+  readPremiumRecipientHandoff,
+} from "../../components/agreements/premiumPartyNamesHandoff";
 import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
@@ -239,15 +244,146 @@ export function mergePaidProRecipientSetupSignerMetadataIntoDraft(
   return changed ? { ...draft, parties } : draft;
 }
 
+function pickSignerSlotValue(
+  index: number,
+  entityName: string,
+  explicitArr: readonly (string | null | undefined)[] | undefined,
+  handoffValue: string | undefined,
+  draftValue: string | undefined,
+  field: "signerName" | "signerTitle",
+): string {
+  const fromExplicit = field === "signerName"
+    ? explicitSignerNameForEntity(
+        Array.isArray(explicitArr) ? explicitArr[index] : undefined,
+        entityName,
+      )
+    : normalizeSignerMetadataForSave(Array.isArray(explicitArr) ? explicitArr[index] : undefined);
+  const fromHandoff =
+    field === "signerName"
+      ? explicitSignerNameForEntity(handoffValue, entityName)
+      : normalizeSignerMetadataForSave(handoffValue);
+  const fromDraft =
+    field === "signerName"
+      ? explicitSignerNameForEntity(draftValue, entityName)
+      : normalizeSignerMetadataForSave(draftValue);
+  return fromExplicit || fromHandoff || fromDraft || "";
+}
+
+/**
+ * Resolve recipient-setup signer/email arrays from explicit UI input, session handoff, and draft parties.
+ * Handoff is authoritative when the live draft was hydrated without representative fields (common after review links).
+ */
+export function resolveRecipientSetupForVs01Bridge(
+  draft: AgreementDraft | null,
+  explicit?: RecipientSetupEmailInput | null,
+): RecipientSetupEmailInput | null {
+  if (!draft) return explicit ?? null;
+  const parties = (draft.parties ?? []) as AgreementParty[];
+  const partyCount = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+  if (partyCount === 0) return explicit ?? null;
+
+  const handoff = readPremiumRecipientHandoff();
+  const handoffSlots = handoff ? linearPremiumRecipientSlots(handoff, partyCount) : [];
+
+  const recipientPartySignerNames: string[] = [];
+  const recipientPartySignerTitles: string[] = [];
+  const recipientPartyEmails: string[] = [];
+  for (let i = 0; i < partyCount; i++) {
+    const p = parties[i]!;
+    const entity = (p.name || "").trim();
+    const ho = handoffSlots[i];
+    recipientPartySignerNames.push(
+      pickSignerSlotValue(
+        i,
+        entity,
+        explicit?.recipientPartySignerNames,
+        ho?.signerName,
+        p.signerName,
+        "signerName",
+      ),
+    );
+    recipientPartySignerTitles.push(
+      pickSignerSlotValue(
+        i,
+        entity,
+        explicit?.recipientPartySignerTitles,
+        ho?.signerTitle,
+        p.signerTitle,
+        "signerTitle",
+      ),
+    );
+    const draftEm = stripRecipientEmailNoise(String(p.email ?? ""));
+    const hoEm = stripRecipientEmailNoise(String(ho?.email ?? ""));
+    const exArr = explicit?.recipientPartyEmails;
+    const fromEx = Array.isArray(exArr) ? normalizeRecipientSetupSlot(exArr[i]) : undefined;
+    const fromLegacy =
+      i === 0
+        ? normalizeRecipientSetupSlot(explicit?.recipient1Email)
+        : i === 1
+          ? normalizeRecipientSetupSlot(explicit?.recipient2Email)
+          : undefined;
+    recipientPartyEmails.push(fromEx || fromLegacy || (isPlausibleEmail(hoEm) ? hoEm : "") || draftEm || "");
+  }
+
+  const hasSigner =
+    recipientPartySignerNames.some(Boolean) || recipientPartySignerTitles.some(Boolean);
+  const hasEmail = recipientPartyEmails.some((e) => isPlausibleEmail(e));
+  if (!hasSigner && !hasEmail && !explicit) return null;
+
+  return {
+    recipient1Email: recipientPartyEmails[0] || explicit?.recipient1Email,
+    recipient2Email: recipientPartyEmails[1] || explicit?.recipient2Email,
+    recipientPartyEmails,
+    recipientPartySignerNames,
+    recipientPartySignerTitles,
+  };
+}
+
+export function countRecipientSetupSignerMetadata(
+  setup: RecipientSetupEmailInput | null | undefined,
+): { slotsWithSignerName: number; slotsWithSignerTitle: number; partyCount: number } {
+  const names = setup?.recipientPartySignerNames ?? [];
+  const titles = setup?.recipientPartySignerTitles ?? [];
+  const partyCount = Math.max(names.length, titles.length);
+  return {
+    partyCount,
+    slotsWithSignerName: names.filter((n) => Boolean((n || "").trim())).length,
+    slotsWithSignerTitle: titles.filter((t) => Boolean((t || "").trim())).length,
+  };
+}
+
+export function logSignerMetadataBeforeVs01Bridge(
+  draft: AgreementDraft | null,
+  recipientSetup: RecipientSetupEmailInput | null | undefined,
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const counts = countRecipientSetupSignerMetadata(recipientSetup);
+  const draftParties = (draft?.parties ?? []) as AgreementParty[];
+  const draftWithSignerName = draftParties.filter((p) =>
+    Boolean(explicitSignerNameForEntity(p.signerName, (p.name || "").trim())),
+  ).length;
+  const draftWithSignerTitle = draftParties.filter((p) => Boolean((p.signerTitle || "").trim())).length;
+  // eslint-disable-next-line no-console
+  console.info("[signer-metadata-before-vs01-bridge]", {
+    partyCount: counts.partyCount,
+    slotsWithSignerName: counts.slotsWithSignerName,
+    slotsWithSignerTitle: counts.slotsWithSignerTitle,
+    draftPartiesWithSignerName: draftWithSignerName,
+    draftPartiesWithSignerTitle: draftWithSignerTitle,
+    usedHandoff: Boolean(readPremiumRecipientHandoff()),
+  });
+}
+
 /** Last-mile merge for Paid Pro VS01 bridge: live draft + optional recipient-setup slots (by party index). */
 export function mergeLiveDraftWithRecipientSetupForVs01Bridge(
   liveDraft: AgreementDraft | null,
   recipientSetup?: RecipientSetupEmailInput | null,
 ): AgreementDraft | null {
   if (!liveDraft) return null;
-  if (!recipientSetup) return liveDraft;
-  const withEmails = mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, recipientSetup) ?? liveDraft;
-  const withSigner = mergePaidProRecipientSetupSignerMetadataIntoDraft(withEmails, recipientSetup) ?? withEmails;
+  const resolved = resolveRecipientSetupForVs01Bridge(liveDraft, recipientSetup);
+  if (!resolved) return liveDraft;
+  const withEmails = mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, resolved) ?? liveDraft;
+  const withSigner = mergePaidProRecipientSetupSignerMetadataIntoDraft(withEmails, resolved) ?? withEmails;
   return withSigner;
 }
 
@@ -531,8 +667,13 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
   if (!id) return false;
   const vs01Seed = await fetchAgreementVs01SigningSeed(id);
   if (!vs01Seed.ok) return false;
-  const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, options.recipientSetup ?? null);
-  logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(options.recipientSetup));
+  const resolvedSetup = resolveRecipientSetupForVs01Bridge(
+    options.draft,
+    options.recipientSetup ?? null,
+  );
+  const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, resolvedSetup);
+  logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
+  logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
   const bridge = buildAgreementVs01BridgeSession({
     agreementId: id,
     vs01DocumentId: vs01Seed.documentId,

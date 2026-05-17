@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   logSignerMetadataInputChange,
   logSignerMetadataNormalizedForSave,
@@ -22,7 +23,62 @@ export function Vs01PrepareSignerMetadataPanel({
   const known = isKnownPrepareSignerName(role);
   const signerName = signerMetadataInputRaw(role.signerName);
   const signerTitle = signerMetadataInputRaw(role.signerTitle);
+  const [editOpen, setEditOpen] = useState(false);
 
+  if (known && !editOpen) {
+    return (
+      <div className="vs01-prepare-signer-metadata-compact" role="group" aria-label="Signer details">
+        <p className="vs01-prepare-signer-metadata-compact-line">
+          Representative: <strong>{signerName}</strong>
+          {signerTitle ? (
+            <>
+              {" "}
+              · <span>{signerTitle}</span>
+            </>
+          ) : null}
+        </p>
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--auto vs01-prepare-signer-metadata-edit-btn"
+          disabled={busy}
+          onClick={() => setEditOpen(true)}
+        >
+          Edit signer details
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <SignerMetadataEditor
+      party={party}
+      signerName={signerName}
+      signerTitle={signerTitle}
+      busy={busy}
+      known={known}
+      onPatch={onPatch}
+      onDone={known ? () => setEditOpen(false) : undefined}
+    />
+  );
+}
+
+function SignerMetadataEditor({
+  party,
+  signerName,
+  signerTitle,
+  busy,
+  known,
+  onPatch,
+  onDone,
+}: {
+  party: string;
+  signerName: string;
+  signerTitle: string;
+  busy: boolean;
+  known: boolean;
+  onPatch: (patch: { signerName?: string; signerTitle?: string }) => void;
+  onDone?: () => void;
+}) {
   return (
     <div className="vs01-prepare-signer-metadata-panel" role="group" aria-label="Signer details">
       <p className="vs01-prepare-signer-metadata-title">
@@ -103,9 +159,19 @@ export function Vs01PrepareSignerMetadataPanel({
       </label>
       {!known ? (
         <p className="vs01-prepare-signer-metadata-hint">
-          Printed name fields show &ldquo;Signer name&rdquo; with party context until you enter a representative name
-          or the signer provides it from their link.
+          Printed name fields show &ldquo;Signer name&rdquo; with party context until you enter a representative
+          name or the signer provides it from their link.
         </p>
+      ) : null}
+      {onDone ? (
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--auto mt-2"
+          disabled={busy}
+          onClick={onDone}
+        >
+          Done editing
+        </button>
       ) : null}
     </div>
   );

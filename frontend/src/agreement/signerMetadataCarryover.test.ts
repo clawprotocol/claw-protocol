@@ -97,4 +97,39 @@ describe("signer metadata carryover Jane Doe", () => {
     );
     expect(seeded[0]!.value).toBe("Sam Rivera");
   });
+
+  it("Redwood Peak owner printed_name and title resolve from explicit signer metadata", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_redwood",
+      creatorName: "Redwood Peak Ventures LLC",
+      creatorEmail: "owner@example.com",
+      ownerSignerName: "Redwood Santa",
+      ownerSignerTitle: "Honcho",
+      counterparties: [
+        {
+          id: "atlas",
+          name: "Atlas Harbor Technologies Inc.",
+          email: "jim@atlas.example",
+          signerName: "Jim Atlas",
+          signerTitle: "CEO",
+        },
+      ],
+    });
+    const owner = roles[0]!;
+    const cp = roles[1]!;
+    expect(owner.partyName).toBe("Redwood Peak Ventures LLC");
+    expect(resolvePreparePrintedNameDisplay(owner, "prepare_display").primary).toBe("Redwood Santa");
+    expect(
+      resolveVs01FieldValueForRole({ fieldType: "text", role: owner, mode: "prepare_display" }),
+    ).toBe("Honcho");
+    expect(resolvePreparePrintedNameDisplay(cp, "prepare_display").primary).toBe("Jim Atlas");
+    expect(
+      resolveVs01FieldValueForRole({
+        fieldType: "printed_name",
+        role: owner,
+        mode: "prepare_stored",
+        ownerPad: { typedName: "Script From Pad", initials: "SP" },
+      }),
+    ).toBe("Redwood Santa");
+  });
 });

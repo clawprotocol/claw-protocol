@@ -5,6 +5,7 @@ import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { vs01DiagnosticsEnabled } from "./vs01SignerFieldAssignment";
 import {
   initialsFromSignerName,
+  resolvePreparePrintedNameDisplay,
   resolvePrepareSignerDisplayName,
   resolvePrepareSignerTitleDisplay,
 } from "./vs01PrepareSignerDisplay";
@@ -108,7 +109,9 @@ export function resolveVs01FieldValueForRole(args: {
       }
       case "printed_name": {
         if (stored) return stored;
-        return resolvePrepareSignerDisplayName(args.role, "prepare_stored", ownerPad).value;
+        const known = (args.role.signerName ?? "").trim();
+        if (known) return known;
+        return "";
       }
       case "text": {
         if (stored) return stored;
@@ -139,7 +142,8 @@ export function resolveVs01FieldValueForRole(args: {
       if (stored) {
         out = stored;
       } else {
-        out = resolvePrepareSignerDisplayName(args.role, "prepare_display", ownerPad).value;
+        const printed = resolvePreparePrintedNameDisplay(args.role, "prepare_display", ownerPad);
+        out = printed.primary;
       }
     } else if (args.fieldType === "text") {
       out = stored || resolvePrepareSignerTitleDisplay(args.role, "prepare_display").value;

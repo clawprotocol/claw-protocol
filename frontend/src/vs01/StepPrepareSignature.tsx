@@ -51,7 +51,7 @@ import {
   prepareTemplateCornerLabel,
   prepareTemplateDisplayForField,
 } from "./vs01PrepareTemplateField";
-import { resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
+import { isKnownPrepareSignerName, resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
 import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 import {
   SIGNING_FIELD_TOOLS,
@@ -60,6 +60,7 @@ import {
   defaultValueForType,
   fieldsToManifest,
   labelForFieldType,
+  labelForPrepareFieldType,
   resizeBoundsForPlacementField,
   resolveSenderEmailForEmailFieldPlacement,
   type PlacedSigningField,
@@ -111,6 +112,10 @@ export type StepPrepareSignatureProps = {
 };
 
 const STEP_ID = "prepare-sign" as const;
+
+function prepareToolbarFieldLabel(t: SigningFieldType, prepareMode: boolean): string {
+  return prepareMode ? labelForPrepareFieldType(t) : labelForFieldType(t);
+}
 
 /** Corner label on placed fields (Step 3, first person). */
 function signingPlacementCornerLabel(t: SigningFieldType, field?: PlacedSigningField): string {
@@ -1192,7 +1197,7 @@ export function StepPrepareSignature({
         <div className="vs01-sign-doc-col">
           {placementArmed && placementSurface && !previewLoading ? (
             <div className="vs01-sign-armed-banner" role="status">
-              Click once on the document to place your {labelForFieldType(armedTool)}.
+              Click once on the document to place your {prepareToolbarFieldLabel(armedTool, Boolean(agreementBridgePlacementCopy))}.
             </div>
           ) : null}
 
@@ -1693,7 +1698,7 @@ export function StepPrepareSignature({
                     console.info("[vs01-placement-tool-selected]", { tool: type, placementMode: "off" });
                   }}
                 >
-                  {labelForFieldType(type)}
+                  {prepareToolbarFieldLabel(type, Boolean(agreementBridgePlacementCopy))}
                 </button>
               ))}
             </div>
@@ -1711,11 +1716,11 @@ export function StepPrepareSignature({
                   console.info("[vs01-placement-tool-selected]", { tool: activeTool, placementMode: "on" });
                 }}
               >
-                Place {labelForFieldType(activeTool)} on document
+                Place {prepareToolbarFieldLabel(activeTool, Boolean(agreementBridgePlacementCopy))} on document
               </button>
               {placementArmed ? (
                 <p className="vs01-sign-placement-mode-hint">
-                  Click once on the document to place your {labelForFieldType(armedTool)}.
+                  Click once on the document to place your {prepareToolbarFieldLabel(armedTool, Boolean(agreementBridgePlacementCopy))}.
                 </p>
               ) : (
                 <p className="vs01-sign-placement-mode-hint vs01-sign-placement-mode-hint--muted">
@@ -1754,11 +1759,17 @@ export function StepPrepareSignature({
                         </p>
                       ) : null}
                       {isOwnerSel ? (
-                        <p className="vs01-sign-selected-note">You complete this field.</p>
+                        <p className="vs01-sign-selected-note">
+                          {selectedField.type === "text"
+                            ? "You complete this title field."
+                            : "You complete this field."}
+                        </p>
                       ) : (
                         <p className="vs01-sign-selected-note">
-                          Completed by signer from private link.
-                          {selectedField.type === "printed_name"
+                          {selectedField.type === "text"
+                            ? "Completed by signer from private link."
+                            : "Completed by signer from private link."}
+                          {selectedField.type === "printed_name" && selRole && !isKnownPrepareSignerName(selRole)
                             ? " Signer name will be collected unless you enter it now."
                             : null}
                         </p>
