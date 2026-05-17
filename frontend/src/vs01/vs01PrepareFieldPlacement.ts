@@ -8,10 +8,12 @@ import {
   clampFieldRectToPage,
   computePrepareRectFromClick,
   computeRecipientRectFromClick,
-  getVs01DefaultFieldGeometry,
+  findNonOverlappingPrepareRect,
   logVs01FieldOverlapAdjusted,
   newSigningFieldId,
   normalizePlacedFieldGeometryIfBelowMinimum,
+  prepareAutoInitialsLaneAnchor,
+  prepareAutoInitialsPlacementDims,
   type PlacedSigningField,
   type SigningFieldType,
   type SigningPlacementValueContext,
@@ -100,22 +102,36 @@ function createPreparePlacedFieldAtClick(
   existingOnPage: PlacedSigningField[],
   options?: { autoInitials?: boolean },
 ): PlacedSigningField {
-  const before = computePrepareRectFromClick(type, clickX, clickY, [], role.roleId);
-  const { x, y, width, height } = computePrepareRectFromClick(
-    type,
-    clickX,
-    clickY,
-    existingOnPage,
-    role.roleId,
-  );
-  if (before.y !== y || before.x !== x) {
+  const clicked = computePrepareRectFromClick(type, clickX, clickY, existingOnPage, role.roleId);
+  const resolved = findNonOverlappingPrepareRect({
+    desiredRect: clicked,
+    page,
+    roleId: role.roleId,
+    existingFields: existingOnPage,
+  });
+  const { x, y, width, height } = resolved;
+  if (resolved.adjusted) {
     logVs01FieldOverlapAdjusted({
       fieldType: type,
       roleIdShort: role.roleId.slice(0, 16),
       page,
-      fromY: before.y,
+      fromY: clicked.y,
       toY: y,
+      fromX: clicked.x,
+      toX: x,
     });
+    if (resolved.adjusted && vs01DiagnosticsEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-initials-overlap-resolved]", {
+        fieldType: type,
+        page,
+        roleIdShort: role.roleId.slice(0, 16),
+        fromX: clicked.x,
+        fromY: clicked.y,
+        toX: x,
+        toY: y,
+      });
+    }
   }
   const auto = options?.autoInitials === true;
   return {
@@ -141,8 +157,10 @@ export function buildPrepareAutoInitialsEveryPage(args: {
   existingFields: PlacedSigningField[];
   valueCtx: SigningPlacementValueContext;
 }): PlacedSigningField[] {
-  const { width, height } = getVs01DefaultFieldGeometry("initials");
+  const dims = prepareAutoInitialsPlacementDims();
+  const { width, height } = dims;
   const roleId = args.role.roleId;
+  const roleLane = args.role.partyIndex;
   const pagesWithRoleInitials = new Set(
     args.existingFields
       .filter(
@@ -153,8 +171,22 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       .map((f) => f.page),
   );
   const out: PlacedSigningField[] = [];
+  const placedSoFar: PlacedSigningField[] = [...args.existingFields];
   let added = 0;
   let skipped = 0;
+  const laneAnchor = prepareAutoInitialsLaneAnchor(roleLane, dims);
+  if (vs01DiagnosticsEnabled()) {
+    // eslint-disable-next-line no-console
+    console.info("[vs01-initials-lane-assigned]", {
+      roleIdShort: roleId.slice(0, 16),
+      partyIndex: args.role.partyIndex,
+      roleLane,
+      anchorX: laneAnchor.x,
+      anchorY: laneAnchor.y,
+      width,
+      height,
+    });
+  }
   for (let p = 0; p < args.pageCount; p++) {
     if (args.skippedPages.has(p)) {
       skipped += 1;
@@ -164,19 +196,32 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       skipped += 1;
       continue;
     }
-    const colOffset = Math.min(0.12, args.role.partyIndex * 0.012);
-    const { x, y } = clampFieldRectToPage(
-      1 - width - 0.02 - colOffset,
-      1 - height - 0.058,
-      width,
-      height,
-    );
+    const desired = clampFieldRectToPage(laneAnchor.x, laneAnchor.y, width, height);
+    const onPage = placedSoFar.filter((f) => f.page === p);
+    const resolved = findNonOverlappingPrepareRect({
+      desiredRect: desired,
+      page: p,
+      roleId,
+      existingFields: onPage,
+    });
+    if (resolved.adjusted && vs01DiagnosticsEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-initials-overlap-resolved]", {
+        roleIdShort: roleId.slice(0, 16),
+        page: p,
+        partyIndex: args.role.partyIndex,
+        fromX: desired.x,
+        fromY: desired.y,
+        toX: resolved.x,
+        toY: resolved.y,
+      });
+    }
     const raw: PlacedSigningField = {
       id: prepareAutoInitialsFieldId(roleId, p),
       type: "initials",
       page: p,
-      x,
-      y,
+      x: resolved.x,
+      y: resolved.y,
       width,
       height,
       value: defaultPrepareTemplateStoredValue("initials", args.role, args.valueCtx),
@@ -190,6 +235,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
     };
     const { field } = normalizePlacedFieldGeometryIfBelowMinimum(withSource);
     out.push(field);
+    placedSoFar.push(field);
     added += 1;
   }
   if (vs01DiagnosticsEnabled()) {
@@ -200,6 +246,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       pageCount: args.pageCount,
       addedCount: added,
       skippedCount: skipped,
+      roleLane,
     });
   }
   return out;

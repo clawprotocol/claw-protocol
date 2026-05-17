@@ -67,6 +67,27 @@ describe("resolveVs01FieldValueForRole", () => {
     ).toBe("");
   });
 
+  it("counterparty printed_name stored empty when only entity name on party row", () => {
+    const cps: Vs01Counterparty[] = [
+      { id: "ent", name: "Atlas LLC", email: "a@x.com" },
+    ];
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: AG,
+      creatorName: "Owner",
+      creatorEmail: "o@x.com",
+      counterparties: cps,
+    });
+    const cp = roles[1]!;
+    expect(cp.partyName).toBe("Atlas LLC");
+    expect(
+      resolveVs01FieldValueForRole({
+        fieldType: "printed_name",
+        role: cp,
+        mode: "prepare_stored",
+      }),
+    ).toBe("");
+  });
+
   it("five-party handoff keeps distinct emails on roles", () => {
     const cps: Vs01Counterparty[] = [
       { id: "p1", name: "Alpha", email: "1@x.com" },

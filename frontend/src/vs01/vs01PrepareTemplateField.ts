@@ -7,6 +7,14 @@ import {
 } from "./vs01FieldValueResolution";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { vs01DiagnosticsEnabled, type PreparePlacementValueContext } from "./vs01SignerFieldAssignment";
+import {
+  resolvePrepareInitialsDisplayLabel,
+  resolvePrepareSignerDisplayName,
+  resolvePrepareSignerTitleDisplay,
+  VS01_PREPARE_INITIALS_PLACEHOLDER,
+  VS01_PREPARE_SIGNER_NAME_PLACEHOLDER,
+  VS01_PREPARE_TITLE_PLACEHOLDER,
+} from "./vs01PrepareSignerDisplay";
 
 /** Stored field value at prepare placement time. */
 export function defaultPrepareTemplateStoredValue(
@@ -63,7 +71,7 @@ export function prepareTemplateDisplayForField(
   role: Vs01PrepareSigningRole | null,
   ownerPad?: Vs01SignerRuntimeContext,
 ): PrepareTemplateDisplay {
-  const entity = (role?.entityName ?? field.assignedSignerRoleLabel ?? "").trim() || "Signer";
+  const entity = (role?.roleLabel ?? role?.partyName ?? role?.entityName ?? field.assignedSignerRoleLabel ?? "").trim() || "Signer";
   const kind = role?.kind ?? field.assignedSignerRoleKind ?? "owner";
   const resolved = resolvePrepareFieldDisplayValue(field, role, ownerPad);
 
@@ -82,24 +90,49 @@ export function prepareTemplateDisplayForField(
         isPlaceholder: !resolved.trim(),
       };
     }
-    case "initials":
+    case "initials": {
+      const initialsLabel = role
+        ? resolvePrepareInitialsDisplayLabel(role, ownerPad)
+        : {
+            label: resolved.trim().slice(0, 8) || VS01_PREPARE_INITIALS_PLACEHOLDER,
+            isPlaceholder: !resolved.trim(),
+            source: "field_only",
+          };
       return {
-        body: resolved.trim().slice(0, 8) || (kind === "owner" ? "Your initials" : "Initials"),
+        body: initialsLabel.label,
         assigneeLine: entity,
-        isPlaceholder: !resolved.trim(),
+        isPlaceholder: initialsLabel.isPlaceholder,
       };
-    case "printed_name":
+    }
+    case "printed_name": {
+      const nameDisp = role
+        ? resolvePrepareSignerDisplayName(role, "prepare_display", ownerPad)
+        : null;
+      const body =
+        resolved.trim() ||
+        nameDisp?.value ||
+        (kind === "counterparty" ? VS01_PREPARE_SIGNER_NAME_PLACEHOLDER : "Printed name");
       return {
-        body: resolved.trim() || "Printed name",
+        body,
         assigneeLine: entity,
-        isPlaceholder: !resolved.trim(),
+        isPlaceholder: nameDisp?.isPlaceholder ?? !resolved.trim(),
       };
-    case "text":
+    }
+    case "text": {
+      const titleDisp =
+        role && kind === "counterparty"
+          ? resolvePrepareSignerTitleDisplay(role, "prepare_display")
+          : null;
+      const body =
+        resolved.trim() ||
+        titleDisp?.value ||
+        (kind === "counterparty" ? VS01_PREPARE_TITLE_PLACEHOLDER : "Add text");
       return {
-        body: resolved.trim() || (kind === "counterparty" ? "Title" : "Add text"),
+        body,
         assigneeLine: entity,
-        isPlaceholder: !resolved.trim(),
+        isPlaceholder: titleDisp?.isPlaceholder ?? !resolved.trim(),
       };
+    }
     case "email": {
       const emailHint = role ? resolveRolePlausibleEmail(role) : "";
       return {

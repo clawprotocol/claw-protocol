@@ -410,6 +410,65 @@ export function autoInitialsPlacementDims(): { width: number; height: number } {
   return { width: 0.048, height: 0.024 };
 }
 
+/** Prepare packet auto-initials every page — compact canonical footprint. */
+export function prepareAutoInitialsPlacementDims(): { width: number; height: number } {
+  return { width: 0.075, height: 0.035 };
+}
+
+export type PrepareRectObstacle = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  id?: string;
+  page?: number;
+  assignedSignerRoleId?: string;
+};
+
+/**
+ * Resolve collisions on one page: nudge up/left from desired anchor, clamped in-bounds.
+ * Compares against all obstacles on the page (any role).
+ */
+export function findNonOverlappingPrepareRect(args: {
+  desiredRect: { x: number; y: number; width: number; height: number };
+  page: number;
+  roleId?: string;
+  existingFields: ReadonlyArray<PrepareRectObstacle>;
+  excludeFieldId?: string;
+}): { x: number; y: number; width: number; height: number; adjusted: boolean } {
+  const { width, height } = args.desiredRect;
+  const obstacles = args.existingFields
+    .filter((f) => (f.page == null || f.page === args.page) && f.id !== args.excludeFieldId)
+    .map((f) => ({ x: f.x, y: f.y, width: f.width, height: f.height }));
+  const start = clampFieldRectToPage(args.desiredRect.x, args.desiredRect.y, width, height);
+  const cleared = nudgeAutoInitialsRectClearOfNormRects(start, obstacles);
+  const adjusted =
+    Math.abs(cleared.x - start.x) > 1e-6 || Math.abs(cleared.y - start.y) > 1e-6;
+  return { ...cleared, adjusted };
+}
+
+/** Deterministic bottom-right lane anchor for prepare auto-initials (role-scoped). */
+export function prepareAutoInitialsLaneAnchor(partyIndex: number, dims: { width: number; height: number }): {
+  x: number;
+  y: number;
+} {
+  const baseX = 0.82;
+  const baseY = 0.91;
+  const laneStepY = 0.045;
+  const minY = 0.04;
+  const maxLanesPerColumn = Math.max(1, Math.floor((baseY - minY) / laneStepY) + 1);
+  const wrapCol = Math.floor(Math.max(0, partyIndex) / maxLanesPerColumn);
+  const laneInCol = partyIndex % maxLanesPerColumn;
+  let y = baseY - laneInCol * laneStepY;
+  let x = baseX - wrapCol * (dims.width + 0.012);
+  if (y + dims.height > 1 - 0.02) {
+    y = 1 - dims.height - 0.02;
+  }
+  x = Math.max(0.055, Math.min(x, 1 - dims.width - 0.02));
+  y = Math.max(minY, Math.min(y, 1 - dims.height - 0.02));
+  return { x, y };
+}
+
 /**
  * Gray auto-initials only: reserved bottom safe band (matches VS01 signing PDF seed bottom inset).
  * Order: bottom-right anchor, then move left along the same bottom band (small vertical wiggle).

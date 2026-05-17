@@ -23,7 +23,13 @@ export type Vs01PrepareSigningRole = {
   roleId: string;
   partyIndex: number;
   partyId: string;
+  /** Legal / org party name on the agreement (entity). */
   entityName: string;
+  /** Same as entityName — explicit party label for prepare diagnostics. */
+  partyName: string;
+  /** UI label for the signer slot (defaults to party name). */
+  roleLabel: string;
+  /** Human representative name when known from intake; not the entity name. */
   signerName?: string;
   signerTitle?: string;
   signerEmail?: string;
@@ -54,6 +60,8 @@ export function buildVs01PrepareSigningRoles(args: {
       partyIndex: 0,
       partyId: ownerPartyId,
       entityName: ownerName,
+      partyName: ownerName,
+      roleLabel: "Owner",
       signerName: undefined,
       signerTitle: undefined,
       signerEmail: (args.creatorEmail || "").trim() || undefined,
@@ -71,11 +79,14 @@ export function buildVs01PrepareSigningRoles(args: {
     const rowEmail = [c.signerEmail, c.reviewEmail, c.email]
       .map((x) => (x ?? "").trim())
       .find((x) => isPlausibleEmail(x));
+    const partyName = c.name.trim();
     out.push({
       roleId,
       partyIndex: idx,
       partyId: c.id,
-      entityName: c.name.trim(),
+      entityName: partyName,
+      partyName,
+      roleLabel: partyName,
       signerName: c.signerName?.trim() || undefined,
       signerTitle: c.signerTitle?.trim() || undefined,
       signerEmail: rowEmail || undefined,

@@ -3,6 +3,11 @@ import type { SigningFieldType, SigningPlacementValueContext } from "./signingFi
 import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { vs01DiagnosticsEnabled } from "./vs01SignerFieldAssignment";
+import {
+  initialsFromSignerName,
+  resolvePrepareSignerDisplayName,
+  resolvePrepareSignerTitleDisplay,
+} from "./vs01PrepareSignerDisplay";
 
 export type Vs01FieldValueMode = "prepare_stored" | "prepare_display" | "recipient_runtime";
 
@@ -32,13 +37,7 @@ export function resolveRolePlausibleEmail(role: Vs01PrepareSigningRole): string 
 }
 
 function initialsFromName(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 4)
-    .toUpperCase();
+  return initialsFromSignerName(name);
 }
 
 export function logVs01RoleValueResolved(payload: Record<string, unknown>): void {
@@ -97,11 +96,13 @@ export function resolveVs01FieldValueForRole(args: {
       }
       case "printed_name": {
         if (stored) return stored;
-        if (isOwner) return (ownerPad.typedName ?? "").trim();
-        return (args.role.signerName ?? "").trim();
+        return resolvePrepareSignerDisplayName(args.role, "prepare_stored", ownerPad).value;
       }
-      case "text":
-        return stored;
+      case "text": {
+        if (stored) return stored;
+        if (isOwner) return stored;
+        return resolvePrepareSignerTitleDisplay(args.role, "prepare_stored").value;
+      }
       case "email": {
         if (stored) return stored;
         if (isOwner) {
@@ -123,7 +124,17 @@ export function resolveVs01FieldValueForRole(args: {
   if (args.mode === "prepare_stored") {
     out = resolveStored();
   } else if (args.mode === "prepare_display") {
-    out = stored || resolveStored();
+    if (args.fieldType === "printed_name") {
+      if (stored) {
+        out = stored;
+      } else {
+        out = resolvePrepareSignerDisplayName(args.role, "prepare_display", ownerPad).value;
+      }
+    } else if (args.fieldType === "text" && !isOwner) {
+      out = stored || resolvePrepareSignerTitleDisplay(args.role, "prepare_display").value;
+    } else {
+      out = stored || resolveStored();
+    }
   } else {
     switch (args.fieldType) {
       case "signature":
@@ -134,10 +145,13 @@ export function resolveVs01FieldValueForRole(args: {
         out =
           stored ||
           (runtime.typedName ?? "").trim() ||
-          (args.role.signerName ?? "").trim();
+          resolvePrepareSignerDisplayName(args.role, "recipient_runtime", ownerPad).value;
         break;
       case "text":
-        out = stored;
+        out =
+          stored ||
+          (runtime.typedName ?? "").trim() ||
+          resolvePrepareSignerTitleDisplay(args.role, "recipient_runtime").value;
         break;
       case "email":
         out = stored || (runtime.signerEmail ?? "").trim() || roleEmail;

@@ -7,6 +7,7 @@ import {
   prepareTemplateCornerLabel,
   resolvePrepareFieldDisplayValue,
 } from "./vs01PrepareTemplateField";
+import { VS01_PREPARE_SIGNER_NAME_PLACEHOLDER, VS01_PREPARE_TITLE_PLACEHOLDER } from "./vs01PrepareSignerDisplay";
 
 function formatIsoDateDisplay(iso: string): string {
   const t = iso.trim();
@@ -110,11 +111,13 @@ export function PrepareSigningFieldBody({
   if (field.type === "printed_name" || field.type === "text" || field.type === "email") {
     const placeholder =
       field.type === "printed_name"
-        ? "Printed name"
+        ? role?.kind === "counterparty"
+          ? VS01_PREPARE_SIGNER_NAME_PLACEHOLDER
+          : "Printed name"
         : field.type === "email"
           ? "Email"
           : role?.kind === "counterparty"
-            ? "Title"
+            ? VS01_PREPARE_TITLE_PLACEHOLDER
             : "Add text";
     if (isSelected && !busy) {
       return (
