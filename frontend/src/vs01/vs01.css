@@ -4795,4 +4795,59 @@ button.vs01-upload-btn:disabled {
   margin-top: 0.5rem;
 }
 
+/* Recipient signing — all signers visible; locked vs active fields */
+.vs01-recipient-signing-field--mine-active {
+  outline: 2px solid rgba(16, 185, 129, 0.75);
+  outline-offset: 1px;
+}
+
+.vs01-recipient-signing-field--mine-readonly {
+  opacity: 0.95;
+  background: rgba(241, 245, 249, 0.92);
+}
+
+.vs01-recipient-signing-field--other-waiting {
+  opacity: 0.72;
+  background: rgba(248, 250, 252, 0.88);
+  border-style: dashed;
+}
+
+.vs01-recipient-signing-field--other-signed {
+  opacity: 0.8;
+  background: rgba(236, 253, 245, 0.85);
+}
+
+.vs01-recipient-signing-state-pill {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-left: auto;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+.vs01-recipient-signing-field--other-signed .vs01-recipient-signing-state-pill {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.vs01-recipient-signing-readonly-val {
+  display: block;
+  width: 100%;
+  font-size: inherit;
+  line-height: 1.25;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.workspace-agreement-status-badge {
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
 /* Agreement landing sections use shared `DocumentListSectionGroup` / Tailwind (see `DocumentWorkspaceListUi.tsx`). */

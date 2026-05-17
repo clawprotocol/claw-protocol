@@ -22,6 +22,8 @@ import {
   formatRelativeUpdated,
   type DocListFunnelSection,
 } from "../documents/DocumentWorkspaceListUi";
+import { dedupeWorkspaceIndexAgreements } from "../launch/workspaceIndexDedupe";
+import { workspaceAgreementStatusBadge } from "../launch/workspaceAgreementCard";
 import {
   fetchWorkspaceIndex,
   patchWorkspaceArchive,
@@ -38,7 +40,7 @@ function partiesSubline(row: WorkspaceIndexAgreement): string {
   const n = row.party_count;
   const partyPart = !n ? "No parties yet" : `${n} ${n === 1 ? "party" : "parties"}`;
   const updated = formatRelativeUpdated(row.updated_at);
-  return `${partyPart} · Updated ${updated}`;
+  return `${workspaceAgreementStatusBadge(row)} · ${partyPart} · Updated ${updated}`;
 }
 
 function parseSearchParams(search: string): URLSearchParams {
@@ -147,7 +149,7 @@ export function MyAgreementsLanding(props: {
     setLoading(true);
     setLoadError(null);
     const [idx, flds] = await Promise.all([fetchWorkspaceIndex(), fetchProofFolders()]);
-    setRows(idx.agreements);
+    setRows(dedupeWorkspaceIndexAgreements(idx.agreements));
     setLoadError(idx.error);
     if (flds.error) setFolderLoadError(flds.error);
     else {

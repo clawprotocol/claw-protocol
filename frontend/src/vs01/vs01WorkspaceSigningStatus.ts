@@ -44,14 +44,14 @@ export function workspaceSigningStatusLabel(row: WorkspaceIndexAgreement): strin
   if (isAgreementFullySignedLocal(row.id)) return "Fully signed";
   if (row.has_server_signing_lock) return "Signing in progress";
   if (isAgreementPacketPrepared(row.id)) return "Signing in progress";
-  if (row.all_reviewers_approved) return "All reviewers approved — ready to prepare signing";
+  if (row.all_reviewers_approved) return "Ready to prepare signing";
   const req = row.review_approvals_required ?? 0;
   const done = row.review_approvals_completed ?? 0;
   if (row.reviewer_approved && req > 1) {
     return `${done} of ${req} reviewers approved`;
   }
-  if (row.reviewer_approved) return "Reviewer approved — ready to prepare signing";
-  if (row.review_sent_at) return "Sent";
-  if (row.version_ledger_count > 0) return "Ready to send";
+  if (row.reviewer_approved) return "Ready to prepare signing";
+  if (row.review_sent_at) return "Waiting for review";
+  if (row.version_ledger_count > 0) return "Ready to prepare signing";
   return "Draft";
 }

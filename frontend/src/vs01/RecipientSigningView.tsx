@@ -30,6 +30,12 @@ import {
   hideSenderTemplateFieldForRecipientSigner,
   recipientFieldBelongsToLockedSigner,
 } from "./vs01SignerFieldAssignment";
+import {
+  hydrateRecipientSigningFields,
+  isRecipientSigningEditableType,
+  recipientSigningFieldIsComplete,
+  resolveRecipientSigningAutoValue,
+} from "./recipientSigningFieldUtils";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -126,23 +132,19 @@ function SenderReferenceFieldContent({
   return null;
 }
 
-function fieldIsComplete(f: Vs01RecipientPlacedField): boolean {
-  const v = typeof f.value === "string" ? f.value.trim() : "";
-  switch (f.type) {
-    case "signature":
-    case "initials":
-      return v.length > 0;
-    case "printed_name":
-      return v.length > 0;
-    case "text":
-      return v.length > 0;
-    case "email":
-      return v.length > 0;
-    case "date":
-      return v.length > 0;
-    default:
-      return false;
+type RecipientFieldExecutionState = "mine-editable" | "mine-readonly" | "other-waiting" | "other-signed";
+
+function recipientFieldExecutionState(
+  field: Vs01RecipientPlacedField,
+  lockedCp: string,
+  lockedSignerRoleId: string | null,
+  cpById: Map<string, Vs01Counterparty>,
+): RecipientFieldExecutionState {
+  const isMine = recipientFieldBelongsToLockedSigner(field, lockedCp, lockedSignerRoleId);
+  if (!isMine) {
+    return recipientSigningFieldIsComplete(field, cpById) ? "other-signed" : "other-waiting";
   }
+  return isRecipientSigningEditableType(field.type) ? "mine-editable" : "mine-readonly";
 }
 
 /**
@@ -173,14 +175,22 @@ export function RecipientSigningView({
   const signer = cpById.get(lockedCp);
   const signerName = signer?.name.trim() || "Signer";
   const signerEmail = signer?.email.trim() || "";
-  const explicitSignerName = (signer?.signerName ?? "").trim();
+  const documentFields = recipientFields;
+
   const myFields = useMemo(
     () =>
-      recipientFields.filter((f) =>
+      documentFields.filter((f) =>
         recipientFieldBelongsToLockedSigner(f, lockedCp, lockedSignerRoleId ?? null),
       ),
-    [recipientFields, lockedCp, lockedSignerRoleId],
+    [documentFields, lockedCp, lockedSignerRoleId],
   );
+
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current || documentFields.length === 0) return;
+    hydratedRef.current = true;
+    onRecipientFieldsChange((prev) => hydrateRecipientSigningFields(prev, cpById));
+  }, [documentFields.length, cpById, onRecipientFieldsChange]);
 
   useEffect(() => {
     const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
@@ -273,7 +283,11 @@ export function RecipientSigningView({
     (id: string, patch: Partial<Vs01RecipientPlacedField>) => {
       onRecipientFieldsChange((prev) => {
         const target = prev.find((f) => f.id === id);
-        if (!target || !recipientFieldBelongsToLockedSigner(target, lockedCp, lockedSignerRoleId ?? null)) {
+        if (
+          !target ||
+          !recipientFieldBelongsToLockedSigner(target, lockedCp, lockedSignerRoleId ?? null) ||
+          !isRecipientSigningEditableType(target.type)
+        ) {
           const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
           const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
           if (diag || dev) {
@@ -341,7 +355,9 @@ export function RecipientSigningView({
   }, [numPages]);
 
   const allComplete =
-    !manifestDecodeError && myFields.length > 0 && myFields.every(fieldIsComplete);
+    !manifestDecodeError &&
+    myFields.length > 0 &&
+    myFields.every((f) => recipientSigningFieldIsComplete(f, cpById));
   const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
 
   const genuinelyNoFields = !manifestDecodeError && myFields.length === 0 && !manifestParamPresent;
@@ -366,7 +382,7 @@ export function RecipientSigningView({
       return;
     }
     if (!allComplete) {
-      const remaining = myFields.filter((f) => !fieldIsComplete(f)).length;
+      const remaining = myFields.filter((f) => !recipientSigningFieldIsComplete(f, cpById)).length;
       onError(`Complete ${remaining === 1 ? "the remaining field" : `all ${remaining} remaining fields`} before finishing.`);
       return;
     }
@@ -384,7 +400,7 @@ export function RecipientSigningView({
           Review and sign
         </h2>
         <p className="vs01-recipient-signing-subtitle">
-          Complete your assigned fields below, then choose Finish signing.
+          Complete your signature and initials. Other signers&apos; fields are shown for context and stay locked until they sign.
         </p>
         <p className="vs01-recipient-signing-signer">
           <span className="vs01-recipient-signing-name">{signerName}</span>
@@ -483,7 +499,7 @@ export function RecipientSigningView({
                     >
                       {pdfDocReady && numPages > 0
                         ? Array.from({ length: numPages }, (_, p) => {
-                            const fieldsHere = myFields.filter((f) => f.page === p);
+                            const fieldsHere = documentFields.filter((f) => f.page === p);
                             const senderFieldsHere = senderPlacedFields.filter(
                               (f) =>
                                 f.page === p &&
@@ -552,39 +568,72 @@ export function RecipientSigningView({
                                         {fieldsHere.map((field) => {
                                           const xFit = Math.min(field.x, 1 - field.width);
                                           const yFit = Math.min(field.y, 1 - field.height);
-                                          const textVal = typeof field.value === "string" ? field.value : "";
-                                          const forName = counterpartyName(cpById, field.counterpartyId);
+                                          const execState = recipientFieldExecutionState(
+                                            field,
+                                            lockedCp,
+                                            lockedSignerRoleId ?? null,
+                                            cpById,
+                                          );
+                                          const isMine = execState.startsWith("mine");
+                                          const editable =
+                                            isMine && isRecipientSigningEditableType(field.type);
+                                          const displayVal = editable
+                                            ? typeof field.value === "string"
+                                              ? field.value
+                                              : ""
+                                            : resolveRecipientSigningAutoValue(field, cpById);
+                                          const forName =
+                                            field.assignedSignerRoleLabel?.trim() ||
+                                            counterpartyName(cpById, field.counterpartyId);
+                                          const stateClass =
+                                            execState === "mine-editable"
+                                              ? " vs01-recipient-signing-field--mine-active"
+                                              : execState === "mine-readonly"
+                                                ? " vs01-recipient-signing-field--mine-readonly"
+                                                : execState === "other-signed"
+                                                  ? " vs01-recipient-signing-field--other-signed"
+                                                  : " vs01-recipient-signing-field--other-waiting";
                                           return (
                                             <div
                                               key={field.id}
                                               data-field-id={field.id}
-                                              className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type} vs01-recipient-signing-field${
-                                                field.type === "signature" || field.type === "initials"
-                                                  ? " vs01-recipient-pending-slot"
-                                                  : ""
+                                              className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type} vs01-recipient-signing-field${stateClass}${
+                                                editable ? " vs01-recipient-pending-slot" : ""
                                               }`}
                                               style={{
                                                 left: `${xFit * 100}%`,
                                                 top: `${yFit * 100}%`,
                                                 width: `${field.width * 100}%`,
                                                 height: `${field.height * 100}%`,
-                                                zIndex: 3,
-                                                cursor: "default",
+                                                zIndex: isMine ? 4 : 2,
+                                                cursor: editable ? "text" : "default",
+                                                pointerEvents: editable ? "auto" : "none",
                                               }}
+                                              aria-disabled={!editable}
                                             >
                                               <span className="vs01-sign-placement-label">
                                                 {labelForRecipientFieldType(field.type)}
                                               </span>
-                                              {field.type === "signature" || field.type === "printed_name" ? null : (
-                                                <span className="vs01-recipient-assign-for">{forName}</span>
-                                              )}
-                                              {field.type === "signature" ? (
+                                              {!isMine ? (
+                                                <span className="vs01-recipient-signing-state-pill">
+                                                  {execState === "other-signed" ? "Signed" : "Waiting"}
+                                                </span>
+                                              ) : null}
+                                              {field.type === "signature" || field.type === "printed_name"
+                                                ? null
+                                                : (
+                                                  <span className="vs01-recipient-assign-for">{forName}</span>
+                                                )}
+                                              {field.type === "signature" && editable ? (
                                                 <div className="vs01-recipient-signing-signature-stack">
-                                                  <RecipientSignatureFieldBody textVal={textVal} assigneeLabel={forName} />
+                                                  <RecipientSignatureFieldBody
+                                                    textVal={displayVal}
+                                                    assigneeLabel={forName}
+                                                  />
                                                   <input
                                                     type="text"
                                                     className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline vs01-recipient-signing-signature-input"
-                                                    value={textVal}
+                                                    value={displayVal}
                                                     placeholder="Type your name or signature"
                                                     autoComplete="off"
                                                     aria-label="Signature"
@@ -593,11 +642,16 @@ export function RecipientSigningView({
                                                   />
                                                 </div>
                                               ) : null}
-                                              {field.type === "initials" ? (
+                                              {field.type === "signature" && !editable ? (
+                                                <span className="vs01-recipient-signing-readonly-val">
+                                                  {displayVal.trim() || "—"}
+                                                </span>
+                                              ) : null}
+                                              {field.type === "initials" && editable ? (
                                                 <input
                                                   type="text"
                                                   className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-                                                  value={textVal}
+                                                  value={displayVal}
                                                   placeholder="Your initials"
                                                   maxLength={8}
                                                   autoComplete="off"
@@ -606,55 +660,30 @@ export function RecipientSigningView({
                                                   onPointerDown={(ev) => ev.stopPropagation()}
                                                 />
                                               ) : null}
+                                              {field.type === "initials" && !editable ? (
+                                                <span className="vs01-recipient-signing-readonly-val">
+                                                  {displayVal.trim() || "—"}
+                                                </span>
+                                              ) : null}
                                               {field.type === "printed_name" ? (
-                                                explicitSignerName ? (
-                                                  <RecipientPrintedNameFieldBody displayName={explicitSignerName} />
-                                                ) : (
-                                                  <input
-                                                    type="text"
-                                                    className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-                                                    value={textVal}
-                                                    placeholder="Authorized Signer Name"
-                                                    autoComplete="name"
-                                                    aria-label="Authorized signer printed name"
-                                                    onChange={(ev) => updateField(field.id, { value: ev.target.value })}
-                                                    onPointerDown={(ev) => ev.stopPropagation()}
-                                                  />
-                                                )
+                                                <RecipientPrintedNameFieldBody
+                                                  displayName={displayVal.trim() || forName}
+                                                />
                                               ) : null}
                                               {field.type === "text" ? (
-                                                  <input
-                                                    type="text"
-                                                    className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-                                                    value={textVal}
-                                                    placeholder="Title"
-                                                    autoComplete="organization-title"
-                                                    aria-label="Title"
-                                                    onChange={(ev) => updateField(field.id, { value: ev.target.value })}
-                                                    onPointerDown={(ev) => ev.stopPropagation()}
-                                                  />
+                                                <span className="vs01-recipient-signing-readonly-val">
+                                                  {displayVal.trim() || "—"}
+                                                </span>
                                               ) : null}
                                               {field.type === "email" ? (
-                                                <input
-                                                  type="email"
-                                                  className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-                                                  value={textVal}
-                                                  placeholder="Email"
-                                                  autoComplete="email"
-                                                  aria-label="Email field"
-                                                  onChange={(ev) => updateField(field.id, { value: ev.target.value })}
-                                                  onPointerDown={(ev) => ev.stopPropagation()}
-                                                />
+                                                <span className="vs01-recipient-signing-readonly-val">
+                                                  {displayVal.trim() || "—"}
+                                                </span>
                                               ) : null}
                                               {field.type === "date" ? (
-                                                <input
-                                                  type="date"
-                                                  className="vs01-sign-field-inline-input vs01-sign-placement-text vs01-sign-placement-text--inline"
-                                                  value={textVal}
-                                                  aria-label="Date"
-                                                  onChange={(ev) => updateField(field.id, { value: ev.target.value })}
-                                                  onPointerDown={(ev) => ev.stopPropagation()}
-                                                />
+                                                <span className="vs01-recipient-signing-readonly-val">
+                                                  {formatIsoDateDisplay(displayVal)}
+                                                </span>
                                               ) : null}
                                             </div>
                                           );
@@ -716,7 +745,8 @@ export function RecipientSigningView({
         </button>
         {myFields.length > 0 && !allComplete ? (
           <p className="vs01-recipient-signing-progress">
-            {myFields.filter(fieldIsComplete).length} of {myFields.length} fields complete
+            {myFields.filter((f) => recipientSigningFieldIsComplete(f, cpById)).length} of{" "}
+            {myFields.length} fields complete
           </p>
         ) : null}
       </div>

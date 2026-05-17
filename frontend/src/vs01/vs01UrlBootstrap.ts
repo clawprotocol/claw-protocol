@@ -1,11 +1,13 @@
 import type { Vs01Counterparty, Vs01Step, Vs01RecipientPlacedField } from "./types";
-import { VS01_RECIPIENT_SIGN_QUERY, loadRecipientManifest } from "./StepReceipt";
+import { VS01_PACKET_MANIFEST_SCOPE, VS01_RECIPIENT_SIGN_QUERY, loadRecipientManifest } from "./StepReceipt";
 import {
+  counterpartiesFromRecipientManifestFields,
   decodeRecipientManifestParam,
   ensureRecipientFieldDefaults,
-  rebindRecipientFieldsToCounterparty,
+  normalizeRecipientManifestCounterparties,
   VS01_RECIPIENT_MANIFEST_QUERY,
 } from "./recipientManifestUrl";
+import { hydrateRecipientSigningFields } from "./recipientSigningFieldUtils";
 
 function newCpId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -78,17 +80,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   const recipientLockedSignerRoleIdRaw = (params.get("signer_role_id") ?? "").trim();
   const recipientLockedSignerRoleId = recipientLockedSignerRoleIdRaw || null;
 
-  const counterparties: Vs01Counterparty[] = [];
-  for (let i = 0; i < recipientIndex; i++) {
-    counterparties.push({ id: newCpId(), name: "", email: "", phone: "" });
-  }
   const lockedId = counterpartyIdFromUrl || newCpId();
-  counterparties.push({
-    id: lockedId,
-    name: recipientName || "Recipient",
-    email: recipientEmail,
-    phone: "",
-  });
 
   const manifestRaw = params.get(VS01_RECIPIENT_MANIFEST_QUERY);
   const manifestStored = params.get("vs01_rmanifest_stored") === "1";
@@ -98,16 +90,25 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   let recipientManifestDecodeError: string | null = null;
   let hydrationSource: "url_manifest" | "stored_manifest" | "none" = "none";
 
-  const defaultsSignerOpts = { signerName: counterparties[recipientIndex]?.signerName };
-
   if (manifestRaw) {
     const decoded = decodeRecipientManifestParam(manifestRaw);
     if (decoded.ok) {
-      recipientHydratedFields = ensureRecipientFieldDefaults(
-        rebindRecipientFieldsToCounterparty(decoded.fields, lockedId),
+      const normalized = normalizeRecipientManifestCounterparties(decoded.fields, lockedId);
+      const cps = counterpartiesFromRecipientManifestFields(
+        normalized,
+        lockedId,
         recipientName || "Recipient",
-        recipientEmail || undefined,
-        defaultsSignerOpts,
+        recipientEmail,
+      );
+      const cpMap = new Map(cps.map((c) => [c.id, c]));
+      recipientHydratedFields = hydrateRecipientSigningFields(
+        ensureRecipientFieldDefaults(
+          normalized,
+          recipientName || "Recipient",
+          recipientEmail || undefined,
+          { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+        ),
+        cpMap,
       );
       hydrationSource = "url_manifest";
     } else {
@@ -115,17 +116,51 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     }
   } else {
     const lookupId = counterpartyIdFromUrl || lockedId;
-    const stored = loadRecipientManifest(documentId, lookupId);
+    const packetStored = loadRecipientManifest(documentId, VS01_PACKET_MANIFEST_SCOPE);
+    const stored = packetStored ?? loadRecipientManifest(documentId, lookupId);
     if (stored && stored.length > 0) {
-      recipientHydratedFields = ensureRecipientFieldDefaults(
-        rebindRecipientFieldsToCounterparty(stored, lockedId),
+      const normalized = normalizeRecipientManifestCounterparties(stored, lockedId);
+      const cps = counterpartiesFromRecipientManifestFields(
+        normalized,
+        lockedId,
         recipientName || "Recipient",
-        recipientEmail || undefined,
-        defaultsSignerOpts,
+        recipientEmail,
+      );
+      const cpMap = new Map(cps.map((c) => [c.id, c]));
+      recipientHydratedFields = hydrateRecipientSigningFields(
+        ensureRecipientFieldDefaults(
+          normalized,
+          recipientName || "Recipient",
+          recipientEmail || undefined,
+          { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+        ),
+        cpMap,
       );
       hydrationSource = "stored_manifest";
     }
   }
+
+  const counterparties: Vs01Counterparty[] =
+    recipientHydratedFields.length > 0
+      ? counterpartiesFromRecipientManifestFields(
+          recipientHydratedFields,
+          lockedId,
+          recipientName || "Recipient",
+          recipientEmail,
+        )
+      : (() => {
+          const legacy: Vs01Counterparty[] = [];
+          for (let i = 0; i < recipientIndex; i++) {
+            legacy.push({ id: newCpId(), name: "", email: "", phone: "" });
+          }
+          legacy.push({
+            id: lockedId,
+            name: recipientName || "Recipient",
+            email: recipientEmail,
+            phone: "",
+          });
+          return legacy;
+        })();
 
   const diagEnabled =
     typeof window !== "undefined" &&

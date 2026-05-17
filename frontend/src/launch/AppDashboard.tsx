@@ -4,7 +4,11 @@ import { useLaunchNav } from "./LaunchNavContext";
 import { getOrgId } from "./orgContext";
 import { fetchSubscription } from "./billingApi";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
-import { workspaceSigningStatusLabel } from "../vs01/vs01WorkspaceSigningStatus";
+import {
+  workspaceAgreementPrimaryAction,
+  workspaceAgreementStatusBadge,
+} from "./workspaceAgreementCard";
+import { dedupeWorkspaceIndexAgreements } from "./workspaceIndexDedupe";
 import {
   fetchAgreementUsageSummary,
   fetchWorkspaceIndex,
@@ -71,7 +75,7 @@ function formatRelativeUpdated(iso: string): string {
 
 /** Status line for recent-agreement rows (workspace index). */
 export function workspaceAgreementStatusLabel(r: WorkspaceIndexAgreement): string {
-  return workspaceSigningStatusLabel(r);
+  return workspaceAgreementStatusBadge(r);
 }
 
 function displayAgreementTitle(title: string): string {
@@ -125,7 +129,7 @@ export function AppDashboard() {
     setIndexLoading(true);
     setIndexError(null);
     const { agreements, error } = await fetchWorkspaceIndex();
-    setRows(agreements);
+    setRows(dedupeWorkspaceIndexAgreements(agreements));
     setIndexError(error);
     setIndexLoading(false);
   }, []);
@@ -580,17 +584,32 @@ export function AppDashboard() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-slate-100">{displayAgreementTitle(r.title)}</p>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {workspaceAgreementStatusLabel(r)} · {formatRelativeUpdated(r.updated_at)}
+                  <span className="workspace-agreement-status-badge">
+                    {workspaceAgreementStatusBadge(r)}
+                  </span>
+                  {" · "}
+                  {formatRelativeUpdated(r.updated_at)}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-                <button
-                  type="button"
-                  className="vs01-btn vs01-btn--secondary vs01-btn--compact !mt-0 min-w-[4.5rem]"
-                  onClick={() => withClearEntry(() => navigate(`/app/send/${encodeURIComponent(r.id)}`))}
-                >
-                  Open
-                </button>
+                {(() => {
+                  const action = workspaceAgreementPrimaryAction(r);
+                  return (
+                    <button
+                      type="button"
+                      className={`vs01-btn vs01-btn--compact !mt-0 min-w-[4.5rem] ${
+                        action.kind === "track_signing"
+                          ? "vs01-btn--primary"
+                          : "vs01-btn--secondary"
+                      }`}
+                      onClick={() =>
+                        withClearEntry(() => navigate(`/app/send/${encodeURIComponent(r.id)}`))
+                      }
+                    >
+                      {action.label}
+                    </button>
+                  );
+                })()}
                 {!hideWorkspaceFat ? (
                   <button
                     type="button"

@@ -37,6 +37,12 @@ describe("workspaceSigningStatusLabel", () => {
     ).toBe("Signing in progress");
   });
 
+  it("uses Waiting for review when review links sent", () => {
+    expect(
+      workspaceSigningStatusLabel(row({ review_sent_at: "2026-01-01T00:00:00Z" })),
+    ).toBe("Waiting for review");
+  });
+
   it("uses local packet prepared flag", () => {
     markAgreementPacketPrepared("ag_ws");
     expect(workspaceSigningStatusLabel(row({ id: "ag_ws" }))).toBe("Signing in progress");

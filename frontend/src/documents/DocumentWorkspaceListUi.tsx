@@ -311,9 +311,9 @@ export function docListPrimaryCtaForRowStatus(status: DocListRowStatus): string 
     case "in_review":
       return "Review";
     case "pending_signature":
-      return "View status";
+      return "Track signing";
     case "completed":
-      return "View";
+      return "Open";
     case "archived":
       return "View";
     default:

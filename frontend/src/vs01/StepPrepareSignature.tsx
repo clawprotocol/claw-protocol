@@ -34,8 +34,9 @@ import {
   type Vs01PrepareSigningRole,
 } from "./vs01SignerFieldAssignment";
 import {
-  buildPrepareAutoInitialsEveryPage,
+  buildPrepareAutoInitialsForAllRoles,
   createPrepareStampedSenderField,
+  prepareAutoInitialsSkipKey,
 } from "./vs01PrepareFieldPlacement";
 import {
   PrepareSigningFieldBody,
@@ -111,6 +112,8 @@ export type StepPrepareSignatureProps = {
   senderMessage: string;
   /** Paid Pro agreement → VS01 bridge: placement-first framing (not “sign your document” yet). */
   agreementBridgePlacementCopy?: boolean;
+  /** Agreement id for prepare-packet lifecycle audit rows. */
+  prepareAgreementId?: string | null;
   /** Paid Pro prepare flow: roles for signer-bound placement (sidebar). */
   prepareSignerRoles?: Vs01PrepareSigningRole[];
   prepareActiveSignerRoleId?: string;
@@ -217,6 +220,7 @@ export function StepPrepareSignature({
   creatorEmail,
   senderMessage,
   agreementBridgePlacementCopy = false,
+  prepareAgreementId = null,
   prepareSignerRoles,
   prepareActiveSignerRoleId,
   onPrepareActiveSignerRoleChange,
@@ -343,7 +347,7 @@ export function StepPrepareSignature({
   armedToolForEmailLogRef.current = armedTool;
 
   const [autoInitialsEveryPage, setAutoInitialsEveryPage] = useState(false);
-  const [skippedAutoPages, setSkippedAutoPages] = useState<Set<number>>(() => new Set());
+  const [skippedAutoInitialsSlots, setSkippedAutoInitialsSlots] = useState<Set<string>>(() => new Set());
 
   const [signatureMode, setSignatureMode] = useState<SignatureMode>("type");
   const [typedName, setTypedName] = useState(() => nameFromSignerRef(defaultSignerRef));
@@ -471,7 +475,7 @@ export function StepPrepareSignature({
     setPdfDocReady(false);
     setPreviewError(null);
     setAutoInitialsEveryPage(false);
-    setSkippedAutoPages(new Set());
+    setSkippedAutoInitialsSlots(new Set());
     setArmedTool(null);
   }, [documentId]);
 
@@ -536,12 +540,13 @@ export function StepPrepareSignature({
   }, []);
 
   useEffect(() => {
-    setSkippedAutoPages((prev) => {
-      const next = new Set<number>();
-      for (const p of prev) {
-        if (p < numPages) next.add(p);
+    setSkippedAutoInitialsSlots((prev) => {
+      const next = new Set<string>();
+      for (const key of prev) {
+        const page = parseInt(key.split(":").pop() ?? "", 10);
+        if (Number.isFinite(page) && page < numPages) next.add(key);
       }
-      return next;
+      return next.size === prev.size ? prev : next;
     });
   }, [numPages]);
 
@@ -641,26 +646,34 @@ export function StepPrepareSignature({
   const removeField = useCallback((id: string) => {
     const target = fieldsRef.current.find((f) => f.id === id);
     if (target?.autoInitials) {
-      setSkippedAutoPages((s) => new Set(s).add(target.page));
+      const roleId = (target.assignedSignerRoleId ?? displayRoleId ?? "").trim();
+      if (roleId) {
+        setSkippedAutoInitialsSlots((s) =>
+          new Set(s).add(prepareAutoInitialsSkipKey(roleId, target.page)),
+        );
+      }
     }
     if (agreementBridgePlacementCopy && target) {
       logVs01LifecycleEvent({
         event: "vs01_prepare_field_removed",
+        agreementId: prepareAgreementId ?? undefined,
+        documentId: documentId ?? undefined,
+        signerRoleId: target.assignedSignerRoleId ?? displayRoleId ?? undefined,
         fieldType: target.type,
         partyIndex: target.assignedPartyIndex ?? null,
       });
     }
     setFields((prev) => prev.filter((f) => f.id !== id));
     setSelectedFieldId((cur) => (cur === id ? null : cur));
-  }, [agreementBridgePlacementCopy]);
+  }, [agreementBridgePlacementCopy, prepareAgreementId, documentId, displayRoleId]);
 
-  /** Add/remove auto-initials slots only when toggle, page count, or skipped pages change — not on every name keystroke. */
+  /** Add/remove auto-initials slots only when toggle, page count, or skipped slots change — not on active-signer switch. */
   useEffect(() => {
     if (!autoInitialsEveryPage) {
       if (fieldsRef.current.some((f) => f.autoInitials)) {
         setFields((prev) => prev.filter((f) => !f.autoInitials));
       }
-      setSkippedAutoPages((prev) => (prev.size === 0 ? prev : new Set()));
+      setSkippedAutoInitialsSlots((prev) => (prev.size === 0 ? prev : new Set()));
       return;
     }
     if (numPages <= 0) return;
@@ -672,38 +685,31 @@ export function StepPrepareSignature({
     };
 
     setFields((prev) => {
-      const activeRoleId = displayRoleId;
-      const manual = prev.filter(
-        (f) =>
-          !f.autoInitials ||
-          (agreementBridgePlacementCopy &&
-            activeRoleId &&
-            (f.assignedSignerRoleId ?? "").trim() !== activeRoleId),
-      );
-      if (agreementBridgePlacementCopy) {
-        const activeRole =
-          prepareRoleCtx?.activeRole ?? findPrepareSigningRole(prepareSignerRoles, displayRoleId);
-        if (activeRole) {
-          const auto = buildPrepareAutoInitialsEveryPage({
-            role: activeRole,
-            pageCount: numPages,
-            skippedPages: skippedAutoPages,
-            existingFields: prev,
-            valueCtx: ownerValueCtx,
-          });
-          return [...manual, ...auto];
-        }
+      const manual = prev.filter((f) => !f.autoInitials);
+      if (agreementBridgePlacementCopy && prepareSignerRoles && prepareSignerRoles.length > 0) {
+        const auto = buildPrepareAutoInitialsForAllRoles({
+          roles: prepareSignerRoles,
+          pageCount: numPages,
+          skippedSlots: skippedAutoInitialsSlots,
+          existingFields: prev,
+          valueCtxForRole: (role) =>
+            buildPrepareTemplateValueContext(role, ownerValueCtx),
+        });
+        return [...manual, ...auto];
       }
-      const auto = buildAutoInitialsFields(numPages, ownerValueCtx, skippedAutoPages, manual);
+      const skippedPages = new Set<number>();
+      for (const key of skippedAutoInitialsSlots) {
+        const page = parseInt(key.split(":").pop() ?? "", 10);
+        if (Number.isFinite(page)) skippedPages.add(page);
+      }
+      const auto = buildAutoInitialsFields(numPages, ownerValueCtx, skippedPages, manual);
       return [...manual, ...auto];
     });
   }, [
     autoInitialsEveryPage,
     numPages,
-    skippedAutoPages,
+    skippedAutoInitialsSlots,
     agreementBridgePlacementCopy,
-    displayRoleId,
-    prepareRoleCtx,
     prepareSignerRoles,
     signerEmailForPlacement,
   ]);
@@ -711,27 +717,24 @@ export function StepPrepareSignature({
   /** Keep auto-initials text in sync when the user edits initials/name, without rebuilding positions. */
   useEffect(() => {
     if (!autoInitialsEveryPage) return;
+    const ownerValueCtx = {
+      typedName,
+      initials,
+      signerEmail: signerEmailForPlacement,
+    };
     setFields((prev) =>
       prev.map((f) => {
         if (!f.autoInitials || f.type !== "initials") return f;
-        if (agreementBridgePlacementCopy) {
+        if (agreementBridgePlacementCopy && prepareSignerRoles?.length) {
           const roleId = (f.assignedSignerRoleId ?? "").trim();
           const role = findPrepareSigningRole(prepareSignerRoles, roleId);
-          if (!role || role.kind !== "owner") return f;
-          const ctx = buildPrepareTemplateValueContext(role, {
-            typedName,
-            initials,
-            signerEmail: signerEmailForPlacement,
-          });
+          if (!role) return f;
+          const ctx = buildPrepareTemplateValueContext(role, ownerValueCtx);
           return { ...f, value: defaultValueForType("initials", ctx) };
         }
         return {
           ...f,
-          value: defaultValueForType("initials", {
-            typedName,
-            initials,
-            signerEmail: signerEmailForPlacement,
-          }),
+          value: defaultValueForType("initials", ownerValueCtx),
         };
       }),
     );
@@ -850,6 +853,9 @@ export function StepPrepareSignature({
         const msg = placementSuccessMessage(toolLabel, activePrepareRole.entityName ?? "");
         logVs01LifecycleEvent({
           event: "vs01_prepare_field_added",
+          agreementId: prepareAgreementId ?? undefined,
+          documentId: documentId ?? undefined,
+          signerRoleId: nf.assignedSignerRoleId ?? roleBefore?.roleId ?? undefined,
           fieldType: nf.type,
           partyIndex: roleBefore?.partyIndex ?? nf.assignedPartyIndex ?? null,
         });
@@ -1321,7 +1327,7 @@ export function StepPrepareSignature({
   const onAutoInitialsToggle = useCallback((checked: boolean) => {
     setAutoInitialsEveryPage(checked);
     if (checked) {
-      setSkippedAutoPages(new Set());
+      setSkippedAutoInitialsSlots(new Set());
     }
   }, []);
 
@@ -1942,13 +1948,13 @@ export function StepPrepareSignature({
             />
             <span>
               {agreementBridgePlacementCopy
-                ? "Add initials for this signer on every page"
+                ? "Add initials on every page for all signers"
                 : "Add my initials box to every page"}
             </span>
           </label>
           {agreementBridgePlacementCopy ? (
             <p className="vs01-prepare-initials-hint">
-              Applies to the signer selected above. Repeat for each signer as you move through roles.
+              Packet default: one toggle places initials for every signer on every page. Auto-initials do not count toward required fields.
             </p>
           ) : null}
 

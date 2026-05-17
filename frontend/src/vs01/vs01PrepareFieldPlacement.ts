@@ -328,6 +328,49 @@ export function buildPrepareAutoInitialsEveryPage(args: {
   return out;
 }
 
+export function prepareAutoInitialsSkipKey(roleId: string, page: number): string {
+  return `${roleId.trim()}:${page}`;
+}
+
+export function parsePrepareAutoInitialsSkipKey(key: string): { roleId: string; page: number } | null {
+  const i = key.lastIndexOf(":");
+  if (i <= 0) return null;
+  const roleId = key.slice(0, i).trim();
+  const page = parseInt(key.slice(i + 1), 10);
+  if (!roleId || !Number.isFinite(page) || page < 0) return null;
+  return { roleId, page };
+}
+
+/** Packet-level: auto-initials for every prepare role on every page (deduped per role/page). */
+export function buildPrepareAutoInitialsForAllRoles(args: {
+  roles: Vs01PrepareSigningRole[];
+  pageCount: number;
+  skippedSlots: Set<string>;
+  existingFields: PlacedSigningField[];
+  valueCtxForRole: (role: Vs01PrepareSigningRole) => SigningPlacementValueContext;
+}): PlacedSigningField[] {
+  const manual = args.existingFields.filter((f) => !f.autoInitials);
+  const out: PlacedSigningField[] = [];
+  let placedSoFar: PlacedSigningField[] = [...manual];
+  for (const role of args.roles) {
+    const skippedPages = new Set<number>();
+    for (const key of args.skippedSlots) {
+      const parsed = parsePrepareAutoInitialsSkipKey(key);
+      if (parsed?.roleId === role.roleId) skippedPages.add(parsed.page);
+    }
+    const batch = buildPrepareAutoInitialsEveryPage({
+      role,
+      pageCount: args.pageCount,
+      skippedPages,
+      existingFields: [...placedSoFar, ...out],
+      valueCtx: args.valueCtxForRole(role),
+    });
+    out.push(...batch);
+    placedSoFar = [...manual, ...out];
+  }
+  return out;
+}
+
 export function createPrepareStampedSenderField(args: {
   authority: Vs01PrepareRoleAuthority;
   type: SigningFieldType;

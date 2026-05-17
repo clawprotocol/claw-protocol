@@ -1123,6 +1123,7 @@ export function Vs01Wizard({
                 creatorEmail={creatorEmail.trim() ? creatorEmail.trim() : undefined}
                 senderMessage={senderMessage}
                 agreementBridgePlacementCopy={paidProAgreementBridgeSkip}
+                prepareAgreementId={vs01LinkedAgreementId || null}
                 prepareSignerRoles={prepareSignerRoles}
                 prepareRecipientPlacedFields={recipientPlacedFields}
                 onPrepareSignerMetadataChange={handlePrepareSignerMetadataChange}

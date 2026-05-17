@@ -2,6 +2,10 @@ import type { AgreementReviewSection } from "../components/agreements/AgreementR
 import { isSigningLockActive, loadBundle, type AgreementVersionBundle } from "./agreementVersionStore";
 import type { AgreementDraft } from "./agreementTypes";
 import type { WorkspaceIndexAgreement } from "./agreementWorkspaceApi";
+import {
+  isAgreementFullySignedLocal,
+  isAgreementPacketPrepared,
+} from "../vs01/vs01WorkspaceSigningStatus";
 
 export type AgreementLifecycle =
   | "draft"
@@ -37,8 +41,14 @@ export function deriveLifecycle(
   bundle: AgreementVersionBundle | null
 ): AgreementLifecycle {
   if (row.workspace_archived_at) return "archived";
-  if (row.completed_signed) return "completed";
-  if (row.has_server_signing_lock || isSigningLockActive(bundle)) return "pending_signature";
+  if (row.completed_signed || isAgreementFullySignedLocal(row.id)) return "completed";
+  if (
+    row.has_server_signing_lock ||
+    isSigningLockActive(bundle) ||
+    isAgreementPacketPrepared(row.id)
+  ) {
+    return "pending_signature";
+  }
   const reviewAt = bundle?.reviewSentAt || row.review_sent_at;
   const recipientEdited = Boolean(bundle?.versions?.some((v) => v.created_by === "recipient"));
   if (reviewAt || recipientEdited) return "in_review";

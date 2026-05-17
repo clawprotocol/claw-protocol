@@ -10,6 +10,9 @@ export const VS01_RECIPIENT_SIGN_QUERY = "vs01_recipient_sign";
 const MANIFEST_STORAGE_PREFIX = "claw_vs01_rlink_manifest_";
 const MANIFEST_LS_PREFIX = "claw_vs01_rlink_ls_manifest_";
 
+/** Document-scoped full-packet manifest (all signers) for recipient signing view. */
+export const VS01_PACKET_MANIFEST_SCOPE = "__packet__";
+
 function manifestStorageKey(documentId: string, counterpartyId: string): string {
   return `${MANIFEST_STORAGE_PREFIX}${documentId.trim()}_${counterpartyId.trim()}`;
 }
@@ -74,8 +77,13 @@ export function buildVs01RecipientSigningUrl(opts: {
   const cpId = opts.counterpartyId.trim();
   const forSigner = opts.recipientFieldsForSigner ?? [];
 
-  if (did && cpId && forSigner.length > 0) {
-    storeRecipientManifest(did, cpId, forSigner);
+  if (did && forSigner.length > 0) {
+    const distinctCp = new Set(forSigner.map((f) => f.counterpartyId.trim()).filter(Boolean));
+    if (distinctCp.size > 1) {
+      storeRecipientManifest(did, VS01_PACKET_MANIFEST_SCOPE, forSigner);
+    } else if (cpId) {
+      storeRecipientManifest(did, cpId, forSigner);
+    }
   }
 
   const params = new URLSearchParams();

@@ -41,6 +41,35 @@ export function buildSignerManifestForRole(args: {
   return out;
 }
 
+/** All signer fields for one document view (deduped by field id). */
+export function buildFullPacketSigningManifestFields(args: {
+  ownerRole: Vs01PrepareSigningRole;
+  roles: Vs01PrepareSigningRole[];
+  senderPlacedFields: PlacedSigningField[];
+  recipientPlacedFields: Vs01RecipientPlacedField[];
+}): Vs01RecipientPlacedField[] {
+  const seen = new Set<string>();
+  const out: Vs01RecipientPlacedField[] = [];
+  const add = (f: Vs01RecipientPlacedField) => {
+    if (seen.has(f.id)) return;
+    seen.add(f.id);
+    out.push(f);
+  };
+  for (const f of args.recipientPlacedFields) add(f);
+  for (const role of args.roles) {
+    for (const f of buildSignerManifestForRole({
+      role,
+      ownerRole: args.ownerRole,
+      roles: args.roles,
+      senderPlacedFields: args.senderPlacedFields,
+      recipientPlacedFields: args.recipientPlacedFields,
+    })) {
+      add(f);
+    }
+  }
+  return out;
+}
+
 export function buildSigningUrlForPrepareRole(args: {
   role: Vs01PrepareSigningRole;
   ownerRole: Vs01PrepareSigningRole;
@@ -56,8 +85,7 @@ export function buildSigningUrlForPrepareRole(args: {
   const email =
     (args.role.signerEmail ?? args.role.reviewEmail ?? "").trim() ||
     (args.role.kind === "owner" ? "" : "");
-  const fields = buildSignerManifestForRole({
-    role: args.role,
+  const fields = buildFullPacketSigningManifestFields({
     ownerRole: args.ownerRole,
     roles: args.roles,
     senderPlacedFields: args.senderPlacedFields,

@@ -3,7 +3,7 @@
  * can render the same assignments without access to the sender's browser state.
  */
 import { defaultRecipientFieldValue } from "./signingFields";
-import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
+import type { Vs01Counterparty, Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 
 export const VS01_RECIPIENT_MANIFEST_QUERY = "vs01_rmanifest";
 
@@ -185,8 +185,46 @@ export function rebindRecipientFieldsToCounterparty(
 }
 
 /**
+ * Legacy single-signer manifests are rebound to the URL counterparty; full-packet manifests keep per-signer ids.
+ */
+export function normalizeRecipientManifestCounterparties(
+  fields: Vs01RecipientPlacedField[],
+  lockedCounterpartyId: string,
+): Vs01RecipientPlacedField[] {
+  const distinct = new Set(fields.map((f) => f.counterpartyId.trim()).filter(Boolean));
+  if (distinct.size > 1) return fields;
+  return rebindRecipientFieldsToCounterparty(fields, lockedCounterpartyId);
+}
+
+/**
  * Fill default display values for printed name / date after hydration (signature and initials stay empty).
  */
+/** Build minimal counterparties from a multi-signer manifest (labels from field stamps). */
+export function counterpartiesFromRecipientManifestFields(
+  fields: Vs01RecipientPlacedField[],
+  lockedCounterpartyId: string,
+  lockedName: string,
+  lockedEmail: string,
+): Vs01Counterparty[] {
+  const m = new Map<string, Vs01Counterparty>();
+  const locked = lockedCounterpartyId.trim();
+  for (const f of fields) {
+    const id = f.counterpartyId.trim();
+    if (!id || m.has(id)) continue;
+    m.set(id, {
+      id,
+      name:
+        f.assignedSignerRoleLabel?.trim() ||
+        (id === locked ? lockedName.trim() || "Signer" : "Signer"),
+      email: f.assignedSignerEmail?.trim() || (id === locked ? lockedEmail.trim() : ""),
+    });
+  }
+  if (locked && !m.has(locked)) {
+    m.set(locked, { id: locked, name: lockedName.trim() || "Signer", email: lockedEmail.trim() });
+  }
+  return [...m.values()];
+}
+
 export function ensureRecipientFieldDefaults(
   fields: Vs01RecipientPlacedField[],
   recipientDisplayName: string,

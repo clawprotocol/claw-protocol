@@ -43,7 +43,7 @@ describe("workspaceAgreementStatusLabel", () => {
           all_reviewers_approved: true,
         }),
       ),
-    ).toBe("All reviewers approved — ready to prepare signing");
+    ).toBe("Ready to prepare signing");
   });
 
   it("returns fractional status when some but not all reviewers approved", () => {
@@ -63,6 +63,6 @@ describe("workspaceAgreementStatusLabel", () => {
   it("returns Sent when review sent but not approved", () => {
     expect(
       workspaceAgreementStatusLabel(row({ review_sent_at: "2026-01-01T00:00:00Z" })),
-    ).toBe("Sent");
+    ).toBe("Waiting for review");
   });
 });
