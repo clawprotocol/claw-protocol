@@ -131,21 +131,20 @@ describe("vs01 prepare placement sticky", () => {
     expect(gate.missingByParty[cp.roleId]?.includes("date")).not.toBe(true);
   });
 
-  it("placementSuccessMessage reflects one-shot disarm vs keep placing", () => {
-    expect(placementSuccessMessage("Date", "NovaGrid Systems LLC", false)).toContain(
-      "Placement mode is now off",
-    );
-    expect(placementSuccessMessage("Date", "NovaGrid Systems LLC", true)).toContain(
-      "Placement mode stays on",
+  it("placementSuccessMessage is concise", () => {
+    expect(placementSuccessMessage("Date", "NovaGrid Systems LLC")).toBe(
+      "Date added for NovaGrid Systems LLC.",
     );
   });
 
-  it("StepPrepareSignature disarms armed tool after placement unless keep placing", () => {
+  it("StepPrepareSignature arms on tool click and disarms after place", () => {
     const src = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
-    expect(src).toContain("keepPlacingField");
-    expect(src).toMatch(/if \(!keepPlacingField\)/);
+    expect(src).toContain("vs01DevKeepPlacingEnabled");
+    expect(src).not.toContain("Keep placing this field");
+    expect(src).not.toContain("Switch to this signer");
+    expect(src).not.toContain("vs01-sign-place-cta");
+    expect(src).toMatch(/setArmedTool\(t\)/);
     expect(src).toContain("setArmedTextPurpose(undefined)");
-    expect(src).toContain("Keep placing this field");
   });
 
   it("removeField does not call setActiveRole", () => {

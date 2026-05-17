@@ -21,7 +21,7 @@ function row(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement {
 
 describe("workspaceAgreementStatusLabel", () => {
   it("returns Signed when completed", () => {
-    expect(workspaceAgreementStatusLabel(row({ completed_signed: true }))).toBe("Signed");
+    expect(workspaceAgreementStatusLabel(row({ completed_signed: true }))).toBe("Fully signed");
   });
 
   it("returns Ready to sign when server lock exists", () => {
@@ -29,7 +29,7 @@ describe("workspaceAgreementStatusLabel", () => {
       workspaceAgreementStatusLabel(
         row({ has_server_signing_lock: true, locked_version_id: "v1", reviewer_approved: true }),
       ),
-    ).toBe("Ready to sign");
+    ).toBe("Signing in progress");
   });
 
   it("returns Reviewer approved — ready to prepare signing when single reviewer path approved but not locked", () => {

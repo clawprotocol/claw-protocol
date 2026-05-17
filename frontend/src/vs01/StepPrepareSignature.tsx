@@ -73,7 +73,6 @@ import {
 import {
   buildPrepareMissingBySignerSummary,
   evaluatePrepareFinishClick,
-  formatPrepareMissingFieldLabel,
   logVs01PrepareFinishClick,
 } from "./vs01PreparePacketCompletion";
 import {
@@ -82,6 +81,12 @@ import {
   logVs01FieldCreated,
   placementSuccessMessage,
 } from "./vs01PreparePlacementControl";
+import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
+import {
+  buildPreparePacketChecklistView,
+  logVs01PrepareContinueBlocked,
+  vs01DevKeepPlacingEnabled,
+} from "./vs01PreparePacketChecklist";
 
 const INTENT_OPTIONS = ["agree_and_sign"] as const;
 
@@ -329,7 +334,6 @@ export function StepPrepareSignature({
   /** When set, the next click on the document places this field type once, then clears. */
   const [armedTool, setArmedTool] = useState<SigningFieldType | null>(null);
   const [armedTextPurpose, setArmedTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
-  const [keepPlacingField, setKeepPlacingField] = useState(false);
   const [placementNotice, setPlacementNotice] = useState<string | null>(null);
   const placementNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [prepareContinueBlockedVisible, setPrepareContinueBlockedVisible] = useState(false);
@@ -558,7 +562,34 @@ export function StepPrepareSignature({
 
   const hasSignatureOnDoc = fields.some((f) => f.type === "signature");
   const flowStep3Ready = signReady && hasSignatureOnDoc;
-  const flowStep3ReadyEffective = agreementBridgePlacementCopy ? hasSignatureOnDoc : flowStep3Ready;
+  const flowStep3ReadyEffective = agreementBridgePlacementCopy
+    ? Boolean(preparePacketGate?.canFinish)
+    : flowStep3Ready;
+  const packetChecklist = useMemo(
+    () =>
+      buildPreparePacketChecklistView(
+        preparePacketGate,
+        prepareSignerRoles ?? [],
+        displayRoleId || null,
+      ),
+    [preparePacketGate, prepareSignerRoles, displayRoleId],
+  );
+  const placementToolbarHint = useMemo(() => {
+    if (!agreementBridgePlacementCopy) return null;
+    if (placementNotice) return placementNotice;
+    if (armedTool && activePrepareRole) {
+      const field = labelForPreparePlacedField(armedTool, armedTextPurpose);
+      const party = activePrepareRole.entityName?.trim() || "this signer";
+      return `Click once on the document to place ${field} for ${party}.`;
+    }
+    return "Choose a field, then click the document.";
+  }, [
+    agreementBridgePlacementCopy,
+    placementNotice,
+    armedTool,
+    armedTextPurpose,
+    activePrepareRole,
+  ]);
 
   const ownerPadForFields = useMemo(
     () =>
@@ -612,9 +643,16 @@ export function StepPrepareSignature({
     if (target?.autoInitials) {
       setSkippedAutoPages((s) => new Set(s).add(target.page));
     }
+    if (agreementBridgePlacementCopy && target) {
+      logVs01LifecycleEvent({
+        event: "vs01_prepare_field_removed",
+        fieldType: target.type,
+        partyIndex: target.assignedPartyIndex ?? null,
+      });
+    }
     setFields((prev) => prev.filter((f) => f.id !== id));
     setSelectedFieldId((cur) => (cur === id ? null : cur));
-  }, []);
+  }, [agreementBridgePlacementCopy]);
 
   /** Add/remove auto-initials slots only when toggle, page count, or skipped pages change — not on every name keystroke. */
   useEffect(() => {
@@ -809,11 +847,12 @@ export function StepPrepareSignature({
       }
       if (agreementBridgePlacementCopy && nf && activePrepareRole) {
         const toolLabel = labelForPreparePlacedField(armedTool, armedTextPurpose);
-        const msg = placementSuccessMessage(
-          toolLabel,
-          activePrepareRole.entityName ?? "",
-          keepPlacingField,
-        );
+        const msg = placementSuccessMessage(toolLabel, activePrepareRole.entityName ?? "");
+        logVs01LifecycleEvent({
+          event: "vs01_prepare_field_added",
+          fieldType: nf.type,
+          partyIndex: roleBefore?.partyIndex ?? nf.assignedPartyIndex ?? null,
+        });
         setPlacementNotice(msg);
         if (placementNoticeTimerRef.current) clearTimeout(placementNoticeTimerRef.current);
         placementNoticeTimerRef.current = setTimeout(() => {
@@ -823,7 +862,7 @@ export function StepPrepareSignature({
       }
       setSelectedFieldId(nf.id);
       setCurrentPage(pageIndex0 + 1);
-      if (!keepPlacingField) {
+      if (!vs01DevKeepPlacingEnabled()) {
         setArmedTool(null);
         setArmedTextPurpose(undefined);
       }
@@ -839,7 +878,6 @@ export function StepPrepareSignature({
     [
       armedTool,
       armedTextPurpose,
-      keepPlacingField,
       busy,
       signerEmailForPlacement,
       agreementBridgePlacementCopy,
@@ -863,10 +901,13 @@ export function StepPrepareSignature({
     });
     if (!result.allowed) {
       setPrepareContinueBlockedVisible(true);
+      logVs01PrepareContinueBlocked({
+        incompleteSignerCount: result.rows.length,
+        focusRoleIdShort: result.focusRoleId?.slice(0, 16) ?? null,
+      });
       onError(result.message);
       if (result.focusRoleId) {
-        prepareRoleCtx?.setActiveRole(result.focusRoleId, "auto_advance");
-        onPrepareActiveSignerRoleChange?.(result.focusRoleId);
+        goToPrepareSigner(result.focusRoleId);
       }
       return;
     }
@@ -877,7 +918,7 @@ export function StepPrepareSignature({
     preparePacketGate,
     prepareSignerRoles,
     prepareRoleCtx,
-    onPrepareActiveSignerRoleChange,
+    goToPrepareSigner,
     onError,
     onContinue,
   ]);
@@ -1298,7 +1339,7 @@ export function StepPrepareSignature({
         <p className="vs01-card-help vs01-sign-step-lead">
           {agreementBridgePlacementCopy
             ? "Place required signature fields for each party. Reviewers already approved this draft — you are preparing the signing packet, not signing yet."
-            : "Choose a field type, use Place on document, then click once where it should go."}
+            : "Choose a field type, then click once where it should go."}
         </p>
       </header>
 
@@ -1681,7 +1722,7 @@ export function StepPrepareSignature({
                 ? "Scroll the document area (mouse wheel, trackpad, or scrollbar) if a page is off-screen. Drag the field to move it; use the corner handle to resize."
                 : placementArmed
                   ? "Scroll the document area (mouse wheel, trackpad, or scrollbar) to reach every page, then click once where the field should go."
-                  : "Scroll the document area (mouse wheel, trackpad, or scrollbar) to review every page. Use Place on document in the toolbar, then click once on the page to add a field."
+                  : "Scroll the document area (mouse wheel, trackpad, or scrollbar) to review every page. Choose a field type, then click once on the page to add it."
               : null}
           </p>
         </div>
@@ -1713,27 +1754,12 @@ export function StepPrepareSignature({
                   );
                 })}
               </div>
-              {preparePacketGate ? (
-                <ul className="vs01-prepare-role-progress mt-2 text-xs" aria-label="Required fields per signer">
-                  {prepareSignerRoles.map((r) => {
-                    const miss = preparePacketGate.missingByParty[r.roleId] ?? [];
-                    const done = miss.length === 0;
-                    return (
-                      <li
-                        key={r.roleId}
-                        className={
-                          done
-                            ? "vs01-prepare-role-progress-item vs01-prepare-role-progress-item--done"
-                            : "vs01-prepare-role-progress-item"
-                        }
-                      >
-                        <span className="font-medium">{r.entityName}</span>
-                        {done ? " — complete" : ` — needs: ${miss.map(formatPrepareMissingFieldLabel).join(", ")}`}
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
+              <div className="vs01-prepare-packet-checklist mt-2 text-sm" aria-label="Packet checklist">
+                <p className="font-medium text-slate-700 dark:text-slate-300">{packetChecklist.headline}</p>
+                {packetChecklist.activeSignerHint ? (
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{packetChecklist.activeSignerHint}</p>
+                ) : null}
+              </div>
               {preparePacketGate && !preparePacketGate.canFinish ? (
                 <button
                   type="button"
@@ -1802,7 +1828,9 @@ export function StepPrepareSignature({
                 )}
               </p>
             ) : null}
-            <p className="vs01-sign-toolbar-hint">Choose what to place</p>
+            <p className="vs01-sign-toolbar-hint">
+              {agreementBridgePlacementCopy ? placementToolbarHint : "Choose what to place"}
+            </p>
             <div className="vs01-sign-toolbar-btns">
               {(agreementBridgePlacementCopy ? PREPARE_PACKET_FIELD_TOOLS : SIGNING_FIELD_TOOLS).map((tool) => {
                 const t = tool.type;
@@ -1821,56 +1849,25 @@ export function StepPrepareSignature({
                     onClick={() => {
                       setActiveTool(t);
                       setActiveTextPurpose(purpose);
-                      setArmedTool(null);
-                      setArmedTextPurpose(undefined);
-                      // eslint-disable-next-line no-console
-                      console.info("[vs01-placement-tool-selected]", { tool: t, textPurpose: purpose, placementMode: "off" });
+                      if (agreementBridgePlacementCopy) {
+                        setArmedTool(t);
+                        setArmedTextPurpose(purpose);
+                        // eslint-disable-next-line no-console
+                        console.info("[vs01-placement-tool-selected]", {
+                          tool: t,
+                          textPurpose: purpose,
+                          placementMode: "on",
+                        });
+                      } else {
+                        setArmedTool(null);
+                        setArmedTextPurpose(undefined);
+                      }
                     }}
                   >
                     {agreementBridgePlacementCopy ? tool.label : labelForFieldType(t)}
                   </button>
                 );
               })}
-            </div>
-            <div className="vs01-sign-placement-mode">
-              <p className="vs01-sign-placement-mode-status">
-                {placementArmed
-                  ? "Placement mode: On — click once on the PDF."
-                  : "Placement mode: Off — choose Place on document before clicking."}
-              </p>
-              <button
-                type="button"
-                className="vs01-btn vs01-btn--secondary vs01-btn--auto vs01-sign-place-cta"
-                disabled={busy || !placementSurface || previewLoading}
-                onClick={() => {
-                  setArmedTool(activeTool);
-                  setArmedTextPurpose(activeTextPurpose);
-                  // eslint-disable-next-line no-console
-                  console.info("[vs01-placement-tool-selected]", { tool: activeTool, textPurpose: activeTextPurpose, placementMode: "on" });
-                }}
-              >
-                Place{" "}
-                {agreementBridgePlacementCopy
-                  ? labelForPreparePlacedField(activeTool, activeTextPurpose)
-                  : labelForFieldType(activeTool)}{" "}
-                on document
-              </button>
-              {agreementBridgePlacementCopy ? (
-                <label className="vs01-sign-keep-placing mt-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-                  <input
-                    type="checkbox"
-                    checked={keepPlacingField}
-                    disabled={busy}
-                    onChange={(e) => setKeepPlacingField(e.target.checked)}
-                  />
-                  <span>Keep placing this field</span>
-                </label>
-              ) : null}
-              {placementNotice ? (
-                <p className="vs01-sign-placement-notice mt-2 text-sm text-emerald-700 dark:text-emerald-400" role="status">
-                  {placementNotice}
-                </p>
-              ) : null}
             </div>
           </div>
 
@@ -1895,28 +1892,9 @@ export function StepPrepareSignature({
                   );
                   const party = selRole ? resolvePreparePartyEntityLabel(selRole) : "";
                   const isOwnerSel = selRole?.kind === "owner";
-                  const activeParty = activePrepareRole
-                    ? resolvePreparePartyEntityLabel(activePrepareRole)
-                    : "";
-                  const foreignField =
-                    selRole && activePrepareRole && selRole.roleId !== activePrepareRole.roleId;
                   return (
                     <>
-                      {foreignField && party && activeParty ? (
-                        <p className="vs01-sign-selected-note vs01-sign-selected-note--warn">
-                          Selected field belongs to <strong>{party}</strong>. Active signer remains{" "}
-                          <strong>{activeParty}</strong>.
-                          <button
-                            type="button"
-                            className="vs01-btn vs01-btn--secondary vs01-btn--auto ml-2 text-xs"
-                            disabled={busy}
-                            onClick={() => goToPrepareSigner(selRole.roleId)}
-                          >
-                            Switch to this signer
-                          </button>
-                        </p>
-                      ) : null}
-                      {party && !foreignField ? (
+                      {party ? (
                         <p className="vs01-sign-selected-note">
                           Assigned to: <strong>{party}</strong>
                         </p>
@@ -1951,10 +1929,8 @@ export function StepPrepareSignature({
             </div>
           ) : null}
 
-          {!selectedField ? (
-            <p className="vs01-sign-rail-helper">
-              Pick a field type, tap Place on document, then click the preview once.
-            </p>
+          {!selectedField && !agreementBridgePlacementCopy ? (
+            <p className="vs01-sign-rail-helper">Pick a field type, then click the preview once.</p>
           ) : null}
 
           <label className="vs01-sign-auto-initials">
@@ -1976,12 +1952,9 @@ export function StepPrepareSignature({
             </p>
           ) : null}
 
-          {agreementBridgePlacementCopy &&
-          preparePacketGate &&
-          !preparePacketGate.canFinish &&
-          (prepareContinueBlockedVisible || prepareMissingSummary.length > 0) ? (
+          {agreementBridgePlacementCopy && prepareContinueBlockedVisible && prepareMissingSummary.length > 0 ? (
             <div className="vs01-prepare-finish-blocked-panel" role="alert">
-              <p className="vs01-prepare-finish-blocked-title">Required fields still missing</p>
+              <p className="vs01-prepare-finish-blocked-title">Add these fields before continuing</p>
               <ul className="vs01-prepare-finish-blocked-list">
                 {prepareMissingSummary.map((row) => (
                   <li key={row.roleId}>
@@ -2096,9 +2069,14 @@ export function StepPrepareSignature({
           </div>
           ) : null}
 
-          {flowStep3ReadyEffective && !receiptId ? (
+          {agreementBridgePlacementCopy && packetChecklist.allReady && !receiptId ? (
             <p className="vs01-sign-status-ready" role="status">
-              {agreementBridgePlacementCopy ? "Ready to continue" : "Ready to sign"}
+              Packet ready — continue to signing links.
+            </p>
+          ) : null}
+          {!agreementBridgePlacementCopy && flowStep3ReadyEffective && !receiptId ? (
+            <p className="vs01-sign-status-ready" role="status">
+              Ready to sign
             </p>
           ) : null}
 
@@ -2138,7 +2116,9 @@ export function StepPrepareSignature({
               {receiptId
                 ? "Signature added ✓"
                 : agreementBridgePlacementCopy
-                  ? "Continue to recipient fields"
+                  ? packetChecklist.allReady
+                    ? "Continue to signing packet"
+                    : "Continue"
                   : busySession
                     ? "Working…"
                     : busyComplete

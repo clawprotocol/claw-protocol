@@ -66,6 +66,7 @@ import {
   logVs01FieldCreated,
   placementSuccessMessage,
 } from "./vs01PreparePlacementControl";
+import { vs01DevKeepPlacingEnabled } from "./vs01PreparePacketChecklist";
 import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -259,7 +260,6 @@ export function StepCompleteAndSend({
   const [activeTextPurpose, setActiveTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
   const [armedTool, setArmedTool] = useState<Vs01RecipientFieldType | null>(null);
   const [armedTextPurpose, setArmedTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
-  const [keepPlacingField, setKeepPlacingField] = useState(false);
   const [placementNotice, setPlacementNotice] = useState<string | null>(null);
   const placementNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, setFinishBlockedVisible] = useState(false);
@@ -738,11 +738,7 @@ export function StepCompleteAndSend({
       }
       if (prepareSigningPacket && nf && activePrepareRole) {
         const toolLabel = labelForPreparePlacedField(armedTool, armedTextPurpose);
-        const msg = placementSuccessMessage(
-          toolLabel,
-          activePrepareRole.entityName ?? "",
-          keepPlacingField,
-        );
+        const msg = placementSuccessMessage(toolLabel, activePrepareRole.entityName ?? "");
         setPlacementNotice(msg);
         if (placementNoticeTimerRef.current) clearTimeout(placementNoticeTimerRef.current);
         placementNoticeTimerRef.current = setTimeout(() => {
@@ -752,7 +748,7 @@ export function StepCompleteAndSend({
       }
       setSelectedFieldId(nf.id);
       setCurrentPage(pageIndex0 + 1);
-      if (!keepPlacingField) {
+      if (!vs01DevKeepPlacingEnabled()) {
         setArmedTool(null);
         setArmedTextPurpose(undefined);
       }
@@ -768,7 +764,6 @@ export function StepCompleteAndSend({
     [
       armedTool,
       armedTextPurpose,
-      keepPlacingField,
       busy,
       cpById,
       selectedCounterpartyId,
@@ -1573,17 +1568,6 @@ export function StepCompleteAndSend({
                   ? `Place ${labelForPreparePlacedField(activeTool, activeTextPurpose)} on document`
                   : "Place on document"}
               </button>
-              {prepareSigningPacket ? (
-                <label className="vs01-sign-keep-placing mt-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-                  <input
-                    type="checkbox"
-                    checked={keepPlacingField}
-                    disabled={busy}
-                    onChange={(e) => setKeepPlacingField(e.target.checked)}
-                  />
-                  <span>Keep placing this field</span>
-                </label>
-              ) : null}
               {placementNotice ? (
                 <p className="vs01-sign-placement-notice mt-2 text-sm text-emerald-700 dark:text-emerald-400" role="status">
                   {placementNotice}

@@ -7,6 +7,7 @@ import "./vs01.css";
 import { StepAgreementDetails } from "./StepAgreementDetails";
 import { RecipientSigningView } from "./RecipientSigningView";
 import { StepCompleteAndSend } from "./StepCompleteAndSend";
+import { StepSigningPacketStatus } from "./StepSigningPacketStatus";
 import { StepDocument } from "./StepDocument";
 import { StepDone } from "./StepDone";
 import { Vs01DocumentsList } from "./Vs01DocumentsList";
@@ -59,6 +60,9 @@ import {
   formatPrepareFinishBlockedMessage,
   logVs01PrepareFinishBlocked,
 } from "./vs01PreparePacketCompletion";
+import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
+import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
+import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
 import {
   clearVs01DraftState,
   loadVs01DraftState,
@@ -217,6 +221,7 @@ export function Vs01Wizard({
   const [receiptId, setReceiptId] = useState<string | null>(() => VS01_URL_BOOT?.receiptId ?? null);
   const [receiptHashSha256, setReceiptHashSha256] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<unknown>(null);
+  const [packetHandoff, setPacketHandoff] = useState<PaidProVs01PostSignHandoffV1 | null>(null);
 
   useEffect(() => {
     const seed = (seedDocumentId || "").trim();
@@ -428,6 +433,75 @@ export function Vs01Wizard({
     setError(null);
     onStepChangeRef.current?.(target);
   }, []);
+
+  const completeBridgePreparePacket = useCallback(() => {
+    const linkedAgreementId =
+      (vs01LinkedAgreementId ?? "").trim() ||
+      bridgeHandoffSnapshotRef.current?.agreementId?.trim() ||
+      "";
+    const did = documentId?.trim() ?? "";
+    if (!linkedAgreementId || !did) {
+      setError("Agreement or document is not ready yet.");
+      return;
+    }
+    const result = handlePreparePacketContinue({
+      agreementId: linkedAgreementId,
+      agreementTitle,
+      documentId: did,
+      creatorName,
+      creatorEmail,
+      ownerSignerName: creatorSignerName,
+      ownerSignerTitle: creatorSignerTitle,
+      counterparties,
+      senderPlacedFields,
+      recipientPlacedFields,
+      receiptId,
+      receiptHashSha256,
+    });
+    if (!result.ok) {
+      setError(result.finish.message);
+      if (result.finish.focusRoleId) {
+        setPrepareActiveSignerRoleId(result.finish.focusRoleId);
+      }
+      return;
+    }
+    writePaidProVs01PostSignHandoff(result.handoff);
+    setPacketHandoff(result.handoff);
+    clearVs01DraftState(did, "packet_ready_in_wizard");
+    // eslint-disable-next-line no-console
+    console.info("[vs01-packet-prepared]", {
+      agreementId: linkedAgreementId,
+      documentIdShort: did.slice(0, 8),
+      signerCount: result.handoff.signers.length,
+    });
+    goToStep(3);
+  }, [
+    vs01LinkedAgreementId,
+    documentId,
+    agreementTitle,
+    creatorName,
+    creatorEmail,
+    creatorSignerName,
+    creatorSignerTitle,
+    counterparties,
+    senderPlacedFields,
+    recipientPlacedFields,
+    receiptId,
+    receiptHashSha256,
+    goToStep,
+  ]);
+
+  useEffect(() => {
+    if (!paidProAgreementBridgeSkip || step !== 2) return;
+    const aid = (vs01LinkedAgreementId ?? "").trim();
+    const did = documentId?.trim() ?? "";
+    if (!aid || !did) return;
+    logVs01LifecycleEvent({
+      event: "vs01_prepare_started",
+      agreementId: aid,
+      documentId: did,
+    });
+  }, [paidProAgreementBridgeSkip, step, vs01LinkedAgreementId, documentId]);
 
   useEffect(() => {
     if (!paidProAgreementBridgeSkip) return;
@@ -870,7 +944,27 @@ export function Vs01Wizard({
               senderSignatureRef={senderSignatureRef}
               onRecipientFieldsChange={setRecipientPlacedFields}
               onError={setError}
-              onFinishSigning={() => setRecipientSigningFinished(true)}
+              onFinishSigning={() => {
+                setRecipientSigningFinished(true);
+                const aid = RECIPIENT_AGREEMENT_ID.trim();
+                const roleKey = (RECIPIENT_LOCKED_SIGNER_ROLE_ID ?? "").trim();
+                if (aid && roleKey) {
+                  const next = patchSignerPacketStatus(aid, roleKey, "signed");
+                  logVs01LifecycleEvent({
+                    event: "vs01_signer_completed",
+                    agreementId: aid,
+                    documentId: documentId ?? undefined,
+                    signerRoleId: roleKey,
+                  });
+                  if (next?.fullySigned) {
+                    logVs01LifecycleEvent({
+                      event: "vs01_packet_fully_signed",
+                      agreementId: aid,
+                      documentId: documentId ?? undefined,
+                    });
+                  }
+                }
+              }}
               manifestDecodeError={VS01_URL_BOOT?.recipientManifestDecodeError ?? null}
               manifestParamPresent={VS01_URL_BOOT?.recipientManifestParamPresent ?? false}
             />
@@ -1036,11 +1130,23 @@ export function Vs01Wizard({
                 onFieldsChange={setSenderPlacedFields}
                 onBack={() => goToStep(0)}
                 onContinue={() => {
-                  if (receiptId || paidProAgreementBridgeSkip) goToStep(3);
+                  if (paidProAgreementBridgeSkip) {
+                    completeBridgePreparePacket();
+                    return;
+                  }
+                  if (receiptId) goToStep(3);
                 }}
               />
             ) : null}
-            {step === 3 ? (
+            {step === 3 && packetHandoff && prepareSignerRoles?.length ? (
+              <StepSigningPacketStatus
+                handoff={packetHandoff}
+                prepareSignerRoles={prepareSignerRoles}
+                creatorDisplayName={creatorName}
+                onBack={() => goToStep(2)}
+              />
+            ) : null}
+            {step === 3 && !packetHandoff ? (
               <StepCompleteAndSend
             documentId={documentId}
             counterparties={counterparties}

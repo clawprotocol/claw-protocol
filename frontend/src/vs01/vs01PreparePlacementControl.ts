@@ -52,14 +52,7 @@ export function logVs01ActiveRoleAfterPlace(payload: {
   });
 }
 
-export function placementSuccessMessage(
-  toolLabel: string,
-  partyName: string,
-  keepPlacing: boolean,
-): string {
+export function placementSuccessMessage(toolLabel: string, partyName: string): string {
   const party = partyName.trim() || "signer";
-  if (keepPlacing) {
-    return `${toolLabel} added for ${party}. Placement mode stays on.`;
-  }
-  return `${toolLabel} added for ${party}. Placement mode is now off.`;
+  return `${toolLabel} added for ${party}.`;
 }

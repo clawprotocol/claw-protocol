@@ -9,7 +9,10 @@ export type PaidProVs01PostSignSignerRow = {
   displayName: string;
   email: string;
   signingUrl: string;
+  signerRoleId?: string;
 };
+
+export type Vs01SignerPacketRowStatus = "waiting" | "opened" | "signed";
 
 export type PaidProVs01PostSignHandoffV1 = {
   v: 1;
@@ -23,6 +26,10 @@ export type PaidProVs01PostSignHandoffV1 = {
   packetPrepareOnly?: boolean;
   savedAt: string;
   signers: PaidProVs01PostSignSignerRow[];
+  /** Owner/sender role id for status tracking. */
+  ownerSignerRoleId?: string;
+  /** When true, sender should sign before sharing counterparty links. */
+  senderMustSignFirst?: boolean;
 };
 
 export function writePaidProVs01PostSignHandoff(payload: PaidProVs01PostSignHandoffV1): void {
