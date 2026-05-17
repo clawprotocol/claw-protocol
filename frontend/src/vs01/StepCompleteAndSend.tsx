@@ -60,6 +60,12 @@ import {
 } from "./vs01PreparePacketCompletion";
 import type { Vs01TextFieldPurpose } from "./signingFields";
 import { createPrepareStampedRecipientField } from "./vs01PrepareFieldPlacement";
+import {
+  logVs01ActiveRoleAfterPlace,
+  logVs01ActiveRoleBeforePlace,
+  logVs01FieldCreated,
+  placementSuccessMessage,
+} from "./vs01PreparePlacementControl";
 import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -223,6 +229,7 @@ export function StepCompleteAndSend({
       if (cpId) setSelectedCounterpartyId(cpId);
       setSelectedFieldId(null);
       setArmedTool(null);
+      setArmedTextPurpose(undefined);
     },
     [prepareRoleCtx, prepareSignerRoles],
   );
@@ -252,6 +259,9 @@ export function StepCompleteAndSend({
   const [activeTextPurpose, setActiveTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
   const [armedTool, setArmedTool] = useState<Vs01RecipientFieldType | null>(null);
   const [armedTextPurpose, setArmedTextPurpose] = useState<Vs01TextFieldPurpose | undefined>();
+  const [keepPlacingField, setKeepPlacingField] = useState(false);
+  const [placementNotice, setPlacementNotice] = useState<string | null>(null);
+  const placementNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, setFinishBlockedVisible] = useState(false);
 
   const [placementPopId, setPlacementPopId] = useState<string | null>(null);
@@ -655,6 +665,16 @@ export function StepCompleteAndSend({
       const px = (ev.clientX - rect.left) / rect.width;
       const py = (ev.clientY - rect.top) / rect.height;
       let nf: Vs01RecipientPlacedField | null = null;
+      const roleBeforeId = prepareRoleCtx?.authority.getActiveRoleId() ?? "";
+      const roleBefore = findPrepareSigningRole(prepareSignerRoles, roleBeforeId);
+      if (prepareSigningPacket && roleBefore) {
+        logVs01ActiveRoleBeforePlace({
+          roleIdShort: roleBefore.roleId.slice(0, 16),
+          partyIndex: roleBefore.partyIndex,
+          tool: armedTool,
+          textPurpose: armedTool === "text" ? armedTextPurpose : undefined,
+        });
+      }
       if (prepareSigningPacket && prepareRoleCtx) {
         const role = prepareRoleCtx.activeRole;
         const cpId = role?.vs01CounterpartyId ?? "";
@@ -680,6 +700,13 @@ export function StepCompleteAndSend({
           textPurpose: armedTool === "text" ? armedTextPurpose : undefined,
         });
         if (!nf) return;
+        logVs01FieldCreated({
+          roleIdShort: nf.assignedSignerRoleId?.slice(0, 16) ?? "",
+          partyIndex: roleBefore?.partyIndex ?? nf.assignedPartyIndex ?? 0,
+          fieldType: nf.type,
+          textPurpose: nf.textPurpose,
+          page: pageIndex0,
+        });
       } else {
         const cpId = selectedCounterpartyId;
         const cpRow = cpById.get(cpId);
@@ -700,9 +727,35 @@ export function StepCompleteAndSend({
         }
         return next;
       });
+      const roleAfterId = prepareRoleCtx?.authority.getActiveRoleId() ?? roleBeforeId;
+      const roleAfter = findPrepareSigningRole(prepareSignerRoles, roleAfterId);
+      if (prepareSigningPacket && roleAfter) {
+        logVs01ActiveRoleAfterPlace({
+          roleIdShort: roleAfter.roleId.slice(0, 16),
+          partyIndex: roleAfter.partyIndex,
+          unchanged: roleAfterId === roleBeforeId,
+        });
+      }
+      if (prepareSigningPacket && nf && activePrepareRole) {
+        const toolLabel = labelForPreparePlacedField(armedTool, armedTextPurpose);
+        const msg = placementSuccessMessage(
+          toolLabel,
+          activePrepareRole.entityName ?? "",
+          keepPlacingField,
+        );
+        setPlacementNotice(msg);
+        if (placementNoticeTimerRef.current) clearTimeout(placementNoticeTimerRef.current);
+        placementNoticeTimerRef.current = setTimeout(() => {
+          setPlacementNotice(null);
+          placementNoticeTimerRef.current = null;
+        }, 4500);
+      }
       setSelectedFieldId(nf.id);
       setCurrentPage(pageIndex0 + 1);
-      setArmedTool(null);
+      if (!keepPlacingField) {
+        setArmedTool(null);
+        setArmedTextPurpose(undefined);
+      }
       setPlacementPopId(nf.id);
       window.setTimeout(() => setPlacementPopId(null), 380);
       if (dragHintTimerRef.current) clearTimeout(dragHintTimerRef.current);
@@ -715,6 +768,7 @@ export function StepCompleteAndSend({
     [
       armedTool,
       armedTextPurpose,
+      keepPlacingField,
       busy,
       cpById,
       selectedCounterpartyId,
@@ -724,12 +778,14 @@ export function StepCompleteAndSend({
       prepareRoleCtx,
       displayRoleId,
       senderPlacedFields,
+      activePrepareRole,
     ]
   );
 
   useEffect(() => {
     return () => {
       if (dragHintTimerRef.current) clearTimeout(dragHintTimerRef.current);
+      if (placementNoticeTimerRef.current) clearTimeout(placementNoticeTimerRef.current);
     };
   }, []);
 
@@ -737,6 +793,7 @@ export function StepCompleteAndSend({
     (ev: PointerEvent<HTMLDivElement>, field: Vs01RecipientPlacedField) => {
       if (busy || resizing) return;
       if (prepareSigningPacket && !fieldMatchesActive(field)) {
+        setSelectedFieldId(field.id);
         ev.preventDefault();
         ev.stopPropagation();
         return;
@@ -770,18 +827,10 @@ export function StepCompleteAndSend({
     [busy, resizing, selectedFieldId, prepareSigningPacket, fieldMatchesActive]
   );
 
-  const onPlacementBoxClick = useCallback(
-    (ev: MouseEvent<HTMLDivElement>, field: Vs01RecipientPlacedField) => {
-      if (prepareSigningPacket && !fieldMatchesActive(field)) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        return;
-      }
-      ev.stopPropagation();
-      setSelectedFieldId(field.id);
-    },
-    [prepareSigningPacket, fieldMatchesActive],
-  );
+  const onPlacementBoxClick = useCallback((ev: MouseEvent<HTMLDivElement>, field: Vs01RecipientPlacedField) => {
+    ev.stopPropagation();
+    setSelectedFieldId(field.id);
+  }, []);
 
   useEffect(() => {
     if (!dragging || !dragStartRef.current) return;
@@ -1507,8 +1556,9 @@ export function StepCompleteAndSend({
                 Place on document
               </p>
               <p className="vs01-sign-placement-mode-status">
-                Placement is <strong>{placementArmed ? "on" : "off"}</strong>
-                {placementArmed ? " — click the PDF to drop the field." : " — use the button below, then click the PDF."}
+                {placementArmed
+                  ? "Placement mode: On — click once on the PDF."
+                  : "Placement mode: Off — choose Place on document before clicking."}
               </p>
               <button
                 type="button"
@@ -1519,21 +1569,26 @@ export function StepCompleteAndSend({
                   setArmedTextPurpose(activeTextPurpose);
                 }}
               >
-                Place on document
+                {prepareSigningPacket
+                  ? `Place ${labelForPreparePlacedField(activeTool, activeTextPurpose)} on document`
+                  : "Place on document"}
               </button>
-              {placementArmed ? (
-                <p className="vs01-sign-placement-mode-hint">
-                  Click once on the document to add a{" "}
-                  {prepareSigningPacket && armedTool
-                    ? labelForPreparePlacedField(armedTool, armedTextPurpose)
-                    : labelForRecipientFieldType(armedTool)}{" "}
-                  marker for them.
+              {prepareSigningPacket ? (
+                <label className="vs01-sign-keep-placing mt-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={keepPlacingField}
+                    disabled={busy}
+                    onChange={(e) => setKeepPlacingField(e.target.checked)}
+                  />
+                  <span>Keep placing this field</span>
+                </label>
+              ) : null}
+              {placementNotice ? (
+                <p className="vs01-sign-placement-notice mt-2 text-sm text-emerald-700 dark:text-emerald-400" role="status">
+                  {placementNotice}
                 </p>
-              ) : (
-                <p className="vs01-sign-placement-mode-hint vs01-sign-placement-mode-hint--muted">
-                  Not armed — clicks on the document will not add a field.
-                </p>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -1562,7 +1617,15 @@ export function StepCompleteAndSend({
               <ul className="vs01-prepare-finish-blocked-list">
                 {prepareMissingSummary.map((row) => (
                   <li key={row.roleId}>
-                    <strong>{row.entityName}</strong> still needs: {row.missingLabels.join(", ")}.
+                    <strong>{row.entityName}</strong> still needs: {row.missingLabels.join(", ")}.{" "}
+                    <button
+                      type="button"
+                      className="vs01-prepare-go-to-signer"
+                      disabled={busy}
+                      onClick={() => selectPrepareRole(row.roleId)}
+                    >
+                      Go to {row.entityName}
+                    </button>
                   </li>
                 ))}
               </ul>

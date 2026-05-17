@@ -49,12 +49,10 @@ describe("vs01 prepare placement flow", () => {
     expect(String(placed.field.value ?? "")).toBe(""); // signature template empty
   });
 
-  it("role advances owner through four counterparties when each bucket completes", () => {
+  it("afterPlacement keeps active signer sticky while user advances manually", () => {
     const cps: Vs01Counterparty[] = [
       { id: "p1", name: "Alpha Corp", email: "1@x.com" },
       { id: "p2", name: "Beta LLC", email: "2@x.com" },
-      { id: "p3", name: "Gamma Inc", email: "3@x.com" },
-      { id: "p4", name: "Delta LP", email: "4@x.com" },
     ];
     const roles = buildVs01PrepareSigningRoles({
       agreementId: AG,
@@ -64,45 +62,21 @@ describe("vs01 prepare placement flow", () => {
     });
     const authority = createVs01PrepareRoleAuthority();
     authority.setRoles(roles);
-    authority.setActiveRole(roles[0]!.roleId, "init");
+    authority.setActiveRole(roles[1]!.roleId, "user_select");
     const base: PlacedSigningField = {
       id: "b",
-      type: "signature",
+      type: "date",
       page: 0,
       x: 0.1,
       y: 0.1,
-      width: 0.34,
-      height: 0.075,
+      width: 0.2,
+      height: 0.04,
     };
-    const completeRole = (role: (typeof roles)[number]) => {
-      const sender = [
-        stampSenderFieldWithPrepareRole(base, role),
-        stampSenderFieldWithPrepareRole({ ...base, id: `${role.roleId}-pn`, type: "printed_name" }, role),
-        stampSenderFieldWithPrepareRole(
-          { ...base, id: `${role.roleId}-dt`, type: "date", value: "2026-05-01" },
-          role,
-        ),
-      ];
-      if (role.isEntityParty) {
-        sender.push(
-          stampSenderFieldWithPrepareRole({ ...base, id: `${role.roleId}-tt`, type: "text" }, role),
-        );
-      }
-      return sender;
-    };
-    let sender: PlacedSigningField[] = [];
-    const order: string[] = [roles[0]!.roleId];
-    for (const role of roles) {
-      sender = [...sender, ...completeRole(role)];
-      authority.afterPlacement(sender, []);
-      order.push(authority.getActiveRoleId());
-    }
-    expect(order[0]).toBe(roles[0]!.roleId);
-    expect(order[1]).toBe(roles[1]!.roleId);
-    expect(order[2]).toBe(roles[2]!.roleId);
-    expect(order[3]).toBe(roles[3]!.roleId);
-    expect(order[4]).toBe(roles[4]!.roleId);
-    expect(order[5]).toBe(roles[4]!.roleId);
+    const sender = [stampSenderFieldWithPrepareRole(base, roles[1]!)];
+    authority.afterPlacement(sender, []);
+    expect(authority.getActiveRoleId()).toBe(roles[1]!.roleId);
+    const next = authority.advanceToNextIncompleteRole(sender, [], "next_signer");
+    expect(next?.roleId).toBe(roles[2]!.roleId);
   });
 
   it("five-party agreement gate passes when all roles complete", () => {

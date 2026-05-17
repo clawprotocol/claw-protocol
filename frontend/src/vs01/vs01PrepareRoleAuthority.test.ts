@@ -36,7 +36,7 @@ describe("Vs01PrepareRoleAuthority", () => {
     if (resolved.ok) expect(resolved.role.partyId).toBe("c1");
   });
 
-  it("owner complete auto-advances to first counterparty", () => {
+  it("afterPlacement does not auto-advance when owner bucket is complete", () => {
     const cps: Vs01Counterparty[] = [{ id: "c1", name: "Atlas LLC", email: "a@x.com" }];
     const roles = buildVs01PrepareSigningRoles({
       agreementId: AG,
@@ -45,7 +45,6 @@ describe("Vs01PrepareRoleAuthority", () => {
       counterparties: cps,
     });
     const owner = roles[0]!;
-    const cp = roles.find((r) => r.vs01CounterpartyId === "c1")!;
     const authority = createVs01PrepareRoleAuthority();
     authority.setRoles(roles);
     authority.setActiveRole(owner.roleId, "init");
@@ -64,7 +63,7 @@ describe("Vs01PrepareRoleAuthority", () => {
       stampSenderFieldWithPrepareRole({ ...base, id: "dt", type: "date", value: "2026-01-01" }, owner),
     ];
     authority.afterPlacement(sender, []);
-    expect(authority.getActiveRoleId()).toBe(cp.roleId);
+    expect(authority.getActiveRoleId()).toBe(owner.roleId);
   });
 
   it("next signer cycles to next incomplete role", () => {

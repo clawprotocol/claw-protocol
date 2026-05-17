@@ -237,15 +237,17 @@ export class Vs01PrepareRoleAuthority {
     return pick;
   }
 
+  /**
+   * Logs placement progress only — never changes active signer.
+   * Role changes are explicit: user picker, “Next signer”, missing-field “Go to”, or continue-blocked focus.
+   */
   afterPlacement(
     senderFields: PlacedSigningField[],
     recipientFields: Vs01RecipientPlacedField[],
-    onParentSync?: (id: string) => void,
+    _onParentSync?: (id: string) => void,
   ): void {
     const gate = this.evaluateProgress(senderFields, recipientFields);
-    const curId = this.getActiveRoleId();
-    if ((gate.missingByParty[curId]?.length ?? 0) > 0) return;
-    this.advanceToNextIncompleteRole(senderFields, recipientFields, "auto_advance", onParentSync);
+    this.logRoleProgress(gate, senderFields, recipientFields);
   }
 }
 
