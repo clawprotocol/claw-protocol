@@ -6,8 +6,10 @@ No I/O, logging, or persistence. Outbound payloads must never echo raw input whe
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
+from backend.agreements.premium_airlock import assess_premium_agreement_outbound_airlock
 from backend.config.external_ai_policy import is_non_production_external_ai_bypass_active
 
 from .privilege_policy import (
@@ -16,6 +18,8 @@ from .privilege_policy import (
     evaluate_privilege_policy,
 )
 from .redaction import RedactionResult, redact_text
+
+log = logging.getLogger("claw.backend.ai_airlock")
 
 # Conservative cap for outbound excerpt size; easy to tune or inject later.
 _DEFAULT_MAX_MINIMIZED_CHARS: int = 4096
@@ -87,8 +91,19 @@ def run_ai_airlock(
     When blocked, safe outbound fields are empty; raw input is not copied into outputs.
     """
     original_length = len(text)
-    policy = evaluate_privilege_policy(text, policy_profile=policy_profile)
+    policy: PrivilegePolicyDecision
+    premium_decision = assess_premium_agreement_outbound_airlock(text, policy_profile=policy_profile)
+    if premium_decision is not None:
+        policy = premium_decision.policy
+    else:
+        policy = evaluate_privilege_policy(text, policy_profile=policy_profile)
+
     summary: list[str] = ["privilege_policy_evaluated", f"policy_profile:{policy_profile}"]
+    if premium_decision is not None:
+        summary.append(f"premium_wire_class:{premium_decision.request_class}")
+        summary.append(f"premium_airlock_reason:{premium_decision.reason_code}")
+        if premium_decision.allowed:
+            summary.append("premium_agreement_draft_allowed")
 
     if _external_ai_blocked(policy):
         if is_non_production_external_ai_bypass_active():

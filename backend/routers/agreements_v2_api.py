@@ -845,9 +845,24 @@ def _premium_full_draft_finalize_http_response(
         )
     body_bytes = raw.encode("utf-8")
     doc_len = len(wire.get("document_text") or "") if isinstance(wire.get("document_text"), str) else 0
+    gen_ok = wire.get("generation_ok")
+    retryable = wire.get("retryable") is True
+    gen_out = str(wire.get("generation_outcome") or "")
+    fail_code = str(wire.get("server_generation_failure_code") or "")
+    status_code = 200
+    if gen_ok is False and retryable and doc_len == 0 and gen_out == "degraded":
+        status_code = 503
+        log.error(
+            "[premium-full-draft-empty-output-forbidden] status=503 failure_code=%s "
+            "intake_len=%s session_hint=%s document_text_len=0 retryable=1",
+            fail_code,
+            intake_len,
+            session_hint,
+        )
     log.info(
-        "[premium-full-draft] event=response_build status=200 intake_len=%s body_len=%s document_text_len=%s "
+        "[premium-full-draft] event=response_build status=%s intake_len=%s body_len=%s document_text_len=%s "
         "session_hint=%s generation_outcome=%s",
+        status_code,
         intake_len,
         len(body_bytes),
         doc_len,
@@ -855,7 +870,7 @@ def _premium_full_draft_finalize_http_response(
         wire.get("generation_outcome"),
     )
     return Response(
-        status_code=200,
+        status_code=status_code,
         content=body_bytes,
         media_type="application/json; charset=utf-8",
     )
@@ -4194,6 +4209,18 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         code, log_detail = _classify_premium_full_draft_failure(exc)
         if code == "airlock_blocked":
             try:
+                from backend.agreements.premium_airlock import (
+                    assess_premium_agreement_outbound_airlock,
+                    log_premium_airlock_decision_for_route,
+                )
+
+                prem = assess_premium_agreement_outbound_airlock(
+                    airlock_wire_text, policy_profile="agreement_outbound"
+                )
+                if prem is not None:
+                    log_premium_airlock_decision_for_route(
+                        prem, airlock_route="premium_full_draft:failure"
+                    )
                 diag = first_privilege_airlock_block_diagnostic(
                     airlock_wire_text, policy_profile="agreement_outbound"
                 )

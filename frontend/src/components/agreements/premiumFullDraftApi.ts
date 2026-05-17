@@ -366,6 +366,20 @@ export async function postPremiumFullDraftOnce(args: {
     generationOutcome: genOut || undefined,
   });
   if (!res.ok) {
+    const wire = parsed as PremiumFullDraftResult;
+    const genRetry503 = classifyPremiumFullDraftGenerationRetryable(wire);
+    if (genRetry503.retryable) {
+      logPremiumGenerationRetryableFailure({
+        error_code: genRetry503.errorCode,
+        reason: genRetry503.reason,
+        generation_outcome: wire.generation_outcome,
+        document_text_len: (wire.document_text || "").trim().length,
+        generation_ok: wire.generation_ok ?? false,
+        retryable: wire.retryable ?? true,
+        http_status: res.status,
+      });
+      return wire;
+    }
     const err = parsed as { detail?: { message?: string; code?: string } };
     const msg = typeof err?.detail === "object" ? err.detail?.message : null;
     const detail = err?.detail;

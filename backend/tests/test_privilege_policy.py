@@ -312,6 +312,56 @@ def test_deposition_still_blocks_under_agreement_outbound() -> None:
     assert REASON_LITIGATION_SIGNAL in d.reason_codes
 
 
+def test_premium_repair_wire_allows_despite_plaintiff_in_rejected_draft_body() -> None:
+    """Repair JSON must not be blocked by model-echo litigation tokens in rejected_pro_draft."""
+    import json
+
+    from backend.agreements.premium_airlock import assess_premium_agreement_outbound_airlock
+    from backend.security.ai_airlock import run_ai_airlock
+
+    repair = {
+        "repair_task": "full_draft_rewrite_after_rejection",
+        "original_user_prompt": LAWDOG_QA_SAAS_RESELLER_PROMPT,
+        "free_draft_reference_text": "free outline",
+        "rejected_pro_draft": {
+            "title": "Agreement",
+            "document_text": (
+                "The plaintiff shall recover damages. Opposing counsel strategy memo. "
+                "Work product doctrine analysis."
+            ),
+        },
+        "rejection_reasons": ["schema_fail"],
+        "scenario_category": "saas",
+    }
+    wire = json.dumps(repair, ensure_ascii=False)
+    prem = assess_premium_agreement_outbound_airlock(wire, policy_profile="agreement_outbound")
+    assert prem is not None
+    assert prem.allowed is True
+    r = run_ai_airlock(wire, policy_profile="agreement_outbound")
+    assert r.blocked is False
+
+
+def test_premium_unsafe_intake_still_blocked() -> None:
+    import json
+
+    from backend.agreements.premium_airlock import assess_premium_agreement_outbound_airlock
+    from backend.security.ai_airlock import run_ai_airlock
+
+    payload = {
+        "intake": (
+            "Create a SaaS agreement. Outline our litigation strategy for opposing counsel "
+            "and attorney-client privilege before filing."
+        ),
+        "scenario_category": "custom_mixed",
+    }
+    wire = json.dumps(payload, ensure_ascii=False)
+    prem = assess_premium_agreement_outbound_airlock(wire, policy_profile="agreement_outbound")
+    assert prem is not None
+    assert prem.allowed is False
+    r = run_ai_airlock(wire, policy_profile="agreement_outbound")
+    assert r.blocked is True
+
+
 def test_first_privilege_airlock_block_diagnostic_stable_ids() -> None:
     diag = first_privilege_airlock_block_diagnostic("contact my attorney", policy_profile="default")
     assert diag is not None

@@ -1056,7 +1056,7 @@ def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypa
         + "\n\n"
         + ("Additional operative detail. " * 200)
         + "\n\n"
-        + ("z" * 1200)
+        + ("z" * 5200)
     )
     out_json = {
         "title": "Reseller and White-Label Services Agreement",
@@ -1094,7 +1094,8 @@ def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypa
     assert res.status_code == 200
     body = res.json()
     assert body.get("server_generation_failure_code") != "airlock_blocked"
-    assert len((body.get("document_text") or "").strip()) > 1000
+    assert body.get("generation_ok") is True
+    assert len((body.get("document_text") or "").strip()) > 5000
 
 
 def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
@@ -1141,7 +1142,7 @@ def test_premium_full_draft_degraded_airlock_returns_empty_document(monkeypatch,
         headers=_ORG_H,
         json={"intake_text": "SaaS services agreement between two LLCs. Fee $10,000. Delaware law."},
     )
-    assert res.status_code == 200
+    assert res.status_code == 503
     body = res.json()
     assert body.get("generation_outcome") == "degraded"
     assert body.get("server_generation_failure_code") == "airlock_blocked"
