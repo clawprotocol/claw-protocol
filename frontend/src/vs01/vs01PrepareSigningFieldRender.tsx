@@ -46,7 +46,8 @@ export function PrepareSigningFieldBody({
   onInputFocus,
 }: PrepareSigningFieldBodyProps) {
   const display = prepareTemplateDisplayForField(field, role, ownerPad);
-  const isOwnerField = (role?.kind ?? field.assignedSignerRoleKind) === "owner";
+  const fieldRoleKind = role?.kind ?? field.assignedSignerRoleKind ?? "owner";
+  const isOwnerField = fieldRoleKind === "owner";
   const stored = typeof field.value === "string" ? field.value : "";
   const resolved = resolvePrepareFieldDisplayValue(field, role, ownerPad);
   const editValue = stored || resolved;
@@ -87,13 +88,9 @@ export function PrepareSigningFieldBody({
       );
     }
     return (
-      <div className="vs01-sign-placement-signature-body vs01-sign-placement-body--noninteractive">
-        <span className="vs01-recipient-field-assignee">{display.assigneeLine}</span>
-        <span
-          className={`vs01-recipient-field-placeholder-text${display.isPlaceholder ? "" : " vs01-sign-placement-script"}`}
-        >
-          {display.body}
-        </span>
+      <div className="vs01-sign-placement-signature-body vs01-sign-placement-signature-body--counterparty vs01-sign-placement-body--noninteractive">
+        <span className="vs01-prepare-signature-heading">{display.assigneeLine}</span>
+        <span className="vs01-prepare-signature-placeholder">{display.body}</span>
       </div>
     );
   }

@@ -6,7 +6,8 @@ import {
   prepareAutoInitialsFieldId,
 } from "./vs01PrepareFieldPlacement";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
-import { fieldRectsOverlap, findNonOverlappingPrepareRect, prepareAutoInitialsLaneAnchor } from "./signingFields";
+import { fieldRectsOverlap, findNonOverlappingPrepareRect, isRectInPrepareAutoInitialsSafeZone } from "./signingFields";
+import { stampSenderFieldWithPrepareRole } from "./vs01SignerFieldAssignment";
 import {
   resolvePrepareSignerDisplayName,
   resolvePrepareSignerTitleDisplay,
@@ -55,9 +56,36 @@ describe("buildPrepareAutoInitialsEveryPage deconflict", () => {
         }
       }
     }
-    const anchors = roles.map((r) => prepareAutoInitialsLaneAnchor(r.partyIndex, { width: 0.075, height: 0.035 }));
-    const ys = anchors.map((a) => a.y);
-    expect(new Set(ys).size).toBe(ys.length);
+    for (const f of existing) {
+      expect(isRectInPrepareAutoInitialsSafeZone(f)).toBe(true);
+    }
+  });
+
+  it("manual signature and auto-initials do not collide on the same page", () => {
+    const roles = fivePartyRoles();
+    const owner = roles[0]!;
+    const sig = stampSenderFieldWithPrepareRole(
+      {
+        id: "owner-sig",
+        type: "signature",
+        page: 0,
+        x: 0.72,
+        y: 0.82,
+        width: 0.34,
+        height: 0.075,
+      },
+      owner,
+    );
+    const autos = buildPrepareAutoInitialsEveryPage({
+      role: owner,
+      pageCount: 1,
+      skippedPages: new Set(),
+      existingFields: [sig],
+      valueCtx: { typedName: "O", initials: "O" },
+    });
+    expect(autos.length).toBe(1);
+    expect(fieldRectsOverlap(sig, autos[0]!)).toBe(false);
+    expect(isRectInPrepareAutoInitialsSafeZone(autos[0]!)).toBe(true);
   });
 
   it("re-running checkbox does not duplicate initials for same role/page", () => {

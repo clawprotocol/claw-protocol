@@ -5,14 +5,14 @@ import {
   vs01DiagnosticsEnabled,
 } from "./vs01SignerFieldAssignment";
 import {
-  clampFieldRectToPage,
   computePrepareRectFromClick,
   computeRecipientRectFromClick,
   findNonOverlappingPrepareRect,
+  isRectInPrepareAutoInitialsSafeZone,
+  layoutPrepareAutoInitialsRectOnPage,
   logVs01FieldOverlapAdjusted,
   newSigningFieldId,
   normalizePlacedFieldGeometryIfBelowMinimum,
-  prepareAutoInitialsLaneAnchor,
   prepareAutoInitialsPlacementDims,
   type PlacedSigningField,
   type SigningFieldType,
@@ -160,7 +160,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
   const dims = prepareAutoInitialsPlacementDims();
   const { width, height } = dims;
   const roleId = args.role.roleId;
-  const roleLane = args.role.partyIndex;
+  const partyIndex = args.role.partyIndex;
   const pagesWithRoleInitials = new Set(
     args.existingFields
       .filter(
@@ -174,19 +174,6 @@ export function buildPrepareAutoInitialsEveryPage(args: {
   const placedSoFar: PlacedSigningField[] = [...args.existingFields];
   let added = 0;
   let skipped = 0;
-  const laneAnchor = prepareAutoInitialsLaneAnchor(roleLane, dims);
-  if (vs01DiagnosticsEnabled()) {
-    // eslint-disable-next-line no-console
-    console.info("[vs01-initials-lane-assigned]", {
-      roleIdShort: roleId.slice(0, 16),
-      partyIndex: args.role.partyIndex,
-      roleLane,
-      anchorX: laneAnchor.x,
-      anchorY: laneAnchor.y,
-      width,
-      height,
-    });
-  }
   for (let p = 0; p < args.pageCount; p++) {
     if (args.skippedPages.has(p)) {
       skipped += 1;
@@ -196,22 +183,54 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       skipped += 1;
       continue;
     }
-    const desired = clampFieldRectToPage(laneAnchor.x, laneAnchor.y, width, height);
     const onPage = placedSoFar.filter((f) => f.page === p);
+    const layout = layoutPrepareAutoInitialsRectOnPage({
+      partyIndex,
+      page: p,
+      existingFields: placedSoFar,
+      roleId,
+      dims,
+    });
+    if (vs01DiagnosticsEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-auto-initials-layout]", {
+        page: p,
+        roleIdShort: roleId.slice(0, 16),
+        partyIndex,
+        lane: layout.lane,
+        collisionCount: layout.collisionCount,
+        width,
+        height,
+      });
+    }
+    if (!layout.rect) {
+      skipped += 1;
+      if (vs01DiagnosticsEnabled()) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-auto-initials-layout]", {
+          page: p,
+          roleIdShort: roleId.slice(0, 16),
+          skipped: true,
+          reason: "no_clean_bottom_slot",
+        });
+      }
+      continue;
+    }
     const resolved = findNonOverlappingPrepareRect({
-      desiredRect: desired,
+      desiredRect: layout.rect,
       page: p,
       roleId,
       existingFields: onPage,
     });
     if (resolved.adjusted && vs01DiagnosticsEnabled()) {
       // eslint-disable-next-line no-console
-      console.info("[vs01-initials-overlap-resolved]", {
+      console.info("[vs01-auto-initials-collision-resolved]", {
         roleIdShort: roleId.slice(0, 16),
         page: p,
-        partyIndex: args.role.partyIndex,
-        fromX: desired.x,
-        fromY: desired.y,
+        partyIndex,
+        lane: layout.lane,
+        fromX: layout.rect.x,
+        fromY: layout.rect.y,
         toX: resolved.x,
         toY: resolved.y,
       });
@@ -237,6 +256,20 @@ export function buildPrepareAutoInitialsEveryPage(args: {
     out.push(field);
     placedSoFar.push(field);
     added += 1;
+    if (vs01DiagnosticsEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-auto-initials-final]", {
+        page: p,
+        roleIdShort: roleId.slice(0, 16),
+        partyIndex,
+        lane: layout.lane,
+        x: field.x,
+        y: field.y,
+        width: field.width,
+        height: field.height,
+        inSafeZone: isRectInPrepareAutoInitialsSafeZone(field),
+      });
+    }
   }
   if (vs01DiagnosticsEnabled()) {
     // eslint-disable-next-line no-console
@@ -246,7 +279,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       pageCount: args.pageCount,
       addedCount: added,
       skippedCount: skipped,
-      roleLane,
+      partyIndex,
     });
   }
   return out;

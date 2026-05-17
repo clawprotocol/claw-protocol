@@ -1160,7 +1160,9 @@ export function StepPrepareSignature({
         </p>
       </header>
 
-      <div className="vs01-sign-workspace">
+      <div
+        className={`vs01-sign-workspace${agreementBridgePlacementCopy ? " vs01-sign-workspace--prepare" : ""}`}
+      >
         <div className="vs01-sign-doc-col">
           {placementArmed && placementSurface && !previewLoading ? (
             <div className="vs01-sign-armed-banner" role="status">
@@ -1305,6 +1307,13 @@ export function StepPrepareSignature({
                                           data-field-id={field.id}
                                           className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
                                             field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
+                                          }${
+                                            field.type === "signature" &&
+                                            (findPrepareSigningRole(prepareSignerRoles, field.assignedSignerRoleId)
+                                              ?.kind ??
+                                              field.assignedSignerRoleKind) === "counterparty"
+                                              ? " vs01-sign-placement-box--counterparty-signature"
+                                              : ""
                                           }${isSel ? " vs01-sign-placement-box--selected" : ""}${
                                             pop ? " vs01-sign-placement-box--pop" : ""
                                           }${!isActiveRoleField ? " vs01-sign-placement-box--other-role" : ""}`}

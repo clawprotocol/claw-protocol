@@ -415,6 +415,96 @@ export function prepareAutoInitialsPlacementDims(): { width: number; height: num
   return { width: 0.075, height: 0.035 };
 }
 
+const PREPARE_SIGNATURE_OBSTACLE_PAD = 0.028;
+
+function expandNormRectForPad(
+  rect: { x: number; y: number; width: number; height: number },
+  pad: number,
+): { x: number; y: number; width: number; height: number } {
+  return {
+    x: Math.max(0, rect.x - pad),
+    y: Math.max(0, rect.y - pad),
+    width: Math.min(1, rect.width + pad * 2),
+    height: Math.min(1, rect.height + pad * 2),
+  };
+}
+
+/** Obstacle rects for prepare auto-initials layout (signatures padded to avoid overlap). */
+export function buildPreparePageObstacleRects(
+  fields: ReadonlyArray<
+    Pick<PlacedSigningField, "page" | "x" | "y" | "width" | "height" | "type" | "id" | "assignedSignerRoleId" | "autoInitials">
+  >,
+  page: number,
+  options?: { excludeFieldId?: string; excludeRoleAutoInitialsId?: string },
+): Array<{ x: number; y: number; width: number; height: number }> {
+  const out: Array<{ x: number; y: number; width: number; height: number }> = [];
+  for (const f of fields) {
+    if (f.page !== page) continue;
+    if (options?.excludeFieldId && f.id === options.excludeFieldId) continue;
+    if (
+      options?.excludeRoleAutoInitialsId &&
+      f.autoInitials &&
+      f.type === "initials" &&
+      (f.assignedSignerRoleId ?? "").trim() === options.excludeRoleAutoInitialsId
+    ) {
+      continue;
+    }
+    const pad =
+      f.type === "signature" ? PREPARE_SIGNATURE_OBSTACLE_PAD : AUTO_INITIALS_OBSTACLE_PAD;
+    out.push(expandNormRectForPad({ x: f.x, y: f.y, width: f.width, height: f.height }, pad));
+  }
+  return out;
+}
+
+/** True when a rect sits in the reserved bottom-right initials band (prepare packet). */
+export function isRectInPrepareAutoInitialsSafeZone(rect: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): boolean {
+  const yBottom = 1 - AUTO_INITIALS_MARGIN_BOTTOM - rect.height;
+  const yLow = yBottom - AUTO_INITIALS_BOTTOM_BAND_HEIGHT;
+  return (
+    rect.y >= yLow - 1e-5 &&
+    rect.y <= yBottom + 1e-5 &&
+    rect.x >= AUTO_INITIALS_BOTTOM_SWEEP_X_MIN - 1e-5 &&
+    rect.x + rect.width <= 1 - AUTO_INITIALS_MARGIN_RIGHT + 1e-5
+  );
+}
+
+export type PrepareAutoInitialsLayoutResult = {
+  rect: { x: number; y: number; width: number; height: number } | null;
+  lane: number;
+  collisionCount: number;
+};
+
+/**
+ * Deterministic bottom-right initials slot for one prepare signer on one page.
+ * Uses the same margin-band scanner as legacy auto-initials (no upward scatter).
+ */
+export function layoutPrepareAutoInitialsRectOnPage(args: {
+  partyIndex: number;
+  page: number;
+  existingFields: ReadonlyArray<PlacedSigningField>;
+  roleId: string;
+  dims?: { width: number; height: number };
+}): PrepareAutoInitialsLayoutResult {
+  const dims = args.dims ?? prepareAutoInitialsPlacementDims();
+  const lane = Math.max(0, Math.floor(args.partyIndex));
+  const obstacles = buildPreparePageObstacleRects(args.existingFields, args.page, {
+    excludeRoleAutoInitialsId: args.roleId,
+  });
+  const probe = findAutoInitialsMarginSlotOrNull(dims, obstacles, { columnOffset: lane });
+  let collisionCount = 0;
+  if (probe) {
+    for (const o of obstacles) {
+      if (fieldRectsOverlap(probe, o, AUTO_INITIALS_OBSTACLE_PAD)) collisionCount += 1;
+    }
+  }
+  return { rect: probe, lane, collisionCount };
+}
+
 export type PrepareRectObstacle = {
   x: number;
   y: number;
@@ -447,25 +537,18 @@ export function findNonOverlappingPrepareRect(args: {
   return { ...cleared, adjusted };
 }
 
-/** Deterministic bottom-right lane anchor for prepare auto-initials (role-scoped). */
+/**
+ * @deprecated Use {@link layoutPrepareAutoInitialsRectOnPage} (bottom margin-band scanner).
+ */
 export function prepareAutoInitialsLaneAnchor(partyIndex: number, dims: { width: number; height: number }): {
   x: number;
   y: number;
 } {
-  const baseX = 0.82;
-  const baseY = 0.91;
-  const laneStepY = 0.045;
-  const minY = 0.04;
-  const maxLanesPerColumn = Math.max(1, Math.floor((baseY - minY) / laneStepY) + 1);
-  const wrapCol = Math.floor(Math.max(0, partyIndex) / maxLanesPerColumn);
-  const laneInCol = partyIndex % maxLanesPerColumn;
-  let y = baseY - laneInCol * laneStepY;
-  let x = baseX - wrapCol * (dims.width + 0.012);
-  if (y + dims.height > 1 - 0.02) {
-    y = 1 - dims.height - 0.02;
-  }
-  x = Math.max(0.055, Math.min(x, 1 - dims.width - 0.02));
-  y = Math.max(minY, Math.min(y, 1 - dims.height - 0.02));
+  const lane = Math.max(0, Math.floor(partyIndex));
+  const slot = findAutoInitialsMarginSlotOrNull(dims, [], { columnOffset: lane });
+  if (slot) return { x: slot.x, y: slot.y };
+  const y = Math.max(0, 1 - AUTO_INITIALS_MARGIN_BOTTOM - dims.height);
+  const x = Math.max(AUTO_INITIALS_BOTTOM_SWEEP_X_MIN, 1 - AUTO_INITIALS_MARGIN_RIGHT - dims.width - lane * (dims.width + AUTO_INITIALS_COLUMN_GAP));
   return { x, y };
 }
 

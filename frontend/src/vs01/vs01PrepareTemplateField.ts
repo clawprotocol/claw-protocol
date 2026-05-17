@@ -78,10 +78,11 @@ export function prepareTemplateDisplayForField(
   switch (field.type) {
     case "signature": {
       if (kind === "counterparty") {
+        const party = (role?.partyName ?? role?.entityName ?? entity).trim() || "Signer";
         return {
-          body: resolved.trim() || "Signer signs here",
-          assigneeLine: entity,
-          isPlaceholder: !resolved.trim(),
+          body: "Signer signs here",
+          assigneeLine: `SIGNATURE — ${party}`,
+          isPlaceholder: true,
         };
       }
       return {
