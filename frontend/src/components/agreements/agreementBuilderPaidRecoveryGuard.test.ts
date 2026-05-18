@@ -34,10 +34,11 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
     expect(src).toContain("paidCheckoutRecovery: true");
   });
 
-  it("clears runPremiumModelPassRef after failure only when not in paid completion session (retry without checkout)", () => {
+  it("clears runPremiumModelPassRef after failure only when not retryable and not in paid completion session", () => {
     expect(src).toContain(
-      "if (result != null || !hasPaidPremiumCompletionSession()) {\n            runPremiumModelPassRef.current = null;\n          }",
+      "if (!retryableResult && (result != null || !hasPaidPremiumCompletionSession()))",
     );
+    expect(src).toContain("runPremiumModelPassRef.current = null");
   });
 
   it("optional full-draft upgrade failure keeps review phase when paid completion session is active", () => {
@@ -78,5 +79,43 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
 
   it("paid Pro upgrade failure copy remains available for real paid recovery panels", () => {
     expect(src).toContain("We couldn’t complete the Pro upgrade with your terms yet.");
+  });
+
+  it("suppresses amber recovery while premium return wait is active (patience / in-flight)", () => {
+    expect(src).toContain("const premiumReturnWaitActive = Boolean(");
+    expect(src).toMatch(/showProAmberRecoveryPanel = Boolean\([\s\S]*?!premiumReturnWaitActive/);
+  });
+
+  it("120s hard ceiling defers to patience extended when authoritative request is in flight", () => {
+    expect(src).toContain("onHardPatienceThresholdTimeout");
+    expect(src).toContain("[premium-modal-hard-ceiling-nonterminal]");
+    expect(src).toContain("[premium-return-wait-extended]");
+    expect(src).toContain("setPremiumReturnPatienceExtended(true)");
+  });
+
+  it("does not call applyPremiumModalFailopen from hard ceiling while request is in flight", () => {
+    const start = src.indexOf("const onHardPatienceThresholdTimeout = () => {");
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("const runModelPass = async", start);
+    expect(end).toBeGreaterThan(start);
+    const block = src.slice(start, end);
+    expect(block).toContain("premiumAuthoritativeRequestInFlightRef.current");
+    expect(block).toContain("return;");
+    expect(block).not.toMatch(/applyPremiumModalFailopen\([\s\S]*premiumAuthoritativeRequestInFlightRef/);
+  });
+
+  it("logs explicit user fallback to starter draft", () => {
+    expect(src).toContain("[premium-return-user-fallback]");
+    expect(src).toContain("PREMIUM_RETURN_USE_STARTER_LABEL");
+  });
+
+  it("logs late premium success after patience or failopen wait", () => {
+    expect(src).toContain("[premium-return-late-success-applied]");
+    expect(src).toContain("shouldLogPremiumReturnLateSuccess");
+  });
+
+  it("logs terminal premium completion boundary timeout", () => {
+    expect(src).toContain("[premium-return-terminal-timeout]");
+    expect(src).toContain("PREMIUM_COMPLETION_ATTEMPT_MAX_MS");
   });
 });

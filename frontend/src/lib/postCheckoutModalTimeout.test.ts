@@ -49,14 +49,26 @@ describe("postCheckoutModalTimeout policy", () => {
     ).toBe(false);
   });
 
-  it("hard ceiling with no body triggers failopen policy", () => {
+  it("hard ceiling with no body triggers failopen policy when request is not in flight", () => {
     expect(
       shouldFailOpenAfterHardCeiling({
         elapsedMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
         hasAcceptedServerFullDraftBody: false,
         premiumFullDraftRequestFailed: false,
+        authoritativeRequestInFlight: false,
       }),
     ).toBe(true);
+  });
+
+  it("120s hard ceiling while authoritative request in flight does not trigger failopen", () => {
+    expect(
+      shouldFailOpenAfterHardCeiling({
+        elapsedMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+        hasAcceptedServerFullDraftBody: false,
+        premiumFullDraftRequestFailed: false,
+        authoritativeRequestInFlight: true,
+      }),
+    ).toBe(false);
   });
 
   it("request failure triggers failopen regardless of elapsed time", () => {

@@ -82,9 +82,6 @@ import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
 import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
 import {
-  PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_BODY,
-  PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_TITLE,
-  PRO_UPGRADE_WAIT_MODAL_BODY,
   PRO_UPGRADE_WAIT_MODAL_TITLE,
   PRO_UPGRADE_WAIT_REASSURANCE,
   PRO_UPGRADE_WAIT_ROTATING_LINES,
@@ -411,6 +408,13 @@ import {
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
 } from "../../lib/postCheckoutModalTimeout";
+import {
+  PREMIUM_RETURN_KEEP_WAITING_LABEL,
+  PREMIUM_RETURN_RETRY_GENERATION_LABEL,
+  PREMIUM_RETURN_USE_STARTER_LABEL,
+  resolvePremiumCheckoutModalCopy,
+  shouldLogPremiumReturnLateSuccess,
+} from "../../lib/premiumPostCheckoutReturnUx";
 import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraftApi";
 import { preflightPremiumBackendHealth } from "./premiumBackendHealth";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
@@ -1860,6 +1864,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumPostCheckoutModalHardFailopenRef = useRef(false);
   /** True while `ensurePremiumCompletion` is awaited — 30s handler defers failopen only via deferred log + extended copy. */
   const premiumAuthoritativeRequestInFlightRef = useRef(false);
+  const setPremiumAuthoritativeRequestInFlight = useCallback((inFlight: boolean) => {
+    premiumAuthoritativeRequestInFlightRef.current = inFlight;
+    setPremiumAuthoritativeRequestInFlightUi(inFlight);
+  }, []);
   /** User hit escape on the post-checkout wait — do not apply a late `ensurePremiumCompletion` result. */
   const premiumPostCheckoutUserDismissedRef = useRef(false);
   const draftSnapshotRef = useRef<ParsedDraftShape | null>(null);
@@ -1903,6 +1911,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   /** UI-only: longer-wait copy after PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS without closing the modal. */
   const [premiumCheckoutModalExtendedWait, setPremiumCheckoutModalExtendedWait] = useState(false);
+  /** After 120s patience threshold while authoritative request still runs — not a failure state. */
+  const [premiumReturnPatienceExtended, setPremiumReturnPatienceExtended] = useState(false);
+  const [premiumAuthoritativeRequestInFlightUi, setPremiumAuthoritativeRequestInFlightUi] = useState(false);
   const [premiumNetworkRetryInFlight, setPremiumNetworkRetryInFlight] = useState(false);
   const [premiumNetworkStillReconnecting, setPremiumNetworkStillReconnecting] = useState(false);
   const [premiumGapQuestions, setPremiumGapQuestions] = useState<string[]>([]);
@@ -2331,6 +2342,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const createFlowPhaseRef = useRef(createFlowPhase);
   const displayPhaseRef = useRef(displayPhase);
   const premiumPostCheckoutPhaseRef = useRef(premiumPostCheckoutPhase);
+  const premiumReturnPatienceExtendedRef = useRef(premiumReturnPatienceExtended);
   const proFullDraftQualityRetryRef = useRef(proFullDraftQualityRetry);
   const proUpgradeUseStarterViewRef = useRef(proUpgradeUseStarterView);
   const hardErrorRef = useRef(hardError);
@@ -2338,6 +2350,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   createFlowPhaseRef.current = createFlowPhase;
   displayPhaseRef.current = displayPhase;
   premiumPostCheckoutPhaseRef.current = premiumPostCheckoutPhase;
+  premiumReturnPatienceExtendedRef.current = premiumReturnPatienceExtended;
   proFullDraftQualityRetryRef.current = proFullDraftQualityRetry;
   proUpgradeUseStarterViewRef.current = proUpgradeUseStarterView;
   hardErrorRef.current = hardError;
@@ -4360,6 +4373,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         opts: {
           extendedWaitWasActive: boolean;
           hardFailopenWasActive: boolean;
+          patienceExtendedWasActive: boolean;
           acceptedPlainLen: number;
           reason?: string;
           premiumRenderResolveSource?: string | null;
@@ -4420,9 +4434,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setCreateUiStage(CreateUiStage.DRAFT);
         setMobileWorkspacePane("preview");
         setPreviewPaneRevealed(true);
-        if (opts.hardFailopenWasActive) {
-          logPremiumFailopenOverriddenBySuccess({ bodyLen: opts.acceptedPlainLen, pipelineSource });
+        if (
+          shouldLogPremiumReturnLateSuccess({
+            hardFailopenWasActive: opts.hardFailopenWasActive,
+            patienceExtendedWasActive: opts.patienceExtendedWasActive,
+          })
+        ) {
+          if (opts.hardFailopenWasActive) {
+            logPremiumFailopenOverriddenBySuccess({ bodyLen: opts.acceptedPlainLen, pipelineSource });
+          }
+          // eslint-disable-next-line no-console
+          console.info("[premium-return-late-success-applied]", {
+            bodyLen: opts.acceptedPlainLen,
+            pipelineSource,
+            reason: opts.reason ?? "unspecified",
+            hard_failopen_was_active: opts.hardFailopenWasActive,
+            patience_extended_was_active: opts.patienceExtendedWasActive,
+          });
         }
+        setPremiumReturnPatienceExtended(false);
+        setPremiumCheckoutModalExtendedWait(false);
+        premiumModalExtendedWaitActiveRef.current = false;
+        premiumPostCheckoutModalHardFailopenRef.current = false;
         bumpPremiumSurfaceGateTick();
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -4472,6 +4505,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const applySuccess = (result: PremiumCompletionResult) => {
         const extendedWaitAtApplyStart = premiumModalExtendedWaitActiveRef.current;
         const hardFailopenAtApplyStart = premiumPostCheckoutModalHardFailopenRef.current;
+        const patienceExtendedAtApplyStart = premiumReturnPatienceExtendedRef.current;
         const runIdForLateApply = getOrInitSessionAgreementGenerationId();
         const logPremiumLateApply = (tag: string, fields: Record<string, unknown>) => {
           if (import.meta.env.DEV) {
@@ -4969,6 +5003,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           commitAuthoritativePremiumVisibleSurface(finalDoc, result.premiumRenderSource, {
             extendedWaitWasActive: extendedWaitAtApplyStart,
             hardFailopenWasActive: hardFailopenAtApplyStart,
+            patienceExtendedWasActive: patienceExtendedAtApplyStart,
             acceptedPlainLen: snapshotPlain.length,
             reason: "premium_rewrite_request_success_immediate_commit",
             premiumRenderResolveSource: resolvedPersist.premium_render_source,
@@ -5506,32 +5541,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             ts: new Date().toISOString(),
           });
         };
-        const onHardFailopenTimeout = () => {
-          if (!runIsCurrent()) return;
+        const applyPremiumModalFailopen = (failopenReason: string) => {
+          if (premiumAuthoritativeRequestInFlightRef.current) {
+            // eslint-disable-next-line no-console
+            console.info("[premium-modal-failopen-suppressed]", {
+              reason: failopenReason,
+              authoritative_request_in_flight: true,
+            });
+            return;
+          }
           const snap = readPremiumCompletionSnapshot();
           const hasAuthoritative =
             Boolean(snap?.premiumAccepted) &&
             isAuthoritativePremiumPipelineRenderSource(String(snap?.premiumPipelineRenderSource || "")) &&
             (snap?.premiumWinningBodyText || "").trim().length >= 500;
           if (hasAuthoritative) return;
-          /** Late `ensurePremiumCompletion` may still resolve; keep run current so `applySuccess` can win. */
           premiumPostCheckoutModalHardFailopenRef.current = true;
           console.warn("[premium-modal-timeout]", {
             timeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
-            phase: "hard_ceiling",
+            phase: "terminal_failopen",
+            reason: failopenReason,
             ts: new Date().toISOString(),
           });
           console.info("[premium-modal-failopen]", {
-            reason: "hard_ceiling_timeout",
-            source: "cached_or_prior_draft",
+            reason: failopenReason,
+            source: "terminal_failure",
           });
           if (import.meta.env.MODE !== "test") {
             // eslint-disable-next-line no-console
-            console.info("[CLAW] premium hydration still pending after modal wait", { reason: "modal_hard_ceiling_failopen" });
+            console.info("[CLAW] premium hydration failed after modal wait", { reason: failopenReason });
           }
           premiumModalExtendedWaitActiveRef.current = false;
           setPremiumCheckoutModalExtendedWait(false);
+          setPremiumReturnPatienceExtended(false);
           setPremiumPipelineUserMessage(null);
+          setPremiumAuthoritativeRequestInFlight(false);
           if (hasPaidPremiumCompletionSession()) {
             setHardError(null);
             setProFullDraftQualityRetry(true);
@@ -5550,6 +5594,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumPostCheckoutPhase(null);
           setPremiumGapQuestions([]);
           setPremiumGapOneField("");
+        };
+
+        const onHardPatienceThresholdTimeout = () => {
+          if (!runIsCurrent()) return;
+          const snap = readPremiumCompletionSnapshot();
+          const hasAuthoritative =
+            Boolean(snap?.premiumAccepted) &&
+            isAuthoritativePremiumPipelineRenderSource(String(snap?.premiumPipelineRenderSource || "")) &&
+            (snap?.premiumWinningBodyText || "").trim().length >= 500;
+          if (hasAuthoritative) return;
+
+          if (premiumAuthoritativeRequestInFlightRef.current) {
+            console.info("[premium-modal-hard-ceiling-nonterminal]", {
+              timeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+              ts: new Date().toISOString(),
+            });
+            console.info("[premium-return-wait-extended]", {
+              authoritative_request_in_flight: true,
+            });
+            premiumModalExtendedWaitActiveRef.current = true;
+            setPremiumCheckoutModalExtendedWait(true);
+            setPremiumReturnPatienceExtended(true);
+            return;
+          }
+
+          applyPremiumModalFailopen("hard_patience_threshold_no_inflight");
         };
 
         const runModelPass = async (args: {
@@ -5582,13 +5652,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPostCheckoutUserDismissedRef.current = false;
           premiumModalExtendedWaitActiveRef.current = false;
           setPremiumCheckoutModalExtendedWait(false);
+          setPremiumReturnPatienceExtended(false);
           premiumPostCheckoutModalHardFailopenRef.current = false;
           const sessionGenForPass = getOrInitSessionAgreementGenerationId();
           const sessionFpForPass = shortIntakeFingerprint(args.intakeText);
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
           let lastAttemptForLog = 0;
           modalSoftProgressTimerId = window.setTimeout(onSoftProgressTimeout, PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS);
-          modalHardFailopenTimerId = window.setTimeout(onHardFailopenTimeout, PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS);
+          modalHardFailopenTimerId = window.setTimeout(onHardPatienceThresholdTimeout, PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS);
           premiumModalEscapeHandlerRef.current = () => {
             if (!runIsCurrent()) return;
             clearPostCheckoutModalTimers();
@@ -5637,7 +5708,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 rawIntakeBase,
               );
               try {
-                premiumAuthoritativeRequestInFlightRef.current = true;
+                setPremiumAuthoritativeRequestInFlight(true);
                 try {
                   result = await withTimeout(
                     ensurePremiumCompletion({
@@ -5661,7 +5732,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     "premium_completion_attempt",
                   );
                 } finally {
-                  premiumAuthoritativeRequestInFlightRef.current = false;
+                  setPremiumAuthoritativeRequestInFlight(false);
                 }
                 console.info("[premium-flow] premium_completion_timeout_boundary", {
                   attempt,
@@ -5684,6 +5755,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   timed_out: timedOutThisAttempt,
                 });
                 console.warn("[premium-flow] premium_rewrite_request_failure", { attempt, err: e });
+                if (timedOutThisAttempt) {
+                  console.warn("[premium-return-terminal-timeout]", {
+                    attempt,
+                    timeout_ms: premiumCompletionAttemptTimeoutMs,
+                    ts: new Date().toISOString(),
+                  });
+                }
                 if (import.meta.env.DEV && timedOutThisAttempt) {
                   // eslint-disable-next-line no-console
                   console.info("[premium-late-apply] ensure_attempt_wall_timeout", {
@@ -9754,6 +9832,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, []);
 
   const handleProUpgradeUseStarterInstead = React.useCallback(() => {
+    console.info("[premium-return-user-fallback]", {
+      source: "use_starter_draft_for_now",
+      authoritative_request_in_flight: premiumAuthoritativeRequestInFlightRef.current,
+    });
+    premiumCheckoutRunGenRef.current += 1;
+    setPremiumAuthoritativeRequestInFlight(false);
+    setPremiumReturnPatienceExtended(false);
+    setPremiumCheckoutModalExtendedWait(false);
+    premiumModalExtendedWaitActiveRef.current = false;
+    premiumPostCheckoutModalHardFailopenRef.current = false;
+    setProFullDraftQualityRetry(false);
+    setProFullDraftCustomGateMessage(null);
+    setPremiumPostCheckoutPhase(null);
     clearPaidPremiumCompletionSession();
     bumpPremiumSurfaceGateTick();
     setProUpgradeUseStarterView(true);
@@ -11968,8 +12059,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumProTruthGate,
     renderSource: blockedPreviewRenderSource,
   });
+  const premiumReturnWaitActive = Boolean(
+    premiumPostCheckoutPhase || premiumAuthoritativeRequestInFlightUi || premiumReturnPatienceExtended,
+  );
   const showProAmberRecoveryPanel = Boolean(
-    premiumPaidDocumentSurface && !proUpgradeUseStarterView && !canProceedWithPaidProDocument,
+    premiumPaidDocumentSurface &&
+      !proUpgradeUseStarterView &&
+      !canProceedWithPaidProDocument &&
+      !premiumReturnWaitActive,
   );
   const showRetryAsPrimaryCta = Boolean(
     simpleCreateUnifiedBottomCta &&
@@ -13691,28 +13788,74 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     </>
                   ) : (
                     <>
-                      <h2
-                        id="claw-premium-processing-title"
-                        className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
-                      >
-                        {premiumCheckoutModalExtendedWait
-                          ? PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_TITLE
-                          : CLAW_PREMIUM_PREPARING_AGREEMENT_COPY}
-                      </h2>
-                      <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
-                        {premiumCheckoutModalExtendedWait
-                          ? PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_BODY
-                          : PRO_UPGRADE_WAIT_MODAL_BODY}
-                      </p>
-                      <ProUpgradeWaitRotatingText
-                        active
-                        lines={PRO_UPGRADE_WAIT_ROTATING_LINES}
-                        intervalMs={2500}
-                        className="mt-4 min-h-[3rem] text-center text-sm leading-relaxed text-slate-300 sm:text-base"
-                      />
-                      <p className="mt-2 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
-                        {PRO_UPGRADE_WAIT_REASSURANCE}
-                      </p>
+                      {(() => {
+                        const modalTier = premiumReturnPatienceExtended
+                          ? ("patience_extended" as const)
+                          : premiumCheckoutModalExtendedWait
+                            ? ("soft_progress" as const)
+                            : ("initial" as const);
+                        const modalCopy = resolvePremiumCheckoutModalCopy(modalTier);
+                        return (
+                          <>
+                            <h2
+                              id="claw-premium-processing-title"
+                              className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
+                            >
+                              {modalCopy.title}
+                            </h2>
+                            <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
+                              {modalCopy.body}
+                            </p>
+                            {modalCopy.helper ? (
+                              <p className="mt-2 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
+                                {modalCopy.helper}
+                              </p>
+                            ) : null}
+                            {!modalCopy.showPatienceActions ? (
+                              <ProUpgradeWaitRotatingText
+                                active
+                                lines={PRO_UPGRADE_WAIT_ROTATING_LINES}
+                                intervalMs={2500}
+                                className="mt-4 min-h-[3rem] text-center text-sm leading-relaxed text-slate-300 sm:text-base"
+                              />
+                            ) : null}
+                            {!modalCopy.showPatienceActions ? (
+                              <p className="mt-2 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
+                                {PRO_UPGRADE_WAIT_REASSURANCE}
+                              </p>
+                            ) : null}
+                            {modalCopy.showPatienceActions ? (
+                              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
+                                <button
+                                  type="button"
+                                  className="vs01-btn vs01-btn--primary w-full sm:w-auto"
+                                  onClick={() => {
+                                    setPremiumReturnPatienceExtended(true);
+                                    setPremiumCheckoutModalExtendedWait(true);
+                                  }}
+                                >
+                                  {PREMIUM_RETURN_KEEP_WAITING_LABEL}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="vs01-btn vs01-btn--secondary w-full sm:w-auto"
+                                  disabled={premiumAuthoritativeRequestInFlightUi}
+                                  onClick={() => void handleRetryProFullDraft()}
+                                >
+                                  {PREMIUM_RETURN_RETRY_GENERATION_LABEL}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="vs01-btn vs01-btn--secondary w-full sm:w-auto"
+                                  onClick={() => handleProUpgradeUseStarterInstead()}
+                                >
+                                  {PREMIUM_RETURN_USE_STARTER_LABEL}
+                                </button>
+                              </div>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                       {premiumPipelineUserMessage &&
                       premiumPipelineUserMessage !== CLAW_PREMIUM_PREPARING_AGREEMENT_COPY ? (
                         <p className="mt-3 text-center text-sm font-medium text-amber-200/95" role="status">
@@ -15012,7 +15155,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             onClick={handleRetryProFullDraft}
                                           >
                                             {hasPaidPremiumCompletionSession()
-                                              ? "Retry Pro agreement"
+                                              ? PREMIUM_RETURN_RETRY_GENERATION_LABEL
                                               : "Retry Pro draft"}
                                           </button>
                                           {hasPaidPremiumCompletionSession() ? (
@@ -15021,7 +15164,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-500/50 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800/60 sm:w-auto"
                                               onClick={handleProUpgradeUseStarterInstead}
                                             >
-                                              Continue with current draft for now
+                                              {PREMIUM_RETURN_USE_STARTER_LABEL}
                                             </button>
                                           ) : null}
                                         </div>
@@ -15051,7 +15194,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             onClick={handleRetryProFullDraft}
                                           >
                                             {hasPaidPremiumCompletionSession()
-                                              ? "Retry Pro agreement"
+                                              ? PREMIUM_RETURN_RETRY_GENERATION_LABEL
                                               : "Retry Pro draft"}
                                           </button>
                                           {!hasPaidPremiumCompletionSession() ? (
@@ -15069,7 +15212,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             onClick={handleProUpgradeUseStarterInstead}
                                           >
                                             {hasPaidPremiumCompletionSession()
-                                              ? "Continue with current draft for now"
+                                              ? PREMIUM_RETURN_USE_STARTER_LABEL
                                               : "Use starter draft instead"}
                                           </button>
                                         </div>
