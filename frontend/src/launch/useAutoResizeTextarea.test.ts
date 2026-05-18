@@ -2,6 +2,8 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP,
+  HOMEPAGE_TEXTAREA_MAX_PX_MOBILE,
   syncTextareaSize,
   useAutoResizeTextarea,
   useResponsiveTextareaMaxPx,
@@ -25,9 +27,9 @@ function mountTextareaLikeHomepage(widthPx = 560) {
   el.style.width = `${widthPx}px`;
   el.style.lineHeight = "26px";
   el.style.paddingTop = "16px";
-  el.style.paddingBottom = "48px";
+  el.style.paddingBottom = "56px";
   el.style.paddingLeft = "16px";
-  el.style.paddingRight = "56px";
+  el.style.paddingRight = "64px";
   el.style.border = "1px solid #cbd5e1";
   el.rows = 4;
   document.body.appendChild(el);
@@ -44,18 +46,39 @@ describe("syncTextareaSize", () => {
       get: () => measuredScroll,
     });
 
-    const initial = syncTextareaSize(el, { minRows: 4, maxPx: 420 });
-    expect(initial.heightPx).toBe(180);
+    const initial = syncTextareaSize(el, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    expect(initial.heightPx).toBe(181);
     expect(initial.overflowAuto).toBe(false);
     expect(el.style.overflowY).toBe("hidden");
-    expect(el.style.maxHeight).toBe("420px");
+    expect(el.style.maxHeight).toBe(`${HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP}px`);
 
     measuredScroll = 900;
-    const grown = syncTextareaSize(el, { minRows: 4, maxPx: 420 });
-    expect(grown.heightPx).toBe(420);
+    const grown = syncTextareaSize(el, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    expect(grown.heightPx).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
     expect(grown.overflowAuto).toBe(true);
     expect(el.style.overflowY).toBe("auto");
 
+    document.body.removeChild(el);
+  });
+
+  it("uses overflow hidden below cap and auto at cap", () => {
+    const el = document.createElement("textarea");
+    document.body.appendChild(el);
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 400,
+    });
+    const under = syncTextareaSize(el, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    expect(under.overflowAuto).toBe(false);
+    expect(el.style.overflowY).toBe("hidden");
+
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 700,
+    });
+    const over = syncTextareaSize(el, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    expect(over.overflowAuto).toBe(true);
+    expect(el.style.overflowY).toBe("auto");
     document.body.removeChild(el);
   });
 });
@@ -68,20 +91,57 @@ describe("useAutoResizeTextarea", () => {
     expect(IRONCLAD_HOMEPAGE_PROMPT.split("\n").length).toBeGreaterThan(4);
   });
 
-  it("grows height for long pasted content (Ironclad-scale line count) up to maxPx", () => {
+  it("grows Ironclad-scale pasted content above 420px up to desktop cap", () => {
+    const pasted = `${IRONCLAD_HOMEPAGE_PROMPT}\n${"Line of deal terms.\n".repeat(100)}`;
+    const el = mountTextareaLikeHomepage();
+    el.value = pasted;
+    // jsdom under-reports scrollHeight for long multiline text; production hero paste ~480px at ~560px width.
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 480,
+    });
+
+    const ref = { current: el };
+    const { result } = renderHook(() =>
+      useAutoResizeTextarea(ref, pasted, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+    );
+    act(() => {
+      result.current.sync();
+    });
+
+    const heightPx = parseFloat(el.style.height);
+    expect(heightPx).toBeGreaterThan(420);
+    expect(heightPx).toBeLessThanOrEqual(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
+    expect(el.style.overflowY).toBe("hidden");
+
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 900,
+    });
+    act(() => {
+      result.current.sync();
+    });
+    expect(parseFloat(el.style.height)).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
+    expect(el.style.overflowY).toBe("auto");
+    document.body.removeChild(el);
+  });
+
+  it("grows height for long pasted content up to maxPx", () => {
     const long = `${IRONCLAD_HOMEPAGE_PROMPT.split("\n")[0]}\n${"Line of deal terms.\n".repeat(80)}`;
     const el = mountTextareaLikeHomepage();
     el.value = long;
 
     const ref = { current: el };
-    const { result } = renderHook(() => useAutoResizeTextarea(ref, long, { minRows: 4, maxPx: 420 }));
+    const { result } = renderHook(() =>
+      useAutoResizeTextarea(ref, long, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+    );
     act(() => {
       result.current.sync();
     });
 
     const heightPx = parseFloat(el.style.height);
     expect(heightPx).toBeGreaterThan(120);
-    expect(heightPx).toBeLessThanOrEqual(420);
+    expect(heightPx).toBeLessThanOrEqual(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
     document.body.removeChild(el);
   });
 
@@ -90,7 +150,7 @@ describe("useAutoResizeTextarea", () => {
     const ref = { current: el };
     const short = "Hi";
     const { result, rerender } = renderHook(
-      ({ v }) => useAutoResizeTextarea(ref, v, { minRows: 4, maxPx: 420 }),
+      ({ v }) => useAutoResizeTextarea(ref, v, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
       { initialProps: { v: short } },
     );
     el.value = short;
@@ -117,7 +177,9 @@ describe("useAutoResizeTextarea", () => {
         return 1;
       });
     const ref = { current: document.createElement("textarea") };
-    const { result } = renderHook(() => useAutoResizeTextarea(ref, "short", { maxPx: 420 }));
+    const { result } = renderHook(() =>
+      useAutoResizeTextarea(ref, "short", { maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+    );
     act(() => {
       result.current.onPaste();
       result.current.onDrop();
@@ -126,7 +188,7 @@ describe("useAutoResizeTextarea", () => {
     raf.mockRestore();
   });
 
-  it("useResponsiveTextareaMaxPx uses 420 desktop and 300 mobile", () => {
+  it("useResponsiveTextareaMaxPx uses 520 desktop and 360 mobile", () => {
     Object.defineProperty(window, "matchMedia", {
       writable: true,
       value: vi.fn().mockImplementation((q: string) => ({
@@ -136,7 +198,7 @@ describe("useAutoResizeTextarea", () => {
       })),
     });
     const { result: mobile } = renderHook(() => useResponsiveTextareaMaxPx());
-    expect(mobile.current).toBe(300);
+    expect(mobile.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
 
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -147,7 +209,7 @@ describe("useAutoResizeTextarea", () => {
       })),
     });
     const { result: desktop } = renderHook(() => useResponsiveTextareaMaxPx());
-    expect(desktop.current).toBe(420);
+    expect(desktop.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
   });
 });
 

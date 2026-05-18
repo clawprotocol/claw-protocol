@@ -1,8 +1,12 @@
 import { useCallback, useLayoutEffect, useState, type RefObject } from "react";
 
+/** Homepage hero textarea caps (visible box before internal scroll). */
+export const HOMEPAGE_TEXTAREA_MAX_PX_MOBILE = 360;
+export const HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP = 520;
+
 export type SyncTextareaSizeOpts = {
   minRows?: number;
-  /** Max height in px before internal scrolling (desktop ~420, mobile ~300). */
+  /** Max height in px before internal scrolling. */
   maxPx: number;
 };
 
@@ -13,8 +17,26 @@ export type SyncTextareaSizeResult = {
 };
 
 /**
- * Measure and apply textarea height from content. Resets height before reading scrollHeight
- * so growth is not capped by a previous smaller inline height.
+ * Measure full content height without an applied maxHeight cap (must run before setting maxHeight).
+ */
+export function measureTextareaScrollHeight(el: HTMLTextAreaElement): number {
+  el.style.boxSizing = "border-box";
+  el.style.minHeight = "0";
+  el.style.maxHeight = "none";
+  el.style.height = "0px";
+  el.style.overflowY = "hidden";
+  el.style.overflowX = "hidden";
+
+  let scrollH = el.scrollHeight;
+  if (scrollH <= 0 && el.value.trim()) {
+    el.style.height = "auto";
+    scrollH = el.scrollHeight;
+  }
+  return Math.ceil(scrollH);
+}
+
+/**
+ * Measure and apply textarea height from content. The hook owns height, maxHeight, and overflowY.
  */
 export function syncTextareaSize(
   el: HTMLTextAreaElement,
@@ -23,22 +45,21 @@ export function syncTextareaSize(
   const minRows = opts.minRows ?? 4;
   const maxPx = opts.maxPx;
 
-  el.style.boxSizing = "border-box";
-  el.style.maxHeight = "none";
-  el.style.height = "auto";
-  el.style.overflowY = "hidden";
-
   const style = getComputedStyle(el);
   const lineHeight = parseFloat(style.lineHeight) || 24;
   const padY =
     (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
   const borderY =
     (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
-  const minPx = lineHeight * minRows + padY + borderY;
+  const minPx = Math.ceil(lineHeight * minRows + padY + borderY);
 
-  const scrollH = el.scrollHeight;
-  const heightPx = Math.min(maxPx, Math.max(minPx, scrollH));
+  const scrollH = measureTextareaScrollHeight(el);
   const overflowAuto = scrollH > maxPx;
+  let heightPx = Math.min(maxPx, Math.max(minPx, scrollH));
+  // Avoid clipping the last line when still below the cap (subpixel / padding).
+  if (!overflowAuto && heightPx < maxPx) {
+    heightPx = Math.min(maxPx, heightPx + 1);
+  }
 
   el.style.maxHeight = `${maxPx}px`;
   el.style.height = `${heightPx}px`;
@@ -58,15 +79,18 @@ export type AutoResizeTextareaHandlers = {
   onDrop: () => void;
 };
 
-/** Responsive max height: ~300px mobile, ~420px desktop. */
+/** Responsive max height: 360px mobile, 520px desktop. */
 export function useResponsiveTextareaMaxPx(): number {
   const [maxPx, setMaxPx] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches ? 300 : 420,
+    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches
+      ? HOMEPAGE_TEXTAREA_MAX_PX_MOBILE
+      : HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP,
   );
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(max-width: 639px)");
-    const apply = () => setMaxPx(mq.matches ? 300 : 420);
+    const apply = () =>
+      setMaxPx(mq.matches ? HOMEPAGE_TEXTAREA_MAX_PX_MOBILE : HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
     apply();
     mq.addEventListener("change", apply);
     window.addEventListener("resize", apply);
@@ -85,14 +109,14 @@ function scheduleTextareaSync(sync: () => void): void {
   });
 }
 
-/** Collapsed ~4–5 lines; grows with content up to maxPx, then scrolls inside the field. */
+/** Grows with content up to maxPx; internal scroll only after cap. */
 export function useAutoResizeTextarea(
   ref: RefObject<HTMLTextAreaElement | null>,
   value: string,
   opts?: AutoResizeTextareaOpts,
 ): AutoResizeTextareaHandlers {
   const minRows = opts?.minRows ?? 4;
-  const maxPx = opts?.maxPx ?? 420;
+  const maxPx = opts?.maxPx ?? HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP;
 
   const sync = useCallback(() => {
     const el = ref.current;
@@ -122,6 +146,17 @@ export function useAutoResizeTextarea(
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [sync]);
+
+  useLayoutEffect(() => {
+    if (typeof document === "undefined" || !document.fonts?.ready) return;
+    let cancelled = false;
+    void document.fonts.ready.then(() => {
+      if (!cancelled) sync();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sync, value]);
 
   return { sync, onPaste, onDrop };
 }

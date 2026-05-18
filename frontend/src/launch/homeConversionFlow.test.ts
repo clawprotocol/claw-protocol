@@ -109,8 +109,12 @@ describe("LaunchHomePage routing (static)", () => {
     expect(page).toContain("useResponsiveTextareaMaxPx");
     expect(page).toContain('rows={4}');
     expect(page).toContain("resize-none");
+    expect(page).toContain("pb-14");
+    expect(page).toContain("pr-16");
+    expect(page).toContain("min-h-0 overflow-visible");
     expect(page).not.toContain("min-h-[6.5rem]");
-    expect(page).not.toContain("overflow-hidden");
+    expect(page).not.toMatch(/textarea[\s\S]*overflow-hidden/);
+    expect(page).not.toContain("max-h-");
   });
 });
 

@@ -215,7 +215,7 @@ export function LaunchHomePage() {
             <label htmlFor="claw-hero-intake" className="sr-only">
               Describe your agreement
             </label>
-            <div className="relative">
+            <div className="relative min-h-0 overflow-visible">
               <textarea
                 ref={intakeRef}
                 id="claw-hero-intake"
@@ -232,7 +232,7 @@ export function LaunchHomePage() {
                 onInput={() => syncHeroTextarea()}
                 placeholder={HOMEPAGE_HERO_PLACEHOLDER || home.heroPlaceholder}
                 disabled={handoffBusy || homeTransitionActive}
-                className="claw-seo-input block w-full resize-none px-4 py-4 pb-12 pr-14 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out lg:text-lg lg:placeholder:text-lg"
+                className="claw-seo-input block w-full resize-none px-4 py-4 pb-14 pr-16 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out lg:text-lg lg:placeholder:text-lg"
               />
               <HeroVoiceInputBar
                 surface="light"
