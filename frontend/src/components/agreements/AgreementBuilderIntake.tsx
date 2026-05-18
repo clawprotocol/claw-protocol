@@ -42,6 +42,7 @@ import {
   type StarterQuickAdd,
 } from "../../launch/simpleProduct/starterQuickAdds";
 import { StarterQuickAddsRow } from "./StarterQuickAddsRow";
+import { StarterDraftDocumentSurface } from "./StarterDraftDocumentSurface";
 import {
   NO_ATTORNEY_CLIENT,
   PRODUCT_NOT_LAW_FIRM,
@@ -49,9 +50,6 @@ import {
 } from "../../compliance/disclosureCopy";
 import {
   FUNNEL_CTA_SEND_WITH_PRO,
-  FUNNEL_FREE_STARTER_BODY,
-  FUNNEL_FREE_STARTER_HEADLINE,
-  FUNNEL_FREE_STARTER_HELPER,
   HOMEPAGE_LONG_INTAKE_EXAMPLE,
   INTAKE_INTRO_HEADLINE,
   INTAKE_MICRO_TRUST_LINE,
@@ -102,8 +100,8 @@ import { ProUpgradeWaitRotatingText } from "./ProUpgradeWaitRotatingText";
 import {
   CHIP_STATE_COMMERCIAL,
   CHIP_STATE_PRO_NEEDS_DRAFT,
-  CHIP_STATE_READY,
   CHIP_VERSION_PRO,
+  CHIP_STATE_INITIAL_READY,
   CHIP_VERSION_STARTER,
   PREVIEW_BLOCK_TITLE,
   PRO_REPLACED_STARTER_PREVIEW,
@@ -123,10 +121,18 @@ import {
 } from "./reviewRefineUserCopy";
 import {
   DRAFT_LOADING_KEEPING,
+  DRAFT_LOADING_PREPARING,
+  DRAFT_LOADING_REVIEW_SCREEN,
   DRAFT_LOADING_STRUCTURING,
-  DRAFT_LOADING_TURNING,
   PRO_CTA_CONTINUE,
 } from "../../launch/simpleProduct/proConversionCopy";
+import {
+  REVIEW_AHA_CHIP,
+  REVIEW_AHA_HEADING,
+  REVIEW_AHA_REASSURANCE,
+  REVIEW_AHA_SUBHEAD,
+  logProContinuationCardVisible,
+} from "../../launch/simpleProduct/guidedWorkflowCopy";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
   getStarterProRefineCtaExperiment,
@@ -575,6 +581,8 @@ type Props = {
    * starter hero/step 1 chrome (title, stepper, starter chips) without resetting intake stage.
    */
   onSimpleCreateShellChrome?: (state: { paidProReviewReady: boolean }) => void;
+  /** Homepage auto-generate handoff: parent shows concierge overlay until review is ready. */
+  onHomeGuidedTransitionPhase?: (phase: "preparing" | "review_ready") => void;
 };
 
 type MissingKey =
@@ -929,9 +937,9 @@ const PREMIUM_ORIGINAL_WORDING_PLACEHOLDER =
 const PREMIUM_ORIGINAL_WORDING_CTA = FUNNEL_CTA_SEND_WITH_PRO;
 const PREMIUM_ORIGINAL_WORDING_DETAILS_SUMMARY = "Use your exact wording (LawDog Pro)";
 
-const STARTER_REVIEW_HEADLINE = FUNNEL_FREE_STARTER_HEADLINE;
-const STARTER_REVIEW_SUBLINE = FUNNEL_FREE_STARTER_BODY;
-const STARTER_REVIEW_HELPER = FUNNEL_FREE_STARTER_HELPER;
+const STARTER_REVIEW_HEADLINE = REVIEW_AHA_HEADING;
+const STARTER_REVIEW_SUBLINE = REVIEW_AHA_SUBHEAD;
+const STARTER_REVIEW_HELPER = REVIEW_AHA_REASSURANCE;
 const STARTER_CONTINUE_TO_SEND_UPGRADE_NUDGE =
   "Closing soon? Continue with Pro for a calmer review surface, clearer terms, and professional delivery.";
 
@@ -1704,6 +1712,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   firstLawdogSession = false,
   homeHeroAutoGenerate = false,
   onSimpleCreateShellChrome,
+  onHomeGuidedTransitionPhase,
 }) => {
   const [intakeBaselineCommitted, setIntakeBaselineCommitted] = useState("");
   const [intakeStepBuffer, setIntakeStepBuffer] = useState(() =>
@@ -7921,6 +7930,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase === "preparing_review" ||
     loading;
 
+  useEffect(() => {
+    if (!homeHeroAutoGenerate || !onHomeGuidedTransitionPhase) return;
+    const reviewReady =
+      Boolean(draft) &&
+      createUiStage === CreateUiStage.DRAFT &&
+      (createFlowPhase === "draft_ready_for_review" || (!isGenerating && draft));
+    if (reviewReady) {
+      onHomeGuidedTransitionPhase("review_ready");
+      return;
+    }
+    if (isGenerating || !draft) {
+      onHomeGuidedTransitionPhase("preparing");
+    }
+  }, [
+    homeHeroAutoGenerate,
+    onHomeGuidedTransitionPhase,
+    draft,
+    createUiStage,
+    createFlowPhase,
+    isGenerating,
+  ]);
+
   /**
    * Authoritative: user has left the first-time “describe only” INPUT shell (generation started or draft exists).
    * Used so the legacy intake chrome never flashes between INPUT → DRAFT (state-driven, not refs).
@@ -8779,6 +8810,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
+  const useStarterDocumentPaperSurface = Boolean(
+    productionDraftPrimaryReviewSurface &&
+      isFreeStarterReviewSurface &&
+      streamlineFirstRunReviewUi &&
+      createUiStage === CreateUiStage.DRAFT &&
+      !premiumPaidDocumentSurface,
+  );
+
   useLayoutEffect(() => {
     const surface = premiumPaidDocumentSurface;
     if (!surface) {
@@ -9037,6 +9076,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     obs.observe(el);
     return () => obs.disconnect();
   }, [showStarterProRefineUpsell, starterProRefineCtaExperiment, tier]);
+
+  useEffect(() => {
+    if (!showStarterProRefineUpsell) return;
+    logProContinuationCardVisible();
+  }, [showStarterProRefineUpsell]);
 
   /** Starter/basic review editor helper — independent of upgrade lock so copy stays visible while editing. */
   const starterReviewEditableHelperSurface = useMemo(() => {
@@ -9589,8 +9633,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (m === "pro_upgrade") return "Preparing your LawDog Pro agreement...";
     if (displayPhase === "hydrating_generated") return DRAFT_LOADING_KEEPING;
     if (displayPhase === "generating_draft" || displayPhase === "editing_pro") return DRAFT_LOADING_STRUCTURING;
-    if (displayPhase === "preparing_review") return DRAFT_LOADING_TURNING;
-    return DRAFT_LOADING_STRUCTURING;
+    if (displayPhase === "preparing_review") return DRAFT_LOADING_REVIEW_SCREEN;
+    return DRAFT_LOADING_PREPARING;
   };
   /** Production draft parse / hydrate: sticky showed NOTTHING_SENT + busy CTA — one line only. */
   const stickyProductionAgreementCreationLoading = Boolean(
@@ -10324,8 +10368,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       proCheckoutRecipientStageAdvanceAllowed,
   );
 
+  const hideStickyForStarterProContinuation = Boolean(
+    streamlineFirstRunReviewUi &&
+      showStarterProRefineUpsell &&
+      createUiStage === CreateUiStage.DRAFT,
+  );
+
   const simpleCreateStickyBottomBarVisible =
-    simpleCreateStickyBottomBarVisibleBase && !hideStickyForPaidProFinalizeDeliveryChoice;
+    simpleCreateStickyBottomBarVisibleBase &&
+    !hideStickyForPaidProFinalizeDeliveryChoice &&
+    !hideStickyForStarterProContinuation;
 
   useEffect(() => {
     if (!import.meta.env.DEV || !hideStickyForPaidProFinalizeDeliveryChoice) return;
@@ -10344,8 +10396,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       return { version: CHIP_VERSION_PRO, state: CHIP_STATE_PRO_NEEDS_DRAFT };
     }
-    return { version: CHIP_VERSION_STARTER, state: CHIP_STATE_READY };
-  }, [createUiStage, draft, premiumPaidDocumentSurface, premiumProTruthGate]);
+    if (streamlineFirstRunReviewUi) {
+      return { version: "", state: REVIEW_AHA_CHIP };
+    }
+    return { version: CHIP_VERSION_STARTER, state: CHIP_STATE_INITIAL_READY };
+  }, [createUiStage, draft, premiumPaidDocumentSurface, premiumProTruthGate, streamlineFirstRunReviewUi]);
 
   /**
    * If checkout occurred and strict truth gate blocks success, emit a second (non-once)
@@ -11781,6 +11836,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               reason: !draft ? "no_draft" : undefined,
             };
           }
+        }
+        if (
+          showUpgradeToFullDraftOnReview &&
+          streamlineFirstRunReviewUi &&
+          showStarterProRefineUpsell
+        ) {
+          return {
+            label: "Keep reviewing",
+            action: "guided_continue",
+            disabled: false,
+          };
         }
         if (showUpgradeToFullDraftOnReview) {
           // Pro-required tier (13+ real parties) gets an explicit, lower-pressure label.
@@ -14723,9 +14789,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               className="mb-3 flex flex-wrap items-center gap-2"
                               aria-label="Draft version and status"
                             >
-                              <span className="inline-flex items-center rounded-md border border-slate-600/70 bg-slate-900/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200">
-                                {productionDocumentStatusChips.version}
-                              </span>
+                              {productionDocumentStatusChips.version ? (
+                                <span className="inline-flex items-center rounded-md border border-slate-600/70 bg-slate-900/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200">
+                                  {productionDocumentStatusChips.version}
+                                </span>
+                              ) : null}
                               <span className="inline-flex items-center rounded-md border border-emerald-500/25 bg-emerald-950/20 px-2.5 py-1 text-[11px] font-medium tracking-wide text-emerald-100/90">
                                 {productionDocumentStatusChips.state}
                               </span>
@@ -14877,9 +14945,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
                                     {STARTER_REVIEW_SUBLINE}
                                   </p>
-                                  <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
-                                    {STARTER_REVIEW_HELPER}
-                                  </p>
                                 </>
                               ) : (
                                 <>
@@ -15026,9 +15091,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 )}
                               </>
                             ) : streamlineFirstRunReviewUi ? (
-                              <span className="block text-slate-500">
-                                {STARTER_REVIEW_HELPER} Optional upgrades stay available when you want them.
-                              </span>
+                              <span className="block text-slate-500">{STARTER_REVIEW_HELPER}</span>
                             ) : showUpgradeToFullDraftOnReview ? (
                               <>When you&apos;re happy here, use Continue at the bottom to add recipients — still no
                               automatic sends.</>
@@ -15565,11 +15628,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             ) : productionDraftPrimaryReviewSurface ? (
                               <div
                                 className={`rounded-lg transition-[box-shadow,ring-color] duration-500 ${
-                                  !hasFullDraftAccess
+                                  !hasFullDraftAccess && !useStarterDocumentPaperSurface
                                     ? "rounded-xl border border-slate-800/45 bg-slate-950/15 p-0.5"
                                     : ""
                                 }`}
                               >
+                                {useStarterDocumentPaperSurface ? (
+                                  <StarterDraftDocumentSurface
+                                    editorRef={agreementPreviewEditorRef}
+                                    id="claw-agreement-preview-editor"
+                                    value={agreementDocumentText}
+                                    disabled={(isGenerating && !draft) || upgradeLockActive}
+                                    onChange={(next) => {
+                                      agreementDocumentDirtyRef.current = true;
+                                      setAgreementDocumentText(next);
+                                      scheduleAgreementDocSync(next);
+                                    }}
+                                  />
+                                ) : (
                                 <textarea
                                   ref={agreementPreviewEditorRef}
                                   id="claw-agreement-preview-editor"
@@ -15597,6 +15673,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   disabled={(isGenerating && !draft) || upgradeLockActive}
                                   aria-label="Agreement document"
                                 />
+                                )}
                               </div>
                             ) : (
                               <pre className="max-h-[min(28rem,55vh)] overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800/80 bg-[#0d1424] p-4 font-serif text-[13px] leading-[1.65] text-slate-200/95 sm:text-sm sm:leading-relaxed">

@@ -63,6 +63,8 @@ import {
   SIMPLE_CREATE_STARTER_HERO_TITLE,
   SIMPLE_CREATE_STARTER_PROGRESS_LABELS,
 } from "./simpleCreatePaidProReviewShell";
+import { HomeCreateTransitionOverlay } from "./HomeCreateTransitionOverlay";
+import { DRAFT_LOADING_PREPARING } from "./guidedWorkflowCopy";
 
 const STARTER_TEMPLATE =
   "Services Agreement between [Your Company] and [Client]. Scope: [describe work]. Payment: [amount] due [terms]. Governing law: [state].";
@@ -212,9 +214,14 @@ export function SimpleCreatePage() {
   const simplifyFirstSession = firstSessionLive;
 
   const [paidProReviewReadyShell, setPaidProReviewReadyShell] = useState(false);
+  const [homeTransitionVisible, setHomeTransitionVisible] = useState(homeHeroAutoGenerate);
   const onSimpleCreateShellChrome = useCallback((state: { paidProReviewReady: boolean }) => {
     setPaidProReviewReadyShell(state.paidProReviewReady);
   }, []);
+  const onHomeGuidedTransitionPhase = useCallback((phase: "preparing" | "review_ready") => {
+    if (phase === "review_ready") setHomeTransitionVisible(false);
+    else if (homeHeroAutoGenerate) setHomeTransitionVisible(true);
+  }, [homeHeroAutoGenerate]);
 
   const shellStep = paidProReviewReadyShell ? 2 : 1;
   const shellProgressLabels =
@@ -235,7 +242,7 @@ export function SimpleCreatePage() {
       : isFreshSimpleCreateStart
         ? SIMPLE_CREATE_STARTER_HERO_SUBHEAD
         : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Review, share, or prepare for signing when you're ready.";
-  const hideIntakeMarketingChrome = paidProReviewReadyShell;
+  const hideIntakeMarketingChrome = paidProReviewReadyShell || homeTransitionVisible;
 
   return (
     <SimpleFlowShell
@@ -251,6 +258,7 @@ export function SimpleCreatePage() {
       title={shellTitle}
       subtitle={shellSubtitle}
     >
+      <HomeCreateTransitionOverlay active={homeTransitionVisible} />
       <div className={isFreshSimpleCreateStart || paidProReviewReadyShell ? "pb-36 sm:pb-32" : undefined}>
         {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival && !hideIntakeMarketingChrome ? (
           <p className="mb-2 text-center text-[11px] font-medium leading-snug text-slate-500 sm:text-left sm:text-xs">
@@ -505,9 +513,10 @@ export function SimpleCreatePage() {
             }
             simpleProductFollowUpSubmitLabel="Next"
             simpleProductFlowGeneratingLabel={
-              quickSendTypedArrival || homeHeroAutoGenerate ? "Structuring your agreement…" : undefined
+              quickSendTypedArrival || homeHeroAutoGenerate ? DRAFT_LOADING_PREPARING : undefined
             }
             homeHeroAutoGenerate={homeHeroAutoGenerate}
+            onHomeGuidedTransitionPhase={homeHeroAutoGenerate ? onHomeGuidedTransitionPhase : undefined}
             continuitySourcePanel={
               quickSendTypedArrival && heroHandoff?.text
                 ? { label: "Your starting text", text: heroHandoff.text }

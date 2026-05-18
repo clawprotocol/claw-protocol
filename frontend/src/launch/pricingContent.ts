@@ -13,7 +13,9 @@ export const HOMEPAGE_HERO_SUBHEAD =
 export const HOMEPAGE_HERO_MICRO_TRUST =
   "Nothing is sent, signed, or shared until you confirm.";
 export const HOMEPAGE_CTA_CREATE_FREE_DRAFT = "Create free draft";
-export const HOMEPAGE_CTA_SEE_HOW = "See how it works";
+export const HOMEPAGE_CTA_VIEW_EXAMPLE = "View example";
+/** @deprecated Use {@link HOMEPAGE_CTA_VIEW_EXAMPLE} */
+export const HOMEPAGE_CTA_SEE_HOW = HOMEPAGE_CTA_VIEW_EXAMPLE;
 export const HOMEPAGE_HERO_PLACEHOLDER =
   "Example: Services agreement for a $5k project, simple NDA between two parties, contractor agreement with monthly pay…";
 
@@ -92,9 +94,9 @@ export const REVIEW_STRUCTURED_WIN_LINE =
   "You now have a structured agreement ready for review and signature.";
 
 /** Free draft simple-home: headline + body for Pro delta (review remains fully editable). */
-export const FUNNEL_FREE_STARTER_HEADLINE = "Your agreement";
+export const FUNNEL_FREE_STARTER_HEADLINE = "Your agreement is ready";
 export const FUNNEL_FREE_STARTER_BODY =
-  "This is your initial agreement. Review it here, then choose whether to continue with LawDog Pro, share for review, or prepare for signing.";
+  "Review and edit everything before sending or signing.";
 export const FUNNEL_FREE_STARTER_HELPER =
   "Nothing is sent, signed, or shared until you choose the next step.";
 

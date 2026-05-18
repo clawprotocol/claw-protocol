@@ -21,8 +21,8 @@ describe("starter draft shell copy", () => {
     expect(SIMPLE_CREATE_STARTER_HERO_SUBHEAD).toMatch(/share for review/i);
     expect(SIMPLE_CREATE_STARTER_HERO_SUBHEAD).toMatch(/prepare for signing/i);
     expect(SIMPLE_CREATE_STARTER_CONTROL_LINE).toMatch(/review, improve, share, sign, or stop/i);
-    expect(FUNNEL_FREE_STARTER_HEADLINE).toBe("Your agreement");
-    expect(FUNNEL_FREE_STARTER_BODY).toMatch(/continue with LawDog Pro/i);
+    expect(FUNNEL_FREE_STARTER_HEADLINE).toBe("Your agreement is ready");
+    expect(FUNNEL_FREE_STARTER_BODY).toMatch(/Review and edit everything/i);
     expect(FUNNEL_FREE_STARTER_HELPER).toMatch(/Nothing is sent, signed, or shared/i);
     expect(CHIP_STATE_READY).toBe("Draft ready to review");
     expect(STARTER_PRO_REFINE_IMPROVEMENT_CTA).toBe("Continue with Pro");

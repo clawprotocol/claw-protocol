@@ -15,7 +15,7 @@ import { LawdogMarketingPixels } from "../compliance/LawdogMarketingPixels";
 import { NOT_LEGAL_ADVICE } from "../compliance/disclosureCopy";
 import {
   HOMEPAGE_CTA_CREATE_FREE_DRAFT,
-  HOMEPAGE_CTA_SEE_HOW,
+  HOMEPAGE_CTA_VIEW_EXAMPLE,
   HOMEPAGE_HERO_MICRO_TRUST,
   HOMEPAGE_HERO_PLACEHOLDER,
   HOMEPAGE_HERO_SUBHEAD,
@@ -43,7 +43,8 @@ import { peekCreateOrHomeBanner, type CreateOrHomeBanner } from "./reEngagementS
 import { useInputConfidenceHint } from "./useInputConfidenceHint";
 import { HOME_EXAMPLE_PROMPTS, logHomeExampleSelected } from "./homeExamplePrompts";
 import { logHomeCreateSubmit, meetsHomeDraftSubmitThreshold } from "./homeCreateSubmit";
-import { DRAFT_LOADING_STRUCTURING } from "./simpleProduct/proConversionCopy";
+import { HomeCreateTransitionOverlay } from "./simpleProduct/HomeCreateTransitionOverlay";
+import { useAutoResizeTextarea } from "./useAutoResizeTextarea";
 
 export function LaunchHomePage() {
   const { navigate } = useLaunchNav();
@@ -51,7 +52,9 @@ export function LaunchHomePage() {
   const home = dc.home;
   const [heroInput, setHeroInput] = useState("");
   const [handoffBusy, setHandoffBusy] = useState(false);
+  const [homeTransitionActive, setHomeTransitionActive] = useState(false);
   const intakeRef = useRef<HTMLTextAreaElement | null>(null);
+  useAutoResizeTextarea(intakeRef, heroInput, { minRows: 4, maxPx: 320 });
   const heroDictationEnabled = useMemo(
     () => String(import.meta.env.VITE_CLAW_HERO_DICTATION ?? "1") !== "0",
     [],
@@ -140,6 +143,7 @@ export function LaunchHomePage() {
       return;
     }
 
+    setHomeTransitionActive(true);
     setHandoffBusy(true);
     try {
       prepareFreshMarketingEntry();
@@ -158,10 +162,12 @@ export function LaunchHomePage() {
     }
   }
 
-  const primaryLabel = handoffBusy ? DRAFT_LOADING_STRUCTURING : HOMEPAGE_CTA_CREATE_FREE_DRAFT;
+  const primaryLabel = HOMEPAGE_CTA_CREATE_FREE_DRAFT;
+  const homepageTrustCards = HOMEPAGE_TRUST_CARDS.slice(0, 2);
 
   return (
     <div className="claw-seo-root">
+      <HomeCreateTransitionOverlay active={homeTransitionActive} />
       <LawdogMarketingPixels surface="homepage" />
       <div className="claw-marketing-page mx-auto w-full max-w-5xl px-4 pb-12 pt-6 sm:px-6 sm:pt-8 md:px-8 lg:pb-20 lg:pt-8">
         {reEngageBanner ? (
@@ -213,12 +219,12 @@ export function LaunchHomePage() {
                 id="claw-hero-intake"
                 name="agreement_intake"
                 autoComplete="off"
-                rows={5}
+                rows={4}
                 value={heroInput}
                 onChange={(e) => setHeroInput(e.target.value)}
                 placeholder={HOMEPAGE_HERO_PLACEHOLDER || home.heroPlaceholder}
-                disabled={handoffBusy}
-                className="claw-seo-input min-h-[9.5rem] w-full resize-y px-4 py-4 pb-12 pr-14 text-base leading-relaxed placeholder:text-base sm:min-h-[10.5rem] lg:min-h-[11rem] lg:text-lg lg:placeholder:text-lg"
+                disabled={handoffBusy || homeTransitionActive}
+                className="claw-seo-input min-h-[6.5rem] w-full resize-none overflow-hidden px-4 py-4 pb-12 pr-14 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out sm:min-h-[7rem] lg:text-lg lg:placeholder:text-lg"
               />
               <HeroVoiceInputBar
                 surface="light"
@@ -255,8 +261,8 @@ export function LaunchHomePage() {
               className={`mt-3 text-sm leading-relaxed sm:text-base ${confidenceHint ? "font-medium text-emerald-800" : "text-slate-500"}`}
               aria-live="polite"
             >
-              {handoffBusy
-                ? DRAFT_LOADING_STRUCTURING
+              {homeTransitionActive
+                ? ""
                 : confidenceHint
                   ? confidenceHint
                   : dictation.phase === "recording"
@@ -282,8 +288,8 @@ export function LaunchHomePage() {
             <div className="mt-5 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
               <button
                 type="submit"
-                disabled={handoffBusy}
-                aria-busy={handoffBusy}
+                disabled={handoffBusy || homeTransitionActive}
+                aria-busy={handoffBusy || homeTransitionActive}
                 className="claw-seo-btn-primary min-h-12 flex-1 px-6 py-3.5 text-base font-semibold disabled:cursor-not-allowed disabled:opacity-55 sm:min-h-[3.25rem] sm:text-lg"
               >
                 {primaryLabel}
@@ -293,7 +299,7 @@ export function LaunchHomePage() {
                 className="claw-seo-btn-secondary min-h-12 px-6 py-3 text-base font-medium text-slate-600 sm:min-h-[3.25rem]"
                 onClick={scrollToHowItWorks}
               >
-                {HOMEPAGE_CTA_SEE_HOW}
+                {HOMEPAGE_CTA_VIEW_EXAMPLE}
               </button>
             </div>
 
@@ -362,7 +368,7 @@ export function LaunchHomePage() {
             {HOMEPAGE_TRUST_SECTION_TITLE}
           </h2>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {HOMEPAGE_TRUST_CARDS.map((card) => (
+            {homepageTrustCards.map((card) => (
               <article key={card.title} className="claw-seo-card px-4 py-4 sm:px-5 sm:py-5">
                 <h3 className="text-base font-semibold text-slate-900">{card.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-600 sm:text-[0.9375rem]">{card.body}</p>

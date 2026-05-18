@@ -103,6 +103,12 @@ describe("LaunchHomePage routing (static)", () => {
     expect(page).toContain("DisclosureFooter");
     expect(page).toContain("NOT_LEGAL_ADVICE");
   });
+
+  it("uses collapsed auto-resize textarea defaults", () => {
+    expect(page).toContain("useAutoResizeTextarea");
+    expect(page).toContain('rows={4}');
+    expect(page).toContain("resize-none");
+  });
 });
 
 describe("AgreementBuilderIntake home auto-generate (static)", () => {
