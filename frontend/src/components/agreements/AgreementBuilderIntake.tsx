@@ -91,12 +91,7 @@ import { simplifyParsedDraftForInstantPath } from "./agreementComplexityGate";
 import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies";
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
 import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
-import {
-  PRO_UPGRADE_WAIT_MODAL_TITLE,
-  PRO_UPGRADE_WAIT_REASSURANCE,
-  PRO_UPGRADE_WAIT_ROTATING_LINES,
-} from "./proUpgradeWaitCopy";
-import { ProUpgradeWaitRotatingText } from "./ProUpgradeWaitRotatingText";
+import { PremiumProGenerationWaitPanel } from "./PremiumProGenerationWaitPanel";
 import {
   CHIP_STATE_COMMERCIAL,
   CHIP_STATE_PRO_NEEDS_DRAFT,
@@ -440,10 +435,11 @@ import {
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
 } from "../../lib/postCheckoutModalTimeout";
 import {
-  PREMIUM_RETURN_KEEP_WAITING_LABEL,
   PREMIUM_RETURN_RETRY_GENERATION_LABEL,
   PREMIUM_RETURN_USE_STARTER_LABEL,
-  resolvePremiumCheckoutModalCopy,
+  logPremiumProWaitSuccessTransition,
+  resolvePremiumProWaitModalView,
+  resolvePremiumProWaitVisualPhase,
   shouldLogPremiumReturnLateSuccess,
 } from "../../lib/premiumPostCheckoutReturnUx";
 import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraftApi";
@@ -1607,7 +1603,7 @@ function CreateFlowSendRecipientsPanel({
   );
 }
 
-const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = PRO_UPGRADE_WAIT_MODAL_TITLE;
+const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = "Building your Pro agreement…";
 
 const PAID_PREMIUM_CONNECTION_RECOVERY_COPY =
   "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.";
@@ -1629,6 +1625,7 @@ type PremiumPostCheckoutPhase =
   | null
   | "awaiting_gaps"
   | "processing"
+  | "terminal_failure"
   | "network_retry"
   | "generation_retry";
 
@@ -1958,6 +1955,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumCheckoutModalExtendedWait, setPremiumCheckoutModalExtendedWait] = useState(false);
   /** After 120s patience threshold while authoritative request still runs — not a failure state. */
   const [premiumReturnPatienceExtended, setPremiumReturnPatienceExtended] = useState(false);
+  const [premiumProWaitSuccessFlash, setPremiumProWaitSuccessFlash] = useState(false);
   const [premiumAuthoritativeRequestInFlightUi, setPremiumAuthoritativeRequestInFlightUi] = useState(false);
   const [premiumNetworkRetryInFlight, setPremiumNetworkRetryInFlight] = useState(false);
   const [premiumNetworkStillReconnecting, setPremiumNetworkStillReconnecting] = useState(false);
@@ -4483,7 +4481,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setAgreementDocumentText(collapsedDoc);
         agreementDocumentDirtyRef.current = false;
         setPremiumReviewDocEditorOpen(false);
-        setPremiumPostCheckoutPhase(null);
+        const lateSuccessTransition = shouldLogPremiumReturnLateSuccess({
+          hardFailopenWasActive: opts.hardFailopenWasActive,
+          patienceExtendedWasActive: opts.patienceExtendedWasActive,
+        });
+        if (
+          lateSuccessTransition &&
+          (premiumPostCheckoutPhaseRef.current === "processing" ||
+            premiumPostCheckoutPhaseRef.current === "terminal_failure")
+        ) {
+          logPremiumProWaitSuccessTransition();
+          setPremiumProWaitSuccessFlash(true);
+          window.setTimeout(() => {
+            setPremiumProWaitSuccessFlash(false);
+            setPremiumPostCheckoutPhase(null);
+            document.getElementById("claw-agreement-preview-editor")?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }, 1400);
+        } else {
+          setPremiumPostCheckoutPhase(null);
+        }
         setCreateFlowPhase("draft_ready_for_review");
         setDisplayPhase("review");
         setCreateUiStage(CreateUiStage.DRAFT);
@@ -5646,7 +5665,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             runPremiumModelPassRef.current = null;
             applyFailureFallback();
           }
-          setPremiumPostCheckoutPhase(null);
+          setPremiumPostCheckoutPhase("terminal_failure");
           setPremiumGapQuestions([]);
           setPremiumGapOneField("");
         };
@@ -14109,83 +14128,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     </>
                   ) : (
                     <>
-                      {(() => {
-                        const modalTier = premiumReturnPatienceExtended
-                          ? ("patience_extended" as const)
-                          : premiumCheckoutModalExtendedWait
-                            ? ("soft_progress" as const)
-                            : ("initial" as const);
-                        const modalCopy = resolvePremiumCheckoutModalCopy(modalTier);
-                        return (
-                          <>
-                            <h2
-                              id="claw-premium-processing-title"
-                              className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
-                            >
-                              {modalCopy.title}
-                            </h2>
-                            <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
-                              {modalCopy.body}
-                            </p>
-                            {modalCopy.helper ? (
-                              <p className="mt-2 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
-                                {modalCopy.helper}
-                              </p>
-                            ) : null}
-                            {!modalCopy.showPatienceActions ? (
-                              <ProUpgradeWaitRotatingText
-                                active
-                                lines={PRO_UPGRADE_WAIT_ROTATING_LINES}
-                                intervalMs={2500}
-                                className="mt-4 min-h-[3rem] text-center text-sm leading-relaxed text-slate-300 sm:text-base"
-                              />
-                            ) : null}
-                            {!modalCopy.showPatienceActions ? (
-                              <p className="mt-2 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
-                                {PRO_UPGRADE_WAIT_REASSURANCE}
-                              </p>
-                            ) : null}
-                            {modalCopy.showPatienceActions ? (
-                              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
-                                <button
-                                  type="button"
-                                  className="vs01-btn vs01-btn--primary w-full sm:w-auto"
-                                  onClick={() => {
-                                    setPremiumReturnPatienceExtended(true);
-                                    setPremiumCheckoutModalExtendedWait(true);
-                                  }}
-                                >
-                                  {PREMIUM_RETURN_KEEP_WAITING_LABEL}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="vs01-btn vs01-btn--secondary w-full sm:w-auto"
-                                  disabled={premiumAuthoritativeRequestInFlightUi}
-                                  onClick={() => void handleRetryProFullDraft()}
-                                >
-                                  {PREMIUM_RETURN_RETRY_GENERATION_LABEL}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="vs01-btn vs01-btn--secondary w-full sm:w-auto"
-                                  onClick={() => handleProUpgradeUseStarterInstead()}
-                                >
-                                  {PREMIUM_RETURN_USE_STARTER_LABEL}
-                                </button>
-                              </div>
-                            ) : null}
-                          </>
-                        );
-                      })()}
+                      <PremiumProGenerationWaitPanel
+                        view={resolvePremiumProWaitModalView(
+                          resolvePremiumProWaitVisualPhase({
+                            successFlash: premiumProWaitSuccessFlash,
+                            terminalFailure: premiumPostCheckoutPhase === "terminal_failure",
+                            patienceExtended: premiumReturnPatienceExtended,
+                            softProgress: premiumCheckoutModalExtendedWait,
+                          }),
+                        )}
+                        titleId="claw-premium-processing-title"
+                        onRetry={() => void handleRetryProFullDraft()}
+                        onUseStarter={() => handleProUpgradeUseStarterInstead()}
+                        retryDisabled={premiumAuthoritativeRequestInFlightUi}
+                      />
                       {premiumPipelineUserMessage &&
                       premiumPipelineUserMessage !== CLAW_PREMIUM_PREPARING_AGREEMENT_COPY ? (
                         <p className="mt-3 text-center text-sm font-medium text-amber-200/95" role="status">
                           {premiumPipelineUserMessage}
                         </p>
                       ) : null}
-                      <div className="mt-6 flex justify-center" aria-hidden>
-                        <div className="h-10 w-10 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 motion-safe:animate-spin sm:h-12 sm:w-12" />
-                      </div>
                     </>
                   )}
                 </div>

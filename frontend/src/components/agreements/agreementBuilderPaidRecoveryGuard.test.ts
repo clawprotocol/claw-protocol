@@ -107,6 +107,9 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   it("logs explicit user fallback to starter draft", () => {
     expect(src).toContain("[premium-return-user-fallback]");
     expect(src).toContain("PREMIUM_RETURN_USE_STARTER_LABEL");
+    expect(src).toContain("PremiumProGenerationWaitPanel");
+    expect(src).toContain("logPremiumProWaitSuccessTransition");
+    expect(src).not.toContain("Still finishing your Pro agreement");
   });
 
   it("logs late premium success after patience or failopen wait", () => {
