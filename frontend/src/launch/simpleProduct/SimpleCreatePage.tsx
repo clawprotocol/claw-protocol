@@ -19,10 +19,7 @@ import { SimpleFlowShell } from "./SimpleFlowShell";
 import { recordAgreementCreatedForInboundRef } from "../affiliate/clawOpportunityStore";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { useLaunchNav } from "../LaunchNavContext";
-import {
-  EXAMPLE_INTAKE_PROMPTS,
-  SIMPLE_CREATE_CONVERSATION_STARTERS,
-} from "../useInputConfidenceHint";
+import { EXAMPLE_INTAKE_PROMPTS } from "../useInputConfidenceHint";
 import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
 import {
   readLawDogUserMonetizationState,
@@ -285,10 +282,6 @@ export function SimpleCreatePage() {
           <p className="mb-3 text-center text-base font-medium leading-relaxed text-slate-300 sm:text-left sm:text-[1.0625rem] md:text-[1.125rem] lg:text-[1.1875rem] lg:leading-[1.55] lg:text-slate-200/95">
             Describe your agreement. We&apos;ll turn it into something you can send.
           </p>
-        ) : !quickSendTypedArrival && isFreshSimpleCreateStart && !hideIntakeMarketingChrome ? (
-          <p className="mb-2 text-center text-sm font-medium leading-snug text-slate-400 sm:text-left sm:mb-3 sm:text-[0.9375rem] md:text-base">
-            Tap a starter or describe your deal below — then create your draft.
-          </p>
         ) : null}
         {intakeActive && !isFreshSimpleCreateStart && !hideIntakeMarketingChrome ? (
           <p
@@ -298,18 +291,13 @@ export function SimpleCreatePage() {
             {FIRST_RUN_INTAKE_REASSURANCE}
           </p>
         ) : null}
-        {!quickSendTypedArrival && !hideIntakeMarketingChrome ? (
-          <div
-            className={`flex flex-wrap justify-center gap-2 sm:justify-start ${isFreshSimpleCreateStart ? "mb-3" : "mb-5"}`}
-            aria-label={isFreshSimpleCreateStart ? "Quick starters" : "Example prompts"}
-          >
-            {(isFreshSimpleCreateStart ? SIMPLE_CREATE_CONVERSATION_STARTERS : EXAMPLE_INTAKE_PROMPTS).map((text) => (
+        {!quickSendTypedArrival && !isFreshSimpleCreateStart && !hideIntakeMarketingChrome ? (
+          <div className="mb-5 flex flex-wrap justify-center gap-2 sm:justify-start" aria-label="Example prompts">
+            {EXAMPLE_INTAKE_PROMPTS.map((text) => (
               <button
                 key={text}
                 type="button"
-                className={`rounded-full border border-slate-700/80 bg-slate-900/40 px-3 py-2 text-left text-xs font-medium text-slate-300 transition-colors hover:border-emerald-500/45 hover:text-emerald-100 active:scale-[0.99] sm:text-[0.8125rem] md:text-sm lg:px-3.5 lg:py-2.5 lg:text-[0.9375rem] lg:leading-snug motion-safe:transition-transform motion-safe:duration-100 ${
-                  isFreshSimpleCreateStart ? "motion-safe:active:ring-2 motion-safe:active:ring-emerald-500/25" : ""
-                }`}
+                className="rounded-full border border-slate-700/80 bg-slate-900/40 px-3 py-2 text-left text-xs font-medium text-slate-300 transition-colors hover:border-emerald-500/45 hover:text-emerald-100 active:scale-[0.99] sm:text-[0.8125rem] md:text-sm lg:px-3.5 lg:py-2.5 lg:text-[0.9375rem] lg:leading-snug motion-safe:transition-transform motion-safe:duration-100"
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent("claw-prefill-intake", { detail: { text } }));
                 }}
@@ -317,17 +305,6 @@ export function SimpleCreatePage() {
                 {text}
               </button>
             ))}
-            {isFreshSimpleCreateStart ? (
-              <button
-                type="button"
-                className="rounded-full border border-violet-700/50 bg-violet-950/35 px-3 py-2 text-left text-xs font-semibold text-violet-100/95 transition-colors hover:border-violet-500/55 hover:bg-violet-950/50 active:scale-[0.99] sm:text-[0.8125rem] md:text-sm lg:px-3.5 lg:py-2.5 lg:text-[0.9375rem] motion-safe:transition-transform motion-safe:duration-100 motion-safe:active:ring-2 motion-safe:active:ring-violet-500/25"
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent("claw-intake-start-dictation"));
-                }}
-              >
-                <span aria-hidden>🎤</span> Speak your agreement
-              </button>
-            ) : null}
           </div>
         ) : null}
         {!quickSendTypedArrival && !simplifyFirstSession && !hideIntakeMarketingChrome ? (

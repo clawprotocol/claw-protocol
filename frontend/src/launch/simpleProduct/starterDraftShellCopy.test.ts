@@ -48,6 +48,8 @@ describe("SimpleCreatePage starter copy (static)", () => {
     expect(page).toContain("PRODUCT_NOT_LAW_FIRM");
     expect(page).toContain("NO_ATTORNEY_CLIENT");
     expect(page).toContain("STRUCTURED_DRAFT_ASSIST_SHORT");
+    expect(page).not.toContain("Simple NDA between two parties");
+    expect(page).not.toContain("Tap a starter or describe");
   });
 });
 

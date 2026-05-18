@@ -117,7 +117,8 @@ export const SAMPLE_ARTIFACTS_DISCLAIMER_COMPACT =
 export const SIMPLE_CREATE_INTAKE_PLACEHOLDER = HOMEPAGE_LONG_INTAKE_EXAMPLE;
 
 /** First session only — ghost-style prompt (placeholder, not committed value). */
-export const FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER = HOMEPAGE_LONG_INTAKE_EXAMPLE;
+export const FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER =
+  "Example: Create a services agreement between…";
 
 export const PRICING_COMPARE_TEASER =
   "Try LawDog (free) · LawDog Plus · LawDog Pro · Enterprise. Simple subscription tiers — monthly or annual.";

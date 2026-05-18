@@ -29,6 +29,13 @@ import { useLaunchNav } from "../../launch/LaunchNavContext";
 import { triggerPaywall } from "../../launch/triggerPaywall";
 import { useInputConfidenceHint } from "../../launch/useInputConfidenceHint";
 import {
+  SIMPLE_CREATE_PROMPT_HEADING,
+  SIMPLE_CREATE_PROMPT_PLACEHOLDER,
+  SIMPLE_CREATE_PROMPT_SUPPORT,
+  logStarterCreateSubmit,
+  resolveStarterCreateSubmitText,
+} from "../../launch/simpleProduct/starterCreateSubmit";
+import {
   NO_ATTORNEY_CLIENT,
   PRODUCT_NOT_LAW_FIRM,
   STRUCTURED_DRAFT_ASSIST_SHORT,
@@ -2856,7 +2863,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const onPrefill = (e: Event) => {
       const t = String((e as CustomEvent<{ text?: string }>).detail?.text ?? "").trim();
       if (!t) return;
-      if (simpleProductFlow && liveWorkspaceTwoPane && !continuitySourcePanel) {
+      if (freshSimpleCreateUx) {
+        setIntakeBaselineCommitted("");
+        setIntakeStepBuffer(t);
+        setDebouncedStepBuffer(t);
+        setBaselineActionAck(null);
+        setPreviewPaneRevealed(false);
+        if (t.length >= 8 && !firstInputTrackedRef.current) {
+          firstInputTrackedRef.current = true;
+          trackFunnelEvent("first_input_started", { chars: t.length, source: "example_prefill" });
+        }
+      } else if (simpleProductFlow && liveWorkspaceTwoPane && !continuitySourcePanel) {
         trackFunnelEvent("starter_selected", { starter_chars: t.length });
         if (t.length >= 8 && !firstInputTrackedRef.current) {
           firstInputTrackedRef.current = true;
@@ -2877,7 +2894,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     };
     window.addEventListener("claw-prefill-intake", onPrefill as EventListener);
     return () => window.removeEventListener("claw-prefill-intake", onPrefill as EventListener);
-  }, [simpleProductFlow, liveWorkspaceTwoPane, continuitySourcePanel, trackFunnelEvent]);
+  }, [simpleProductFlow, liveWorkspaceTwoPane, continuitySourcePanel, freshSimpleCreateUx, trackFunnelEvent]);
 
   useEffect(() => {
     if (!freshSimpleCreateUx) return;
@@ -6289,10 +6306,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       displayPhase_before: displayPhase,
     });
     assignLocalDraftParseStickyMode();
+    const deferDraftStageForFreshInput =
+      freshSimpleCreateUx && createUiStageRef.current === CreateUiStage.INPUT;
     setHardError(null);
     setCreateFlowPhase("generating_draft");
     setDisplayPhase("generating_draft");
-    setCreateUiStage(CreateUiStage.DRAFT);
+    if (!deferDraftStageForFreshInput) {
+      setCreateUiStage(CreateUiStage.DRAFT);
+    }
     setLoading(true);
     await finalizeIntakeCapture();
     try {
@@ -6389,6 +6410,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createProductionTwoPane,
     emitPaidFunnelEvent,
     paidProEditReturnResumeActive,
+    freshSimpleCreateUx,
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(
@@ -7767,23 +7789,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     returnToIntakeEditing();
   }, [createProductionTwoPane, draft, createUiStage, returnToIntakeEditing]);
 
-  const commitBaselineFromTypedDescription = React.useCallback((): boolean => {
-    const step = intakeStepBuffer.trim();
-    if (step.length < 6) return false;
-    const live = buildLiveDraftPreview(step);
-    if (!isUsablePartialIntakeStructure(live, step) && !meetsMinimalIntakeProgress(step, live)) return false;
-    setIntakeBaselineCommitted(step);
-    setIntakeStepBuffer("");
-    setDebouncedStepBuffer("");
-    setBaselineActionAck(buildActionAcknowledgementLine(step));
-    prevFirstMissingRef.current = "unset";
-    setPreviewPaneRevealed(false);
-    if (!firstInputTrackedRef.current) {
-      firstInputTrackedRef.current = true;
-      trackFunnelEvent("first_input_started", { chars: step.length, source: "start_cta" });
+  /** Fresh `/app/create`: textarea at click time wins; clears stale starter baseline before parse. */
+  const prepareFreshStarterCreateSubmit = React.useCallback((): string => {
+    const resolved = resolveStarterCreateSubmitText({
+      textareaCurrentValue: textareaRef.current?.value ?? "",
+      intakeStepBuffer: intakeStepBufferRef.current,
+      intakeBaselineCommitted,
+      freshSimpleCreateUx,
+    });
+    if (freshSimpleCreateUx && resolved.text.length > 0) {
+      logStarterCreateSubmit(resolved.text, resolved.source);
+      setIntakeBaselineCommitted("");
+      setIntakeStepBuffer(resolved.text);
+      setDebouncedStepBuffer(resolved.text);
+      setBaselineActionAck(null);
     }
-    return true;
-  }, [intakeStepBuffer, trackFunnelEvent]);
+    return resolved.text;
+  }, [freshSimpleCreateUx, intakeBaselineCommitted]);
+
+  const startFreshStarterDictation = React.useCallback(() => {
+    setDictationStartNonce((n) => n + 1);
+    setVoiceEntryHintVisible(true);
+    window.setTimeout(() => setVoiceEntryHintVisible(false), 5200);
+    textareaRef.current?.focus();
+  }, []);
 
   const primaryBtn = workspaceUi
     ? "btn shrink-0 bg-emerald-600 px-6 py-3 text-[0.9375rem] font-semibold text-white shadow-md shadow-emerald-600/40 ring-1 ring-emerald-300/35 hover:bg-emerald-500 hover:shadow-lg hover:shadow-emerald-500/35 disabled:opacity-60 md:text-base lg:text-[1.125rem]"
@@ -7886,12 +7915,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createUiStage === CreateUiStage.INPUT &&
       !hasEnteredDraftFlow &&
       !draft &&
-      !isGenerating &&
       !reviewWorkspaceBootstrapping &&
-      createFlowPhase === "capturing_input" &&
-      displayPhase === "intake" &&
       !isEditingDescription &&
-      !premiumPostCheckoutPhase,
+      !premiumPostCheckoutPhase &&
+      ((!isGenerating && createFlowPhase === "capturing_input" && displayPhase === "intake") ||
+        (freshSimpleCreateUx && isGenerating && displayPhase === "generating_draft")),
   );
   const showLegacyIntakeShell = Boolean(
     createUiStage === CreateUiStage.INPUT &&
@@ -10532,6 +10560,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [readyIdleForAction, freshSimpleCreateUx, firstLawdogSession]);
 
   const guidedQuestionPlaceholder = useMemo(() => {
+    if (stageAInputFirst && freshSimpleCreateUx) return SIMPLE_CREATE_PROMPT_PLACEHOLDER;
     if (stageAInputFirst) return HOMEPAGE_LONG_INTAKE_EXAMPLE;
     if (!nextIntakeQuestion) return stepIntakePlaceholder;
     switch (nextIntakeQuestion.field) {
@@ -10552,7 +10581,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       default:
         return stepIntakePlaceholder;
     }
-  }, [stageAInputFirst, nextIntakeQuestion, stepIntakePlaceholder]);
+  }, [stageAInputFirst, freshSimpleCreateUx, nextIntakeQuestion, stepIntakePlaceholder]);
 
   const draftSoFarSummary = useMemo(() => {
     if (!simpleProductFlow || !liveWorkspaceTwoPane) return undefined;
@@ -11430,7 +11459,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       : ""
   }`;
 
-  /** Stage-A Continue only when commitBaselineFromTypedDescription would succeed (avoids enabled no-op). */
+  /** Stage-A Continue only when typed description passes minimal structure heuristics. */
   const stageAContinueBlocked = useMemo(() => {
     if (!stageAInputFirst) return false;
     const step = intakeStepBuffer.trim();
@@ -12901,30 +12930,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               return;
             }
             if (stageAInputFirst) {
-              if (createProductionTwoPane) {
-                console.debug("[handoff-start]", {
-                  source: "executePrimaryCta_stageA",
-                  createUiStage,
-                  createFlowPhase_before: createFlowPhase,
-                  displayPhase_before: displayPhase,
-                });
-                setHardError(null);
-                setCreateFlowPhase("generating_draft");
-                setDisplayPhase("generating_draft");
-                setCreateUiStage(CreateUiStage.DRAFT);
-                setLoading(true);
-              }
               await finalizeIntakeCapture();
-              const rawCommitted = intakeStepBuffer.trim();
-              const didCommit = commitBaselineFromTypedDescription();
-              if (createProductionTwoPane && didCommit) {
+              const rawSubmitted = prepareFreshStarterCreateSubmit();
+              if (createProductionTwoPane) {
+                if (rawSubmitted.length < 6) return;
+                const live = buildLiveDraftPreview(rawSubmitted);
+                if (
+                  !isUsablePartialIntakeStructure(live, rawSubmitted) &&
+                  !meetsMinimalIntakeProgress(rawSubmitted, live)
+                ) {
+                  return;
+                }
+                if (!freshSimpleCreateUx) {
+                  console.debug("[handoff-start]", {
+                    source: "executePrimaryCta_stageA",
+                    createUiStage,
+                    createFlowPhase_before: createFlowPhase,
+                    displayPhase_before: displayPhase,
+                  });
+                  setHardError(null);
+                  setCreateFlowPhase("generating_draft");
+                  setDisplayPhase("generating_draft");
+                  setCreateUiStage(CreateUiStage.DRAFT);
+                  setLoading(true);
+                }
                 trackFunnelEvent("generate_clicked", {
                   ready_state: guidedStructureComplete && !isGenerating,
-                  intake_chars: rawCommitted.length,
+                  intake_chars: rawSubmitted.length,
                   max_step_reached: funnelMaxStepRef.current,
                   production_phase: "local_draft_parse",
                 });
-                await runProductionLocalDraftParse({ rawOverride: rawCommitted, handoffSource: "stageA_baseline" });
+                await runProductionLocalDraftParse({
+                  rawOverride: rawSubmitted,
+                  handoffSource: freshSimpleCreateUx ? "starter_create_submit" : "stageA_baseline",
+                });
               } else if (createProductionTwoPane && !paidProAuthoritative) {
                 setLoading(false);
                 setDisplayPhase("intake");
@@ -13034,30 +13073,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       if (stageAInputFirst) {
-        if (createProductionTwoPane) {
-          console.debug("[handoff-start]", {
-            source: "runPrimary_stageA",
-            createUiStage,
-            createFlowPhase_before: createFlowPhase,
-            displayPhase_before: displayPhase,
-          });
-          setHardError(null);
-          setCreateFlowPhase("generating_draft");
-          setDisplayPhase("generating_draft");
-          setCreateUiStage(CreateUiStage.DRAFT);
-          setLoading(true);
-        }
         await finalizeIntakeCapture();
-        const rawCommitted = intakeStepBuffer.trim();
-        const didCommit = commitBaselineFromTypedDescription();
-        if (createProductionTwoPane && didCommit) {
+        const rawSubmitted = prepareFreshStarterCreateSubmit();
+        if (createProductionTwoPane) {
+          if (rawSubmitted.length < 6) return;
+          const live = buildLiveDraftPreview(rawSubmitted);
+          if (
+            !isUsablePartialIntakeStructure(live, rawSubmitted) &&
+            !meetsMinimalIntakeProgress(rawSubmitted, live)
+          ) {
+            return;
+          }
+          if (!freshSimpleCreateUx) {
+            console.debug("[handoff-start]", {
+              source: "runPrimary_stageA",
+              createUiStage,
+              createFlowPhase_before: createFlowPhase,
+              displayPhase_before: displayPhase,
+            });
+            setHardError(null);
+            setCreateFlowPhase("generating_draft");
+            setDisplayPhase("generating_draft");
+            setCreateUiStage(CreateUiStage.DRAFT);
+            setLoading(true);
+          }
           trackFunnelEvent("generate_clicked", {
             ready_state: guidedStructureComplete && !isGenerating,
-            intake_chars: rawCommitted.length,
+            intake_chars: rawSubmitted.length,
             max_step_reached: funnelMaxStepRef.current,
             production_phase: "local_draft_parse",
           });
-          await runProductionLocalDraftParse({ rawOverride: rawCommitted, handoffSource: "stageA_baseline" });
+          await runProductionLocalDraftParse({
+            rawOverride: rawSubmitted,
+            handoffSource: freshSimpleCreateUx ? "starter_create_submit" : "stageA_baseline",
+          });
         } else if (createProductionTwoPane && !paidProAuthoritative) {
           setLoading(false);
           setDisplayPhase("intake");
@@ -13979,12 +14028,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     <div className="min-w-0 flex-1">
                       {stageAInputFirst ? (
                         <>
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 sm:text-[11px] md:text-xs lg:text-sm lg:text-slate-500">
-                            Continue here
-                          </p>
-                          <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-200 sm:text-xl md:text-[1.25rem]">
-                            {INTAKE_INTRO_HEADLINE}
+                          <h2 className="text-lg font-semibold tracking-tight text-slate-200 sm:text-xl md:text-[1.25rem]">
+                            {freshSimpleCreateUx ? SIMPLE_CREATE_PROMPT_HEADING : INTAKE_INTRO_HEADLINE}
                           </h2>
+                          {freshSimpleCreateUx ? (
+                            <p className="mt-2 text-sm leading-relaxed text-slate-500 sm:text-[0.9375rem] md:text-base lg:text-slate-400">
+                              {SIMPLE_CREATE_PROMPT_SUPPORT}
+                            </p>
+                          ) : (
+                            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 sm:text-[11px] md:text-xs lg:text-slate-500">
+                              Continue here
+                            </p>
+                          )}
+                          {freshSimpleCreateUx ? (
+                            <button
+                              type="button"
+                              className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-violet-700/50 bg-violet-950/35 px-3 py-2 text-left text-xs font-semibold text-violet-100/95 transition-colors hover:border-violet-500/55 hover:bg-violet-950/50 active:scale-[0.99] sm:text-[0.8125rem] md:text-sm"
+                              onClick={startFreshStarterDictation}
+                            >
+                              <span aria-hidden>🎤</span> Speak your agreement
+                            </button>
+                          ) : null}
                         </>
                       ) : (
                         <>

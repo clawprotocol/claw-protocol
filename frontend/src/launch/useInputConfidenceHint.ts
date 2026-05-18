@@ -7,13 +7,6 @@ export const EXAMPLE_INTAKE_PROMPTS = [
   "Consulting agreement with monthly retainer",
 ] as const;
 
-/** First-run simple create — deterministic starter actions (must match guided routing heuristics). */
-export const SIMPLE_CREATE_CONVERSATION_STARTERS = [
-  "Simple NDA between two parties",
-  "Independent contractor agreement",
-  "Consulting agreement with monthly retainer",
-] as const;
-
 const ROTATING = [
   "Generating structured agreement…",
   "Organizing terms…",
