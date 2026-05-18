@@ -3,6 +3,8 @@ import { PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS } from "./postCheckoutModalTimeo
 import {
   PREMIUM_PRO_WAIT_REASSURANCE,
   PREMIUM_PRO_WAIT_STALE_COPY_BANS,
+  PREMIUM_PAID_CORPUS_REJECTED_BODY,
+  PREMIUM_PAID_CORPUS_REJECTED_HEADLINE,
   PREMIUM_RETURN_RETRY_GENERATION_LABEL,
   PREMIUM_RETURN_USE_STARTER_LABEL,
   logPremiumProWaitCopyRotated,
@@ -65,6 +67,20 @@ describe("premium post-checkout return UX policy", () => {
       }),
     ).toBe(false);
     expect(view.reassurance).toBe(PREMIUM_PRO_WAIT_REASSURANCE);
+  });
+
+  it("progress pills use Upgrade and Terms loaded, not Payment", () => {
+    const view = resolvePremiumProWaitModalView("processing");
+    const labels = view.progressSteps.map((s) => s.shortLabel).join(" ");
+    expect(labels).toContain("Upgrade");
+    expect(labels).toContain("Terms loaded");
+    expect(labels).not.toMatch(/\bPayment\b/);
+  });
+
+  it("terminal failure uses paid corpus rejected copy", () => {
+    const view = resolvePremiumProWaitModalView("terminal_failure");
+    expect(view.title).toBe(PREMIUM_PAID_CORPUS_REJECTED_HEADLINE);
+    expect(view.statusLine).toBe(PREMIUM_PAID_CORPUS_REJECTED_BODY);
   });
 
   it("terminal failure shows recovery when request is not in flight", () => {

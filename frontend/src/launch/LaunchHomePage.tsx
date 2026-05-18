@@ -44,7 +44,7 @@ import { useInputConfidenceHint } from "./useInputConfidenceHint";
 import { HOME_EXAMPLE_PROMPTS, logHomeExampleSelected } from "./homeExamplePrompts";
 import { logHomeCreateSubmit, meetsHomeDraftSubmitThreshold } from "./homeCreateSubmit";
 import { HomeCreateTransitionOverlay } from "./simpleProduct/HomeCreateTransitionOverlay";
-import { useAutoResizeTextarea } from "./useAutoResizeTextarea";
+import { useAutoResizeTextarea, useResponsiveTextareaMaxPx } from "./useAutoResizeTextarea";
 
 export function LaunchHomePage() {
   const { navigate } = useLaunchNav();
@@ -54,13 +54,9 @@ export function LaunchHomePage() {
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [homeTransitionActive, setHomeTransitionActive] = useState(false);
   const intakeRef = useRef<HTMLTextAreaElement | null>(null);
-  const heroTextareaMaxPx =
-    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches ? 280 : 320;
-  const { sync: syncHeroTextarea, onPaste: onHeroTextareaPaste } = useAutoResizeTextarea(
-    intakeRef,
-    heroInput,
-    { minRows: 4, maxPx: heroTextareaMaxPx },
-  );
+  const heroTextareaMaxPx = useResponsiveTextareaMaxPx();
+  const { sync: syncHeroTextarea, onPaste: onHeroTextareaPaste, onDrop: onHeroTextareaDrop } =
+    useAutoResizeTextarea(intakeRef, heroInput, { minRows: 4, maxPx: heroTextareaMaxPx });
   const heroDictationEnabled = useMemo(
     () => String(import.meta.env.VITE_CLAW_HERO_DICTATION ?? "1") !== "0",
     [],
@@ -229,10 +225,11 @@ export function LaunchHomePage() {
                 value={heroInput}
                 onChange={(e) => setHeroInput(e.target.value)}
                 onPaste={() => onHeroTextareaPaste()}
+                onDrop={() => onHeroTextareaDrop()}
                 onInput={() => syncHeroTextarea()}
                 placeholder={HOMEPAGE_HERO_PLACEHOLDER || home.heroPlaceholder}
                 disabled={handoffBusy || homeTransitionActive}
-                className="claw-seo-input min-h-[6.5rem] w-full resize-none overflow-hidden px-4 py-4 pb-12 pr-14 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out sm:min-h-[7rem] lg:text-lg lg:placeholder:text-lg"
+                className="claw-seo-input min-h-[6.5rem] w-full resize-none px-4 py-4 pb-12 pr-14 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out sm:min-h-[7rem] lg:text-lg lg:placeholder:text-lg"
               />
               <HeroVoiceInputBar
                 surface="light"

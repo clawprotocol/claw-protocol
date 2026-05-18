@@ -12570,7 +12570,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }) === "party_placeholder" &&
           (draftHasFullDraftExpansion(draft) || tierAllowsAdvancedFullDraftReveal(tier)))) &&
       !(showFullDraftDiffPreview && createUiStage === CreateUiStage.DRAFT) &&
-      !ownerRecipientAcceptedAwaitingLock,
+      !ownerRecipientAcceptedAwaitingLock &&
+      (!premiumPaidDocumentSurface || canProceedWithPaidProDocument),
   );
 
   /** Free starter path on recipients — show subtle “sendable as-is” reassurance (not paywalled). */

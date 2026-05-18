@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  analyzeTemplatePlaceholderFragments,
+  classifyTemplateFragment,
   collectForbiddenTemplateFragments,
   finalizeUserVisibleAgreementPlainText,
   repairAgreementTemplatePlaceholders,
@@ -95,6 +97,36 @@ describe("agreementTemplatePlaceholderSafety", () => {
     });
     expect(fin.ok, fin.remaining.join("; ")).toBe(true);
     expect(fin.text).not.toMatch(/\[\s*NAME\s*\]/i);
+  });
+
+  it("classifies signature-line brackets as nonfatal when parties are resolved", () => {
+    const raw = "AGREEMENT between Acme LLC and Beta Inc.\n" + "x".repeat(8000) + "\n[NAME]\n[TITLE]";
+    const idx = raw.indexOf("[NAME]");
+    const d = classifyTemplateFragment("[NAME]", raw, idx, {
+      partyNames: ["Acme LLC", "Beta Inc."],
+    });
+    expect(d.fatal).toBe(false);
+    expect(d.category).toBe("signature_line_stub");
+    const fatal = collectForbiddenTemplateFragments(raw, "", { partyNames: ["Acme LLC", "Beta Inc."] });
+    expect(fatal.some((x) => /\[NAME\]/i.test(x))).toBe(false);
+  });
+
+  it("still flags operative insert/mustache placeholders in body", () => {
+    const raw =
+      "Between Beta Inc. and Gamma LLC, fees are {{party_name}} and notice at [INSERT PAYMENT TERMS HERE].\n" +
+      "terms. ".repeat(200);
+    const fin = finalizeUserVisibleAgreementPlainText(raw, {
+      intakeRaw: "",
+      partyNames: ["Beta Inc.", "Gamma LLC"],
+      surface: "test",
+    });
+    expect(fin.ok).toBe(false);
+    expect(fin.remainingFatal.length).toBeGreaterThan(0);
+    const detail = analyzeTemplatePlaceholderFragments(fin.text, {
+      intakeRaw: "",
+      partyNames: ["Beta Inc.", "Gamma LLC"],
+    });
+    expect(detail.some((d) => d.fatal && (d.token.includes("{{") || /INSERT/i.test(d.token)))).toBe(true);
   });
 
   it("still flags mustache party placeholders when not in intake", () => {

@@ -39,6 +39,7 @@ import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import { ensureMaterialAsksInAdditional } from "./materialAsksMerge";
 import { setPaidFunnelLastPremiumProContext } from "../../lib/experimentation/paidFunnelIntentAttribution";
 import { getOrCreateLawdogSessionId } from "../../tracking/lawdogSession";
+import { formatPremiumPaidCorpusRejectedMessage } from "../../lib/premiumPostCheckoutReturnUx";
 import {
   proIntentMessageWhenServerFullDraftFailed,
   proIntentPlainEnglishForGate,
@@ -1796,10 +1797,12 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           });
         }
         if (!proIntentGateMessage && intentContract.pro_strict && (!acc.ok || !vPaid.ok)) {
-          proIntentGateMessage = proIntentPlainEnglishForGate(
-            intentContract,
-            !vPaid.ok ? vPaid.reasons : acc.reasons,
-          );
+          const gateReasons = !vPaid.ok ? vPaid.reasons : acc.reasons;
+          if (!acc.ok && gateReasons.some((r) => r.startsWith("placeholder:"))) {
+            proIntentGateMessage = formatPremiumPaidCorpusRejectedMessage();
+          } else {
+            proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, gateReasons);
+          }
         }
         if (acc.ok || founderDetailsGateMessage || proIntentGateMessage) {
           premiumRenderSource = "rejected_paid_corpus";

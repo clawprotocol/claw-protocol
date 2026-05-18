@@ -127,7 +127,7 @@ export function rejectPremiumBodyForProRender(
   if (!ph.ok) {
     return {
       ok: false,
-      reasons: ph.remaining.slice(0, 12).map((x) => `placeholder:${x.slice(0, 48)}`),
+      reasons: ph.remainingFatal.slice(0, 12).map((x) => `placeholder:${x.slice(0, 48)}`),
     };
   }
   return { ok: true, reasons: [] };

@@ -2779,6 +2779,20 @@ button.vs01-upload-btn:disabled {
   color: var(--vs01-color-text-primary);
 }
 
+.vs01-prepare-finish-blocked-body {
+  margin: 0 0 0.4rem;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--vs01-color-text-muted);
+}
+
+.vs01-prepare-optional-fields-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.65rem;
+  line-height: 1.35;
+  color: var(--vs01-color-text-muted);
+}
+
 .vs01-prepare-finish-blocked-list {
   margin: 0;
   padding-left: 1.1rem;

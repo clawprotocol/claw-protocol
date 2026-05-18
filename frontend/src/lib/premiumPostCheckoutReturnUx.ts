@@ -15,8 +15,8 @@ export const PREMIUM_PRO_WAIT_REASSURANCE =
   "Nothing is sent, signed, or shared until you confirm.";
 
 export const PREMIUM_PRO_WAIT_PROGRESS_STEPS = [
-  { short: "Payment", full: "Payment confirmed" },
-  { short: "Terms", full: "Terms loaded" },
+  { short: "Upgrade", full: "Upgrade confirmed" },
+  { short: "Terms loaded", full: "Source terms loaded" },
   { short: "Pro draft", full: "Pro agreement building" },
   { short: "Review", full: "Review screen ready" },
 ] as const;
@@ -49,6 +49,15 @@ export const PREMIUM_PRO_WAIT_ROTATE_INTERVAL_MS = 5000;
 
 export const PREMIUM_RETURN_RETRY_GENERATION_LABEL = "Retry Pro generation";
 export const PREMIUM_RETURN_USE_STARTER_LABEL = "Use current draft for now";
+
+/** Shown when HTTP succeeded but client corpus gates rejected the paid body. */
+export const PREMIUM_PAID_CORPUS_REJECTED_HEADLINE = "We couldn't safely finalize the Pro version.";
+export const PREMIUM_PAID_CORPUS_REJECTED_BODY =
+  "Your current draft is still available. Retry Pro draft or keep editing.";
+
+export function formatPremiumPaidCorpusRejectedMessage(): string {
+  return `${PREMIUM_PAID_CORPUS_REJECTED_HEADLINE}\n\n${PREMIUM_PAID_CORPUS_REJECTED_BODY}`;
+}
 
 export type PremiumProWaitProgressStepState = "pending" | "active" | "done";
 
@@ -127,8 +136,8 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
   if (phase === "terminal_failure") {
     return {
       phase,
-      title: "We couldn't finish the Pro version",
-      statusLine: "Your payment was detected. No additional checkout needed.",
+      title: PREMIUM_PAID_CORPUS_REJECTED_HEADLINE,
+      statusLine: PREMIUM_PAID_CORPUS_REJECTED_BODY,
       showRotatingLines: false,
       showSpinner: false,
       showRecoveryActions: true,

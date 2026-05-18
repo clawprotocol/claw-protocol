@@ -97,8 +97,10 @@ describe("five-party paid Pro corpus acceptance (production QA)", () => {
       partyNames: [...FIVE_PARTIES],
       surface: "test",
     });
-    expect(fin.ok, fin.remaining.join("; ")).toBe(true);
+    expect(fin.ok, fin.remainingFatal.join("; ")).toBe(true);
+    expect(fin.remainingFatal).toHaveLength(0);
     expect(fin.text).not.toMatch(/\[\s*NAME\s*\]/i);
+    expect(fin.repaired.some((r) => r.startsWith("sig_line:"))).toBe(true);
     expect(fin.text).toContain("Redwood Peak Ventures LLC");
   });
 
