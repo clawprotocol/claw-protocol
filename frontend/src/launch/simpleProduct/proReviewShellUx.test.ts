@@ -27,10 +27,13 @@ describe("Pro review shell UX", () => {
   });
 
   it("highlights Review on paid Pro create shell and hides duplicate intake chrome", () => {
-    expect(createPage).toContain('lifecycleStepForStage("review")');
+    expect(createPage).toContain("shellLifecycleStage");
+    expect(createPage).toContain("lifecycleStepForStage(shellLifecycleStage)");
     expect(createPage).toContain("SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE");
     expect(intake).toContain("paidProReviewCompactChrome");
     expect(intake).toContain("PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY");
+    expect(intake).toContain("resolveSimpleCreateShellLifecycleStage");
+    expect(intake).toContain("lifecycleStage: simpleCreateShellLifecycleStage");
     expect(intake).not.toContain("formatPremiumRevealDeltaRow(premiumFinalizeAudit)");
   });
 
@@ -43,5 +46,7 @@ describe("Pro review shell UX", () => {
     expect(intake).toContain("Send for review");
     expect(intake).toContain("Send for signature");
     expect(intake).toContain("Edit wording");
+    expect(intake).toContain("handleProSendForSignature");
+    expect(intake).toContain("logProReviewSendSignatureClick");
   });
 });

@@ -74,18 +74,17 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(s).toMatch(/peekPremiumForkUserSendMode\(\)\s*\?\?\s*peekPremiumSendIntent\(\)/);
   });
 
-  it("paid authoritative recipient handoff uses advancePaidPro only when premium signers surface is ready (handOff + runPrimary)", () => {
+  it("paid authoritative recipient handoff uses advancePaidPro when inline signers surface is ready (handOff + runPrimary)", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     const matches = [
-      ...s.matchAll(
-        /if\s*\(\s*paidProAuthoritative\s*&&\s*premiumSignersSurfaceReady\s*\)\s*\{[\s\S]*?advancePaidProToRecipientSetup\(\)/g,
-      ),
+      ...s.matchAll(/paidProInlineRecipientReady[\s\S]*?advancePaidProToRecipientSetup\(\)/g),
     ];
-    expect(matches.length).toBeGreaterThanOrEqual(2);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+    expect(s).toContain("peekPremiumRecipientsSurfaceReleased()");
   });
 
-  it("handOffProductionDraftToRecipients gates advancePaidPro on premiumSignersSurfaceReady", () => {
+  it("handOffProductionDraftToRecipients gates advancePaidPro on inline signers readiness", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     const i = s.indexOf("const handOffProductionDraftToRecipients");
@@ -93,9 +92,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const j = s.indexOf("const handlePremiumReviewFirstContinueToSigners", i);
     expect(j).toBeGreaterThan(i);
     const block = s.slice(i, j);
-    expect(block).toMatch(
-      /if\s*\(\s*paidProAuthoritative\s*&&\s*premiumSignersSurfaceReady\s*\)[\s\S]*advancePaidProToRecipientSetup/,
-    );
+    expect(block).toContain("paidProInlineRecipientReady");
+    expect(block).toMatch(/if\s*\(\s*paidProInlineRecipientReady\s*\)[\s\S]*advancePaidProToRecipientSetup/);
     expect(block).toMatch(/else\s*\{[\s\S]*setCreateFlowPhase\("recipient_setup_required"\)/);
   });
 
@@ -125,10 +123,11 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const s = readFileSync(p, "utf8");
     const i = s.indexOf("if (createProductionTwoPane && !hydrate && structuredOk)");
     expect(i).toBeGreaterThanOrEqual(0);
-    const frag = s.slice(i, i + 550);
+    const frag = s.slice(i, i + 900);
+    expect(frag).toContain("paidProFallback");
     expect(frag).toContain("isPaidProAgreementAuthoritative");
-    expect(frag).toContain('? "review"');
-    expect(frag).toContain(': "intake"');
+    expect(frag).toContain('setDisplayPhase("review")');
+    expect(frag).toMatch(/commitFreeDraftForReview|paidProFallback/);
   });
 
   it("shows Pro refine “What changed” under preview when host wires onProRefineWhatChanged", () => {
@@ -280,24 +279,24 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(finalize).toContain("Choose how to deliver");
   });
 
-  it("paid Pro finalize routes: review pick+continue; authoritative signature waits on draft then continue control", () => {
+  it("paid Pro finalize routes: review and signature advance via canonical recipient/sign handoff", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain('handleFinalizeRoutePrimaryAction("review")');
-    expect(intake).toContain('handleFinalizeRoutePrimaryAction("signature")');
-    expect(intake).toMatch(/!paidProAuthoritative\s*\|\|\s*mode\s*===\s*["']review["']/);
-    expect(intake).toContain("draft_signature_options");
+    expect(intake).toContain("handleProSendForSignature");
+    expect(intake).toContain("logProReviewSendSignatureClick");
+    expect(intake).toContain("void handleProSendForSignature()");
+    expect(intake).toMatch(/mode === "signature" && paidProAuthoritative[\s\S]*handleProSendForSignature/);
+    expect(intake).toContain("forceReviewDisplay: true");
+    expect(intake).toContain("commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true })");
     expect(intake).toContain("showSignatureRecipientContinue");
     expect(intake).toContain("onContinueToRecipientSetup");
     expect(intake).toContain("Share for review");
-    expect(intake).toContain("Create review link");
-    expect(intake).toContain("Nothing changes unless you accept it");
+    expect(intake).toContain("premiumReviewMintPrimaryLabel");
     expect(intake).toContain("deliveryCtasOnDraftCard={canProceedWithPaidProDocument}");
-    expect(intake).toContain("Send a private review link so the other party can suggest changes.");
-    expect(intake).toContain("Ready to sign now? Start the signature flow.");
+    expect(intake).toContain("private review link");
     expect(intake).toContain("Save changes");
     expect(intake).toContain("Apply revision.");
     expect(intake).toContain("Tell LawDog what to change");
-    expect(intake).toContain("Manual edit is ready. AI edit coming next.");
   });
 
   it("sign-first control is gated to paid signature recipients (not review mode)", () => {
@@ -365,7 +364,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const sendBlock = unifiedRegion.slice(sendSurface, draftAfterSendSurface);
     expect(sendBlock).toMatch(/action:\s*"send_agreement"/);
     expect(sendBlock).not.toMatch(/action:\s*"continue_to_recipients"/);
-    expect(sendBlock).toContain('"Create review link"');
+    expect(sendBlock).toContain("premiumReviewMintPrimaryLabel");
     expect(sendBlock).toContain('"Confirm and send for signature"');
   });
 
@@ -438,9 +437,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 
   it("continue to send: authoritative without premium signers surface uses RECIPIENTS shell (basic recipient_setup_required visible)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    const matches = intake.match(/paidProAuthoritative && premiumSignersSurfaceReady/g);
-    expect((matches ?? []).length).toBeGreaterThanOrEqual(2);
-    expect(intake).toMatch(/Inline Pro recipient rail requires/);
+    expect(intake).toContain("paidProInlineRecipientReady");
+    expect(intake).toContain("premiumSignersSurfaceReady");
+    expect(intake).toMatch(/Inline Pro recipient rail/);
   });
 
   it("runPersistAndOpen clears stale hardError before persist and after successful hydrate (free/basic retry)", () => {

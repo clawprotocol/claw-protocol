@@ -214,17 +214,27 @@ export function SimpleCreatePage() {
   const simplifyFirstSession = firstSessionLive;
 
   const [paidProReviewReadyShell, setPaidProReviewReadyShell] = useState(false);
+  const [shellLifecycleStage, setShellLifecycleStage] = useState<
+    import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId
+  >("draft");
   const [homeTransitionVisible, setHomeTransitionVisible] = useState(homeHeroAutoGenerate);
-  const onSimpleCreateShellChrome = useCallback((state: { paidProReviewReady: boolean }) => {
-    setPaidProReviewReadyShell(state.paidProReviewReady);
-  }, []);
+  const onSimpleCreateShellChrome = useCallback(
+    (state: {
+      paidProReviewReady: boolean;
+      lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
+    }) => {
+      setPaidProReviewReadyShell(state.paidProReviewReady);
+      setShellLifecycleStage(state.lifecycleStage);
+    },
+    [],
+  );
   const onHomeGuidedTransitionPhase = useCallback((phase: "preparing" | "review_ready") => {
     if (phase === "review_ready") setHomeTransitionVisible(false);
     else if (homeHeroAutoGenerate) setHomeTransitionVisible(true);
   }, [homeHeroAutoGenerate]);
 
   const shellStep = paidProReviewReadyShell
-    ? lifecycleStepForStage("review")
+    ? lifecycleStepForStage(shellLifecycleStage)
     : lifecycleStepForStage("draft");
   const shellProgressLabels = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
   const shellTitle = paidProReviewReadyShell

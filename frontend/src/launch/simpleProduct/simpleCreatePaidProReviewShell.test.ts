@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { CreateUiStage } from "../../components/agreements/createUiStage";
 import {
   computeSimpleCreatePaidProReviewReady,
+  resolveSimpleCreateShellLifecycleStage,
   SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE,
   SIMPLE_CREATE_STARTER_HERO_TITLE,
 } from "./simpleCreatePaidProReviewShell";
@@ -30,6 +31,33 @@ describe("computeSimpleCreatePaidProReviewReady", () => {
     expect(computeSimpleCreatePaidProReviewReady({ ...base, paidProAuthoritative: false })).toBe(false);
     expect(computeSimpleCreatePaidProReviewReady({ ...base, simpleProductFlow: false })).toBe(false);
     expect(computeSimpleCreatePaidProReviewReady({ ...base, liveWorkspaceTwoPane: false })).toBe(false);
+  });
+});
+
+describe("resolveSimpleCreateShellLifecycleStage", () => {
+  it("stays on Review until signature recipient setup is active", () => {
+    const base = {
+      paidProReviewReady: true,
+      paidProRecipientSetupOnDraft: false,
+      createFlowPhase: "draft_ready_for_review" as const,
+      effectivePremiumSendMode: "signature" as const,
+    };
+    expect(resolveSimpleCreateShellLifecycleStage(base)).toBe("review");
+    expect(
+      resolveSimpleCreateShellLifecycleStage({
+        ...base,
+        paidProRecipientSetupOnDraft: true,
+        createFlowPhase: "recipient_setup_required",
+      }),
+    ).toBe("sign");
+    expect(
+      resolveSimpleCreateShellLifecycleStage({
+        ...base,
+        paidProRecipientSetupOnDraft: true,
+        createFlowPhase: "recipient_setup_required",
+        effectivePremiumSendMode: "review",
+      }),
+    ).toBe("review");
   });
 });
 

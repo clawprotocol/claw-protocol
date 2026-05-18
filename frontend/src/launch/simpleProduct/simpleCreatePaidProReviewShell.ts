@@ -1,5 +1,10 @@
 import { CreateUiStage } from "../../components/agreements/createUiStage";
-import { AGREEMENT_LIFECYCLE_CONTROL_LINE } from "../../agreement/agreementLifecycleRail";
+import {
+  AGREEMENT_LIFECYCLE_CONTROL_LINE,
+  type AgreementLifecycleStageId,
+} from "../../agreement/agreementLifecycleRail";
+import type { CreateFlowProductionPhase } from "../../components/agreements/createFlowTypes";
+import type { PremiumSendIntent } from "./premiumSendIntent";
 
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE = "Review your Pro agreement";
 
@@ -41,4 +46,31 @@ export function computeSimpleCreatePaidProReviewReady(input: {
   if (!input.simpleProductFlow || !input.liveWorkspaceTwoPane || !input.paidProAuthoritative) return false;
   if (input.createUiStage === CreateUiStage.RECIPIENTS) return true;
   return input.createUiStage === CreateUiStage.DRAFT && input.displayPhase === "review";
+}
+
+/** Shell rail step while authoritative paid Pro is active on `/app/create`. */
+export function resolveSimpleCreateShellLifecycleStage(input: {
+  paidProReviewReady: boolean;
+  paidProRecipientSetupOnDraft: boolean;
+  createFlowPhase: CreateFlowProductionPhase;
+  effectivePremiumSendMode: PremiumSendIntent;
+}): AgreementLifecycleStageId {
+  if (!input.paidProReviewReady) return "draft";
+  if (
+    input.paidProRecipientSetupOnDraft ||
+    input.createFlowPhase === "recipient_setup_required" ||
+    input.createFlowPhase === "ready_to_send"
+  ) {
+    return input.effectivePremiumSendMode === "signature" ? "sign" : "review";
+  }
+  return "review";
+}
+
+export function logProReviewSendSignatureClick(args: {
+  agreementIdShort: string | null;
+  bodyLen: number;
+  renderSource: string | null;
+  paidProAuthoritative: boolean;
+}): void {
+  console.info("[pro-review-send-signature-click]", args);
 }

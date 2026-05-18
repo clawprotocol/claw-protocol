@@ -278,7 +278,11 @@ import {
   type PremiumCompletionSnapshot,
 } from "./premiumCompletionStorage";
 import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
-import { computeSimpleCreatePaidProReviewReady } from "../../launch/simpleProduct/simpleCreatePaidProReviewShell";
+import {
+  computeSimpleCreatePaidProReviewReady,
+  logProReviewSendSignatureClick,
+  resolveSimpleCreateShellLifecycleStage,
+} from "../../launch/simpleProduct/simpleCreatePaidProReviewShell";
 import { type CreateFlowProductionPhase, isCreateFlowPastCapture } from "./createFlowTypes";
 import { CreateUiStage, createUiStagePrimaryCta } from "./createUiStage";
 import { getCanonicalAgreementTypeForCreate } from "./agreementTypeCanonical";
@@ -571,7 +575,10 @@ type Props = {
    * `/app/create` SimpleFlowShell: when authoritative paid Pro is in DRAFT-stage review, parent hides
    * starter hero/step 1 chrome (title, stepper, starter chips) without resetting intake stage.
    */
-  onSimpleCreateShellChrome?: (state: { paidProReviewReady: boolean }) => void;
+  onSimpleCreateShellChrome?: (state: {
+    paidProReviewReady: boolean;
+    lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
+  }) => void;
   /** Homepage auto-generate handoff: parent shows concierge overlay until review is ready. */
   onHomeGuidedTransitionPhase?: (phase: "preparing" | "review_ready") => void;
 };
@@ -3416,7 +3423,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return out;
   }
 
-  function commitParsedDraftToReviewFlow(next: ParsedDraftShape): void {
+  function commitParsedDraftToReviewFlow(
+    next: ParsedDraftShape,
+    opts?: { forceReviewDisplay?: boolean },
+  ): void {
     let nextDraft = canonicalizeStarterDraftForReview(next);
     if (simpleInstantProductionSurface) {
       const raw = intakeCombined.trim();
@@ -3442,7 +3452,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setDraft(nextDraft);
     setFollowUpDetailTotal(0);
-    setDisplayPhase("intake");
+    const proReviewDisplay =
+      opts?.forceReviewDisplay === true ||
+      premiumPersistedFlowActive ||
+      premiumSendPathUnlocked ||
+      hasPaidPremiumCompletionSession() ||
+      isPaidProAgreementAuthoritative({
+        draft: nextDraft,
+        tier,
+        agreementId: reviewAgreementIdRef.current,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      });
+    setDisplayPhase(proReviewDisplay ? "review" : "intake");
+    if (proReviewDisplay && import.meta.env.DEV && displayPhaseRef.current === "intake") {
+      console.info("[pro-review-display-normalized]", {
+        source: "commitParsedDraftToReviewFlow",
+        forceReviewDisplay: opts?.forceReviewDisplay === true,
+      });
+    }
     setDraftNowCommitted(true);
     setCreateFlowPhase("draft_ready_for_review");
     setCreateUiStage(CreateUiStage.DRAFT);
@@ -3803,7 +3832,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setDebouncedStepBuffer(raw);
     writeAgreementCreatorIntakeStorage(raw);
 
-    commitParsedDraftToReviewFlow(merged.draft);
+    commitParsedDraftToReviewFlow(merged.draft, { forceReviewDisplay: true });
     if (recipientsSurfaceReleased) {
       setDisplayPhase("review");
       setCreateFlowPhase("recipient_setup_required");
@@ -4718,7 +4747,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             modalParty1NameRef.current,
             modalParty2NameRef.current,
           );
-          commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(mergedF.draft));
+          commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(mergedF.draft), {
+            forceReviewDisplay: true,
+          });
           if (createProductionTwoPane && simpleProductFlow) {
             setDisplayPhase("review");
           }
@@ -4948,7 +4979,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumRefineReview(null);
             setPremiumFinalizeAudit(null);
             setPremiumReviewRoute(null);
-            commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft));
+            commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft), {
+              forceReviewDisplay: true,
+            });
             if (createProductionTwoPane && simpleProductFlow) {
               setDisplayPhase("review");
             }
@@ -5044,7 +5077,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
         setPremiumPersistedFlowActive(true);
         setPremiumSendPathUnlocked(true);
-        commitParsedDraftToReviewFlow(mergedDraftPersist);
+        commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true });
         agreementDocumentDirtyRef.current = false;
         if (shouldImmediateAuthoritativeCommit) {
           commitAuthoritativePremiumVisibleSurface(finalDoc, result.premiumRenderSource, {
@@ -5493,7 +5526,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             trackAgreementFunnelEvent("pro_draft_loaded", { path: "fallback" }, { planTier: String(tier), atMsProDraft: Date.now() });
           }
         }
-        commitParsedDraftToReviewFlow(merged.draft);
+        commitParsedDraftToReviewFlow(merged.draft, { forceReviewDisplay: true });
         if (createProductionTwoPane && simpleProductFlow) {
           setDisplayPhase("review");
         }
@@ -7857,21 +7890,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setMobileWorkspacePane("preview");
   }, []);
 
-  useLayoutEffect(() => {
-    if (!onSimpleCreateShellChrome) return;
-    onSimpleCreateShellChrome({ paidProReviewReady });
-    if (
-      import.meta.env.DEV &&
-      paidProReviewReady &&
-      paidProAuthoritative &&
-      createUiStage === CreateUiStage.DRAFT &&
-      (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send")
-    ) {
-      devPremiumSendShellGuard("simple_create_shell_paid_pro_recipients");
-    }
-    return () => onSimpleCreateShellChrome({ paidProReviewReady: false });
-  }, [paidProReviewReady, onSimpleCreateShellChrome, createUiStage, paidProAuthoritative, createFlowPhase]);
-
   const returnToIntakeEditing = () => {
     if (paidProAuthoritative) {
       setIsEditingDescription(false);
@@ -9924,6 +9942,51 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumDefaultSendMode,
     premiumForkPrimedNonce,
     premiumSurfaceGateTick,
+  ]);
+
+  const simpleCreateShellLifecycleStage = useMemo(
+    () =>
+      resolveSimpleCreateShellLifecycleStage({
+        paidProReviewReady,
+        paidProRecipientSetupOnDraft,
+        createFlowPhase,
+        effectivePremiumSendMode,
+      }),
+    [
+      paidProReviewReady,
+      paidProRecipientSetupOnDraft,
+      createFlowPhase,
+      effectivePremiumSendMode,
+    ],
+  );
+
+  useLayoutEffect(() => {
+    if (!onSimpleCreateShellChrome) return;
+    onSimpleCreateShellChrome({
+      paidProReviewReady,
+      lifecycleStage: simpleCreateShellLifecycleStage,
+    });
+    if (
+      import.meta.env.DEV &&
+      paidProReviewReady &&
+      paidProAuthoritative &&
+      createUiStage === CreateUiStage.DRAFT &&
+      (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send")
+    ) {
+      devPremiumSendShellGuard("simple_create_shell_paid_pro_recipients");
+    }
+    return () =>
+      onSimpleCreateShellChrome({
+        paidProReviewReady: false,
+        lifecycleStage: "draft",
+      });
+  }, [
+    paidProReviewReady,
+    simpleCreateShellLifecycleStage,
+    onSimpleCreateShellChrome,
+    createUiStage,
+    paidProAuthoritative,
+    createFlowPhase,
   ]);
 
   const paidProDistinctValidRecipientEmailCount = useMemo(() => {
@@ -12768,8 +12831,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       persistPremiumRecipientHandoffFromDraftAndUi(d, { displayName1: next1, displayName2: next2 });
     }
     setAgreementTypeAccepted(true);
-    /** Inline Pro recipient rail requires {@link premiumSignersSurfaceReady}; otherwise stay on legacy RECIPIENTS shell. */
-    if (paidProAuthoritative && premiumSignersSurfaceReady) {
+    /** Inline Pro recipient rail — read peek/active synchronously (state may not flush before handoff). */
+    const paidProInlineRecipientReady =
+      paidProAuthoritative &&
+      (premiumSignersSurfaceReady ||
+        premiumRecipientUxActive ||
+        (premiumPersistedFlowActive && peekPremiumRecipientsSurfaceReleased()));
+    if (paidProInlineRecipientReady) {
       advancePaidProToRecipientSetup();
     } else {
       setCreateFlowPhase("recipient_setup_required");
@@ -12783,6 +12851,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     advancePaidProToRecipientSetup,
     paidProAuthoritative,
     premiumSignersSurfaceReady,
+    premiumRecipientUxActive,
     createProductionTwoPane,
     createUiStage,
     missing,
@@ -12871,21 +12940,65 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumDefaultSendMode,
   ]);
 
+  const handleProSendForSignature = React.useCallback(() => {
+    const rawId = (reviewAgreementIdRef.current || reviewAgreementId || "").trim();
+    const agreementIdShort =
+      rawId.length > 12 ? `${rawId.slice(0, 8)}…` : rawId.length > 0 ? rawId : "(local)";
+    const bodyPlain = (premiumPaidReadonlyPick.plainText || agreementDocumentTextRef.current || "").trim();
+    logProReviewSendSignatureClick({
+      agreementIdShort,
+      bodyLen: bodyPlain.length,
+      renderSource: premiumPaidReadonlyPick.sourceUsed ?? null,
+      paidProAuthoritative,
+    });
+    handlePremiumSendModePick("signature");
+    setPremiumSignatureSenderFirst(true);
+    writePremiumSenderSignFirst(true);
+    devPremiumSendRoute("signature", true, "recipients_setup");
+    if (draft) {
+      agreementDocumentDirtyRef.current = false;
+      applyHandoffAgreementPreviewOrAuthoritative(draft);
+      persistPremiumRecipientHandoffFromDraftAndUi(draft);
+    }
+    setDisplayPhase("review");
+    setCreateFlowPhase("draft_ready_for_review");
+    setCreateUiStage(CreateUiStage.DRAFT);
+    markPremiumRecipientsSurfaceReleased();
+    setPremiumRecipientUxActive(true);
+    bumpPremiumSurfaceGateTick();
+    void handlePremiumReviewFirstContinueToSigners({ telemetryMode: "signature" });
+  }, [
+    reviewAgreementId,
+    premiumPaidReadonlyPick,
+    paidProAuthoritative,
+    handlePremiumSendModePick,
+    draft,
+    applyHandoffAgreementPreviewOrAuthoritative,
+    persistPremiumRecipientHandoffFromDraftAndUi,
+    bumpPremiumSurfaceGateTick,
+    handlePremiumReviewFirstContinueToSigners,
+  ]);
+
   const handleFinalizeRoutePrimaryAction = React.useCallback(
     (mode: PremiumSendIntent) => {
       devTracePremiumSendIntent("finalize_panel_cta", mode, peekPremiumSenderSignFirst());
       devPremiumSendChoice(mode, peekPremiumSenderSignFirst());
+      if (mode === "signature" && paidProAuthoritative) {
+        void handleProSendForSignature();
+        return;
+      }
       handlePremiumSendModePick(mode);
       if (mode === "review" || mode === "signature") {
-        if (!paidProAuthoritative || mode === "review") {
-          devPremiumSendRoute(mode, peekPremiumSenderSignFirst(), "recipients_setup");
-          void handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode });
-        } else {
-          devPremiumSendRoute(mode, peekPremiumSenderSignFirst(), "draft_signature_options");
-        }
+        devPremiumSendRoute(mode, peekPremiumSenderSignFirst(), "recipients_setup");
+        void handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode });
       }
     },
-    [handlePremiumSendModePick, handlePremiumReviewFirstContinueToSigners, paidProAuthoritative],
+    [
+      handlePremiumSendModePick,
+      handlePremiumReviewFirstContinueToSigners,
+      paidProAuthoritative,
+      handleProSendForSignature,
+    ],
   );
 
   const bumpFinalizeRoutePrimaryActionNonce = React.useCallback(() => {
@@ -15640,7 +15753,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         <button
                                           type="button"
                                           className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
-                                          onClick={() => handleFinalizeRoutePrimaryAction("signature")}
+                                          onClick={() => void handleProSendForSignature()}
                                         >
                                           Send for signature
                                         </button>
