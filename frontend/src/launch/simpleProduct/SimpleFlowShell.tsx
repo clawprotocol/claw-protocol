@@ -8,7 +8,7 @@ import { useLaunchNav } from "../LaunchNavContext";
 import { LawdogLogoLink } from "../../components/ui/LawdogLogoLink";
 import { DisclosureFooter } from "../../compliance/DisclosureFooter";
 
-type Step = 1 | 2 | 3 | 4;
+type Step = 1 | 2 | 3 | 4 | 5;
 
 const DEFAULT_PROGRESS: readonly [string, string, string, string] = [
   JOY_COPY.progressDraft,
@@ -29,8 +29,8 @@ export function SimpleFlowShell(props: {
   titleClassName?: string;
   /** Optional progress: highlights current step only; earlier steps show as completed. */
   step?: Step;
-  /** Override nav labels (e.g. Describe → Review → Send → Proof). */
-  progressLabels?: readonly [string, string, string, string];
+  /** Override nav labels (4- or 5-step flows, e.g. checkout upgrade path). */
+  progressLabels?: readonly string[];
 }) {
   const { navigate } = useLaunchNav();
   const affiliateNav = useFeatureGate("affiliate_opportunity_enabled");

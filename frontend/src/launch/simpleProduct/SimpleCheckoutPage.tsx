@@ -2,7 +2,11 @@ import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { useDynamicConfig } from "../../config/dynamicConfig/useDynamicConfig";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalytics";
-import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
+import {
+  CHECKOUT_STARTER_UPGRADE_AFTER_PAYMENT_LINE,
+  CHECKOUT_STARTER_UPGRADE_SUBTITLE,
+  resolveCheckoutFlowProgress,
+} from "./checkoutFlowProgress";
 import {
   createFiatToCryptoOnrampIntent,
   demoConfirmFiatToCryptoOnrampFromCard,
@@ -50,8 +54,6 @@ import {
   TAX_VAT_LOCATION_NEUTRAL,
   paidSubscriptionRenewalMaterialLine,
 } from "../../compliance/disclosureCopy";
-
-const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
 
 function CheckoutPrePaymentDisclosure(props: { planName: string; priceLine: string; cadence: PricingCadence }) {
   const { planName, priceLine, cadence } = props;
@@ -378,6 +380,16 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     [isCreateAgreementCheckout, upgradeCheckoutSnap],
   );
 
+  const checkoutFlowProgress = useMemo(
+    () =>
+      resolveCheckoutFlowProgress({
+        agreementId,
+        isSingleAgreementCheckout,
+        returnTo,
+      }),
+    [agreementId, isSingleAgreementCheckout, returnTo],
+  );
+
   const disclosureForCheckout =
     isSingleAgreementCheckout && amountUsd != null ? (
       <CheckoutSingleUnlockDisclosure priceLine={priceLine} />
@@ -407,8 +419,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   return (
     <div className={checkoutArrivalShellClass}>
       <SimpleFlowShell
-        step={3}
-        progressLabels={FLOW_PROGRESS}
+        step={checkoutFlowProgress.step}
+        progressLabels={checkoutFlowProgress.labels}
         title={
           isSingleAgreementCheckout
             ? "Unlock this agreement"
@@ -420,8 +432,10 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           isSingleAgreementCheckout
             ? "One-time purchase — then return to send or export this agreement."
             : isCreateAgreementCheckout
-              ? "Full send, collaboration, and tracked signing — then back to your agreement. Nothing sends until you choose."
-              : ck.pageSubtitle
+              ? CHECKOUT_STARTER_UPGRADE_SUBTITLE
+              : checkoutFlowProgress.variant === "direct_send"
+                ? "Unlock professional send for this agreement — then review recipients before anything goes out."
+                : ck.pageSubtitle
         }
         titleClassName={
           isCreateAgreementCheckout
@@ -587,7 +601,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
             ) : null}
             {isCreateAgreementCheckout ? (
               <p className="mt-4 text-center text-sm leading-7 text-slate-300 sm:text-left sm:text-[15px]">
-                After payment: back to your agreement to review — nothing sends until you confirm.
+                {CHECKOUT_STARTER_UPGRADE_AFTER_PAYMENT_LINE}
               </p>
             ) : null}
               </div>
@@ -736,7 +750,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
             {isSingleAgreementCheckout
               ? "Payment via card processor · Unlock applies after payment is confirmed · Nothing is sent until you confirm · You control all actions"
               : isCreateAgreementCheckout
-                ? "Secured checkout · Draft saved · You control send"
+                ? "Secured checkout · Draft saved · Review before send"
                 : "Payment via card processor · Plans activate after payment is confirmed · Nothing is sent until you confirm · You control all actions"}
           </p>
           {!isCreateAgreementCheckout ? <p className="text-sm text-slate-400">{ck.trustLines.footnote}</p> : null}
