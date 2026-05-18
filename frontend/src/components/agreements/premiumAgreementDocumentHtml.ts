@@ -34,11 +34,12 @@ function premiumCalloutInline(text: string): string {
 
 export type PremiumSignatureSectionMode = "collaboration" | "execution";
 
-function formatSignerDisplayName(raw: string, slot: "A" | "B"): { primary: string; sub: string } {
+function formatSignerDisplayName(raw: string, index: number): { primary: string; sub: string } {
   const t = (raw || "").trim();
-  if (!t || /^party\s*a$/i.test(t) || /^party\s*b$/i.test(t) || t.length < 2) {
+  const letter = String.fromCharCode(65 + Math.min(index, 25));
+  if (!t || /^party\s*[a-z]$/i.test(t) || t.length < 2) {
     return {
-      primary: slot === "A" ? "Party A / Authorized Signer" : "Party B / Authorized Signer",
+      primary: `Party ${letter} / Authorized Signer`,
       sub: "Sign below on behalf of the party named in the agreement body.",
     };
   }
@@ -50,16 +51,11 @@ function formatSignerDisplayName(raw: string, slot: "A" | "B"): { primary: strin
  * `execution` adds initials emphasis and execution-ready framing (Ready for Signature path).
  */
 export function buildPremiumSignatureSectionHtml(
-  partyNameA: string,
-  partyNameB: string,
+  partyNames: readonly string[],
   mode: PremiumSignatureSectionMode,
 ): string {
-  const a = formatSignerDisplayName(partyNameA, "A");
-  const b = formatSignerDisplayName(partyNameB, "B");
-  const ap = escapeHtml(a.primary);
-  const asub = escapeHtml(a.sub);
-  const bp = escapeHtml(b.primary);
-  const bsub = escapeHtml(b.sub);
+  const names = partyNames.length > 0 ? [...partyNames] : ["Party A", "Party B"];
+  const formatted = names.map((name, index) => formatSignerDisplayName(name, index));
   const head =
     mode === "execution"
       ? "Execution — Signatures"
@@ -117,8 +113,11 @@ export function buildPremiumSignatureSectionHtml(
   )}</h2>
   <p style="font-size:12px;color:#44403c;margin:0 0 1.35rem;line-height:1.65;max-width:44rem;text-align:justify">${escapeHtml(lead)}</p>
   <div style="margin-left:-0.125rem;margin-right:-0.125rem;padding:1.5rem 1.25rem 1.35rem;border-radius:5px;border:1px solid #d6d3cd;background:linear-gradient(180deg,#f6f2e8 0%,#efe9de 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,0.65),0 6px 20px -8px rgba(28,25,23,0.12)">
-    ${signerBlock(ap, asub, false)}
-    ${signerBlock(bp, bsub, true)}
+    ${formatted
+      .map((f, index) =>
+        signerBlock(escapeHtml(f.primary), escapeHtml(f.sub), index === formatted.length - 1),
+      )
+      .join("")}
   </div>
 </section>`;
 }
@@ -129,8 +128,7 @@ export type BuildPremiumAgreementReadonlyHtmlOpts = {
    * and initials markers.
    */
   signatureSectionMode: PremiumSignatureSectionMode;
-  partyNameA: string;
-  partyNameB: string;
+  partyNames: readonly string[];
   renderHints?: PremiumDocumentRenderHints | null;
 };
 
@@ -182,6 +180,6 @@ export function buildPremiumAgreementReadonlyHtml(
       (_m, before, mid) => `${before}${mid}${premiumCalloutInline("Select jurisdiction before signing.")}`,
     );
   }
-  html += buildPremiumSignatureSectionHtml(opts.partyNameA, opts.partyNameB, opts.signatureSectionMode);
+  html += buildPremiumSignatureSectionHtml(opts.partyNames, opts.signatureSectionMode);
   return html;
 }

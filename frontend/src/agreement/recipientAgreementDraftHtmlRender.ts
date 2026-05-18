@@ -4,18 +4,9 @@
  */
 
 import type { AgreementDraft } from "./agreementTypes";
+import { extractAgreementParties } from "./extractAgreementParties";
 import { normalizeJurisdictionDisplay } from "./jurisdictionNormalize";
 import { formatLegalPartyList } from "../components/agreements/formatLegalPartyList";
-
-const INTERNAL_PARTY_REF_RE = /\s*[\[(]?\s*(?:ORG|PARTY|CLIENT|COMPANY)_\d+\s*[\])]?\s*/gi;
-
-function stripInternalPartyRefsFromName(name: string): string {
-  const s = (name || "").trim();
-  if (!s) return "";
-  const cleaned = s.replace(INTERNAL_PARTY_REF_RE, " ");
-  return cleaned.replace(/\s+/g, " ").trim();
-}
-
 
 function escapeHtml(s: string): string {
   return s
@@ -69,15 +60,29 @@ export function renderAgreementDraftHtmlLikeBackend(draft: AgreementDraft): stri
   const paymentTerms = escapeHtml((draft.payment_terms || "").trim() || "TBD");
   const duration = escapeHtml((draft.duration || "").trim() || "TBD");
   const dueDate = escapeHtml((draft.due_date || "").trim() || "TBD");
-  const partiesForFormat = (draft.parties || []).map((p, idx) => {
-    const rawName = stripInternalPartyRefsFromName((p?.name || "").trim());
-    const name = rawName || (idx === 0 ? "Party A" : "Party B");
-    const role = (p?.role || "").trim() || "party";
-    return { name, role };
+  const signaturePartyNames = extractAgreementParties({
+    parties: draft.parties,
+    renderedText: purposeRaw,
   });
+  const partiesForFormat = signaturePartyNames.map((name) => ({
+    name,
+    role: "party",
+  }));
   const partyListHtml = escapeHtml(formatLegalPartyList(partiesForFormat));
-  const partyAName = escapeHtml(partiesForFormat[0]?.name || "Party A");
-  const partyBName = escapeHtml(partiesForFormat[1]?.name || "Party B");
+  const signatureBlocksHtml = signaturePartyNames
+    .map((name) => {
+      const label = escapeHtml(name);
+      return (
+        `<div style='min-width:0;padding:8px 12px 8px 0'>` +
+        `<p style='font-size:12px;font-weight:600;color:#334155;margin:0 0 8px'>${label}</p>` +
+        `<div style='border-bottom:1px solid #64748b;height:28px'></div>` +
+        `<p style='font-size:11px;color:#475569;margin:8px 0 0'>Signature</p>` +
+        `<div style='margin-top:8px;border-bottom:1px solid #cbd5e1;height:20px'></div>` +
+        `<p style='font-size:11px;color:#475569;margin:4px 0 0'>Name · Title · Date</p>` +
+        `</div>`
+      );
+    })
+    .join("");
 
   return (
     "<article style='position:relative'>" +
@@ -106,14 +111,8 @@ export function renderAgreementDraftHtmlLikeBackend(draft: AgreementDraft): stri
     `<p>This Agreement is governed by the laws of ${jurisdiction}, without regard to conflict of law principles.</p>` +
     "<h2>8. Signatures</h2>" +
     "<p>IN WITNESS WHEREOF, the parties have executed this Agreement as of the effective date.</p>" +
-    "<table style='width:100%;margin-top:16px;border-collapse:collapse'>" +
-    "<tr>" +
-    `<td style='width:50%;padding-right:12px'><div style='border-bottom:1px solid #64748b;height:28px'></div><div style='font-size:12px;color:#475569'>` +
-    `${partyAName} Signature</div><div style='margin-top:8px;border-bottom:1px solid #cbd5e1;height:20px'></div><div style='font-size:12px;color:#475569'>Date</div></td>` +
-    `<td style='width:50%;padding-left:12px'><div style='border-bottom:1px solid #64748b;height:28px'></div><div style='font-size:12px;color:#475569'>` +
-    `${partyBName} Signature</div><div style='margin-top:8px;border-bottom:1px solid #cbd5e1;height:20px'></div><div style='font-size:12px;color:#475569'>Date</div></td>` +
-    "</tr>" +
-    "</table>" +
+    `<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:16px'>${signatureBlocksHtml}</div>` +
++
     "</article>"
   );
 }

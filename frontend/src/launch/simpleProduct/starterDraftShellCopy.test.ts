@@ -64,6 +64,13 @@ describe("AgreementBuilderIntake starter copy (static)", () => {
     expect(intake).toContain("ProConversionComparisonCard");
     expect(intake).toContain("STARTER_REVIEW_HELPER");
     expect(intake).toContain("performKeepReviewingFocus");
+    const surface = readFileSync(
+      join(__dirname, "../../components/agreements/StarterDraftDocumentSurface.tsx"),
+      "utf8",
+    );
+    expect(intake).toContain("StarterDraftDocumentSurface");
+    expect(surface).toContain("starter-draft-copy-text");
+    expect(surface).toContain("logFreeDraftCopyText");
     expect(intake).not.toMatch(/label:\s*["']Upgrade to send["']/);
   });
 });

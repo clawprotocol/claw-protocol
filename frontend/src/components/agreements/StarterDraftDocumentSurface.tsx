@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
+import type { AgreementParty } from "../../agreement/agreementTypes";
+import { extractAgreementParties } from "../../agreement/extractAgreementParties";
+import { AgreementSignaturePlaceholderGrid } from "./AgreementSignaturePlaceholderGrid";
 import {
   STARTER_DOCUMENT_DONE_EDITING_LABEL,
   STARTER_DOCUMENT_EDIT_WORDING_LABEL,
@@ -31,8 +34,21 @@ export function StarterDraftDocumentSurface(props: {
   id?: string;
   /** Increment to open edit mode from parent (e.g. Pro card “Edit free draft”). */
   editRequestNonce?: number;
+  parties?: readonly AgreementParty[] | null;
+  intakeText?: string | null;
+  partiesLine?: string | null;
 }) {
-  const { value, onChange, disabled, editorRef, id = "claw-starter-agreement-document", editRequestNonce } = props;
+  const {
+    value,
+    onChange,
+    disabled,
+    editorRef,
+    id = "claw-starter-agreement-document",
+    editRequestNonce,
+    parties,
+    intakeText,
+    partiesLine,
+  } = props;
   const [editing, setEditing] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "failed">("idle");
 
@@ -42,6 +58,16 @@ export function StarterDraftDocumentSurface(props: {
     window.requestAnimationFrame(() => editorRef?.current?.focus());
   }, [editRequestNonce, editorRef]);
   const { title, body } = useMemo(() => splitAgreementDisplay(value), [value]);
+  const signaturePartyNames = useMemo(
+    () =>
+      extractAgreementParties({
+        parties,
+        intakeText,
+        renderedText: value,
+        partiesLine,
+      }),
+    [parties, intakeText, value, partiesLine],
+  );
 
   useEffect(() => {
     logStarterReviewDocumentRendered();
@@ -144,18 +170,11 @@ export function StarterDraftDocumentSurface(props: {
           ) : (
             <p className="mt-6 text-stone-600">{value.trim() || "Your agreement text will appear here."}</p>
           )}
-          <div className="mt-10 border-t border-dashed border-stone-300/80 pt-6">
-            <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Signatures</p>
-            <div className="mt-4 grid gap-6 sm:grid-cols-2">
-              {["Party A", "Party B"].map((label) => (
-                <div key={label} className="rounded-lg border border-stone-200/90 bg-white/60 px-4 py-3">
-                  <p className="text-xs font-medium text-stone-500">{label}</p>
-                  <div className="mt-6 border-b border-stone-400/70" aria-hidden />
-                  <p className="mt-2 text-[11px] text-stone-400">Name · Date</p>
-                </div>
-              ))}
-            </div>
-          </div>
+          <AgreementSignaturePlaceholderGrid
+            partyNames={signaturePartyNames}
+            className="mt-10 border-t border-dashed border-stone-300/80 pt-6"
+            variant="paper"
+          />
         </article>
       )}
     </div>

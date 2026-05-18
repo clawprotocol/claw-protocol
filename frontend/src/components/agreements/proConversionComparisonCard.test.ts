@@ -7,7 +7,9 @@ import {
   PRO_UPGRADE_CARD_BODY,
   PRO_UPGRADE_CARD_HEADING,
   PRO_UPGRADE_FREE_BULLETS,
+  PRO_UPGRADE_FREE_COLUMN_HELPER,
   PRO_UPGRADE_FREE_COLUMN_LABEL,
+  STALE_PRO_CONVERSION_STRINGS,
   PRO_UPGRADE_PRO_BULLETS,
   PRO_UPGRADE_PRO_COLUMN_LABEL,
   PRO_UPGRADE_REASSURANCE,
@@ -24,19 +26,30 @@ describe("Pro conversion comparison copy", () => {
     expect(PRO_UPGRADE_REASSURANCE).toBe("You review everything before anything is shared.");
   });
 
-  it("defines free and pro comparison columns", () => {
+  it("defines free and pro comparison columns without download language", () => {
     expect(PRO_UPGRADE_FREE_COLUMN_LABEL).toBe("Free");
     expect(PRO_UPGRADE_PRO_COLUMN_LABEL).toBe("Pro");
+    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Copy your draft text");
+    expect(PRO_UPGRADE_FREE_BULLETS.join(" ").toLowerCase()).not.toMatch(/download/);
+    expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/Free keeps drafting lightweight/i);
+    expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/proof records/i);
     expect(PRO_UPGRADE_FREE_BULLETS).toContain("Nothing is shared automatically");
     expect(PRO_UPGRADE_PRO_BULLETS[0]).toMatch(/private review link/i);
+    expect(PRO_UPGRADE_PRO_BULLETS.join(" ")).toMatch(/signature|proof/i);
     expect(PRO_CTA_EDIT_FREE_DRAFT).toBe("Edit free draft");
+    for (const bullet of PRO_UPGRADE_FREE_BULLETS) {
+      expect(bullet.toLowerCase()).not.toMatch(/download/);
+    }
+    expect(STALE_PRO_CONVERSION_STRINGS.some((s) => s.toLowerCase().includes("download"))).toBe(true);
   });
 
   it("renders comparison card with column labels in component", () => {
     expect(card).toContain("PRO_UPGRADE_FREE_COLUMN_LABEL");
     expect(card).toContain("PRO_UPGRADE_PRO_COLUMN_LABEL");
     expect(card).toContain("PRO_UPGRADE_CARD_HEADING");
+    expect(card).toContain("PRO_UPGRADE_FREE_COLUMN_HELPER");
     expect(card).toContain("ProConversionComparisonCard");
+    expect(card.toLowerCase()).not.toMatch(/download/);
   });
 });
 

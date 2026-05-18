@@ -9,7 +9,7 @@
  * mis-order multi-party Oxford lists — never rely on it alone for Pro body / export text.
  */
 
-import { extractBetweenPartyPair } from "../components/agreements/partyBetweenParse";
+import { extractBetweenPartyNameList } from "../components/agreements/partyBetweenParse";
 
 const ENTITY_SUFFIX = /(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|PC|P\.C\.)/i;
 
@@ -36,17 +36,9 @@ export function extractAgreementEntityCandidates(context: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
 
-  const betweenPair = extractBetweenPartyPair(text);
-  if (betweenPair) {
-    const left = stripParenClauses(betweenPair.left);
-    const right = stripParenClauses(betweenPair.right);
-    const leftParts = left.split(/\s*,\s*/).map((x) => stripParenClauses(x)).filter(Boolean);
-    if (leftParts.length >= 2) {
-      for (const p of leftParts) pushUnique(out, seen, p);
-    } else {
-      pushUnique(out, seen, left);
-    }
-    pushUnique(out, seen, right);
+  const betweenNames = extractBetweenPartyNameList(text);
+  for (const raw of betweenNames) {
+    pushUnique(out, seen, stripParenClauses(raw));
   }
 
   const partiesLine = text.match(/\bparties?\s*:\s*([^\n]+)/i);

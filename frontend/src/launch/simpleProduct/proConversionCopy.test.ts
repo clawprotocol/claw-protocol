@@ -15,6 +15,7 @@ import {
   PRO_CTA_KEEP_FREE_DRAFT,
   PRO_UPGRADE_CARD_HEADING,
   PRO_UPGRADE_FREE_BULLETS,
+  PRO_UPGRADE_FREE_COLUMN_HELPER,
   PRO_UPGRADE_PRO_BULLETS,
   STALE_PRO_CONVERSION_STRINGS,
 } from "./proConversionCopy";
@@ -43,7 +44,9 @@ describe("proConversionCopy", () => {
     expect(PRO_CTA_KEEP_FREE_DRAFT).toBe("Keep free draft");
     expect(PRO_CTA_EDIT_FREE_DRAFT).toBe("Edit free draft");
     expect(PRO_UPGRADE_CARD_HEADING).toMatch(/draft to deal/i);
-    expect(PRO_UPGRADE_FREE_BULLETS.length).toBeGreaterThan(0);
+    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Copy your draft text");
+    expect(PRO_UPGRADE_FREE_BULLETS.join(" ").toLowerCase()).not.toMatch(/download/);
+    expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/proof records/i);
     expect(PRO_UPGRADE_PRO_BULLETS.length).toBeGreaterThan(0);
     expect(CHECKOUT_TITLE).toBe("Continue with Pro");
     expect(CHECKOUT_SUBTITLE).toMatch(/Review it before anything is shared, sent, or signed/i);

@@ -9,8 +9,7 @@ describe("escapeHtml", () => {
 
 describe("buildPremiumAgreementReadonlyHtml", () => {
   const baseOpts = {
-    partyNameA: "A",
-    partyNameB: "B",
+    partyNames: ["A", "B"],
   } as const;
 
   it("wraps numbered section labels as h2 and body as p", () => {
@@ -57,8 +56,7 @@ Net 30.`;
   it("always appends a signature section for collaboration and execution modes", () => {
     const htmlCollab = buildPremiumAgreementReadonlyHtml("TITLE\n\nBody.", {
       ...baseOpts,
-      partyNameA: "Acme LLC",
-      partyNameB: "Beta LLC",
+      partyNames: ["Acme LLC", "Beta LLC"],
       signatureSectionMode: "collaboration",
     });
     expect(htmlCollab).toContain("Signatures");
@@ -70,8 +68,7 @@ Net 30.`;
 
     const htmlExec = buildPremiumAgreementReadonlyHtml("TITLE\n\nBody.", {
       ...baseOpts,
-      partyNameA: "Acme LLC",
-      partyNameB: "Beta LLC",
+      partyNames: ["Acme LLC", "Beta LLC"],
       signatureSectionMode: "execution",
     });
     expect(htmlExec).toContain("Execution — Signatures");
@@ -80,11 +77,25 @@ Net 30.`;
 
   it("uses tasteful placeholder labels when party names are generic", () => {
     const html = buildPremiumAgreementReadonlyHtml("T\n\nB.", {
-      partyNameA: "Party A",
-      partyNameB: "Party B",
+      partyNames: ["Party A", "Party B"],
       signatureSectionMode: "collaboration",
     });
     expect(html).toContain("Party A / Authorized Signer");
     expect(html).toContain("Party B / Authorized Signer");
+  });
+
+  it("renders a signature block for each party when more than two are provided", () => {
+    const names = [
+      "Redwood Peak Ventures LLC",
+      "Atlas Harbor Technologies Inc.",
+      "Meridian Workforce Group LLC",
+    ];
+    const html = buildPremiumAgreementReadonlyHtml("TITLE\n\nBody.", {
+      partyNames: names,
+      signatureSectionMode: "collaboration",
+    });
+    for (const name of names) {
+      expect(html).toContain(name);
+    }
   });
 });

@@ -13,6 +13,7 @@ import {
   formatAuthoritativeAgreementPartiesHeadline,
   orderedAuthoritativePartyDisplayNames,
 } from "../../agreement/handoffPartyDisplay";
+import { extractAgreementParties } from "../../agreement/extractAgreementParties";
 import {
   isAgreementDetailsStepReady,
   normalizeAgreementDraftFromApi,
@@ -10603,8 +10604,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (shouldShowPaidRetry) return "";
     const rd = reviewDraft ?? draft;
     const corpus = premiumPaidReadonlyPick.plainText;
-    const partyNameA = (rd?.parties?.[0]?.name || "").trim() || "Party A";
-    const partyNameB = (rd?.parties?.[1]?.name || "").trim() || "Party B";
+    const signaturePartyNames = extractAgreementParties({
+      parties: rd?.parties,
+      intakeText: intakeCombined,
+      renderedText: corpus,
+      partiesLine: displayLivePreviewModel.partiesLine,
+    });
     const referralEconomicsPrompt = /\b(\d{1,2}\s*%|commission|referral|realtor|lead|source(?:d)?\b)\b/i.test(intakeCombined);
     const genericPaymentInRender = /\b(to be agreed|to be specified|payment schedule to be agreed)\b/i.test(corpus);
     const titleNow = (rd?.title || "").trim();
@@ -10654,15 +10659,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         purpose: rd?.purpose || "",
         additional_terms: rd?.additional_terms || "",
         party_roles: (rd?.parties || []).map((p) => (p.role || "").trim()).filter(Boolean),
-        signature_labels: [partyNameA, partyNameB],
+        signature_labels: signaturePartyNames,
         text: corpus,
       });
     }
     const renderHints = computePremiumDocumentRenderHints(rd, corpus);
     return buildPremiumAgreementReadonlyHtml(corpus, {
       signatureSectionMode: effectivePremiumSendMode === "signature" ? "execution" : "collaboration",
-      partyNameA,
-      partyNameB,
+      partyNames: signaturePartyNames,
       renderHints,
     });
   }, [
@@ -15640,6 +15644,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     editorRef={agreementPreviewEditorRef}
                                     id="claw-agreement-preview-editor"
                                     editRequestNonce={starterDocumentEditRequest}
+                                    parties={draft?.parties}
+                                    intakeText={intakeCombined}
+                                    partiesLine={displayLivePreviewModel.partiesLine}
                                     value={agreementDocumentText}
                                     disabled={(isGenerating && !draft) || upgradeLockActive}
                                     onChange={(next) => {

@@ -24,11 +24,12 @@ const TAIL_STOP = /\s+(?:\n|(?:(?:for|whereas|hereafter|effective|the\s+term|ter
 const SENTENCE_BOUNDARY_FIELD_STOP =
   /\.\s+(?:\$|Fee\b|Payment\b|Compensation\b|Price\b|Term\b|Scope\b|Purpose\b|Effective\b|Closing\b|Property\b|Premises\b|Rent\b|Deposit\b|Governing\b|Jurisdiction\b|Venue\b|Confidential|Termination\b|Notice\b|Services?\b|Deliverables?\b)/i;
 
-/**
- * After the word "between ", split the remainder on the **last** " and " so that
- * party A can contain "Smith and Wesson" while still separating A from B.
- */
-export function extractBetweenPartyPair(raw: string): { left: string; right: string } | null {
+function trimBetweenPartyFragment(s: string): string {
+  // Strip list punctuation only — preserve "Inc." / "Corp." terminal periods.
+  return normalizePartyNameFragment(s.replace(/[,;:]+$/g, "").trim());
+}
+
+function sliceBetweenPartyClauseTail(raw: string): string | null {
   const text = raw.trim();
   const m = text.match(/\bbetween\s+/i);
   if (!m || m.index === undefined) return null;
@@ -42,16 +43,41 @@ export function extractBetweenPartyPair(raw: string): { left: string; right: str
   const sentStop = SENTENCE_BOUNDARY_FIELD_STOP.exec(tail);
   if (sentStop && sentStop.index !== undefined && sentStop.index > 0) tail = tail.slice(0, sentStop.index);
   tail = tail.trim();
-  if (tail.length < 3) return null;
+  return tail.length >= 3 ? tail : null;
+}
+
+/**
+ * Ordered party names after "between …" (2+ parties). Normalizes each name individually so
+ * entity suffix dedupe never strips LLC/Inc. from later parties in a comma-separated list.
+ */
+export function extractBetweenPartyNameList(raw: string): string[] {
+  const tail = sliceBetweenPartyClauseTail(raw);
+  if (!tail) return [];
 
   const segments = tail.split(/\s+and\s+/i).filter((s) => s.trim().length > 0);
-  if (segments.length < 2) return null;
+  if (segments.length < 2) return [];
 
-  const trimName = (s: string) => normalizePartyNameFragment(s.replace(/[.;:]+$/g, "").trim());
-  const right = trimName(segments[segments.length - 1]);
-  const left = trimName(segments.slice(0, -1).join(" and "));
+  const right = trimBetweenPartyFragment(segments[segments.length - 1]);
+  const leftCsv = segments.slice(0, -1).join(" and ");
+  const leftNames = leftCsv
+    .split(/\s*,\s*/)
+    .map(trimBetweenPartyFragment)
+    .filter((n) => n.length >= 2);
+
+  const names = right.length >= 2 ? [...leftNames, right] : leftNames;
+  return names.length >= 2 ? names : [];
+}
+
+/**
+ * After the word "between ", split the remainder on the **last** " and " so that
+ * party A can contain "Smith and Wesson" while still separating A from B.
+ */
+export function extractBetweenPartyPair(raw: string): { left: string; right: string } | null {
+  const names = extractBetweenPartyNameList(raw);
+  if (names.length < 2) return null;
+  const right = names[names.length - 1];
+  const left = names.slice(0, -1).join(" and ");
   if (left.length < 2 || right.length < 2) return null;
-
   return { left, right };
 }
 
