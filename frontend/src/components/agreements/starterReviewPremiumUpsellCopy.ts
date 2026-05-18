@@ -6,19 +6,23 @@
  * Free “proceed” CTAs (Continue, Add party names, Send Agreement, …) stay emerald — do not reuse these classes there.
  */
 
-import { FUNNEL_CTA_SEND_WITH_PRO } from "../../launch/pricingContent";
+import {
+  PRO_CTA_CONTINUE,
+  PRO_UPGRADE_CAN_HELP_BULLETS,
+  PRO_UPGRADE_CARD_BODY,
+  PRO_UPGRADE_CARD_HEADING,
+  PRO_UPGRADE_REASSURANCE,
+} from "../../launch/simpleProduct/proConversionCopy";
 
-export const STARTER_REVIEW_PREMIUM_HEADLINE = "Turn this into a serious business agreement";
+export const STARTER_REVIEW_PREMIUM_HEADLINE = PRO_UPGRADE_CARD_HEADING;
 
-export const STARTER_REVIEW_PREMIUM_BULLETS: readonly string[] = [
-  "Stronger clauses + cleaner language",
-  "Collaborate on edits before signing",
-  "Tracked e-signatures + proof record",
-];
+export const STARTER_REVIEW_PREMIUM_BODY = PRO_UPGRADE_CARD_BODY;
 
-export const STARTER_REVIEW_PREMIUM_CTA = FUNNEL_CTA_SEND_WITH_PRO;
+export const STARTER_REVIEW_PREMIUM_BULLETS = PRO_UPGRADE_CAN_HELP_BULLETS;
 
-export const STARTER_REVIEW_PREMIUM_MICROCOPY = "Used when terms matter.";
+export const STARTER_REVIEW_PREMIUM_CTA = PRO_CTA_CONTINUE;
+
+export const STARTER_REVIEW_PREMIUM_MICROCOPY = PRO_UPGRADE_REASSURANCE;
 
 /** Card / section shell: deep slate + amber border & warm glow (distinct from free emerald chrome). */
 export const STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME =

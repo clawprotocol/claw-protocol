@@ -1,6 +1,7 @@
 import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../../components/agreements/agreementAdvancedDraftAccess";
 import { extractAgreementIdFromSendReturnUrl } from "../checkoutParams";
+import { CHECKOUT_SUBTITLE } from "./proConversionCopy";
 
 /** Starter “Upgrade to improve draft” checkout — review before send/sign. */
 export const STARTER_UPGRADE_CHECKOUT_PROGRESS_LABELS = [
@@ -11,8 +12,7 @@ export const STARTER_UPGRADE_CHECKOUT_PROGRESS_LABELS = [
   "Proof",
 ] as const;
 
-export const CHECKOUT_STARTER_UPGRADE_SUBTITLE =
-  "Upgrade this starter draft into a full agreement. After checkout, review it before sending or signing.";
+export const CHECKOUT_STARTER_UPGRADE_SUBTITLE = CHECKOUT_SUBTITLE;
 
 export const CHECKOUT_STARTER_UPGRADE_AFTER_PAYMENT_LINE =
   "After payment: back to your agreement to review — nothing sends until you confirm.";

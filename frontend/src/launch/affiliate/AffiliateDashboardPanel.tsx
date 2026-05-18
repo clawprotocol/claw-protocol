@@ -122,12 +122,18 @@ export function AffiliateDashboardPanel(props: {
       try {
         const d = await fetchAffiliateDashboard(orgId.trim());
         if (cancel) return;
-        setData(d);
-        setCelebrations(d.celebrations ?? null);
+        if (d) {
+          setData(d);
+          setCelebrations(d.celebrations ?? null);
+        } else {
+          setData(null);
+          setCelebrations(null);
+        }
         setErr(null);
       } catch (e) {
         if (!cancel) {
           setData(null);
+          setCelebrations(null);
           setErr(e instanceof Error ? e.message : "Dashboard unavailable.");
         }
       }
@@ -622,8 +628,10 @@ export function AffiliateDashboardPanel(props: {
                   try {
                     await createAffiliateLink(normalizeHandle(handleInput));
                     const refreshed = await fetchAffiliateDashboard(orgId.trim());
-                    setData(refreshed);
-                    setCelebrations(refreshed.celebrations ?? null);
+                    if (refreshed) {
+                      setData(refreshed);
+                      setCelebrations(refreshed.celebrations ?? null);
+                    }
                   } catch (e) {
                     setCreateError(e instanceof Error ? e.message : "Could not create link.");
                   } finally {

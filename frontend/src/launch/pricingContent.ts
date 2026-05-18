@@ -59,10 +59,10 @@ export const FIRST_RUN_INTAKE_REASSURANCE =
 export const REVIEW_STRUCTURED_WIN_LINE =
   "You now have a structured agreement ready for review and signature.";
 
-/** Free/starter simple-home: headline + body for Pro delta (review remains fully editable). */
-export const FUNNEL_FREE_STARTER_HEADLINE = "Starter draft";
+/** Free draft simple-home: headline + body for Pro delta (review remains fully editable). */
+export const FUNNEL_FREE_STARTER_HEADLINE = "Your agreement";
 export const FUNNEL_FREE_STARTER_BODY =
-  "This is your first draft. Review it here, then choose whether to improve it with LawDog Pro, send it for review, or prepare it for signing.";
+  "This is your initial agreement. Review it here, then choose whether to continue with LawDog Pro, share for review, or prepare for signing.";
 export const FUNNEL_FREE_STARTER_HELPER =
   "Nothing is sent, signed, or shared until you choose the next step.";
 
@@ -76,13 +76,13 @@ export const FUNNEL_PRO_VALUE_BULLETS = [
 ] as const;
 
 /** Primary conversion CTA on free send upsell — aligned to Create → Send → Prove. */
-export const FUNNEL_CTA_SEND_WITH_PRO = "Unlock professional send";
+export const FUNNEL_CTA_SEND_WITH_PRO = "Continue with Pro";
 
 /** Simple create / intake — first prompt (AgreementBuilderIntake, SimpleCreatePage). */
 export const INTAKE_INTRO_HEADLINE = "Describe your agreement. We'll turn it into something you can send.";
 export const INTAKE_HELPER_LEAD = "Works for anything:";
 export const INTAKE_HELPER_BULLETS = ["freelance work", "NDAs", "partnerships", "simple deals"] as const;
-export const INTAKE_MICRO_TRUST_LINE = "You'll see a real agreement in seconds — ready to send.";
+export const INTAKE_MICRO_TRUST_LINE = "Nothing is sent until you confirm.";
 
 /** AgreementReview — lightweight reassurance above first preview (simple home). */
 export const SIMPLE_HOME_AGREEMENT_READY_LINES = [

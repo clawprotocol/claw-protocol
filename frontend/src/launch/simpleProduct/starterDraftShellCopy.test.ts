@@ -21,11 +21,11 @@ describe("starter draft shell copy", () => {
     expect(SIMPLE_CREATE_STARTER_HERO_SUBHEAD).toMatch(/share for review/i);
     expect(SIMPLE_CREATE_STARTER_HERO_SUBHEAD).toMatch(/prepare for signing/i);
     expect(SIMPLE_CREATE_STARTER_CONTROL_LINE).toMatch(/review, improve, share, sign, or stop/i);
-    expect(FUNNEL_FREE_STARTER_HEADLINE).toBe("Starter draft");
-    expect(FUNNEL_FREE_STARTER_BODY).toMatch(/improve it with LawDog Pro/i);
+    expect(FUNNEL_FREE_STARTER_HEADLINE).toBe("Your agreement");
+    expect(FUNNEL_FREE_STARTER_BODY).toMatch(/continue with LawDog Pro/i);
     expect(FUNNEL_FREE_STARTER_HELPER).toMatch(/Nothing is sent, signed, or shared/i);
     expect(CHIP_STATE_READY).toBe("Draft ready to review");
-    expect(STARTER_PRO_REFINE_IMPROVEMENT_CTA).toBe("Upgrade and strengthen draft");
+    expect(STARTER_PRO_REFINE_IMPROVEMENT_CTA).toBe("Continue with Pro");
   });
 
   it("starter progress labels use Review before Share/Sign and keep Draft as step 1", () => {
@@ -54,15 +54,15 @@ describe("SimpleCreatePage starter copy (static)", () => {
 });
 
 describe("AgreementBuilderIntake starter copy (static)", () => {
-  it("uses Continue with LawDog Pro and upgrade strengthen CTA on streamline path", () => {
+  it("uses Continue with Pro CTA on streamline path", () => {
     const intake = readFileSync(
       join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx"),
       "utf8",
     );
-    expect(intake).toContain("Continue with LawDog Pro");
+    expect(intake).toContain("PRO_CTA_CONTINUE");
     expect(intake).not.toContain("Send with LawDog Pro");
     expect(intake).toContain("STARTER_PRO_REFINE_IMPROVEMENT_CTA");
     expect(intake).toContain("FUNNEL_FREE_STARTER_HELPER");
-    expect(intake).not.toContain("upgrade to send, collect signatures");
+    expect(intake).not.toMatch(/label:\s*["']Upgrade to send["']/);
   });
 });

@@ -1,5 +1,13 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
+import {
+  PRO_CTA_CONTINUE,
+  PRO_CTA_KEEP_FREE_DRAFT,
+  PRO_UPGRADE_CAN_HELP_BULLETS,
+  PRO_UPGRADE_CARD_BODY,
+  PRO_UPGRADE_CARD_HEADING,
+  PRO_UPGRADE_REASSURANCE,
+} from "../../launch/simpleProduct/proConversionCopy";
 
 export type AdvancedFullDraftPaywallModalProps = {
   open: boolean;
@@ -102,52 +110,25 @@ export function AdvancedFullDraftPaywallModal({
                 id="adv-draft-paywall-title"
                 className="text-lg font-semibold tracking-tight text-slate-100 sm:text-xl md:text-2xl"
               >
-                Complete this agreement properly
+                {PRO_UPGRADE_CARD_HEADING}
               </h2>
-              <p className="mt-2 text-sm leading-6 text-slate-400 sm:text-[15px]">
-                Your starter draft is a strong start. The complete version turns rough wording into clearer terms both
-                sides can approve, adds stronger protections, and prepares it for sending.
-              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-400 sm:text-[15px]">{PRO_UPGRADE_CARD_BODY}</p>
               <ul className="mt-4 space-y-2 text-sm leading-6 text-slate-200 sm:text-[15px]">
-                <li className="flex gap-2">
-                  <span className="shrink-0 text-slate-500" aria-hidden>
-                    •
-                  </span>
-                  <span>Keeps everything you entered</span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="shrink-0 text-slate-500" aria-hidden>
-                    •
-                  </span>
-                  <span>Makes terms easier for the other party to accept</span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="shrink-0 text-slate-500" aria-hidden>
-                    •
-                  </span>
-                  <span>Reduces back-and-forth and misunderstandings</span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="shrink-0 text-slate-500" aria-hidden>
-                    •
-                  </span>
-                  <span>Adds stronger protections where needed</span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="shrink-0 text-slate-500" aria-hidden>
-                    •
-                  </span>
-                  <span>Prepares send + signature flow</span>
-                </li>
+                {PRO_UPGRADE_CAN_HELP_BULLETS.map((line) => (
+                  <li key={line} className="flex gap-2">
+                    <span className="shrink-0 text-slate-500" aria-hidden>
+                      •
+                    </span>
+                    <span>{line}</span>
+                  </li>
+                ))}
               </ul>
-              <p className="mt-6 text-xs leading-5 text-slate-500 sm:text-sm sm:leading-6">
-                You can review everything before sending.
-              </p>
+              <p className="mt-6 text-xs leading-5 text-slate-500 sm:text-sm sm:leading-6">{PRO_UPGRADE_REASSURANCE}</p>
             </div>
             <div className="mt-8 flex flex-col gap-4 md:mt-10">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 sm:text-xs">Next step</p>
               <p className="text-sm leading-6 text-slate-400 sm:text-[15px]">
-                Choose a plan, then return here with a clearer agreement that&apos;s easier to approve and ready to finish.
+                Choose Pro, then return here to review before anything is shared, sent, or signed.
               </p>
               <button
                 ref={primaryRef}
@@ -161,7 +142,7 @@ export function AdvancedFullDraftPaywallModal({
                   onContinueToCompleteVersion();
                 }}
               >
-                Continue to complete version
+                {PRO_CTA_CONTINUE}
               </button>
               <button
                 type="button"
@@ -171,7 +152,7 @@ export function AdvancedFullDraftPaywallModal({
                   onStayWithStarter();
                 }}
               >
-                Continue with starter draft
+                {PRO_CTA_KEEP_FREE_DRAFT}
               </button>
               <button
                 type="button"

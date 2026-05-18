@@ -1,6 +1,14 @@
 /** Calm, proof-first user-facing copy for the below-document refine path (not legal advice). */
 
 import type { AgreementFamily } from "./agreementFamilyRouter";
+import {
+  PRO_CTA_CONTINUE,
+  PRO_CTA_KEEP_FREE_DRAFT,
+  PRO_UPGRADE_CAN_HELP_BULLETS,
+  PRO_UPGRADE_CARD_BODY,
+  PRO_UPGRADE_CARD_HEADING,
+  PRO_UPGRADE_REASSURANCE,
+} from "../../launch/simpleProduct/proConversionCopy";
 import { REFINE_FIELD_HEADING_FREE, REFINE_FIELD_HEADING_PRO } from "./draftPreviewLabels";
 
 export { REFINE_FIELD_HEADING_FREE, REFINE_FIELD_HEADING_PRO } from "./draftPreviewLabels";
@@ -18,22 +26,17 @@ export const REFINE_THIS_DRAFT_PLACEHOLDER =
 export const PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER =
   'Edit the agreement OR add notes for the reviewer (e.g., "Add late fee..." or "List items the other party should review")';
 
-export const STARTER_PRO_REFINE_IMPROVEMENT_HEADING = "Want LawDog to strengthen this draft?";
+export const STARTER_PRO_REFINE_IMPROVEMENT_HEADING = PRO_UPGRADE_CARD_HEADING;
 /** @deprecated Use {@link STARTER_PRO_REFINE_IMPROVEMENT_HEADING} in create-flow card. */
 export const STARTER_PRO_REFINE_UPSELL_HEADING = STARTER_PRO_REFINE_IMPROVEMENT_HEADING;
-export const STARTER_PRO_REFINE_IMPROVEMENT_BODY =
-  "Upgrade to expand, revise, and organize this into a fuller agreement before review, sharing, or signing.";
-export const STARTER_PRO_REFINE_IMPROVEMENT_BULLETS: readonly string[] = [
-  "Add missing structure and key clauses",
-  "Tighten payment, scope, review, and delivery terms",
-  "Preserve your business deal while improving the language",
-] as const;
-export const STARTER_PRO_REFINE_IMPROVEMENT_CTA = "Upgrade and strengthen draft";
-export const STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY =
-  "You can still keep reviewing this starter draft as-is.";
+export const STARTER_PRO_REFINE_IMPROVEMENT_BODY = PRO_UPGRADE_CARD_BODY;
+export const STARTER_PRO_REFINE_IMPROVEMENT_BULLETS = PRO_UPGRADE_CAN_HELP_BULLETS;
+export const STARTER_PRO_REFINE_IMPROVEMENT_CTA = PRO_CTA_CONTINUE;
+export const STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY = PRO_UPGRADE_REASSURANCE;
+export const STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA = PRO_CTA_KEEP_FREE_DRAFT;
 
 export const STARTER_PRO_REFINE_UPSELL_BODY_DEFAULT =
-  "Turn this starter draft into a stronger send-ready agreement.";
+  "Turn your draft into a cleaner, negotiation-ready version before you share or sign.";
 export const STARTER_PRO_REFINE_UPSELL_CTA = STARTER_PRO_REFINE_IMPROVEMENT_CTA;
 /** CTA A/B: same product copy; experiment still routes analytics. */
 export const STARTER_PRO_REFINE_UPSELL_CTA_EXPERIMENT_VARIANT = STARTER_PRO_REFINE_IMPROVEMENT_CTA;

@@ -225,9 +225,9 @@ export function buildLiveDraftPreview(raw: string): LivePreviewModel {
 
 export function pickLiveStructuringHint(text: string, docTitle: string): LiveStructuringHint {
   const t = text.trim();
-  if (t.length < 4) return "Structuring from your words…";
-  if (docTitle && docTitle !== "Agreement") return `Suggested agreement type: ${docTitle}`;
-  return "Mapping parties, term, scope, obligations, payment, and timing from your text…";
+  if (t.length < 4) return "Structuring your agreement…";
+  if (docTitle && docTitle !== "Agreement") return `Structuring your ${docTitle.toLowerCase()}…`;
+  return "Turning your notes into a draft…";
 }
 
 /** Preview rows that support click-to-edit in the live preview pane. */

@@ -19,7 +19,7 @@ describe("paywallExperiment", () => {
 
   it("resolveSendPaywallCopy control has expected dimension keys", () => {
     const c = resolveSendPaywallCopy("control");
-    expect(c.ctaLabel).toBe("Unlock professional send");
+    expect(c.ctaLabel).toBe("Continue with Pro");
     expect(c.showSecondaryUrgency).toBe(true);
     expect(paywallDimensionsForVariant("control").headline_frame).toBe("default");
   });

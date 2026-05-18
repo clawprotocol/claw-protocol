@@ -202,9 +202,15 @@ export async function patchAffiliatePayoutWallet(
   return readJson<AffiliateDashboardResponse>(res);
 }
 
-export async function fetchAffiliateDashboard(orgId: string): Promise<AffiliateDashboardResponse> {
+export async function fetchAffiliateDashboard(orgId: string): Promise<AffiliateDashboardResponse | null> {
   const url = apiUrl(`/v1/orgs/${encodeURIComponent(orgId)}/affiliate/gamification/dashboard`);
   const res = await fetch(url, { headers: clawAgreementHeaders() });
+  if (res.status === 404) {
+    if (import.meta.env.DEV) {
+      console.debug("[affiliate] gamification dashboard unavailable (optional)");
+    }
+    return null;
+  }
   if (!res.ok) throw new Error(await errorMessageFromResponse(res, "Could not load affiliate dashboard."));
   return readJson<AffiliateDashboardResponse>(res);
 }

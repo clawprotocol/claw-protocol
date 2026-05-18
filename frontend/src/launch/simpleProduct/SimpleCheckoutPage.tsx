@@ -7,6 +7,7 @@ import {
   CHECKOUT_STARTER_UPGRADE_SUBTITLE,
   resolveCheckoutFlowProgress,
 } from "./checkoutFlowProgress";
+import { CHECKOUT_CTA, CHECKOUT_FOOTER, CHECKOUT_TITLE } from "./proConversionCopy";
 import {
   createFiatToCryptoOnrampIntent,
   demoConfirmFiatToCryptoOnrampFromCard,
@@ -425,7 +426,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           isSingleAgreementCheckout
             ? "Unlock this agreement"
             : isCreateAgreementCheckout
-              ? "Upgrade & complete checkout"
+              ? CHECKOUT_TITLE
               : "Activate your plan"
         }
         subtitle={
@@ -434,7 +435,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
             : isCreateAgreementCheckout
               ? CHECKOUT_STARTER_UPGRADE_SUBTITLE
               : checkoutFlowProgress.variant === "direct_send"
-                ? "Unlock professional send for this agreement — then review recipients before anything goes out."
+                ? "Continue with Pro for this agreement — review recipients before anything goes out."
                 : ck.pageSubtitle
         }
         titleClassName={
@@ -585,6 +586,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                     />
                     <span>Processing payment…</span>
                   </span>
+                ) : isCreateAgreementCheckout ? (
+                  CHECKOUT_CTA
                 ) : (
                   "Pay & continue"
                 )}
@@ -750,7 +753,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
             {isSingleAgreementCheckout
               ? "Payment via card processor · Unlock applies after payment is confirmed · Nothing is sent until you confirm · You control all actions"
               : isCreateAgreementCheckout
-                ? "Secured checkout · Draft saved · Review before send"
+                ? CHECKOUT_FOOTER
                 : "Payment via card processor · Plans activate after payment is confirmed · Nothing is sent until you confirm · You control all actions"}
           </p>
           {!isCreateAgreementCheckout ? <p className="text-sm text-slate-400">{ck.trustLines.footnote}</p> : null}

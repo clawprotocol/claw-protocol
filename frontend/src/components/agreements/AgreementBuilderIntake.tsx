@@ -119,7 +119,14 @@ import {
   STARTER_PRO_REFINE_IMPROVEMENT_CTA,
   STARTER_PRO_REFINE_IMPROVEMENT_HEADING,
   STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY,
+  STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA,
 } from "./reviewRefineUserCopy";
+import {
+  DRAFT_LOADING_KEEPING,
+  DRAFT_LOADING_STRUCTURING,
+  DRAFT_LOADING_TURNING,
+  PRO_CTA_CONTINUE,
+} from "../../launch/simpleProduct/proConversionCopy";
 import {
   getStarterProRefineCtaExperiment,
   starterProRefineImpressionFunnelEvent,
@@ -203,6 +210,7 @@ import { buildWeCapturedSummaryBullets, buildWhatWeUnderstoodBullets } from "./i
 import { WhatWeUnderstoodBlock } from "./WhatWeUnderstoodBlock";
 import { CreateDraftReviewCard } from "./CreateDraftReviewCard";
 import {
+  STARTER_REVIEW_PREMIUM_BODY,
   STARTER_REVIEW_PREMIUM_BULLETS,
   STARTER_REVIEW_PREMIUM_CTA,
   STARTER_REVIEW_PREMIUM_CTA_BUTTON_CLASSNAME,
@@ -922,7 +930,7 @@ const STARTER_REVIEW_HEADLINE = FUNNEL_FREE_STARTER_HEADLINE;
 const STARTER_REVIEW_SUBLINE = FUNNEL_FREE_STARTER_BODY;
 const STARTER_REVIEW_HELPER = FUNNEL_FREE_STARTER_HELPER;
 const STARTER_CONTINUE_TO_SEND_UPGRADE_NUDGE =
-  "Closing soon? Upgrade to send for a calmer review surface, clearer terms, and professional delivery.";
+  "Closing soon? Continue with Pro for a calmer review surface, clearer terms, and professional delivery.";
 
 type FullDraftUpgradeIntakeCalloutProps = {
   onUpgrade: () => void | Promise<void>;
@@ -936,6 +944,7 @@ function FullDraftUpgradeIntakeCallout({ onUpgrade }: FullDraftUpgradeIntakeCall
       className={`mt-3 p-4 sm:p-5 ${STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME}`}
     >
       <p className="text-base font-semibold tracking-tight text-slate-50 sm:text-lg">{STARTER_REVIEW_PREMIUM_HEADLINE}</p>
+      <p className="mt-2 text-sm leading-relaxed text-slate-400 sm:text-base">{STARTER_REVIEW_PREMIUM_BODY}</p>
       <ul className="mt-3 space-y-2 text-sm leading-snug text-slate-200/95 sm:leading-relaxed">
         {STARTER_REVIEW_PREMIUM_BULLETS.map((b) => (
           <li key={b} className="flex gap-2">
@@ -9546,9 +9555,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const m = productionStickyLabelModeRef.current;
     if (m === "refine") return "Updating your agreement...";
     if (m === "pro_upgrade") return "Preparing your LawDog Pro agreement...";
-    if (m === "free_draft") return "Creating your draft...";
-    if (m === "generic") return "Working...";
-    return "Working...";
+    if (displayPhase === "hydrating_generated") return DRAFT_LOADING_KEEPING;
+    if (displayPhase === "generating_draft" || displayPhase === "editing_pro") return DRAFT_LOADING_STRUCTURING;
+    if (displayPhase === "preparing_review") return DRAFT_LOADING_TURNING;
+    return DRAFT_LOADING_STRUCTURING;
   };
   /** Production draft parse / hydrate: sticky showed NOTTHING_SENT + busy CTA — one line only. */
   const stickyProductionAgreementCreationLoading = Boolean(
@@ -10743,6 +10753,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const starterStrongProtectionsUpsellEl = useMemo(() => {
     if (suppressIntakePremiumUpsell) return null;
+    if (streamlineFirstRunReviewUi || showStarterProRefineUpsell) return null;
     if (!originalWordingIsPremiumOnlyOnStarter) return null;
     return (
       <div
@@ -10778,7 +10789,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         <p className="mt-2 text-center text-[11px] leading-snug text-slate-400 sm:text-xs">{STARTER_REVIEW_PREMIUM_MICROCOPY}</p>
       </div>
     );
-  }, [originalWordingIsPremiumOnlyOnStarter, beginAdvancedFullDraftCheckout, suppressIntakePremiumUpsell, tier]);
+  }, [
+    originalWordingIsPremiumOnlyOnStarter,
+    beginAdvancedFullDraftCheckout,
+    suppressIntakePremiumUpsell,
+    streamlineFirstRunReviewUi,
+    showStarterProRefineUpsell,
+    tier,
+  ]);
 
   const continueIsSecondary = Boolean(
     simpleProductFlow &&
@@ -11734,12 +11752,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         if (showUpgradeToFullDraftOnReview) {
           // Pro-required tier (13+ real parties) gets an explicit, lower-pressure label.
-          // Normal/caution tiers keep "Continue with LawDog Pro" / "Upgrade to send" on first-session streamline UI.
+          // Streamline review uses unified Pro CTA; Pro-required tier keeps explicit label.
           const proRequiredCtaLabel = starterPartyCountRequiresPro
             ? STARTER_PARTY_PRO_REQUIRED_CTA_LABEL
-            : streamlineFirstRunReviewUi
-              ? "Continue with LawDog Pro"
-              : "Upgrade to send";
+            : PRO_CTA_CONTINUE;
           return {
             label: proRequiredCtaLabel,
             action: "continue_basic_draft",
@@ -14990,7 +15006,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           </p>
                           {upgradeLockActive &&
                           productionDraftPrimaryReviewSurface &&
-                          createUiStage === CreateUiStage.DRAFT ? (
+                          createUiStage === CreateUiStage.DRAFT &&
+                          !(streamlineFirstRunReviewUi && showStarterProRefineUpsell) ? (
                             <div
                               ref={upgradeRequiredBlockRef}
                               className="mx-auto mb-3 w-full max-w-none px-4 sm:px-0"
@@ -15024,7 +15041,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     className="min-h-[2.85rem] w-full rounded-lg border border-slate-600/70 bg-slate-800/80 px-5 py-3 text-center text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 sm:w-auto"
                                     onClick={clearUpgradeLockAndResume}
                                   >
-                                    Continue with this draft
+                                    {STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA}
                                   </button>
                                 </div>
                                 <p className="mt-3 text-center text-[11px] leading-snug text-slate-400 sm:text-xs">
@@ -15642,7 +15659,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     <li key={line}>{line}</li>
                                   ))}
                                 </ul>
-                                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                                   <button
                                     type="button"
                                     className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-950/40 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-sm transition hover:border-amber-400/60 hover:bg-amber-900/50 sm:w-auto"
@@ -15658,6 +15675,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     }}
                                   >
                                     {STARTER_PRO_REFINE_IMPROVEMENT_CTA}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-600/70 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:bg-slate-800/60 sm:w-auto"
+                                    onClick={() => {
+                                      agreementPreviewEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                      agreementPreviewEditorRef.current?.focus();
+                                    }}
+                                  >
+                                    {STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA}
                                   </button>
                                 </div>
                                 <p className="mt-3 text-center text-[11px] leading-snug text-slate-500 sm:mt-2 sm:text-right sm:text-xs">
