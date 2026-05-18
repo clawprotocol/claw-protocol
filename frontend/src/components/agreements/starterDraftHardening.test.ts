@@ -140,7 +140,7 @@ E-signatures: Agreement to be signed electronically by all parties.`;
   it("starter preview does NOT contain Pro delivery copy", () => {
     const result = runPipeline(intake);
     const preview = starterPreview(result);
-    expect(preview).toContain(STARTER_DISCLAIMER);
+    expect(preview).not.toContain(STARTER_DISCLAIMER);
     for (const phrase of PRO_DELIVERY_PHRASES) {
       expect(preview).not.toContain(phrase);
     }
@@ -216,7 +216,7 @@ E-signatures: Parties agree to execute this agreement electronically.`;
   it("starter preview does NOT contain Pro delivery copy", () => {
     const result = runPipeline(intake);
     const preview = starterPreview(result);
-    expect(preview).toContain(STARTER_DISCLAIMER);
+    expect(preview).not.toContain(STARTER_DISCLAIMER);
     for (const phrase of PRO_DELIVERY_PHRASES) {
       expect(preview).not.toContain(phrase);
     }
@@ -278,7 +278,7 @@ Confidentiality: Mutual — each party's proprietary information, trade secrets,
   it("starter preview does NOT contain Pro delivery copy", () => {
     const result = runPipeline(intake);
     const preview = starterPreview(result);
-    expect(preview).toContain(STARTER_DISCLAIMER);
+    expect(preview).not.toContain(STARTER_DISCLAIMER);
     for (const phrase of PRO_DELIVERY_PHRASES) {
       expect(preview).not.toContain(phrase);
     }

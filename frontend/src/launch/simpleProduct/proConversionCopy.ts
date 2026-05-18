@@ -17,16 +17,17 @@ export const DRAFT_LOADING_TURNING = DRAFT_LOADING_REVIEW_SCREEN;
 
 export const PRO_CTA_CONTINUE = "Continue with Pro";
 export const PRO_CTA_KEEP_FREE_DRAFT = "Keep free draft";
+export const PRO_CTA_EDIT_THIS_DRAFT = "Edit this draft";
 
-export const PRO_UPGRADE_CARD_HEADING = "Continue to collaboration + signing";
+export const PRO_UPGRADE_CARD_HEADING = "Ready to share or sign?";
 export const PRO_UPGRADE_CARD_BODY =
-  "Track revisions, collect signatures, and finalize the agreement when you're ready.";
+  "LawDog Pro turns this draft into a collaboration and signing workflow — private review links, tracked changes, signature prep, and a proof record.";
 
 export const PRO_UPGRADE_CAN_HELP_HEADING = "LawDog Pro can also help with";
 export const PRO_UPGRADE_CAN_HELP_BULLETS: readonly string[] = [
-  "Share a private review link",
+  "Send a private review link",
   "Track requested changes",
-  "Prepare signing fields",
+  "Prepare signature fields",
   "Collect signatures",
   "Keep a proof record",
 ] as const;
@@ -77,4 +78,6 @@ export const STALE_PRO_CONVERSION_STRINGS: readonly string[] = [
   "What your current draft doesn",
   "Upgrade and strengthen draft",
   "Make this agreement easier to approve",
+  "Continue to collaboration + signing",
+  "simplified starter preview",
 ] as const;

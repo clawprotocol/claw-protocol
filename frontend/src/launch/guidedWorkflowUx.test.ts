@@ -25,10 +25,10 @@ describe("guided workflow copy", () => {
   });
 
   it("frames Pro as workflow continuation", () => {
-    expect(PRO_UPGRADE_CARD_HEADING).toBe("Continue to collaboration + signing");
+    expect(PRO_UPGRADE_CARD_HEADING).toBe("Ready to share or sign?");
     expect(PRO_CTA_CONTINUE).toBe("Continue with Pro");
     expect(PRO_CTA_KEEP_FREE_DRAFT).toBe("Keep free draft");
-    expect(PRO_UPGRADE_CAN_HELP_BULLETS[0]).toBe("Share a private review link");
+    expect(PRO_UPGRADE_CAN_HELP_BULLETS[0]).toBe("Send a private review link");
   });
 });
 
@@ -62,6 +62,14 @@ describe("AgreementBuilderIntake review UX (static)", () => {
     expect(intake).toContain("StarterDraftDocumentSurface");
     expect(intake).toContain("logProContinuationCardVisible");
     expect(intake).toContain("hideStickyForStarterProContinuation");
+    expect(intake).toContain("freeTrackBlocksRecipientAdvance");
+    expect(intake).toContain('case "keep_reviewing"');
+    expect(intake).toContain("logFreeReviewKeepReviewing");
+    expect(intake).toContain("logFreeSendGatedToPro");
+    expect(intake).not.toContain('label: "Keep reviewing"');
+    expect(intake).toContain("logHomeAutoGenerateSkipped");
+    expect(intake).toContain("homeAutoGenerateConsumedRef");
+    expect(intake).toContain("STARTER_PRO_REFINE_EDIT_DRAFT_CTA");
   });
 
   it("does not surface stale funnel strings in primary review", () => {

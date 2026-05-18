@@ -23,9 +23,17 @@ export function StarterDraftDocumentSurface(props: {
   disabled?: boolean;
   editorRef?: RefObject<HTMLTextAreaElement | null>;
   id?: string;
+  /** Increment to open edit mode from parent (e.g. Pro card “Edit this draft”). */
+  editRequestNonce?: number;
 }) {
-  const { value, onChange, disabled, editorRef, id = "claw-starter-agreement-document" } = props;
+  const { value, onChange, disabled, editorRef, id = "claw-starter-agreement-document", editRequestNonce } = props;
   const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editRequestNonce) return;
+    setEditing(true);
+    window.requestAnimationFrame(() => editorRef?.current?.focus());
+  }, [editRequestNonce, editorRef]);
   const { title, body } = useMemo(() => splitAgreementDisplay(value), [value]);
 
   useEffect(() => {

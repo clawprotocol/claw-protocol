@@ -81,7 +81,7 @@ describe("buildAgreementPreviewText", () => {
     expect(t).toMatch(/to be agreed (?:by|between) the parties/i);
     expect(t).not.toMatch(/in review/i);
     expect(t).not.toContain("Their Lobby");
-    expect(t).toContain("simplified starter preview");
+    expect(t).not.toContain("simplified starter preview");
     const scopeSection = t.split("1. Scope of Services / Purpose")[1]?.split("2. Payment Terms")[0] ?? "";
     expect(scopeSection.length).toBeLessThan(longPurpose.length + 80);
   });

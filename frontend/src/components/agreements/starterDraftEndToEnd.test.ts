@@ -356,7 +356,7 @@ describe("free starter preview Pro copy isolation", () => {
     const intake = `Consulting agreement between Acme Corp and Beta Industries. Fee: $3,000/month. Governing law: Texas.`;
     const result = runPipeline(intake);
     const preview = starter(result);
-    expect(preview).toContain(STARTER_DISCLAIMER);
+    expect(preview).not.toContain(STARTER_DISCLAIMER);
     expect(preview).not.toContain("This LawDog Pro agreement");
     expect(preview).not.toContain("confirm material terms before you share or sign");
   });

@@ -62,7 +62,8 @@ describe("AgreementBuilderIntake starter copy (static)", () => {
     expect(intake).toContain("PRO_CTA_CONTINUE");
     expect(intake).not.toContain("Send with LawDog Pro");
     expect(intake).toContain("STARTER_PRO_REFINE_IMPROVEMENT_CTA");
-    expect(intake).toContain("FUNNEL_FREE_STARTER_HELPER");
+    expect(intake).toContain("STARTER_REVIEW_HELPER");
+    expect(intake).toContain("performKeepReviewingFocus");
     expect(intake).not.toMatch(/label:\s*["']Upgrade to send["']/);
   });
 });

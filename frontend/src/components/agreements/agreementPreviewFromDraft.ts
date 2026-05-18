@@ -538,7 +538,7 @@ export function buildAgreementPreviewTextCore(
   const more = sanitizeUserAdditionalTerms(draft.additional_terms, premiumDeliverable);
 
   const introGeneral = starterPreview
-    ? "This simplified starter preview reflects your key fields only. It is not legal advice — LawDog Pro can expand this into fuller agreement language when you upgrade."
+    ? ""
     : premiumDeliverable
       ? "This LawDog Pro agreement is organized for your review. It is not legal advice; confirm material terms before you share or sign."
       : "This draft agreement preview is generated from your structured fields for review only. It is not legal advice and may require edits before signing.";
@@ -573,7 +573,10 @@ export function buildAgreementPreviewTextCore(
     return collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
   }
 
-  const lines: string[] = [title.toUpperCase(), "", introGeneral, ""];
+  const lines: string[] = [title.toUpperCase(), ""];
+  if (introGeneral.trim()) {
+    lines.push(introGeneral, "");
+  }
   if (premiumDeliverable) lines.push("");
   lines.push(
     partiesBlock,

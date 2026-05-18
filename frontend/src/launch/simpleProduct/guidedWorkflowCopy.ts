@@ -38,6 +38,23 @@ export function logProContinuationCardVisible(): void {
   console.info("[pro-continuation-card-visible]");
 }
 
+export const FREE_REVIEW_OUTSIDE_HELPER =
+  "Initial draft generated from your notes. Review and edit before sharing.";
+
+export function logFreeReviewKeepReviewing(agreementIdShort: string, source: string): void {
+  console.info("[free-review-keep-reviewing]", { agreementIdShort, source });
+}
+
+export function logFreeSendGatedToPro(source: string): void {
+  console.info("[free-send-gated-to-pro]", { source });
+}
+
+export type HomeAutoGenerateSkipReason = "draft_exists" | "already_consumed" | "phase_ready";
+
+export function logHomeAutoGenerateSkipped(reason: HomeAutoGenerateSkipReason): void {
+  console.info("[home-auto-generate-skipped]", { reason });
+}
+
 /** Stale user-facing strings that must not appear on primary funnel surfaces. */
 export const STALE_FUNNEL_UI_STRINGS: readonly string[] = [
   "Generating structured agreement",

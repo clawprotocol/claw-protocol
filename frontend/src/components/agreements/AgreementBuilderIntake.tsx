@@ -117,6 +117,7 @@ import {
   STARTER_PRO_REFINE_IMPROVEMENT_CTA,
   STARTER_PRO_REFINE_IMPROVEMENT_HEADING,
   STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY,
+  STARTER_PRO_REFINE_EDIT_DRAFT_CTA,
   STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA,
 } from "./reviewRefineUserCopy";
 import {
@@ -132,6 +133,9 @@ import {
   REVIEW_AHA_REASSURANCE,
   REVIEW_AHA_SUBHEAD,
   logProContinuationCardVisible,
+  logFreeReviewKeepReviewing,
+  logFreeSendGatedToPro,
+  logHomeAutoGenerateSkipped,
 } from "../../launch/simpleProduct/guidedWorkflowCopy";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
@@ -981,6 +985,7 @@ function FullDraftUpgradeIntakeCallout({ onUpgrade }: FullDraftUpgradeIntakeCall
 /** FSM-aligned primary CTA for the simple-workspace sticky + inline bar (single source of truth). */
 type PrimaryCtaAction =
   | "guided_continue"
+  | "keep_reviewing"
   | "fix_review"
   | "continue_basic_draft"
   | "continue_to_recipients"
@@ -1792,7 +1797,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [previewPaneRevealed, setPreviewPaneRevealed] = useState(() => homeHeroAutoGenerate);
   const homeHeroAutoGenerateRef = useRef(homeHeroAutoGenerate);
   const homeAutoGenerateStartedRef = useRef(false);
+  const homeAutoGenerateConsumedRef = useRef(false);
+  const freeTrackBlocksRecipientAdvanceRef = useRef(false);
   homeHeroAutoGenerateRef.current = homeHeroAutoGenerate;
+  const [starterDocumentEditRequest, setStarterDocumentEditRequest] = useState(0);
   const [dictationStartNonce, setDictationStartNonce] = useState(0);
   const [voiceEntryHintVisible, setVoiceEntryHintVisible] = useState(false);
   /** Ready + 1200ms idle — emphasize action bar, analytics, preview de-emphasis */
@@ -6311,6 +6319,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const runProductionLocalDraftParse = React.useCallback(
     async (opts?: { rawOverride?: string; handoffSource?: string }): Promise<boolean> => {
     const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
+    const fromHomeHandoff =
+      handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
+    if (fromHomeHandoff) {
+      if (homeAutoGenerateConsumedRef.current) {
+        logHomeAutoGenerateSkipped("already_consumed");
+        return true;
+      }
+      if (
+        draft &&
+        (createFlowPhase === "draft_ready_for_review" || createUiStageRef.current === CreateUiStage.DRAFT)
+      ) {
+        logHomeAutoGenerateSkipped("draft_exists");
+        homeAutoGenerateConsumedRef.current = true;
+        return true;
+      }
+    }
     if (paidProEditReturnResumeActive && handoffSource !== "inline_wording_submit") {
       const hid = (reviewAgreementIdRef.current || "").trim();
       logPaidProEditReturnSkipBasicGenerate(
@@ -6414,6 +6438,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementDocumentDirtyRef.current = false;
       setReviewDocRefreshTick((n) => n + 1);
       emitPaidFunnelEvent("free_draft_generated", { once: true, extra: { source: "local_parse" } });
+      if (fromHomeHandoff) {
+        homeAutoGenerateConsumedRef.current = true;
+      }
       window.requestAnimationFrame(() => {
         document.getElementById("claw-simple-create-preview")?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
@@ -6449,6 +6476,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
+    if (homeAutoGenerateConsumedRef.current) {
+      logHomeAutoGenerateSkipped("already_consumed");
+      return;
+    }
+    if (draft && createFlowPhase === "draft_ready_for_review") {
+      logHomeAutoGenerateSkipped("phase_ready");
+      homeAutoGenerateConsumedRef.current = true;
+      return;
+    }
     const text = (initialIntakeText ?? intakeStepBufferRef.current ?? "").trim();
     if (text.length < 6) return;
     homeAutoGenerateStartedRef.current = true;
@@ -6466,6 +6502,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     initialIntakeText,
     paidProEditReturnResumeActive,
     runProductionLocalDraftParse,
+    draft,
+    createFlowPhase,
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(
@@ -7275,6 +7313,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }
 
   const onGenerate = async () => {
+    if (
+      homeAutoGenerateConsumedRef.current &&
+      draft &&
+      createFlowPhase === "draft_ready_for_review" &&
+      createUiStage === CreateUiStage.DRAFT &&
+      freeTrackBlocksRecipientAdvanceRef.current
+    ) {
+      logHomeAutoGenerateSkipped("phase_ready");
+      return;
+    }
     if (import.meta.env.DEV) {
       devSendCtaTrace("onGenerate entered", {
         createProductionTwoPane,
@@ -8809,6 +8857,45 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProAuthoritative,
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
+
+  const freeTrackBlocksRecipientAdvance = useMemo(() => {
+    if (!draft) return false;
+    if (paidProAuthoritative) return false;
+    if (premiumPersistedFlowActive) return false;
+    if (premiumSendPathUnlocked) return false;
+    if (hasPaidPremiumCompletionSession()) return false;
+    if (tierAllowsAdvancedFullDraftReveal(tier)) return false;
+    return isFreeStarterReviewSurface;
+  }, [
+    draft,
+    paidProAuthoritative,
+    premiumPersistedFlowActive,
+    premiumSendPathUnlocked,
+    tier,
+    isFreeStarterReviewSurface,
+    premiumSurfaceGateTick,
+  ]);
+
+  useLayoutEffect(() => {
+    freeTrackBlocksRecipientAdvanceRef.current = freeTrackBlocksRecipientAdvance;
+  }, [freeTrackBlocksRecipientAdvance]);
+
+  const performKeepReviewingFocus = useCallback(
+    (source: string) => {
+      const rawId = (reviewAgreementIdRef.current || reviewAgreementId || "").trim();
+      const agreementIdShort =
+        rawId.length > 12 ? `${rawId.slice(0, 8)}…` : rawId.length > 0 ? rawId : "(local)";
+      logFreeReviewKeepReviewing(agreementIdShort, source);
+      setStarterDocumentEditRequest((n) => n + 1);
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById("claw-agreement-preview-editor")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        agreementPreviewEditorRef.current?.focus();
+      });
+    },
+    [reviewAgreementId],
+  );
 
   const useStarterDocumentPaperSurface = Boolean(
     productionDraftPrimaryReviewSurface &&
@@ -10369,9 +10456,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const hideStickyForStarterProContinuation = Boolean(
-    streamlineFirstRunReviewUi &&
-      showStarterProRefineUpsell &&
-      createUiStage === CreateUiStage.DRAFT,
+    createUiStage === CreateUiStage.DRAFT &&
+      streamlineFirstRunReviewUi &&
+      freeTrackBlocksRecipientAdvance &&
+      (showStarterProRefineUpsell || isFreeStarterReviewSurface),
   );
 
   const simpleCreateStickyBottomBarVisible =
@@ -11837,17 +11925,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             };
           }
         }
-        if (
-          showUpgradeToFullDraftOnReview &&
-          streamlineFirstRunReviewUi &&
-          showStarterProRefineUpsell
-        ) {
-          return {
-            label: "Keep reviewing",
-            action: "guided_continue",
-            disabled: false,
-          };
-        }
         if (showUpgradeToFullDraftOnReview) {
           // Pro-required tier (13+ real parties) gets an explicit, lower-pressure label.
           // Streamline review uses unified Pro CTA; Pro-required tier keeps explicit label.
@@ -11947,6 +12024,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               : undefined,
           };
         }
+        if (freeTrackBlocksRecipientAdvance) {
+          return {
+            label: PRO_CTA_CONTINUE,
+            action: "continue_basic_draft",
+            disabled: !draft,
+            reason: !draft ? "no_draft" : undefined,
+          };
+        }
         return {
           label: streamlineContinueLabel,
           action: "continue_to_recipients",
@@ -12036,6 +12121,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase,
     paidProRecipientSetupOnDraft,
     starterPartyCountRequiresPro,
+    freeTrackBlocksRecipientAdvance,
+    showStarterProRefineUpsell,
     renderedAgreementPreview,
     debouncedStepBuffer,
   ]);
@@ -12532,6 +12619,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setHardError("Continue to send is only available from draft review.");
       return;
     }
+    if (freeTrackBlocksRecipientAdvanceRef.current) {
+      logFreeSendGatedToPro("handoff_production_recipients");
+      await launchUpgradeCheckoutFromStarterDraft();
+      return;
+    }
     const draftForPartyGate = opts?.partyNamesJustResolvedDraft ?? draft;
     if (draftForPartyGate && draftHasPlaceholderParties(draftForPartyGate)) {
       const allowSoftPartyContinue =
@@ -12992,8 +13084,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             handlePremiumReviewFirstContinueToSigners({ telemetryMode: m });
             return;
           }
+          case "keep_reviewing": {
+            performKeepReviewingFocus("primary_cta");
+            return;
+          }
           case "continue_to_recipients": {
             setHardError(null);
+            if (freeTrackBlocksRecipientAdvanceRef.current) {
+              logFreeSendGatedToPro("continue_to_recipients");
+              await launchUpgradeCheckoutFromStarterDraft();
+              return;
+            }
             if (
               createProductionTwoPane &&
               premiumPersistedFlowActive &&
@@ -13150,6 +13251,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               return;
             }
             if (createProductionTwoPane && createUiStage === CreateUiStage.DRAFT && draft) {
+              if (freeTrackBlocksRecipientAdvanceRef.current) {
+                logFreeSendGatedToPro("guided_continue_draft");
+                setHardError(null);
+                await launchUpgradeCheckoutFromStarterDraft();
+                return;
+              }
               if (import.meta.env.DEV) {
                 console.warn(
                   "[CTA] guided_continue fallback: production DRAFT reached generic handler → recipients handoff",
@@ -15637,6 +15744,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   <StarterDraftDocumentSurface
                                     editorRef={agreementPreviewEditorRef}
                                     id="claw-agreement-preview-editor"
+                                    editRequestNonce={starterDocumentEditRequest}
                                     value={agreementDocumentText}
                                     disabled={(isGenerating && !draft) || upgradeLockActive}
                                     onChange={(next) => {
@@ -15787,11 +15895,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   </button>
                                   <button
                                     type="button"
-                                    className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-600/70 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:bg-slate-800/60 sm:w-auto"
-                                    onClick={() => {
-                                      agreementPreviewEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-                                      agreementPreviewEditorRef.current?.focus();
-                                    }}
+                                    className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-600/70 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800/60 sm:w-auto"
+                                    onClick={() => performKeepReviewingFocus("pro_card_edit_draft")}
+                                  >
+                                    {STARTER_PRO_REFINE_EDIT_DRAFT_CTA}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-transparent bg-transparent px-4 py-2.5 text-sm font-medium text-slate-400 underline-offset-2 transition hover:text-slate-200 hover:underline sm:w-auto"
+                                    onClick={() => performKeepReviewingFocus("pro_card_keep_free_draft")}
                                   >
                                     {STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA}
                                   </button>
