@@ -36,6 +36,8 @@ import {
 import {
   FUNNEL_CTA_SEND_WITH_PRO,
   FUNNEL_FREE_STARTER_BODY,
+  FUNNEL_FREE_STARTER_HEADLINE,
+  FUNNEL_FREE_STARTER_HELPER,
   HOMEPAGE_LONG_INTAKE_EXAMPLE,
   INTAKE_HELPER_BULLETS,
   INTAKE_HELPER_LEAD,
@@ -900,8 +902,9 @@ const PREMIUM_ORIGINAL_WORDING_PLACEHOLDER =
 const PREMIUM_ORIGINAL_WORDING_CTA = FUNNEL_CTA_SEND_WITH_PRO;
 const PREMIUM_ORIGINAL_WORDING_DETAILS_SUMMARY = "Use your exact wording (LawDog Pro)";
 
-const STARTER_REVIEW_HEADLINE = PREVIEW_BLOCK_TITLE;
+const STARTER_REVIEW_HEADLINE = FUNNEL_FREE_STARTER_HEADLINE;
 const STARTER_REVIEW_SUBLINE = FUNNEL_FREE_STARTER_BODY;
+const STARTER_REVIEW_HELPER = FUNNEL_FREE_STARTER_HELPER;
 const STARTER_CONTINUE_TO_SEND_UPGRADE_NUDGE =
   "Closing soon? Upgrade to send for a calmer review surface, clearer terms, and professional delivery.";
 
@@ -1476,7 +1479,7 @@ function CreateFlowSendRecipientsPanel({
       ) : null}
       {showStarterRecipientsReassurance && !isPremiumRecipientSurface ? (
         <p className="mt-3 text-center text-[11px] leading-relaxed text-slate-500 sm:text-xs">
-          You can send this starter draft now, or upgrade anytime for stronger terms and tracked e-signing.
+          You can keep reviewing this starter draft, or upgrade when you want a fuller agreement before sharing or signing.
         </p>
       ) : null}
       {!minimalProSendRecipientChrome ? (
@@ -11560,11 +11563,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         if (showUpgradeToFullDraftOnReview) {
           // Pro-required tier (13+ real parties) gets an explicit, lower-pressure label.
-          // Normal/caution tiers keep the existing "Send with LawDog Pro" / "Upgrade to send" copy.
+          // Normal/caution tiers keep "Continue with LawDog Pro" / "Upgrade to send" on first-session streamline UI.
           const proRequiredCtaLabel = starterPartyCountRequiresPro
             ? STARTER_PARTY_PRO_REQUIRED_CTA_LABEL
             : streamlineFirstRunReviewUi
-              ? "Send with LawDog Pro"
+              ? "Continue with LawDog Pro"
               : "Upgrade to send";
           return {
             label: proRequiredCtaLabel,
@@ -14570,6 +14573,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
                                     {STARTER_REVIEW_SUBLINE}
                                   </p>
+                                  <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
+                                    {STARTER_REVIEW_HELPER}
+                                  </p>
                                 </>
                               ) : (
                                 <>
@@ -14590,8 +14596,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   Review your starter draft below.
                                 </p>
                                 <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
-                                  Copy it now, or upgrade to send, collect signatures, and keep a proof record.
-                                  Nothing is sent automatically until you choose Pro and complete checkout.
+                                  Copy it now, or upgrade to strengthen it before you share for review or prepare for
+                                  signing. Nothing moves forward until you choose the next step.
                                 </p>
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
                                   <button
@@ -14709,7 +14715,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     {showStarterRecipientsReassurance ? (
                                       <>
                                         {" "}
-                                        You can send this starter draft now, or upgrade anytime for stronger terms and tracked e-signing.
+                                        You can keep reviewing this starter draft, or upgrade when you want a fuller agreement before sharing or signing.
                                       </>
                                     ) : null}
                                   </>
@@ -14717,7 +14723,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </>
                             ) : streamlineFirstRunReviewUi ? (
                               <span className="block text-slate-500">
-                                You choose when to send. Optional upgrades stay available later.
+                                {STARTER_REVIEW_HELPER} Optional upgrades stay available when you want them.
                               </span>
                             ) : showUpgradeToFullDraftOnReview ? (
                               <>When you&apos;re happy here, use Continue at the bottom to add recipients — still no

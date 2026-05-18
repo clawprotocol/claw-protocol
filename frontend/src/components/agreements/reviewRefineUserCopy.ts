@@ -18,25 +18,25 @@ export const REFINE_THIS_DRAFT_PLACEHOLDER =
 export const PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER =
   'Edit the agreement OR add notes for the reviewer (e.g., "Add late fee..." or "List items the other party should review")';
 
+export const STARTER_PRO_REFINE_IMPROVEMENT_HEADING = "Want LawDog to strengthen this draft?";
 /** @deprecated Use {@link STARTER_PRO_REFINE_IMPROVEMENT_HEADING} in create-flow card. */
-export const STARTER_PRO_REFINE_UPSELL_HEADING = "Want LawDog to improve this draft?";
-export const STARTER_PRO_REFINE_IMPROVEMENT_HEADING = "Want LawDog to improve this draft?";
+export const STARTER_PRO_REFINE_UPSELL_HEADING = STARTER_PRO_REFINE_IMPROVEMENT_HEADING;
 export const STARTER_PRO_REFINE_IMPROVEMENT_BODY =
-  "Upgrade to have LawDog expand, revise, and strengthen this agreement before you send it.";
+  "Upgrade to expand, revise, and organize this into a fuller agreement before review, sharing, or signing.";
 export const STARTER_PRO_REFINE_IMPROVEMENT_BULLETS: readonly string[] = [
-  "Add missing clauses",
-  "Tighten payment, scope, and delivery terms",
-  "Preserve key business terms while improving the language",
+  "Add missing structure and key clauses",
+  "Tighten payment, scope, review, and delivery terms",
+  "Preserve your business deal while improving the language",
 ] as const;
-export const STARTER_PRO_REFINE_IMPROVEMENT_CTA = "Upgrade to improve draft";
+export const STARTER_PRO_REFINE_IMPROVEMENT_CTA = "Upgrade and strengthen draft";
 export const STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY =
-  "You can still continue with this starter draft as-is.";
+  "You can still keep reviewing this starter draft as-is.";
 
 export const STARTER_PRO_REFINE_UPSELL_BODY_DEFAULT =
   "Turn this starter draft into a stronger send-ready agreement.";
-export const STARTER_PRO_REFINE_UPSELL_CTA = "Upgrade to improve draft";
+export const STARTER_PRO_REFINE_UPSELL_CTA = STARTER_PRO_REFINE_IMPROVEMENT_CTA;
 /** CTA A/B: same product copy; experiment still routes analytics. */
-export const STARTER_PRO_REFINE_UPSELL_CTA_EXPERIMENT_VARIANT = "Upgrade to improve draft";
+export const STARTER_PRO_REFINE_UPSELL_CTA_EXPERIMENT_VARIANT = STARTER_PRO_REFINE_IMPROVEMENT_CTA;
 /** @deprecated Replaced by {@link STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY} on the card. */
 export const STARTER_PRO_REFINE_UPSELL_MICRO_PROOF =
   "Keeps your names, price, dates, and core terms. Improves structure.";

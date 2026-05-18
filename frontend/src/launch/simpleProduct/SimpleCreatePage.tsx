@@ -38,7 +38,6 @@ import {
 import {
   FIRST_RUN_INTAKE_REASSURANCE,
   FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER,
-  NOTHING_SENT_UNTIL_CONFIRM,
   SIMPLE_CREATE_INTAKE_PLACEHOLDER,
 } from "../pricingContent";
 import { useFirstSessionHint } from "../../conversion/firstExposureHints";
@@ -62,7 +61,10 @@ import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnel
 import {
   SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE,
   SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE,
+  SIMPLE_CREATE_STARTER_CONTROL_LINE,
+  SIMPLE_CREATE_STARTER_HERO_SUBHEAD,
   SIMPLE_CREATE_STARTER_HERO_TITLE,
+  SIMPLE_CREATE_STARTER_PROGRESS_LABELS,
 } from "./simpleCreatePaidProReviewShell";
 
 const STARTER_TEMPLATE =
@@ -217,6 +219,10 @@ export function SimpleCreatePage() {
   }, []);
 
   const shellStep = paidProReviewReadyShell ? 2 : 1;
+  const shellProgressLabels =
+    paidProReviewReadyShell || !isFreshSimpleCreateStart
+      ? SIMPLE_FLOW_PROGRESS_LABELS
+      : SIMPLE_CREATE_STARTER_PROGRESS_LABELS;
   const shellTitle = paidProReviewReadyShell
     ? SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE
     : quickSendTypedArrival
@@ -229,14 +235,14 @@ export function SimpleCreatePage() {
     : quickSendTypedArrival
       ? "We turned your input into a structured draft for the same send/sign/proof workflow."
       : isFreshSimpleCreateStart
-        ? "Type or speak what you need. Review before anything is sent."
-        : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Draft → Send → Sign. You can export and keep your records anytime.";
+        ? SIMPLE_CREATE_STARTER_HERO_SUBHEAD
+        : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Review, share, or prepare for signing when you're ready.";
   const hideIntakeMarketingChrome = paidProReviewReadyShell;
 
   return (
     <SimpleFlowShell
       step={shellStep}
-      progressLabels={SIMPLE_FLOW_PROGRESS_LABELS}
+      progressLabels={shellProgressLabels}
       kicker={
         paidProReviewReadyShell
           ? undefined
@@ -250,7 +256,7 @@ export function SimpleCreatePage() {
       <div className={isFreshSimpleCreateStart || paidProReviewReadyShell ? "pb-28 sm:pb-24" : undefined}>
         {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival && !hideIntakeMarketingChrome ? (
           <p className="mb-2 text-center text-[11px] font-medium leading-snug text-slate-500 sm:text-left sm:text-xs">
-            {NOTHING_SENT_UNTIL_CONFIRM}
+            {SIMPLE_CREATE_STARTER_CONTROL_LINE}
           </p>
         ) : null}
         {reEngageBanner && !simplifyFirstSession ? (

@@ -4,7 +4,7 @@
  */
 
 export const CHIP_VERSION_STARTER = "Starter Draft";
-export const CHIP_STATE_READY = "Ready for Review";
+export const CHIP_STATE_READY = "Draft ready to review";
 export const CHIP_VERSION_PRO = "LawDog Pro Draft";
 export const CHIP_STATE_COMMERCIAL = "Commercial Version Ready";
 /** Upgraded / paid path but Pro body did not pass truth gate (no fake “ready” chip). */

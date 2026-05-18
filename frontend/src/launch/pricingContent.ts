@@ -60,9 +60,11 @@ export const REVIEW_STRUCTURED_WIN_LINE =
   "You now have a structured agreement ready for review and signature.";
 
 /** Free/starter simple-home: headline + body for Pro delta (review remains fully editable). */
-export const FUNNEL_FREE_STARTER_HEADLINE = "Starter draft ready";
+export const FUNNEL_FREE_STARTER_HEADLINE = "Starter draft";
 export const FUNNEL_FREE_STARTER_BODY =
-  "You can review and edit this draft now. Upgrade when you’re ready to send, collect signatures, and keep a proof record.";
+  "This is your first draft. Review it here, then choose whether to improve it with LawDog Pro, send it for review, or prepare it for signing.";
+export const FUNNEL_FREE_STARTER_HELPER =
+  "Nothing is sent, signed, or shared until you choose the next step.";
 
 /** Bullets for Pro value on free send / upgrade surfaces (product capabilities). */
 export const FUNNEL_PRO_VALUE_BULLETS = [

@@ -6,7 +6,17 @@ export const SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE =
   "Your Pro agreement is ready. Review or adjust above, then choose how you want to deliver it (review or signature).";
 
 /** Starter hero title on `/app/create` when the shell is in first-session marketing mode. */
-export const SIMPLE_CREATE_STARTER_HERO_TITLE = "Create an agreement in minutes.";
+export const SIMPLE_CREATE_STARTER_HERO_TITLE = "Draft it fast. Review it before it moves.";
+
+export const SIMPLE_CREATE_STARTER_HERO_SUBHEAD =
+  "Type or speak what you need. LawDog creates a starter draft you can review, improve, share for review, or prepare for signing when you're ready.";
+
+/** Trust line under starter hero — lifecycle-aware, not send-only. */
+export const SIMPLE_CREATE_STARTER_CONTROL_LINE =
+  "You control the next step — review, improve, share, sign, or stop.";
+
+/** Free starter draft shell stepper — Draft active; later steps inactive. */
+export const SIMPLE_CREATE_STARTER_PROGRESS_LABELS = ["Draft", "Review", "Share/Sign", "Proof"] as const;
 
 /**
  * `/app/create` shell chrome: suppress generic “Create an agreement in minutes” marketing while authoritative

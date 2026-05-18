@@ -255,7 +255,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     // resolves to STARTER_PARTY_PRO_REQUIRED_CTA_LABEL ("Continue to LawDog Pro") via
     // `starterPartyCountRequiresPro`, but the existing `continue_basic_draft` action wires
     // remain unchanged.
-    expect(block).toMatch(/streamlineFirstRunReviewUi[\s\S]{0,60}"Send with LawDog Pro"[\s\S]{0,60}"Upgrade to send"/);
+    expect(block).toMatch(/streamlineFirstRunReviewUi[\s\S]{0,60}"Continue with LawDog Pro"[\s\S]{0,60}"Upgrade to send"/);
     expect(block).toContain("STARTER_PARTY_PRO_REQUIRED_CTA_LABEL");
     expect(block).toContain('action: "continue_basic_draft"');
     expect(block).not.toContain("label: streamlineContinueLabelEarly");

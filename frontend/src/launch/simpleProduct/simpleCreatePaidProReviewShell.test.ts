@@ -37,7 +37,7 @@ describe("Simple create shell copy contract", () => {
   it("uses distinct Pro review title vs starter marketing title", () => {
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).not.toContain("in minutes");
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).toContain("Pro");
-    expect(SIMPLE_CREATE_STARTER_HERO_TITLE).toContain("Create an agreement in minutes");
+    expect(SIMPLE_CREATE_STARTER_HERO_TITLE).toMatch(/Draft it fast/i);
   });
 
   it("SimpleCreatePage gates starter hero on paidProReviewReadyShell (not createUiStage alone)", () => {
