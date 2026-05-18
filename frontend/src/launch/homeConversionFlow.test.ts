@@ -104,17 +104,24 @@ describe("LaunchHomePage routing (static)", () => {
     expect(page).toContain("NOT_LEGAL_ADVICE");
   });
 
-  it("uses collapsed auto-resize textarea defaults", () => {
+  it("uses responsive auto-resize textarea with smart-intake styling", () => {
     expect(page).toContain("useAutoResizeTextarea");
     expect(page).toContain("useResponsiveTextareaMaxPx");
-    expect(page).toContain('rows={4}');
+    expect(page).toContain("HOMEPAGE_TEXTAREA_LARGE_LINE_THRESHOLD");
+    expect(page).toContain('rows={3}');
+    expect(page).toContain("claw-seo-input--hero");
+    expect(page).toContain("claw-seo-hero-intake-wrap");
+    expect(page).toContain("claw-seo-hero-intake-fade");
+    expect(page).toContain("heroTextareaOverflow");
+    expect(page).toContain("Large agreement detected");
     expect(page).toContain("resize-none");
-    expect(page).toContain("pb-14");
-    expect(page).toContain("pr-16");
-    expect(page).toContain("min-h-0 overflow-visible");
+    expect(page).toContain("pb-12");
+    expect(page).toContain("pr-14");
+    expect(page).toContain("overflow-hidden");
     expect(page).not.toContain("min-h-[6.5rem]");
-    expect(page).not.toMatch(/textarea[\s\S]*overflow-hidden/);
-    expect(page).not.toContain("max-h-");
+    expect(page).not.toMatch(/textarea[\s\S]*max-h-/);
+    const textareaBlock = page.slice(page.indexOf('id="claw-hero-intake"'), page.indexOf('id="claw-hero-intake"') + 900);
+    expect(textareaBlock).not.toMatch(/className="[^"]*overflow-hidden/);
   });
 });
 

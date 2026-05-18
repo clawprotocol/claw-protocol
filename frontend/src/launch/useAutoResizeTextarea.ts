@@ -1,8 +1,12 @@
 import { useCallback, useLayoutEffect, useState, type RefObject } from "react";
 
 /** Homepage hero textarea caps (visible box before internal scroll). */
-export const HOMEPAGE_TEXTAREA_MAX_PX_MOBILE = 360;
-export const HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP = 520;
+export const HOMEPAGE_TEXTAREA_MAX_PX_MOBILE = 240;
+export const HOMEPAGE_TEXTAREA_MAX_PX_TABLET = 320;
+export const HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP = 400;
+
+/** Visible lines before we show the “large agreement” helper. */
+export const HOMEPAGE_TEXTAREA_LARGE_LINE_THRESHOLD = 10;
 
 export type SyncTextareaSizeOpts = {
   minRows?: number;
@@ -15,6 +19,13 @@ export type SyncTextareaSizeResult = {
   scrollHeight: number;
   overflowAuto: boolean;
 };
+
+/** Device-aware cap from viewport width (mobile / tablet / desktop). */
+export function resolveHomepageTextareaMaxPx(viewportWidth: number): number {
+  if (viewportWidth < 640) return HOMEPAGE_TEXTAREA_MAX_PX_MOBILE;
+  if (viewportWidth <= 1024) return HOMEPAGE_TEXTAREA_MAX_PX_TABLET;
+  return HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP;
+}
 
 /**
  * Measure full content height without an applied maxHeight cap (must run before setting maxHeight).
@@ -35,6 +46,43 @@ export function measureTextareaScrollHeight(el: HTMLTextAreaElement): number {
   return Math.ceil(scrollH);
 }
 
+function textareaVerticalMetrics(el: HTMLTextAreaElement) {
+  const style = getComputedStyle(el);
+  const lineHeight = parseFloat(style.lineHeight) || 24;
+  const padY =
+    (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  const borderY =
+    (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+  return { lineHeight, padY, borderY };
+}
+
+/** Approximate rendered line count from scroll height (for large-prompt helper). */
+export function estimateTextareaContentLineCount(
+  el: HTMLTextAreaElement,
+  scrollHeight?: number,
+): number {
+  const { lineHeight, padY, borderY } = textareaVerticalMetrics(el);
+  const sh = scrollHeight ?? measureTextareaScrollHeight(el);
+  return Math.max(1, Math.ceil((sh - padY - borderY) / lineHeight));
+}
+
+/** Keep caret in view when content scrolls inside a capped textarea. */
+export function scrollTextareaCaretIntoView(el: HTMLTextAreaElement): void {
+  if (el.scrollHeight <= el.clientHeight) return;
+  const { lineHeight, padY } = textareaVerticalMetrics(el);
+  const padBottom = parseFloat(getComputedStyle(el).paddingBottom) || 0;
+  const pos = el.selectionStart ?? el.value.length;
+  const lineIndex = Math.max(0, el.value.slice(0, pos).split("\n").length - 1);
+  const caretTop = lineIndex * lineHeight + padY;
+  const caretBottom = caretTop + lineHeight;
+  const viewTop = el.scrollTop + padY;
+  const viewBottom = el.scrollTop + el.clientHeight - padBottom;
+  if (caretTop < viewTop || caretBottom > viewBottom) {
+    const target = Math.max(0, caretTop - el.clientHeight * 0.35);
+    el.scrollTop = Math.min(target, el.scrollHeight - el.clientHeight);
+  }
+}
+
 /**
  * Measure and apply textarea height from content. The hook owns height, maxHeight, and overflowY.
  */
@@ -42,15 +90,10 @@ export function syncTextareaSize(
   el: HTMLTextAreaElement,
   opts: SyncTextareaSizeOpts,
 ): SyncTextareaSizeResult {
-  const minRows = opts.minRows ?? 4;
+  const minRows = opts.minRows ?? 3;
   const maxPx = opts.maxPx;
 
-  const style = getComputedStyle(el);
-  const lineHeight = parseFloat(style.lineHeight) || 24;
-  const padY =
-    (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-  const borderY =
-    (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+  const { lineHeight, padY, borderY } = textareaVerticalMetrics(el);
   const minPx = Math.ceil(lineHeight * minRows + padY + borderY);
 
   const scrollH = measureTextareaScrollHeight(el);
@@ -77,26 +120,33 @@ export type AutoResizeTextareaHandlers = {
   sync: () => void;
   onPaste: () => void;
   onDrop: () => void;
+  overflowActive: boolean;
+  contentLineCount: number;
 };
 
-/** Responsive max height: 360px mobile, 520px desktop. */
+/** Responsive max height: 240px mobile, 320px tablet, 400px desktop. */
 export function useResponsiveTextareaMaxPx(): number {
   const [maxPx, setMaxPx] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches
-      ? HOMEPAGE_TEXTAREA_MAX_PX_MOBILE
+    typeof window !== "undefined"
+      ? resolveHomepageTextareaMaxPx(window.innerWidth)
       : HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP,
   );
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(max-width: 639px)");
-    const apply = () =>
-      setMaxPx(mq.matches ? HOMEPAGE_TEXTAREA_MAX_PX_MOBILE : HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
+    const apply = () => setMaxPx(resolveHomepageTextareaMaxPx(window.innerWidth));
     apply();
-    mq.addEventListener("change", apply);
     window.addEventListener("resize", apply);
+    const mobileMq = window.matchMedia("(max-width: 639px)");
+    const tabletMq = window.matchMedia("(min-width: 640px) and (max-width: 1024px)");
+    const desktopMq = window.matchMedia("(min-width: 1025px)");
+    mobileMq.addEventListener("change", apply);
+    tabletMq.addEventListener("change", apply);
+    desktopMq.addEventListener("change", apply);
     return () => {
-      mq.removeEventListener("change", apply);
       window.removeEventListener("resize", apply);
+      mobileMq.removeEventListener("change", apply);
+      tabletMq.removeEventListener("change", apply);
+      desktopMq.removeEventListener("change", apply);
     };
   }, []);
   return maxPx;
@@ -115,13 +165,21 @@ export function useAutoResizeTextarea(
   value: string,
   opts?: AutoResizeTextareaOpts,
 ): AutoResizeTextareaHandlers {
-  const minRows = opts?.minRows ?? 4;
+  const minRows = opts?.minRows ?? 3;
   const maxPx = opts?.maxPx ?? HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP;
+  const [overflowActive, setOverflowActive] = useState(false);
+  const [contentLineCount, setContentLineCount] = useState(0);
 
   const sync = useCallback(() => {
     const el = ref.current;
     if (!el) return;
-    syncTextareaSize(el, { minRows, maxPx });
+    const result = syncTextareaSize(el, { minRows, maxPx });
+    const lines = estimateTextareaContentLineCount(el, result.scrollHeight);
+    setOverflowActive(result.overflowAuto);
+    setContentLineCount(lines);
+    if (result.overflowAuto) {
+      scrollTextareaCaretIntoView(el);
+    }
   }, [ref, minRows, maxPx]);
 
   const onPaste = useCallback(() => {
@@ -158,5 +216,5 @@ export function useAutoResizeTextarea(
     };
   }, [sync, value]);
 
-  return { sync, onPaste, onDrop };
+  return { sync, onPaste, onDrop, overflowActive, contentLineCount };
 }

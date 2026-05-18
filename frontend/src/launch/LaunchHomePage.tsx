@@ -44,7 +44,11 @@ import { useInputConfidenceHint } from "./useInputConfidenceHint";
 import { HOME_EXAMPLE_PROMPTS, logHomeExampleSelected } from "./homeExamplePrompts";
 import { logHomeCreateSubmit, meetsHomeDraftSubmitThreshold } from "./homeCreateSubmit";
 import { HomeCreateTransitionOverlay } from "./simpleProduct/HomeCreateTransitionOverlay";
-import { useAutoResizeTextarea, useResponsiveTextareaMaxPx } from "./useAutoResizeTextarea";
+import {
+  HOMEPAGE_TEXTAREA_LARGE_LINE_THRESHOLD,
+  useAutoResizeTextarea,
+  useResponsiveTextareaMaxPx,
+} from "./useAutoResizeTextarea";
 
 export function LaunchHomePage() {
   const { navigate } = useLaunchNav();
@@ -55,8 +59,15 @@ export function LaunchHomePage() {
   const [homeTransitionActive, setHomeTransitionActive] = useState(false);
   const intakeRef = useRef<HTMLTextAreaElement | null>(null);
   const heroTextareaMaxPx = useResponsiveTextareaMaxPx();
-  const { sync: syncHeroTextarea, onPaste: onHeroTextareaPaste, onDrop: onHeroTextareaDrop } =
-    useAutoResizeTextarea(intakeRef, heroInput, { minRows: 4, maxPx: heroTextareaMaxPx });
+  const {
+    sync: syncHeroTextarea,
+    onPaste: onHeroTextareaPaste,
+    onDrop: onHeroTextareaDrop,
+    overflowActive: heroTextareaOverflow,
+    contentLineCount: heroContentLineCount,
+  } = useAutoResizeTextarea(intakeRef, heroInput, { minRows: 3, maxPx: heroTextareaMaxPx });
+  const heroLargeAgreementHint =
+    heroContentLineCount > HOMEPAGE_TEXTAREA_LARGE_LINE_THRESHOLD;
   const heroDictationEnabled = useMemo(
     () => String(import.meta.env.VITE_CLAW_HERO_DICTATION ?? "1") !== "0",
     [],
@@ -205,7 +216,7 @@ export function LaunchHomePage() {
           </p>
 
           <form
-            className="claw-seo-card mt-5 w-full p-4 sm:p-5 lg:p-6"
+            className="claw-seo-card mt-4 w-full p-3.5 sm:mt-5 sm:p-5 lg:p-6"
             onSubmit={(e) => {
               e.preventDefault();
               if (handoffBusy) return;
@@ -215,13 +226,13 @@ export function LaunchHomePage() {
             <label htmlFor="claw-hero-intake" className="sr-only">
               Describe your agreement
             </label>
-            <div className="relative min-h-0 overflow-visible">
+            <div className="claw-seo-hero-intake-wrap relative min-h-0 overflow-hidden">
               <textarea
                 ref={intakeRef}
                 id="claw-hero-intake"
                 name="agreement_intake"
                 autoComplete="off"
-                rows={4}
+                rows={3}
                 value={heroInput}
                 onChange={(e) => {
                   setHeroInput(e.target.value);
@@ -230,10 +241,21 @@ export function LaunchHomePage() {
                 onPaste={() => onHeroTextareaPaste()}
                 onDrop={() => onHeroTextareaDrop()}
                 onInput={() => syncHeroTextarea()}
+                onClick={() => requestAnimationFrame(() => syncHeroTextarea())}
+                onKeyUp={() => requestAnimationFrame(() => syncHeroTextarea())}
                 placeholder={HOMEPAGE_HERO_PLACEHOLDER || home.heroPlaceholder}
                 disabled={handoffBusy || homeTransitionActive}
-                className="claw-seo-input block w-full resize-none px-4 py-4 pb-14 pr-16 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out lg:text-lg lg:placeholder:text-lg"
+                aria-describedby={
+                  heroLargeAgreementHint ? "claw-hero-intake-large-hint" : undefined
+                }
+                className="claw-seo-input claw-seo-input--hero block w-full max-w-full resize-none px-3.5 py-3 pb-12 pr-14 text-[15px] leading-[1.5] placeholder:text-[15px] transition-[height] duration-150 ease-out sm:px-4 sm:py-3.5 sm:pb-12 sm:pr-16 sm:text-base sm:leading-relaxed sm:placeholder:text-base lg:text-[17px] lg:leading-normal lg:placeholder:text-[17px]"
               />
+              {heroTextareaOverflow ? (
+                <div
+                  className="claw-seo-hero-intake-fade pointer-events-none absolute inset-x-0 bottom-11 h-8 sm:bottom-12"
+                  aria-hidden
+                />
+              ) : null}
               <HeroVoiceInputBar
                 surface="light"
                 enabled={heroDictationEnabled && !handoffBusy}
@@ -247,7 +269,16 @@ export function LaunchHomePage() {
               />
             </div>
 
-            <div className="mt-3 flex flex-wrap justify-center gap-2 sm:justify-start" aria-label="Example prompts">
+            {heroLargeAgreementHint ? (
+              <p
+                id="claw-hero-intake-large-hint"
+                className="mt-2 text-xs font-medium text-emerald-800/90 sm:text-sm"
+              >
+                Large agreement detected ✓
+              </p>
+            ) : null}
+
+            <div className="mt-2.5 flex flex-wrap justify-center gap-2 sm:mt-3 sm:justify-start" aria-label="Example prompts">
               {HOME_EXAMPLE_PROMPTS.map((ex) => (
                 <button
                   key={ex.key}
@@ -294,7 +325,7 @@ export function LaunchHomePage() {
               </p>
             ) : null}
 
-            <div className="mt-5 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+            <div className="mt-4 flex flex-col items-stretch gap-2 sm:mt-5 sm:flex-row sm:items-center">
               <button
                 type="submit"
                 disabled={handoffBusy || homeTransitionActive}

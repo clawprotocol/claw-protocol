@@ -2,8 +2,13 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  HOMEPAGE_TEXTAREA_LARGE_LINE_THRESHOLD,
   HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP,
   HOMEPAGE_TEXTAREA_MAX_PX_MOBILE,
+  HOMEPAGE_TEXTAREA_MAX_PX_TABLET,
+  estimateTextareaContentLineCount,
+  resolveHomepageTextareaMaxPx,
+  scrollTextareaCaretIntoView,
   syncTextareaSize,
   useAutoResizeTextarea,
   useResponsiveTextareaMaxPx,
@@ -25,16 +30,28 @@ function mountTextareaLikeHomepage(widthPx = 560) {
   const el = document.createElement("textarea");
   el.style.boxSizing = "border-box";
   el.style.width = `${widthPx}px`;
-  el.style.lineHeight = "26px";
-  el.style.paddingTop = "16px";
-  el.style.paddingBottom = "56px";
-  el.style.paddingLeft = "16px";
-  el.style.paddingRight = "64px";
+  el.style.lineHeight = "24px";
+  el.style.paddingTop = "12px";
+  el.style.paddingBottom = "48px";
+  el.style.paddingLeft = "14px";
+  el.style.paddingRight = "56px";
   el.style.border = "1px solid #cbd5e1";
-  el.rows = 4;
+  el.rows = 3;
   document.body.appendChild(el);
   return el;
 }
+
+describe("resolveHomepageTextareaMaxPx", () => {
+  it("uses 240px mobile, 320px tablet, 400px desktop", () => {
+    expect(resolveHomepageTextareaMaxPx(375)).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+    expect(resolveHomepageTextareaMaxPx(639)).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+    expect(resolveHomepageTextareaMaxPx(640)).toBe(HOMEPAGE_TEXTAREA_MAX_PX_TABLET);
+    expect(resolveHomepageTextareaMaxPx(820)).toBe(HOMEPAGE_TEXTAREA_MAX_PX_TABLET);
+    expect(resolveHomepageTextareaMaxPx(1024)).toBe(HOMEPAGE_TEXTAREA_MAX_PX_TABLET);
+    expect(resolveHomepageTextareaMaxPx(1025)).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
+    expect(resolveHomepageTextareaMaxPx(1440)).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
+  });
+});
 
 describe("syncTextareaSize", () => {
   it("does not cap scrollHeight measurement with maxHeight (applies max only after measure)", () => {
@@ -46,14 +63,14 @@ describe("syncTextareaSize", () => {
       get: () => measuredScroll,
     });
 
-    const initial = syncTextareaSize(el, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    const initial = syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
     expect(initial.heightPx).toBe(181);
     expect(initial.overflowAuto).toBe(false);
     expect(el.style.overflowY).toBe("hidden");
     expect(el.style.maxHeight).toBe(`${HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP}px`);
 
     measuredScroll = 900;
-    const grown = syncTextareaSize(el, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    const grown = syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
     expect(grown.heightPx).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
     expect(grown.overflowAuto).toBe(true);
     expect(el.style.overflowY).toBe("auto");
@@ -66,9 +83,9 @@ describe("syncTextareaSize", () => {
     document.body.appendChild(el);
     Object.defineProperty(el, "scrollHeight", {
       configurable: true,
-      get: () => 400,
+      get: () => 300,
     });
-    const under = syncTextareaSize(el, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    const under = syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
     expect(under.overflowAuto).toBe(false);
     expect(el.style.overflowY).toBe("hidden");
 
@@ -76,9 +93,47 @@ describe("syncTextareaSize", () => {
       configurable: true,
       get: () => 700,
     });
-    const over = syncTextareaSize(el, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    const over = syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
     expect(over.overflowAuto).toBe(true);
     expect(el.style.overflowY).toBe("auto");
+    document.body.removeChild(el);
+  });
+
+  it("respects mobile and tablet caps", () => {
+    const el = document.createElement("textarea");
+    document.body.appendChild(el);
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+
+    const mobile = syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_MOBILE });
+    expect(mobile.heightPx).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+    expect(mobile.overflowAuto).toBe(true);
+
+    const tablet = syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_TABLET });
+    expect(tablet.heightPx).toBe(HOMEPAGE_TEXTAREA_MAX_PX_TABLET);
+    expect(tablet.overflowAuto).toBe(true);
+
+    document.body.removeChild(el);
+  });
+});
+
+describe("scrollTextareaCaretIntoView", () => {
+  it("scrolls when caret is below the visible region", () => {
+    const el = mountTextareaLikeHomepage();
+    el.value = Array.from({ length: 40 }, (_, i) => `Line ${i + 1}`).join("\n");
+    syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 900,
+    });
+    syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP });
+    el.selectionStart = el.value.length;
+    el.selectionEnd = el.value.length;
+    el.scrollTop = 0;
+    scrollTextareaCaretIntoView(el);
+    expect(el.scrollTop).toBeGreaterThan(0);
     document.body.removeChild(el);
   });
 });
@@ -91,11 +146,10 @@ describe("useAutoResizeTextarea", () => {
     expect(IRONCLAD_HOMEPAGE_PROMPT.split("\n").length).toBeGreaterThan(4);
   });
 
-  it("grows Ironclad-scale pasted content above 420px up to desktop cap", () => {
+  it("caps Ironclad-scale pasted content at desktop max with internal scroll", () => {
     const pasted = `${IRONCLAD_HOMEPAGE_PROMPT}\n${"Line of deal terms.\n".repeat(100)}`;
     const el = mountTextareaLikeHomepage();
     el.value = pasted;
-    // jsdom under-reports scrollHeight for long multiline text; production hero paste ~480px at ~560px width.
     Object.defineProperty(el, "scrollHeight", {
       configurable: true,
       get: () => 480,
@@ -103,16 +157,16 @@ describe("useAutoResizeTextarea", () => {
 
     const ref = { current: el };
     const { result } = renderHook(() =>
-      useAutoResizeTextarea(ref, pasted, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+      useAutoResizeTextarea(ref, pasted, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
     );
     act(() => {
       result.current.sync();
     });
 
     const heightPx = parseFloat(el.style.height);
-    expect(heightPx).toBeGreaterThan(420);
     expect(heightPx).toBeLessThanOrEqual(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
-    expect(el.style.overflowY).toBe("hidden");
+    expect(el.style.overflowY).toBe("auto");
+    expect(result.current.overflowActive).toBe(true);
 
     Object.defineProperty(el, "scrollHeight", {
       configurable: true,
@@ -126,6 +180,24 @@ describe("useAutoResizeTextarea", () => {
     document.body.removeChild(el);
   });
 
+  it("exposes overflowActive and contentLineCount for large agreement helper", () => {
+    const el = mountTextareaLikeHomepage();
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 520,
+    });
+    const ref = { current: el };
+    const long = `${IRONCLAD_HOMEPAGE_PROMPT}\n${"extra line\n".repeat(20)}`;
+    el.value = long;
+    const { result } = renderHook(() =>
+      useAutoResizeTextarea(ref, long, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+    );
+    act(() => result.current.sync());
+    expect(result.current.overflowActive).toBe(true);
+    expect(result.current.contentLineCount).toBeGreaterThan(HOMEPAGE_TEXTAREA_LARGE_LINE_THRESHOLD);
+    document.body.removeChild(el);
+  });
+
   it("grows height for long pasted content up to maxPx", () => {
     const long = `${IRONCLAD_HOMEPAGE_PROMPT.split("\n")[0]}\n${"Line of deal terms.\n".repeat(80)}`;
     const el = mountTextareaLikeHomepage();
@@ -133,14 +205,14 @@ describe("useAutoResizeTextarea", () => {
 
     const ref = { current: el };
     const { result } = renderHook(() =>
-      useAutoResizeTextarea(ref, long, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+      useAutoResizeTextarea(ref, long, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
     );
     act(() => {
       result.current.sync();
     });
 
     const heightPx = parseFloat(el.style.height);
-    expect(heightPx).toBeGreaterThan(120);
+    expect(heightPx).toBeGreaterThan(100);
     expect(heightPx).toBeLessThanOrEqual(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
     document.body.removeChild(el);
   });
@@ -150,7 +222,7 @@ describe("useAutoResizeTextarea", () => {
     const ref = { current: el };
     const short = "Hi";
     const { result, rerender } = renderHook(
-      ({ v }) => useAutoResizeTextarea(ref, v, { minRows: 4, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+      ({ v }) => useAutoResizeTextarea(ref, v, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
       { initialProps: { v: short } },
     );
     el.value = short;
@@ -165,7 +237,6 @@ describe("useAutoResizeTextarea", () => {
 
     expect(longH).toBeGreaterThanOrEqual(shortH);
     expect(example.length).toBeGreaterThan(short.length);
-    expect(el.style.overflowY).toBe("hidden");
     document.body.removeChild(el);
   });
 
@@ -188,28 +259,36 @@ describe("useAutoResizeTextarea", () => {
     raf.mockRestore();
   });
 
-  it("useResponsiveTextareaMaxPx uses 520 desktop and 360 mobile", () => {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: vi.fn().mockImplementation((q: string) => ({
-        matches: q.includes("639px"),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    });
-    const { result: mobile } = renderHook(() => useResponsiveTextareaMaxPx());
-    expect(mobile.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+  it("useResponsiveTextareaMaxPx follows viewport breakpoints", () => {
+    const matchMedia = vi.fn().mockImplementation(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    Object.defineProperty(window, "matchMedia", { writable: true, configurable: true, value: matchMedia });
 
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: vi.fn().mockImplementation((q: string) => ({
-        matches: !q.includes("639px"),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    });
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 390 });
+    const { result: mobile, unmount: u1 } = renderHook(() => useResponsiveTextareaMaxPx());
+    expect(mobile.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+    u1();
+
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 768 });
+    const { result: tablet, unmount: u2 } = renderHook(() => useResponsiveTextareaMaxPx());
+    expect(tablet.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_TABLET);
+    u2();
+
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1280 });
     const { result: desktop } = renderHook(() => useResponsiveTextareaMaxPx());
     expect(desktop.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
+  });
+});
+
+describe("estimateTextareaContentLineCount", () => {
+  it("counts lines from scroll height", () => {
+    const el = mountTextareaLikeHomepage();
+    const lines = estimateTextareaContentLineCount(el, 360);
+    expect(lines).toBeGreaterThan(8);
+    document.body.removeChild(el);
   });
 });
 
