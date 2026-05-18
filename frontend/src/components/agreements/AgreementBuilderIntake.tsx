@@ -346,10 +346,11 @@ import {
   writePremiumSendIntent,
   writePremiumSenderSignFirst,
 } from "../../launch/simpleProduct/premiumSendIntent";
+import { mergeLiveDraftWithRecipientSetupForVs01Bridge } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
 import {
-  mergeLiveDraftWithRecipientSetupForVs01Bridge,
-  tryNavigatePaidProAgreementSenderFirstVs01Esign,
-} from "../../launch/simpleProduct/agreementToVs01SigningBridge";
+  executePaidProPostRecipientSetupHandoff,
+  shouldSkipPaidProPrepareReviewLinkInterstitial,
+} from "../../launch/simpleProduct/paidProPostRecipientSetupHandoff";
 import {
   logSignerMetadataInputChange,
   logSignerMetadataNormalizedForSave,
@@ -11885,45 +11886,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const openPaidProPostInlineSendDestination = React.useCallback(async () => {
     const id = productionSendBarAgreementId?.trim();
     if (!id || !draft) return;
-    const sig =
-      effectivePremiumSendMode === "signature" &&
-      peekPremiumSenderSignFirst() &&
-      isPaidProAgreementAuthoritative({
-        draft,
-        tier,
-        agreementId: id,
-        premiumSendPathUnlocked,
-        premiumPersistedFlowActive,
-        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
-      });
-    if (sig) {
-      const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
-        navigate: (to) => void navigate(to),
-        agreementId: id,
-        draft: draft as unknown as AgreementDraft,
-        logReason: "intake_inline_send_success_cta",
-        recipientSetup: buildRecipientSetupForVs01Bridge(draft as unknown as ParsedDraftShape),
-      });
-      if (ok) {
-        clearPaidProStarterSignatureSendFromCreateFlow();
-        return;
-      }
-      if (import.meta.env.DEV) {
-        console.warn("[paid-pro-obsolete-review-link-bypass]", {
-          reason: "vs01_seed_failed_open_link_setup_fallback",
-          agreementId: id,
-        });
-      }
-    }
-    const primedForSendShell =
+    const primedForHandoff =
       mergeLiveDraftWithRecipientSetupForVs01Bridge(
         draft as unknown as AgreementDraft,
         buildRecipientSetupForVs01Bridge(draft),
       ) ?? (draft as unknown as AgreementDraft);
+    if (
+      shouldSkipPaidProPrepareReviewLinkInterstitial({
+        draft: primedForHandoff,
+        agreementId: id,
+        premiumSendIntent: effectivePremiumSendMode,
+      })
+    ) {
+      const result = await executePaidProPostRecipientSetupHandoff({
+        navigate: (to) => void navigate(to),
+        agreementId: id,
+        draft: primedForHandoff,
+        premiumSendIntent: effectivePremiumSendMode,
+        recipientSetup: buildRecipientSetupForVs01Bridge(draft as unknown as ParsedDraftShape),
+        logSource: "intake_inline_send_success_cta",
+      });
+      if (result.ok) {
+        clearPaidProStarterSignatureSendFromCreateFlow();
+        return;
+      }
+      setHardError(result.failure.userMessage);
+      return;
+    }
     navigate(`/app/send/${encodeURIComponent(id)}`, {
       simpleSendHandoff: buildSimpleSendHandoff({
         agreementId: id,
-        primedDraft: primedForSendShell,
+        primedDraft: primedForHandoff,
         streamlinedSimpleFlow: freshSimpleCreateUx,
         premiumSendIntent: effectivePremiumSendMode,
         openFlowPhase: "send",

@@ -28,21 +28,22 @@ describe("starter Pro VS01 regression (source locks)", () => {
     expect(block).toMatch(/\(paidProAuthoritative && premiumSignersSurfaceReady\)/);
   });
 
-  it("SimpleCreate paid Pro signature prefers VS01 esign route before /app/send fallback", () => {
+  it("SimpleCreate paid Pro post-recipient setup prefers skip-interstitial handoff before /app/send fallback", () => {
     const page = readFileSync(join(__dirname, "SimpleCreatePage.tsx"), "utf8");
+    const handoff = readFileSync(join(__dirname, "paidProPostRecipientSetupHandoff.ts"), "utf8");
     const bridge = readFileSync(join(__dirname, "agreementToVs01SigningBridge.ts"), "utf8");
-    expect(page).toContain("tryNavigatePaidProAgreementSenderFirstVs01Esign");
+    expect(page).toContain("executePaidProPostRecipientSetupHandoff");
+    expect(page).toContain("shouldSkipPaidProPrepareReviewLinkInterstitial");
+    expect(handoff).toContain("[send-flow-skip-review-link-interstitial]");
     expect(bridge).toContain("/app/esign/");
     expect(bridge).toContain("agreement_bridge=1");
-    expect(page).toContain("peekPremiumSenderSignFirst()");
-    expect(page).toContain("isPaidProAgreementAuthoritative");
     const onCreated = page.indexOf("onCreated={");
     expect(onCreated).toBeGreaterThanOrEqual(0);
-    const slice = page.slice(onCreated, onCreated + 2800);
+    const slice = page.slice(onCreated, onCreated + 3200);
     const sendIdx = slice.indexOf("/app/send/");
-    const tryNavIdx = slice.indexOf("tryNavigatePaidProAgreementSenderFirstVs01Esign");
-    expect(tryNavIdx).toBeGreaterThanOrEqual(0);
-    expect(sendIdx).toBeGreaterThan(tryNavIdx);
+    const skipIdx = slice.indexOf("shouldSkipPaidProPrepareReviewLinkInterstitial");
+    expect(skipIdx).toBeGreaterThanOrEqual(0);
+    expect(sendIdx).toBeGreaterThan(skipIdx);
   });
 
   it("VS01 paid Pro workspace navigate targets agreements workspace with vs01_saved", () => {

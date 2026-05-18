@@ -6,7 +6,10 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import AgreementBuilderIntake, {
   readAgreementCreatorIntakeStorage,
 } from "../../components/agreements/AgreementBuilderIntake";
-import { clearCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
+import {
+  clearCreateReviewAgreementResumeId,
+  writeCreateReviewAgreementResumeId,
+} from "../../components/agreements/agreementIntakeStorage";
 import { setJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
 import {
   clearHeroIntakeHandoffAfterApply,
@@ -45,11 +48,13 @@ import { isFreshSimpleCreateStart as computeFreshSimpleCreateStart } from "./fre
 import { buildSimpleSendHandoff } from "./simpleSendHandoff";
 import {
   clearPaidProStarterSignatureSendFromCreateFlow,
-  peekPremiumSenderSignFirst,
   type PremiumSendIntent,
 } from "./premiumSendIntent";
-import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
-import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
+import {
+  executePaidProPostRecipientSetupHandoff,
+  shouldSkipPaidProPrepareReviewLinkInterstitial,
+  type PaidProPostRecipientSetupFailure,
+} from "./paidProPostRecipientSetupHandoff";
 import { shouldSuppressReviewPipelineTelemetry } from "../../vs01/vs01SignatureDashboardFlow";
 import { getOrgId } from "../orgContext";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
@@ -122,10 +127,14 @@ export function SimpleCreatePage() {
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
   const creationBlockedForUi = creationBlocked && !workspaceProEntitled;
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [postRecipientHandoffFailure, setPostRecipientHandoffFailure] =
+    useState<PaidProPostRecipientSetupFailure | null>(null);
+  const [postRecipientHandoffRetrying, setPostRecipientHandoffRetrying] = useState(false);
   const [reEngageBanner, setReEngageBanner] = useState<CreateOrHomeBanner | null>(null);
   const [intakeActive, setIntakeActive] = useState(false);
   const trustNudge = getLawdogTrustNudges();
   const intakeChangeBootRef = useRef(true);
+  const primedDraftForHandoffRetryRef = useRef<AgreementDraft | null>(null);
 
   useEffect(() => {
     setReEngageBanner(peekCreateOrHomeBanner("create"));
@@ -406,6 +415,65 @@ export function SimpleCreatePage() {
           </div>
         ) : null}
 
+        {postRecipientHandoffFailure ? (
+          <div
+            className="mb-4 rounded-lg border border-rose-800/45 bg-rose-950/25 px-4 py-4 text-sm text-rose-50/95"
+            role="alert"
+          >
+            <p className="font-medium text-rose-100">{postRecipientHandoffFailure.userMessage}</p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--primary min-h-[2.65rem]"
+                disabled={postRecipientHandoffRetrying || !primedDraftForHandoffRetryRef.current}
+                onClick={() => {
+                  const failure = postRecipientHandoffFailure;
+                  const draft = primedDraftForHandoffRetryRef.current;
+                  const id = failure.agreementId.trim();
+                  if (!id || !draft) return;
+                  setPostRecipientHandoffRetrying(true);
+                  void (async () => {
+                    try {
+                      const result = await executePaidProPostRecipientSetupHandoff({
+                        navigate: (to) => void navigate(to),
+                        agreementId: id,
+                        draft,
+                        premiumSendIntent: failure.premiumSendIntent,
+                        logSource: "create_flow_post_recipient_retry",
+                      });
+                      if (result.ok) {
+                        setPostRecipientHandoffFailure(null);
+                        clearPaidProStarterSignatureSendFromCreateFlow();
+                      } else {
+                        setPostRecipientHandoffFailure(result.failure);
+                      }
+                    } finally {
+                      setPostRecipientHandoffRetrying(false);
+                    }
+                  })();
+                }}
+              >
+                {postRecipientHandoffRetrying ? "Preparing…" : "Retry prepare signing"}
+              </button>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary min-h-[2.65rem]"
+                disabled={postRecipientHandoffRetrying}
+                onClick={() => {
+                  const id = postRecipientHandoffFailure.agreementId.trim();
+                  setPostRecipientHandoffFailure(null);
+                  if (id) {
+                    writeCreateReviewAgreementResumeId(id);
+                    void navigate("/app/create");
+                  }
+                }}
+              >
+                Back to agreement
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {creationBlockedForUi ? (
           <div
             className="mb-4 rounded-lg border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/95"
@@ -495,30 +563,32 @@ export function SimpleCreatePage() {
                 console.debug("[SimpleCreate] navigate to review with agreement id", agreementId);
               }
               void (async () => {
-                const sig =
-                  handoff?.premiumSendIntent === "signature" &&
-                  peekPremiumSenderSignFirst() &&
-                  isPaidProAgreementAuthoritative({
+                const resolvedIntent: PremiumSendIntent | null =
+                  handoff?.premiumSendIntent === "signature" || handoff?.premiumSendIntent === "review"
+                    ? handoff.premiumSendIntent
+                    : null;
+                primedDraftForHandoffRetryRef.current = primed;
+                if (
+                  resolvedIntent &&
+                  shouldSkipPaidProPrepareReviewLinkInterstitial({
                     draft: primed,
                     agreementId,
-                  });
-                if (sig) {
-                  const ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
+                    premiumSendIntent: resolvedIntent,
+                  })
+                ) {
+                  const result = await executePaidProPostRecipientSetupHandoff({
                     navigate: (to) => void navigate(to),
                     agreementId,
                     draft: primed,
-                    logReason: "create_flow_paid_pro_signature",
+                    premiumSendIntent: resolvedIntent,
+                    logSource: "create_flow_post_recipient_setup",
                   });
-                  if (ok) {
+                  if (result.ok) {
                     clearPaidProStarterSignatureSendFromCreateFlow();
                     return;
                   }
-                  if (import.meta.env.DEV) {
-                    console.warn("[paid-pro-obsolete-review-link-bypass]", {
-                      reason: "vs01_seed_failed_fallback_send_shell",
-                      agreementId,
-                    });
-                  }
+                  setPostRecipientHandoffFailure(result.failure);
+                  return;
                 }
                 navigate(`/app/send/${encodeURIComponent(agreementId)}`, {
                   simpleSendHandoff: buildSimpleSendHandoff({
