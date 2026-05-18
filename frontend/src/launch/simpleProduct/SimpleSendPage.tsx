@@ -4,7 +4,10 @@ import { orderedAuthoritativePartyDisplayNames } from "../../agreement/handoffPa
 import { AgreementReviewErrorBoundary } from "../../agreement/AgreementReviewErrorBoundary";
 import AgreementReview from "../../components/agreements/AgreementReview";
 import { JoyFlashBanner } from "../../joy/JoyFlashBanner";
-import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
+import {
+  AGREEMENT_LIFECYCLE_PROGRESS_LABELS,
+  lifecycleStepForStage,
+} from "../../agreement/agreementLifecycleRail";
 import { consumeJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { markSimpleFlowSent } from "../simpleFlowSent";
@@ -72,7 +75,7 @@ import { SendConversionModal } from "./SendConversionModal";
 import { PAYWALL_SEND_FINAL_HEADLINE, PAYWALL_SEND_FINAL_SUB } from "../paywallMessaging";
 import { FIRST_WORKFLOW_GUARANTEE_SHORT, REVIEW_STRUCTURED_WIN_LINE } from "../pricingContent";
 
-const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
+const FLOW_PROGRESS = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
 
 const SIMPLE_SEND_PHASE_SS_KEY = (id: string) => `claw_simple_send_phase_v1_${encodeURIComponent(id)}`;
 
@@ -356,7 +359,10 @@ export function SimpleSendPage(props: { agreementId: string }) {
     setSimpleFlowPremiumHandoffIntent("signature");
   }, [premiumSendUnlocked, simpleFlowPremiumHandoffIntent, simpleFlowPhase]);
 
-  const shellStep = simpleFlowPhase === "review" ? 2 : 3;
+  const shellStep =
+    simpleFlowPhase === "review"
+      ? lifecycleStepForStage("review")
+      : lifecycleStepForStage("sign");
   const shellTitle = useMemo(() => {
     if (!premiumSendUnlocked) return "Your Agreement";
     if (simpleFlowPremiumHandoffIntent === "review") return "Prepare review link";

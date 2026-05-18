@@ -8,11 +8,11 @@ import {
   FUNNEL_FREE_STARTER_HEADLINE,
   FUNNEL_FREE_STARTER_HELPER,
 } from "../pricingContent";
+import { AGREEMENT_LIFECYCLE_PROGRESS_LABELS } from "../../agreement/agreementLifecycleRail";
 import {
   SIMPLE_CREATE_STARTER_CONTROL_LINE,
   SIMPLE_CREATE_STARTER_HERO_SUBHEAD,
   SIMPLE_CREATE_STARTER_HERO_TITLE,
-  SIMPLE_CREATE_STARTER_PROGRESS_LABELS,
 } from "./simpleCreatePaidProReviewShell";
 
 describe("starter draft shell copy", () => {
@@ -28,11 +28,9 @@ describe("starter draft shell copy", () => {
     expect(STARTER_PRO_REFINE_IMPROVEMENT_CTA).toBe("Continue with Pro");
   });
 
-  it("starter progress labels use Review before Share/Sign and keep Draft as step 1", () => {
-    expect(SIMPLE_CREATE_STARTER_PROGRESS_LABELS[0]).toBe("Draft");
-    expect(SIMPLE_CREATE_STARTER_PROGRESS_LABELS[1]).toBe("Review");
-    expect(SIMPLE_CREATE_STARTER_PROGRESS_LABELS[2]).toBe("Share/Sign");
-    expect(SIMPLE_CREATE_STARTER_PROGRESS_LABELS).not.toContain("Send");
+  it("starter create uses universal lifecycle rail with Draft active first", () => {
+    expect(AGREEMENT_LIFECYCLE_PROGRESS_LABELS).toEqual(["Draft", "Review", "Sign", "Proof"]);
+    expect(AGREEMENT_LIFECYCLE_PROGRESS_LABELS).not.toContain("Send");
   });
 });
 
@@ -40,7 +38,7 @@ describe("SimpleCreatePage starter copy (static)", () => {
   it("does not use stale send-first hero or Send with LawDog Pro", () => {
     const page = readFileSync(join(__dirname, "SimpleCreatePage.tsx"), "utf8");
     expect(page).toContain("SIMPLE_CREATE_STARTER_HERO_TITLE");
-    expect(page).toContain("SIMPLE_CREATE_STARTER_PROGRESS_LABELS");
+    expect(page).toContain("AGREEMENT_LIFECYCLE_PROGRESS_LABELS");
     expect(page).toContain("shellProgressLabels");
     expect(page).not.toContain("Review before anything is sent");
     expect(page).not.toContain("Send with LawDog Pro");

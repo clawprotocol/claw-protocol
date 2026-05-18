@@ -13,9 +13,8 @@ export const LAWDOG_ON_RECORD_LINE = "LawDog · on record" as const;
 /** @deprecated Prefer LAWDOG_ON_RECORD_LINE or LawdogOnRecordStamp in UI. */
 export const LAWDOG_CERTIFIED_STAMP = LAWDOG_ON_RECORD_LINE;
 
-/** Progress labels for simple agreement flow steps (Pass 1 surfaces). */
-/** Short path: review happens inline before send; proof stays as the final record step. */
-export const SIMPLE_FLOW_PROGRESS_LABELS = ["Draft", "Send", "Sign", "Proof"] as const;
+/** @deprecated Prefer {@link ../agreement/agreementLifecycleRail AGREEMENT_LIFECYCLE_PROGRESS_LABELS}. */
+export { AGREEMENT_LIFECYCLE_PROGRESS_LABELS as SIMPLE_FLOW_PROGRESS_LABELS } from "../agreement/agreementLifecycleRail";
 
 export const JOY_COPY = {
   /** After signing (single signer step done) */
@@ -33,8 +32,8 @@ export const JOY_COPY = {
   proofSecured: "On record. Ready to verify when you are.",
   /** Progress step micro-labels (simple product) */
   progressDraft: "Draft",
-  progressSend: "Send",
-  progressSeal: "Seal",
+  progressSend: "Review",
+  progressSeal: "Sign",
   progressProof: "Proof",
   /** Workspace / status */
   workspaceSealedTitle: "Sealed",

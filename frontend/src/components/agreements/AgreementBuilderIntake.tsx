@@ -501,14 +501,10 @@ import {
   POST_CHECKOUT_PREMIUM_SUPPORT_BODY,
   POST_CHECKOUT_PREMIUM_SUPPORT_TITLE,
 } from "./postPaymentPremiumReviewSummary";
-
-/** Optional one-line from finalize audit; omit generic marketing so chips + title stay primary. */
-function formatPremiumRevealDeltaRow(audit: PremiumFinalizeAudit | null): string | null {
-  const strengths = (audit?.resolved_strengths ?? []).map((s) => s.trim()).filter(Boolean);
-  if (strengths.length === 0) return null;
-  if (strengths.length === 1) return strengths[0];
-  return strengths.slice(0, 3).join(" · ");
-}
+import {
+  PRO_REVIEW_DOCUMENT_PANEL_HEADING,
+  PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY,
+} from "../../launch/simpleProduct/simpleCreatePaidProReviewShell";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -7739,6 +7735,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase,
   });
 
+  /** Paid Pro on `/app/create`: shell owns title/subtitle/control — suppress duplicate intake chrome. */
+  const paidProReviewCompactChrome = Boolean(
+    paidProReviewReady && createUiStage === CreateUiStage.DRAFT && displayPhase === "review",
+  );
+
   const ownerRecipientAcceptedAwaitingLock = useMemo(
     () =>
       Boolean(
@@ -14846,7 +14847,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           createProductionTwoPane &&
                           simpleProductFlow &&
                           premiumPostCheckoutSummaryVisible &&
-                          premiumProTruthGate?.successBannerAllowed ? (
+                          premiumProTruthGate?.successBannerAllowed &&
+                          !paidProReviewCompactChrome ? (
                             <div
                               className="mb-4 rounded-xl border border-slate-700/55 bg-slate-950/45 px-4 py-3.5 sm:px-5"
                               role="status"
@@ -14858,15 +14860,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </p>
                               <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
                                 {POST_CHECKOUT_PREMIUM_SUPPORT_BODY}
-                              </p>
-                              {((line) =>
-                                line ? (
-                                  <p className="mt-2 text-xs leading-relaxed text-slate-500">{line}</p>
-                                ) : null)(formatPremiumRevealDeltaRow(premiumFinalizeAudit))}
-                              <p className="mt-4 text-sm leading-relaxed text-slate-300">
-                                Next: use <span className="font-medium text-slate-100">Send for review</span> on your
-                                draft when you want a private link — the other party can suggest edits; you choose what
-                                to accept. Nothing is signed yet.
                               </p>
                             </div>
                           ) : null}
@@ -14954,11 +14947,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 </button>
                               </div>
                               <p className="mt-2 text-[11px] leading-snug text-slate-500">
-                                Counterparty suggestions stay suggestions until you accept them — your Pro agreement does
-                                not change automatically. Nothing is sent automatically.
+                                Counterparty suggestions stay suggestions until you accept them — your Pro agreement
+                                does not change automatically.
                               </p>
                             </div>
                           ) : null}
+                          {paidProReviewCompactChrome ? null : (
+                          <>
                           <div className="flex flex-wrap items-center gap-2">
                             {createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft ? (
                               <>
@@ -15134,6 +15129,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               <>Edit anything, then continue to recipients to send for signature.</>
                             )}
                           </p>
+                          </>
+                          )}
                           {upgradeLockActive &&
                           productionDraftPrimaryReviewSurface &&
                           createUiStage === CreateUiStage.DRAFT &&
@@ -15316,32 +15313,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 );
                               })()
                             : null}
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 sm:text-[11px]">
-                            {(createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
-                            minimalProSendRecipientChrome
-                              ? "Agreement"
-                              : PREVIEW_BLOCK_TITLE}
-                          </p>
-                          <p
-                            className={
-                              showUpgradeToFullDraftOnReview && createUiStage === CreateUiStage.DRAFT
-                                ? "mt-0.5 text-[11px] leading-snug text-slate-500 sm:text-xs"
-                                : premiumPaidDocumentSurface
-                                  ? "mt-1.5 max-w-[72ch] text-xs leading-relaxed text-slate-400 sm:text-sm"
-                                  : "mt-1 text-[11px] leading-relaxed text-slate-500 sm:text-xs"
-                            }
-                          >
-                            {premiumPaidDocumentSurface
-                              ? (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
-                                  minimalProSendRecipientChrome
-                                ? canProceedWithPaidProDocument
-                                  ? "Full agreement below. Not legal advice."
-                                  : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
-                                : canProceedWithPaidProDocument
-                                  ? "Use Edit wording for the full text, then the Pro review panel below. Not legal advice."
-                                  : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
-                              : "Not legal advice. Signer lines are added when you send."}
-                          </p>
+                          {!paidProReviewCompactChrome ? (
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 sm:text-[11px]">
+                              {(createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
+                              minimalProSendRecipientChrome
+                                ? "Agreement"
+                                : PREVIEW_BLOCK_TITLE}
+                            </p>
+                          ) : null}
+                          {!paidProReviewCompactChrome ? (
+                            <p
+                              className={
+                                showUpgradeToFullDraftOnReview && createUiStage === CreateUiStage.DRAFT
+                                  ? "mt-0.5 text-[11px] leading-snug text-slate-500 sm:text-xs"
+                                  : premiumPaidDocumentSurface
+                                    ? "mt-1.5 max-w-[72ch] text-xs leading-relaxed text-slate-400 sm:text-sm"
+                                    : "mt-1 text-[11px] leading-relaxed text-slate-500 sm:text-xs"
+                              }
+                            >
+                              {premiumPaidDocumentSurface
+                                ? (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
+                                    minimalProSendRecipientChrome
+                                  ? canProceedWithPaidProDocument
+                                    ? "Full agreement below. Not legal advice."
+                                    : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
+                                  : canProceedWithPaidProDocument
+                                    ? "Not legal advice."
+                                    : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
+                                : "Not legal advice. Signer lines are added when you send."}
+                            </p>
+                          ) : null}
                           <div
                             id="fadeWrapper"
                             className={
@@ -15511,7 +15512,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           </p>
                                         ) : null}
                                         <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900 sm:text-lg">
-                                          Review your draft
+                                          {PRO_REVIEW_DOCUMENT_PANEL_HEADING}
                                         </p>
                                         {import.meta.env.DEV ? (
                                           <p className="mt-1 text-[10px] font-medium tracking-wide text-stone-600">
@@ -15521,10 +15522,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         ) : null}
                                       </div>
                                       <p className="text-xs leading-relaxed text-stone-600 sm:text-sm">
-                                        Send a private review link so the other party can suggest changes.
-                                      </p>
-                                      <p className="text-xs leading-relaxed text-stone-600 sm:text-sm">
-                                        Ready to sign now? Start the signature flow.
+                                        {PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY}
                                       </p>
                                       <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2.5">
                                         {!premiumReviewDocEditorOpen ? (

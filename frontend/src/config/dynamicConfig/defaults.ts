@@ -12,7 +12,7 @@ export const DYNAMIC_CONFIG_DEFAULTS: DynamicConfigRoot = {
     heroMicroTrust: "Nothing is sent, signed, or shared until you confirm.",
     heroPlaceholder:
       "Example: Services agreement for a $5k project, simple NDA between two parties, contractor agreement with monthly pay…",
-    microSteps: ["Describe", "Review", "Share/Sign", "Proof"],
+    microSteps: ["Draft", "Review", "Sign", "Proof"],
   },
   readyToSend: {
     pageTitle: "Your agreement is ready to send",

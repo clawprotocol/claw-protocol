@@ -1,9 +1,15 @@
 import { CreateUiStage } from "../../components/agreements/createUiStage";
+import { AGREEMENT_LIFECYCLE_CONTROL_LINE } from "../../agreement/agreementLifecycleRail";
 
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE = "Review your Pro agreement";
 
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE =
-  "Your Pro agreement is ready. Review or adjust above, then choose how you want to deliver it (review or signature).";
+  "Your agreement is ready. Edit it, send it for review, or start signatures.";
+
+export const SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE = AGREEMENT_LIFECYCLE_CONTROL_LINE;
+
+/** @deprecated Use {@link AGREEMENT_LIFECYCLE_PROGRESS_LABELS} from agreementLifecycleRail. */
+export { AGREEMENT_LIFECYCLE_PROGRESS_LABELS as SIMPLE_CREATE_STARTER_PROGRESS_LABELS } from "../../agreement/agreementLifecycleRail";
 
 /** Starter hero title on `/app/create` when the shell is in first-session marketing mode. */
 export const SIMPLE_CREATE_STARTER_HERO_TITLE = "Draft it fast. Review it before it moves.";
@@ -15,8 +21,10 @@ export const SIMPLE_CREATE_STARTER_HERO_SUBHEAD =
 export const SIMPLE_CREATE_STARTER_CONTROL_LINE =
   "You control the next step — review, improve, share, sign, or stop.";
 
-/** Free starter draft shell stepper — Draft active; later steps inactive. */
-export const SIMPLE_CREATE_STARTER_PROGRESS_LABELS = ["Draft", "Review", "Share/Sign", "Proof"] as const;
+export const PRO_REVIEW_DOCUMENT_PANEL_HEADING = "Review your draft";
+
+export const PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY =
+  "Send a private review link for comments and edits. Or start the signature flow when you're ready.";
 
 /**
  * `/app/create` shell chrome: suppress generic “Create an agreement in minutes” marketing while authoritative

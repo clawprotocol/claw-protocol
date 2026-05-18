@@ -20,7 +20,7 @@ import { recordAgreementCreatedForInboundRef } from "../affiliate/clawOpportunit
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { useLaunchNav } from "../LaunchNavContext";
 import { EXAMPLE_INTAKE_PROMPTS } from "../useInputConfidenceHint";
-import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
+import { AGREEMENT_LIFECYCLE_PROGRESS_LABELS, lifecycleStepForStage } from "../../agreement/agreementLifecycleRail";
 import {
   readLawDogUserMonetizationState,
   shouldBlockSecondAgreementCreation,
@@ -56,12 +56,12 @@ import { getOrgId } from "../orgContext";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import {
+  SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE,
   SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE,
   SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE,
   SIMPLE_CREATE_STARTER_CONTROL_LINE,
   SIMPLE_CREATE_STARTER_HERO_SUBHEAD,
   SIMPLE_CREATE_STARTER_HERO_TITLE,
-  SIMPLE_CREATE_STARTER_PROGRESS_LABELS,
 } from "./simpleCreatePaidProReviewShell";
 import { HomeCreateTransitionOverlay } from "./HomeCreateTransitionOverlay";
 import { DRAFT_LOADING_PREPARING } from "./guidedWorkflowCopy";
@@ -223,11 +223,10 @@ export function SimpleCreatePage() {
     else if (homeHeroAutoGenerate) setHomeTransitionVisible(true);
   }, [homeHeroAutoGenerate]);
 
-  const shellStep = paidProReviewReadyShell ? 2 : 1;
-  const shellProgressLabels =
-    paidProReviewReadyShell || !isFreshSimpleCreateStart
-      ? SIMPLE_FLOW_PROGRESS_LABELS
-      : SIMPLE_CREATE_STARTER_PROGRESS_LABELS;
+  const shellStep = paidProReviewReadyShell
+    ? lifecycleStepForStage("review")
+    : lifecycleStepForStage("draft");
+  const shellProgressLabels = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
   const shellTitle = paidProReviewReadyShell
     ? SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE
     : quickSendTypedArrival
@@ -258,6 +257,11 @@ export function SimpleCreatePage() {
       title={shellTitle}
       subtitle={shellSubtitle}
     >
+      {paidProReviewReadyShell ? (
+        <p className="mb-4 text-center text-xs leading-relaxed text-slate-500 sm:mb-5 sm:text-left sm:text-sm">
+          {SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE}
+        </p>
+      ) : null}
       <HomeCreateTransitionOverlay active={homeTransitionVisible} />
       <div className={isFreshSimpleCreateStart || paidProReviewReadyShell ? "pb-36 sm:pb-32" : undefined}>
         {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival && !hideIntakeMarketingChrome ? (

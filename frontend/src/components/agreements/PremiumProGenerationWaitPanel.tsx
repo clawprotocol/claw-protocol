@@ -1,10 +1,13 @@
+import { useEffect } from "react";
 import { ProUpgradeWaitRotatingText } from "./ProUpgradeWaitRotatingText";
 import type { PremiumProWaitModalView } from "../../lib/premiumPostCheckoutReturnUx";
 import {
+  PREMIUM_PRO_WAIT_ROTATE_INTERVAL_MS,
   PREMIUM_PRO_WAIT_ROTATING_LINES,
   PREMIUM_RETURN_RETRY_GENERATION_LABEL,
-  PREMIUM_RETURN_TERMINAL_HELPER,
   PREMIUM_RETURN_USE_STARTER_LABEL,
+  logPremiumProWaitCopyRotated,
+  logPremiumProWaitView,
 } from "../../lib/premiumPostCheckoutReturnUx";
 
 type Props = {
@@ -15,86 +18,75 @@ type Props = {
   retryDisabled?: boolean;
 };
 
-function StepIcon({ state }: { state: "pending" | "active" | "done" }) {
-  if (state === "done") {
-    return (
-      <span
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-emerald-500/50 bg-emerald-500/20 text-xs font-semibold text-emerald-100"
-        aria-hidden
-      >
-        ✓
-      </span>
-    );
-  }
-  if (state === "active") {
-    return (
-      <span
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-emerald-400/60 bg-emerald-500/10 motion-safe:animate-pulse"
-        aria-hidden
-      >
-        <span className="h-2 w-2 rounded-full bg-emerald-400" />
-      </span>
-    );
-  }
+function ProgressPill({ label, state }: { label: string; state: "pending" | "active" | "done" }) {
+  const done = state === "done";
+  const active = state === "active";
   return (
     <span
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-600/70 bg-slate-900/80"
-      aria-hidden
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-wide sm:text-xs ${
+        done
+          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100/90"
+          : active
+            ? "border-emerald-400/55 bg-emerald-500/15 text-emerald-50 motion-safe:animate-pulse"
+            : "border-slate-600/60 bg-slate-900/60 text-slate-500"
+      }`}
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
+      <span>{label}</span>
+      {done ? (
+        <span className="text-emerald-300/90" aria-hidden>
+          ✓
+        </span>
+      ) : active ? (
+        <span className="text-emerald-300/80" aria-hidden>
+          …
+        </span>
+      ) : null}
     </span>
   );
 }
 
 export function PremiumProGenerationWaitPanel(props: Props) {
   const { view, titleId, onRetry, onUseStarter, retryDisabled } = props;
+  useEffect(() => {
+    logPremiumProWaitView(view.phase);
+  }, [view.phase]);
 
   return (
-    <>
-      <div className="mb-6 space-y-2.5" aria-label="Pro agreement progress">
-        {view.progressSteps.map((step) => (
-          <div
-            key={step.label}
-            className={`flex items-center gap-3 text-sm ${
-              step.state === "active"
-                ? "font-medium text-emerald-100/95"
-                : step.state === "done"
-                  ? "text-slate-300"
-                  : "text-slate-500"
-            }`}
-          >
-            <StepIcon state={step.state} />
-            <span>{step.label}</span>
-          </div>
-        ))}
-      </div>
-
+    <div className="flex flex-col items-center text-center">
       <h2
         id={titleId}
-        className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
+        className="text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
       >
         {view.title}
       </h2>
-      <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">{view.body}</p>
-      {view.flavorLine ? (
-        <p className="mt-2 text-center text-xs font-medium italic leading-relaxed text-emerald-200/80 sm:text-sm">
-          {view.flavorLine}
-        </p>
-      ) : null}
+
+      <div
+        className="mt-5 flex flex-wrap items-center justify-center gap-2"
+        aria-label="Pro agreement progress"
+      >
+        {view.progressSteps.map((step) => (
+          <ProgressPill key={step.shortLabel} label={step.shortLabel} state={step.state} />
+        ))}
+      </div>
 
       {view.showRotatingLines ? (
         <ProUpgradeWaitRotatingText
           active
           lines={PREMIUM_PRO_WAIT_ROTATING_LINES}
-          intervalMs={2800}
-          className="mt-4 min-h-[3rem] text-center text-sm leading-relaxed text-slate-300 sm:text-base"
+          intervalMs={PREMIUM_PRO_WAIT_ROTATE_INTERVAL_MS}
+          onLineChange={logPremiumProWaitCopyRotated}
+          className="mt-6 min-h-[2.75rem] max-w-md text-sm leading-relaxed text-slate-300 sm:text-base"
         />
+      ) : view.statusLine ? (
+        <p className="mt-6 max-w-md text-sm leading-relaxed text-slate-300 sm:text-base" role="status">
+          {view.statusLine}
+        </p>
       ) : null}
 
-      <p className="mt-3 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">{view.reassurance}</p>
+      <p className="mt-5 max-w-md text-xs leading-relaxed text-slate-500 sm:text-sm">{view.reassurance}</p>
 
       {view.showRecoveryActions ? (
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
+        <div className="mt-6 flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
           <button
             type="button"
             className="vs01-btn vs01-btn--primary w-full sm:w-auto"
@@ -110,23 +102,20 @@ export function PremiumProGenerationWaitPanel(props: Props) {
           >
             {PREMIUM_RETURN_USE_STARTER_LABEL}
           </button>
-          <p className="w-full text-center text-[11px] leading-snug text-slate-500 sm:text-xs">
-            {PREMIUM_RETURN_TERMINAL_HELPER}
-          </p>
         </div>
       ) : null}
 
       {view.showSpinner ? (
         <div className="mt-6 flex justify-center" aria-hidden>
-          <div className="h-10 w-10 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 motion-safe:animate-spin sm:h-12 sm:w-12" />
+          <div className="h-9 w-9 rounded-full border-2 border-emerald-400/25 border-t-emerald-400 motion-safe:animate-spin sm:h-10 sm:w-10" />
         </div>
       ) : view.phase === "success" ? (
         <div className="mt-6 flex justify-center" aria-hidden>
-          <span className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/45 bg-emerald-500/20 text-xl text-emerald-100">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-500/50 bg-emerald-500/25 text-lg text-emerald-100 motion-safe:animate-pulse">
             ✓
           </span>
         </div>
       ) : null}
-    </>
+    </div>
   );
 }

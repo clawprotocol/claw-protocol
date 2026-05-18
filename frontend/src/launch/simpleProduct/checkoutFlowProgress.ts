@@ -1,16 +1,10 @@
-import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
+import { AGREEMENT_LIFECYCLE_PROGRESS_LABELS } from "../../agreement/agreementLifecycleRail";
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../../components/agreements/agreementAdvancedDraftAccess";
 import { extractAgreementIdFromSendReturnUrl } from "../checkoutParams";
 import { CHECKOUT_SUBTITLE } from "./proConversionCopy";
 
-/** Starter “Upgrade to improve draft” checkout — review before send/sign. */
-export const STARTER_UPGRADE_CHECKOUT_PROGRESS_LABELS = [
-  "Draft",
-  "Upgrade",
-  "Review",
-  "Send/Sign",
-  "Proof",
-] as const;
+/** Checkout uses the same lifecycle rail; step 2 highlights Review while upgrading. */
+export const STARTER_UPGRADE_CHECKOUT_PROGRESS_LABELS = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
 
 export const CHECKOUT_STARTER_UPGRADE_SUBTITLE = CHECKOUT_SUBTITLE;
 
@@ -53,7 +47,7 @@ export function resolveCheckoutFlowProgress(params: {
   if (params.isSingleAgreementCheckout) {
     return {
       variant: "single_agreement",
-      labels: SIMPLE_FLOW_PROGRESS_LABELS,
+      labels: AGREEMENT_LIFECYCLE_PROGRESS_LABELS,
       step: 2,
     };
   }
@@ -61,14 +55,14 @@ export function resolveCheckoutFlowProgress(params: {
   if (directSendCheckout) {
     return {
       variant: "direct_send",
-      labels: SIMPLE_FLOW_PROGRESS_LABELS,
+      labels: AGREEMENT_LIFECYCLE_PROGRESS_LABELS,
       step: 2,
     };
   }
 
   return {
     variant: "default",
-    labels: SIMPLE_FLOW_PROGRESS_LABELS,
+    labels: AGREEMENT_LIFECYCLE_PROGRESS_LABELS,
     step: 2,
   };
 }

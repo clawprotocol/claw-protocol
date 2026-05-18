@@ -16,7 +16,7 @@ export const REVIEW_AHA_HEADING = "Your agreement is ready";
 export const REVIEW_AHA_SUBHEAD = "Review and edit everything before sending or signing.";
 export const REVIEW_AHA_CHIP = "Draft ready to review";
 export const REVIEW_AHA_REASSURANCE =
-  "Nothing is sent, signed, or shared until you choose the next step.";
+  "Nothing is sent or signed until you choose the next step.";
 
 export const DRAFT_LOADING_PREPARING = "Preparing your agreement…";
 export const DRAFT_LOADING_STRUCTURING = "Structuring key terms…";

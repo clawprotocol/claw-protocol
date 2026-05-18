@@ -71,8 +71,8 @@ export function SimpleFlowShell(props: {
           </div>
           {step ? (
             <ol
-              className="claw-joy-flow-warm flex list-none flex-wrap items-center gap-x-1.5 gap-y-1.5 px-1 py-1 text-[10px] font-semibold uppercase tracking-wide sm:gap-x-2 sm:text-[11px] md:text-xs md:tracking-[0.06em] lg:text-[0.8125rem]"
-              aria-label="Agreement flow steps"
+              className="flex list-none flex-wrap items-center gap-x-1 gap-y-1 px-0.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:gap-x-1.5 sm:text-[11px]"
+              aria-label="Agreement lifecycle"
             >
               {progressLabels.flatMap((label, i) => {
                 const out: ReactNode[] = [];
@@ -90,25 +90,15 @@ export function SimpleFlowShell(props: {
                     key={`step-${i}`}
                     className={
                       done
-                        ? "flex items-center gap-1.5 rounded-md border border-emerald-800/35 bg-emerald-950/20 px-2 py-1 text-emerald-200/90"
+                        ? "flex items-center gap-1 rounded px-1.5 py-0.5 text-emerald-200/85"
                         : current
-                          ? "claw-joy-step-current flex items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-emerald-300"
-                          : "rounded-md px-2 py-1 text-slate-600"
+                          ? "flex items-center gap-1 rounded border border-emerald-500/25 bg-emerald-500/8 px-1.5 py-0.5 text-emerald-200"
+                          : "rounded px-1.5 py-0.5 text-slate-600"
                     }
                   >
                     {done ? (
-                      <span
-                        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-[9px] text-emerald-300"
-                        aria-hidden
-                      >
+                      <span className="text-[9px] text-emerald-400/90" aria-hidden>
                         ✓
-                      </span>
-                    ) : current ? (
-                      <span
-                        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-emerald-400/40 text-[9px] text-emerald-200"
-                        aria-hidden
-                      >
-                        {i + 1}
                       </span>
                     ) : null}
                     <span>{label}</span>

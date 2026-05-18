@@ -14,11 +14,14 @@ import { canAccessSimpleSendActions, isSimpleSendPaywallActive } from "../simple
 import { LawdogValueBulletsList } from "../LaunchOfferBlocks";
 import { ConversionPricingTriad } from "../ConversionPricingTriad";
 import { PAYWALL_DEFAULT_HEADLINE, PAYWALL_DEFAULT_SUB } from "../paywallMessaging";
-import { SIMPLE_FLOW_PROGRESS_LABELS } from "../../joy/clawJoyCopy";
+import {
+  AGREEMENT_LIFECYCLE_PROGRESS_LABELS,
+  lifecycleStepForStage,
+} from "../../agreement/agreementLifecycleRail";
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
 
-const FLOW_PROGRESS = SIMPLE_FLOW_PROGRESS_LABELS;
+const FLOW_PROGRESS = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
 
 export function SimpleReadyToSendPage(props: { agreementId: string }) {
   const { agreementId } = props;
@@ -88,7 +91,7 @@ export function SimpleReadyToSendPage(props: { agreementId: string }) {
 
   return (
     <SimpleFlowShell
-      step={3}
+      step={lifecycleStepForStage("sign")}
       progressLabels={FLOW_PROGRESS}
       title={PAYWALL_DEFAULT_HEADLINE}
       subtitle={PAYWALL_DEFAULT_SUB}

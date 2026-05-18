@@ -1,19 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Props = {
   lines: readonly string[];
   intervalMs?: number;
   active: boolean;
   className?: string;
+  onLineChange?: (line: string) => void;
 };
 
 /**
  * Cycles through calm progress lines (accessibility: polite live region).
  */
-export function ProUpgradeWaitRotatingText({ lines, intervalMs = 2500, active, className }: Props) {
+export function ProUpgradeWaitRotatingText({
+  lines,
+  intervalMs = 5000,
+  active,
+  className,
+  onLineChange,
+}: Props) {
   const [i, setI] = useState(0);
   const safe = lines.length ? i % lines.length : 0;
   const line = lines[safe] ?? "";
+  const onLineChangeRef = useRef(onLineChange);
+  onLineChangeRef.current = onLineChange;
 
   useEffect(() => {
     if (!active || lines.length < 2) return;
@@ -24,6 +33,11 @@ export function ProUpgradeWaitRotatingText({ lines, intervalMs = 2500, active, c
   useEffect(() => {
     if (active) setI(0);
   }, [active]);
+
+  useEffect(() => {
+    if (!line || !active) return;
+    onLineChangeRef.current?.(line);
+  }, [line, active]);
 
   if (!line) return null;
   return (

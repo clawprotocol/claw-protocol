@@ -4,10 +4,10 @@ import {
   type PublicVerifyPayload,
 } from "../../agreement/agreementPublicVerify";
 import {
-  CANONICAL_PROOF_SENTENCE,
-  JOY_COPY,
-  SIMPLE_FLOW_PROGRESS_LABELS,
-} from "../../joy/clawJoyCopy";
+  AGREEMENT_LIFECYCLE_PROGRESS_LABELS,
+  lifecycleStepForStage,
+} from "../../agreement/agreementLifecycleRail";
+import { CANONICAL_PROOF_SENTENCE, JOY_COPY } from "../../joy/clawJoyCopy";
 import { PROOF_LADDER_SUBTITLE } from "../../components/proof/proofTrustLadder";
 import { LawdogOnRecordStamp } from "../../components/ui/LawdogOnRecordStamp";
 import { JoyMilestoneMark } from "../../joy/JoyMilestone";
@@ -72,8 +72,8 @@ export function SimpleVerificationPage(props: { agreementId: string }) {
 
   return (
     <SimpleFlowShell
-      step={4}
-      progressLabels={SIMPLE_FLOW_PROGRESS_LABELS}
+      step={lifecycleStepForStage("proof")}
+      progressLabels={AGREEMENT_LIFECYCLE_PROGRESS_LABELS}
       title="Verification"
       subtitle="Check status, fingerprints, and version history for this agreement."
     >

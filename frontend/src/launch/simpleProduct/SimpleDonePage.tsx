@@ -4,10 +4,10 @@ import { agreementPublicVerifyPath, fetchPublicAgreementVerify } from "../../agr
 import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import {
-  CANONICAL_PROOF_SENTENCE,
-  JOY_COPY,
-  SIMPLE_FLOW_PROGRESS_LABELS,
-} from "../../joy/clawJoyCopy";
+  AGREEMENT_LIFECYCLE_PROGRESS_LABELS,
+  lifecycleStepForStage,
+} from "../../agreement/agreementLifecycleRail";
+import { CANONICAL_PROOF_SENTENCE, JOY_COPY } from "../../joy/clawJoyCopy";
 import { JoyMilestoneMark } from "../../joy/JoyMilestone";
 import { JoyShareMilestone } from "../../joy/JoyShareMilestone";
 import { consumeJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
@@ -915,8 +915,8 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   return (
     <SimpleFlowShell
-      step={4}
-      progressLabels={SIMPLE_FLOW_PROGRESS_LABELS}
+      step={lifecycleStepForStage("proof")}
+      progressLabels={AGREEMENT_LIFECYCLE_PROGRESS_LABELS}
       title="Agreement complete"
       subtitle={title ? `“${title}”` : JOY_COPY.taglineMoveWithProof}
     >
