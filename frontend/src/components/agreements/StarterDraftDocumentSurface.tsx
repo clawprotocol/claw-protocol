@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import {
   STARTER_DOCUMENT_DONE_EDITING_LABEL,
   STARTER_DOCUMENT_EDIT_WORDING_LABEL,
+  logFreeDraftCopyText,
   logStarterReviewDocumentRendered,
 } from "../../launch/simpleProduct/guidedWorkflowCopy";
+import {
+  FREE_DRAFT_COPY_TEXT_COPIED,
+  FREE_DRAFT_COPY_TEXT_FAILED,
+  FREE_DRAFT_COPY_TEXT_LABEL,
+} from "../../launch/simpleProduct/proConversionCopy";
 
 function splitAgreementDisplay(text: string): { title: string; body: string } {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -23,11 +29,12 @@ export function StarterDraftDocumentSurface(props: {
   disabled?: boolean;
   editorRef?: RefObject<HTMLTextAreaElement | null>;
   id?: string;
-  /** Increment to open edit mode from parent (e.g. Pro card “Edit this draft”). */
+  /** Increment to open edit mode from parent (e.g. Pro card “Edit free draft”). */
   editRequestNonce?: number;
 }) {
   const { value, onChange, disabled, editorRef, id = "claw-starter-agreement-document", editRequestNonce } = props;
   const [editing, setEditing] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "failed">("idle");
 
   useEffect(() => {
     if (!editRequestNonce) return;
@@ -40,26 +47,70 @@ export function StarterDraftDocumentSurface(props: {
     logStarterReviewDocumentRendered();
   }, []);
 
+  useEffect(() => {
+    if (copyFeedback === "idle") return;
+    const t = window.setTimeout(() => setCopyFeedback("idle"), 2200);
+    return () => window.clearTimeout(t);
+  }, [copyFeedback]);
+
+  const handleCopyText = useCallback(async () => {
+    const text = value.trim();
+    if (!text) {
+      setCopyFeedback("failed");
+      return;
+    }
+    try {
+      if (!navigator.clipboard?.writeText) {
+        setCopyFeedback("failed");
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      logFreeDraftCopyText("starter_review_preview", text.length);
+      setCopyFeedback("copied");
+    } catch {
+      setCopyFeedback("failed");
+    }
+  }, [value]);
+
   const paperClass =
     "rounded-xl border border-stone-200/90 bg-[#faf8f4] shadow-[0_12px_40px_-18px_rgba(0,0,0,0.55),0_1px_0_rgba(255,255,255,0.9)_inset] ring-1 ring-stone-300/40";
+
+  const copyButtonLabel =
+    copyFeedback === "copied"
+      ? FREE_DRAFT_COPY_TEXT_COPIED
+      : copyFeedback === "failed"
+        ? FREE_DRAFT_COPY_TEXT_FAILED
+        : FREE_DRAFT_COPY_TEXT_LABEL;
 
   return (
     <div className={paperClass}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200/80 bg-[#f3efe6] px-[clamp(1.25rem,4vw,2.25rem)] py-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Agreement preview</p>
-        <button
-          type="button"
-          className="rounded-md border border-stone-300/90 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45"
-          disabled={disabled}
-          onClick={() => {
-            setEditing((v) => !v);
-            if (!editing) {
-              window.requestAnimationFrame(() => editorRef?.current?.focus());
-            }
-          }}
-        >
-          {editing ? STARTER_DOCUMENT_DONE_EDITING_LABEL : STARTER_DOCUMENT_EDIT_WORDING_LABEL}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            data-testid="starter-draft-copy-text"
+            className="rounded-md border border-stone-300/90 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={disabled || !value.trim()}
+            aria-live="polite"
+            onClick={() => void handleCopyText()}
+          >
+            {copyButtonLabel}
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-stone-300/90 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={disabled}
+            onClick={() => {
+              setEditing((v) => !v);
+              if (!editing) {
+                window.requestAnimationFrame(() => editorRef?.current?.focus());
+              }
+            }}
+          >
+            {editing ? STARTER_DOCUMENT_DONE_EDITING_LABEL : STARTER_DOCUMENT_EDIT_WORDING_LABEL}
+          </button>
+        </div>
       </div>
 
       {editing ? (

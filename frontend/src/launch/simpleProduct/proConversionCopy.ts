@@ -30,9 +30,16 @@ export const PRO_UPGRADE_FREE_COLUMN_LABEL = "Free";
 export const PRO_UPGRADE_FREE_BULLETS: readonly string[] = [
   "Review the draft",
   "Edit wording",
-  "Copy or download your text",
+  "Copy your draft text",
   "Nothing is shared automatically",
 ] as const;
+
+export const PRO_UPGRADE_FREE_COLUMN_HELPER =
+  "Free keeps drafting lightweight. Pro unlocks collaboration, signatures, and proof records.";
+
+export const FREE_DRAFT_COPY_TEXT_LABEL = "Copy text";
+export const FREE_DRAFT_COPY_TEXT_COPIED = "Copied";
+export const FREE_DRAFT_COPY_TEXT_FAILED = "Couldn't copy — try selecting text manually.";
 
 export const PRO_UPGRADE_PRO_COLUMN_LABEL = "Pro";
 export const PRO_UPGRADE_PRO_BULLETS: readonly string[] = [
@@ -100,4 +107,6 @@ export const STALE_PRO_CONVERSION_STRINGS: readonly string[] = [
   "simplified starter preview",
   "Ready to share or sign?",
   "Still finishing your Pro agreement",
+  "Copy or download your text",
+  "download your text",
 ] as const;

@@ -8,6 +8,7 @@ import {
   PRO_UPGRADE_CARD_BODY,
   PRO_UPGRADE_CARD_HEADING,
   PRO_UPGRADE_FREE_BULLETS,
+  PRO_UPGRADE_FREE_COLUMN_HELPER,
   PRO_UPGRADE_PRO_BULLETS,
 } from "./simpleProduct/proConversionCopy";
 import {
@@ -33,6 +34,9 @@ describe("guided workflow copy", () => {
     expect(PRO_CTA_CONTINUE).toBe("Continue with Pro");
     expect(PRO_CTA_KEEP_FREE_DRAFT).toBe("Keep free draft");
     expect(PRO_CTA_EDIT_FREE_DRAFT).toBe("Edit free draft");
+    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Copy your draft text");
+    expect(PRO_UPGRADE_FREE_BULLETS.join(" ").toLowerCase()).not.toMatch(/download/);
+    expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/collaboration, signatures, and proof records/i);
     expect(PRO_UPGRADE_FREE_BULLETS).toContain("Nothing is shared automatically");
     expect(PRO_UPGRADE_PRO_BULLETS[0]).toBe("Send a private review link");
   });
@@ -77,6 +81,10 @@ describe("AgreementBuilderIntake review UX (static)", () => {
     expect(intake).toContain("logHomeAutoGenerateSkipped");
     expect(intake).toContain("homeAutoGenerateConsumedRef");
     expect(intake).toContain("logProConversionEditFreeClick");
+    expect(intake).toContain("StarterDraftDocumentSurface");
+    const surface = read("../components/agreements/StarterDraftDocumentSurface.tsx");
+    expect(surface).toContain("starter-draft-copy-text");
+    expect(surface).toContain("logFreeDraftCopyText");
   });
 
   it("does not surface stale funnel strings in primary review", () => {

@@ -7,6 +7,7 @@ import {
   PRO_UPGRADE_CARD_BODY,
   PRO_UPGRADE_CARD_HEADING,
   PRO_UPGRADE_FREE_BULLETS,
+  PRO_UPGRADE_FREE_COLUMN_HELPER,
   PRO_UPGRADE_FREE_COLUMN_LABEL,
   PRO_UPGRADE_PRO_BULLETS,
   PRO_UPGRADE_PRO_COLUMN_LABEL,
@@ -75,6 +76,7 @@ export function ProConversionComparisonCard(props: Props) {
               <ColumnBullet key={line}>{line}</ColumnBullet>
             ))}
           </ul>
+          <p className="mt-3 text-[11px] leading-snug text-slate-500 sm:text-xs">{PRO_UPGRADE_FREE_COLUMN_HELPER}</p>
         </div>
         <div className="rounded-lg border border-amber-500/35 bg-gradient-to-b from-amber-950/25 via-slate-950/80 to-slate-950/90 p-3.5 shadow-[inset_0_1px_0_0_rgba(251,191,36,0.08)] sm:p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200/90">{PRO_UPGRADE_PRO_COLUMN_LABEL}</p>
