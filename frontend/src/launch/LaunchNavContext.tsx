@@ -20,6 +20,8 @@ export type LaunchNavigateOptions = {
   heroIntake?: string;
   /** Marketing hero submit — uses intake as authoritative (including empty), not restored draft. */
   heroFromHome?: boolean;
+  /** Homepage submit with text — begin starter draft generation on create mount (skip prompt-only handoff). */
+  heroAutoGenerate?: boolean;
   /** `/app/quick` typed handoff — create page shows continuity copy (requires `heroFromHome`). */
   heroQuickSendTypedHandoff?: boolean;
   heroVoiceFinalize?: boolean;
@@ -71,6 +73,7 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
           clawHeroIntake: options.heroIntake ?? "",
           clawHeroFromHome: true,
           clawHeroVoiceFinalize: options.heroVoiceFinalize === true,
+          ...(options.heroAutoGenerate === true ? { clawHeroAutoGenerate: true } : {}),
           ...(options.heroQuickSendTypedHandoff === true ? { clawHeroQuickSendTypedHandoff: true } : {}),
         };
       } else if (options?.heroIntake?.trim()) {

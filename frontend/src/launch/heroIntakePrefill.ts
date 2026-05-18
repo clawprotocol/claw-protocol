@@ -24,6 +24,8 @@ export type HeroHandoffPayload = {
   fromHome: boolean;
   /** Transcript was merged from an in-flight mic finalize before navigation. */
   voiceFinalize: boolean;
+  /** Homepage submit with text — auto-run starter draft parse on `/app/create` mount. */
+  autoGenerate?: boolean;
   /** Typed intake from `/app/quick` → Generate draft agreement (continuity UI on create). */
   quickSendTypedHandoff?: boolean;
 };
@@ -59,6 +61,7 @@ function parseHistoryHandoff(st: Record<string, unknown> | null): HeroHandoffPay
       text,
       fromHome: true as const,
       voiceFinalize: st.clawHeroVoiceFinalize === true,
+      autoGenerate: st.clawHeroAutoGenerate === true,
     };
     if (st.clawHeroQuickSendTypedHandoff === true) {
       return { ...base, quickSendTypedHandoff: true };
@@ -89,7 +92,10 @@ export function resetHeroHandoffForCreateNavigationWithoutPayload(): void {
  * Prepare handoff from the homepage. Invalidates read cache.
  * With `fromHomeSubmit`, empty merged text clears persisted intake so archived drafts cannot win.
  */
-export function stashHeroIntakePrefill(text: string, opts?: { fromHomeSubmit?: boolean }): void {
+export function stashHeroIntakePrefill(
+  text: string,
+  opts?: { fromHomeSubmit?: boolean; autoGenerate?: boolean },
+): void {
   handoffReadCache = undefined;
   const t = (text || "").trim();
   try {
@@ -192,13 +198,15 @@ export function clearHeroIntakeHandoffAfterApply(): void {
         "clawHeroIntake" in st ||
         "clawHeroFromHome" in st ||
         "clawHeroVoiceFinalize" in st ||
-        "clawHeroQuickSendTypedHandoff" in st;
+        "clawHeroQuickSendTypedHandoff" in st ||
+        "clawHeroAutoGenerate" in st;
       if (hasAny) {
         const next = { ...st };
         delete next.clawHeroIntake;
         delete next.clawHeroFromHome;
         delete next.clawHeroVoiceFinalize;
         delete next.clawHeroQuickSendTypedHandoff;
+        delete next.clawHeroAutoGenerate;
         const keys = Object.keys(next);
         history.replaceState(keys.length ? next : null, "", window.location.href);
       }

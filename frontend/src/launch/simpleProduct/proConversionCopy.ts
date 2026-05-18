@@ -44,9 +44,18 @@ export const EARN_HERO_TITLE = "Earn with LawDog";
 export const EARN_HERO_SUBHEAD = "Share LawDog. Earn when people upgrade.";
 export const EARN_CTA_START = "Start earning";
 export const EARN_BENEFIT_CARDS: readonly { title: string; body: string }[] = [
-  { title: "Share your link", body: "Send your referral link anywhere you already talk about deals and tools." },
-  { title: "Earn on upgrades", body: "When someone upgrades to LawDog Pro, you earn a share." },
-  { title: "Monthly payouts", body: "Payouts run monthly when you meet the minimum balance." },
+  {
+    title: "Subscribers unlock affiliate access",
+    body: "Paid LawDog subscribers can create a referral link and start sharing right away.",
+  },
+  {
+    title: "Doginal holders get early access",
+    body: "Doginal Dog holders and approved partners may request early access during private beta.",
+  },
+  {
+    title: "Monthly payouts",
+    body: "Earn when people upgrade. Payouts run monthly when you meet the minimum balance.",
+  },
 ] as const;
 export const EARN_EARLY_ACCESS_NOTE =
   "Subscribers unlock affiliate access instantly. Doginal Dog holders and approved partners may request early access.";

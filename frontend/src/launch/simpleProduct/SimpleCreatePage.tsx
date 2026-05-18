@@ -76,6 +76,7 @@ export function SimpleCreatePage() {
   const [otherWaysOpen, setOtherWaysOpen] = useState(false);
   const [heroHandoff] = useState(() => readHeroIntakeHandoffForCreate());
   const handoffFromHome = heroHandoff?.fromHome ?? false;
+  const homeHeroAutoGenerate = heroHandoff?.autoGenerate === true && Boolean((heroHandoff?.text || "").trim());
   const quickSendTypedArrival =
     heroHandoff?.quickSendTypedHandoff === true && Boolean((heroHandoff?.text || "").trim());
   const hadBrowserPromptDraft = useMemo(() => {
@@ -503,7 +504,10 @@ export function SimpleCreatePage() {
               isFreshSimpleCreateStart ? "Create draft" : quickSendTypedArrival ? "Review" : "Review"
             }
             simpleProductFollowUpSubmitLabel="Next"
-            simpleProductFlowGeneratingLabel={quickSendTypedArrival ? "Structuring your draft…" : undefined}
+            simpleProductFlowGeneratingLabel={
+              quickSendTypedArrival || homeHeroAutoGenerate ? "Structuring your agreement…" : undefined
+            }
+            homeHeroAutoGenerate={homeHeroAutoGenerate}
             continuitySourcePanel={
               quickSendTypedArrival && heroHandoff?.text
                 ? { label: "Your starting text", text: heroHandoff.text }

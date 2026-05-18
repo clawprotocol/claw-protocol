@@ -4,21 +4,31 @@
 export const PRICING_HEADLINE = "Create and send agreements in minutes";
 
 export const PRICING_SUBHEAD =
-  "Turn drafts into real agreements instantly. Start free on Try LawDog, then subscribe for watermark-free sends, export, and team tools — Enterprise (custom pricing) when you need volume agreements, APIs, compliance packaging, and org-level intelligence.";
+  "Move from draft to review to signature flow. Start free on Try LawDog, then subscribe for watermark-free sends, export, and team tools — Enterprise (custom pricing) when you need volume agreements, APIs, compliance packaging, and org-level intelligence.";
+
+/** Homepage hero — primary marketing headline (SEO home). */
+export const HOMEPAGE_HERO_TITLE = "Create. Review. Send. Prove.";
+export const HOMEPAGE_HERO_SUBHEAD =
+  "Draft agreements in plain language, review every step, then share or sign only when you choose.";
+export const HOMEPAGE_HERO_MICRO_TRUST =
+  "Nothing is sent, signed, or shared until you confirm.";
+export const HOMEPAGE_CTA_CREATE_FREE_DRAFT = "Create free draft";
+export const HOMEPAGE_CTA_SEE_HOW = "See how it works";
+export const HOMEPAGE_HERO_PLACEHOLDER =
+  "Example: Services agreement for a $5k project, simple NDA between two parties, contractor agreement with monthly pay…";
 
 /** Homepage + pricing — outcome bullets (product capabilities, not legal outcomes). */
 export const LAWDOG_VALUE_BULLETS = [
-  "Create and send agreements in minutes",
-  "Turn drafts into real agreements instantly",
-  "Send with a clear, professional path",
-  "Keep proof and records you can share when it matters",
-  "No legal complexity required",
+  "Plain-language workflow",
+  "Move from draft to review to signature flow",
+  "Send only when you choose",
+  "Keep a checkable proof record",
 ] as const;
 
 export const PRICING_FIRST_WORKFLOW_GUARANTEE_TITLE = "Try your first agreement risk-free";
 
 export const PRICING_FIRST_WORKFLOW_GUARANTEE_BODY =
-  "If you can't complete your first agreement workflow as intended, we'll refund your subscription. No friction.";
+  "If the workflow does not work as intended, we'll refund your subscription. No friction.";
 
 /** Product workflow completion only — not legal results. */
 export const PRICING_FIRST_WORKFLOW_GUARANTEE_FOOTNOTE =
@@ -31,10 +41,10 @@ export const LAWDOG_MICRO_TRUST_UNDER_CTA =
 export const HOMEPAGE_WHAT_HAPPENS_NEXT_TITLE = "What happens next";
 
 export const HOMEPAGE_WHAT_HAPPENS_NEXT_BULLETS = [
-  "Describe or speak what you need (or upload a PDF)",
-  "Review the structured draft — edit anything",
-  "Send only when you choose",
-  "Keep a checkable proof record",
+  "Describe or upload",
+  "Review the draft",
+  "Share or sign when ready",
+  "Keep a proof record",
 ] as const;
 
 /** Homepage hero + create intake — long example placeholder (plain English). */
@@ -44,11 +54,33 @@ export const HOMEPAGE_LONG_INTAKE_EXAMPLE =
 /** Single trust line near primary create / send CTAs. */
 export const NOTHING_SENT_UNTIL_CONFIRM = "Nothing is sent until you confirm.";
 
+export const HOMEPAGE_TRUST_SECTION_TITLE = "Built for trust, not lock-in.";
+
+export const HOMEPAGE_TRUST_CARDS = [
+  {
+    title: "Timestamped actions",
+    body: "Key steps are recorded with clear timestamps so you know what happened and when.",
+  },
+  {
+    title: "Verifiable records",
+    body: "Proof is designed to be checked — not just displayed on a dashboard you have to trust.",
+  },
+  {
+    title: "Export anytime",
+    body: "Take your agreement and proof data with you for your own files and workflows.",
+  },
+  {
+    title: "Public status without exposing full agreement text",
+    body: "Share progress when useful — recipients see status, not your full private draft.",
+  },
+] as const;
+
+/** @deprecated Prefer {@link HOMEPAGE_TRUST_CARDS} on the marketing homepage. */
 export const HOMEPAGE_PRODUCT_TRUST_MICRO = [
-  "Real agreements",
-  "Real signatures",
+  "Timestamped actions",
   "Verifiable records",
   "Export anytime",
+  "Public status without exposing full agreement text",
 ] as const;
 
 /** Shown once the user starts typing on first-run create (simple product). */

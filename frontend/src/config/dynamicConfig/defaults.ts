@@ -6,12 +6,13 @@ const SHARE_PREFIX =
 
 export const DYNAMIC_CONFIG_DEFAULTS: DynamicConfigRoot = {
   home: {
-    heroTitle: "Create. Send. Prove.",
-    heroSupportLine: "Agreements that are instantly usable — with a verifiable proof record.",
-    heroMicroTrust: "Like DocuSign, but you don't have to trust it.",
+    heroTitle: "Create. Review. Send. Prove.",
+    heroSupportLine:
+      "Draft agreements in plain language, review every step, then share or sign only when you choose.",
+    heroMicroTrust: "Nothing is sent, signed, or shared until you confirm.",
     heroPlaceholder:
-      "Example: NDA between two parties, contractor agreement for $2,500/month, consulting agreement with 6 month term…",
-    microSteps: ["Create", "Send", "Prove"],
+      "Example: Services agreement for a $5k project, simple NDA between two parties, contractor agreement with monthly pay…",
+    microSteps: ["Describe", "Review", "Share/Sign", "Proof"],
   },
   readyToSend: {
     pageTitle: "Your agreement is ready to send",

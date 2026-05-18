@@ -127,6 +127,7 @@ import {
   DRAFT_LOADING_TURNING,
   PRO_CTA_CONTINUE,
 } from "../../launch/simpleProduct/proConversionCopy";
+import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
   getStarterProRefineCtaExperiment,
   starterProRefineImpressionFunnelEvent,
@@ -567,6 +568,8 @@ type Props = {
   freshSimpleCreateStart?: boolean;
   /** First completed LawDog agreement in this browser (marketing / first-win UX only). */
   firstLawdogSession?: boolean;
+  /** Marketing homepage submitted with text — parse immediately into starter review (no second prompt step). */
+  homeHeroAutoGenerate?: boolean;
   /**
    * `/app/create` SimpleFlowShell: when authoritative paid Pro is in DRAFT-stage review, parent hides
    * starter hero/step 1 chrome (title, stepper, starter chips) without resetting intake stage.
@@ -1699,6 +1702,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   onIntakeTextChange,
   freshSimpleCreateStart = false,
   firstLawdogSession = false,
+  homeHeroAutoGenerate = false,
   onSimpleCreateShellChrome,
 }) => {
   const [intakeBaselineCommitted, setIntakeBaselineCommitted] = useState("");
@@ -1776,7 +1780,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Simple product funnel: `.vs01-shell` is the sole horizontal gate — never stack a 56rem “page rail” here (input, complexity gate, draft/review, continuity handoff all share this wrapper). */
   const simpleCreateWorkspaceOuterMaxClass =
     simpleProductFlow && liveWorkspaceTwoPane ? "max-w-none" : "max-w-[min(100%,56rem)]";
-  const [previewPaneRevealed, setPreviewPaneRevealed] = useState(false);
+  const [previewPaneRevealed, setPreviewPaneRevealed] = useState(() => homeHeroAutoGenerate);
+  const homeHeroAutoGenerateRef = useRef(homeHeroAutoGenerate);
+  const homeAutoGenerateStartedRef = useRef(false);
+  homeHeroAutoGenerateRef.current = homeHeroAutoGenerate;
   const [dictationStartNonce, setDictationStartNonce] = useState(0);
   const [voiceEntryHintVisible, setVoiceEntryHintVisible] = useState(false);
   /** Ready + 1200ms idle — emphasize action bar, analytics, preview de-emphasis */
@@ -6321,7 +6328,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     assignLocalDraftParseStickyMode();
     const deferDraftStageForFreshInput =
-      freshSimpleCreateUx && createUiStageRef.current === CreateUiStage.INPUT;
+      freshSimpleCreateUx &&
+      createUiStageRef.current === CreateUiStage.INPUT &&
+      !homeHeroAutoGenerateRef.current;
     setHardError(null);
     setCreateFlowPhase("generating_draft");
     setDisplayPhase("generating_draft");
@@ -6425,6 +6434,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     emitPaidFunnelEvent,
     paidProEditReturnResumeActive,
     freshSimpleCreateUx,
+    homeHeroAutoGenerate,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!homeHeroAutoGenerate || homeAutoGenerateStartedRef.current) return;
+    if (paidProEditReturnResumeActive) return;
+    const text = (initialIntakeText ?? intakeStepBufferRef.current ?? "").trim();
+    if (text.length < 6) return;
+    homeAutoGenerateStartedRef.current = true;
+    logHomeCreateSubmit(text);
+    setPreviewPaneRevealed(true);
+    setCreateUiStage(CreateUiStage.DRAFT);
+    void (async () => {
+      await runProductionLocalDraftParse({
+        rawOverride: text,
+        handoffSource: "home_create_submit",
+      });
+    })();
+  }, [
+    homeHeroAutoGenerate,
+    initialIntakeText,
+    paidProEditReturnResumeActive,
+    runProductionLocalDraftParse,
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(
