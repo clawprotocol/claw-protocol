@@ -1,12 +1,21 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { Vs01Counterparty, Vs01RecipientPlacedField } from "./types";
 import {
   hydrateRecipientSigningFields,
   isRecipientSigningEditableType,
-  recipientSigningFieldIsComplete,
+  isRecipientSignerMarkedComplete,
+  recipientEditableFieldIsComplete,
+  recipientFieldStatusPill,
+  recipientFieldStatusPillLabel,
+  recipientFinishGateComplete,
+  recipientFinishGateEditableFields,
   resolveRecipientSigningAutoValue,
+  signerKeyForRecipientField,
 } from "./recipientSigningFieldUtils";
+import { patchSignerPacketStatus, writeSigningPacketStatus } from "./vs01SigningPacketStatusStore";
+
+const AG = "ag_recipient_ui";
 
 function field(
   type: Vs01RecipientPlacedField["type"],
@@ -21,6 +30,7 @@ function field(
     y: 0.1,
     width: 0.2,
     height: 0.05,
+    assignedSignerRoleId: "role_cp1",
     ...overrides,
   };
 }
@@ -37,29 +47,113 @@ describe("recipientSigningFieldUtils", () => {
         signerTitle: "CEO",
       },
     ],
+    [
+      "cp2",
+      {
+        id: "cp2",
+        name: "Beta Inc",
+        email: "b@x.com",
+        signerName: "Bob Beta",
+        signerTitle: "CFO",
+      },
+    ],
   ]);
 
-  it("only signature and initials are editable types", () => {
-    expect(isRecipientSigningEditableType("signature")).toBe(true);
-    expect(isRecipientSigningEditableType("initials")).toBe(true);
-    expect(isRecipientSigningEditableType("printed_name")).toBe(false);
-    expect(isRecipientSigningEditableType("date")).toBe(false);
+  beforeEach(() => {
+    localStorage.clear();
   });
 
-  it("auto-fills printed name, title, email, and date", () => {
+  it("unsigned signature shows click-to-sign, not signed", () => {
+    const pill = recipientFieldStatusPill({
+      field: field("signature", { counterpartyId: "cp1", value: "" }),
+      isCurrentSignerField: true,
+      agreementId: AG,
+    });
+    expect(pill).toBe("click-to-sign");
+    expect(recipientFieldStatusPillLabel(pill)).toBe("Click to sign here");
+    expect(pill).not.toBe("signed");
+  });
+
+  it("auto-filled metadata has no status pill for current signer", () => {
+    const pill = recipientFieldStatusPill({
+      field: field("printed_name"),
+      isCurrentSignerField: true,
+      agreementId: AG,
+    });
+    expect(pill).toBeNull();
     expect(resolveRecipientSigningAutoValue(field("printed_name"), cpById)).toBe("Pat Signer");
-    expect(resolveRecipientSigningAutoValue(field("text", { textPurpose: "title" }), cpById)).toBe(
-      "CEO",
-    );
-    expect(resolveRecipientSigningAutoValue(field("email"), cpById)).toBe("signer@x.com");
-    expect(resolveRecipientSigningAutoValue(field("date"), cpById)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it("treats read-only metadata fields as complete for finish gate", () => {
-    const hydrated = hydrateRecipientSigningFields(
-      [field("printed_name"), field("date"), field("signature", { value: "Pat Signer" })],
-      cpById,
+  it("other signer fields show Waiting until signer marked complete in store", () => {
+    writeSigningPacketStatus({
+      agreementId: AG,
+      updatedAt: new Date().toISOString(),
+      bySignerKey: { role_cp2: "waiting" },
+      fullySigned: false,
+    });
+    const otherField = field("printed_name", {
+      counterpartyId: "cp2",
+      assignedSignerRoleId: "role_cp2",
+    });
+    expect(
+      recipientFieldStatusPill({
+        field: otherField,
+        isCurrentSignerField: false,
+        agreementId: AG,
+      }),
+    ).toBe("waiting");
+    expect(isRecipientSignerMarkedComplete(AG, signerKeyForRecipientField(otherField))).toBe(
+      false,
     );
-    expect(hydrated.every((f) => recipientSigningFieldIsComplete(f, cpById))).toBe(true);
+  });
+
+  it("signer completion flips only that signer fields to Signed pill", () => {
+    writeSigningPacketStatus({
+      agreementId: AG,
+      updatedAt: new Date().toISOString(),
+      bySignerKey: { role_cp2: "signed", role_cp1: "waiting" },
+      fullySigned: false,
+    });
+    const otherDone = field("date", { counterpartyId: "cp2", assignedSignerRoleId: "role_cp2" });
+    const mineWaiting = field("signature", { counterpartyId: "cp1", value: "Pat" });
+    expect(
+      recipientFieldStatusPill({
+        field: otherDone,
+        isCurrentSignerField: false,
+        agreementId: AG,
+      }),
+    ).toBe("signed");
+    expect(
+      recipientFieldStatusPill({
+        field: mineWaiting,
+        isCurrentSignerField: true,
+        agreementId: AG,
+      }),
+    ).toBe("ready");
+    patchSignerPacketStatus(AG, "role_cp1", "signed");
+    expect(isRecipientSignerMarkedComplete(AG, "role_cp1")).toBe(true);
+  });
+
+  it("finish gate requires signature and initials only", () => {
+    const myFields = [
+      field("printed_name"),
+      field("date"),
+      field("email"),
+      field("text", { textPurpose: "title" }),
+      field("signature", { value: "" }),
+      field("initials", { id: "f2", value: "" }),
+    ];
+    const hydrated = hydrateRecipientSigningFields(myFields, cpById);
+    expect(recipientFinishGateComplete(hydrated)).toBe(false);
+    const editable = recipientFinishGateEditableFields(hydrated);
+    expect(editable).toHaveLength(2);
+    expect(editable.every((f) => isRecipientSigningEditableType(f.type))).toBe(true);
+    const done = hydrated.map((f) =>
+      isRecipientSigningEditableType(f.type)
+        ? { ...f, value: f.type === "signature" ? "Pat Signer" : "PS" }
+        : f,
+    );
+    expect(recipientFinishGateComplete(done)).toBe(true);
+    expect(recipientEditableFieldIsComplete(field("printed_name"))).toBe(true);
   });
 });
