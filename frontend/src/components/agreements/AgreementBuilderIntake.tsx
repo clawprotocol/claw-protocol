@@ -36,6 +36,13 @@ import {
   resolveStarterCreateSubmitText,
 } from "../../launch/simpleProduct/starterCreateSubmit";
 import {
+  STARTER_QUICK_ADDS,
+  appendStarterQuickAddSnippet,
+  logStarterSuggestionApplied,
+  type StarterQuickAdd,
+} from "../../launch/simpleProduct/starterQuickAdds";
+import { StarterQuickAddsRow } from "./StarterQuickAddsRow";
+import {
   NO_ATTORNEY_CLIENT,
   PRODUCT_NOT_LAW_FIRM,
   STRUCTURED_DRAFT_ASSIST_SHORT,
@@ -46,8 +53,6 @@ import {
   FUNNEL_FREE_STARTER_HEADLINE,
   FUNNEL_FREE_STARTER_HELPER,
   HOMEPAGE_LONG_INTAKE_EXAMPLE,
-  INTAKE_HELPER_BULLETS,
-  INTAKE_HELPER_LEAD,
   INTAKE_INTRO_HEADLINE,
   INTAKE_MICRO_TRUST_LINE,
   NOTHING_SENT_UNTIL_CONFIRM,
@@ -11334,9 +11339,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const showStarterQuickAdds = Boolean(
+    freshSimpleCreateUx &&
+      stageAInputFirst &&
+      createUiStage === CreateUiStage.INPUT &&
+      !isGenerating &&
+      !draftPreCommitFreeze,
+  );
+
   const showUnifiedClauseSuggestions = Boolean(
     simpleProductFlow &&
       liveWorkspaceTwoPane &&
+      !showStarterQuickAdds &&
       !isGenerating &&
       !draftNowCommitted &&
       !draftPreCommitFreeze &&
@@ -11372,6 +11386,43 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeClauseToastTimerRef.current = null;
     }, 2400);
   }, []);
+
+  const handleStarterQuickAddApply = useCallback(
+    (item: StarterQuickAdd) => {
+      if (isGenerating || draftPreCommitFreeze) return;
+      const current = textareaRef.current?.value ?? intakeStepBufferRef.current;
+      const inputLenBefore = current.trim().length;
+      const next = appendStarterQuickAddSnippet(current, item.append);
+      markIntakeEdit();
+      setIntakeBaselineCommitted("");
+      setIntakeStepBuffer(next);
+      setDebouncedStepBuffer(next);
+      flushDebouncedStepBuffer({ forceFlash: true });
+      logStarterSuggestionApplied({
+        suggestionKey: item.key,
+        inputLenBefore,
+        inputLenAfter: next.trim().length,
+      });
+      flashIntakeClauseAddedToast(item.label);
+      window.requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        el?.focus();
+        try {
+          const len = el?.value?.length ?? 0;
+          el?.setSelectionRange(len, len);
+        } catch {
+          /* selection unsupported in some modes */
+        }
+      });
+    },
+    [
+      isGenerating,
+      draftPreCommitFreeze,
+      markIntakeEdit,
+      flushDebouncedStepBuffer,
+      flashIntakeClauseAddedToast,
+    ],
+  );
 
   const handleClauseSuggestionRowApply = useCallback(
     (item: IntakeClauseSuggestionRowItem) => {
@@ -14338,6 +14389,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       placeholder={guidedQuestionPlaceholder}
                     />
                   </div>
+                  {showStarterQuickAdds ? (
+                    <StarterQuickAddsRow
+                      items={STARTER_QUICK_ADDS}
+                      disabled={isGenerating || draftPreCommitFreeze}
+                      onApply={handleStarterQuickAddApply}
+                      addedToastLabel={intakeClauseAddedToast}
+                      className={
+                        simpleCreateStickyBottomBarVisible
+                          ? "mt-4 mb-24 sm:mb-20"
+                          : "mt-4 mb-6"
+                      }
+                    />
+                  ) : null}
                   {simpleProductFlow &&
                   liveWorkspaceTwoPane &&
                   !createProductionTwoPane &&
@@ -14430,21 +14494,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               ? null
                               : "Describe your agreement in plain English. We'll structure it instantly."}
                   </p>
-                ) : null}
-                {stageAInputFirst &&
-                simpleProductFlow &&
-                liveWorkspaceTwoPane &&
-                createUiStage === CreateUiStage.INPUT &&
-                !isGenerating ? (
-                  <div className="mt-3 rounded-lg border border-slate-800/60 bg-slate-950/40 px-3 py-2.5 sm:px-4">
-                    <p className="text-xs font-medium text-slate-400 sm:text-sm">{INTAKE_HELPER_LEAD}</p>
-                    <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-xs text-slate-500 sm:text-sm">
-                      {INTAKE_HELPER_BULLETS.map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                    <p className="mt-2 text-xs leading-snug text-slate-500 sm:text-sm">{INTAKE_MICRO_TRUST_LINE}</p>
-                  </div>
                 ) : null}
                 {intakeRefinementWarning && !hideIntakeMicrocopy && !isGenerating ? (
                   <p

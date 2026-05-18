@@ -62,6 +62,7 @@ describe("starter create page static contracts", () => {
     expect(page).not.toContain("SIMPLE_CREATE_CONVERSATION_STARTERS");
     expect(page).not.toContain("Quick starters");
     expect(page).not.toContain("Speak your agreement");
+    expect(intake).toContain("Speak your agreement");
   });
 
   it("uses starter create prompt copy constants in intake stage-A", () => {

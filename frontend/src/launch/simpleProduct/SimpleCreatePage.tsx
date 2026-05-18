@@ -250,7 +250,7 @@ export function SimpleCreatePage() {
       title={shellTitle}
       subtitle={shellSubtitle}
     >
-      <div className={isFreshSimpleCreateStart || paidProReviewReadyShell ? "pb-28 sm:pb-24" : undefined}>
+      <div className={isFreshSimpleCreateStart || paidProReviewReadyShell ? "pb-36 sm:pb-32" : undefined}>
         {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival && !hideIntakeMarketingChrome ? (
           <p className="mb-2 text-center text-[11px] font-medium leading-snug text-slate-500 sm:text-left sm:text-xs">
             {SIMPLE_CREATE_STARTER_CONTROL_LINE}
