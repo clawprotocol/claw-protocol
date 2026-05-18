@@ -55,6 +55,15 @@ export function logProConversionKeepFreeClick(source: string): void {
   console.info("[pro-conversion-keep-free-click]", { source });
 }
 
+export type FreeDraftCopyTextSource = "starter_review_preview";
+
+export function logFreeDraftCopyText(payload: {
+  source: FreeDraftCopyTextSource;
+  textLen: number;
+}): void {
+  console.info("[free-draft-copy-text]", payload);
+}
+
 export const FREE_REVIEW_OUTSIDE_HELPER =
   "Initial draft generated from your notes. Review and edit before sharing.";
 

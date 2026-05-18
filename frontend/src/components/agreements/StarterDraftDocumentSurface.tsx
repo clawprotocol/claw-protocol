@@ -65,7 +65,7 @@ export function StarterDraftDocumentSurface(props: {
         return;
       }
       await navigator.clipboard.writeText(text);
-      logFreeDraftCopyText("starter_review_preview", text.length);
+      logFreeDraftCopyText({ source: "starter_review_preview", textLen: text.length });
       setCopyFeedback("copied");
     } catch {
       setCopyFeedback("failed");
