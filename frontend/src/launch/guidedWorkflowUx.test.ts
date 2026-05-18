@@ -69,6 +69,8 @@ describe("AgreementBuilderIntake review UX (static)", () => {
   it("hides starter draft version chip on streamline review", () => {
     expect(intake).toContain("REVIEW_AHA_CHIP");
     expect(intake).toContain('version: ""');
+    expect(intake).toContain("isFreeStreamlineDraftReview");
+    expect(intake).toContain("resolveIsFreeStreamlineDraftReview");
     expect(intake).toContain("StarterDraftDocumentSurface");
     expect(intake).toContain("logProConversionCardVisible");
     expect(intake).toContain("ProConversionComparisonCard");
@@ -77,14 +79,18 @@ describe("AgreementBuilderIntake review UX (static)", () => {
     expect(intake).toContain('case "keep_reviewing"');
     expect(intake).toContain("logFreeReviewKeepReviewing");
     expect(intake).toContain("logFreeSendGatedToPro");
+    expect(intake).toContain('logFreeSendGatedToPro("guided_continue_draft")');
     expect(intake).not.toContain('label: "Keep reviewing"');
     expect(intake).toContain("logHomeAutoGenerateSkipped");
     expect(intake).toContain("homeAutoGenerateConsumedRef");
     expect(intake).toContain("logProConversionEditFreeClick");
-    expect(intake).toContain("StarterDraftDocumentSurface");
+    expect(intake).toContain("logFreeReviewSurfaceResolved");
+    expect(intake).toContain("logFreeReviewLegacySurfaceBlocked");
+    expect(intake).toContain("logFreeReviewApiLateMerge");
     const surface = read("../components/agreements/StarterDraftDocumentSurface.tsx");
     expect(surface).toContain("starter-draft-copy-text");
     expect(surface).toContain("logFreeDraftCopyText");
+    expect(surface).not.toMatch(/download/i);
   });
 
   it("does not surface stale funnel strings in primary review", () => {

@@ -505,6 +505,13 @@ import {
   PRO_REVIEW_DOCUMENT_PANEL_HEADING,
   PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY,
 } from "../../launch/simpleProduct/simpleCreatePaidProReviewShell";
+import {
+  logFreeReviewApiLateMerge,
+  logFreeReviewLegacySurfaceBlocked,
+  logFreeReviewSurfaceResolved,
+  resolveIsFreeStreamlineDraftReview,
+  type FreeReviewSurfaceSource,
+} from "./freeStreamlineDraftReview";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -6301,6 +6308,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     runEntitledPremiumImprovementRewrite,
   ]);
 
+  const commitFreeDraftForReview = React.useCallback(
+    (opts: { source: FreeReviewSurfaceSource; fromHomeAutoGenerate?: boolean }) => {
+      setCreateFlowPhase("draft_ready_for_review");
+      setCreateUiStage(CreateUiStage.DRAFT);
+      setDisplayPhase("review");
+      setDraftNowCommitted(true);
+      setMobileWorkspacePane("preview");
+      setPreviewPaneRevealed(true);
+      setFollowUpDetailTotal(0);
+      logFreeReviewSurfaceResolved({
+        source: opts.source,
+        displayPhase: "review",
+        createFlowPhase: "draft_ready_for_review",
+        hasDraft: true,
+        fromHomeAutoGenerate: Boolean(opts.fromHomeAutoGenerate ?? homeHeroAutoGenerateRef.current),
+      });
+    },
+    [],
+  );
+
   const runProductionLocalDraftParse = React.useCallback(
     async (opts?: { rawOverride?: string; handoffSource?: string }): Promise<boolean> => {
     const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
@@ -6412,16 +6439,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setReviewShowsSimplifiedAdvancedDraft(false);
       setDraft(parsed);
       setFollowUpDetailTotal(0);
-      setDisplayPhase("intake");
-      setDraftNowCommitted(true);
-      setCreateFlowPhase("draft_ready_for_review");
-      setCreateUiStage(CreateUiStage.DRAFT);
-      setMobileWorkspacePane("preview");
-      setPreviewPaneRevealed(true);
       setIntakeStepBuffer("");
       setDebouncedStepBuffer("");
       agreementDocumentDirtyRef.current = false;
       setReviewDocRefreshTick((n) => n + 1);
+      commitFreeDraftForReview({
+        source: fromHomeHandoff ? "home_create_submit" : "local_parse",
+        fromHomeAutoGenerate: fromHomeHandoff,
+      });
       emitPaidFunnelEvent("free_draft_generated", { once: true, extra: { source: "local_parse" } });
       if (fromHomeHandoff) {
         homeAutoGenerateConsumedRef.current = true;
@@ -6456,6 +6481,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProEditReturnResumeActive,
     freshSimpleCreateUx,
     homeHeroAutoGenerate,
+    commitFreeDraftForReview,
   ]);
 
   useLayoutEffect(() => {
@@ -7188,6 +7214,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumPersistedFlowActive,
             premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
           }));
+      const freeNonProHydrate =
+        Boolean(simpleProductFlow && liveWorkspaceTwoPane && normalized) &&
+        !keepReviewAfterHydrate &&
+        !isPaidProAgreementAuthoritative({
+          draft: normalized as unknown as ParsedDraftShape,
+          tier,
+          agreementId: id,
+          premiumSendPathUnlocked,
+          premiumPersistedFlowActive,
+          premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+        });
       const nextDisplayAfterPersist = keepReviewAfterHydrate ? "review" : "intake";
       if (import.meta.env.DEV && simpleProductFlow && liveWorkspaceTwoPane && normalized) {
         const rs = String(normalized.premium_render_source ?? "").trim();
@@ -7198,13 +7235,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           corpusLen,
           hasMaterialPremiumPipelineCorpus: hasMaterialPremiumPipelineCorpus(normalized),
           displayPhase_before: displayPhaseRef.current,
-          displayPhase_after: nextDisplayAfterPersist,
+          displayPhase_after: freeNonProHydrate ? "review" : nextDisplayAfterPersist,
           createUiStage_before: String(createUiStageRef.current),
           createUiStage_after: String(createUiStageRef.current),
           source: "runPersistAndOpen",
         });
       }
-      setDisplayPhase(nextDisplayAfterPersist);
+      if (freeNonProHydrate) {
+        logFreeReviewApiLateMerge({
+          agreementIdShort: id.length > 12 ? `${id.slice(0, 8)}…` : id,
+          displayPhaseBefore: displayPhaseRef.current,
+        });
+        commitFreeDraftForReview({
+          source: displayPhaseRef.current === "review" ? "api_late_merge" : "api_hydrate",
+        });
+      } else {
+        setDisplayPhase(nextDisplayAfterPersist);
+      }
       clearAgreementCreatorIntakeStorage();
       /** Do not clear premium snapshot / LS here — that is only for post-send teardown; clearing on persist→send caused paid Pro to fall back to free intake. */
       /** Any successful simple-product persist → send/review handoff must not leave a create-page resume id (zombie shell). */
@@ -7264,23 +7311,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setHardError(msg);
       }
       if (createProductionTwoPane && !hydrate && structuredOk) {
-        setCreateFlowPhase("draft_ready_for_review");
         setCreateUiStage(CreateUiStage.DRAFT);
-        setDisplayPhase(
-          isPaidProAgreementAuthoritative({
-            draft: parsed,
-            tier,
-            agreementId: reviewAgreementIdRef.current,
-            premiumSendPathUnlocked,
-            premiumPersistedFlowActive,
-            premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
-          })
-            ? "review"
-            : "intake",
-        );
-        setMobileWorkspacePane("preview");
-        setDraftNowCommitted(true);
-        setPreviewPaneRevealed(true);
+        const paidProFallback = isPaidProAgreementAuthoritative({
+          draft: parsed,
+          tier,
+          agreementId: reviewAgreementIdRef.current,
+          premiumSendPathUnlocked,
+          premiumPersistedFlowActive,
+          premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+        });
+        if (paidProFallback) {
+          setCreateFlowPhase("draft_ready_for_review");
+          setDisplayPhase("review");
+          setMobileWorkspacePane("preview");
+          setDraftNowCommitted(true);
+          setPreviewPaneRevealed(true);
+        } else {
+          commitFreeDraftForReview({ source: "basic_parse_timeout" });
+        }
         if (import.meta.env.PROD) {
           // eslint-disable-next-line no-console
           console.warn("[CLAW] on-page review fallback (draft POST/hydrate failed; structured parse OK)", {
@@ -8848,6 +8896,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
+  const isFreeStreamlineDraftReview = useMemo(
+    () =>
+      resolveIsFreeStreamlineDraftReview({
+        simpleProductFlow: Boolean(simpleProductFlow),
+        liveWorkspaceTwoPane: Boolean(liveWorkspaceTwoPane),
+        createProductionTwoPane,
+        createUiStage,
+        createFlowPhase,
+        hasDraft: Boolean(draft),
+        paidProAuthoritative,
+        premiumPaidDocumentSurface,
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        hasPaidPremiumCompletionSession: hasPaidPremiumCompletionSession,
+        showUpgradeToFullDraftOnReview,
+      }),
+    [
+      simpleProductFlow,
+      liveWorkspaceTwoPane,
+      createProductionTwoPane,
+      createUiStage,
+      createFlowPhase,
+      draft,
+      paidProAuthoritative,
+      premiumPaidDocumentSurface,
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+      premiumSurfaceGateTick,
+      showUpgradeToFullDraftOnReview,
+    ],
+  );
+
+  useEffect(() => {
+    if (!isFreeStreamlineDraftReview) return;
+    if (displayPhase !== "intake" || createFlowPhase !== "draft_ready_for_review" || !draft) return;
+    logFreeReviewLegacySurfaceBlocked({
+      reason: "display_phase_intake_on_ready_draft",
+      displayPhase,
+      createFlowPhase,
+    });
+    setDisplayPhase("review");
+  }, [isFreeStreamlineDraftReview, displayPhase, createFlowPhase, draft]);
+
   const freeTrackBlocksRecipientAdvance = useMemo(() => {
     if (!draft) return false;
     if (paidProAuthoritative) return false;
@@ -8888,11 +8979,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const useStarterDocumentPaperSurface = Boolean(
-    productionDraftPrimaryReviewSurface &&
-      isFreeStarterReviewSurface &&
-      streamlineFirstRunReviewUi &&
-      createUiStage === CreateUiStage.DRAFT &&
-      !premiumPaidDocumentSurface,
+    isFreeStreamlineDraftReview && createUiStage === CreateUiStage.DRAFT,
   );
 
   useLayoutEffect(() => {
@@ -9075,7 +9162,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (paidProAuthoritative) return false;
     if (suppressIntakePremiumUpsell) return false;
     if (proAgreementEntitled) return false;
-    if (isFreeStarterReviewSurface) return belowDocumentRefineSectionParentEligible;
+    if (isFreeStreamlineDraftReview || isFreeStarterReviewSurface) {
+      return belowDocumentRefineSectionParentEligible;
+    }
     return shouldShowStarterProRefineUpsellCard(
       belowDocumentRefineSectionParentEligible,
       premiumPaidDocumentSurface,
@@ -9083,6 +9172,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     );
   }, [
     proAgreementEntitled,
+    isFreeStreamlineDraftReview,
     isFreeStarterReviewSurface,
     suppressIntakePremiumUpsell,
     belowDocumentRefineSectionParentEligible,
@@ -10458,10 +10548,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const hideStickyForStarterProContinuation = Boolean(
-    createUiStage === CreateUiStage.DRAFT &&
-      streamlineFirstRunReviewUi &&
-      freeTrackBlocksRecipientAdvance &&
-      (showStarterProRefineUpsell || isFreeStarterReviewSurface),
+    isFreeStreamlineDraftReview && freeTrackBlocksRecipientAdvance,
   );
 
   const simpleCreateStickyBottomBarVisible =
@@ -10486,11 +10573,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       return { version: CHIP_VERSION_PRO, state: CHIP_STATE_PRO_NEEDS_DRAFT };
     }
-    if (streamlineFirstRunReviewUi) {
+    if (isFreeStreamlineDraftReview) {
       return { version: "", state: REVIEW_AHA_CHIP };
     }
     return { version: CHIP_VERSION_STARTER, state: CHIP_STATE_INITIAL_READY };
-  }, [createUiStage, draft, premiumPaidDocumentSurface, premiumProTruthGate, streamlineFirstRunReviewUi]);
+  }, [createUiStage, draft, premiumPaidDocumentSurface, premiumProTruthGate, isFreeStreamlineDraftReview]);
 
   /**
    * If checkout occurred and strict truth gate blocks success, emit a second (non-once)
@@ -10933,7 +11020,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const starterStrongProtectionsUpsellEl = useMemo(() => {
     if (suppressIntakePremiumUpsell) return null;
-    if (streamlineFirstRunReviewUi || showStarterProRefineUpsell) return null;
+    if (isFreeStreamlineDraftReview || showStarterProRefineUpsell) return null;
     if (!originalWordingIsPremiumOnlyOnStarter) return null;
     return (
       <ProConversionComparisonCard
@@ -10954,7 +11041,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     originalWordingIsPremiumOnlyOnStarter,
     beginAdvancedFullDraftCheckout,
     suppressIntakePremiumUpsell,
-    streamlineFirstRunReviewUi,
+    isFreeStreamlineDraftReview,
     showStarterProRefineUpsell,
     tier,
   ]);
@@ -14966,26 +15053,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   </span>
                                 ) : null}
                               </>
-                            ) : streamlineFirstRunReviewUi ? (
-                              starterReviewEditableHelperSurface ? (
-                                <>
-                                  <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                    {STARTER_REVIEW_HEADLINE}
-                                  </h2>
-                                  <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
-                                    {STARTER_REVIEW_SUBLINE}
-                                  </p>
-                                </>
-                              ) : (
-                                <>
-                                  <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                    {PREVIEW_BLOCK_TITLE}
-                                  </h2>
-                                  <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
-                                    Edits stay on this version until you continue. Nothing is sent automatically.
-                                  </p>
-                                </>
-                              )
+                            ) : isFreeStreamlineDraftReview ? (
+                              <>
+                                <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+                                  {STARTER_REVIEW_HEADLINE}
+                                </h2>
+                                <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
+                                  {STARTER_REVIEW_SUBLINE}
+                                </p>
+                              </>
                             ) : showUpgradeToFullDraftOnReview ? (
                               <>
                                 <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
@@ -15120,7 +15196,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   </>
                                 )}
                               </>
-                            ) : streamlineFirstRunReviewUi ? (
+                            ) : isFreeStreamlineDraftReview ? (
                               <span className="block text-slate-500">{STARTER_REVIEW_HELPER}</span>
                             ) : showUpgradeToFullDraftOnReview ? (
                               <>When you&apos;re happy here, use Continue at the bottom to add recipients — still no
@@ -15134,7 +15210,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           {upgradeLockActive &&
                           productionDraftPrimaryReviewSurface &&
                           createUiStage === CreateUiStage.DRAFT &&
-                          !(streamlineFirstRunReviewUi && showStarterProRefineUpsell) ? (
+                          !(isFreeStreamlineDraftReview && showStarterProRefineUpsell) ? (
                             <div ref={upgradeRequiredBlockRef} className="mx-auto mb-3 w-full max-w-none px-4 sm:px-0">
                               <ProConversionComparisonCard
                                 onPrimaryClick={() => {

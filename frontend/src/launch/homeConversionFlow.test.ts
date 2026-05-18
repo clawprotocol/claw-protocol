@@ -122,6 +122,15 @@ describe("AgreementBuilderIntake home auto-generate (static)", () => {
     expect(intake).toContain('handoffSource: "home_create_submit"');
     expect(intake).toContain("logHomeCreateSubmit");
   });
+
+  it("commits free review surface after local parse (homepage + timeout paths)", () => {
+    expect(intake).toContain("commitFreeDraftForReview");
+    expect(intake).toContain('source: fromHomeHandoff ? "home_create_submit" : "local_parse"');
+    expect(intake).toContain('source: "basic_parse_timeout"');
+    expect(intake).toContain("logFreeReviewSurfaceResolved");
+    expect(intake).toContain("StarterDraftDocumentSurface");
+    expect(intake).toContain("hideStickyForStarterProContinuation");
+  });
 });
 
 describe("ClawOpportunityPage earn landing (static)", () => {
