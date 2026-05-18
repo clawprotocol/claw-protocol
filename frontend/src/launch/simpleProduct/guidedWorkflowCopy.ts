@@ -34,8 +34,25 @@ export function logStarterReviewDocumentRendered(): void {
   console.info("[starter-review-document-rendered]");
 }
 
+export function logProConversionCardVisible(): void {
+  console.info("[pro-conversion-card-visible]");
+}
+
+/** @deprecated Use {@link logProConversionCardVisible} */
 export function logProContinuationCardVisible(): void {
-  console.info("[pro-continuation-card-visible]");
+  logProConversionCardVisible();
+}
+
+export function logProConversionPrimaryClick(source: string): void {
+  console.info("[pro-conversion-primary-click]", { source });
+}
+
+export function logProConversionEditFreeClick(source: string): void {
+  console.info("[pro-conversion-edit-free-click]", { source });
+}
+
+export function logProConversionKeepFreeClick(source: string): void {
+  console.info("[pro-conversion-keep-free-click]", { source });
 }
 
 export const FREE_REVIEW_OUTSIDE_HELPER =

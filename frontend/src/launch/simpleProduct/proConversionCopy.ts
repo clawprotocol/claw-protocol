@@ -17,21 +17,39 @@ export const DRAFT_LOADING_TURNING = DRAFT_LOADING_REVIEW_SCREEN;
 
 export const PRO_CTA_CONTINUE = "Continue with Pro";
 export const PRO_CTA_KEEP_FREE_DRAFT = "Keep free draft";
-export const PRO_CTA_EDIT_THIS_DRAFT = "Edit this draft";
+export const PRO_CTA_EDIT_FREE_DRAFT = "Edit free draft";
 
-export const PRO_UPGRADE_CARD_HEADING = "Ready to share or sign?";
+/** @deprecated Use {@link PRO_CTA_EDIT_FREE_DRAFT} */
+export const PRO_CTA_EDIT_THIS_DRAFT = PRO_CTA_EDIT_FREE_DRAFT;
+
+export const PRO_UPGRADE_CARD_HEADING = "Ready to move this from draft to deal?";
 export const PRO_UPGRADE_CARD_BODY =
-  "LawDog Pro turns this draft into a collaboration and signing workflow — private review links, tracked changes, signature prep, and a proof record.";
+  "Free gives you the draft. Pro gives you the workflow to review it with the other side, collect signatures, and keep the proof record.";
 
-export const PRO_UPGRADE_CAN_HELP_HEADING = "LawDog Pro can also help with";
-export const PRO_UPGRADE_CAN_HELP_BULLETS: readonly string[] = [
-  "Send a private review link",
-  "Track requested changes",
-  "Prepare signature fields",
-  "Collect signatures",
-  "Keep a proof record",
+export const PRO_UPGRADE_FREE_COLUMN_LABEL = "Free";
+export const PRO_UPGRADE_FREE_BULLETS: readonly string[] = [
+  "Review the draft",
+  "Edit wording",
+  "Copy or download your text",
+  "Nothing is shared automatically",
 ] as const;
 
+export const PRO_UPGRADE_PRO_COLUMN_LABEL = "Pro";
+export const PRO_UPGRADE_PRO_BULLETS: readonly string[] = [
+  "Send a private review link",
+  "See requested changes",
+  "Prepare signature fields",
+  "Collect signatures",
+  "Save the proof record",
+] as const;
+
+export const PRO_UPGRADE_BRIDGE_LINE =
+  "Use Pro when another person needs to review, approve, or sign.";
+
+/** @deprecated Use {@link PRO_UPGRADE_PRO_BULLETS} */
+export const PRO_UPGRADE_CAN_HELP_BULLETS = PRO_UPGRADE_PRO_BULLETS;
+
+export const PRO_UPGRADE_CAN_HELP_HEADING = "LawDog Pro can also help with";
 export const PRO_UPGRADE_REASSURANCE = "You review everything before anything is shared.";
 
 export const CHECKOUT_TITLE = "Continue with Pro";
@@ -80,4 +98,6 @@ export const STALE_PRO_CONVERSION_STRINGS: readonly string[] = [
   "Make this agreement easier to approve",
   "Continue to collaboration + signing",
   "simplified starter preview",
+  "Ready to share or sign?",
+  "Still finishing your Pro agreement",
 ] as const;

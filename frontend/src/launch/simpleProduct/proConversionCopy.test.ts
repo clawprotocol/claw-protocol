@@ -11,7 +11,11 @@ import {
   EARN_CTA_START,
   EARN_HERO_TITLE,
   PRO_CTA_CONTINUE,
+  PRO_CTA_EDIT_FREE_DRAFT,
   PRO_CTA_KEEP_FREE_DRAFT,
+  PRO_UPGRADE_CARD_HEADING,
+  PRO_UPGRADE_FREE_BULLETS,
+  PRO_UPGRADE_PRO_BULLETS,
   STALE_PRO_CONVERSION_STRINGS,
 } from "./proConversionCopy";
 import {
@@ -30,17 +34,22 @@ const CONVERSION_SURFACE_PATHS: readonly string[] = [
   join(__dirname, "checkoutFlowProgress.ts"),
   join(__dirname, "../affiliate/ClawOpportunityPage.tsx"),
   join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx"),
+  join(__dirname, "../../components/agreements/ProConversionComparisonCard.tsx"),
 ];
 
 describe("proConversionCopy", () => {
   it("exports unified Pro and checkout strings", () => {
     expect(PRO_CTA_CONTINUE).toBe("Continue with Pro");
     expect(PRO_CTA_KEEP_FREE_DRAFT).toBe("Keep free draft");
+    expect(PRO_CTA_EDIT_FREE_DRAFT).toBe("Edit free draft");
+    expect(PRO_UPGRADE_CARD_HEADING).toMatch(/draft to deal/i);
+    expect(PRO_UPGRADE_FREE_BULLETS.length).toBeGreaterThan(0);
+    expect(PRO_UPGRADE_PRO_BULLETS.length).toBeGreaterThan(0);
     expect(CHECKOUT_TITLE).toBe("Continue with Pro");
     expect(CHECKOUT_SUBTITLE).toMatch(/Review it before anything is shared, sent, or signed/i);
     expect(CHECKOUT_CTA).toBe("Unlock collaboration + send");
     expect(CHECKOUT_FOOTER).toMatch(/Review before anything moves/i);
-    expect(DRAFT_LOADING_STRUCTURING).toBe("Structuring your agreement…");
+    expect(DRAFT_LOADING_STRUCTURING).toBe("Structuring key terms…");
     expect(EARN_HERO_TITLE).toBe("Earn with LawDog");
     expect(EARN_CTA_START).toBe("Start earning");
   });

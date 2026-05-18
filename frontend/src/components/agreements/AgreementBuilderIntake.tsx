@@ -107,14 +107,8 @@ import {
   REFINE_PERSISTED_UPDATE_FAIL_INLINE,
   REFINE_THIS_DRAFT_PLACEHOLDER,
   REFINE_THIS_DRAFT_SUBCOPY,
-  STARTER_PRO_REFINE_IMPROVEMENT_BODY,
-  STARTER_PRO_REFINE_IMPROVEMENT_BULLETS,
-  STARTER_PRO_REFINE_IMPROVEMENT_CTA,
-  STARTER_PRO_REFINE_IMPROVEMENT_HEADING,
-  STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY,
-  STARTER_PRO_REFINE_EDIT_DRAFT_CTA,
-  STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA,
 } from "./reviewRefineUserCopy";
+import { ProConversionComparisonCard } from "./ProConversionComparisonCard";
 import {
   DRAFT_LOADING_KEEPING,
   DRAFT_LOADING_PREPARING,
@@ -127,7 +121,10 @@ import {
   REVIEW_AHA_HEADING,
   REVIEW_AHA_REASSURANCE,
   REVIEW_AHA_SUBHEAD,
-  logProContinuationCardVisible,
+  logProConversionCardVisible,
+  logProConversionEditFreeClick,
+  logProConversionKeepFreeClick,
+  logProConversionPrimaryClick,
   logFreeReviewKeepReviewing,
   logFreeSendGatedToPro,
   logHomeAutoGenerateSkipped,
@@ -215,16 +212,6 @@ import {
 import { buildWeCapturedSummaryBullets, buildWhatWeUnderstoodBullets } from "./intakeWhatWeUnderstood";
 import { WhatWeUnderstoodBlock } from "./WhatWeUnderstoodBlock";
 import { CreateDraftReviewCard } from "./CreateDraftReviewCard";
-import {
-  STARTER_REVIEW_PREMIUM_BODY,
-  STARTER_REVIEW_PREMIUM_BULLETS,
-  STARTER_REVIEW_PREMIUM_CTA,
-  STARTER_REVIEW_PREMIUM_CTA_BUTTON_CLASSNAME,
-  STARTER_REVIEW_PREMIUM_HEADLINE,
-  STARTER_REVIEW_PREMIUM_LIST_GLYPH_CLASSNAME,
-  STARTER_REVIEW_PREMIUM_MICROCOPY,
-  STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME,
-} from "./starterReviewPremiumUpsellCopy";
 import {
   STARTER_PARTY_PRO_REQUIRED_CTA_LABEL,
   resolveStarterPartyCountGuard,
@@ -949,32 +936,14 @@ type FullDraftUpgradeIntakeCalloutProps = {
 
 function FullDraftUpgradeIntakeCallout({ onUpgrade }: FullDraftUpgradeIntakeCalloutProps) {
   return (
-    <div
-      role="region"
-      aria-label={STARTER_REVIEW_PREMIUM_HEADLINE}
-      className={`mt-3 p-4 sm:p-5 ${STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME}`}
-    >
-      <p className="text-base font-semibold tracking-tight text-slate-50 sm:text-lg">{STARTER_REVIEW_PREMIUM_HEADLINE}</p>
-      <p className="mt-2 text-sm leading-relaxed text-slate-400 sm:text-base">{STARTER_REVIEW_PREMIUM_BODY}</p>
-      <ul className="mt-3 space-y-2 text-sm leading-snug text-slate-200/95 sm:leading-relaxed">
-        {STARTER_REVIEW_PREMIUM_BULLETS.map((b) => (
-          <li key={b} className="flex gap-2">
-            <span className={STARTER_REVIEW_PREMIUM_LIST_GLYPH_CLASSNAME} aria-hidden>
-              •
-            </span>
-            <span>{b}</span>
-          </li>
-        ))}
-      </ul>
-      <button
-        type="button"
-        className={`mt-4 min-h-[2.75rem] w-full px-4 py-2.5 text-center text-sm sm:text-base ${STARTER_REVIEW_PREMIUM_CTA_BUTTON_CLASSNAME}`}
-        onClick={() => void onUpgrade()}
-      >
-        {STARTER_REVIEW_PREMIUM_CTA}
-      </button>
-      <p className="mt-2 text-center text-[11px] leading-snug text-slate-400 sm:text-xs">{STARTER_REVIEW_PREMIUM_MICROCOPY}</p>
-    </div>
+    <ProConversionComparisonCard
+      className="mt-3"
+      showSecondaryActions={false}
+      onPrimaryClick={() => {
+        logProConversionPrimaryClick("full_draft_intake_callout");
+        void onUpgrade();
+      }}
+    />
   );
 }
 
@@ -9185,8 +9154,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!showStarterProRefineUpsell) return;
-    logProContinuationCardVisible();
+    logProConversionCardVisible();
   }, [showStarterProRefineUpsell]);
+
+  const handleStarterProConversionPrimaryClick = React.useCallback(() => {
+    logProConversionPrimaryClick("starter_pro_refine_card");
+    if (starterProRefineCtaExperiment === "variant") {
+      trackAgreementFunnelEvent("starter_pro_refine_upsell_variant_click", {}, { planTier: String(tier) });
+    } else {
+      trackAgreementFunnelEvent("starter_pro_refine_upsell_control_click", {}, { planTier: String(tier) });
+    }
+    void beginAdvancedFullDraftCheckout(null, {
+      starterProRefineCtaExperiment,
+    });
+  }, [starterProRefineCtaExperiment, tier, beginAdvancedFullDraftCheckout]);
 
   /** Starter/basic review editor helper — independent of upgrade lock so copy stays visible while editing. */
   const starterReviewEditableHelperSurface = useMemo(() => {
@@ -10950,38 +10931,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (streamlineFirstRunReviewUi || showStarterProRefineUpsell) return null;
     if (!originalWordingIsPremiumOnlyOnStarter) return null;
     return (
-      <div
-        className={`mt-3 p-4 sm:mt-3 sm:p-5 ${STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME}`}
-        role="region"
-        aria-label={STARTER_REVIEW_PREMIUM_HEADLINE}
-      >
-        <p className="text-base font-semibold tracking-tight text-slate-50 sm:text-lg">{STARTER_REVIEW_PREMIUM_HEADLINE}</p>
-        <ul className="mt-3 space-y-2 text-sm leading-snug text-slate-200/95 sm:leading-relaxed">
-          {STARTER_REVIEW_PREMIUM_BULLETS.map((b) => (
-            <li key={b} className="flex gap-2">
-              <span className={STARTER_REVIEW_PREMIUM_LIST_GLYPH_CLASSNAME} aria-hidden>
-                •
-              </span>
-              <span>{b}</span>
-            </li>
-          ))}
-        </ul>
-        <button
-          type="button"
-          className={`mt-4 w-full min-h-[2.75rem] px-4 py-2.5 text-sm sm:w-auto sm:min-w-[14rem] sm:text-base ${STARTER_REVIEW_PREMIUM_CTA_BUTTON_CLASSNAME}`}
-          onClick={() => {
-            logProductEvent("upgrade_clicked", {
-              surface: "starter_review_protections_upsell",
-              intent: "unlock_premium_rewrite",
-            });
-            trackAgreementFunnelEvent("premium_upgrade_clicked", { surface: "starter_review_protections_upsell" }, { planTier: String(tier) });
-            beginAdvancedFullDraftCheckout();
-          }}
-        >
-          {STARTER_REVIEW_PREMIUM_CTA}
-        </button>
-        <p className="mt-2 text-center text-[11px] leading-snug text-slate-400 sm:text-xs">{STARTER_REVIEW_PREMIUM_MICROCOPY}</p>
-      </div>
+      <ProConversionComparisonCard
+        className="mt-3 sm:mt-3"
+        showSecondaryActions={false}
+        onPrimaryClick={() => {
+          logProConversionPrimaryClick("starter_review_protections_upsell");
+          logProductEvent("upgrade_clicked", {
+            surface: "starter_review_protections_upsell",
+            intent: "unlock_premium_rewrite",
+          });
+          trackAgreementFunnelEvent("premium_upgrade_clicked", { surface: "starter_review_protections_upsell" }, { planTier: String(tier) });
+          beginAdvancedFullDraftCheckout();
+        }}
+      />
     );
   }, [
     originalWordingIsPremiumOnlyOnStarter,
@@ -15172,46 +15134,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           productionDraftPrimaryReviewSurface &&
                           createUiStage === CreateUiStage.DRAFT &&
                           !(streamlineFirstRunReviewUi && showStarterProRefineUpsell) ? (
-                            <div
-                              ref={upgradeRequiredBlockRef}
-                              className="mx-auto mb-3 w-full max-w-none px-4 sm:px-0"
-                              role="region"
-                              aria-label={STARTER_REVIEW_PREMIUM_HEADLINE}
-                            >
-                              <div className={`p-5 sm:p-6 ${STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME}`}>
-                                <h3 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                  {STARTER_REVIEW_PREMIUM_HEADLINE}
-                                </h3>
-                                <ul className="mt-3 space-y-2 text-sm leading-snug text-slate-200/95 sm:text-base sm:leading-relaxed">
-                                  {STARTER_REVIEW_PREMIUM_BULLETS.map((b) => (
-                                    <li key={b} className="flex gap-2">
-                                      <span className={STARTER_REVIEW_PREMIUM_LIST_GLYPH_CLASSNAME} aria-hidden>
-                                        •
-                                      </span>
-                                      <span>{b}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-                                  <button
-                                    type="button"
-                                    className={`min-h-[2.85rem] w-full px-5 py-3 text-center text-sm sm:w-auto sm:min-w-[14rem] sm:text-base ${STARTER_REVIEW_PREMIUM_CTA_BUTTON_CLASSNAME}`}
-                                    onClick={() => void handleUpgradeToFullDraft()}
-                                  >
-                                    {STARTER_REVIEW_PREMIUM_CTA}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="min-h-[2.85rem] w-full rounded-lg border border-slate-600/70 bg-slate-800/80 px-5 py-3 text-center text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 sm:w-auto"
-                                    onClick={clearUpgradeLockAndResume}
-                                  >
-                                    {STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA}
-                                  </button>
-                                </div>
-                                <p className="mt-3 text-center text-[11px] leading-snug text-slate-400 sm:text-xs">
-                                  {STARTER_REVIEW_PREMIUM_MICROCOPY}
-                                </p>
-                              </div>
+                            <div ref={upgradeRequiredBlockRef} className="mx-auto mb-3 w-full max-w-none px-4 sm:px-0">
+                              <ProConversionComparisonCard
+                                onPrimaryClick={() => {
+                                  logProConversionPrimaryClick("upgrade_lock_block");
+                                  void handleUpgradeToFullDraft();
+                                }}
+                                onKeepFreeClick={() => {
+                                  logProConversionKeepFreeClick("upgrade_lock_block");
+                                  clearUpgradeLockAndResume();
+                                }}
+                              />
                             </div>
                           ) : null}
                           {createUiStage === CreateUiStage.RECIPIENTS &&
@@ -15820,60 +15753,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </div>
                             ) : null}
                             {showStarterProRefineUpsell ? (
-                              <div
+                              <ProConversionComparisonCard
                                 id="claw-refine-starter-pro-upsell"
-                                ref={starterProRefineUpsellCardRef}
-                                className="mt-4 w-full max-w-[min(100%,58rem)] scroll-mt-4 rounded-2xl border border-amber-500/35 bg-slate-950/90 p-4 pb-20 shadow-md shadow-amber-950/10 ring-1 ring-amber-500/15 sm:mt-5 sm:p-5 sm:pb-24"
-                                role="region"
-                                aria-label="Upgrade to improve draft with LawDog Pro"
-                              >
-                                <h3 className="text-base font-semibold tracking-tight text-slate-50 sm:text-lg">
-                                  {STARTER_PRO_REFINE_IMPROVEMENT_HEADING}
-                                </h3>
-                                <p className="mt-2 text-sm leading-relaxed text-slate-400 sm:text-base">
-                                  {STARTER_PRO_REFINE_IMPROVEMENT_BODY}
-                                </p>
-                                <ul className="mt-3 list-outside list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-400 sm:text-base">
-                                  {STARTER_PRO_REFINE_IMPROVEMENT_BULLETS.map((line) => (
-                                    <li key={line}>{line}</li>
-                                  ))}
-                                </ul>
-                                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-                                  <button
-                                    type="button"
-                                    className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-950/40 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-sm transition hover:border-amber-400/60 hover:bg-amber-900/50 sm:w-auto"
-                                    onClick={() => {
-                                      if (starterProRefineCtaExperiment === "variant") {
-                                        trackAgreementFunnelEvent("starter_pro_refine_upsell_variant_click", {}, { planTier: String(tier) });
-                                      } else {
-                                        trackAgreementFunnelEvent("starter_pro_refine_upsell_control_click", {}, { planTier: String(tier) });
-                                      }
-                                      void beginAdvancedFullDraftCheckout(null, {
-                                        starterProRefineCtaExperiment: starterProRefineCtaExperiment,
-                                      });
-                                    }}
-                                  >
-                                    {STARTER_PRO_REFINE_IMPROVEMENT_CTA}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-600/70 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800/60 sm:w-auto"
-                                    onClick={() => performKeepReviewingFocus("pro_card_edit_draft")}
-                                  >
-                                    {STARTER_PRO_REFINE_EDIT_DRAFT_CTA}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-transparent bg-transparent px-4 py-2.5 text-sm font-medium text-slate-400 underline-offset-2 transition hover:text-slate-200 hover:underline sm:w-auto"
-                                    onClick={() => performKeepReviewingFocus("pro_card_keep_free_draft")}
-                                  >
-                                    {STARTER_PRO_REFINE_KEEP_FREE_DRAFT_CTA}
-                                  </button>
-                                </div>
-                                <p className="mt-3 text-center text-[11px] leading-snug text-slate-500 sm:mt-2 sm:text-right sm:text-xs">
-                                  {STARTER_PRO_REFINE_IMPROVEMENT_SECONDARY}
-                                </p>
-                              </div>
+                                panelRef={starterProRefineUpsellCardRef}
+                                className="mt-4 w-full max-w-[min(100%,58rem)] pb-20 sm:mt-5 sm:pb-24"
+                                onPrimaryClick={handleStarterProConversionPrimaryClick}
+                                onEditFreeClick={() => {
+                                  logProConversionEditFreeClick("starter_pro_refine_card");
+                                  performKeepReviewingFocus("pro_card_edit_draft");
+                                }}
+                                onKeepFreeClick={() => {
+                                  logProConversionKeepFreeClick("starter_pro_refine_card");
+                                  performKeepReviewingFocus("pro_card_keep_free_draft");
+                                }}
+                              />
                             ) : null}
                             {showProLawdogRefineAndFinalize && reviewRefineUserMessage ? (
                               <p

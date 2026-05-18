@@ -3,9 +3,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   PRO_CTA_CONTINUE,
+  PRO_CTA_EDIT_FREE_DRAFT,
   PRO_CTA_KEEP_FREE_DRAFT,
-  PRO_UPGRADE_CAN_HELP_BULLETS,
+  PRO_UPGRADE_CARD_BODY,
   PRO_UPGRADE_CARD_HEADING,
+  PRO_UPGRADE_FREE_BULLETS,
+  PRO_UPGRADE_PRO_BULLETS,
 } from "./simpleProduct/proConversionCopy";
 import {
   HOME_CREATE_TRANSITION_HEADING,
@@ -24,11 +27,14 @@ describe("guided workflow copy", () => {
     expect(REVIEW_AHA_CHIP).toBe("Draft ready to review");
   });
 
-  it("frames Pro as workflow continuation", () => {
-    expect(PRO_UPGRADE_CARD_HEADING).toBe("Ready to share or sign?");
+  it("frames Pro as draft-to-deal workflow continuation", () => {
+    expect(PRO_UPGRADE_CARD_HEADING).toBe("Ready to move this from draft to deal?");
+    expect(PRO_UPGRADE_CARD_BODY).toMatch(/Free gives you the draft/i);
     expect(PRO_CTA_CONTINUE).toBe("Continue with Pro");
     expect(PRO_CTA_KEEP_FREE_DRAFT).toBe("Keep free draft");
-    expect(PRO_UPGRADE_CAN_HELP_BULLETS[0]).toBe("Send a private review link");
+    expect(PRO_CTA_EDIT_FREE_DRAFT).toBe("Edit free draft");
+    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Nothing is shared automatically");
+    expect(PRO_UPGRADE_PRO_BULLETS[0]).toBe("Send a private review link");
   });
 });
 
@@ -60,7 +66,8 @@ describe("AgreementBuilderIntake review UX (static)", () => {
     expect(intake).toContain("REVIEW_AHA_CHIP");
     expect(intake).toContain('version: ""');
     expect(intake).toContain("StarterDraftDocumentSurface");
-    expect(intake).toContain("logProContinuationCardVisible");
+    expect(intake).toContain("logProConversionCardVisible");
+    expect(intake).toContain("ProConversionComparisonCard");
     expect(intake).toContain("hideStickyForStarterProContinuation");
     expect(intake).toContain("freeTrackBlocksRecipientAdvance");
     expect(intake).toContain('case "keep_reviewing"');
@@ -69,7 +76,7 @@ describe("AgreementBuilderIntake review UX (static)", () => {
     expect(intake).not.toContain('label: "Keep reviewing"');
     expect(intake).toContain("logHomeAutoGenerateSkipped");
     expect(intake).toContain("homeAutoGenerateConsumedRef");
-    expect(intake).toContain("STARTER_PRO_REFINE_EDIT_DRAFT_CTA");
+    expect(intake).toContain("logProConversionEditFreeClick");
   });
 
   it("does not surface stale funnel strings in primary review", () => {
