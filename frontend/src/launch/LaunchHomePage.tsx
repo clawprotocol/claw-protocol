@@ -54,7 +54,13 @@ export function LaunchHomePage() {
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [homeTransitionActive, setHomeTransitionActive] = useState(false);
   const intakeRef = useRef<HTMLTextAreaElement | null>(null);
-  useAutoResizeTextarea(intakeRef, heroInput, { minRows: 4, maxPx: 320 });
+  const heroTextareaMaxPx =
+    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches ? 280 : 320;
+  const { sync: syncHeroTextarea, onPaste: onHeroTextareaPaste } = useAutoResizeTextarea(
+    intakeRef,
+    heroInput,
+    { minRows: 4, maxPx: heroTextareaMaxPx },
+  );
   const heroDictationEnabled = useMemo(
     () => String(import.meta.env.VITE_CLAW_HERO_DICTATION ?? "1") !== "0",
     [],
@@ -222,6 +228,8 @@ export function LaunchHomePage() {
                 rows={4}
                 value={heroInput}
                 onChange={(e) => setHeroInput(e.target.value)}
+                onPaste={() => onHeroTextareaPaste()}
+                onInput={() => syncHeroTextarea()}
                 placeholder={HOMEPAGE_HERO_PLACEHOLDER || home.heroPlaceholder}
                 disabled={handoffBusy || homeTransitionActive}
                 className="claw-seo-input min-h-[6.5rem] w-full resize-none overflow-hidden px-4 py-4 pb-12 pr-14 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out sm:min-h-[7rem] lg:text-lg lg:placeholder:text-lg"
@@ -250,6 +258,7 @@ export function LaunchHomePage() {
                     setHeroInput(ex.text);
                     logHomeExampleSelected(ex.key, ex.text.length);
                     intakeRef.current?.focus();
+                    requestAnimationFrame(() => syncHeroTextarea());
                   }}
                 >
                   {ex.label}

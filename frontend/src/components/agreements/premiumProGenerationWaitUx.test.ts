@@ -60,6 +60,14 @@ describe("premium Pro generation wait (static)", () => {
     expect(copy).toMatch(/Still building/i);
   });
 
+  it("progress pills use Upgrade and Terms loaded, not Payment", () => {
+    const view = resolvePremiumProWaitModalView("processing");
+    const labels = view.progressSteps.map((s) => s.shortLabel).join(" ");
+    expect(labels).toContain("Upgrade");
+    expect(labels).toContain("Terms loaded");
+    expect(labels).not.toMatch(/\bPayment\b/);
+  });
+
   it("bans stale copy in resolved modal views", () => {
     const phases = ["processing", "soft_wait", "extended_wait", "terminal_failure", "success"] as const;
     const bundle = phases

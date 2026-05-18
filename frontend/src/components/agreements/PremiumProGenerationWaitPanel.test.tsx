@@ -15,7 +15,8 @@ describe("PremiumProGenerationWaitPanel", () => {
     );
     expect(screen.getByRole("heading", { name: /Building your Pro agreement/i })).toBeTruthy();
     expect(screen.getAllByText(PREMIUM_PRO_WAIT_REASSURANCE)).toHaveLength(1);
-    expect(screen.getByText("Payment")).toBeTruthy();
+    expect(screen.getByText("Upgrade")).toBeTruthy();
+    expect(screen.queryByText("Payment")).toBeNull();
     expect(screen.getByText("Pro draft")).toBeTruthy();
   });
 

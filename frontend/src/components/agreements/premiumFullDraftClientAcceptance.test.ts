@@ -59,6 +59,13 @@ Governing law: the laws of the **State of Oklahoma** (and not the laws of the St
 });
 
 describe("rejectPremiumDegradedFiller", () => {
+  it("does not reject long operative bodies whose title is confidentiality and commercial protections", () => {
+    const line = "Operative confidentiality and commercial protections terms apply as stated.";
+    const body = `CONFIDENTIALITY AND COMMERCIAL PROTECTIONS AGREEMENT\n\n${line}\n${"Detail. ".repeat(3000)}`;
+    const r = rejectPremiumDegradedFiller(body);
+    expect(r.ok, r.reasons.join("; ")).toBe(true);
+  });
+
   it("rejects repeated operative-terms degraded template lines", () => {
     const line =
       "1. Operative terms. The parties intend to document the relationship described in the intake above; specifics follow.";

@@ -27,7 +27,6 @@ const DEGRADED_FALLBACK_BANNED_SUBSTRINGS = [
   "commercial framework",
   "premium generation detail",
   "below is a structured summary from your notes",
-  "confidentiality and commercial protections agreement",
 ] as const;
 
 const REVIEW_COMPLETION_STUB =

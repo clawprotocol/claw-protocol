@@ -75,4 +75,36 @@ describe("agreementTemplatePlaceholderSafety", () => {
     const found = collectForbiddenTemplateFragments("<customer legal name>", "");
     expect(found.length).toBeGreaterThan(0);
   });
+
+  it("does not treat signature-line [NAME]/[TITLE] as hard rejects when parties are resolved", () => {
+    const parties = ["Acme LLC", "Beta Inc."];
+    const raw = [
+      "SERVICES AGREEMENT between Acme LLC and Beta Inc.",
+      "x".repeat(6000),
+      "SIGNATURES",
+      "Acme LLC",
+      "By: [SIGNATURE]",
+      "Name: [NAME]",
+      "Title: [TITLE]",
+      "Date: [DATE]",
+    ].join("\n");
+    const fin = finalizeUserVisibleAgreementPlainText(raw, {
+      intakeRaw: "between Acme LLC and Beta Inc.",
+      partyNames: parties,
+      surface: "test",
+    });
+    expect(fin.ok, fin.remaining.join("; ")).toBe(true);
+    expect(fin.text).not.toMatch(/\[\s*NAME\s*\]/i);
+  });
+
+  it("still flags mustache party placeholders when not in intake", () => {
+    const raw = "Fees payable by {{party_name}} within 30 days.";
+    const fin = finalizeUserVisibleAgreementPlainText(raw, {
+      intakeRaw: "",
+      partyNames: [],
+      surface: "test",
+    });
+    expect(fin.ok).toBe(false);
+    expect(fin.remaining.some((x) => x.includes("{{"))).toBe(true);
+  });
 });

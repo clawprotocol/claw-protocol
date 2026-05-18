@@ -41,8 +41,14 @@ export type PlaceholderSafetyOutcome = {
 
 const ALLOWED_BRACKET = /^\[not yet specified\]$/i;
 
-/** Uppercase bracket tokens like [CASE_ID_1], [PARTY_2] (excludes allowed product placeholders). */
-const BRACKET_UPPER_INTERNAL_RE = /\[[A-Z][A-Z0-9_]*(?:_\d+)?\]/g;
+/**
+ * Internal slot tokens with underscore and/or digit — excludes signature-line stubs like [NAME], [TITLE], [DATE].
+ */
+const BRACKET_INTERNAL_SLOT_RE = /\[(?:[A-Z][A-Z0-9]*_\d+|[A-Z]{2,}_[A-Z0-9_]+)\]/g;
+
+/** Signature-block drafting stubs (repaired when real parties are present in the corpus). */
+const SIGNATURE_LINE_BRACKET_RE =
+  /\[\s*(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|PRINTED\s*NAME|COMPANY\s*NAME|SIGNATORY(?:\s*NAME)?)\s*\]/gi;
 const INSERT_BRACKET_RE = /\[[^\]\n]{0,200}\binsert[^\]\n]{0,200}\]/gi;
 const MUSTACHE_RE = /\{\{[\s\S]*?\}\}/g;
 const SINGLE_BRACE_TOKEN_RE = /\{[a-z][a-z0-9_]*\}/gi;
@@ -75,6 +81,31 @@ function intakeAllowsToken(intakeRaw: string | null | undefined, token: string):
   return i.includes(token);
 }
 
+function corpusHasResolvedPartyAnchors(text: string, partyNames: string[]): boolean {
+  const t = text || "";
+  if (partyNames.some((n) => n.length >= 3 && t.includes(n))) return true;
+  return /\b(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?|LP)\b/.test(t) && t.length >= 5_000;
+}
+
+/** Replace signature-line bracket stubs when the body already names real parties. */
+function repairSignatureLinePlaceholders(
+  text: string,
+  partyNames: string[],
+): { text: string; repaired: string[] } {
+  const names = (partyNames || [])
+    .map((n) => String(n ?? "").replace(/\s+/g, " ").trim())
+    .filter((n) => n.length > 0);
+  if (!corpusHasResolvedPartyAnchors(text, names)) {
+    return { text, repaired: [] };
+  }
+  const repaired: string[] = [];
+  const out = text.replace(SIGNATURE_LINE_BRACKET_RE, (match) => {
+    repaired.push(`sig_line:${match.trim()}`);
+    return "_________________________";
+  });
+  return { text: out, repaired };
+}
+
 /**
  * Deterministic repairs only. Caller runs {@link collectForbiddenTemplateFragments} after.
  */
@@ -92,6 +123,10 @@ export function repairAgreementTemplatePlaceholders(
   }
 
   out = substitutePartyPlaceholdersInUserFacingText(out, partyLine, ctx.partyNames ?? null);
+
+  const sigRepair = repairSignatureLinePlaceholders(out, normPartyNames(ctx as PlaceholderSafetyContext));
+  out = sigRepair.text;
+  repaired.push(...sigRepair.repaired);
 
   const clientRe = /\[\s*CLIENT\s*\]/gi;
   if (clientRe.test(out)) {
@@ -131,7 +166,7 @@ export function collectForbiddenTemplateFragments(
     if (!found.includes(x)) found.push(x);
   };
 
-  for (const m of t.matchAll(BRACKET_UPPER_INTERNAL_RE)) {
+  for (const m of t.matchAll(BRACKET_INTERNAL_SLOT_RE)) {
     const raw = m[0];
     if (ALLOWED_BRACKET.test(raw.trim())) continue;
     push(raw);
@@ -188,6 +223,7 @@ export function finalizeUserVisibleAgreementPlainText(
       surface: ctx.surface,
       family: ctx.agreementFamily ?? "",
       remaining: remaining.slice(0, 12),
+      remaining_detail: remaining.slice(0, 12),
       repaired,
       ok: false,
     });

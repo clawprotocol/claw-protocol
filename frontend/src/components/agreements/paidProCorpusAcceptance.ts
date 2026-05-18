@@ -1,3 +1,4 @@
+import { detectAgreementFamily } from "./agreementFamilyRouter";
 import type { AgreementIntentContract } from "./agreementIntentContract";
 import { validateIntentContractForPaidProOutput } from "./agreementIntentContract";
 import { canShowPremiumSuccess, logPremiumTruthTelemetry } from "./premiumSuccessGate";
@@ -137,6 +138,29 @@ export function rejectCrossPromptContamination(text: string, intakeLower: string
   return { ok: r.length === 0, reasons: r };
 }
 
+export function logPremiumValidationSource(args: {
+  originalIntake: string;
+  paidDocText: string;
+  draftFamily?: string | null;
+}): void {
+  if (import.meta.env.MODE === "test") return;
+  const intake = (args.originalIntake || "").trim();
+  const paid = (args.paidDocText || "").trim();
+  const fromOriginal = detectAgreementFamily(intake);
+  const fromPaid = detectAgreementFamily(paid.slice(0, 12_000));
+  const payload = {
+    originalIntakeLen: intake.length,
+    paidDocLen: paid.length,
+    detectedFamilyFromOriginal: fromOriginal,
+    detectedFamilyFromPaidDoc: fromPaid,
+    draftAgreementFamily: args.draftFamily ?? null,
+  };
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.info("[premium-validation-source]", payload);
+  }
+}
+
 export function validatePaidProOutput(args: {
   text: string;
   rawIntake: string;
@@ -162,6 +186,11 @@ export function validatePaidProOutput(args: {
 }): { ok: boolean; reasons: string[] } {
   const t = args.text || "";
   const rawI = String(args.rawIntake || "");
+  logPremiumValidationSource({
+    originalIntake: rawI,
+    paidDocText: t,
+    draftFamily: args.draft?.agreement_family ?? null,
+  });
   const logVpaidDevFail = (reasons: string[]) => {
     if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
       const diag = buildPaidProValidationDiagnostics(t, rawI);
@@ -169,6 +198,9 @@ export function validatePaidProOutput(args: {
       console.info("[paid-pro-validation-fail]", {
         stage: "validatePaidProOutput",
         validationReasons: reasons,
+        placeholderRemaining: reasons
+          .filter((r) => r.startsWith("placeholder:"))
+          .map((r) => r.slice("placeholder:".length)),
         docLen: diag.docLen,
         intakeLen: diag.intakeLen,
         sourceFactHits: diag.sourceFactHits,
