@@ -101,24 +101,9 @@ describe("vs01 prepare placement flow", () => {
       width: 0.34,
       height: 0.075,
     };
-    const sender: PlacedSigningField[] = [];
-    for (const role of roles) {
-      sender.push(stampSenderFieldWithPrepareRole(base, role));
-      sender.push(
-        stampSenderFieldWithPrepareRole({ ...base, id: `${role.roleId}-pn`, type: "printed_name" }, role),
-      );
-      sender.push(
-        stampSenderFieldWithPrepareRole(
-          { ...base, id: `${role.roleId}-dt`, type: "date", value: "2026-05-01" },
-          role,
-        ),
-      );
-      if (role.isEntityParty) {
-        sender.push(
-          stampSenderFieldWithPrepareRole({ ...base, id: `${role.roleId}-tt`, type: "text" }, role),
-        );
-      }
-    }
+    const sender: PlacedSigningField[] = roles.map((role) =>
+      stampSenderFieldWithPrepareRole({ ...base, id: `${role.roleId}-sig` }, role),
+    );
     const gate = canFinishPreparePacketSignerCentric({
       agreementId: AG,
       creatorName: "Owner Co LLC",

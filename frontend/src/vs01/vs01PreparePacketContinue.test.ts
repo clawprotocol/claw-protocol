@@ -21,20 +21,7 @@ function completeRoleFields(role: Vs01PrepareSigningRole): PlacedSigningField[] 
     width: 0.34,
     height: 0.075,
   };
-  const sender = [
-    stampSenderFieldWithPrepareRole(base, role),
-    stampSenderFieldWithPrepareRole({ ...base, id: "pn", type: "printed_name" }, role),
-    stampSenderFieldWithPrepareRole({ ...base, id: "dt", type: "date", value: "2026-05-16" }, role),
-  ];
-  if (role.isEntityParty) {
-    sender.push(
-      stampSenderFieldWithPrepareRole(
-        { ...base, id: "tt", type: "text", textPurpose: "title" },
-        role,
-      ),
-    );
-  }
-  return sender;
+  return [stampSenderFieldWithPrepareRole(base, role)];
 }
 
 describe("handlePreparePacketContinue", () => {

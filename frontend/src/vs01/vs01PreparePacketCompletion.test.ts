@@ -37,32 +37,20 @@ describe("vs01PreparePacketCompletion", () => {
     });
     const owner = roles[0]!;
     const cp = roles[1]!;
+    const sig: PlacedSigningField = {
+      id: "o_sig",
+      type: "signature",
+      page: 0,
+      x: 0.1,
+      y: 0.1,
+      width: 0.2,
+      height: 0.04,
+      assignedSignerRoleId: owner.roleId,
+    };
     const fields: PlacedSigningField[] = [
-      ...["signature", "printed_name", "date", "text"] as const,
-    ].flatMap((type, i) => [
-      {
-        id: `o_${type}`,
-        type,
-        page: 0,
-        x: 0.1,
-        y: 0.1 + i * 0.08,
-        width: 0.2,
-        height: 0.04,
-        assignedSignerRoleId: owner.roleId,
-        ...(type === "text" ? { textPurpose: "title" as const } : {}),
-      },
-      {
-        id: `c_${type}`,
-        type,
-        page: 0,
-        x: 0.5,
-        y: 0.1 + i * 0.08,
-        width: 0.2,
-        height: 0.04,
-        assignedSignerRoleId: cp.roleId,
-        ...(type === "text" ? { textPurpose: "title" as const } : {}),
-      },
-    ]);
+      sig,
+      { ...sig, id: "c_sig", assignedSignerRoleId: cp.roleId, x: 0.5 },
+    ];
     const gate = evaluatePreparePacketGateFromRoles(roles, fields, []);
     expect(gate.canFinish, JSON.stringify(gate.missingByParty)).toBe(true);
     const result = evaluatePrepareFinishClick(gate, roles);
@@ -80,7 +68,7 @@ describe("vs01PreparePacketCompletion", () => {
     const result = evaluatePrepareFinishClick(gate, roles);
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
-      expect(result.message).toMatch(/still needs/i);
+      expect(result.message).toMatch(/still needs a signature/i);
       expect(result.rows.length).toBeGreaterThan(0);
       expect(result.focusRoleId).toBeTruthy();
     }

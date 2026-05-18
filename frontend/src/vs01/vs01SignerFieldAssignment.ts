@@ -11,6 +11,11 @@ import {
   logVs01PrepareRequiredFields,
   logVs01PrepareRoleCompletion,
 } from "./vs01PreparePacketCompletion";
+import {
+  resolveVs01RequiredSignerFields,
+  type Vs01SignerFieldTallies,
+  VS01_DEFAULT_REQUIRED_KEYS,
+} from "./vs01RequiredSignerFields";
 
 function looksLikeLegalEntityPartyNameLocal(name: string): boolean {
   const t = name.trim();
@@ -534,37 +539,64 @@ export function evaluatePreparePacketGateFromRoles(
 ): SigningPacketPrepareGate {
   const owner = roles[0];
   if (!owner || owner.kind !== "owner") {
-    return {
-      canFinish: false,
-      missingByParty: { __owner__: ["no_owner_role"] },
-      totalRequiredRoles: 0,
-      fieldsByRole: {},
-    };
+    return emptySigningPacketPrepareGate({ __owner__: ["no_owner_role"] });
   }
-  const fieldsByRole: SigningPacketPrepareGate["fieldsByRole"] = {};
-  const missingByParty: Record<string, string[]> = {};
-  for (const role of roles) {
-    if (!role.requiresSignature) continue;
-    const bucket = collectFieldsForRole(role, owner, roles, senderPlacedFields, recipientPlacedFields);
-    const t = countTypes(bucket);
-    fieldsByRole[role.roleId] = t;
-    const miss = missingForRole(t, role.isEntityParty);
-    if (miss.length) missingByParty[role.roleId] = miss;
-  }
+  return buildSigningPacketPrepareGate(roles, owner, roles, senderPlacedFields, recipientPlacedFields);
+}
+
+function emptySigningPacketPrepareGate(
+  missingByParty: Record<string, string[]>,
+): SigningPacketPrepareGate {
   return {
-    canFinish: Object.keys(missingByParty).length === 0,
+    canFinish: false,
     missingByParty,
-    totalRequiredRoles: roles.length,
-    fieldsByRole,
+    missingSignatureRoles: [],
+    optionalSuggestedFieldsByRole: {},
+    requiredKeys: [...VS01_DEFAULT_REQUIRED_KEYS],
+    totalRequiredRoles: 0,
+    fieldsByRole: {},
   };
 }
 
 export type SigningPacketPrepareGate = {
   canFinish: boolean;
   missingByParty: Record<string, string[]>;
+  missingSignatureRoles: Array<{ roleId: string; displayName: string }>;
+  optionalSuggestedFieldsByRole: Record<string, string[]>;
+  requiredKeys: readonly string[];
   totalRequiredRoles: number;
-  fieldsByRole: Record<string, { signature: number; printed_name: number; date: number; title: number }>;
+  fieldsByRole: Record<string, Vs01SignerFieldTallies>;
 };
+
+function buildSigningPacketPrepareGate(
+  roles: Vs01PrepareSigningRole[],
+  ownerRole: Vs01PrepareSigningRole,
+  allRoles: Vs01PrepareSigningRole[],
+  senderPlacedFields: PlacedSigningField[],
+  recipientPlacedFields: Vs01RecipientPlacedField[],
+  templateRequiredKeysByRole?: Record<string, readonly string[]>,
+): SigningPacketPrepareGate {
+  const fieldsByRole: SigningPacketPrepareGate["fieldsByRole"] = {};
+  for (const role of roles) {
+    if (!role.requiresSignature) continue;
+    const bucket = collectFieldsForRole(role, ownerRole, allRoles, senderPlacedFields, recipientPlacedFields);
+    fieldsByRole[role.roleId] = countTypes(bucket);
+  }
+  const resolved = resolveVs01RequiredSignerFields({
+    roles,
+    fieldsByRole,
+    templateRequiredKeysByRole,
+  });
+  return {
+    canFinish: resolved.canContinue,
+    missingByParty: resolved.missingByParty,
+    missingSignatureRoles: resolved.missingSignatureRoles,
+    optionalSuggestedFieldsByRole: resolved.optionalSuggestedFieldsByRole,
+    requiredKeys: resolved.requiredKeys,
+    totalRequiredRoles: roles.length,
+    fieldsByRole,
+  };
+}
 
 function countTypes(
   fields: Iterable<{ type: string; textPurpose?: import("./signingFields").Vs01TextFieldPurpose; autoInitials?: boolean }>,
@@ -581,18 +613,6 @@ function countTypes(
     else if (fieldCountsAsTitle(f)) title += 1;
   }
   return { signature, printed_name, date, title };
-}
-
-function missingForRole(
-  tallies: { signature: number; printed_name: number; date: number; title: number },
-  needsTitle: boolean,
-): string[] {
-  const m: string[] = [];
-  if (tallies.signature < 1) m.push("signature");
-  if (tallies.printed_name < 1) m.push("printed_name");
-  if (tallies.date < 1) m.push("date");
-  if (needsTitle && tallies.title < 1) m.push("title");
-  return m;
 }
 
 function collectFieldsForRole(
@@ -703,27 +723,20 @@ export function canFinishPreparePacketSignerCentric(args: {
   const roles = buildVs01PrepareSigningRoles(args);
   const owner = roles[0];
   if (!owner || owner.kind !== "owner") {
-    return {
-      canFinish: false,
-      missingByParty: { __owner__: ["no_owner_role"] },
-      totalRequiredRoles: 0,
-      fieldsByRole: {},
-    };
+    return emptySigningPacketPrepareGate({ __owner__: ["no_owner_role"] });
   }
-  const fieldsByRole: SigningPacketPrepareGate["fieldsByRole"] = {};
-  const missingByParty: Record<string, string[]> = {};
-  for (const role of roles) {
-    if (!role.requiresSignature) continue;
-    const bucket = collectFieldsForRole(role, owner, roles, args.senderPlacedFields, args.recipientPlacedFields);
-    const t = countTypes(bucket);
-    fieldsByRole[role.roleId] = t;
-    const miss = missingForRole(t, role.isEntityParty);
-    if (miss.length) missingByParty[role.roleId] = miss;
-  }
-  return {
-    canFinish: Object.keys(missingByParty).length === 0,
-    missingByParty,
-    totalRequiredRoles: roles.length,
-    fieldsByRole,
-  };
+  return buildSigningPacketPrepareGate(
+    roles,
+    owner,
+    roles,
+    args.senderPlacedFields,
+    args.recipientPlacedFields,
+  );
 }
+
+export { resolveVs01RequiredSignerFields, VS01_DEFAULT_REQUIRED_KEYS } from "./vs01RequiredSignerFields";
+export type {
+  ResolveVs01RequiredSignerFieldsInput,
+  ResolveVs01RequiredSignerFieldsResult,
+  Vs01SignerFieldTallies,
+} from "./vs01RequiredSignerFields";

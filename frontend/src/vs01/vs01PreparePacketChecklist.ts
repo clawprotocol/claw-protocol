@@ -1,5 +1,5 @@
 import type { SigningPacketPrepareGate, Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
-import { formatPrepareMissingFieldLabel } from "./vs01PreparePacketCompletion";
+import { formatPrepareMissingSignerLine } from "./vs01PreparePacketCompletion";
 
 export type PreparePacketChecklistView = {
   readyCount: number;
@@ -28,17 +28,16 @@ export function buildPreparePacketChecklistView(
   const readyCount = required.filter((r) => !(gate.missingByParty[r.roleId]?.length ?? 0)).length;
   const allReady = gate.canFinish;
   const headline = allReady
-    ? "Packet ready."
+    ? "Packet ready — continue to signing links."
     : `Completed: ${readyCount} / ${totalCount} signers ready`;
 
   let activeSignerHint: string | null = null;
   if (!allReady && activeRoleId) {
     const active = required.find((r) => r.roleId === activeRoleId);
-    const miss = active ? (gate.missingByParty[active.roleId] ?? []) : [];
-    if (active && miss.length) {
-      const labels = miss.map(formatPrepareMissingFieldLabel).join(", ");
+    const missSig = active ? (gate.missingByParty[active.roleId] ?? []).includes("signature") : false;
+    if (active && missSig) {
       const party = active.entityName?.trim() || active.partyName?.trim() || "this signer";
-      activeSignerHint = `For ${party}: add ${labels}.`;
+      activeSignerHint = formatPrepareMissingSignerLine(party);
     }
   }
 

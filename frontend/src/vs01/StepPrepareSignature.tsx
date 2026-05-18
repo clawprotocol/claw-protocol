@@ -75,6 +75,10 @@ import {
   buildPrepareMissingBySignerSummary,
   evaluatePrepareFinishClick,
   logVs01PrepareFinishClick,
+  PREPARE_BLOCKED_PANEL_BODY,
+  PREPARE_BLOCKED_PANEL_TITLE,
+  PREPARE_OPTIONAL_FIELDS_HINT,
+  PREPARE_PACKET_READY_COPY,
 } from "./vs01PreparePacketCompletion";
 import {
   logVs01ActiveRoleAfterPlace,
@@ -1958,13 +1962,18 @@ export function StepPrepareSignature({
             </p>
           ) : null}
 
+          {agreementBridgePlacementCopy ? (
+            <p className="vs01-prepare-optional-fields-hint">{PREPARE_OPTIONAL_FIELDS_HINT}</p>
+          ) : null}
+
           {agreementBridgePlacementCopy && prepareContinueBlockedVisible && prepareMissingSummary.length > 0 ? (
             <div className="vs01-prepare-finish-blocked-panel" role="alert">
-              <p className="vs01-prepare-finish-blocked-title">Add these fields before continuing</p>
+              <p className="vs01-prepare-finish-blocked-title">{PREPARE_BLOCKED_PANEL_TITLE}</p>
+              <p className="vs01-prepare-finish-blocked-body">{PREPARE_BLOCKED_PANEL_BODY}</p>
               <ul className="vs01-prepare-finish-blocked-list">
                 {prepareMissingSummary.map((row) => (
                   <li key={row.roleId}>
-                    <strong>{row.entityName}</strong> still needs: {row.missingLabels.join(", ")}.{" "}
+                    <strong>{row.entityName}</strong> still needs a signature.{" "}
                     <button
                       type="button"
                       className="vs01-prepare-go-to-signer"
@@ -2077,7 +2086,7 @@ export function StepPrepareSignature({
 
           {agreementBridgePlacementCopy && packetChecklist.allReady && !receiptId ? (
             <p className="vs01-sign-status-ready" role="status">
-              Packet ready — continue to signing links.
+              {PREPARE_PACKET_READY_COPY}
             </p>
           ) : null}
           {!agreementBridgePlacementCopy && flowStep3ReadyEffective && !receiptId ? (

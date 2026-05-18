@@ -2,13 +2,21 @@ import type { PlacedSigningField, Vs01TextFieldPurpose } from "./signingFields";
 import type { Vs01RecipientPlacedField } from "./types";
 import type { SigningPacketPrepareGate, Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { findNextIncompletePrepareRole } from "./vs01SignerFieldAssignment";
+import { VS01_DEFAULT_REQUIRED_KEYS } from "./vs01RequiredSignerFields";
 
 export type { Vs01TextFieldPurpose };
 
-export const PREPARE_REQUIRED_FIELD_KEYS = ["signature", "printed_name", "date", "title"] as const;
+export const PREPARE_REQUIRED_FIELD_KEYS = VS01_DEFAULT_REQUIRED_KEYS;
 export type PrepareRequiredFieldKey = (typeof PREPARE_REQUIRED_FIELD_KEYS)[number];
 
-const MISSING_LABEL: Record<PrepareRequiredFieldKey, string> = {
+export const PREPARE_BLOCKED_PANEL_TITLE = "Add signatures before continuing";
+export const PREPARE_BLOCKED_PANEL_BODY =
+  "Each signer needs one signature field. Other fields are optional.";
+export const PREPARE_OPTIONAL_FIELDS_HINT =
+  "Optional: add name, title, or date fields if you want LawDog to prefill them.";
+export const PREPARE_PACKET_READY_COPY = "Packet ready — continue to signing links.";
+
+const MISSING_LABEL: Record<string, string> = {
   signature: "Signature",
   printed_name: "Printed name",
   date: "Date",
@@ -41,25 +49,34 @@ export function buildPrepareMissingBySignerSummary(
   gate: SigningPacketPrepareGate,
   roles: Vs01PrepareSigningRole[],
 ): PrepareMissingBySignerRow[] {
+  if (gate.missingSignatureRoles.length) {
+    return gate.missingSignatureRoles.map((r) => ({
+      roleId: r.roleId,
+      entityName: r.displayName,
+      missingLabels: ["Signature"],
+    }));
+  }
   const out: PrepareMissingBySignerRow[] = [];
   for (const role of roles) {
     if (!role.requiresSignature) continue;
     const miss = gate.missingByParty[role.roleId];
-    if (!miss?.length) continue;
+    if (!miss?.includes("signature")) continue;
     out.push({
       roleId: role.roleId,
       entityName: role.entityName?.trim() || role.partyName?.trim() || "Signer",
-      missingLabels: miss.map(formatPrepareMissingFieldLabel),
+      missingLabels: ["Signature"],
     });
   }
   return out;
 }
 
+export function formatPrepareMissingSignerLine(entityName: string): string {
+  return `${entityName} still needs a signature.`;
+}
+
 export function formatPrepareFinishBlockedMessage(rows: PrepareMissingBySignerRow[]): string {
-  if (!rows.length) return "Add the required fields for each signer before finishing.";
-  return rows
-    .map((r) => `${r.entityName} still needs: ${r.missingLabels.join(", ")}.`)
-    .join(" ");
+  if (!rows.length) return "Add a signature for each signer before continuing.";
+  return rows.map((r) => formatPrepareMissingSignerLine(r.entityName)).join(" ");
 }
 
 export function logVs01PrepareRequiredFields(
@@ -69,7 +86,7 @@ export function logVs01PrepareRequiredFields(
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[vs01-prepare-required-fields]", {
-    requiredKeys: [...PREPARE_REQUIRED_FIELD_KEYS],
+    requiredKeys: [...gate.requiredKeys],
     roleCount: roles.filter((r) => r.requiresSignature).length,
     fieldsByRole: gate.fieldsByRole,
   });

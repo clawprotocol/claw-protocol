@@ -89,17 +89,13 @@ describe("canFinishPreparingSigningPacket", () => {
 
   const cp = (id: string, name: string): Vs01Counterparty => ({ id, name, email: "r@x.com" });
 
-  it("requires owner + each named counterparty signature, printed name, and date", () => {
+  it("requires only signature per signer (printed name and date optional)", () => {
     const sender: PlacedSigningField[] = [
       { id: "s1", type: "signature", page: 0, x: 0.1, y: 0.1, width: 0.2, height: 0.05 },
-      { id: "p1", type: "printed_name", page: 0, x: 0.1, y: 0.2, width: 0.2, height: 0.03, value: "" },
-      { id: "d1", type: "date", page: 0, x: 0.1, y: 0.3, width: 0.15, height: 0.03, value: "2026-01-01" },
     ];
     const cps = [cp("c1", "Human Person")];
     const rec: Vs01RecipientPlacedField[] = [
       { id: "r1", counterpartyId: "c1", type: "signature", page: 0, x: 0.5, y: 0.1, width: 0.2, height: 0.05 },
-      { id: "r2", counterpartyId: "c1", type: "printed_name", page: 0, x: 0.5, y: 0.2, width: 0.2, height: 0.03 },
-      { id: "r3", counterpartyId: "c1", type: "date", page: 0, x: 0.5, y: 0.3, width: 0.15, height: 0.03, value: "2026-01-02" },
     ];
     expect(
       canFinishPreparingSigningPacket({
@@ -111,17 +107,13 @@ describe("canFinishPreparingSigningPacket", () => {
     ).toBe(true);
   });
 
-  it("requires title (text) for entity counterparties", () => {
+  it("entity counterparties do not require title without explicit template keys", () => {
     const sender: PlacedSigningField[] = [
       { id: "s1", type: "signature", page: 0, x: 0.1, y: 0.1, width: 0.2, height: 0.05 },
-      { id: "p1", type: "printed_name", page: 0, x: 0.1, y: 0.2, width: 0.2, height: 0.03 },
-      { id: "d1", type: "date", page: 0, x: 0.1, y: 0.3, width: 0.15, height: 0.03, value: "2026-01-01" },
     ];
     const cps = [cp("c1", "Meridian Workforce Group LLC")];
     const rec: Vs01RecipientPlacedField[] = [
       { id: "r1", counterpartyId: "c1", type: "signature", page: 0, x: 0.5, y: 0.1, width: 0.2, height: 0.05 },
-      { id: "r2", counterpartyId: "c1", type: "printed_name", page: 0, x: 0.5, y: 0.2, width: 0.2, height: 0.03 },
-      { id: "r3", counterpartyId: "c1", type: "date", page: 0, x: 0.5, y: 0.3, width: 0.15, height: 0.03, value: "2026-01-02" },
     ];
     const g = canFinishPreparingSigningPacket({
       ...gateArgsBase,
@@ -129,21 +121,11 @@ describe("canFinishPreparingSigningPacket", () => {
       senderPlacedFields: sender,
       recipientPlacedFields: rec,
     });
-    expect(g.canFinish).toBe(false);
-    const c1RoleId = buildStableSignerRoleId(AG, 1, "c1");
-    expect(g.missingByParty[c1RoleId]).toContain("title");
-    const rec2 = [...rec, { id: "r4", counterpartyId: "c1", type: "text" as const, page: 0, x: 0.5, y: 0.4, width: 0.2, height: 0.03 }];
-    expect(
-      canFinishPreparingSigningPacket({
-        ...gateArgsBase,
-        counterparties: cps,
-        senderPlacedFields: sender,
-        recipientPlacedFields: rec2,
-      }).canFinish,
-    ).toBe(true);
+    expect(g.canFinish).toBe(true);
+    expect(g.missingByParty[buildStableSignerRoleId(AG, 1, "c1")]).toBeUndefined();
   });
 
-  it("owner-only: no named counterparties still requires sender trio", () => {
+  it("owner-only: signature on owner completes when no named counterparties", () => {
     const sender: PlacedSigningField[] = [{ id: "s1", type: "signature", page: 0, x: 0.1, y: 0.1, width: 0.2, height: 0.05 }];
     const g = canFinishPreparingSigningPacket({
       ...gateArgsBase,
@@ -151,10 +133,10 @@ describe("canFinishPreparingSigningPacket", () => {
       senderPlacedFields: sender,
       recipientPlacedFields: [],
     });
-    expect(g.canFinish).toBe(false);
+    expect(g.canFinish).toBe(true);
   });
 
-  it("finish disabled when party 3 missing fields in a 5-role agreement", () => {
+  it("finish disabled when party 3 missing signature in a 5-role agreement", () => {
     const cps = [
       cp("c1", "Party One LLC"),
       cp("c2", "Party Two LLC"),
@@ -163,19 +145,20 @@ describe("canFinishPreparingSigningPacket", () => {
     ];
     const sender: PlacedSigningField[] = [
       { id: "s1", type: "signature", page: 0, x: 0.1, y: 0.1, width: 0.2, height: 0.05 },
-      { id: "p1", type: "printed_name", page: 0, x: 0.1, y: 0.2, width: 0.2, height: 0.03 },
-      { id: "d1", type: "date", page: 0, x: 0.1, y: 0.3, width: 0.15, height: 0.03, value: "2026-01-01" },
-      { id: "t1", type: "text", page: 0, x: 0.1, y: 0.4, width: 0.2, height: 0.03 },
     ];
     const rec: Vs01RecipientPlacedField[] = [];
     for (const c of cps) {
       if (c.id === "c3") continue;
-      rec.push(
-        { id: `${c.id}_sig`, counterpartyId: c.id, type: "signature", page: 0, x: 0.5, y: 0.1, width: 0.2, height: 0.05 },
-        { id: `${c.id}_pn`, counterpartyId: c.id, type: "printed_name", page: 0, x: 0.5, y: 0.2, width: 0.2, height: 0.03 },
-        { id: `${c.id}_dt`, counterpartyId: c.id, type: "date", page: 0, x: 0.5, y: 0.3, width: 0.15, height: 0.03, value: "2026-01-02" },
-        { id: `${c.id}_tt`, counterpartyId: c.id, type: "text", page: 0, x: 0.5, y: 0.4, width: 0.2, height: 0.03 },
-      );
+      rec.push({
+        id: `${c.id}_sig`,
+        counterpartyId: c.id,
+        type: "signature",
+        page: 0,
+        x: 0.5,
+        y: 0.1,
+        width: 0.2,
+        height: 0.05,
+      });
     }
     const g = canFinishPreparingSigningPacket({
       ...gateArgsBase,
@@ -184,7 +167,7 @@ describe("canFinishPreparingSigningPacket", () => {
       recipientPlacedFields: rec,
     });
     expect(g.canFinish).toBe(false);
-    expect(Object.keys(g.missingByParty).length).toBeGreaterThan(0);
+    expect(g.missingSignatureRoles.length).toBeGreaterThan(0);
   });
 });
 

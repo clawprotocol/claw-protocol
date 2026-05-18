@@ -57,6 +57,9 @@ import {
   evaluatePrepareFinishClick,
   formatPrepareMissingFieldLabel,
   logVs01PrepareFinishClick,
+  PREPARE_BLOCKED_PANEL_BODY,
+  PREPARE_BLOCKED_PANEL_TITLE,
+  PREPARE_OPTIONAL_FIELDS_HINT,
 } from "./vs01PreparePacketCompletion";
 import type { Vs01TextFieldPurpose } from "./signingFields";
 import { createPrepareStampedRecipientField } from "./vs01PrepareFieldPlacement";
@@ -1595,13 +1598,18 @@ export function StepCompleteAndSend({
             </p>
           ) : null}
 
+          {prepareSigningPacket ? (
+            <p className="vs01-prepare-optional-fields-hint">{PREPARE_OPTIONAL_FIELDS_HINT}</p>
+          ) : null}
+
           {prepareSigningPacket && prepareGate && !prepareGate.canFinish ? (
             <div className="vs01-prepare-finish-blocked-panel" role="alert">
-              <p className="vs01-prepare-finish-blocked-title">Required fields still missing</p>
+              <p className="vs01-prepare-finish-blocked-title">{PREPARE_BLOCKED_PANEL_TITLE}</p>
+              <p className="vs01-prepare-finish-blocked-body">{PREPARE_BLOCKED_PANEL_BODY}</p>
               <ul className="vs01-prepare-finish-blocked-list">
                 {prepareMissingSummary.map((row) => (
                   <li key={row.roleId}>
-                    <strong>{row.entityName}</strong> still needs: {row.missingLabels.join(", ")}.{" "}
+                    <strong>{row.entityName}</strong> still needs a signature.{" "}
                     <button
                       type="button"
                       className="vs01-prepare-go-to-signer"
