@@ -223,13 +223,16 @@ export function LaunchHomePage() {
                 autoComplete="off"
                 rows={4}
                 value={heroInput}
-                onChange={(e) => setHeroInput(e.target.value)}
+                onChange={(e) => {
+                  setHeroInput(e.target.value);
+                  requestAnimationFrame(() => syncHeroTextarea());
+                }}
                 onPaste={() => onHeroTextareaPaste()}
                 onDrop={() => onHeroTextareaDrop()}
                 onInput={() => syncHeroTextarea()}
                 placeholder={HOMEPAGE_HERO_PLACEHOLDER || home.heroPlaceholder}
                 disabled={handoffBusy || homeTransitionActive}
-                className="claw-seo-input min-h-[6.5rem] w-full resize-none px-4 py-4 pb-12 pr-14 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out sm:min-h-[7rem] lg:text-lg lg:placeholder:text-lg"
+                className="claw-seo-input block w-full resize-none px-4 py-4 pb-12 pr-14 text-base leading-relaxed placeholder:text-base transition-[height] duration-150 ease-out lg:text-lg lg:placeholder:text-lg"
               />
               <HeroVoiceInputBar
                 surface="light"

@@ -106,8 +106,11 @@ describe("LaunchHomePage routing (static)", () => {
 
   it("uses collapsed auto-resize textarea defaults", () => {
     expect(page).toContain("useAutoResizeTextarea");
+    expect(page).toContain("useResponsiveTextareaMaxPx");
     expect(page).toContain('rows={4}');
     expect(page).toContain("resize-none");
+    expect(page).not.toContain("min-h-[6.5rem]");
+    expect(page).not.toContain("overflow-hidden");
   });
 });
 
