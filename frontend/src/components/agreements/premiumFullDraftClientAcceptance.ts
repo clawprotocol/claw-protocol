@@ -121,10 +121,13 @@ export function rejectPremiumBodyForProRender(
   const uniq = [...new Set(reasons)];
   if (uniq.length > 0) return { ok: false, reasons: uniq };
   const intakeRaw = ((opts?.intakeText ?? "") || "").trim() || (opts?.intakeLower ?? "");
-  const partyNames = resolvePlaceholderPartyNames({
-    intakeRaw,
-    partyNames: opts?.partyNames ?? null,
-  });
+  const partyNames = resolvePlaceholderPartyNames(
+    {
+      intakeRaw,
+      partyNames: opts?.partyNames ?? null,
+    },
+    (body || "").trim(),
+  );
   const ph = finalizeUserVisibleAgreementPlainText((body || "").trim(), {
     intakeRaw,
     partyNames,

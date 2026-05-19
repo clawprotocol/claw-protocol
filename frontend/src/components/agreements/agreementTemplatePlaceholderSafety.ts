@@ -35,7 +35,13 @@ export type PlaceholderTokenDecision = {
   lineKind?: "signature" | "operative" | "preamble";
   sectionKind?: "signature" | "execution" | "operative";
   nearestHeading?: string;
+  normalizedToken?: string;
+  isTailSection?: boolean;
+  isExecutionContext?: boolean;
 };
+
+/** Paid Pro bodies below this length do not get signature-only fatal demotion. */
+export const PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN = 18_000;
 
 export type PlaceholderPartyResolution = {
   names: string[];
@@ -85,22 +91,49 @@ export function logPlaceholderRejectDetail(
   if (import.meta.env.MODE === "test") return;
   const fatal = decisions.filter((d) => d.fatal);
   if (!fatal.length) return;
+  for (const d of fatal.slice(0, 12)) {
+    // eslint-disable-next-line no-console
+    console.warn("[placeholder-fatal-detail]", {
+      surface,
+      token: d.token,
+      normalizedToken: d.normalizedToken ?? normalizePlaceholderToken(d.token),
+      category: d.category,
+      fatal: d.fatal,
+      lineKind: d.lineKind,
+      sectionKind: d.sectionKind,
+      nearestHeading: d.nearestHeading ?? "",
+      isTailSection: d.isTailSection ?? false,
+      isExecutionContext: d.isExecutionContext ?? false,
+      snippet: d.contextSnippet.slice(0, 120),
+      partyAnchorsFound: partyResolution?.anchorsFound ?? null,
+      partyCount: partyResolution?.partyCount ?? null,
+    });
+  }
   // eslint-disable-next-line no-console
   console.warn("[placeholder-reject-detail]", {
     surface,
     partyAnchorsFound: partyResolution?.anchorsFound ?? null,
     partyCount: partyResolution?.partyCount ?? null,
     partySources: partyResolution?.sources ?? null,
-    items: fatal.slice(0, 12).map((d) => ({
-      token: d.token,
-      category: d.category,
-      fatal: d.fatal,
-      lineKind: d.lineKind,
-      sectionKind: d.sectionKind,
-      nearestHeading: d.nearestHeading,
-      contextSnippet: d.contextSnippet.slice(0, 120),
-    })),
+    fatalCount: fatal.length,
   });
+}
+
+export function logPaidProPlaceholderGateDecision(payload: {
+  surface: string;
+  docLen: number;
+  scannedCount: number;
+  fatalCount: number;
+  nonfatalCount: number;
+  repairedCount: number;
+  partyAnchorsFound: boolean;
+  partyCount: number;
+  accepted: boolean;
+  signatureOnlyDemotion?: boolean;
+}): void {
+  if (import.meta.env.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-placeholder-gate-decision]", payload);
 }
 
 export type PlaceholderSafetyContext = {
@@ -125,11 +158,41 @@ const ALLOWED_BRACKET = /^\[not yet specified\]$/i;
 const BRACKET_INTERNAL_SLOT_RE = /\[(?:[A-Z][A-Z0-9]*_\d+|[A-Z]{2,}_[A-Z0-9_]+)\]/g;
 
 const SIGNATURE_LINE_BRACKET_RE =
-  /\[\s*(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|PRINTED[\s_]*NAME|COMPANY[\s_]*NAME|SIGNATORY(?:[\s_]*NAME)?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|WITNESS(?:[\s_]*NAME)?)\s*\]/gi;
+  /\[\s*(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|PRINTED[\s_]*NAME|COMPANY[\s_]*NAME|LEGAL[\s_]*NAME|AUTHORIZED[\s_]*SIGNATORY|SIGNATORY(?:[\s_]*NAME)?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|WITNESS(?:[\s_]*NAME)?)\s*\]/gi;
 
 /** Party/signer metadata stubs — [PARTY NAME], [PARTY_NAME], [CLIENT NAME], [CLIENT_NAME]. */
 const SIGNATURE_PARTY_LABEL_BRACKET_RE =
-  /\[\s*(?:(?:PARTY|CLIENT|COMPANY|COUNTERPARTY|ORGANIZATION|ORG)(?:[\s_]*NAME)?(?:_\d+)?)\s*\]/gi;
+  /\[\s*(?:(?:PARTY|CLIENT|COMPANY|COUNTERPARTY|ORGANIZATION|ORG)(?:[\s_]*NAME)?(?:_\d+)?|AUTHORIZED[\s_]*SIGNATORY|SIGNATORY(?:[\s_]*NAME)?)\s*\]/gi;
+
+/** Normalized allowlist keys (uppercase, spaces → underscores). */
+const SIGNATURE_TOKEN_ALLOWLIST = new Set([
+  "NAME",
+  "TITLE",
+  "DATE",
+  "EMAIL",
+  "SIGNATURE",
+  "INITIAL",
+  "INITIALS",
+  "PARTY_NAME",
+  "CLIENT_NAME",
+  "COMPANY_NAME",
+  "COUNTERPARTY_NAME",
+  "ORG_NAME",
+  "ORGANIZATION_NAME",
+  "AUTHORIZED_SIGNATORY",
+  "SIGNATORY_NAME",
+  "SIGNATORY",
+  "DATE_OF_AGREEMENT",
+  "EFFECTIVE_DATE",
+  "AGREEMENT_DATE",
+  "LEGAL_NAME",
+  "PRINTED_NAME",
+  "PRINT_NAME",
+  "ADDRESS",
+  "PHONE",
+  "WITNESS_NAME",
+  "WITNESS",
+]);
 
 const GENERIC_UPPER_BRACKET_RE = /\[[A-Z][A-Z0-9\s/&.'_\-]{1,55}\]/g;
 
@@ -156,9 +219,15 @@ const OPERATIVE_SECTION_HEADING_RE =
   /\b(?:payment|fees?|compensation|scope|services|deliverables|confidential|indemnif|governing law|termination|liability|limitation of liability|intellectual property|notices?|dispute|warranty|representations)\b/i;
 
 const SOFT_SIGNATURE_LABEL_RE =
-  /^(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|PRINTED[\s_]*NAME|COMPANY[\s_]*NAME|SIGNATORY(?:[\s_]*NAME)?|PARTY[\s_]*NAME|CLIENT[\s_]*NAME|COUNTERPARTY(?:[\s_]*NAME)?|LEGAL[\s_]*NAME|WITNESS(?:[\s_]*NAME)?)$/i;
+  /^(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|PRINTED[\s_]*NAME|PRINT[\s_]*NAME|COMPANY[\s_]*NAME|LEGAL[\s_]*NAME|AUTHORIZED[\s_]*SIGNATORY|SIGNATORY(?:[\s_]*NAME)?|SIGNATORY|PARTY[\s_]*NAME|CLIENT[\s_]*NAME|COUNTERPARTY(?:[\s_]*NAME)?|WITNESS(?:[\s_]*NAME)?|WITNESS)$/i;
 
 const SOFT_PREAMBLE_LABEL_RE = /^(?:DATE[\s_]*OF[\s_]*AGREEMENT|EFFECTIVE[\s_]*DATE|AGREEMENT[\s_]*DATE)$/i;
+
+const TAIL_EXECUTION_WINDOW_RE =
+  /\b(?:in witness whereof|signatures?|execution|counterparts?|electronic signatures?|signed|signatory|authorized signatory|authorized representative|by\s*:|name\s*:|title\s*:|date\s*:|email\s*:|initials?\s*:)/i;
+
+/** Operative misuse of a name-style token (not CLIENT LEGAL NAME — that stays fatal via separate rule). */
+const OPERATIVE_CLIENT_LEGAL_NAME_RE = /\bCLIENT[\s_]*LEGAL[\s_]*NAME\b/i;
 
 /** Strip minimal HTML to plain text for placeholder scanning (preserves line breaks). */
 export function stripHtmlAgreementScanText(html: string): string {
@@ -303,12 +372,83 @@ export function isInSignatureRegion(text: string, index: number): boolean {
     if (sigHeading >= 0 && (text.length - sigHeading) < 15_000) lastMarker = sigHeading;
   }
   if (lastMarker < 0) return false;
-  const tailLen = (text || "").length - lastMarker;
-  return index >= lastMarker && tailLen <= 15_000;
+  if (index < lastMarker) return false;
+  // Placeholders must sit within a reasonable window after the witness/signature heading
+  // (paid bodies may append long operative padding after the signature block).
+  return index - lastMarker <= 12_000;
 }
 
 function bracketInner(token: string): string {
   return token.replace(/^\[|\]$/g, "").replace(/_/g, " ").trim();
+}
+
+/** Normalize bracket token for allowlist matching: trim, collapse space/underscore, uppercase. */
+export function normalizePlaceholderToken(token: string): string {
+  return bracketInner(token).replace(/[\s./-]+/g, "_").replace(/_+/g, "_").toUpperCase();
+}
+
+export function isAllowlistedSignatureToken(token: string): boolean {
+  const n = normalizePlaceholderToken(token);
+  if (SIGNATURE_TOKEN_ALLOWLIST.has(n)) return true;
+  const spaced = bracketInner(token).replace(/\s+/g, " ").toUpperCase();
+  return SIGNATURE_TOKEN_ALLOWLIST.has(spaced.replace(/ /g, "_"));
+}
+
+/** True when every fatal token is a known signature/execution field label. */
+export function isSignatureOnlyFatalToken(token: string): boolean {
+  if (!token.startsWith("[") || !token.endsWith("]")) return false;
+  const inner = bracketInner(token);
+  if (/^CLIENT[\s_]*LEGAL[\s_]*NAME$/i.test(inner)) return false;
+  if (/^CLIENT[\s_]*NAME$/i.test(inner)) return false;
+  if (isAllowlistedSignatureToken(token)) return true;
+  if (isSignatureLineBracketToken(token)) return true;
+  return isSignatureFieldLabel(inner) || SOFT_PREAMBLE_LABEL_RE.test(inner.replace(/_/g, " "));
+}
+
+/** Last ~25% of long documents with execution/signature markers nearby. */
+export function isTailSignatureSection(text: string, index: number): boolean {
+  const len = (text || "").length;
+  if (len < 6_000) return false;
+  const tailStart = Math.floor(len * 0.75);
+  if (index < tailStart) return false;
+  const window = text.slice(Math.max(tailStart - 300, index - 500), Math.min(len, index + 500));
+  return TAIL_EXECUTION_WINDOW_RE.test(window);
+}
+
+/**
+ * Paid Pro safety net: if a long corpus only has signature-allowlist fatals and anchors exist, accept.
+ */
+export function demotePaidProSignatureOnlyFatals(
+  decisions: PlaceholderTokenDecision[],
+  bodyLen: number,
+  partyResolution: PlaceholderPartyResolution,
+): { decisions: PlaceholderTokenDecision[]; demoted: boolean } {
+  if (bodyLen < PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN) {
+    return { decisions, demoted: false };
+  }
+  const fatals = decisions.filter((d) => d.fatal);
+  if (fatals.length === 0 || fatals.length > 16) {
+    return { decisions, demoted: false };
+  }
+  if (!fatals.every((d) => isSignatureOnlyFatalToken(d.token))) {
+    return { decisions, demoted: false };
+  }
+  const hasAnchor = partyResolution.anchorsFound || partyResolution.partyCount >= 2;
+  if (!hasAnchor && bodyLen < 25_000) {
+    return { decisions, demoted: false };
+  }
+  const next: PlaceholderTokenDecision[] = decisions.map((d) =>
+    d.fatal && isSignatureOnlyFatalToken(d.token)
+      ? {
+          ...d,
+          fatal: false,
+          category: "signature_line_stub" as const,
+          sectionKind: "signature" as const,
+          lineKind: "signature" as const,
+        }
+      : d,
+  );
+  return { decisions: next, demoted: true };
 }
 
 function contextSnippet(text: string, index: number, radius = 60): string {
@@ -348,17 +488,22 @@ function sectionKindForIndex(text: string, index: number): PlaceholderTokenDecis
 
 /** Execution/signature block context — does not require party anchors. */
 export function isExecutionSignatureContext(text: string, index: number): boolean {
+  const len = (text || "").length;
+  if (index < len * 0.5) {
+    return isInSignatureRegion(text, index);
+  }
   if (isInSignatureRegion(text, index)) return true;
+  if (isTailSignatureSection(text, index)) return true;
   const lineStart = text.lastIndexOf("\n", index) + 1;
   const lineEnd = text.indexOf("\n", index);
   const line = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
   if (EXECUTION_LINE_LABEL_RE.test(line)) return true;
-  const window = text.slice(Math.max(0, index - 700), Math.min(text.length, index + 250));
+  const window = text.slice(Math.max(0, index - 800), Math.min(text.length, index + 400));
   if (EXECUTION_CONTEXT_RE.test(window)) return true;
   const heading = nearestSectionHeading(text, index);
   if (heading && /\b(SIGNATURE|EXECUTION|WITNESS|COUNTERPART)\b/i.test(heading)) return true;
   const tailStart = Math.floor(text.length * 0.72);
-  if (index >= tailStart && EXECUTION_LINE_LABEL_RE.test(window)) return true;
+  if (index >= tailStart && TAIL_EXECUTION_WINDOW_RE.test(window)) return true;
   return false;
 }
 
@@ -388,22 +533,52 @@ function isInternalPartySlotToken(token: string): boolean {
 
 function isOperativeMaterialPlaceholder(token: string, text: string, index: number): boolean {
   const inner = bracketInner(token);
+  const normalized = normalizePlaceholderToken(token);
+  if (OPERATIVE_CLIENT_LEGAL_NAME_RE.test(normalized) || OPERATIVE_CLIENT_LEGAL_NAME_RE.test(inner)) {
+    return true;
+  }
   if (INSERT_BRACKET_RE.test(token)) return true;
   if (MUSTACHE_RE.test(token) || SINGLE_BRACE_TOKEN_RE.test(token)) return true;
   if (ANGLE_LEGAL_STUB_RE.test(token) || ANGLE_INSERT_RE.test(token)) return true;
   if (isInternalPartySlotToken(token) && !isExecutionSignatureContext(text, index)) return true;
-  if (
-    /\b(?:CLIENT|COMPANY|COUNTERPARTY)[\s_]*NAME\b/i.test(inner) &&
-    !isExecutionSignatureContext(text, index)
-  ) {
+  if (/^CLIENT[\s_]*NAME$/i.test(inner) && index < text.length * 0.5 && !isExecutionSignatureContext(text, index)) {
     return true;
   }
-  if (/^CLIENT[\s_]*NAME$/i.test(inner) && isNearOperativeSectionHeading(text, index)) {
+  if (
+    /\b(?:CLIENT|COMPANY|COUNTERPARTY)[\s_]*NAME\b/i.test(inner) &&
+    !isExecutionSignatureContext(text, index) &&
+    isNearOperativeSectionHeading(text, index)
+  ) {
     return true;
   }
   if (/^EFFECTIVE[\s_]*DATE$/i.test(inner) && isNearOperativeSectionHeading(text, index)) return true;
   if (/\b(?:INSERT|DESCRIBE)\b/i.test(inner)) return true;
+  if (isAllowlistedSignatureToken(token) && isNearOperativeSectionHeading(text, index)) {
+    return true;
+  }
   return false;
+}
+
+function decisionBase(
+  token: string,
+  text: string,
+  index: number,
+  inExec: boolean,
+  isTail: boolean,
+): Pick<
+  PlaceholderTokenDecision,
+  "token" | "contextSnippet" | "lineKind" | "sectionKind" | "nearestHeading" | "normalizedToken" | "isTailSection" | "isExecutionContext"
+> {
+  return {
+    token,
+    normalizedToken: normalizePlaceholderToken(token),
+    contextSnippet: contextSnippet(text, index),
+    lineKind: lineKindForIndex(text, index),
+    sectionKind: sectionKindForIndex(text, index),
+    nearestHeading: nearestSectionHeading(text, index),
+    isTailSection: isTail,
+    isExecutionContext: inExec,
+  };
 }
 
 export function classifyTemplateFragment(
@@ -415,15 +590,40 @@ export function classifyTemplateFragment(
   const partyNames = opts?.partyNames ?? [];
   const intakeRaw = opts?.intakeRaw ?? null;
   const inExec = isExecutionSignatureContext(text, index);
+  const isTail = isTailSignatureSection(text, index);
   const anchorsOk = corpusHasResolvedPartyAnchors(text, partyNames, intakeRaw);
-  const nearestHeading = nearestSectionHeading(text, index);
-  const snippet = contextSnippet(text, index);
-  const lineKind = lineKindForIndex(text, index);
-  const sectionKind = sectionKindForIndex(text, index);
+  const base = decisionBase(token, text, index, inExec, isTail);
 
-  const base = { token, contextSnippet: snippet, lineKind, sectionKind, nearestHeading };
+  if (isAllowlistedSignatureToken(token)) {
+    const innerLabel = bracketInner(token);
+    if (
+      /^CLIENT[\s_]*NAME$/i.test(innerLabel) &&
+      !inExec &&
+      !isTail &&
+      (index < text.length * 0.5 || isNearOperativeSectionHeading(text, index))
+    ) {
+      return { ...base, category: "internal_slot", fatal: true };
+    }
+    if (isOperativeMaterialPlaceholder(token, text, index) && !inExec && !isTail) {
+      return { ...base, category: "internal_slot", fatal: true };
+    }
+    if (inExec || isTail) {
+      return { ...base, category: "signature_line_stub", fatal: false };
+    }
+    if (SOFT_PREAMBLE_LABEL_RE.test(bracketInner(token).replace(/_/g, " ")) && index < 5_000) {
+      return { ...base, category: "soft_field_label", fatal: false };
+    }
+    const tailStart = Math.floor(text.length * 0.75);
+    const tailMinLen =
+      text.length >= PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN
+        ? PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN
+        : 6_000;
+    if (text.length >= tailMinLen && index >= tailStart) {
+      return { ...base, category: "signature_line_stub", fatal: false };
+    }
+  }
 
-  if (isOperativeMaterialPlaceholder(token, text, index) && !inExec) {
+  if (isOperativeMaterialPlaceholder(token, text, index) && !inExec && !isTail) {
     if (INSERT_BRACKET_RE.test(token)) {
       return { ...base, category: "insert_stub", fatal: true };
     }
@@ -436,7 +636,7 @@ export function classifyTemplateFragment(
     return { ...base, category: "internal_slot", fatal: true };
   }
 
-  if (isSignatureLineBracketToken(token) || (inExec && isSignatureFieldLabel(bracketInner(token)))) {
+  if ((inExec || isTail) && (isSignatureLineBracketToken(token) || isSignatureFieldLabel(bracketInner(token)))) {
     return { ...base, category: "signature_line_stub", fatal: false };
   }
 
@@ -447,7 +647,13 @@ export function classifyTemplateFragment(
     if (inExec && (partySlot || nameStyleSlot || isSignatureFieldLabel(bracketInner(token)))) {
       return { ...base, category: "signature_region_slot", fatal: false };
     }
-    if (anchorsOk && (inExec || lineKind === "signature") && (partySlot || nameStyleSlot)) {
+    if (
+      isAllowlistedSignatureToken(token) &&
+      (inExec || isTail || index >= Math.floor(text.length * 0.75))
+    ) {
+      return { ...base, category: "signature_region_slot", fatal: false };
+    }
+    if (anchorsOk && (inExec || base.lineKind === "signature") && (partySlot || nameStyleSlot)) {
       return { ...base, category: "signature_region_slot", fatal: false };
     }
     return { ...base, category: "internal_slot", fatal: true };
@@ -498,7 +704,11 @@ function repairBracketInExecutionContext(
   const out = text.replace(re, (match, offset) => {
     const idx = typeof offset === "number" ? offset : text.indexOf(match);
     if (idx < 0) return match;
-    if (!isExecutionSignatureContext(text, idx) && !SOFT_PREAMBLE_LABEL_RE.test(bracketInner(match))) {
+    const inner = bracketInner(match);
+    if (/^CLIENT[\s_]*NAME$/i.test(inner) && idx < text.length * 0.5) {
+      return match;
+    }
+    if (!isExecutionSignatureContext(text, idx) && !SOFT_PREAMBLE_LABEL_RE.test(inner)) {
       return match;
     }
     repaired.push(`${repairKey}:${match.trim()}`);
@@ -674,10 +884,29 @@ export function finalizeUserVisibleAgreementPlainText(
   const partyResolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
   const scanCtx = { intakeRaw: ctx.intakeRaw, partyNames: partyResolution.names };
   const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(text, scanCtx);
-  const remainingDetail = analyzeTemplatePlaceholderFragments(repairedText, scanCtx);
+  let remainingDetail = analyzeTemplatePlaceholderFragments(repairedText, scanCtx);
+  const demotion = demotePaidProSignatureOnlyFatals(
+    remainingDetail,
+    repairedText.length,
+    partyResolution,
+  );
+  remainingDetail = demotion.decisions;
   const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
   const remaining = [...new Set(remainingDetail.map((d) => d.token))].slice(0, 40);
   const ok = remainingFatal.length === 0;
+
+  logPaidProPlaceholderGateDecision({
+    surface: ctx.surface,
+    docLen: repairedText.length,
+    scannedCount: remainingDetail.length,
+    fatalCount: remainingFatal.length,
+    nonfatalCount: remainingDetail.length - remainingFatal.length,
+    repairedCount: repaired.length,
+    partyAnchorsFound: partyResolution.anchorsFound,
+    partyCount: partyResolution.partyCount,
+    accepted: ok,
+    signatureOnlyDemotion: demotion.demoted,
+  });
 
   logPlaceholderScanResult({
     surface: ctx.surface,

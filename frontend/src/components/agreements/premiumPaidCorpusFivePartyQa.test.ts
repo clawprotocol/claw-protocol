@@ -144,6 +144,62 @@ describe("five-party paid Pro corpus acceptance (production QA)", () => {
     expect(fin.remaining.some((x) => /PARTY_9|INSERT/i.test(x))).toBe(true);
   });
 
+  it("accepts 30k Ironclad body with exactly five signature placeholder tokens (production gate)", () => {
+    const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
+    const sig = IRONCLAD_PARTIES.map(
+      (p) => `${p} By: [SIGNATURE] Name: [PARTY_NAME] Title: [TITLE] Date: [DATE]`,
+    ).join(" ");
+    const core = [
+      "CONFIDENTIALITY AND COMMERCIAL PROTECTIONS AGREEMENT",
+      `Among ${IRONCLAD_PARTIES.join(", ")}.`,
+      "1. Scope. AI workflow software and infrastructure rollout.",
+      "2. Fees. $187,500 milestone payments.",
+      "IN WITNESS WHEREOF:",
+      sig,
+    ].join(" ");
+    const body = padOperative(core, 30_000);
+
+    const fin = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: intake,
+      partyNames: null,
+      surface: "ironclad_production_gate",
+    });
+    expect(fin.remainingFatal, fin.remainingFatal.join("; ")).toHaveLength(0);
+    expect(fin.ok).toBe(true);
+
+    const acc = rejectPremiumBodyForProRender(body, {
+      intakeLower: intake.toLowerCase(),
+      intakeText: intake,
+      partyNames: null,
+    });
+    expect(acc.ok, acc.reasons.join("; ")).toBe(true);
+
+    const v = validatePaidProOutput({
+      text: body,
+      rawIntake: intake,
+      draft: null,
+      premiumPipelineSource: "server_full_draft",
+    });
+    expect(v.ok, v.reasons.join("; ")).toBe(true);
+  });
+
+  it("accepts [CLIENT_NAME] inside signature block on long paid body", () => {
+    const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
+    const body = padOperative(
+      `AGREEMENT among ${IRONCLAD_PARTIES.join(", ")}.\n` +
+        "x".repeat(2500) +
+        `\nSIGNATURES\n${IRONCLAD_PARTIES[0]}\nBy: [SIGNATURE]\n[CLIENT_NAME]\nName: [NAME]\nTitle: [TITLE]\nDate: [DATE]`,
+      20_000,
+    );
+    const fin = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: intake,
+      partyNames: null,
+      surface: "test",
+    });
+    expect(fin.ok, fin.remainingFatal.join("; ")).toBe(true);
+    expect(fin.remainingFatal).toHaveLength(0);
+  });
+
   it("accepts Ironclad joint-rollout paid body with signature field stubs (production shape)", () => {
     const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
     const signers = ["Ethan Cole", "Maya Bennett", "Lucas Reed", "Olivia Hart", "Adrian Vale"];
@@ -244,10 +300,10 @@ describe("five-party paid Pro corpus acceptance (production QA)", () => {
     expect(fin.remainingFatal.some((x) => /DESCRIBE/i.test(x))).toBe(true);
   });
 
-  it("rejects [CLIENT NAME] in operative obligations", () => {
+  it("rejects operative [CLIENT_NAME] in first half of agreement body", () => {
     const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
     const body = `${padOperative(
-      `AGREEMENT among ${IRONCLAD_PARTIES.join(", ")}.\n\n3. OBLIGATIONS\n[CLIENT NAME] shall deliver all work product.\n` +
+      `AGREEMENT among ${IRONCLAD_PARTIES.join(", ")}.\n\n3. OBLIGATIONS\n[CLIENT_NAME] shall deliver all work product.\n` +
         "x".repeat(2000),
       10_000,
     )}`;
@@ -257,7 +313,23 @@ describe("five-party paid Pro corpus acceptance (production QA)", () => {
       surface: "test",
     });
     expect(fin.ok).toBe(false);
-    expect(fin.remainingFatal.length).toBeGreaterThan(0);
+    expect(fin.remainingFatal.some((x) => /CLIENT_NAME/i.test(x))).toBe(true);
+  });
+
+  it("rejects [CLIENT LEGAL NAME] in operative obligations (first half)", () => {
+    const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
+    const body = `${padOperative(
+      `AGREEMENT among ${IRONCLAD_PARTIES.join(", ")}.\n\n3. OBLIGATIONS\n[CLIENT LEGAL NAME] shall deliver all work product.\n` +
+        "x".repeat(2000),
+      10_000,
+    )}`;
+    const fin = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: intake,
+      partyNames: null,
+      surface: "test",
+    });
+    expect(fin.ok).toBe(false);
+    expect(fin.remainingFatal.some((x) => /CLIENT[\s_]*LEGAL[\s_]*NAME/i.test(x))).toBe(true);
   });
 
   it("rejects operative [PARTY_1] and [INSERT PAYMENT TERMS] in Ironclad-scale body", () => {

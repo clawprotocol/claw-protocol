@@ -4,6 +4,8 @@ import {
   classifyTemplateFragment,
   collectForbiddenTemplateFragments,
   finalizeUserVisibleAgreementPlainText,
+  isAllowlistedSignatureToken,
+  normalizePlaceholderToken,
   repairAgreementTemplatePlaceholders,
 } from "./agreementTemplatePlaceholderSafety";
 
@@ -171,6 +173,13 @@ describe("agreementTemplatePlaceholderSafety", () => {
     });
     expect(fin.ok, fin.remainingFatal.join("; ")).toBe(true);
     expect(fin.text).not.toMatch(/\[\s*INITIALS\s*\]/i);
+  });
+
+  it("normalizes signature allowlist tokens across case and separators", () => {
+    expect(normalizePlaceholderToken("[party name]")).toBe("PARTY_NAME");
+    expect(normalizePlaceholderToken("[CLIENT_NAME]")).toBe("CLIENT_NAME");
+    expect(isAllowlistedSignatureToken("[Authorized Signatory]")).toBe(true);
+    expect(isAllowlistedSignatureToken("[INSERT PAYMENT TERMS]")).toBe(false);
   });
 
   it("still flags mustache party placeholders when not in intake", () => {
