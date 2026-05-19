@@ -35,6 +35,8 @@ export type ParsedDraftShape = {
   premium_full_document_text?: string | null;
   /** First-pass premium full draft (POST /premium-full-draft primary output). */
   premium_server_full_document_text?: string | null;
+  /** Which premium body field drives readonly/review render (client-only). */
+  premium_render_source?: string | null;
   /** Quality-gate repair pass output when primary failed structural checks (server). */
   premium_server_repair_document_text?: string | null;
   /** Audit labels from the full-draft model. Omitted from POST /draft. */

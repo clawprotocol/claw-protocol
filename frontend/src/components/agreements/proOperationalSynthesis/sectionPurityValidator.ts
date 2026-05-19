@@ -31,7 +31,14 @@ const SENTENCE_TOPIC: readonly { kind: SectionSemanticKind; re: RegExp }[] = [
   },
 ];
 
-const STRICT_SECTIONS: ReadonlySet<SectionSemanticKind> = new Set(["contacts", "signatures", "confidentiality", "ip"]);
+const STRICT_SECTIONS: ReadonlySet<SectionSemanticKind> = new Set([
+  "contacts",
+  "signatures",
+  "confidentiality",
+  "ip",
+  "governance",
+  "scope",
+]);
 
 function classifyHeading(heading: string): SectionSemanticKind {
   const h = heading.trim();

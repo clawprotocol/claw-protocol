@@ -16,10 +16,24 @@ export type AgreementFamily =
 /**
  * Order: more specific families before generic fallbacks.
  */
+/** Joint AI / software / infrastructure rollout — always services (not NDA hybrid). */
+export function isAiSoftwareInfrastructureRolloutPrompt(intakeText: string): boolean {
+  const low = (intakeText || "").toLowerCase();
+  return (
+    /\b(?:ai|artificial\s+intelligence)\b/.test(low) &&
+    /\b(?:software|infrastructure)\b/.test(low) &&
+    /\b(?:rollout|deployment|implementation|integration|api|platform)\b/.test(low)
+  );
+}
+
 export function detectAgreementFamily(intakeText: string): AgreementFamily {
   const t = intakeText.replace(/\s+/g, " ").trim();
   const low = t.toLowerCase();
   if (!t) return "generic_business_agreement";
+
+  if (isAiSoftwareInfrastructureRolloutPrompt(t)) {
+    return "services_agreement";
+  }
 
   const commercialSignals = {
     referralLike: /\b(referral|channel\s+partner|introduced?\s+accounts?|introduced?\s+deals?|sourced\s+deals?|growth\s+partner|business\s+development)\b/i.test(low),

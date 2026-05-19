@@ -12,12 +12,14 @@ export function mapPremiumFullDraftFamilyHint(
   if (/\boperating\s+agreement\b|multimember|member[-\s]managed|llc\s+operating\b/.test(t)) {
     return "operating_agreement";
   }
+  if (/\b(?:ai|artificial\s+intelligence)\b/.test(t) && /\b(?:software|infrastructure|rollout)\b/.test(t)) {
+    return "services_agreement";
+  }
   if (/\bnda\b|non[-\s]?disclosure|confidentiality\s+and\s+commercial|commercial\s+protections/.test(t)) {
     if (
-      /\bconfidentiality\s+and\s+commercial|commercial\s+protections\b/.test(t) &&
-      (fallback === "services_agreement" ||
-        fallback === "consulting_agreement" ||
-        fallback === "independent_contractor_agreement")
+      fallback === "services_agreement" ||
+      fallback === "consulting_agreement" ||
+      fallback === "independent_contractor_agreement"
     ) {
       return fallback;
     }

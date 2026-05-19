@@ -100,7 +100,8 @@ export type PremiumFullDraftApiSuccess = {
 export type PremiumFullDraftApiResult = PremiumFullDraftApiSuccess | PremiumFullDraftApiFailure;
 
 /** True when fetch failed before a normal HTTP response (transient browser/network). */
-export const PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS = 4;
+/** Transient browser errors (e.g. ERR_NETWORK_CHANGED): retry twice with backoff. */
+export const PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS = 2;
 
 export function isPremiumFullDraftNetworkFailure(error: unknown): boolean {
   if (error == null) return false;

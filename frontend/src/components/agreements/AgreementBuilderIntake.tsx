@@ -508,9 +508,13 @@ import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import {
-  logPremiumAuthoritativeVisibleCommitFailed,
-  shouldSkipAgreementDocLivePreviewSync,
-} from "./premiumAuthoritativeVisibleCommit";
+  commitAuthoritativePremiumDocument,
+  probeAuthoritativeVisibleSurfaces,
+  scheduleAuthoritativeVisibleSurfaceVerification,
+  syncAuthoritativePremiumDocumentRefs,
+  type AuthoritativePremiumDocumentRefs,
+} from "./commitAuthoritativePremiumDocument";
+import { shouldSkipAgreementDocLivePreviewSync } from "./premiumAuthoritativeVisibleCommit";
 import {
   endPremiumEnsureForIntake,
   logPremiumAuthoritativeVisibleSurface,
@@ -1881,6 +1885,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const hydratedPremiumBodyRef = useRef("");
   /** Winning paid corpus ref — preferred over length-heuristic merges for authoritative pipeline picks. */
   const lastPremiumWinningCorpusRef = useRef("");
+  const authoritativePremiumDocRefs = useMemo(
+    (): AuthoritativePremiumDocumentRefs => ({
+      agreementDocumentTextRef,
+      agreementDocumentDirtyRef,
+      hydratedPremiumBodyRef,
+      lastPremiumWinningCorpusRef,
+      premiumPipelineOutputBodyRef,
+      lastPremiumPipelineRenderSourceRef,
+    }),
+    [],
+  );
   /**
    * Set when applySuccess commits an authoritative server full-draft body; used for DEV
    * `[premium-authoritative-lost]` (UI reverted to live preview / recovery after a good 200).
@@ -4485,7 +4500,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         },
       ) => {
         if (!isAuthoritativePremiumPipelineRenderSource(pipelineSource) || opts.acceptedPlainLen < 500) return;
-        const bodyTrim = collapsedDoc.trim();
         const agreementDocumentTextLenBefore = agreementDocumentTextRef.current.trim().length;
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -4521,10 +4535,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           createUiStage: String(createUiStageRef.current),
           displayPhase: displayPhaseRef.current,
         });
-        agreementDocumentDirtyRef.current = true;
-        hydratedPremiumBodyRef.current = bodyTrim;
-        lastPremiumWinningCorpusRef.current = bodyTrim;
-        premiumPipelineOutputBodyRef.current = bodyTrim;
+        syncAuthoritativePremiumDocumentRefs(collapsedDoc, authoritativePremiumDocRefs, {
+          pipelineSource,
+          premiumRenderResolveSource: opts.premiumRenderResolveSource,
+        });
         setHardError(null);
         setPremiumPipelineUserMessage(null);
         setProFullDraftCustomGateMessage(null);
@@ -4532,6 +4546,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setProFullDraftQualityRetry(false);
         setAgreementDocumentText(collapsedDoc);
         agreementDocumentDirtyRef.current = false;
+        setDraft((prev) => {
+          const base = prev ?? draftSnapshotRef.current;
+          if (!base) return prev;
+          const committed = commitAuthoritativePremiumDocument(collapsedDoc, base, authoritativePremiumDocRefs, {
+            pipelineSource,
+            premiumRenderResolveSource: opts.premiumRenderResolveSource,
+          });
+          if (committed?.mergedDraft) {
+            draftSnapshotRef.current = committed.mergedDraft;
+          }
+          return committed?.mergedDraft ?? prev;
+        });
         setPremiumReviewDocEditorOpen(false);
         const lateSuccessTransition = shouldLogPremiumReturnLateSuccess({
           hardFailopenWasActive: opts.hardFailopenWasActive,
@@ -5162,7 +5188,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             });
           }
         } else {
+          syncAuthoritativePremiumDocumentRefs(finalDoc, authoritativePremiumDocRefs, {
+            pipelineSource: result.premiumRenderSource,
+            premiumRenderResolveSource: resolvedPersist.premium_render_source,
+          });
           setAgreementDocumentText(finalDoc);
+          agreementDocumentDirtyRef.current = false;
         }
         logPremiumLiveTrace("premium_pipeline_output", {
           source_id: "ensurePremiumCompletion_result",
@@ -5335,38 +5366,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   }
                 : null,
             });
-            queueMicrotask(() => {
-              const snapInv = readPremiumCompletionSnapshot();
-              const rs = snapInv?.premiumRenderResolveSource ?? null;
-              let renderedPreviewLen = 0;
-              try {
-                renderedPreviewLen = buildAgreementPreviewText(mergedDraftPersist, {
-                  starterPreview: false,
-                  premiumDeliverablePreview: true,
-                  intakeText: debouncedStepBuffer,
-                }).length;
-              } catch {
-                renderedPreviewLen = 0;
-              }
-              const reviewDraftStoredLen = (mergedDraftPersist.premium_server_full_document_text || mergedDraftPersist.premium_full_document_text || "").trim().length;
-              const adtLen = agreementDocumentTextRef.current.trim().length;
-              const badLen = adtLen < 500 || adtLen < snapshotPlain.length - 200;
-              const badSource = rs === "live_generated_preview";
-              if (badLen || badSource) {
-                logPremiumAuthoritativeVisibleCommitFailed({
+            scheduleAuthoritativeVisibleSurfaceVerification({
+              acceptedBodyLen: snapshotPlain.length,
+              getProbe: () =>
+                probeAuthoritativeVisibleSurfaces({
+                  refs: authoritativePremiumDocRefs,
+                  draft: draftSnapshotRef.current ?? mergedDraftPersist,
+                  snapshotRenderResolveSource:
+                    readPremiumCompletionSnapshot()?.premiumRenderResolveSource ??
+                    resolvedPersist.premium_render_source,
+                }),
+              buildFailurePayload: (probe) => {
+                let renderedAgreementPreviewLen = 0;
+                try {
+                  renderedAgreementPreviewLen = buildAgreementPreviewText(mergedDraftPersist, {
+                    starterPreview: false,
+                    premiumDeliverablePreview: true,
+                    intakeText: debouncedStepBuffer,
+                  }).length;
+                } catch {
+                  renderedAgreementPreviewLen = 0;
+                }
+                return {
                   acceptedBodyLen: snapshotPlain.length,
-                  agreementDocumentTextLen: adtLen,
-                  renderedAgreementPreviewLen: renderedPreviewLen,
-                  reviewDraftPlainLen: reviewDraftStoredLen,
+                  agreementDocumentTextLen: probe.agreementDocumentTextLen,
+                  renderedAgreementPreviewLen,
+                  reviewDraftPlainLen: probe.reviewDraftPlainLen,
                   createUiStage: String(createUiStageRef.current),
                   createFlowPhase: String(createFlowPhaseRef.current),
                   displayPhase: displayPhaseRef.current,
                   proUpgradeUseStarterView: proUpgradeUseStarterViewRef.current,
                   proFullDraftQualityRetry: proFullDraftQualityRetryRef.current,
                   premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
-                  premiumRenderResolveSource: rs,
-                });
-              }
+                  premiumRenderResolveSource: probe.premiumRenderResolveSource,
+                };
+              },
             });
           }
         } else if (import.meta.env.DEV) {
@@ -9955,6 +9989,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Best-effort: create persisted row early so Send can reuse the same id (deduped inside ensure). Does not gate the refine UI. */
   useEffect(() => {
     if (!createProductionTwoPane || !productionDraftPrimaryReviewSurface || !draft || reviewAgreementId) return;
+    if (authoritativePremiumUiCommitted) return;
+    if (premiumPostCheckoutPhase === "processing" || premiumAuthoritativeRequestInFlightUi) return;
     void ensureReviewAgreementWorkspaceId();
   }, [
     createProductionTwoPane,
@@ -9963,6 +9999,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewAgreementId,
     recipient1Name,
     ensureReviewAgreementWorkspaceId,
+    authoritativePremiumUiCommitted,
+    premiumPostCheckoutPhase,
+    premiumAuthoritativeRequestInFlightUi,
   ]);
 
   useEffect(
@@ -10699,9 +10738,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ).trim();
     if (corpus.length >= 500 && agreementDocumentTextRef.current.trim().length < 500) {
       const collapsed = collapseDuplicateEsignNoticesInFullPreview(corpus);
+      syncAuthoritativePremiumDocumentRefs(collapsed, authoritativePremiumDocRefs, {
+        pipelineSource:
+          snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current ?? "server_full_draft",
+        premiumRenderResolveSource: snap?.premiumRenderResolveSource ?? "server_full_document_text",
+      });
       setAgreementDocumentText(collapsed);
       agreementDocumentDirtyRef.current = false;
-      hydratedPremiumBodyRef.current = corpus;
       setDisplayPhase("review");
       setCreateFlowPhase("draft_ready_for_review");
       setCreateUiStage(CreateUiStage.DRAFT);

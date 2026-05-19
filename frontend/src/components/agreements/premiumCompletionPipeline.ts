@@ -1,5 +1,5 @@
 import type { AgreementFamily } from "./agreementFamilyRouter";
-import { detectAgreementFamily } from "./agreementFamilyRouter";
+import { detectAgreementFamily, isAiSoftwareInfrastructureRolloutPrompt } from "./agreementFamilyRouter";
 import { getCanonicalAgreementTypeForCreate } from "./agreementTypeCanonical";
 import {
   enrichParsedDraftForFullDraftUpgrade,
@@ -325,6 +325,18 @@ function isSparsePrompt(rawIntake: string): boolean {
 
 function applyHardFamilyLocks(parsed: ParsedDraftShape, rawIntake: string): ParsedDraftShape {
   const low = (rawIntake || "").toLowerCase();
+  if (isAiSoftwareInfrastructureRolloutPrompt(rawIntake)) {
+    const title =
+      (parsed.title || "").trim() &&
+      !/confidentiality\s+and\s+commercial\s+protections/i.test(parsed.title || "")
+        ? parsed.title
+        : "Multi-Party Technology Services and Implementation Agreement";
+    return {
+      ...parsed,
+      agreement_family: "services_agreement",
+      title: title || "Multi-Party Technology Services and Implementation Agreement",
+    };
+  }
   const confidentiality = /\b(nda|confidential|non[-\s]?disclosure)\b/.test(low);
   const ownership = /\b(ownership|ip|intellectual\s+property|invention|work\s+product|customer\s+list|crm|lead\s+data)\b/.test(low);
   if (confidentiality && ownership) {
@@ -1315,6 +1327,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       stage: "premium_full_draft_with_retry_start",
       intakeLen: soT.length,
     });
+    const premiumRequestStartedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
     const fullResp = await postPremiumFullDraftWithRetry({
       intakeText: soT,
       context: fullCtx,
@@ -1322,6 +1336,18 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       agreementId: input.agreementId ?? null,
       agreementGenerationId: input.agreementGenerationId ?? null,
     });
+    const premiumServerModelMs = Math.round(
+      (typeof performance !== "undefined" ? performance.now() : Date.now()) - premiumRequestStartedAt,
+    );
+    if (import.meta.env.MODE !== "test") {
+      // eslint-disable-next-line no-console
+      console.info("[premium-timing]", {
+        phase: "server_model",
+        ms: premiumServerModelMs,
+        ok: fullResp.ok,
+        failure_kind: fullResp.ok ? null : fullResp.failure_kind,
+      });
+    }
     if (!fullResp.ok) {
       if (fullResp.failure_kind === "network" && fullResp.retryable) {
         logPremiumCompletionDebug({
@@ -1380,9 +1406,22 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       let doc = (effectiveFull.document_text || "").trim();
       if (doc) {
         const preGateIntake = (rawForSoT || rawIntake).trim();
+        const postProcessStartedAt =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
         doc = applyPaidProRenderPolish(doc, preGateIntake, premiumRejectCtx.partyNames, {
           surface: "premium_completion_pipeline_pre_gate",
         }).text;
+        const postProcessMs = Math.round(
+          (typeof performance !== "undefined" ? performance.now() : Date.now()) - postProcessStartedAt,
+        );
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[premium-timing]", {
+            phase: "post_processing",
+            ms: postProcessMs,
+            docLen: doc.length,
+          });
+        }
         effectiveFull = { ...effectiveFull, document_text: doc };
       }
       const firstCallOutcomeDegraded = (full.generation_outcome || "").trim() === "degraded";

@@ -2,6 +2,9 @@
  * Ordered paid-Pro render polish: contact substitution → masked agreement polish → email restoration.
  */
 
+import { hashPremiumDocText, premiumPolishCacheKey } from "../../lib/premiumDocFingerprint";
+import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
+import { validateAndRepairPremiumAgreementStructure } from "./premiumAgreementStructure";
 import {
   extractIntakeEmailsOrdered,
   substitutePaidProIntakeContactPlaceholders,
@@ -65,8 +68,22 @@ export function logPaidProEmailMutationGuard(
   payload: EmailMutationGuardResult & { surface: string },
 ): void {
   if (import.meta.env.MODE === "test") return;
+  if (payload.mutatedEmailCount === 0) return;
+  if (payload.repairedCount > 0 && payload.finalExactEmailCount >= payload.originalEmailCount) return;
   // eslint-disable-next-line no-console
   console.info("[paid-pro-email-mutation-guard]", payload);
+}
+
+const polishResultCache = new Map<string, PaidProRenderPolishResult>();
+const POLISH_CACHE_MAX = 12;
+
+function rememberPolishResult(key: string, result: PaidProRenderPolishResult): PaidProRenderPolishResult {
+  if (polishResultCache.size >= POLISH_CACHE_MAX) {
+    const first = polishResultCache.keys().next().value;
+    if (first) polishResultCache.delete(first);
+  }
+  polishResultCache.set(key, result);
+  return result;
 }
 
 export type PaidProRenderPolishResult = {
@@ -85,9 +102,17 @@ export function applyPaidProRenderPolish(
   text: string,
   intakeRaw: string | null | undefined,
   partyNames: readonly string[] | null | undefined,
-  opts?: { surface?: string },
+  opts?: { surface?: string; skipCache?: boolean },
 ): PaidProRenderPolishResult {
   const surface = opts?.surface ?? "unknown";
+  const docHash = hashPremiumDocText(text);
+  const intakeFp = shortIntakeFingerprint((intakeRaw || "").trim());
+  const cacheKey = premiumPolishCacheKey({ surface, docHash, intakeFingerprint: intakeFp });
+  if (!opts?.skipCache) {
+    const cached = polishResultCache.get(cacheKey);
+    if (cached) return cached;
+  }
+
   const explicitPartyList = (partyNames?.length ?? 0) >= 2;
   const intakeEmails = extractIntakeEmailsOrdered(intakeRaw);
 
@@ -119,5 +144,19 @@ export function applyPaidProRenderPolish(
 
   logPaidProEmailMutationGuard({ surface, ...guard, repairedCount });
 
-  return { text: working, contactSub, agreementPolish: agreementPolish.log, emailGuard: { ...guard, repairedCount } };
+  const structure = validateAndRepairPremiumAgreementStructure(working);
+  working = structure.text;
+
+  const result: PaidProRenderPolishResult = {
+    text: working,
+    contactSub,
+    agreementPolish: agreementPolish.log,
+    emailGuard: { ...guard, repairedCount },
+  };
+  return rememberPolishResult(cacheKey, result);
+}
+
+/** @internal test helper */
+export function clearPaidProRenderPolishCacheForTests(): void {
+  polishResultCache.clear();
 }

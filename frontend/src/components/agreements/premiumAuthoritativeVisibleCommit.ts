@@ -54,7 +54,6 @@ export type PremiumAuthoritativeVisibleCommitFailedPayload = {
 };
 
 export function logPremiumAuthoritativeVisibleCommitFailed(payload: PremiumAuthoritativeVisibleCommitFailedPayload): void {
-  if (!import.meta.env.DEV) return;
   // eslint-disable-next-line no-console
   console.error("[premium-authoritative-visible-commit-failed]", payload);
 }

@@ -38,10 +38,9 @@ function buildCoordinationReplacement(
   }
   if (dealDna.governanceComplexity === "enterprise") {
     ops.add("cross-party dependency tracking");
-    ops.add("designated operational contacts");
   }
   const list = [...ops].slice(0, 8).join(", ");
-  return `The Parties shall coordinate ${list} through designated operational contacts identified in the Notices section.`;
+  return `The Parties shall coordinate ${list} using the operational contact channels set forth in the Notices section.`;
 }
 
 /**
