@@ -112,10 +112,10 @@ describe("LaunchHomePage routing (static)", () => {
     expect(page).toContain("claw-seo-input--hero");
     expect(page).toContain("claw-seo-hero-intake-wrap");
     expect(page).toContain("claw-seo-hero-intake-fade");
-    expect(page).toContain("heroTextareaOverflow");
+    expect(page).toContain("heroTextareaShowFade");
     expect(page).toContain("Large agreement detected");
     expect(page).toContain("resize-none");
-    expect(page).toContain("pb-12");
+    expect(page).toContain("pb-14");
     expect(page).toContain("pr-14");
     expect(page).toContain("overflow-hidden");
     expect(page).not.toContain("min-h-[6.5rem]");

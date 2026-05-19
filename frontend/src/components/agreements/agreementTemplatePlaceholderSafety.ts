@@ -8,6 +8,9 @@ import {
   substitutePartyPlaceholdersInUserFacingText,
 } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { substitutePaidProIntakeContactPlaceholders } from "./paidProIntakeContactSubstitution";
+import { preserveFullLegalPartyNamesInOpening } from "./paidProPartyNamePreserve";
+import { resolveIntakeEmailForContactSlot } from "./paidProIntakeContactSubstitution";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -239,6 +242,9 @@ const SOFT_PREAMBLE_LABEL_RE = /^(?:DATE[\s_]*OF[\s_]*AGREEMENT|EFFECTIVE[\s_]*D
 const TAIL_EXECUTION_WINDOW_RE =
   /\b(?:in witness whereof|signatures?|execution|counterparts?|electronic signatures?|signed|signatory|authorized signatory|authorized representative|by\s*:|name\s*:|title\s*:|date\s*:|email\s*:|initials?\s*:)/i;
 
+const CONTACT_SECTION_CONTEXT_RE =
+  /\b(?:key contacts?|contact information|signatory information|authorized representatives?|notice contacts?|signature information)\b/i;
+
 /** Operative misuse of a name-style token (not CLIENT LEGAL NAME — that stays fatal via separate rule). */
 const OPERATIVE_CLIENT_LEGAL_NAME_RE = /\bCLIENT[\s_]*LEGAL[\s_]*NAME\b/i;
 
@@ -422,25 +428,8 @@ export function parseSignatureContactSlot(token: string): number | null {
   return Number.isFinite(slot) && slot > 0 ? slot : null;
 }
 
-function extractIntakeEmails(intakeRaw: string | null | undefined): string[] {
-  const raw = String(intakeRaw || "");
-  if (!raw.trim()) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const m of raw.matchAll(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)) {
-    const e = m[0].toLowerCase();
-    if (!seen.has(e)) {
-      seen.add(e);
-      out.push(m[0]);
-    }
-  }
-  return out;
-}
-
 function resolveIntakeEmailForSlot(intakeRaw: string | null | undefined, slot: number | null): string | null {
-  if (!slot || slot < 1) return null;
-  const emails = extractIntakeEmails(intakeRaw);
-  return emails[slot - 1] ?? null;
+  return resolveIntakeEmailForContactSlot(intakeRaw, slot);
 }
 
 export function isAllowlistedSignatureToken(token: string): boolean {
@@ -463,17 +452,27 @@ export function isSignatureOnlyFatalToken(token: string): boolean {
   return isSignatureFieldLabel(inner) || SOFT_PREAMBLE_LABEL_RE.test(inner.replace(/_/g, " "));
 }
 
-function isOperativeSignatureContactMisuse(token: string, text: string, index: number): boolean {
+function isSignatureOrContactContext(text: string, index: number): boolean {
+  const window = text.slice(Math.max(0, index - 700), Math.min(text.length, index + 500));
+  return CONTACT_SECTION_CONTEXT_RE.test(window);
+}
+
+export function isOperativeSignatureContactMisuse(token: string, text: string, index: number): boolean {
   if (!isNumberedSignatureContactToken(token)) return false;
-  if (isTailSignatureSection(text, index)) return false;
   const n = normalizePlaceholderToken(token);
-  const isEmailSlot = /^(?:(?:SIGNER|PARTY|CONTACT)_EMAIL(?:_\d+)?|EMAIL_\d+)$/i.test(n);
-  if (!isEmailSlot) return false;
+  if (!/^(?:(?:SIGNER|PARTY|CONTACT)_EMAIL(?:_\d+)?|EMAIL_\d+)$/i.test(n)) return false;
+  if (isSignatureOrContactContext(text, index)) return false;
+  if (isTailSignatureSection(text, index)) return false;
   if (isExecutionSignatureContext(text, index) && isInSignatureRegion(text, index)) {
     return false;
   }
   if (isNearOperativeSectionHeading(text, index)) return true;
-  if (index < text.length * 0.35) return true;
+  const lineStart = text.lastIndexOf("\n", index) + 1;
+  const lineEnd = text.indexOf("\n", index);
+  const line = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd).toLowerCase();
+  if (/notice\s+email|payment[^.\n]{0,40}email|email[^.\n]{0,24}correspondence/i.test(line)) {
+    return true;
+  }
   return false;
 }
 
@@ -1015,10 +1014,19 @@ export function finalizeUserVisibleAgreementPlainText(
   text: string,
   ctx: PlaceholderSafetyContext,
 ): PlaceholderSafetyOutcome {
-  const prepared = prepareAgreementTextForPlaceholderScan(text);
-  const partyResolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
-  const scanCtx = { intakeRaw: ctx.intakeRaw, partyNames: partyResolution.names };
-  const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(text, scanCtx);
+  const intakeRaw = (ctx.intakeRaw ?? "").trim();
+  let prepared = prepareAgreementTextForPlaceholderScan(text);
+  const contactSub = substitutePaidProIntakeContactPlaceholders(prepared, intakeRaw, {
+    surface: `${ctx.surface}_contact`,
+  });
+  prepared = contactSub.text;
+  const partyResolution = resolvePlaceholderPartyNamesWithMeta(
+    { ...ctx, intakeRaw },
+    prepared,
+  );
+  prepared = preserveFullLegalPartyNamesInOpening(prepared, partyResolution.names, intakeRaw);
+  const scanCtx = { intakeRaw, partyNames: partyResolution.names };
+  const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(prepared, scanCtx);
   let remainingDetail = analyzeTemplatePlaceholderFragments(repairedText, scanCtx);
   const demotion = demotePaidProSignatureOnlyFatals(
     remainingDetail,

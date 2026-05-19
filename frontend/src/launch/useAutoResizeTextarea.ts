@@ -66,19 +66,25 @@ export function estimateTextareaContentLineCount(
   return Math.max(1, Math.ceil((sh - padY - borderY) / lineHeight));
 }
 
+/** True when the textarea is scrolled to (or near) the bottom. */
+export function textareaIsScrolledToBottom(el: HTMLTextAreaElement, thresholdPx = 10): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= thresholdPx;
+}
+
 /** Keep caret in view when content scrolls inside a capped textarea. */
 export function scrollTextareaCaretIntoView(el: HTMLTextAreaElement): void {
   if (el.scrollHeight <= el.clientHeight) return;
   const { lineHeight, padY } = textareaVerticalMetrics(el);
   const padBottom = parseFloat(getComputedStyle(el).paddingBottom) || 0;
+  const fadeClearance = 20;
   const pos = el.selectionStart ?? el.value.length;
   const lineIndex = Math.max(0, el.value.slice(0, pos).split("\n").length - 1);
   const caretTop = lineIndex * lineHeight + padY;
   const caretBottom = caretTop + lineHeight;
   const viewTop = el.scrollTop + padY;
-  const viewBottom = el.scrollTop + el.clientHeight - padBottom;
+  const viewBottom = el.scrollTop + el.clientHeight - padBottom - fadeClearance;
   if (caretTop < viewTop || caretBottom > viewBottom) {
-    const target = Math.max(0, caretTop - el.clientHeight * 0.35);
+    const target = Math.max(0, caretTop - el.clientHeight * 0.32);
     el.scrollTop = Math.min(target, el.scrollHeight - el.clientHeight);
   }
 }
@@ -120,7 +126,10 @@ export type AutoResizeTextareaHandlers = {
   sync: () => void;
   onPaste: () => void;
   onDrop: () => void;
+  onScroll: () => void;
   overflowActive: boolean;
+  /** Show bottom fade only when capped and user has not scrolled to the bottom. */
+  showBottomFade: boolean;
   contentLineCount: number;
 };
 
@@ -168,7 +177,14 @@ export function useAutoResizeTextarea(
   const minRows = opts?.minRows ?? 3;
   const maxPx = opts?.maxPx ?? HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP;
   const [overflowActive, setOverflowActive] = useState(false);
+  const [scrollAtBottom, setScrollAtBottom] = useState(true);
   const [contentLineCount, setContentLineCount] = useState(0);
+
+  const updateScrollState = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setScrollAtBottom(textareaIsScrolledToBottom(el));
+  }, [ref]);
 
   const sync = useCallback(() => {
     const el = ref.current;
@@ -179,8 +195,15 @@ export function useAutoResizeTextarea(
     setContentLineCount(lines);
     if (result.overflowAuto) {
       scrollTextareaCaretIntoView(el);
+      updateScrollState();
+    } else {
+      setScrollAtBottom(true);
     }
-  }, [ref, minRows, maxPx]);
+  }, [ref, minRows, maxPx, updateScrollState]);
+
+  const onScroll = useCallback(() => {
+    updateScrollState();
+  }, [updateScrollState]);
 
   const onPaste = useCallback(() => {
     scheduleTextareaSync(sync);
@@ -216,5 +239,13 @@ export function useAutoResizeTextarea(
     };
   }, [sync, value]);
 
-  return { sync, onPaste, onDrop, overflowActive, contentLineCount };
+  return {
+    sync,
+    onPaste,
+    onDrop,
+    onScroll,
+    overflowActive,
+    showBottomFade: overflowActive && !scrollAtBottom,
+    contentLineCount,
+  };
 }

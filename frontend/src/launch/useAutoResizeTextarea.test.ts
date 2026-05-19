@@ -10,6 +10,7 @@ import {
   resolveHomepageTextareaMaxPx,
   scrollTextareaCaretIntoView,
   syncTextareaSize,
+  textareaIsScrolledToBottom,
   useAutoResizeTextarea,
   useResponsiveTextareaMaxPx,
 } from "./useAutoResizeTextarea";
@@ -288,6 +289,50 @@ describe("estimateTextareaContentLineCount", () => {
     const el = mountTextareaLikeHomepage();
     const lines = estimateTextareaContentLineCount(el, 360);
     expect(lines).toBeGreaterThan(8);
+    document.body.removeChild(el);
+  });
+});
+
+describe("textarea scroll fade UX", () => {
+  it("showBottomFade is false when scrolled to bottom on capped textarea", () => {
+    const el = mountTextareaLikeHomepage();
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 900 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 400 });
+    el.scrollTop = 500;
+    expect(textareaIsScrolledToBottom(el)).toBe(true);
+
+    const ref = { current: el };
+    const long = `${IRONCLAD_HOMEPAGE_PROMPT}\n${"line\n".repeat(80)}`;
+    el.value = long;
+    const { result } = renderHook(() =>
+      useAutoResizeTextarea(ref, long, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+    );
+    act(() => result.current.sync());
+    expect(result.current.overflowActive).toBe(true);
+    act(() => result.current.onScroll());
+    expect(result.current.showBottomFade).toBe(false);
+    document.body.removeChild(el);
+  });
+
+  it("showBottomFade is true when overflow and not at bottom", () => {
+    const el = mountTextareaLikeHomepage();
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 900 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 400 });
+    el.scrollTop = 0;
+    expect(textareaIsScrolledToBottom(el)).toBe(false);
+
+    const ref = { current: el };
+    const long = `${IRONCLAD_HOMEPAGE_PROMPT}\n${"line\n".repeat(80)}`;
+    el.value = long;
+    el.selectionStart = 0;
+    el.selectionEnd = 0;
+    const { result } = renderHook(() =>
+      useAutoResizeTextarea(ref, long, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP }),
+    );
+    act(() => result.current.sync());
+    act(() => result.current.onScroll());
+    expect(result.current.overflowActive).toBe(true);
+    expect(result.current.showBottomFade).toBe(true);
     document.body.removeChild(el);
   });
 });

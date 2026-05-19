@@ -63,7 +63,8 @@ export function LaunchHomePage() {
     sync: syncHeroTextarea,
     onPaste: onHeroTextareaPaste,
     onDrop: onHeroTextareaDrop,
-    overflowActive: heroTextareaOverflow,
+    showBottomFade: heroTextareaShowFade,
+    onScroll: onHeroTextareaScroll,
     contentLineCount: heroContentLineCount,
   } = useAutoResizeTextarea(intakeRef, heroInput, { minRows: 3, maxPx: heroTextareaMaxPx });
   const heroLargeAgreementHint =
@@ -241,6 +242,7 @@ export function LaunchHomePage() {
                 onPaste={() => onHeroTextareaPaste()}
                 onDrop={() => onHeroTextareaDrop()}
                 onInput={() => syncHeroTextarea()}
+                onScroll={onHeroTextareaScroll}
                 onClick={() => requestAnimationFrame(() => syncHeroTextarea())}
                 onKeyUp={() => requestAnimationFrame(() => syncHeroTextarea())}
                 placeholder={HOMEPAGE_HERO_PLACEHOLDER || home.heroPlaceholder}
@@ -248,11 +250,11 @@ export function LaunchHomePage() {
                 aria-describedby={
                   heroLargeAgreementHint ? "claw-hero-intake-large-hint" : undefined
                 }
-                className="claw-seo-input claw-seo-input--hero block w-full max-w-full resize-none px-3.5 py-3 pb-12 pr-14 text-[15px] leading-[1.5] placeholder:text-[15px] transition-[height] duration-150 ease-out sm:px-4 sm:py-3.5 sm:pb-12 sm:pr-16 sm:text-base sm:leading-relaxed sm:placeholder:text-base lg:text-[17px] lg:leading-normal lg:placeholder:text-[17px]"
+                className="claw-seo-input claw-seo-input--hero block w-full max-w-full resize-none px-3.5 py-3 pb-14 pr-14 text-[15px] leading-[1.5] placeholder:text-[15px] transition-[height] duration-150 ease-out sm:px-4 sm:py-3.5 sm:pb-14 sm:pr-16 sm:text-base sm:leading-relaxed sm:placeholder:text-base lg:text-[17px] lg:leading-normal lg:placeholder:text-[17px]"
               />
-              {heroTextareaOverflow ? (
+              {heroTextareaShowFade ? (
                 <div
-                  className="claw-seo-hero-intake-fade pointer-events-none absolute inset-x-0 bottom-11 h-8 sm:bottom-12"
+                  className="claw-seo-hero-intake-fade pointer-events-none absolute inset-x-0 bottom-12 h-5 sm:bottom-[3.25rem]"
                   aria-hidden
                 />
               ) : null}

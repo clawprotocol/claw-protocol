@@ -7,6 +7,8 @@ import {
   finalizeUserVisibleAgreementPlainText,
   resolvePlaceholderPartyNames,
 } from "./agreementTemplatePlaceholderSafety";
+import { substitutePaidProIntakeContactPlaceholders } from "./paidProIntakeContactSubstitution";
+import { preserveFullLegalPartyNamesInOpening } from "./paidProPartyNamePreserve";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const BANNED_SUBSTRINGS = [
@@ -128,7 +130,12 @@ export function rejectPremiumBodyForProRender(
     },
     (body || "").trim(),
   );
-  const ph = finalizeUserVisibleAgreementPlainText((body || "").trim(), {
+  let normalized = (body || "").trim();
+  normalized = substitutePaidProIntakeContactPlaceholders(normalized, intakeRaw, {
+    surface: "rejectPremiumBodyForProRender_contact",
+  }).text;
+  normalized = preserveFullLegalPartyNamesInOpening(normalized, partyNames, intakeRaw);
+  const ph = finalizeUserVisibleAgreementPlainText(normalized, {
     intakeRaw,
     partyNames,
     agreementFamily: null,
