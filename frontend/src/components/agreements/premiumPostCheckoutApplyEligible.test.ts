@@ -45,6 +45,16 @@ describe("premiumPostCheckoutApplyEligible", () => {
     ).toBe(false);
   });
 
+  it("authoritativePremiumPipelineResultForUiApply is true when needs_details advisory but corpus is authoritative", () => {
+    expect(
+      authoritativePremiumPipelineResultForUiApply(
+        mockAuthoritativeResult({
+          proIntentGateMessage: "Add specifics, then tap Retry Pro draft.",
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it("authoritativePremiumCompletionMatchesSession requires agreementGenerationId match", () => {
     const r = mockAuthoritativeResult({ agreementGenerationId: "gen-a" });
     expect(authoritativePremiumCompletionMatchesSession(r, "gen-a")).toBe(true);

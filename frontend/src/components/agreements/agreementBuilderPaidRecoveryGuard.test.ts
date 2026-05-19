@@ -21,6 +21,7 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
     const m = src.match(/const showStarterProRefineUpsell = useMemo\(\(\) => \{([\s\S]*?)\}, \[/);
     expect(m, "showStarterProRefineUpsell useMemo block").not.toBeNull();
     expect(m![1].trimStart()).toMatch(/^\s*if \(hasPaidPremiumCompletionSession\(\)\) return false;/);
+    expect(m![1]).toContain("if (authoritativePremiumUiCommitted) return false;");
   });
 
   it("free starter review surface is false when paid completion session is active", () => {
@@ -84,6 +85,10 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   it("suppresses amber recovery while premium return wait is active (patience / in-flight)", () => {
     expect(src).toContain("const premiumReturnWaitActive = Boolean(");
     expect(src).toMatch(/showProAmberRecoveryPanel = Boolean\([\s\S]*?!premiumReturnWaitActive/);
+  });
+
+  it("suppresses amber recovery when authoritative premium UI is committed", () => {
+    expect(src).toMatch(/showProAmberRecoveryPanel = Boolean\([\s\S]*?!authoritativePremiumUiCommitted/);
   });
 
   it("120s hard ceiling defers to patience extended when authoritative request is in flight", () => {

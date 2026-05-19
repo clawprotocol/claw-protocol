@@ -427,8 +427,15 @@ import {
   emitPremiumRenderResolveLog,
   isAuthoritativePremiumPipelineRenderSource,
   resolvePremiumRenderSource,
+  type PremiumRenderResolveSource,
 } from "./premiumRenderSourceResolver";
 import { shouldImmediateAuthoritativePremiumCommit } from "./premiumImmediateAuthoritativeCommitGate";
+import {
+  cleanPremiumUrlAfterAuthoritativeCommit,
+  logPremiumAuthoritativeCommit,
+  logPremiumFallbackSuppressed,
+  resolveAuthoritativePremiumCommitted,
+} from "./premiumAuthoritativeCommitted";
 import {
   authoritativePremiumCompletionMatchesSession,
   authoritativePremiumPipelineResultForUiApply,
@@ -4061,7 +4068,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumTruthPipelineSource(result.premiumRenderSource);
         return;
       }
-      if (result.proIntentGateMessage || result.founderDetailsGateMessage) {
+      if (
+        (result.proIntentGateMessage || result.founderDetailsGateMessage) &&
+        !authoritativePremiumPipelineResultForUiApply(result)
+      ) {
         setProFullDraftCustomGateMessage(result.proIntentGateMessage || result.founderDetailsGateMessage || null);
         setProFullDraftQualityRetry(true);
         setPremiumPostCheckoutPhase(null);
@@ -4601,6 +4611,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           createUiStage: String(CreateUiStage.DRAFT),
           displayPhase: "review",
         });
+        logPremiumAuthoritativeCommit({
+          bodyLen: opts.acceptedPlainLen,
+          source: pipelineSource,
+          generationOutcome: opts.reason?.includes("needs") ? "needs_details" : "ok",
+        });
+        logPremiumFallbackSuppressed("authoritative_doc_present");
+        cleanPremiumUrlAfterAuthoritativeCommit();
         window.requestAnimationFrame(() => {
           bumpPremiumSurfaceGateTick();
           setReviewDocRefreshTick((n) => n + 1);
@@ -4757,7 +4774,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           return;
         }
-        if (result.proIntentGateMessage || result.founderDetailsGateMessage) {
+        if (
+          (result.proIntentGateMessage || result.founderDetailsGateMessage) &&
+          !authoritativePremiumPipelineResultForUiApply(result)
+        ) {
           setPremiumServerGenerationDegraded(null);
           setProFullDraftCustomGateMessage(
             result.proIntentGateMessage || result.founderDetailsGateMessage || null,
@@ -4998,7 +5018,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             qualityRetryActive: false,
             serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
           });
-          if (!fin.ok && !authoritativePremiumPipelineResultForUiApply(result)) {
+          const authoritativeCommittedForGate = resolveAuthoritativePremiumCommitted({
+            winningPremiumBodyText: winning,
+            premiumRenderSource: result.premiumRenderSource,
+            premiumRenderResolveSource: resolvedPersist.premium_render_source,
+            generationOutcome: result.serverGenerationDegraded ? "degraded" : "needs_details",
+          });
+          if (!fin.ok && !authoritativeCommittedForGate.committed) {
             setPremiumServerGenerationDegraded(null);
             if (contractIc.pro_strict) {
               const d = buildPremiumDetailsGateCopy(contractIc, fin.gate?.validation.reasons ?? fin.reasons);
@@ -8933,6 +8959,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
 
+  const authoritativePremiumUiCommitted = useMemo(() => {
+    const snap = readPremiumCompletionSnapshot();
+    return resolveAuthoritativePremiumCommitted({
+      winningPremiumBodyText:
+        lastPremiumWinningCorpusRef.current ||
+        premiumPipelineOutputBodyRef.current ||
+        snap?.premiumWinningBodyText,
+      premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+      premiumRenderResolveSource: snap?.premiumRenderResolveSource,
+      agreementDocumentText,
+      snapshot: snap,
+    }).committed;
+  }, [
+    agreementDocumentText,
+    premiumTruthPipelineSource,
+    premiumPersistedFlowActive,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
+
   /** Paid Pro body present: `displayPhase` must never be `intake` (guard below). */
   const guardProDocumentDisplayPhase = useMemo(
     () =>
@@ -8969,6 +9015,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    */
   const isFreeStarterReviewSurface = useMemo(() => {
     if (hasPaidPremiumCompletionSession()) return false;
+    if (authoritativePremiumUiCommitted) return false;
     if (paidProAuthoritative) return false;
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return false;
     if (showUpgradeToFullDraftOnReview) return true;
@@ -8995,6 +9042,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPersistedFlowActive,
     premiumSurfaceGateTick,
     paidProAuthoritative,
+    authoritativePremiumUiCommitted,
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
@@ -9261,6 +9309,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showStarterProRefineUpsell = useMemo(() => {
     if (hasPaidPremiumCompletionSession()) return false;
+    if (authoritativePremiumUiCommitted) return false;
     if (paidProAuthoritative) return false;
     if (suppressIntakePremiumUpsell) return false;
     if (proAgreementEntitled) return false;
@@ -9281,6 +9330,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPaidDocumentSurface,
     premiumSurfaceGateTick,
     paidProAuthoritative,
+    authoritativePremiumUiCommitted,
   ]);
 
   useEffect(() => {
@@ -10437,6 +10487,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
       });
       if (!vPick.ok) {
+        const snapWin = (snapObj?.premiumWinningBodyText || snapObj?.premiumReadonlyPlainText || "").trim();
+        const snapAuthoritative =
+          Boolean(snapObj?.premiumAccepted) &&
+          isAuthoritativePremiumPipelineRenderSource(String(snapObj?.premiumPipelineRenderSource || "")) &&
+          snapWin.length >= 500;
+        if (snapAuthoritative) {
+          return {
+            ...pick,
+            plainText: snapWin,
+            sourceUsed:
+              (snapObj?.premiumRenderResolveSource as PremiumRenderResolveSource) || "server_full_document_text",
+            audit: { ...pick.audit, selected: "server_full_document_text" },
+          };
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[premium-readonly] fact gate blocked display corpus", { reasons: vPick.reasons });
@@ -10592,18 +10656,76 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const hasUsablePaidBody = useMemo(
     () =>
       Boolean(
-        hasFullDraftAccess &&
-          premiumPersistedFlowActive &&
-          (premiumPaidReadonlyPick.plainText || "").trim().length >= 500,
+        authoritativePremiumUiCommitted ||
+          (hasFullDraftAccess &&
+            premiumPersistedFlowActive &&
+            (premiumPaidReadonlyPick.plainText || "").trim().length >= 500),
       ),
-    [hasFullDraftAccess, premiumPersistedFlowActive, premiumPaidReadonlyPick.plainText, reviewDocRefreshTick],
+    [
+      authoritativePremiumUiCommitted,
+      hasFullDraftAccess,
+      premiumPersistedFlowActive,
+      premiumPaidReadonlyPick.plainText,
+      reviewDocRefreshTick,
+    ],
   );
   const shouldShowPaidRetry = Boolean(
-    proFullDraftQualityRetry &&
+    !authoritativePremiumUiCommitted &&
+      proFullDraftQualityRetry &&
       !hasUsablePaidBody &&
       !paidProEditReturnResumeActive &&
       !(draft && draftAuditHasRecipientRecordedApproval(draft)),
   );
+
+  const authoritativePremiumRepairLoggedRef = useRef(false);
+  useEffect(() => {
+    if (!authoritativePremiumUiCommitted) {
+      authoritativePremiumRepairLoggedRef.current = false;
+      return;
+    }
+    if (proFullDraftQualityRetry) setProFullDraftQualityRetry(false);
+    if (proUpgradeUseStarterView) setProUpgradeUseStarterView(false);
+    if (premiumPostCheckoutPhase) setPremiumPostCheckoutPhase(null);
+    setPremiumAuthoritativeRequestInFlight(false);
+    premiumModalExtendedWaitActiveRef.current = false;
+    setPremiumCheckoutModalExtendedWait(false);
+    setPremiumReturnPatienceExtended(false);
+    const snap = readPremiumCompletionSnapshot();
+    const corpus = (
+      snap?.premiumWinningBodyText ||
+      lastPremiumWinningCorpusRef.current ||
+      premiumPipelineOutputBodyRef.current ||
+      ""
+    ).trim();
+    if (corpus.length >= 500 && agreementDocumentTextRef.current.trim().length < 500) {
+      const collapsed = collapseDuplicateEsignNoticesInFullPreview(corpus);
+      setAgreementDocumentText(collapsed);
+      agreementDocumentDirtyRef.current = false;
+      hydratedPremiumBodyRef.current = corpus;
+      setDisplayPhase("review");
+      setCreateFlowPhase("draft_ready_for_review");
+      setCreateUiStage(CreateUiStage.DRAFT);
+      setPreviewPaneRevealed(true);
+      bumpPremiumSurfaceGateTick();
+      resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply", force: true });
+    }
+    cleanPremiumUrlAfterAuthoritativeCommit();
+    if (!authoritativePremiumRepairLoggedRef.current) {
+      authoritativePremiumRepairLoggedRef.current = true;
+      logPremiumAuthoritativeCommit({
+        bodyLen: corpus.length,
+        source: snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current,
+        generationOutcome: "needs_details",
+      });
+      logPremiumFallbackSuppressed("authoritative_doc_present");
+    }
+  }, [
+    authoritativePremiumUiCommitted,
+    proFullDraftQualityRetry,
+    proUpgradeUseStarterView,
+    premiumPostCheckoutPhase,
+    bumpPremiumSurfaceGateTick,
+  ]);
 
   const premiumProTruthSnapshot = useMemo(() => {
     if (!hasFullDraftAccess || !premiumPersistedFlowActive) return null;
@@ -10617,7 +10739,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
       intakeText: i,
       draft: draft ?? null,
-      qualityRetryActive: shouldShowPaidRetry,
+      qualityRetryActive: authoritativePremiumUiCommitted ? false : shouldShowPaidRetry,
       serverGenerationDegraded: Boolean(premiumServerGenerationDegraded),
       allowPaidSubstantiveStitch: hasUsablePaidBody,
       stale: false,
@@ -10625,6 +10747,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     hasFullDraftAccess,
     premiumPersistedFlowActive,
+    authoritativePremiumUiCommitted,
     premiumPaidReadonlyPick.plainText,
     premiumPaidReadonlyPick.sourceUsed,
     currentPremiumMergedIntakeKey,
@@ -10655,12 +10778,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const canProceedWithPaidProDocument = useMemo(() => {
+    if (authoritativePremiumUiCommitted) return true;
     if (!premiumPaidDocumentSurface) return true;
     if (proUpgradeUseStarterView) return false;
     const t = (premiumPaidReadonlyPick.plainText || "").trim();
     if (t.length < 500) return false;
     return proTruthIsPremiumDocumentReady(premiumProTruthSnapshot);
-  }, [premiumPaidDocumentSurface, proUpgradeUseStarterView, premiumPaidReadonlyPick.plainText, premiumProTruthSnapshot]);
+  }, [
+    authoritativePremiumUiCommitted,
+    premiumPaidDocumentSurface,
+    proUpgradeUseStarterView,
+    premiumPaidReadonlyPick.plainText,
+    premiumProTruthSnapshot,
+  ]);
 
   /** “Continue to reviewer / signer” after checkout while still on DRAFT (before recipients). */
   const proCheckoutRecipientStageAdvanceAllowed = useMemo(() => {
@@ -10750,6 +10880,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
     if (premiumPaidDocumentSurface) {
+      if (authoritativePremiumUiCommitted) {
+        return { version: CHIP_VERSION_PRO, state: CHIP_STATE_COMMERCIAL };
+      }
       const pipe = (premiumTruthPipelineSource || lastPremiumPipelineRenderSourceRef.current || "").trim();
       const paidBodyRejected =
         shouldShowPaidRetry ||
@@ -10780,6 +10913,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     isFreeStreamlineDraftReview,
     premiumTruthPipelineSource,
     shouldShowPaidRetry,
+    authoritativePremiumUiCommitted,
   ]);
 
   /**
@@ -12608,19 +12742,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const stickyPrimaryButtonNativeDisabled = effectivePrimaryCtaDisabled && !stickyRecipientBlockedNudge;
   const blockedPreviewRenderSource =
     (premiumTruthPipelineSource || premiumPaidReadonlyPick.sourceUsed || lastPremiumPipelineRenderSourceRef.current || "").trim();
-  const showStrictRetryNeedsDetailsPanel = shouldShowRetryNeedsDetailsPanel({
-    proFullDraftQualityRetry: shouldShowPaidRetry,
-    premiumProTruthGate,
-  });
-  const showStrictBlockedDraftPreviewLabel = shouldShowBlockedDraftPreviewLabel({
-    premiumProTruthGate,
-    renderSource: blockedPreviewRenderSource,
-  });
+  const showStrictRetryNeedsDetailsPanel =
+    !authoritativePremiumUiCommitted &&
+    shouldShowRetryNeedsDetailsPanel({
+      proFullDraftQualityRetry: shouldShowPaidRetry,
+      premiumProTruthGate,
+    });
+  const showStrictBlockedDraftPreviewLabel =
+    !authoritativePremiumUiCommitted &&
+    shouldShowBlockedDraftPreviewLabel({
+      premiumProTruthGate,
+      renderSource: blockedPreviewRenderSource,
+    });
   const premiumReturnWaitActive = Boolean(
     premiumPostCheckoutPhase || premiumAuthoritativeRequestInFlightUi || premiumReturnPatienceExtended,
   );
   const showProAmberRecoveryPanel = Boolean(
     premiumPaidDocumentSurface &&
+      !authoritativePremiumUiCommitted &&
       !proUpgradeUseStarterView &&
       !canProceedWithPaidProDocument &&
       !premiumReturnWaitActive,
