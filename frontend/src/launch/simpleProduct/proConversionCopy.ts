@@ -74,7 +74,14 @@ export const CHECKOUT_PRO_HELPS_BULLETS: readonly string[] = [
 /** @deprecated Prefer {@link CHECKOUT_CTA} from checkoutTrustCopy.ts */
 export const CHECKOUT_CTA_LEGACY = "Unlock collaboration + send";
 
-export { CHECKOUT_CTA } from "./checkoutTrustCopy";
+export {
+  CHECKOUT_CTA,
+  CHECKOUT_CTA_ACTIVE_KEY,
+  CHECKOUT_CTA_ALL_VARIANT_STRINGS,
+  CHECKOUT_CTA_VARIANTS,
+  resolveCheckoutCta,
+} from "./checkoutTrustCopy";
+export type { CheckoutCtaVariantKey } from "./checkoutTrustCopy";
 export const CHECKOUT_FOOTER = "Secured checkout · Draft saved · Review before anything moves";
 
 export const EARN_HERO_TITLE = "Earn with LawDog";

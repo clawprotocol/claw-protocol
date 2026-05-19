@@ -52,7 +52,7 @@ describe("proConversionCopy", () => {
     expect(PRO_UPGRADE_PRO_BULLETS.length).toBeGreaterThan(0);
     expect(CHECKOUT_TITLE).toBe("Continue with Pro");
     expect(CHECKOUT_SUBTITLE).toMatch(/Review it before anything is shared, sent, or signed/i);
-    expect(CHECKOUT_CTA).toBe("Unlock Pro Agreement");
+    expect(CHECKOUT_CTA).toBe("Continue with Pro");
     expect(CHECKOUT_FOOTER).toMatch(/Review before anything moves/i);
     expect(DRAFT_LOADING_STRUCTURING).toBe("Structuring key terms…");
     expect(EARN_HERO_TITLE).toBe("Earn with LawDog");

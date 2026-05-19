@@ -2,11 +2,7 @@ import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { useDynamicConfig } from "../../config/dynamicConfig/useDynamicConfig";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalytics";
-import {
-  CHECKOUT_STARTER_UPGRADE_AFTER_PAYMENT_LINE,
-  CHECKOUT_STARTER_UPGRADE_SUBTITLE,
-  resolveCheckoutFlowProgress,
-} from "./checkoutFlowProgress";
+import { CHECKOUT_STARTER_UPGRADE_SUBTITLE, resolveCheckoutFlowProgress } from "./checkoutFlowProgress";
 import { CHECKOUT_CTA, CHECKOUT_FOOTER, CHECKOUT_TITLE } from "./proConversionCopy";
 import { CheckoutTrustPanel } from "./CheckoutTrustPanel";
 import {
@@ -510,7 +506,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                 <span className="text-slate-200">{priceLine}</span>
               </p>
 
-              <div className={`mt-5 min-w-0 space-y-4 ${isCreateAgreementCheckout ? "sm:space-y-5" : ""}`}>
+              <div className={`mt-5 min-w-0 space-y-3 ${isCreateAgreementCheckout ? "sm:space-y-4" : ""}`}>
                 <CheckoutTrustPanel
                   surface="create_flow_checkout"
                   cadence={cadence}
@@ -606,11 +602,6 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
               >
                 DEV: one-click payment success into premium return flow (no real Stripe). Set
                 VITE_ENABLE_DEV_PAYMENT_BYPASS=0 to require demo card fields.
-              </p>
-            ) : null}
-            {isCreateAgreementCheckout ? (
-              <p className="mt-4 text-center text-sm leading-7 text-slate-300 sm:text-left sm:text-[15px]">
-                {CHECKOUT_STARTER_UPGRADE_AFTER_PAYMENT_LINE}
               </p>
             ) : null}
               </div>
