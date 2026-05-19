@@ -60,9 +60,14 @@ export function writeFullDraftUpgradeMarkerAgreementId(agreementId: string | nul
   }
 }
 
-export function clearCreateReviewAgreementResumeId(): void {
+/** Clears persisted agreement id only — keeps draft-ready marker and snapshot (checkout back / refresh). */
+export function clearCreateReviewAgreementResumeIdOnly(): void {
   writeCreateReviewAgreementResumeId(null);
   writeFullDraftUpgradeMarkerAgreementId(null);
+}
+
+export function clearCreateReviewAgreementResumeId(): void {
+  clearCreateReviewAgreementResumeIdOnly();
   clearCreateReviewDraftReadyMarker();
 }
 

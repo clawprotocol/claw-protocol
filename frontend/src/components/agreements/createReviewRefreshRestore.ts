@@ -1,3 +1,4 @@
+import { hasCheckoutBackRestoreSnapshot } from "./checkoutBackRestore";
 import {
   hasStoredCreateReviewState,
   readCreateReviewAgreementResumeId,
@@ -29,6 +30,10 @@ export function logReviewRefreshRegenerationSkipped(reason: ReviewRefreshRegener
 
 /** Skip home hero auto-generate when an in-tab review draft can be restored. */
 export function shouldSkipHomeAutoGenerateForStoredReview(): boolean {
+  if (hasCheckoutBackRestoreSnapshot()) {
+    logReviewRefreshRegenerationSkipped("stored_draft_ready_marker");
+    return true;
+  }
   if (!hasStoredCreateReviewState()) return false;
   if (readCreateReviewAgreementResumeId()) {
     logReviewRefreshRegenerationSkipped("stored_agreement_resume_id");

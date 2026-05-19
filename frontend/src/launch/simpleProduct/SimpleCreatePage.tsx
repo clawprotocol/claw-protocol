@@ -8,9 +8,14 @@ import AgreementBuilderIntake, {
 } from "../../components/agreements/AgreementBuilderIntake";
 import {
   clearCreateReviewAgreementResumeId,
-  hasStoredCreateReviewState,
   writeCreateReviewAgreementResumeId,
 } from "../../components/agreements/agreementIntakeStorage";
+import {
+  hasCheckoutBackRestoreSnapshot,
+  isCheckoutBackRestoreRequested,
+  readCheckoutBackRestoreSnapshot,
+} from "../../components/agreements/checkoutBackRestore";
+import { shouldSkipHomeAutoGenerateForStoredReview } from "../../components/agreements/createReviewRefreshRestore";
 import { setJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
 import {
   clearHeroIntakeHandoffAfterApply,
@@ -73,17 +78,31 @@ const STARTER_TEMPLATE =
 
 export function SimpleCreatePage() {
   const access = useAccess();
-  const { navigate } = useLaunchNav();
+  const { navigate, search } = useLaunchNav();
   const showFirstHints = useFirstSessionHint("create");
   const firstSessionLive = useMemo(() => isFirstLawdogSession(), []);
   const [starterSeed, setStarterSeed] = useState<string | undefined>(undefined);
   const [otherWaysOpen, setOtherWaysOpen] = useState(false);
   const [heroHandoff] = useState(() => readHeroIntakeHandoffForCreate());
   const handoffFromHome = heroHandoff?.fromHome ?? false;
+  const premiumCompletionReturn = useMemo(() => {
+    try {
+      return new URLSearchParams(search).get("premiumCompletion") === "1";
+    } catch {
+      return false;
+    }
+  }, [search]);
+  const checkoutBackRestoreActive = useMemo(
+    () =>
+      !premiumCompletionReturn &&
+      (isCheckoutBackRestoreRequested(search) || hasCheckoutBackRestoreSnapshot()),
+    [search, premiumCompletionReturn],
+  );
   const homeHeroAutoGenerate =
     heroHandoff?.autoGenerate === true &&
     Boolean((heroHandoff?.text || "").trim()) &&
-    !hasStoredCreateReviewState();
+    !shouldSkipHomeAutoGenerateForStoredReview() &&
+    !checkoutBackRestoreActive;
   const quickSendTypedArrival =
     heroHandoff?.quickSendTypedHandoff === true && Boolean((heroHandoff?.text || "").trim());
   const hadBrowserPromptDraft = useMemo(() => {
@@ -192,13 +211,19 @@ export function SimpleCreatePage() {
       : heroHandoff
         ? `free-hp-${heroHandoff.text.length}-${heroHandoff.voiceFinalize ? "v" : "t"}`
         : "free";
+  const checkoutRestoreSnapshot = useMemo(
+    () => (checkoutBackRestoreActive ? readCheckoutBackRestoreSnapshot() : null),
+    [checkoutBackRestoreActive],
+  );
   const initialFromHeroOrStorage = usingTemplate
     ? STARTER_TEMPLATE
     : pasteOnly
       ? ""
-      : heroHandoff
-        ? heroHandoff.text
-        : undefined;
+      : checkoutRestoreSnapshot?.intakeText?.trim()
+        ? checkoutRestoreSnapshot.intakeText
+        : heroHandoff
+          ? heroHandoff.text
+          : undefined;
 
   useEffect(() => {
     const seed =
@@ -210,11 +235,15 @@ export function SimpleCreatePage() {
 
   const prevIntakeKeyRef = useRef<string | null>(null);
   useEffect(() => {
+    if (checkoutBackRestoreActive) {
+      prevIntakeKeyRef.current = intakeKey;
+      return;
+    }
     if (prevIntakeKeyRef.current != null && prevIntakeKeyRef.current !== intakeKey) {
       clearCreateReviewAgreementResumeId();
     }
     prevIntakeKeyRef.current = intakeKey;
-  }, [intakeKey]);
+  }, [intakeKey, checkoutBackRestoreActive]);
 
   const simplifyFirstSession = firstSessionLive;
 
@@ -222,7 +251,9 @@ export function SimpleCreatePage() {
   const [shellLifecycleStage, setShellLifecycleStage] = useState<
     import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId
   >("draft");
-  const [homeTransitionVisible, setHomeTransitionVisible] = useState(homeHeroAutoGenerate);
+  const [homeTransitionVisible, setHomeTransitionVisible] = useState(
+    homeHeroAutoGenerate && !checkoutBackRestoreActive,
+  );
   const onSimpleCreateShellChrome = useCallback(
     (state: {
       paidProReviewReady: boolean;
@@ -536,6 +567,7 @@ export function SimpleCreatePage() {
               quickSendTypedArrival || homeHeroAutoGenerate ? DRAFT_LOADING_PREPARING : undefined
             }
             homeHeroAutoGenerate={homeHeroAutoGenerate}
+            checkoutBackRestoreActive={checkoutBackRestoreActive}
             onHomeGuidedTransitionPhase={homeHeroAutoGenerate ? onHomeGuidedTransitionPhase : undefined}
             continuitySourcePanel={
               quickSendTypedArrival && heroHandoff?.text

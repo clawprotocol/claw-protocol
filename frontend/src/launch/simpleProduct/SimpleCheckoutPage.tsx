@@ -24,6 +24,10 @@ import {
   resolveCheckoutTier,
   safeReturnToForAgreement,
 } from "../checkoutParams";
+import {
+  buildCreateReturnToWithStarterReviewRestore,
+  clearCheckoutBackRestoreSnapshot,
+} from "../../components/agreements/checkoutBackRestore";
 import { checkoutInvoiceUsd, formatMoneyUsdWhole } from "../pricingKeyMath";
 import { CONTEXTUAL_ONE_TIME_UNLOCK_USD } from "../paywallMessaging";
 import { checkoutPayloadFromPaywallAttribution, clearPaywallAttribution } from "../paywallAttribution";
@@ -282,6 +286,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         trackStarterProRefineCheckoutSuccessFromContext(upgradeCtx, String(tier.id));
         markAdvancedFullDraftCheckoutGranted();
         clearUpgradeCheckoutContext();
+        clearCheckoutBackRestoreSnapshot();
         markPaidPremiumCompletionSession();
       }
       const destination =
@@ -771,7 +776,17 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         <button
           type="button"
           className="text-sm font-medium text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
-          onClick={() => window.history.back()}
+          onClick={() => {
+            if (isCreateAgreementCheckout) {
+              navigate(buildCreateReturnToWithStarterReviewRestore());
+              return;
+            }
+            if (returnTo.startsWith("/app/create")) {
+              navigate(appendReturnToQueryParam(returnTo, "restore", "starterReview"));
+              return;
+            }
+            window.history.back();
+          }}
         >
           Back
         </button>

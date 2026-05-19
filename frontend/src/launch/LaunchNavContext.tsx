@@ -8,6 +8,7 @@ import {
   syncLawdogTrafficSourceFromSearch,
 } from "../tracking/lawdogSession";
 import { rememberAffiliateCodeFromPathname, rememberAffiliateCodeFromSearch } from "./affiliate/affiliateAttributionContext";
+import { hasCheckoutBackRestoreSnapshot } from "../components/agreements/checkoutBackRestore";
 import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
 import {
   isSimpleCheckoutPath,
@@ -68,7 +69,18 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
     const pathOnly = p.replace(/[?#].*$/, "");
     let state: Record<string, unknown> | null = null;
     if (pathOnly === "/app/create") {
-      if (options?.heroFromHome) {
+      const restoreStarterReview =
+        (() => {
+          try {
+            const u = new URL(p, "http://localhost");
+            return u.searchParams.get("restore") === "starterReview" || hasCheckoutBackRestoreSnapshot();
+          } catch {
+            return hasCheckoutBackRestoreSnapshot();
+          }
+        })();
+      if (restoreStarterReview) {
+        state = null;
+      } else if (options?.heroFromHome) {
         state = {
           clawHeroIntake: options.heroIntake ?? "",
           clawHeroFromHome: true,

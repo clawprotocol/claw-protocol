@@ -330,6 +330,7 @@ import {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
   clearAgreementCreatorIntakeStorage,
   clearCreateReviewAgreementResumeId,
+  clearCreateReviewAgreementResumeIdOnly,
   readCreateReviewDraftReadyMarker,
   readCreateReviewDraftSnapshot,
   readFullDraftUpgradeMarkerAgreementId,
@@ -348,6 +349,15 @@ import {
   logReviewRefreshRestore,
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
+import {
+  buildCreateReturnToWithStarterReviewRestore,
+  logCheckoutBackRegenerationSkipped,
+  logCheckoutBackRestoreApplied,
+  logCheckoutBackRestoreMiss,
+  logCheckoutBackRestoreStart,
+  persistStarterReviewBeforeCheckout,
+  readCheckoutBackRestoreSnapshot,
+} from "./checkoutBackRestore";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 import {
   clearPaidProEditReturnHandoff,
@@ -583,6 +593,8 @@ type Props = {
   firstLawdogSession?: boolean;
   /** Marketing homepage submitted with text — parse immediately into starter review (no second prompt step). */
   homeHeroAutoGenerate?: boolean;
+  /** Returning from Pro checkout Back — restore saved starter review without regenerating. */
+  checkoutBackRestoreActive?: boolean;
   /**
    * `/app/create` SimpleFlowShell: when authoritative paid Pro is in DRAFT-stage review, parent hides
    * starter hero/step 1 chrome (title, stepper, starter chips) without resetting intake stage.
@@ -1705,6 +1717,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   freshSimpleCreateStart = false,
   firstLawdogSession = false,
   homeHeroAutoGenerate = false,
+  checkoutBackRestoreActive = false,
   onSimpleCreateShellChrome,
   onHomeGuidedTransitionPhase,
 }) => {
@@ -1751,6 +1764,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const followUpDictationControlRef = useRef<VoiceDictationControl | null>(null);
   const productionResumeHydratedRef = useRef(false);
   const freeReviewSnapshotHydratedRef = useRef(false);
+  const checkoutBackRestoreHydratedRef = useRef(false);
   /** Paid Pro “Edit Draft” → /app/create: suppress auto-generate / Retry Pro until user edits inline. */
   const [paidProEditReturnResumeActive, setPaidProEditReturnResumeActive] = useState(false);
   const [followUpEnterReady, setFollowUpEnterReady] = useState(false);
@@ -1784,7 +1798,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Simple product funnel: `.vs01-shell` is the sole horizontal gate — never stack a 56rem “page rail” here (input, complexity gate, draft/review, continuity handoff all share this wrapper). */
   const simpleCreateWorkspaceOuterMaxClass =
     simpleProductFlow && liveWorkspaceTwoPane ? "max-w-none" : "max-w-[min(100%,56rem)]";
-  const [previewPaneRevealed, setPreviewPaneRevealed] = useState(() => homeHeroAutoGenerate);
+  const [previewPaneRevealed, setPreviewPaneRevealed] = useState(
+    () => homeHeroAutoGenerate || checkoutBackRestoreActive,
+  );
   const homeHeroAutoGenerateRef = useRef(homeHeroAutoGenerate);
   const homeAutoGenerateStartedRef = useRef(false);
   const homeAutoGenerateConsumedRef = useRef(false);
@@ -6517,7 +6533,50 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   useLayoutEffect(() => {
-    if (!homeHeroAutoGenerate || homeAutoGenerateStartedRef.current) return;
+    if (!checkoutBackRestoreActive || !createProductionTwoPane || !simpleProductFlow) return;
+    if (checkoutBackRestoreHydratedRef.current) return;
+    if (draft != null) {
+      checkoutBackRestoreHydratedRef.current = true;
+      return;
+    }
+    logCheckoutBackRestoreStart();
+    const snap = readCheckoutBackRestoreSnapshot();
+    if (!snap) {
+      logCheckoutBackRestoreMiss("no_snapshot");
+      return;
+    }
+    checkoutBackRestoreHydratedRef.current = true;
+    freeReviewSnapshotHydratedRef.current = true;
+    homeAutoGenerateConsumedRef.current = true;
+    logCheckoutBackRegenerationSkipped("saved_starter_review");
+    setDraft(snap.draft);
+    setMissing([]);
+    setFollowUpDetailTotal(0);
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setCreateFlowPhase("draft_ready_for_review");
+    setDraftNowCommitted(true);
+    setDisplayPhase("review");
+    setPreviewPaneRevealed(true);
+    setMobileWorkspacePane("preview");
+    if (snap.intakeText.trim()) {
+      setIntakeBaselineCommitted(snap.intakeText);
+      setIntakeStepBuffer(snap.intakeText);
+      setDebouncedStepBuffer(snap.intakeText);
+    }
+    logCheckoutBackRestoreApplied({
+      hasDraft: true,
+      hasPreview: Boolean(snap.previewText?.trim()),
+      inputLen: snap.intakeText.length,
+    });
+  }, [
+    checkoutBackRestoreActive,
+    createProductionTwoPane,
+    simpleProductFlow,
+    draft,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
     if (shouldSkipHomeAutoGenerateForStoredReview()) {
       homeAutoGenerateConsumedRef.current = true;
@@ -6547,6 +6606,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     })();
   }, [
     homeHeroAutoGenerate,
+    checkoutBackRestoreActive,
     initialIntakeText,
     paidProEditReturnResumeActive,
     runProductionLocalDraftParse,
@@ -6948,9 +7008,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       starterProRefineCtaExperiment: opts?.starterProRefineCtaExperiment,
     });
     persistPremiumRecipientHandoffFromDraftAndUi(pending);
+    persistStarterReviewBeforeCheckout({
+      intakeText: raw,
+      draft: pending,
+      previewText: agreementDocumentText,
+    });
     setAdvancedFullDraftPaywallOpen(false);
     const cadence = "annual";
-    const returnTo = encodeURIComponent("/app/create");
+    const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
     navigate(
       `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
@@ -7084,9 +7149,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       completionLabel: buildUpgradeCheckoutCompletionLabel(pending),
       intentSignals: detectUpgradeIntentSignals(`${raw}\n${wording}\n${agreementDocumentText}`),
     });
+    persistStarterReviewBeforeCheckout({
+      intakeText: raw,
+      draft: pending,
+      previewText: agreementDocumentText,
+    });
     setAdvancedFullDraftPaywallOpen(false);
     const cadence = "annual";
-    const returnTo = encodeURIComponent("/app/create");
+    const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
     navigate(
       `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
         cadence,
@@ -9608,15 +9678,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [createProductionTwoPane, simpleProductFlow, reviewAgreementId, draft]);
 
   useEffect(() => {
+    if (checkoutBackRestoreActive) return;
     if ((initialIntakeText ?? "").trim().length > 0) {
-      clearCreateReviewAgreementResumeId();
+      clearCreateReviewAgreementResumeIdOnly();
     }
-  }, [initialIntakeText]);
+  }, [initialIntakeText, checkoutBackRestoreActive]);
 
   useLayoutEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
     if (draft != null) return;
+    if (checkoutBackRestoreHydratedRef.current) return;
     if (freeReviewSnapshotHydratedRef.current || productionResumeHydratedRef.current) return;
+    if (checkoutBackRestoreActive) return;
     if (readCreateReviewAgreementResumeId()) return;
     if (!readCreateReviewDraftReadyMarker()) return;
     const snap = readCreateReviewDraftSnapshot<ParsedDraftShape>();
@@ -9637,10 +9710,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPreviewPaneRevealed(true);
     setMobileWorkspacePane("preview");
     homeAutoGenerateConsumedRef.current = true;
-  }, [createProductionTwoPane, simpleProductFlow, draft]);
+  }, [createProductionTwoPane, simpleProductFlow, draft, checkoutBackRestoreActive]);
 
   useEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow || !liveWorkspaceTwoPane) return;
+    if (checkoutBackRestoreActive) return;
     if (draft != null) return;
     if (productionResumeHydratedRef.current) return;
     const hid = readCreateReviewAgreementResumeId();
@@ -9811,6 +9885,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createProductionTwoPane,
     simpleProductFlow,
     liveWorkspaceTwoPane,
+    checkoutBackRestoreActive,
     draft,
     alignParsedWithCanonicalType,
     intakePartyRoleLabels,

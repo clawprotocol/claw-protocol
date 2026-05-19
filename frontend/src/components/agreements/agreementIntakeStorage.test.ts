@@ -1,16 +1,34 @@
-import { describe, expect, it } from "vitest";
-import { resolveIntakeBootstrap } from "./agreementIntakeStorage";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  clearCreateReviewAgreementResumeId,
+  clearCreateReviewAgreementResumeIdOnly,
+  readCreateReviewAgreementResumeId,
+  readCreateReviewDraftReadyMarker,
+  writeCreateReviewAgreementResumeId,
+  writeCreateReviewDraftReadyMarker,
+} from "./agreementIntakeStorage";
 
-describe("resolveIntakeBootstrap", () => {
-  it("uses persisted draft only when no explicit initial", () => {
-    expect(resolveIntakeBootstrap(undefined, "draft A")).toBe("draft A");
+describe("agreementIntakeStorage create review markers", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
   });
 
-  it("fresh payload B wins over persisted A (regression: second attempt from homepage)", () => {
-    expect(resolveIntakeBootstrap("draft B", "draft A")).toBe("draft B");
+  afterEach(() => {
+    clearCreateReviewAgreementResumeId();
   });
 
-  it("explicit empty string wins over storage (paste-only path)", () => {
-    expect(resolveIntakeBootstrap("", "draft A")).toBe("");
+  it("clearCreateReviewAgreementResumeIdOnly keeps draft-ready marker", () => {
+    writeCreateReviewAgreementResumeId("agr-123");
+    writeCreateReviewDraftReadyMarker();
+    clearCreateReviewAgreementResumeIdOnly();
+    expect(readCreateReviewAgreementResumeId()).toBeNull();
+    expect(readCreateReviewDraftReadyMarker()).toBe(true);
+  });
+
+  it("clearCreateReviewAgreementResumeId clears draft-ready marker", () => {
+    writeCreateReviewDraftReadyMarker();
+    clearCreateReviewAgreementResumeId();
+    expect(readCreateReviewDraftReadyMarker()).toBe(false);
   });
 });
