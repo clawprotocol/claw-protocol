@@ -129,6 +129,50 @@ describe("agreementTemplatePlaceholderSafety", () => {
     expect(detail.some((d) => d.fatal && (d.token.includes("{{") || /INSERT/i.test(d.token)))).toBe(true);
   });
 
+  it("treats [PARTY_NAME] in signature block as nonfatal without merged parties when intake names entities", () => {
+    const intake =
+      "Agreement between Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, Silver Mesa Analytics LP, and VertexGrid Technologies LLC.";
+    const raw = [
+      "AGREEMENT among Ironclad Systems Group LLC and Harborline Data Solutions Inc.",
+      "x".repeat(8000),
+      "SIGNATURES",
+      "Ironclad Systems Group LLC",
+      "Name: [PARTY_NAME]",
+      "Title: [TITLE]",
+      "Date: [DATE]",
+    ].join("\n");
+    const fin = finalizeUserVisibleAgreementPlainText(raw, {
+      intakeRaw: intake,
+      partyNames: null,
+      surface: "test",
+    });
+    expect(fin.ok, fin.remainingFatal.join("; ")).toBe(true);
+    expect(fin.remainingFatal).toHaveLength(0);
+  });
+
+  it("repairs [INITIALS] and [PARTY NAME] in signature blocks when parties resolve from intake", () => {
+    const intake =
+      "Agreement between Ironclad Systems Group LLC and Harborline Data Solutions Inc. Texas law.";
+    const raw = [
+      "AGREEMENT between Ironclad Systems Group LLC and Harborline Data Solutions Inc.",
+      "x".repeat(6500),
+      "SIGNATURES",
+      "Ironclad Systems Group LLC",
+      "By: [SIGNATURE]",
+      "Name: [NAME]",
+      "Initials: [INITIALS]",
+      "Party: [PARTY NAME]",
+      "Address: [ADDRESS]",
+    ].join("\n");
+    const fin = finalizeUserVisibleAgreementPlainText(raw, {
+      intakeRaw: intake,
+      partyNames: null,
+      surface: "test",
+    });
+    expect(fin.ok, fin.remainingFatal.join("; ")).toBe(true);
+    expect(fin.text).not.toMatch(/\[\s*INITIALS\s*\]/i);
+  });
+
   it("still flags mustache party placeholders when not in intake", () => {
     const raw = "Fees payable by {{party_name}} within 30 days.";
     const fin = finalizeUserVisibleAgreementPlainText(raw, {

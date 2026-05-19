@@ -5,7 +5,6 @@
 
 import {
   finalizeUserVisibleAgreementPlainText,
-  prepareAgreementTextForPlaceholderScan,
   resolvePlaceholderPartyNames,
 } from "./agreementTemplatePlaceholderSafety";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -126,15 +125,12 @@ export function rejectPremiumBodyForProRender(
     intakeRaw,
     partyNames: opts?.partyNames ?? null,
   });
-  const ph = finalizeUserVisibleAgreementPlainText(
-    prepareAgreementTextForPlaceholderScan((body || "").trim()),
-    {
-      intakeRaw,
-      partyNames,
-      agreementFamily: null,
-      surface: "rejectPremiumBodyForProRender",
-    },
-  );
+  const ph = finalizeUserVisibleAgreementPlainText((body || "").trim(), {
+    intakeRaw,
+    partyNames,
+    agreementFamily: null,
+    surface: "rejectPremiumBodyForProRender",
+  });
   if (!ph.ok) {
     return {
       ok: false,

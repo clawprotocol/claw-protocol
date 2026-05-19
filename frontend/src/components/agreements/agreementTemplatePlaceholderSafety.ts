@@ -7,6 +7,7 @@ import {
   extractAgreementEntityCandidates,
   substitutePartyPlaceholdersInUserFacingText,
 } from "../../agreement/partyPlaceholderDisplay";
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -33,6 +34,19 @@ export type PlaceholderTokenDecision = {
   contextSnippet: string;
   lineKind?: "signature" | "operative" | "preamble";
   sectionKind?: "signature" | "execution" | "operative";
+  nearestHeading?: string;
+};
+
+export type PlaceholderPartyResolution = {
+  names: string[];
+  partyCount: number;
+  anchorsFound: boolean;
+  sources: {
+    mergedParties: number;
+    intakeExtraction: number;
+    corpusBetween: number;
+    corpusAmong: number;
+  };
 };
 
 function phLog(kind: PhLogKind, payload: Record<string, unknown>): void {
@@ -46,16 +60,18 @@ function phLog(kind: PhLogKind, payload: Record<string, unknown>): void {
   }
 }
 
-export function logPlaceholderScanResult(payload: {
-  surface: string;
-  scannedCount: number;
-  fatalCount: number;
-  nonfatalCount: number;
-  repairedCount: number;
-  bodyLen: number;
-  partyCount: number;
-  ok: boolean;
-}): void {
+export function logPlaceholderScanResult(
+  payload: {
+    surface: string;
+    scannedCount: number;
+    fatalCount: number;
+    nonfatalCount: number;
+    repairedCount: number;
+    bodyLen: number;
+    partyCount: number;
+    ok: boolean;
+  } & Partial<PlaceholderPartyResolution>,
+): void {
   if (import.meta.env.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[placeholder-scan-result]", payload);
@@ -64,31 +80,33 @@ export function logPlaceholderScanResult(payload: {
 export function logPlaceholderRejectDetail(
   decisions: PlaceholderTokenDecision[],
   surface: string,
+  partyResolution?: PlaceholderPartyResolution,
 ): void {
   if (import.meta.env.MODE === "test") return;
   const fatal = decisions.filter((d) => d.fatal);
   if (!fatal.length) return;
   // eslint-disable-next-line no-console
-  console.warn(
-    "[placeholder-reject-detail]",
-    fatal.slice(0, 12).map((d) => ({
+  console.warn("[placeholder-reject-detail]", {
+    surface,
+    partyAnchorsFound: partyResolution?.anchorsFound ?? null,
+    partyCount: partyResolution?.partyCount ?? null,
+    partySources: partyResolution?.sources ?? null,
+    items: fatal.slice(0, 12).map((d) => ({
       token: d.token,
       category: d.category,
       fatal: d.fatal,
-      contextSnippet: d.contextSnippet,
       lineKind: d.lineKind,
       sectionKind: d.sectionKind,
-      surface,
+      nearestHeading: d.nearestHeading,
+      contextSnippet: d.contextSnippet.slice(0, 120),
     })),
-  );
+  });
 }
 
 export type PlaceholderSafetyContext = {
-  /** Raw user intake — tokens literally present here are allowed to remain. */
   intakeRaw?: string | null;
   partyNames?: readonly (string | null | undefined)[] | null;
   agreementFamily?: string | null;
-  /** Where the text is shown or exported (metrics / logs). */
   surface: string;
 };
 
@@ -97,28 +115,23 @@ export type PlaceholderSafetyOutcome = {
   text: string;
   repaired: string[];
   remaining: string[];
-  /** Fatal tokens only (used for accept/reject). */
   remainingFatal: string[];
   remainingDetail: PlaceholderTokenDecision[];
+  partyResolution: PlaceholderPartyResolution;
 };
 
 const ALLOWED_BRACKET = /^\[not yet specified\]$/i;
 
-/**
- * Internal slot tokens with underscore and/or digit — excludes signature-line stubs like [NAME], [TITLE], [DATE].
- */
 const BRACKET_INTERNAL_SLOT_RE = /\[(?:[A-Z][A-Z0-9]*_\d+|[A-Z]{2,}_[A-Z0-9_]+)\]/g;
 
-/** Signature-block drafting stubs (repaired or ignored when real parties are present). */
 const SIGNATURE_LINE_BRACKET_RE =
-  /\[\s*(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|PRINTED\s*NAME|COMPANY\s*NAME|SIGNATORY(?:\s*NAME)?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:\s*CODE)?|POSTAL(?:\s*CODE)?|WITNESS(?:\s*NAME)?)\s*\]/gi;
+  /\[\s*(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|PRINTED[\s_]*NAME|COMPANY[\s_]*NAME|SIGNATORY(?:[\s_]*NAME)?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|WITNESS(?:[\s_]*NAME)?)\s*\]/gi;
 
-/** Party/signer metadata stubs in signature blocks — not operative [PARTY_1] slots. */
+/** Party/signer metadata stubs — [PARTY NAME], [PARTY_NAME], [CLIENT NAME], [CLIENT_NAME]. */
 const SIGNATURE_PARTY_LABEL_BRACKET_RE =
-  /\[\s*(?:(?:PARTY|CLIENT|COMPANY|COUNTERPARTY|ORGANIZATION|ORG)(?:\s*NAME)?(?:_\d+)?)\s*\]/gi;
+  /\[\s*(?:(?:PARTY|CLIENT|COMPANY|COUNTERPARTY|ORGANIZATION|ORG)(?:[\s_]*NAME)?(?:_\d+)?)\s*\]/gi;
 
-/** Uppercase bracket field labels not caught by narrower patterns. */
-const GENERIC_UPPER_BRACKET_RE = /\[[A-Z][A-Z0-9\s/&.'\-]{1,55}\]/g;
+const GENERIC_UPPER_BRACKET_RE = /\[[A-Z][A-Z0-9\s/&.'_\-]{1,55}\]/g;
 
 const INSERT_BRACKET_RE = /\[[^\]\n]{0,200}\b(?:insert|describe|tbd|to\s+be\s+(?:determined|completed|filled))[^\]\n]{0,200}\]/gi;
 const MUSTACHE_RE = /\{\{[\s\S]*?\}\}/g;
@@ -132,60 +145,120 @@ const ANGLE_LEGAL_STUB_RE =
   /<\s*[^>\n]{0,200}(?:customer|client|legal\s*name|party\s*name|tbd|placeholder|to\s+be\s+(?:completed|filled)|insert\s+here)[^>\n]{0,200}\s*>/gi;
 
 const SIGNATURE_REGION_MARKERS =
-  /\b(in witness whereof|signatures?|execution|counterparts?|authorized signatory|by:\s*$)\b/gi;
+  /\b(in witness whereof|signatures?|execution|counterparts?|authorized signatory|electronic signature|signed by)\b/gi;
+
+const EXECUTION_CONTEXT_RE =
+  /\b(in witness whereof|signatures?|execution|counterparts?|signed|signatory|authorized representative|electronic signature|witness|counterpart)\b/i;
+
+const EXECUTION_LINE_LABEL_RE = /\b(by|name|title|date|email|initials?|witness|signature)\s*:/i;
+
+const OPERATIVE_SECTION_HEADING_RE =
+  /\b(?:payment|fees?|compensation|scope|services|deliverables|confidential|indemnif|governing law|termination|liability|limitation of liability|intellectual property|notices?|dispute|warranty|representations)\b/i;
 
 const SOFT_SIGNATURE_LABEL_RE =
-  /^(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:\s*CODE)?|POSTAL(?:\s*CODE)?|PRINTED\s*NAME|COMPANY\s*NAME|SIGNATORY(?:\s*NAME)?|PARTY\s*NAME|LEGAL\s*NAME|COUNTERPARTY(?:\s*NAME)?|WITNESS(?:\s*NAME)?)$/i;
+  /^(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|PRINTED[\s_]*NAME|COMPANY[\s_]*NAME|SIGNATORY(?:[\s_]*NAME)?|PARTY[\s_]*NAME|CLIENT[\s_]*NAME|COUNTERPARTY(?:[\s_]*NAME)?|LEGAL[\s_]*NAME|WITNESS(?:[\s_]*NAME)?)$/i;
 
-const SOFT_PREAMBLE_LABEL_RE = /^(?:DATE\s+OF\s+AGREEMENT|EFFECTIVE\s+DATE|AGREEMENT\s+DATE)$/i;
+const SOFT_PREAMBLE_LABEL_RE = /^(?:DATE[\s_]*OF[\s_]*AGREEMENT|EFFECTIVE[\s_]*DATE|AGREEMENT[\s_]*DATE)$/i;
 
-const FATAL_OPERATIVE_BRACKET_RE =
-  /\b(?:PARTY_\d+|ORG_\d+|INSERT|DESCRIBE|TBD|TO\s+BE\s+DETERMINED|AMOUNT|FEE|SCHEDULE)\b/i;
-
-/** Strip minimal HTML to plain text for placeholder scanning (mirrors backend). */
+/** Strip minimal HTML to plain text for placeholder scanning (preserves line breaks). */
 export function stripHtmlAgreementScanText(html: string): string {
   return String(html || "")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr)>\s*/gi, "\n")
     .replace(/<[^>]+>/g, " ")
-    .replace(/\u00a0/g, " ");
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .replace(/[ \t]{2,}/g, " ");
 }
 
 function looksLikeHtmlDocument(text: string): boolean {
   return /<(html|body|div|p|span|br|h[1-6]|table|ul|ol|li|section|article)\b/i.test(text);
 }
 
-/** Normalize agreement text before placeholder scan/repair (strip HTML when present). */
 export function prepareAgreementTextForPlaceholderScan(text: string): string {
   const raw = String(text || "");
   if (!raw.trim()) return "";
   if (looksLikeHtmlDocument(raw)) {
-    return stripHtmlAgreementScanText(raw).replace(/\u00a0/g, " ");
+    return stripHtmlAgreementScanText(raw);
   }
   return raw.replace(/\u00a0/g, " ");
 }
 
-function normPartyNames(ctx: Pick<PlaceholderSafetyContext, "partyNames">): string[] {
-  return (ctx.partyNames || [])
+function normPartyNames(partyNames?: readonly (string | null | undefined)[] | null): string[] {
+  return (partyNames || [])
     .map((n) => String(n ?? "").replace(/\s+/g, " ").trim())
     .filter((n) => n.length > 0);
 }
 
-/** Merge structured party list with intake-derived entity candidates for repair/anchors. */
+function pushUniqueParty(out: string[], seen: Set<string>, name: string) {
+  const t = name.replace(/\s+/g, " ").trim();
+  if (t.length < 2) return;
+  const low = t.toLowerCase();
+  if (seen.has(low)) return;
+  seen.add(low);
+  out.push(t);
+}
+
+function extractPartyNamesFromCorpusBetween(text: string): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const n of extractBetweenPartyNameList(text)) pushUniqueParty(names, seen, n);
+  const amongRe =
+    /\b(?:by and among|entered into by and among|among)\s+([^\n.]{12,900})/gi;
+  for (const m of text.matchAll(amongRe)) {
+    const clause = m[1] || "";
+    const split = clause.split(/\s*,\s*|\s+and\s+/i);
+    for (const part of split) pushUniqueParty(names, seen, part);
+  }
+  return names;
+}
+
+/** Unified party resolver — same sources for preview + reject paths. */
 export function resolvePlaceholderPartyNames(
   ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
+  corpusText?: string | null,
 ): string[] {
-  const fromOpts = normPartyNames(ctx);
+  return resolvePlaceholderPartyNamesWithMeta(ctx, corpusText).names;
+}
+
+export function resolvePlaceholderPartyNamesWithMeta(
+  ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
+  corpusText?: string | null,
+): PlaceholderPartyResolution {
+  const merged = normPartyNames(ctx.partyNames);
   const fromIntake = extractAgreementEntityCandidates(String(ctx.intakeRaw || ""));
-  const merged: string[] = [];
+  const fromBetween = corpusText ? extractPartyNamesFromCorpusBetween(corpusText) : [];
+  const names: string[] = [];
   const seen = new Set<string>();
-  for (const n of [...fromOpts, ...fromIntake]) {
-    const low = n.toLowerCase();
-    if (seen.has(low)) continue;
-    seen.add(low);
-    merged.push(n);
+  let mergedParties = 0;
+  let intakeExtraction = 0;
+  let corpusBetween = 0;
+  for (const n of merged) {
+    const before = seen.size;
+    pushUniqueParty(names, seen, n);
+    if (seen.size > before) mergedParties += 1;
   }
-  return merged;
+  for (const n of fromIntake) {
+    const before = seen.size;
+    pushUniqueParty(names, seen, n);
+    if (seen.size > before) intakeExtraction += 1;
+  }
+  for (const n of fromBetween) {
+    const before = seen.size;
+    pushUniqueParty(names, seen, n);
+    if (seen.size > before) corpusBetween += 1;
+  }
+  const corpusAmong = 0;
+  const anchorsFound = corpusHasResolvedPartyAnchors(corpusText || "", names, ctx.intakeRaw);
+  return {
+    names,
+    partyCount: names.length,
+    anchorsFound,
+    sources: { mergedParties, intakeExtraction, corpusBetween, corpusAmong },
+  };
 }
 
 function intakeAllowsToken(intakeRaw: string | null | undefined, token: string): boolean {
@@ -200,6 +273,8 @@ function resolvedPartyAnchorCount(text: string, partyNames: string[], intakeRaw?
   if (n >= 2) return n;
   const fromIntake = extractAgreementEntityCandidates(String(intakeRaw || t));
   n = Math.max(n, fromIntake.filter((p) => t.includes(p)).length);
+  if (n >= 2) return n;
+  n = Math.max(n, extractPartyNamesFromCorpusBetween(t).filter((p) => t.includes(p)).length);
   return n;
 }
 
@@ -213,7 +288,6 @@ export function corpusHasResolvedPartyAnchors(
   return /\b(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?|LP)\b/.test(t) && t.length >= 3_000;
 }
 
-/** True when index lies in the tail signature / execution block of a long agreement. */
 export function isInSignatureRegion(text: string, index: number): boolean {
   const head = (text || "").slice(0, Math.max(0, index));
   let lastMarker = -1;
@@ -221,82 +295,117 @@ export function isInSignatureRegion(text: string, index: number): boolean {
     if (m.index != null) lastMarker = Math.max(lastMarker, m.index);
   }
   if (lastMarker < 0) {
-    const witness = head.lastIndexOf("IN WITNESS");
+    const witness = head.search(/\bIN WITNESS\b/i);
     if (witness >= 0) lastMarker = witness;
+  }
+  if (lastMarker < 0) {
+    const sigHeading = head.search(/\bSIGNATURES?\b/i);
+    if (sigHeading >= 0 && (text.length - sigHeading) < 15_000) lastMarker = sigHeading;
   }
   if (lastMarker < 0) return false;
   const tailLen = (text || "").length - lastMarker;
-  return index >= lastMarker && tailLen <= 12_000;
+  return index >= lastMarker && tailLen <= 15_000;
 }
 
 function bracketInner(token: string): string {
-  return token.replace(/^\[|\]$/g, "").trim();
+  return token.replace(/^\[|\]$/g, "").replace(/_/g, " ").trim();
 }
 
-function contextSnippet(text: string, index: number, radius = 48): string {
+function contextSnippet(text: string, index: number, radius = 60): string {
   const start = Math.max(0, index - radius);
   const end = Math.min(text.length, index + radius);
   return text.slice(start, end).replace(/\s+/g, " ").trim();
 }
 
-function sectionKindForIndex(text: string, index: number): PlaceholderTokenDecision["sectionKind"] {
-  if (isInSignatureRegion(text, index)) return "signature";
-  if (index < Math.min(2_500, text.length * 0.12)) return "operative";
-  return "operative";
+export function nearestSectionHeading(text: string, index: number): string {
+  const head = text.slice(0, Math.max(0, index));
+  const lines = head.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (line.length < 3) continue;
+    if (/^(?:\d+[\.)]\s+)?[A-Z][A-Z0-9\s/&\-]{2,60}$/.test(line)) return line.slice(0, 80);
+    if (/^(?:ARTICLE|SECTION|SCHEDULE)\s+[IVX\d]+/i.test(line)) return line.slice(0, 80);
+  }
+  return "";
 }
 
 function lineKindForIndex(text: string, index: number): PlaceholderTokenDecision["lineKind"] {
   const lineStart = text.lastIndexOf("\n", index) + 1;
   const lineEnd = text.indexOf("\n", index);
   const line = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
-  if (/\b(by|signature|name|title|date|email|initials?)\s*:/i.test(line)) return "signature";
+  if (EXECUTION_LINE_LABEL_RE.test(line)) return "signature";
   if (isInSignatureRegion(text, index)) return "signature";
-  if (index < 2_500) return "preamble";
+  if (index < 2_800) return "preamble";
   return "operative";
 }
 
-function isSignatureLineBracketToken(token: string): boolean {
+function sectionKindForIndex(text: string, index: number): PlaceholderTokenDecision["sectionKind"] {
+  if (isInSignatureRegion(text, index) || isExecutionSignatureContext(text, index)) {
+    return "signature";
+  }
+  return "operative";
+}
+
+/** Execution/signature block context — does not require party anchors. */
+export function isExecutionSignatureContext(text: string, index: number): boolean {
+  if (isInSignatureRegion(text, index)) return true;
+  const lineStart = text.lastIndexOf("\n", index) + 1;
+  const lineEnd = text.indexOf("\n", index);
+  const line = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+  if (EXECUTION_LINE_LABEL_RE.test(line)) return true;
+  const window = text.slice(Math.max(0, index - 700), Math.min(text.length, index + 250));
+  if (EXECUTION_CONTEXT_RE.test(window)) return true;
+  const heading = nearestSectionHeading(text, index);
+  if (heading && /\b(SIGNATURE|EXECUTION|WITNESS|COUNTERPART)\b/i.test(heading)) return true;
+  const tailStart = Math.floor(text.length * 0.72);
+  if (index >= tailStart && EXECUTION_LINE_LABEL_RE.test(window)) return true;
+  return false;
+}
+
+function isNearOperativeSectionHeading(text: string, index: number): boolean {
+  const heading = nearestSectionHeading(text, index);
+  if (!heading) return false;
+  return OPERATIVE_SECTION_HEADING_RE.test(heading);
+}
+
+function isSignatureFieldLabel(inner: string): boolean {
+  const n = inner.replace(/_/g, " ").trim();
+  return SOFT_SIGNATURE_LABEL_RE.test(n) || SOFT_PREAMBLE_LABEL_RE.test(n);
+}
+
+export function isSignatureLineBracketToken(token: string): boolean {
   SIGNATURE_LINE_BRACKET_RE.lastIndex = 0;
   if (SIGNATURE_LINE_BRACKET_RE.test(token)) return true;
   SIGNATURE_PARTY_LABEL_BRACKET_RE.lastIndex = 0;
   if (SIGNATURE_PARTY_LABEL_BRACKET_RE.test(token)) return true;
   const inner = bracketInner(token);
-  return SOFT_SIGNATURE_LABEL_RE.test(inner) || SOFT_PREAMBLE_LABEL_RE.test(inner);
-}
-
-function isSoftFieldBracketToken(
-  token: string,
-  text: string,
-  index: number,
-  anchorsOk: boolean,
-): boolean {
-  if (!anchorsOk) return false;
-  const inner = bracketInner(token);
-  if (SOFT_SIGNATURE_LABEL_RE.test(inner)) return true;
-  if (SOFT_PREAMBLE_LABEL_RE.test(inner) && index < 3_500) return true;
-  const inSig = isInSignatureRegion(text, index);
-  if (inSig && /^(?:PARTY|CLIENT|COMPANY|COUNTERPARTY|ORG)(?:\s*NAME)?(?:_\d+)?$/i.test(inner)) {
-    return true;
-  }
-  if (inSig && /^(?:ADDRESS|CITY|STATE|ZIP)$/i.test(inner)) return true;
-  const ctx = contextSnippet(text, index, 32).toLowerCase();
-  if (
-    inSig &&
-    /\b(?:by|signature|name|title|date|email|initials?)\s*:/.test(ctx) &&
-    SOFT_SIGNATURE_LABEL_RE.test(inner)
-  ) {
-    return true;
-  }
-  return false;
+  return isSignatureFieldLabel(inner);
 }
 
 function isInternalPartySlotToken(token: string): boolean {
-  return /\b(?:PARTY|ORG|CLIENT|COMPANY|COUNTERPARTY)_\d+\b/i.test(token);
+  return /\b(?:PARTY|ORG)_\d+\b/i.test(token);
 }
 
-/**
- * Classify a matched fragment for logging and fatal vs nonfatal gating.
- */
+function isOperativeMaterialPlaceholder(token: string, text: string, index: number): boolean {
+  const inner = bracketInner(token);
+  if (INSERT_BRACKET_RE.test(token)) return true;
+  if (MUSTACHE_RE.test(token) || SINGLE_BRACE_TOKEN_RE.test(token)) return true;
+  if (ANGLE_LEGAL_STUB_RE.test(token) || ANGLE_INSERT_RE.test(token)) return true;
+  if (isInternalPartySlotToken(token) && !isExecutionSignatureContext(text, index)) return true;
+  if (
+    /\b(?:CLIENT|COMPANY|COUNTERPARTY)[\s_]*NAME\b/i.test(inner) &&
+    !isExecutionSignatureContext(text, index)
+  ) {
+    return true;
+  }
+  if (/^CLIENT[\s_]*NAME$/i.test(inner) && isNearOperativeSectionHeading(text, index)) {
+    return true;
+  }
+  if (/^EFFECTIVE[\s_]*DATE$/i.test(inner) && isNearOperativeSectionHeading(text, index)) return true;
+  if (/\b(?:INSERT|DESCRIBE)\b/i.test(inner)) return true;
+  return false;
+}
+
 export function classifyTemplateFragment(
   token: string,
   text: string,
@@ -305,53 +414,48 @@ export function classifyTemplateFragment(
 ): PlaceholderTokenDecision {
   const partyNames = opts?.partyNames ?? [];
   const intakeRaw = opts?.intakeRaw ?? null;
-  const inSig = isInSignatureRegion(text, index);
+  const inExec = isExecutionSignatureContext(text, index);
   const anchorsOk = corpusHasResolvedPartyAnchors(text, partyNames, intakeRaw);
+  const nearestHeading = nearestSectionHeading(text, index);
   const snippet = contextSnippet(text, index);
   const lineKind = lineKindForIndex(text, index);
   const sectionKind = sectionKindForIndex(text, index);
 
-  const base = {
-    token,
-    contextSnippet: snippet,
-    lineKind,
-    sectionKind,
-  };
+  const base = { token, contextSnippet: snippet, lineKind, sectionKind, nearestHeading };
 
-  if (isSignatureLineBracketToken(token) || isSoftFieldBracketToken(token, text, index, anchorsOk)) {
-    return {
-      ...base,
-      category: isSignatureLineBracketToken(token) ? "signature_line_stub" : "soft_field_label",
-      fatal: false,
-    };
+  if (isOperativeMaterialPlaceholder(token, text, index) && !inExec) {
+    if (INSERT_BRACKET_RE.test(token)) {
+      return { ...base, category: "insert_stub", fatal: true };
+    }
+    if (MUSTACHE_RE.test(token) || SINGLE_BRACE_TOKEN_RE.test(token)) {
+      return { ...base, category: "mustache", fatal: true };
+    }
+    if (ANGLE_LEGAL_STUB_RE.test(token) || ANGLE_INSERT_RE.test(token)) {
+      return { ...base, category: "angle_stub", fatal: true };
+    }
+    return { ...base, category: "internal_slot", fatal: true };
   }
+
+  if (isSignatureLineBracketToken(token) || (inExec && isSignatureFieldLabel(bracketInner(token)))) {
+    return { ...base, category: "signature_line_stub", fatal: false };
+  }
+
   if (BRACKET_INTERNAL_SLOT_RE.test(token)) {
     BRACKET_INTERNAL_SLOT_RE.lastIndex = 0;
     const partySlot = isInternalPartySlotToken(token);
     const nameStyleSlot = /\b(?:PARTY|CLIENT|COMPANY|COUNTERPARTY|ORG)(?:_NAME|_LEGAL_NAME)\b/i.test(token);
-    if (anchorsOk && (inSig || lineKind === "signature") && (partySlot || nameStyleSlot)) {
-      return {
-        ...base,
-        category: "signature_region_slot",
-        fatal: false,
-      };
+    if (inExec && (partySlot || nameStyleSlot || isSignatureFieldLabel(bracketInner(token)))) {
+      return { ...base, category: "signature_region_slot", fatal: false };
     }
-    if (anchorsOk && nameStyleSlot && !FATAL_OPERATIVE_BRACKET_RE.test(bracketInner(token))) {
-      return {
-        ...base,
-        category: "soft_field_label",
-        fatal: false,
-      };
+    if (anchorsOk && (inExec || lineKind === "signature") && (partySlot || nameStyleSlot)) {
+      return { ...base, category: "signature_region_slot", fatal: false };
     }
-    return {
-      ...base,
-      category: "internal_slot",
-      fatal: true,
-    };
+    return { ...base, category: "internal_slot", fatal: true };
   }
+
   if (INSERT_BRACKET_RE.test(token)) {
     INSERT_BRACKET_RE.lastIndex = 0;
-    return { ...base, category: "insert_stub", fatal: true };
+    return { ...base, category: "insert_stub", fatal: !inExec };
   }
   if (MUSTACHE_RE.test(token) || SINGLE_BRACE_TOKEN_RE.test(token)) {
     MUSTACHE_RE.lastIndex = 0;
@@ -360,7 +464,7 @@ export function classifyTemplateFragment(
   }
   if (DRAFTING_STUB_PHRASE_RE.test(token)) {
     DRAFTING_STUB_PHRASE_RE.lastIndex = 0;
-    return { ...base, category: "drafting_phrase", fatal: !inSig };
+    return { ...base, category: "drafting_phrase", fatal: !inExec };
   }
   if (SCHEDULE_STUB_RE.test(token)) {
     SCHEDULE_STUB_RE.lastIndex = 0;
@@ -371,71 +475,69 @@ export function classifyTemplateFragment(
     ANGLE_INSERT_RE.lastIndex = 0;
     return { ...base, category: "angle_stub", fatal: true };
   }
-  const inner = bracketInner(token);
+
   if (token.startsWith("[") && token.endsWith("]")) {
-    if (isSoftFieldBracketToken(token, text, index, anchorsOk)) {
+    const inner = bracketInner(token);
+    if (inExec && isSignatureFieldLabel(inner)) {
       return { ...base, category: "soft_field_label", fatal: false };
     }
-    if (FATAL_OPERATIVE_BRACKET_RE.test(inner) && !inSig) {
-      return { ...base, category: "other", fatal: true };
-    }
-    if (inSig && anchorsOk && SOFT_SIGNATURE_LABEL_RE.test(inner)) {
-      return { ...base, category: "signature_line_stub", fatal: false };
+    if (SOFT_PREAMBLE_LABEL_RE.test(inner.replace(/_/g, " ")) && index < 4_000) {
+      return { ...base, category: "soft_field_label", fatal: false };
     }
   }
-  return { ...base, category: "other", fatal: true };
+
+  return { ...base, category: "other", fatal: !inExec };
 }
 
-/** Replace signature-line bracket stubs when the body already names real parties. */
-function repairSignatureLinePlaceholders(
+function repairBracketInExecutionContext(
   text: string,
-  partyNames: string[],
-  intakeRaw?: string | null,
+  re: RegExp,
+  repairKey: string,
 ): { text: string; repaired: string[] } {
-  if (!corpusHasResolvedPartyAnchors(text, partyNames, intakeRaw)) {
-    return { text, repaired: [] };
-  }
   const repaired: string[] = [];
-  let out = text.replace(SIGNATURE_LINE_BRACKET_RE, (match) => {
-    repaired.push(`sig_line:${match.trim()}`);
-    return "_________________________";
-  });
-  out = out.replace(SIGNATURE_PARTY_LABEL_BRACKET_RE, (match) => {
-    repaired.push(`sig_party_label:${match.trim()}`);
+  const out = text.replace(re, (match, offset) => {
+    const idx = typeof offset === "number" ? offset : text.indexOf(match);
+    if (idx < 0) return match;
+    if (!isExecutionSignatureContext(text, idx) && !SOFT_PREAMBLE_LABEL_RE.test(bracketInner(match))) {
+      return match;
+    }
+    repaired.push(`${repairKey}:${match.trim()}`);
     return "_________________________";
   });
   return { text: out, repaired };
 }
 
-/** Repair soft uppercase bracket labels in signature / preamble when parties are resolved. */
-function repairSoftFieldBracketPlaceholders(
-  text: string,
-  partyNames: string[],
-  intakeRaw?: string | null,
-): { text: string; repaired: string[] } {
-  if (!corpusHasResolvedPartyAnchors(text, partyNames, intakeRaw)) {
-    return { text, repaired: [] };
-  }
+function repairSignatureLinePlaceholders(text: string): { text: string; repaired: string[] } {
+  const a = repairBracketInExecutionContext(text, SIGNATURE_LINE_BRACKET_RE, "sig_line");
+  const b = repairBracketInExecutionContext(a.text, SIGNATURE_PARTY_LABEL_BRACKET_RE, "sig_party_label");
+  return { text: b.text, repaired: [...a.repaired, ...b.repaired] };
+}
+
+function repairSoftFieldBracketPlaceholders(text: string): { text: string; repaired: string[] } {
   const repaired: string[] = [];
   const out = text.replace(GENERIC_UPPER_BRACKET_RE, (match, offset) => {
     const idx = typeof offset === "number" ? offset : text.indexOf(match);
-    if (!isSoftFieldBracketToken(match, text, idx, true)) return match;
+    if (!isExecutionSignatureContext(text, idx) && !SOFT_PREAMBLE_LABEL_RE.test(bracketInner(match))) {
+      return match;
+    }
+    if (!isSignatureFieldLabel(bracketInner(match)) && !SOFT_PREAMBLE_LABEL_RE.test(bracketInner(match))) {
+      return match;
+    }
     repaired.push(`soft_field:${match.trim()}`);
     return "_________________________";
   });
   return { text: out, repaired };
 }
 
-/**
- * Deterministic repairs only. Caller runs {@link collectForbiddenTemplateFragments} after.
- */
 export function repairAgreementTemplatePlaceholders(
   text: string,
   ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
 ): { text: string; repaired: string[] } {
-  let out = prepareAgreementTextForPlaceholderScan(text);
+  const prepared = prepareAgreementTextForPlaceholderScan(text);
+  let out = prepared;
   const repaired: string[] = [];
-  const names = resolvePlaceholderPartyNames(ctx);
+  const resolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
+  const names = resolution.names;
   const partyLine = [String(ctx.intakeRaw || ""), ...names].join("\n");
 
   if (/\[CASE_ID_\d+\]/i.test(out)) {
@@ -445,30 +547,21 @@ export function repairAgreementTemplatePlaceholders(
 
   out = substitutePartyPlaceholdersInUserFacingText(out, partyLine, names.length ? names : null);
 
-  const sigRepair = repairSignatureLinePlaceholders(out, names, ctx.intakeRaw);
+  const sigRepair = repairSignatureLinePlaceholders(out);
   out = sigRepair.text;
   repaired.push(...sigRepair.repaired);
 
-  const softRepair = repairSoftFieldBracketPlaceholders(out, names, ctx.intakeRaw);
+  const softRepair = repairSoftFieldBracketPlaceholders(out);
   out = softRepair.text;
   repaired.push(...softRepair.repaired);
 
-  const clientRe = /\[\s*CLIENT\s*\]/gi;
-  if (clientRe.test(out)) {
-    out = out.replace(clientRe, "the receiving Party");
+  if (/\[\s*CLIENT\s*\]/gi.test(out)) {
+    out = out.replace(/\[\s*CLIENT\s*\]/gi, "the receiving Party");
     repaired.push("[CLIENT]→the receiving Party");
   }
-  const provRe = /\[\s*PROVIDER\s*\]/gi;
-  if (provRe.test(out)) {
-    out = out.replace(provRe, "the providing Party");
+  if (/\[\s*PROVIDER\s*\]/gi.test(out)) {
+    out = out.replace(/\[\s*PROVIDER\s*\]/gi, "the providing Party");
     repaired.push("[PROVIDER]→the providing Party");
-  }
-
-  const companyRe = /\[\s*COMPANY_NAME\s*\]/gi;
-  if (companyRe.test(out)) {
-    const rep = names.length === 1 ? names[0] : "the applicable Party";
-    out = out.replace(companyRe, rep);
-    repaired.push(`[COMPANY_NAME]→${rep === "the applicable Party" ? rep : "resolved party"}`);
   }
 
   return { text: out, repaired };
@@ -491,9 +584,6 @@ function isInsideMustache(text: string, index: number): boolean {
   return before === "{" || after === "}";
 }
 
-/**
- * Scan all candidate fragments with positions (before fatal filtering).
- */
 export function scanTemplatePlaceholderMatches(
   text: string,
   intakeRaw: string | null | undefined,
@@ -548,25 +638,18 @@ export function scanTemplatePlaceholderMatches(
   return matches;
 }
 
-/**
- * Returns human-readable forbidden fragments still present (deduped) — fatal only.
- */
 export function collectForbiddenTemplateFragments(
   text: string,
   intakeRaw: string | null | undefined,
   opts?: { partyNames?: string[] },
 ): string[] {
   const prepared = prepareAgreementTextForPlaceholderScan(text);
-  const partyNames = resolvePlaceholderPartyNames({
-    intakeRaw,
-    partyNames: opts?.partyNames ?? null,
-  });
+  const partyNames = resolvePlaceholderPartyNames({ intakeRaw, partyNames: opts?.partyNames ?? null }, prepared);
   const decisions = scanTemplatePlaceholderMatches(prepared, intakeRaw).map(({ token, index }) =>
     classifyTemplateFragment(token, prepared, index, { partyNames, intakeRaw }),
   );
-  const fatal = decisions.filter((d) => d.fatal);
   const found: string[] = [];
-  for (const d of fatal) {
+  for (const d of decisions.filter((x) => x.fatal)) {
     if (!found.includes(d.token)) found.push(d.token);
   }
   return found.slice(0, 40);
@@ -577,7 +660,7 @@ export function analyzeTemplatePlaceholderFragments(
   ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
 ): PlaceholderTokenDecision[] {
   const prepared = prepareAgreementTextForPlaceholderScan(text);
-  const partyNames = resolvePlaceholderPartyNames(ctx);
+  const partyNames = resolvePlaceholderPartyNames(ctx, prepared);
   return scanTemplatePlaceholderMatches(prepared, ctx.intakeRaw).map(({ token, index }) =>
     classifyTemplateFragment(token, prepared, index, { partyNames, intakeRaw: ctx.intakeRaw }),
   );
@@ -587,16 +670,14 @@ export function finalizeUserVisibleAgreementPlainText(
   text: string,
   ctx: PlaceholderSafetyContext,
 ): PlaceholderSafetyOutcome {
-  const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(text, ctx);
-  const scanCtx = {
-    intakeRaw: ctx.intakeRaw,
-    partyNames: resolvePlaceholderPartyNames(ctx),
-  };
+  const prepared = prepareAgreementTextForPlaceholderScan(text);
+  const partyResolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
+  const scanCtx = { intakeRaw: ctx.intakeRaw, partyNames: partyResolution.names };
+  const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(text, scanCtx);
   const remainingDetail = analyzeTemplatePlaceholderFragments(repairedText, scanCtx);
   const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
   const remaining = [...new Set(remainingDetail.map((d) => d.token))].slice(0, 40);
   const ok = remainingFatal.length === 0;
-  const partyCount = scanCtx.partyNames.length;
 
   logPlaceholderScanResult({
     surface: ctx.surface,
@@ -605,8 +686,10 @@ export function finalizeUserVisibleAgreementPlainText(
     nonfatalCount: remainingDetail.length - remainingFatal.length,
     repairedCount: repaired.length,
     bodyLen: repairedText.length,
-    partyCount,
+    partyCount: partyResolution.partyCount,
     ok,
+    anchorsFound: partyResolution.anchorsFound,
+    sources: partyResolution.sources,
   });
 
   phLog(LOG_PREFIX_SCAN, {
@@ -626,7 +709,7 @@ export function finalizeUserVisibleAgreementPlainText(
     });
   }
   if (!ok) {
-    logPlaceholderRejectDetail(remainingDetail, ctx.surface);
+    logPlaceholderRejectDetail(remainingDetail, ctx.surface, partyResolution);
     phLog(LOG_PREFIX_REJECT, {
       surface: ctx.surface,
       family: ctx.agreementFamily ?? "",
@@ -638,9 +721,10 @@ export function finalizeUserVisibleAgreementPlainText(
           token: d.token,
           category: d.category,
           fatal: d.fatal,
-          contextSnippet: d.contextSnippet,
+          contextSnippet: d.contextSnippet.slice(0, 120),
           lineKind: d.lineKind,
           sectionKind: d.sectionKind,
+          nearestHeading: d.nearestHeading,
         })),
       repaired,
       ok: false,
@@ -653,6 +737,7 @@ export function finalizeUserVisibleAgreementPlainText(
     remaining,
     remainingFatal,
     remainingDetail,
+    partyResolution,
   };
 }
 

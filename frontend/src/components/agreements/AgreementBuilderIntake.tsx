@@ -12589,7 +12589,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           (draftHasFullDraftExpansion(draft) || tierAllowsAdvancedFullDraftReveal(tier)))) &&
       !(showFullDraftDiffPreview && createUiStage === CreateUiStage.DRAFT) &&
       !ownerRecipientAcceptedAwaitingLock &&
-      (!premiumPaidDocumentSurface || canProceedWithPaidProDocument),
+      (!premiumPaidDocumentSurface || canProceedWithPaidProDocument) &&
+      !shouldShowPaidRetry,
   );
 
   /** Free starter path on recipients — show subtle “sendable as-is” reassurance (not paywalled). */
@@ -15618,9 +15619,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         aria-live="polite"
                                       >
                                         <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
-                                          {hasPaidPremiumCompletionSession()
-                                            ? PAID_PREMIUM_CONNECTION_RECOVERY_COPY
-                                            : "We couldn’t complete the Pro upgrade with your terms yet."}
+                                          {proFullDraftCustomGateMessage ||
+                                            (hasPaidPremiumCompletionSession()
+                                              ? "We couldn’t safely finalize the Pro version. Your current draft is still here."
+                                              : "We couldn’t safely finalize the Pro version. Your current draft is still here.")}
                                         </p>
                                         <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
                                           {hasPaidPremiumCompletionSession()
