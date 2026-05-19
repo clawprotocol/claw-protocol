@@ -330,6 +330,8 @@ import {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
   clearAgreementCreatorIntakeStorage,
   clearCreateReviewAgreementResumeId,
+  readCreateReviewDraftReadyMarker,
+  readCreateReviewDraftSnapshot,
   readFullDraftUpgradeMarkerAgreementId,
   writeFullDraftUpgradeMarkerAgreementId,
   readAgreementCreatorIntakeStorage,
@@ -337,7 +339,15 @@ import {
   resolveIntakeBootstrap,
   writeAgreementCreatorIntakeStorage,
   writeCreateReviewAgreementResumeId,
+  writeCreateReviewDraftReadyMarker,
+  writeCreateReviewDraftSnapshot,
 } from "./agreementIntakeStorage";
+import {
+  agreementIdShort,
+  logReviewRefreshRegenerationSkipped,
+  logReviewRefreshRestore,
+  shouldSkipHomeAutoGenerateForStoredReview,
+} from "./createReviewRefreshRestore";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 import {
   clearPaidProEditReturnHandoff,
@@ -1739,6 +1749,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const dictationControlRef = useRef<VoiceDictationControl | null>(null);
   const followUpDictationControlRef = useRef<VoiceDictationControl | null>(null);
   const productionResumeHydratedRef = useRef(false);
+  const freeReviewSnapshotHydratedRef = useRef(false);
   /** Paid Pro “Edit Draft” → /app/create: suppress auto-generate / Retry Pro until user edits inline. */
   const [paidProEditReturnResumeActive, setPaidProEditReturnResumeActive] = useState(false);
   const [followUpEnterReady, setFollowUpEnterReady] = useState(false);
@@ -6477,6 +6488,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setDebouncedStepBuffer("");
       agreementDocumentDirtyRef.current = false;
       setReviewDocRefreshTick((n) => n + 1);
+      writeCreateReviewDraftReadyMarker();
+      writeCreateReviewDraftSnapshot(parsed);
       commitFreeDraftForReview({
         source: fromHomeHandoff ? "home_create_submit" : "local_parse",
         fromHomeAutoGenerate: fromHomeHandoff,
@@ -6521,12 +6534,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
+    if (shouldSkipHomeAutoGenerateForStoredReview()) {
+      homeAutoGenerateConsumedRef.current = true;
+      return;
+    }
     if (homeAutoGenerateConsumedRef.current) {
       logHomeAutoGenerateSkipped("already_consumed");
       return;
     }
     if (draft && createFlowPhase === "draft_ready_for_review") {
       logHomeAutoGenerateSkipped("phase_ready");
+      logReviewRefreshRegenerationSkipped("draft_already_ready");
       homeAutoGenerateConsumedRef.current = true;
       return;
     }
@@ -9610,6 +9628,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [initialIntakeText]);
 
+  useLayoutEffect(() => {
+    if (!createProductionTwoPane || !simpleProductFlow) return;
+    if (draft != null) return;
+    if (freeReviewSnapshotHydratedRef.current || productionResumeHydratedRef.current) return;
+    if (readCreateReviewAgreementResumeId()) return;
+    if (!readCreateReviewDraftReadyMarker()) return;
+    const snap = readCreateReviewDraftSnapshot<ParsedDraftShape>();
+    if (!snap) return;
+    freeReviewSnapshotHydratedRef.current = true;
+    logReviewRefreshRestore({
+      hasStoredDraft: true,
+      agreementIdShort: null,
+      restored: true,
+    });
+    setDraft(snap);
+    setMissing([]);
+    setFollowUpDetailTotal(0);
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setCreateFlowPhase("draft_ready_for_review");
+    setDraftNowCommitted(true);
+    setDisplayPhase("review");
+    setPreviewPaneRevealed(true);
+    setMobileWorkspacePane("preview");
+    homeAutoGenerateConsumedRef.current = true;
+  }, [createProductionTwoPane, simpleProductFlow, draft]);
+
   useEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow || !liveWorkspaceTwoPane) return;
     if (draft != null) return;
@@ -9712,6 +9756,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setCreateUiStage(CreateUiStage.DRAFT);
         setCreateFlowPhase("draft_ready_for_review");
         setDraftNowCommitted(true);
+        writeCreateReviewDraftReadyMarker();
+        writeCreateReviewDraftSnapshot(next);
+        logReviewRefreshRestore({
+          hasStoredDraft: true,
+          agreementIdShort: agreementIdShort(hid),
+          restored: true,
+        });
         const nextDisplay = shouldKeepReviewDisplayAfterProHydrate(adForHydrate) ? "review" : "intake";
         if (import.meta.env.DEV) {
           const rs = String(adForHydrate.premium_render_source ?? "").trim();

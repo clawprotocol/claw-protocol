@@ -3,31 +3,39 @@
  * Calm, operational; no hype or full-draft exposure.
  */
 
-/** Upgrade teaser heading — future tense; user has not paid yet. */
-export const PRO_CAN_IMPROVE_HEADING = "What Pro can improve";
+/** Upgrade confidence heading — future tense; user has not paid yet. */
+export const PRO_CAN_TIGHTEN_HEADING = "What Pro can tighten";
 
-/** @deprecated Use {@link PRO_CAN_IMPROVE_HEADING} */
-export const PRO_IMPROVED_HEADING = PRO_CAN_IMPROVE_HEADING;
+/** @deprecated Use {@link PRO_CAN_TIGHTEN_HEADING} */
+export const PRO_CAN_IMPROVE_HEADING = PRO_CAN_TIGHTEN_HEADING;
 
-export const PRO_IMPROVED_BULLETS: readonly string[] = [
-  "Clearer agreement structure",
+/** @deprecated Use {@link PRO_CAN_TIGHTEN_HEADING} */
+export const PRO_IMPROVED_HEADING = PRO_CAN_TIGHTEN_HEADING;
+
+export const PRO_CAN_TIGHTEN_BULLETS: readonly string[] = [
+  "Full party names and cleaner opening language",
   "Stronger business protections",
-  "Cleaner signature workflow",
-  "Improved review and approval language",
-  "Tracked signing and verification support",
+  "Review, send, signing, and proof workflow",
+  "Cleaner signature and approval flow",
 ] as const;
 
-export const PRO_TRANSFORMATION_PREVIEW_LABEL = "Example upgrade preview";
+/** @deprecated Use {@link PRO_CAN_TIGHTEN_BULLETS} */
+export const PRO_IMPROVED_BULLETS = PRO_CAN_TIGHTEN_BULLETS;
 
-/** Sample snippet only — not the user's full agreement. */
-export const PRO_TRANSFORMATION_PREVIEW_SAMPLE =
-  'This Agreement is entered into by and among Acme Widgets LLC ("Acme") and Beta Supply Inc. ("Beta") (each a "Party" and together, the "Parties"), effective as of the date of the last signature below.';
-
-export const PRO_TRANSFORMATION_PREVIEW_FOOTNOTE =
-  "Preview only — your Pro agreement unlocks after upgrade.";
+export const PRO_CAN_TIGHTEN_FOOTNOTE =
+  "You review the Pro version before anything is sent or signed.";
 
 /** Stale pre-payment copy — must not appear inside free draft document body. */
 export const STALE_PRO_IMPROVED_SECTION_LABEL = "Pro improved this section";
+
+/** Stale fake-sample upgrade teaser strings — must not appear in user-facing surfaces. */
+export const STALE_PRO_TRANSFORMATION_PREVIEW_STRINGS: readonly string[] = [
+  "Example upgrade preview",
+  "Example Upgrade Preview",
+  "Preview only — your Pro agreement unlocks after upgrade.",
+  "Acme Widgets LLC",
+  "Beta Supply Inc.",
+] as const;
 
 /** Compressed checkout sidebar — replaces long “LawDog Pro helps” bullet list. */
 export const CHECKOUT_PRO_CONTEXT_TITLE = "Pro for this agreement";

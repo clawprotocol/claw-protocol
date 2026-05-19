@@ -6,17 +6,15 @@ import {
   CHECKOUT_CARD_PROCESSING_LINE,
   CHECKOUT_PRO_CONTEXT_LINES,
   CHECKOUT_PRO_CONTEXT_TITLE,
-  PRO_IMPROVED_BULLETS,
-  PRO_IMPROVED_HEADING,
-  PRO_TRANSFORMATION_PREVIEW_FOOTNOTE,
-  PRO_TRANSFORMATION_PREVIEW_LABEL,
-  PRO_TRANSFORMATION_PREVIEW_SAMPLE,
+  PRO_CAN_TIGHTEN_BULLETS,
+  PRO_CAN_TIGHTEN_FOOTNOTE,
+  PRO_CAN_TIGHTEN_HEADING,
   STALE_CHECKOUT_PRO_HELPS_BULLETS,
+  STALE_PRO_TRANSFORMATION_PREVIEW_STRINGS,
 } from "./proTransformationCopy";
 
 const TRANSFORMATION_SURFACE_PATHS: readonly string[] = [
   join(__dirname, "../../components/agreements/ProConversionComparisonCard.tsx"),
-  join(__dirname, "../../components/agreements/ProImprovedSummary.tsx"),
   join(__dirname, "../../components/agreements/ProTransformationPreview.tsx"),
   join(__dirname, "../../components/agreements/StarterDraftDocumentSurface.tsx"),
   join(__dirname, "../../components/agreements/AgreementCompletionCheckoutContext.tsx"),
@@ -24,13 +22,15 @@ const TRANSFORMATION_SURFACE_PATHS: readonly string[] = [
 ];
 
 describe("proTransformationCopy", () => {
-  it("exports compact pro-improved summary and preview cue copy", () => {
-    expect(PRO_IMPROVED_HEADING).toBe("What Pro can improve");
-    expect(PRO_IMPROVED_BULLETS).toHaveLength(5);
-    expect(PRO_IMPROVED_BULLETS.join(" ").toLowerCase()).not.toMatch(/ai-powered|guarantee/);
-    expect(PRO_TRANSFORMATION_PREVIEW_LABEL).toBe("Example upgrade preview");
-    expect(PRO_TRANSFORMATION_PREVIEW_SAMPLE.length).toBeGreaterThan(40);
-    expect(PRO_TRANSFORMATION_PREVIEW_FOOTNOTE).toMatch(/preview only/i);
+  it("exports compact pro-tighten value copy without fake sample parties", () => {
+    expect(PRO_CAN_TIGHTEN_HEADING).toBe("What Pro can tighten");
+    expect(PRO_CAN_TIGHTEN_BULLETS).toHaveLength(4);
+    expect(PRO_CAN_TIGHTEN_BULLETS.join(" ").toLowerCase()).not.toMatch(/ai-powered|guarantee/);
+    expect(PRO_CAN_TIGHTEN_FOOTNOTE).toMatch(/review the Pro version before anything is sent or signed/i);
+    for (const stale of STALE_PRO_TRANSFORMATION_PREVIEW_STRINGS) {
+      expect(PRO_CAN_TIGHTEN_BULLETS.join(" ")).not.toContain(stale);
+      expect(PRO_CAN_TIGHTEN_FOOTNOTE).not.toContain(stale);
+    }
   });
 
   it("exports compressed checkout context and warmer payment lines", () => {
@@ -40,13 +40,13 @@ describe("proTransformationCopy", () => {
     expect(CHECKOUT_CARD_ACTIVATION_LINE).toMatch(/activates after payment/i);
   });
 
-  it("primary surfaces wire transformation preview and improved summary", () => {
+  it("primary surfaces wire transformation value block, not fake sample", () => {
     const card = readFileSync(
       join(__dirname, "../../components/agreements/ProConversionComparisonCard.tsx"),
       "utf8",
     );
-    expect(card).toContain("ProImprovedSummary");
     expect(card).toContain("ProTransformationPreview");
+    expect(card).not.toContain("ProImprovedSummary");
     expect(card).toContain("pro-conversion-comparison-card");
 
     const draft = readFileSync(
@@ -54,13 +54,16 @@ describe("proTransformationCopy", () => {
       "utf8",
     );
     expect(draft).not.toContain("ProTransformationPreview");
-    expect(draft).not.toContain("pro-upgrade-teaser-preview");
+    expect(draft).not.toContain("pro-upgrade-value-block");
   });
 
   it("does not expose full pro draft unlock language on conversion surfaces", () => {
     for (const path of TRANSFORMATION_SURFACE_PATHS) {
       const src = readFileSync(path, "utf8");
       expect(src.toLowerCase()).not.toMatch(/full pro draft download|unlock entire agreement/i);
+      for (const stale of STALE_PRO_TRANSFORMATION_PREVIEW_STRINGS) {
+        expect(src.includes(stale), `${path} must not include "${stale}"`).toBe(false);
+      }
     }
   });
 

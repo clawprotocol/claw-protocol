@@ -10,7 +10,7 @@ import { JoySocialFooter } from "../joy/JoySocialFooter";
 import { LawdogLogoLink } from "../components/ui/LawdogLogoLink";
 import "../joy/joy.css";
 
-export type AppShellNavMode = "default" | "esign_bridge_focused";
+export type AppShellNavMode = "default" | "esign_bridge_focused" | "minimal";
 
 export function AppShell(props: {
   children: ReactNode;
@@ -29,6 +29,7 @@ export function AppShell(props: {
   const { children, title, subtitle, navMode = "default", compactFooter = false } = props;
   const showLegacyQuickPath = access.tier === "free";
   const esignBridgeNav = navMode === "esign_bridge_focused";
+  const minimalNav = navMode === "minimal";
 
   return (
     <div className="vs01-root">
@@ -38,11 +39,13 @@ export function AppShell(props: {
           className="claw-app-nav flex flex-col gap-3 border-b border-slate-800/80 pb-4 sm:flex-row sm:items-center sm:justify-between"
           aria-label="App"
           data-testid="app-shell-primary-nav"
-          data-app-shell-nav={esignBridgeNav ? "esign_bridge_focused" : "default"}
+          data-app-shell-nav={
+            minimalNav ? "minimal" : esignBridgeNav ? "esign_bridge_focused" : "default"
+          }
         >
           <div className="flex items-center gap-3">
             <LawdogLogoLink homeHref="/app" wordmark surface="dark" />
-            {!esignBridgeNav ? (
+            {!esignBridgeNav && !minimalNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -53,7 +56,26 @@ export function AppShell(props: {
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            {!esignBridgeNav ? (
+            {minimalNav ? (
+              <>
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                  title="LawDog dashboard"
+                  onClick={() => navigate("/app")}
+                >
+                  Back to dashboard
+                </button>
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                  onClick={() => navigate("/app/create")}
+                >
+                  New agreement
+                </button>
+              </>
+            ) : null}
+            {!minimalNav && !esignBridgeNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -62,7 +84,7 @@ export function AppShell(props: {
                 Home
               </button>
             ) : null}
-            {esignBridgeNav ? (
+            {!minimalNav && esignBridgeNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -72,14 +94,16 @@ export function AppShell(props: {
                 My agreements
               </button>
             ) : null}
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              onClick={() => navigate("/app/create")}
-            >
-              Create
-            </button>
-            {!esignBridgeNav && showLegacyQuickPath ? (
+            {!minimalNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                onClick={() => navigate("/app/create")}
+              >
+                Create
+              </button>
+            ) : null}
+            {!minimalNav && !esignBridgeNav && showLegacyQuickPath ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -88,7 +112,7 @@ export function AppShell(props: {
                 Quick send
               </button>
             ) : null}
-            {!esignBridgeNav ? (
+            {!minimalNav && !esignBridgeNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -98,7 +122,7 @@ export function AppShell(props: {
                 Reuse
               </button>
             ) : null}
-            {!esignBridgeNav ? (
+            {!minimalNav && !esignBridgeNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -108,7 +132,7 @@ export function AppShell(props: {
                 Work product
               </button>
             ) : null}
-            {!esignBridgeNav && showLegacyQuickPath ? (
+            {!minimalNav && !esignBridgeNav && showLegacyQuickPath ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -117,15 +141,17 @@ export function AppShell(props: {
                 Quick
               </button>
             ) : null}
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              title="Compare plans, subscription status, and payment"
-              onClick={() => navigate("/app/billing")}
-            >
-              Billing
-            </button>
-            {!esignBridgeNav ? (
+            {!minimalNav ? (
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                title="Compare plans, subscription status, and payment"
+                onClick={() => navigate("/app/billing")}
+              >
+                Billing
+              </button>
+            ) : null}
+            {!minimalNav && !esignBridgeNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
@@ -135,7 +161,7 @@ export function AppShell(props: {
                 Integrations
               </button>
             ) : null}
-            {!esignBridgeNav && affiliateNav ? (
+            {!minimalNav && !esignBridgeNav && affiliateNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact opacity-80"
@@ -144,7 +170,7 @@ export function AppShell(props: {
                 Earn
               </button>
             ) : null}
-            {esignBridgeNav ? (
+            {!minimalNav && esignBridgeNav ? (
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"

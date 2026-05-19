@@ -57,4 +57,24 @@ describe("AppShell esign bridge nav", () => {
     const nav = screen.getByTestId("app-shell-primary-nav");
     expect(within(nav).getAllByRole("button", { name: /^Home$/ })).toHaveLength(2);
   });
+
+  it("minimal nav shows only logo, back to dashboard, and new agreement", () => {
+    render(
+      <AppShell title="Genesis Dogs Partner Access" subtitle="Test" navMode="minimal" compactFooter>
+        <div>child</div>
+      </AppShell>,
+    );
+    const nav = screen.getByTestId("app-shell-primary-nav");
+    expect(nav.getAttribute("data-app-shell-nav")).toBe("minimal");
+    expect(within(nav).queryByRole("button", { name: /^Home$/ })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "Create" })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "Quick send" })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "Reuse" })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "Work product" })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "Billing" })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "Integrations" })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "Earn" })).toBeNull();
+    expect(within(nav).getByRole("button", { name: "Back to dashboard" })).toBeTruthy();
+    expect(within(nav).getByRole("button", { name: "New agreement" })).toBeTruthy();
+  });
 });

@@ -74,7 +74,7 @@ export function ClawOpportunityPage() {
 
   if (!affiliateOn) {
     return (
-      <AppShell title="Unavailable" subtitle="This area is paused." compactFooter>
+      <AppShell title="Unavailable" subtitle="This area is paused." navMode="minimal" compactFooter>
         <p className="mx-auto max-w-xl text-sm text-slate-400">Affiliate tools are temporarily off. Your agreements are unchanged.</p>
       </AppShell>
     );
@@ -84,6 +84,7 @@ export function ClawOpportunityPage() {
     <AppShell
       title={earnDetailsOpen ? opp.shellTitle : EARN_HERO_TITLE}
       subtitle={earnDetailsOpen ? opp.shellSubtitle : EARN_HERO_SUBHEAD}
+      navMode="minimal"
       compactFooter
     >
       <div className="mx-auto w-full min-w-0 max-w-5xl space-y-6 overflow-x-hidden pb-6 sm:space-y-8 sm:pb-8">

@@ -8,6 +8,7 @@ import AgreementBuilderIntake, {
 } from "../../components/agreements/AgreementBuilderIntake";
 import {
   clearCreateReviewAgreementResumeId,
+  hasStoredCreateReviewState,
   writeCreateReviewAgreementResumeId,
 } from "../../components/agreements/agreementIntakeStorage";
 import { setJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
@@ -78,7 +79,10 @@ export function SimpleCreatePage() {
   const [otherWaysOpen, setOtherWaysOpen] = useState(false);
   const [heroHandoff] = useState(() => readHeroIntakeHandoffForCreate());
   const handoffFromHome = heroHandoff?.fromHome ?? false;
-  const homeHeroAutoGenerate = heroHandoff?.autoGenerate === true && Boolean((heroHandoff?.text || "").trim());
+  const homeHeroAutoGenerate =
+    heroHandoff?.autoGenerate === true &&
+    Boolean((heroHandoff?.text || "").trim()) &&
+    !hasStoredCreateReviewState();
   const quickSendTypedArrival =
     heroHandoff?.quickSendTypedHandoff === true && Boolean((heroHandoff?.text || "").trim());
   const hadBrowserPromptDraft = useMemo(() => {

@@ -18,7 +18,6 @@ import {
   STARTER_REVIEW_PREMIUM_LIST_GLYPH_CLASSNAME,
   STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME,
 } from "./starterReviewPremiumUpsellCopy";
-import { ProImprovedSummary } from "./ProImprovedSummary";
 import { ProTransformationPreview } from "./ProTransformationPreview";
 
 type Props = {
@@ -69,8 +68,6 @@ export function ProConversionComparisonCard(props: Props) {
     >
       <h3 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">{PRO_UPGRADE_CARD_HEADING}</h3>
       <p className="mt-2 text-sm leading-relaxed text-slate-400 sm:text-[15px]">{PRO_UPGRADE_CARD_BODY}</p>
-
-      <ProImprovedSummary className="mt-4" />
 
       <div className="mt-5 hidden gap-3 sm:grid sm:grid-cols-2 sm:gap-4">
         <div className="rounded-lg border border-slate-700/60 bg-slate-950/60 p-3.5 sm:p-4">

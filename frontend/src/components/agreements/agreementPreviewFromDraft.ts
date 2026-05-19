@@ -39,6 +39,7 @@ import {
   sanitizeStarterPartyNameForDisplay,
   sanitizeStarterPreviewProse,
 } from "./starterPreviewProseSanitize";
+import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
 import {
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
@@ -682,9 +683,13 @@ export function buildAgreementPreviewText(
 ): string {
   const starterPreview = Boolean(options?.starterPreview);
   const premiumDeliverable = Boolean(options?.premiumDeliverablePreview) && !starterPreview;
+  const draftForBuild =
+    starterPreview && (options?.intakeText || "").trim().length > 0
+      ? enrichStarterPreviewPartiesFromIntake(draft, options?.intakeText)
+      : draft;
   if (premiumDeliverable) {
     const res = resolvePremiumRenderSource({
-      draft,
+      draft: draftForBuild,
       intakeText: options?.intakeText,
       legacySnapshotText: options?.legacyPremiumSnapshotText,
       premiumWinningCorpusFallback: options?.premiumWinningCorpusFallback,
@@ -694,14 +699,14 @@ export function buildAgreementPreviewText(
     });
     if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
     const collapsed = collapseDuplicateEsignNoticesInFullPreview(res.text);
-    const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(collapsed, draft, options?.intakeText ?? null);
-    return applyAgreementPreviewPlaceholderGate(hydrated, draft, options, "preview_premium_deliverable");
+    const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(collapsed, draftForBuild, options?.intakeText ?? null);
+    return applyAgreementPreviewPlaceholderGate(hydrated, draftForBuild, options, "preview_premium_deliverable");
   }
-  const core = buildAgreementPreviewTextCore(draft, options);
-  if (starterPreview) return applyAgreementPreviewPlaceholderGate(core, draft, options, "preview_starter");
+  const core = buildAgreementPreviewTextCore(draftForBuild, options);
+  if (starterPreview) return applyAgreementPreviewPlaceholderGate(core, draftForBuild, options, "preview_starter");
   if (textContainsUnresolvedIdentityPlaceholders(core)) {
-    const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(core, draft, options?.intakeText ?? null);
-    return applyAgreementPreviewPlaceholderGate(hydrated, draft, options, "preview_structured_hydrated");
+    const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(core, draftForBuild, options?.intakeText ?? null);
+    return applyAgreementPreviewPlaceholderGate(hydrated, draftForBuild, options, "preview_structured_hydrated");
   }
-  return applyAgreementPreviewPlaceholderGate(core, draft, options, "preview_structured");
+  return applyAgreementPreviewPlaceholderGate(core, draftForBuild, options, "preview_structured");
 }
