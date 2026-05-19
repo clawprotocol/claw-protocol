@@ -72,6 +72,21 @@ describe("LaunchHomePage routing (static)", () => {
     expect(page).toContain('navigate("/app/create")');
   });
 
+  it("uses responsive grid for hero CTAs without flex-row width collapse", () => {
+    expect(page).toContain("claw-seo-hero-cta-grid");
+    expect(page).toContain('data-testid="hero-cta-row"');
+    expect(page).toContain("grid-cols-1");
+    expect(page).toContain("sm:grid-cols-2");
+    expect(page).toContain("claw-seo-hero-cta-primary");
+    expect(page).toContain("claw-seo-hero-cta-secondary");
+    expect(page).not.toContain("sm:flex-row sm:items-center sm:gap-3");
+    expect(page).not.toMatch(/claw-seo-btn-primary[\s\S]{0,200}flex-1/);
+    expect(page).not.toContain("sm:min-w-[10.5rem]");
+    expect(page).not.toContain("sm:flex-none");
+    const ctaBlock = page.slice(page.indexOf("hero-cta-row"), page.indexOf("hero-cta-row") + 900);
+    expect(ctaBlock).toContain("min-w-0");
+  });
+
   it("example chips populate textarea only and sit below primary CTA", () => {
     expect(page).toContain("logHomeExampleSelected");
     const chipBlock = page.slice(page.indexOf("HOME_EXAMPLE_PROMPTS.map"), page.indexOf("HOME_EXAMPLE_PROMPTS.map") + 700);

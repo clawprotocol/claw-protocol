@@ -227,7 +227,7 @@ export function LaunchHomePage() {
           </p>
 
           <form
-            className="claw-seo-card mt-4 w-full p-3.5 sm:mt-5 sm:p-5 lg:p-6"
+            className="claw-seo-card mt-4 w-full min-w-0 p-3.5 sm:mt-5 sm:p-5 lg:p-6"
             onSubmit={(e) => {
               e.preventDefault();
               if (handoffBusy) return;
@@ -321,18 +321,21 @@ export function LaunchHomePage() {
               </p>
             ) : null}
 
-            <div className="mt-4 flex flex-col items-stretch gap-2.5 sm:mt-5 sm:flex-row sm:items-center sm:gap-3">
+            <div
+              className="claw-seo-hero-cta-grid mt-4 grid w-full min-w-0 grid-cols-1 gap-2.5 sm:mt-5 sm:grid-cols-2 sm:gap-3"
+              data-testid="hero-cta-row"
+            >
               <button
                 type="submit"
                 disabled={handoffBusy || homeTransitionActive}
                 aria-busy={handoffBusy || homeTransitionActive}
-                className="claw-seo-btn-primary min-h-12 w-full flex-1 px-6 py-3.5 text-base font-semibold disabled:cursor-not-allowed disabled:opacity-55 sm:min-h-[3.25rem] sm:text-lg"
+                className="claw-seo-btn-primary claw-seo-hero-cta-primary min-h-12 w-full min-w-0 px-6 py-3.5 text-base font-semibold disabled:cursor-not-allowed disabled:opacity-55 sm:min-h-[3.25rem] sm:text-lg"
               >
                 {primaryLabel}
               </button>
               <button
                 type="button"
-                className="claw-seo-btn-secondary claw-seo-btn-secondary--quiet min-h-11 w-full px-5 py-2.5 text-sm font-medium sm:min-h-[3.25rem] sm:min-w-[10.5rem] sm:flex-none sm:px-6 sm:py-3 sm:text-base"
+                className="claw-seo-btn-secondary claw-seo-btn-secondary--quiet claw-seo-hero-cta-secondary min-h-11 w-full min-w-0 px-5 py-2.5 text-sm font-medium sm:min-h-[3.25rem] sm:px-6 sm:py-3 sm:text-base"
                 onClick={scrollToHowItWorks}
               >
                 {HOMEPAGE_CTA_VIEW_EXAMPLE}

@@ -195,6 +195,20 @@
   color: #475569;
 }
 
+.claw-seo-root .claw-seo-hero-cta-grid {
+  width: 100%;
+  min-width: 0;
+}
+
+.claw-seo-root .claw-seo-hero-cta-grid .claw-seo-btn-primary,
+.claw-seo-root .claw-seo-hero-cta-grid .claw-seo-btn-secondary {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
 .claw-seo-root .claw-seo-cta-legal {
   max-width: 36rem;
 }

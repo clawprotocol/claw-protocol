@@ -20,6 +20,13 @@ describe("homepage hero textarea mobile readability (static)", () => {
     expect(css).toContain("display: none");
   });
 
+  it("uses responsive hero CTA grid contained in the card", () => {
+    expect(page).toContain("claw-seo-hero-cta-grid");
+    expect(page).toContain("sm:grid-cols-2");
+    expect(css).toContain("claw-seo-hero-cta-grid");
+    expect(css).toMatch(/max-width:\s*100%/);
+  });
+
   it("uses restrained hero input focus and tertiary example chips", () => {
     expect(page).toContain("data-height-tier");
     expect(page).toContain("claw-seo-example-chip");
