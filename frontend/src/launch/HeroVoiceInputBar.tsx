@@ -56,7 +56,7 @@ export function HeroVoiceInputBar(props: {
   if (!enabled) return null;
   if (!isSupported) {
     return (
-      <div className="pointer-events-auto absolute bottom-3 right-3 flex flex-col items-end gap-2 sm:bottom-4 sm:right-4">
+      <div className="pointer-events-auto absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2 sm:bottom-4 sm:right-4">
         <button
           type="button"
           disabled
@@ -78,7 +78,7 @@ export function HeroVoiceInputBar(props: {
     recording ? "Stop voice input" : processing ? "Transcribing…" : "Start voice input";
 
   return (
-    <div className="pointer-events-auto absolute bottom-3 right-3 flex flex-col items-end gap-2 sm:bottom-4 sm:right-4">
+    <div className="pointer-events-auto absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2 sm:bottom-4 sm:right-4">
       {recording ? (
         <div className="flex flex-col items-end gap-1 rounded-md border border-emerald-700/45 bg-emerald-950/85 px-2.5 py-1.5 text-right shadow-sm sm:px-3">
           <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200/95 sm:text-[11px]">
