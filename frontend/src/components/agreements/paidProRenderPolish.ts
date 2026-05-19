@@ -1,5 +1,5 @@
 /**
- * Ordered paid-Pro render polish: party names (email-safe) → contact email substitution → mutation guard.
+ * Ordered paid-Pro render polish: contact substitution → masked agreement polish → email restoration.
  */
 
 import {
@@ -8,13 +8,19 @@ import {
   type PaidProContactSubstitutionResult,
 } from "./paidProIntakeContactSubstitution";
 import { polishPaidProAgreementText } from "./paidProAgreementPolish";
-import { textContainsCorruptedEntityEmail } from "./paidProEmailMask";
+import {
+  maskProtectedSpans,
+  restoreExactIntakeEmails,
+  textContainsCorruptedEntityEmail,
+  unmaskProtectedSpans,
+} from "./paidProEmailMask";
 
 export type EmailMutationGuardResult = {
   originalEmailCount: number;
   finalExactEmailCount: number;
   mutatedEmailCount: number;
   mutatedSamples: string[];
+  repairedCount: number;
 };
 
 function redactEmail(email: string): string {
@@ -27,8 +33,9 @@ function redactEmail(email: string): string {
 export function verifyIntakeEmailsPreserved(
   intakeRaw: string | null | undefined,
   text: string,
+  intakeEmails?: readonly string[],
 ): EmailMutationGuardResult {
-  const originals = extractIntakeEmailsOrdered(intakeRaw);
+  const originals = intakeEmails ?? extractIntakeEmailsOrdered(intakeRaw);
   const mutatedSamples: string[] = [];
   let finalExactEmailCount = 0;
 
@@ -50,21 +57,8 @@ export function verifyIntakeEmailsPreserved(
     finalExactEmailCount,
     mutatedEmailCount,
     mutatedSamples: mutatedSamples.slice(0, 8),
+    repairedCount: 0,
   };
-}
-
-/** Re-apply exact intake emails when party expansion leaked into substituted addresses. */
-export function repairCorruptedIntakeEmails(text: string, intakeRaw: string | null | undefined): string {
-  const emails = extractIntakeEmailsOrdered(intakeRaw);
-  let out = text;
-  for (const email of emails) {
-    if (out.includes(email)) continue;
-    const local = email.split("@")[0];
-    if (!local) continue;
-    const corruptRe = new RegExp(`${local.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@[^\\s,;<>\\]]+`, "gi");
-    out = out.replace(corruptRe, email);
-  }
-  return out;
 }
 
 export function logPaidProEmailMutationGuard(
@@ -83,9 +77,9 @@ export type PaidProRenderPolishResult = {
 };
 
 /**
- * a) substitute [EMAIL_N] placeholders with exact intake emails
- * b) universal agreement polish (recital, signatures, enterprise clauses)
- * c) verify no intake email was mutated; repair when possible
+ * 1) substitute numbered contact emails
+ * 2) mask emails/URLs and run universal agreement polish
+ * 3) unmask and authoritatively restore intake emails until guard passes
  */
 export function applyPaidProRenderPolish(
   text: string,
@@ -95,23 +89,35 @@ export function applyPaidProRenderPolish(
 ): PaidProRenderPolishResult {
   const surface = opts?.surface ?? "unknown";
   const explicitPartyList = (partyNames?.length ?? 0) >= 2;
+  const intakeEmails = extractIntakeEmailsOrdered(intakeRaw);
 
   const contactSub = substitutePaidProIntakeContactPlaceholders(text, intakeRaw, { surface });
   let working = contactSub.text;
 
-  const agreementPolish = polishPaidProAgreementText(working, intakeRaw, partyNames, {
+  const { text: masked, emails, urls } = maskProtectedSpans(working);
+  const agreementPolish = polishPaidProAgreementText(masked, intakeRaw, partyNames, {
     surface,
     explicitPartyList,
+    skipInternalMask: true,
   });
-  working = agreementPolish.text;
+  working = unmaskProtectedSpans(agreementPolish.text, emails, urls);
 
-  let emailGuard = verifyIntakeEmailsPreserved(intakeRaw, working);
-  if (emailGuard.mutatedEmailCount > 0) {
-    working = repairCorruptedIntakeEmails(working, intakeRaw);
-    emailGuard = verifyIntakeEmailsPreserved(intakeRaw, working);
+  let repairedCount = 0;
+  let guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
+  if (guard.mutatedEmailCount > 0 && intakeEmails.length > 0) {
+    const restored = restoreExactIntakeEmails(working, intakeEmails);
+    working = restored.text;
+    repairedCount += restored.repairedCount;
+    guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
+    if (guard.mutatedEmailCount > 0) {
+      const restored2 = restoreExactIntakeEmails(working, intakeEmails);
+      working = restored2.text;
+      repairedCount += restored2.repairedCount;
+      guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
+    }
   }
 
-  logPaidProEmailMutationGuard({ surface, ...emailGuard });
+  logPaidProEmailMutationGuard({ surface, ...guard, repairedCount });
 
-  return { text: working, contactSub, agreementPolish: agreementPolish.log, emailGuard };
+  return { text: working, contactSub, agreementPolish: agreementPolish.log, emailGuard: { ...guard, repairedCount } };
 }

@@ -71,7 +71,10 @@ export const CHECKOUT_PRO_HELPS_BULLETS: readonly string[] = [
   "strengthen important business terms",
 ] as const;
 
-export const CHECKOUT_CTA = "Unlock collaboration + send";
+/** @deprecated Prefer {@link CHECKOUT_CTA} from checkoutTrustCopy.ts */
+export const CHECKOUT_CTA_LEGACY = "Unlock collaboration + send";
+
+export { CHECKOUT_CTA } from "./checkoutTrustCopy";
 export const CHECKOUT_FOOTER = "Secured checkout · Draft saved · Review before anything moves";
 
 export const EARN_HERO_TITLE = "Earn with LawDog";
@@ -104,6 +107,7 @@ export const STALE_PRO_CONVERSION_STRINGS: readonly string[] = [
   "Upgrade and strengthen draft",
   "Make this agreement easier to approve",
   "Continue to collaboration + signing",
+  "Unlock collaboration + send",
   "simplified starter preview",
   "Ready to share or sign?",
   "Still finishing your Pro agreement",

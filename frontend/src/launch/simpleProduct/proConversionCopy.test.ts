@@ -32,6 +32,8 @@ const CONVERSION_SURFACE_PATHS: readonly string[] = [
   join(__dirname, "../../components/agreements/AdvancedFullDraftPaywallModal.tsx"),
   join(__dirname, "../../components/agreements/AgreementCompletionCheckoutContext.tsx"),
   join(__dirname, "SimpleCheckoutPage.tsx"),
+  join(__dirname, "checkoutTrustCopy.ts"),
+  join(__dirname, "CheckoutTrustPanel.tsx"),
   join(__dirname, "checkoutFlowProgress.ts"),
   join(__dirname, "../affiliate/ClawOpportunityPage.tsx"),
   join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx"),
@@ -50,7 +52,7 @@ describe("proConversionCopy", () => {
     expect(PRO_UPGRADE_PRO_BULLETS.length).toBeGreaterThan(0);
     expect(CHECKOUT_TITLE).toBe("Continue with Pro");
     expect(CHECKOUT_SUBTITLE).toMatch(/Review it before anything is shared, sent, or signed/i);
-    expect(CHECKOUT_CTA).toBe("Unlock collaboration + send");
+    expect(CHECKOUT_CTA).toBe("Unlock Pro Agreement");
     expect(CHECKOUT_FOOTER).toMatch(/Review before anything moves/i);
     expect(DRAFT_LOADING_STRUCTURING).toBe("Structuring key terms…");
     expect(EARN_HERO_TITLE).toBe("Earn with LawDog");
@@ -65,7 +67,7 @@ describe("proConversionCopy", () => {
     });
     expect(p.labels).toEqual([...STARTER_UPGRADE_CHECKOUT_PROGRESS_LABELS]);
     expect(p.step).toBe(2);
-    expect(p.labels[1]).toBe("Upgrade");
+    expect(p.labels[1]).toBe("Review");
   });
 
   it("checkout subtitle matches shared copy module", () => {

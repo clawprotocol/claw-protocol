@@ -16,7 +16,6 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
 
   const annualCharge = annualPrepayUsd(m);
   const saveUsd = annualSavingsVsMonthlyUsd(m);
-  const savePct = Math.max(1, Math.round((100 * saveUsd) / (m * 12)));
   const effectiveMo = Math.floor(annualCharge / 12);
 
   return (
@@ -51,7 +50,7 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
         >
           <span className="block sm:inline">Annual</span>
           <span className="text-slate-400 sm:mx-1">—</span>
-          <span className="font-semibold text-emerald-400">Save {savePct}%</span>
+          <span className="font-semibold text-emerald-400">Save {formatMoneyUsdWhole(saveUsd)}/year</span>
         </button>
         <button
           type="button"
@@ -79,7 +78,7 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
           }`}
         >
           <span className="inline-block rounded-full bg-amber-400 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-950">
-            Best value
+            Most popular
           </span>
           <p className="mt-3 text-3xl font-semibold tracking-tight leading-none text-white sm:text-4xl">
             {formatMoneyUsdWhole(annualCharge)}
@@ -87,6 +86,9 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
           </p>
           <p className="mt-2 text-[15px] leading-7 text-slate-300 sm:text-base">
             ≈ {formatMoneyUsdWhole(effectiveMo)}/mo <span className="text-slate-400">(billed annually)</span>
+          </p>
+          <p className="mt-1 text-sm font-medium text-emerald-400">
+            Save {formatMoneyUsdWhole(saveUsd)}/year vs monthly
           </p>
           <p className="mt-3 text-sm leading-7 text-slate-300">Best for ongoing agreement use</p>
         </button>

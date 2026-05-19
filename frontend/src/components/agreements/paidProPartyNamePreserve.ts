@@ -66,6 +66,8 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
     );
     const next = out.replace(re, (match, offset) => {
       if (typeof offset !== "number") return full;
+      const window = out.slice(Math.max(0, offset - 8), offset + match.length + 16);
+      if (/\[\[LDG_(?:EMAIL|URL)_\d+\]\]/i.test(window)) return match;
       const tail = out.slice(offset + match.length);
       const remainder = full.slice(match.length);
       if (remainder && tail.toLowerCase().startsWith(remainder.toLowerCase())) return match;

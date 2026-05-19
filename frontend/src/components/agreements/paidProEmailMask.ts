@@ -2,27 +2,31 @@
 
 const EMAIL_ADDRESS_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
-const MASK_PREFIX = "\uE000PAID_PRO_EMAIL_";
-const MASK_SUFFIX = "\uE001";
-const URL_MASK_PREFIX = "\uE000PAID_PRO_URL_";
-const URL_MASK_SUFFIX = "\uE001";
+/** ASCII bracket tokens — avoid \\w-friendly underscores in legacy unicode masks. */
+const EMAIL_MASK_RE = /\[\[LDG_EMAIL_(\d+)\]\]/g;
+const URL_MASK_RE = /\[\[LDG_URL_(\d+)\]\]/g;
 
 export function maskEmailAddresses(text: string): { text: string; emails: string[] } {
   const emails: string[] = [];
   const masked = text.replace(EMAIL_ADDRESS_RE, (email) => {
     const idx = emails.length;
     emails.push(email);
-    return `${MASK_PREFIX}${idx}${MASK_SUFFIX}`;
+    return `[[LDG_EMAIL_${idx}]]`;
   });
   return { text: masked, emails };
 }
 
 export function unmaskEmailAddresses(text: string, emails: readonly string[]): string {
-  let out = text;
-  for (let i = 0; i < emails.length; i++) {
-    const token = `${MASK_PREFIX}${i}${MASK_SUFFIX}`;
-    if (out.includes(token)) out = out.split(token).join(emails[i]);
-  }
+  let out = text.replace(EMAIL_MASK_RE, (_, idx) => {
+    const i = parseInt(idx, 10);
+    return Number.isFinite(i) && emails[i] != null ? emails[i] : "";
+  });
+  // Legacy unicode masks from older builds
+  const LEGACY_EMAIL_RE = /\uE000PAID_PRO_EMAIL_(\d+)\uE001/g;
+  out = out.replace(LEGACY_EMAIL_RE, (_, idx) => {
+    const i = parseInt(idx, 10);
+    return Number.isFinite(i) && emails[i] != null ? emails[i] : "";
+  });
   return out;
 }
 
@@ -38,7 +42,7 @@ export function maskProtectedSpans(text: string): ProtectedSpanMask {
   const masked = emailMasked.replace(URL_RE, (url) => {
     const idx = urls.length;
     urls.push(url);
-    return `${URL_MASK_PREFIX}${idx}${URL_MASK_SUFFIX}`;
+    return `[[LDG_URL_${idx}]]`;
   });
   return { text: masked, emails, urls };
 }
@@ -49,10 +53,15 @@ export function unmaskProtectedSpans(
   urls: readonly string[],
 ): string {
   let out = unmaskEmailAddresses(text, emails);
-  for (let i = 0; i < urls.length; i++) {
-    const token = `${URL_MASK_PREFIX}${i}${URL_MASK_SUFFIX}`;
-    if (out.includes(token)) out = out.split(token).join(urls[i]);
-  }
+  out = out.replace(URL_MASK_RE, (_, idx) => {
+    const i = parseInt(idx, 10);
+    return Number.isFinite(i) && urls[i] != null ? urls[i] : "";
+  });
+  const LEGACY_URL_RE = /\uE000PAID_PRO_URL_(\d+)\uE001/g;
+  out = out.replace(LEGACY_URL_RE, (_, idx) => {
+    const i = parseInt(idx, 10);
+    return Number.isFinite(i) && urls[i] != null ? urls[i] : "";
+  });
   return out;
 }
 
@@ -61,4 +70,34 @@ export function textContainsCorruptedEntityEmail(text: string): boolean {
   return /@[A-Za-z][^@\s]{0,140}?\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|LP)\b/i.test(
     text,
   );
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Force exact intake emails back into the document after polish (byte-for-byte when possible).
+ */
+export function restoreExactIntakeEmails(
+  text: string,
+  intakeEmails: readonly string[],
+): { text: string; repairedCount: number } {
+  let out = unmaskEmailAddresses(text, intakeEmails);
+  let repairedCount = 0;
+
+  for (const email of intakeEmails) {
+    if (!email) continue;
+    if (out.includes(email)) continue;
+    const local = email.split("@")[0];
+    if (!local) continue;
+    const corruptRe = new RegExp(`${escapeRe(local)}@[^\\n\\r,;<>\\]\\]]+`, "gi");
+    const next = out.replace(corruptRe, email);
+    if (next !== out) {
+      out = next;
+      repairedCount += 1;
+    }
+  }
+
+  return { text: out, repairedCount };
 }

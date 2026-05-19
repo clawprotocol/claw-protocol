@@ -8,6 +8,7 @@ import {
   resolveCheckoutFlowProgress,
 } from "./checkoutFlowProgress";
 import { CHECKOUT_CTA, CHECKOUT_FOOTER, CHECKOUT_TITLE } from "./proConversionCopy";
+import { CheckoutTrustPanel } from "./CheckoutTrustPanel";
 import {
   createFiatToCryptoOnrampIntent,
   demoConfirmFiatToCryptoOnrampFromCard,
@@ -452,8 +453,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         <div
           className={
             isCreateAgreementCheckout
-              ? "mx-auto w-full max-w-[1240px] space-y-8 px-1 sm:px-0"
-              : "mx-auto max-w-lg space-y-8"
+              ? "mx-auto w-full min-w-0 max-w-[1240px] space-y-8 overflow-x-hidden px-1 sm:px-0"
+              : "mx-auto min-w-0 max-w-lg space-y-8 overflow-x-hidden"
           }
         >
         {paymentError ? (
@@ -509,7 +510,12 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                 <span className="text-slate-200">{priceLine}</span>
               </p>
 
-              <div className={`mt-5 space-y-4 ${isCreateAgreementCheckout ? "sm:space-y-5" : ""}`}>
+              <div className={`mt-5 min-w-0 space-y-4 ${isCreateAgreementCheckout ? "sm:space-y-5" : ""}`}>
+                <CheckoutTrustPanel
+                  surface="create_flow_checkout"
+                  cadence={cadence}
+                  showAnnualRenewal={!isSingleAgreementCheckout}
+                />
                 <div>
                   <p className="text-sm font-medium text-slate-200">Pay with card</p>
                   <p className="text-sm leading-7 text-slate-300">{ck.trustLines.cardProcessing}</p>
@@ -654,6 +660,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
               </p>
 
               <div className="mt-5 space-y-4">
+                <CheckoutTrustPanel
+                  surface="checkout"
+                  cadence={cadence}
+                  showAnnualRenewal={!isSingleAgreementCheckout}
+                />
                 <div>
                   <p className="text-sm font-medium text-slate-200">Pay with card</p>
                   <p className="text-sm leading-7 text-slate-300">{ck.trustLines.cardProcessing}</p>

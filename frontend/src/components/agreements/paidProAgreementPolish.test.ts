@@ -74,6 +74,26 @@ describe("normalizeOpeningRecital", () => {
     expect(text).toContain('Beta Supply Inc. (“Beta”)');
   });
 
+  it("rewrites This Agreement is between opener after a title line", () => {
+    const parties = buildPartyEntries(TWO_PARTY);
+    const body = "MASTER SERVICES AGREEMENT\n\nThis Agreement is between Acme and Beta.";
+    const { text, log } = normalizeOpeningRecital(body, parties, "high");
+    expect(log.reason).not.toBe("recital_not_found");
+    expect(log.applied).toBe(true);
+    expect(text).toContain('Acme Widgets LLC (“Acme”)');
+    expect(text).toMatch(/by and between/i);
+  });
+
+  it("rewrites This [title] Agreement is entered into by and among abbreviated parties", () => {
+    const parties = buildPartyEntries(IRONCLAD_PARTIES);
+    const body =
+      "CONFIDENTIALITY AND COMMERCIAL PROTECTIONS AGREEMENT\n\nThis Confidentiality and Commercial Protections Agreement is entered into by and among Ironclad, Harborline, and Northwind.";
+    const { text, log } = normalizeOpeningRecital(body, parties, "high");
+    expect(log.reason).not.toBe("recital_not_found");
+    expect(log.applied).toBe(true);
+    expect(text).toContain('Ironclad Systems Group LLC (“Ironclad”)');
+  });
+
   it("leaves recital untouched when party confidence is low", () => {
     const parties = buildPartyEntries(["Foo", "Bar"]);
     const body = "entered into by and among Foo and Bar.";

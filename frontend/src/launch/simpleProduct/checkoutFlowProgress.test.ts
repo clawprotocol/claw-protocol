@@ -11,7 +11,7 @@ import {
 } from "./checkoutFlowProgress";
 
 describe("resolveCheckoutFlowProgress", () => {
-  it("starter upgrade checkout: Upgrade active, Draft complete, Send and Sign not complete", () => {
+  it("starter upgrade checkout: Review active, Draft complete, Proof not current", () => {
     const p = resolveCheckoutFlowProgress({
       agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
       isSingleAgreementCheckout: false,
@@ -22,16 +22,15 @@ describe("resolveCheckoutFlowProgress", () => {
     expect(p.step).toBe(2);
     expect(checkoutProgressStepIsComplete(p, 0)).toBe(true);
     expect(checkoutProgressStepIsCurrent(p, 1)).toBe(true);
-    expect(p.labels[1]).toBe("Upgrade");
+    expect(p.labels[1]).toBe("Review");
     expect(checkoutProgressStepIsComplete(p, 2)).toBe(false);
     expect(checkoutProgressStepIsComplete(p, 3)).toBe(false);
     expect(checkoutProgressStepIsCurrent(p, 3)).toBe(false);
-    const signIdx = p.labels.indexOf("Sign");
-    expect(signIdx).toBe(-1);
+    expect(p.labels).toContain("Sign");
     expect(checkoutProgressStepIsCurrent(p, p.labels.length - 2)).toBe(false);
   });
 
-  it("direct send checkout: Send active, Sign not active or complete", () => {
+  it("direct send checkout: Review active on lifecycle rail, Sign not current", () => {
     const p = resolveCheckoutFlowProgress({
       agreementId: "agr-send-1",
       isSingleAgreementCheckout: false,
@@ -39,7 +38,7 @@ describe("resolveCheckoutFlowProgress", () => {
     });
     expect(p.variant).toBe("direct_send");
     expect(p.step).toBe(2);
-    expect(p.labels[1]).toBe("Send");
+    expect(p.labels[1]).toBe("Review");
     expect(checkoutProgressStepIsComplete(p, 0)).toBe(true);
     expect(checkoutProgressStepIsCurrent(p, 1)).toBe(true);
     expect(checkoutProgressStepIsComplete(p, 1)).toBe(false);
@@ -64,6 +63,7 @@ describe("SimpleCheckoutPage checkout copy (static)", () => {
   it("uses review-before-send subtitle and does not imply signing on starter upgrade", () => {
     const page = readFileSync(join(__dirname, "SimpleCheckoutPage.tsx"), "utf8");
     expect(page).toContain("CHECKOUT_STARTER_UPGRADE_SUBTITLE");
+    expect(page).toContain("CheckoutTrustPanel");
     expect(page).toContain("resolveCheckoutFlowProgress");
     expect(page).not.toContain(
       "Full send, collaboration, and tracked signing — then back to your agreement",

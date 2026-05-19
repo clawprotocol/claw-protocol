@@ -13,7 +13,16 @@ const ENTITY_SUFFIX =
 const CORP_GENERIC_SECOND =
   /^(?:systems|data|automation|analytics|solutions|technologies|group|partners|grid|holdings|services|international|global|automation|software)$/i;
 
-const RECITAL_SCAN_LEN = 3_200;
+const RECITAL_SCAN_LEN = 5_000;
+
+const RECITAL_OPENER_RES: readonly RegExp[] = [
+  /\bentered\s+into\s+(?:(?:by\s+and\s+)?)(among|between)\s+/i,
+  /\bThis\s+[\s\S]{0,200}?\s+is\s+(?:by\s+and\s+)?(among|between)\s+/i,
+  /\b(?:CONFIDENTIALITY|COMMERCIAL|MASTER|SERVICES|MUTUAL|NON-?DISCLOSURE)[^\n]{0,120}\n+This\s+[\s\S]{0,120}?\s+is\s+(?:by\s+and\s+)?(among|between)\s+/i,
+  /\bAgreement\s+is\s+(?:by\s+and\s+)?(among|between)\s+/i,
+  /\bis\s+(?:by\s+and\s+)?(among|between)\s+(?=[A-Z][a-z])/i,
+  /\bis\s+between\s+(?=[A-Z][a-z])/i,
+];
 const SIG_REGION_RE = /\b(?:IN WITNESS WHEREOF|SIGNATURES?|EXECUTION)\b/i;
 
 const SOFTWARE_SCOPE_RE =
@@ -159,15 +168,49 @@ type RecitalSpan = {
   end: number;
 };
 
-function findRecitalSpan(head: string): RecitalSpan | null {
-  const m = head.match(/\bentered\s+into\s+(?:(by\s+and\s+)?)(among|between)\s+/i);
-  if (!m || m.index === undefined) return null;
+type RecitalOpenerMatch = {
+  index: number;
+  partyStart: number;
+  connector: "among" | "between";
+};
 
-  const connector = (m[2] || "among").toLowerCase() === "between" ? "between" : "among";
-  const partyStart = m.index + m[0].length;
-  const thisIdx = head.lastIndexOf("This ", m.index);
-  const lineStart = head.lastIndexOf("\n", m.index) + 1;
-  const start = thisIdx >= 0 && m.index - thisIdx < 240 ? thisIdx : lineStart;
+function findRecitalOpener(head: string): RecitalOpenerMatch | null {
+  const candidates: RecitalOpenerMatch[] = [];
+  const pushAll = (
+    re: RegExp,
+    connectorFrom: (m: RegExpExecArray) => "among" | "between",
+  ) => {
+    const flags = re.flags.includes("g") ? re : new RegExp(re.source, `${re.flags}g`);
+    let m: RegExpExecArray | null;
+    while ((m = flags.exec(head)) !== null) {
+      candidates.push({
+        index: m.index,
+        partyStart: m.index + m[0].length,
+        connector: connectorFrom(m),
+      });
+    }
+  };
+
+  for (const re of RECITAL_OPENER_RES) {
+    pushAll(re, (m) => ((m[1] || m[2] || "").toLowerCase() === "between" ? "between" : "among"));
+  }
+  pushAll(/\bis\s+between\s+(?=[A-Z])/gi, () => "between");
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.index - b.index);
+  return candidates[0]!;
+}
+
+function findRecitalSpan(head: string): RecitalSpan | null {
+  const opener = findRecitalOpener(head);
+  if (!opener) return null;
+
+  const connector = opener.connector;
+  const partyStart = opener.partyStart;
+  const matchIndex = opener.index;
+  const thisIdx = head.lastIndexOf("This ", matchIndex);
+  const lineStart = head.lastIndexOf("\n", matchIndex) + 1;
+  const start = thisIdx >= 0 && matchIndex - thisIdx < 280 ? thisIdx : lineStart;
   const prefix = head.slice(start, partyStart);
 
   const rest = head.slice(partyStart);
@@ -221,6 +264,7 @@ export function normalizeOpeningRecital(
   text: string,
   parties: readonly PartyEntry[],
   confidence: PartyExtractionConfidence,
+  opts?: { skipInternalMask?: boolean },
 ): { text: string; log: RecitalPolishLog } {
   const baseLog: RecitalPolishLog = {
     applied: false,
@@ -233,7 +277,13 @@ export function normalizeOpeningRecital(
   }
 
   const headLen = Math.min(text.length, RECITAL_SCAN_LEN);
-  const { text: maskedHead, emails, urls } = maskProtectedSpans(text.slice(0, headLen));
+  const headSlice = text.slice(0, headLen);
+  const maskedPack = opts?.skipInternalMask
+    ? { text: headSlice, emails: [] as string[], urls: [] as string[] }
+    : maskProtectedSpans(headSlice);
+  const maskedHead = maskedPack.text;
+  const emails = maskedPack.emails;
+  const urls = maskedPack.urls;
   const recital = findRecitalSpan(maskedHead);
 
   if (!recital) {
@@ -276,7 +326,7 @@ export function normalizeOpeningRecital(
   );
   const newHead =
     maskedHead.slice(0, recital.start) + replacement + recital.suffix + maskedHead.slice(recital.end);
-  const unmaskedHead = unmaskProtectedSpans(newHead, emails, urls);
+  const unmaskedHead = opts?.skipInternalMask ? newHead : unmaskProtectedSpans(newHead, emails, urls);
   const tail = text.slice(headLen);
   return {
     text: unmaskedHead + tail,
@@ -299,6 +349,7 @@ function isSignatureHeadingLine(line: string, parties: readonly PartyEntry[]): P
 export function normalizeSignatureBlockHeadings(
   text: string,
   parties: readonly PartyEntry[],
+  opts?: { skipInternalMask?: boolean },
 ): { text: string; log: SignaturePolishLog } {
   const marker = text.search(SIG_REGION_RE);
   if (marker < 0 || parties.length < 2) {
@@ -307,7 +358,12 @@ export function normalizeSignatureBlockHeadings(
 
   const before = text.slice(0, marker);
   const sigRegion = text.slice(marker);
-  const { text: masked, emails, urls } = maskProtectedSpans(sigRegion);
+  const maskedPack = opts?.skipInternalMask
+    ? { text: sigRegion, emails: [] as string[], urls: [] as string[] }
+    : maskProtectedSpans(sigRegion);
+  const masked = maskedPack.text;
+  const emails = maskedPack.emails;
+  const urls = maskedPack.urls;
 
   const lines = masked.split("\n");
   let replacedCount = 0;
@@ -325,7 +381,9 @@ export function normalizeSignatureBlockHeadings(
     return `${indent}${hit.full}`;
   });
 
-  const polishedSig = unmaskProtectedSpans(outLines.join("\n"), emails, urls);
+  const polishedSig = opts?.skipInternalMask
+    ? outLines.join("\n")
+    : unmaskProtectedSpans(outLines.join("\n"), emails, urls);
   return { text: before + polishedSig, log: { replacedCount } };
 }
 
@@ -521,7 +579,7 @@ export function polishPaidProAgreementText(
   text: string,
   intakeRaw: string | null | undefined,
   partyNames: readonly string[] | null | undefined,
-  opts?: { surface?: string; explicitPartyList?: boolean },
+  opts?: { surface?: string; explicitPartyList?: boolean; skipInternalMask?: boolean },
 ): PaidProAgreementPolishResult {
   const explicitPartyList = opts?.explicitPartyList ?? (partyNames?.length ?? 0) >= 2;
   const fullNames = resolveFullLegalPartiesFromIntake(partyNames, intakeRaw);
@@ -532,9 +590,13 @@ export function polishPaidProAgreementText(
     explicitPartyList,
   );
 
-  const recital = normalizeOpeningRecital(text, parties, confidence);
+  const recital = normalizeOpeningRecital(text, parties, confidence, {
+    skipInternalMask: opts?.skipInternalMask,
+  });
   let working = recital.text;
-  const signature = normalizeSignatureBlockHeadings(working, parties);
+  const signature = normalizeSignatureBlockHeadings(working, parties, {
+    skipInternalMask: opts?.skipInternalMask,
+  });
   working = signature.text;
   const enterprise = applyEnterpriseClausePolish(working);
   working = enterprise.text;
