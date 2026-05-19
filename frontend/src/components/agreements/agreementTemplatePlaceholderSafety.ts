@@ -130,6 +130,9 @@ export function logPaidProPlaceholderGateDecision(payload: {
   partyCount: number;
   accepted: boolean;
   signatureOnlyDemotion?: boolean;
+  demotedSignatureContactCount?: number;
+  fatalTokens?: string[];
+  executionContextFound?: boolean;
 }): void {
   if (import.meta.env.MODE === "test") return;
   // eslint-disable-next-line no-console
@@ -157,8 +160,13 @@ const ALLOWED_BRACKET = /^\[not yet specified\]$/i;
 
 const BRACKET_INTERNAL_SLOT_RE = /\[(?:[A-Z][A-Z0-9]*_\d+|[A-Z]{2,}_[A-Z0-9_]+)\]/g;
 
+/** Signature / contact line fields, including numbered slots: [EMAIL_1], [SIGNER_EMAIL_2], [NAME_3]. */
 const SIGNATURE_LINE_BRACKET_RE =
-  /\[\s*(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|PRINTED[\s_]*NAME|COMPANY[\s_]*NAME|LEGAL[\s_]*NAME|AUTHORIZED[\s_]*SIGNATORY|SIGNATORY(?:[\s_]*NAME)?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|WITNESS(?:[\s_]*NAME)?)\s*\]/gi;
+  /\[\s*(?:(?:SIGNER|PARTY|CONTACT)_)?(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|PRINTED[\s_]*NAME|COMPANY[\s_]*NAME|LEGAL[\s_]*NAME|AUTHORIZED[\s_]*SIGNATORY|SIGNATORY(?:[\s_]*NAME)?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|WITNESS(?:[\s_]*NAME)?)(?:_\d+)?\s*\]/gi;
+
+/** Numbered signer/contact bracket tokens — requires _N on bare fields; prefixed PARTY_EMAIL optional. */
+const NUMBERED_SIGNATURE_CONTACT_BRACKET_RE =
+  /\[\s*(?:(?:SIGNER|PARTY|CONTACT)_(?:EMAIL|NAME|TITLE|DATE|SIGNATURE|INITIALS?|ADDRESS|PHONE)(?:_\d+)?|(?:EMAIL|NAME|TITLE|DATE|SIGNATURE|INITIALS?|ADDRESS|PHONE)_\d+)\s*\]/gi;
 
 /** Party/signer metadata stubs — [PARTY NAME], [PARTY_NAME], [CLIENT NAME], [CLIENT_NAME]. */
 const SIGNATURE_PARTY_LABEL_BRACKET_RE =
@@ -213,13 +221,18 @@ const SIGNATURE_REGION_MARKERS =
 const EXECUTION_CONTEXT_RE =
   /\b(in witness whereof|signatures?|execution|counterparts?|signed|signatory|authorized representative|electronic signature|witness|counterpart)\b/i;
 
-const EXECUTION_LINE_LABEL_RE = /\b(by|name|title|date|email|initials?|witness|signature)\s*:/i;
+/** Signature block field labels at line start (avoids operative prose like "Notice email:"). */
+const EXECUTION_LINE_LABEL_RE = /^\s*(?:by|name|title|date|email|initials?|witness|signature)\s*:/i;
 
 const OPERATIVE_SECTION_HEADING_RE =
   /\b(?:payment|fees?|compensation|scope|services|deliverables|confidential|indemnif|governing law|termination|liability|limitation of liability|intellectual property|notices?|dispute|warranty|representations)\b/i;
 
 const SOFT_SIGNATURE_LABEL_RE =
-  /^(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|PRINTED[\s_]*NAME|PRINT[\s_]*NAME|COMPANY[\s_]*NAME|LEGAL[\s_]*NAME|AUTHORIZED[\s_]*SIGNATORY|SIGNATORY(?:[\s_]*NAME)?|SIGNATORY|PARTY[\s_]*NAME|CLIENT[\s_]*NAME|COUNTERPARTY(?:[\s_]*NAME)?|WITNESS(?:[\s_]*NAME)?|WITNESS)$/i;
+  /^(?:(?:SIGNER|PARTY|CONTACT)_)?(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|ADDRESS|PHONE|FAX|CITY|STATE|ZIP(?:[\s_]*CODE)?|POSTAL(?:[\s_]*CODE)?|PRINTED[\s_]*NAME|PRINT[\s_]*NAME|COMPANY[\s_]*NAME|LEGAL[\s_]*NAME|AUTHORIZED[\s_]*SIGNATORY|SIGNATORY(?:[\s_]*NAME)?|SIGNATORY|PARTY[\s_]*NAME|CLIENT[\s_]*NAME|COUNTERPARTY(?:[\s_]*NAME)?|WITNESS(?:[\s_]*NAME)?|WITNESS)(?:_\d+)?$/i;
+
+/** Normalized keys for numbered signature/contact fields (EMAIL_1, SIGNER_EMAIL_2, …). */
+const NUMBERED_SIGNATURE_CONTACT_NORMALIZED_RE =
+  /^(?:(?:SIGNER|PARTY|CONTACT)_(?:EMAIL|NAME|TITLE|SIGNATURE|DATE|INITIALS?|ADDRESS|PHONE)(?:_\d+)?|(?:EMAIL|NAME|TITLE|SIGNATURE|DATE|INITIALS?|ADDRESS|PHONE)_\d+)$/i;
 
 const SOFT_PREAMBLE_LABEL_RE = /^(?:DATE[\s_]*OF[\s_]*AGREEMENT|EFFECTIVE[\s_]*DATE|AGREEMENT[\s_]*DATE)$/i;
 
@@ -387,9 +400,53 @@ export function normalizePlaceholderToken(token: string): string {
   return bracketInner(token).replace(/[\s./-]+/g, "_").replace(/_+/g, "_").toUpperCase();
 }
 
+/** True when normalized key is a numbered signature/contact field (not PARTY_1 / ORG_2 party slots). */
+export function isNumberedSignatureContactNormalized(normalized: string): boolean {
+  const n = (normalized || "").toUpperCase();
+  if (/^(?:PARTY|ORG|CASE_ID)_\d+$/i.test(n)) return false;
+  if (/^CLIENT(?:_LEGAL)?_NAME$/i.test(n)) return false;
+  return NUMBERED_SIGNATURE_CONTACT_NORMALIZED_RE.test(n);
+}
+
+export function isNumberedSignatureContactToken(token: string): boolean {
+  if (!token.startsWith("[") || !token.endsWith("]")) return false;
+  return isNumberedSignatureContactNormalized(normalizePlaceholderToken(token));
+}
+
+/** 1-based slot from [EMAIL_3] / [SIGNER_EMAIL_2]; null when unnumbered. */
+export function parseSignatureContactSlot(token: string): number | null {
+  const n = normalizePlaceholderToken(token);
+  const m = /_(\d+)$/.exec(n);
+  if (!m) return null;
+  const slot = parseInt(m[1], 10);
+  return Number.isFinite(slot) && slot > 0 ? slot : null;
+}
+
+function extractIntakeEmails(intakeRaw: string | null | undefined): string[] {
+  const raw = String(intakeRaw || "");
+  if (!raw.trim()) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of raw.matchAll(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)) {
+    const e = m[0].toLowerCase();
+    if (!seen.has(e)) {
+      seen.add(e);
+      out.push(m[0]);
+    }
+  }
+  return out;
+}
+
+function resolveIntakeEmailForSlot(intakeRaw: string | null | undefined, slot: number | null): string | null {
+  if (!slot || slot < 1) return null;
+  const emails = extractIntakeEmails(intakeRaw);
+  return emails[slot - 1] ?? null;
+}
+
 export function isAllowlistedSignatureToken(token: string): boolean {
   const n = normalizePlaceholderToken(token);
   if (SIGNATURE_TOKEN_ALLOWLIST.has(n)) return true;
+  if (isNumberedSignatureContactNormalized(n)) return true;
   const spaced = bracketInner(token).replace(/\s+/g, " ").toUpperCase();
   return SIGNATURE_TOKEN_ALLOWLIST.has(spaced.replace(/ /g, "_"));
 }
@@ -400,9 +457,24 @@ export function isSignatureOnlyFatalToken(token: string): boolean {
   const inner = bracketInner(token);
   if (/^CLIENT[\s_]*LEGAL[\s_]*NAME$/i.test(inner)) return false;
   if (/^CLIENT[\s_]*NAME$/i.test(inner)) return false;
+  if (isNumberedSignatureContactToken(token)) return true;
   if (isAllowlistedSignatureToken(token)) return true;
   if (isSignatureLineBracketToken(token)) return true;
   return isSignatureFieldLabel(inner) || SOFT_PREAMBLE_LABEL_RE.test(inner.replace(/_/g, " "));
+}
+
+function isOperativeSignatureContactMisuse(token: string, text: string, index: number): boolean {
+  if (!isNumberedSignatureContactToken(token)) return false;
+  if (isTailSignatureSection(text, index)) return false;
+  const n = normalizePlaceholderToken(token);
+  const isEmailSlot = /^(?:(?:SIGNER|PARTY|CONTACT)_EMAIL(?:_\d+)?|EMAIL_\d+)$/i.test(n);
+  if (!isEmailSlot) return false;
+  if (isExecutionSignatureContext(text, index) && isInSignatureRegion(text, index)) {
+    return false;
+  }
+  if (isNearOperativeSectionHeading(text, index)) return true;
+  if (index < text.length * 0.35) return true;
+  return false;
 }
 
 /** Last ~25% of long documents with execution/signature markers nearby. */
@@ -422,33 +494,33 @@ export function demotePaidProSignatureOnlyFatals(
   decisions: PlaceholderTokenDecision[],
   bodyLen: number,
   partyResolution: PlaceholderPartyResolution,
-): { decisions: PlaceholderTokenDecision[]; demoted: boolean } {
+): { decisions: PlaceholderTokenDecision[]; demoted: boolean; demotedCount: number } {
   if (bodyLen < PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN) {
-    return { decisions, demoted: false };
+    return { decisions, demoted: false, demotedCount: 0 };
   }
   const fatals = decisions.filter((d) => d.fatal);
-  if (fatals.length === 0 || fatals.length > 16) {
-    return { decisions, demoted: false };
+  if (fatals.length === 0 || fatals.length > 24) {
+    return { decisions, demoted: false, demotedCount: 0 };
   }
   if (!fatals.every((d) => isSignatureOnlyFatalToken(d.token))) {
-    return { decisions, demoted: false };
+    return { decisions, demoted: false, demotedCount: 0 };
   }
-  const hasAnchor = partyResolution.anchorsFound || partyResolution.partyCount >= 2;
-  if (!hasAnchor && bodyLen < 25_000) {
-    return { decisions, demoted: false };
+  if (!partyResolution.anchorsFound) {
+    return { decisions, demoted: false, demotedCount: 0 };
   }
-  const next: PlaceholderTokenDecision[] = decisions.map((d) =>
-    d.fatal && isSignatureOnlyFatalToken(d.token)
-      ? {
-          ...d,
-          fatal: false,
-          category: "signature_line_stub" as const,
-          sectionKind: "signature" as const,
-          lineKind: "signature" as const,
-        }
-      : d,
-  );
-  return { decisions: next, demoted: true };
+  let demotedCount = 0;
+  const next: PlaceholderTokenDecision[] = decisions.map((d) => {
+    if (!d.fatal || !isSignatureOnlyFatalToken(d.token)) return d;
+    demotedCount += 1;
+    return {
+      ...d,
+      fatal: false,
+      category: "signature_line_stub" as const,
+      sectionKind: "signature" as const,
+      lineKind: "signature" as const,
+    };
+  });
+  return { decisions: next, demoted: demotedCount > 0, demotedCount };
 }
 
 function contextSnippet(text: string, index: number, radius = 60): string {
@@ -556,6 +628,7 @@ function isOperativeMaterialPlaceholder(token: string, text: string, index: numb
   if (isAllowlistedSignatureToken(token) && isNearOperativeSectionHeading(text, index)) {
     return true;
   }
+  if (isOperativeSignatureContactMisuse(token, text, index)) return true;
   return false;
 }
 
@@ -593,6 +666,24 @@ export function classifyTemplateFragment(
   const isTail = isTailSignatureSection(text, index);
   const anchorsOk = corpusHasResolvedPartyAnchors(text, partyNames, intakeRaw);
   const base = decisionBase(token, text, index, inExec, isTail);
+
+  if (isNumberedSignatureContactToken(token)) {
+    if (isOperativeSignatureContactMisuse(token, text, index)) {
+      return { ...base, category: "internal_slot", fatal: true };
+    }
+    if (inExec || isTail) {
+      return { ...base, category: "signature_line_stub", fatal: false };
+    }
+    const tailStart = Math.floor(text.length * 0.75);
+    const tailMinLen =
+      text.length >= PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN
+        ? PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN
+        : 6_000;
+    if (text.length >= tailMinLen && index >= tailStart) {
+      return { ...base, category: "signature_line_stub", fatal: false };
+    }
+    return { ...base, category: "internal_slot", fatal: true };
+  }
 
   if (isAllowlistedSignatureToken(token)) {
     const innerLabel = bracketInner(token);
@@ -642,6 +733,15 @@ export function classifyTemplateFragment(
 
   if (BRACKET_INTERNAL_SLOT_RE.test(token)) {
     BRACKET_INTERNAL_SLOT_RE.lastIndex = 0;
+    if (isNumberedSignatureContactToken(token)) {
+      if (isOperativeSignatureContactMisuse(token, text, index)) {
+        return { ...base, category: "internal_slot", fatal: true };
+      }
+      if (inExec || isTail || index >= Math.floor(text.length * 0.75)) {
+        return { ...base, category: "signature_line_stub", fatal: false };
+      }
+      return { ...base, category: "internal_slot", fatal: true };
+    }
     const partySlot = isInternalPartySlotToken(token);
     const nameStyleSlot = /\b(?:PARTY|CLIENT|COMPANY|COUNTERPARTY|ORG)(?:_NAME|_LEGAL_NAME)\b/i.test(token);
     if (inExec && (partySlot || nameStyleSlot || isSignatureFieldLabel(bracketInner(token)))) {
@@ -708,6 +808,9 @@ function repairBracketInExecutionContext(
     if (/^CLIENT[\s_]*NAME$/i.test(inner) && idx < text.length * 0.5) {
       return match;
     }
+    if (isNumberedSignatureContactToken(match) && isOperativeSignatureContactMisuse(match, text, idx)) {
+      return match;
+    }
     if (!isExecutionSignatureContext(text, idx) && !SOFT_PREAMBLE_LABEL_RE.test(inner)) {
       return match;
     }
@@ -717,10 +820,41 @@ function repairBracketInExecutionContext(
   return { text: out, repaired };
 }
 
-function repairSignatureLinePlaceholders(text: string): { text: string; repaired: string[] } {
-  const a = repairBracketInExecutionContext(text, SIGNATURE_LINE_BRACKET_RE, "sig_line");
+function repairNumberedSignatureContactPlaceholders(
+  text: string,
+  intakeRaw: string | null | undefined,
+): { text: string; repaired: string[] } {
+  const repaired: string[] = [];
+  const out = text.replace(NUMBERED_SIGNATURE_CONTACT_BRACKET_RE, (match, offset) => {
+    const idx = typeof offset === "number" ? offset : text.indexOf(match);
+    if (idx < 0) return match;
+    if (isOperativeSignatureContactMisuse(match, text, idx)) return match;
+    if (!isExecutionSignatureContext(text, idx) && !isTailSignatureSection(text, idx)) {
+      return match;
+    }
+    const n = normalizePlaceholderToken(match);
+    const slot = parseSignatureContactSlot(match);
+    if (/^(?:(?:SIGNER|PARTY|CONTACT)_EMAIL(?:_\d+)?|EMAIL_\d+)$/i.test(n)) {
+      const resolved = resolveIntakeEmailForSlot(intakeRaw, slot);
+      if (resolved) {
+        repaired.push(`sig_contact_email:${match.trim()}→${resolved}`);
+        return resolved;
+      }
+    }
+    repaired.push(`sig_contact:${match.trim()}`);
+    return "_________________________";
+  });
+  return { text: out, repaired };
+}
+
+function repairSignatureLinePlaceholders(
+  text: string,
+  intakeRaw?: string | null,
+): { text: string; repaired: string[] } {
+  const numbered = repairNumberedSignatureContactPlaceholders(text, intakeRaw);
+  const a = repairBracketInExecutionContext(numbered.text, SIGNATURE_LINE_BRACKET_RE, "sig_line");
   const b = repairBracketInExecutionContext(a.text, SIGNATURE_PARTY_LABEL_BRACKET_RE, "sig_party_label");
-  return { text: b.text, repaired: [...a.repaired, ...b.repaired] };
+  return { text: b.text, repaired: [...numbered.repaired, ...a.repaired, ...b.repaired] };
 }
 
 function repairSoftFieldBracketPlaceholders(text: string): { text: string; repaired: string[] } {
@@ -757,7 +891,7 @@ export function repairAgreementTemplatePlaceholders(
 
   out = substitutePartyPlaceholdersInUserFacingText(out, partyLine, names.length ? names : null);
 
-  const sigRepair = repairSignatureLinePlaceholders(out);
+  const sigRepair = repairSignatureLinePlaceholders(out, ctx.intakeRaw);
   out = sigRepair.text;
   repaired.push(...sigRepair.repaired);
 
@@ -815,6 +949,7 @@ export function scanTemplatePlaceholderMatches(
   };
 
   scanRe(BRACKET_INTERNAL_SLOT_RE);
+  scanRe(NUMBERED_SIGNATURE_CONTACT_BRACKET_RE);
   scanRe(SIGNATURE_LINE_BRACKET_RE);
   scanRe(SIGNATURE_PARTY_LABEL_BRACKET_RE);
   scanRe(INSERT_BRACKET_RE);
@@ -906,6 +1041,9 @@ export function finalizeUserVisibleAgreementPlainText(
     partyCount: partyResolution.partyCount,
     accepted: ok,
     signatureOnlyDemotion: demotion.demoted,
+    demotedSignatureContactCount: demotion.demotedCount,
+    fatalTokens: remainingFatal.slice(0, 16),
+    executionContextFound: remainingDetail.some((d) => d.isExecutionContext),
   });
 
   logPlaceholderScanResult({

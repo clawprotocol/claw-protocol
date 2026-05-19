@@ -183,6 +183,82 @@ describe("five-party paid Pro corpus acceptance (production QA)", () => {
     expect(v.ok, v.reasons.join("; ")).toBe(true);
   });
 
+  it("accepts Ironclad 25k+ body with numbered signature emails [EMAIL_1]..[EMAIL_5] (production)", () => {
+    const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
+    const sigBlock = IRONCLAD_PARTIES.map((p, i) => {
+      const n = i + 1;
+      return `${p}\nBy: [SIGNATURE]\nName: [NAME_${n}]\nTitle: [TITLE_${n}]\nDate: [DATE_${n}]\nEmail: [EMAIL_${n}]`;
+    }).join("\n\n");
+    const core = [
+      "CONFIDENTIALITY AND COMMERCIAL PROTECTIONS AGREEMENT",
+      `Among ${IRONCLAD_PARTIES.join(", ")}.`,
+      "1. Scope. Joint AI software and infrastructure rollout.",
+      "2. Fees. $187,500 milestone payments.",
+      "IN WITNESS WHEREOF:",
+      sigBlock,
+    ].join("\n");
+    const body = padOperative(core, 26_000);
+
+    const fin = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: intake,
+      partyNames: null,
+      surface: "ironclad_email_slots",
+    });
+    expect(fin.remainingFatal, fin.remainingFatal.join("; ")).toHaveLength(0);
+    expect(fin.ok).toBe(true);
+    expect(fin.text).toContain("ethan.cole@ironcladsg.com");
+    expect(fin.text).not.toMatch(/\[\s*EMAIL_\d+\s*\]/i);
+
+    const acc = rejectPremiumBodyForProRender(body, {
+      intakeLower: intake.toLowerCase(),
+      intakeText: intake,
+      partyNames: null,
+    });
+    expect(acc.ok, acc.reasons.join("; ")).toBe(true);
+
+    const v = validatePaidProOutput({
+      text: body,
+      rawIntake: intake,
+      draft: null,
+      premiumPipelineSource: "server_full_draft",
+    });
+    expect(v.ok, v.reasons.join("; ")).toBe(true);
+  });
+
+  it("accepts [SIGNER_EMAIL_1] and [PARTY_EMAIL_1] in Ironclad signature block", () => {
+    const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
+    const sigBlock = [
+      `${IRONCLAD_PARTIES[0]}\nEmail: [SIGNER_EMAIL_1]`,
+      `${IRONCLAD_PARTIES[1]}\nEmail: [PARTY_EMAIL_1]`,
+    ].join("\n\n");
+    const body = padOperative(
+      `AGREEMENT among ${IRONCLAD_PARTIES.join(", ")}.\nIN WITNESS WHEREOF:\n${sigBlock}`,
+      20_000,
+    );
+    const fin = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: intake,
+      partyNames: null,
+      surface: "test",
+    });
+    expect(fin.ok, fin.remainingFatal.join("; ")).toBe(true);
+    expect(fin.remainingFatal).toHaveLength(0);
+  });
+
+  it("rejects operative Notice email [EMAIL_1] before signature section", () => {
+    const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
+    const body =
+      `AGREEMENT among ${IRONCLAD_PARTIES.join(", ")}.\n\n2. NOTICES\nNotice email: [EMAIL_1] for all correspondence.\n` +
+      "x".repeat(4000) +
+      "\nIN WITNESS WHEREOF:\n[NAME]";
+    const fin = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: intake,
+      partyNames: null,
+      surface: "test",
+    });
+    expect(fin.ok).toBe(false);
+    expect(fin.remainingFatal.some((x) => /EMAIL/i.test(x))).toBe(true);
+  });
+
   it("accepts [CLIENT_NAME] inside signature block on long paid body", () => {
     const intake = IRONCLAD_JOINT_ROLLOUT_INTAKE;
     const body = padOperative(

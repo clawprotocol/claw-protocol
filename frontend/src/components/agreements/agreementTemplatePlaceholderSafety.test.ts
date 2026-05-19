@@ -5,6 +5,8 @@ import {
   collectForbiddenTemplateFragments,
   finalizeUserVisibleAgreementPlainText,
   isAllowlistedSignatureToken,
+  isNumberedSignatureContactNormalized,
+  isNumberedSignatureContactToken,
   normalizePlaceholderToken,
   repairAgreementTemplatePlaceholders,
 } from "./agreementTemplatePlaceholderSafety";
@@ -180,6 +182,43 @@ describe("agreementTemplatePlaceholderSafety", () => {
     expect(normalizePlaceholderToken("[CLIENT_NAME]")).toBe("CLIENT_NAME");
     expect(isAllowlistedSignatureToken("[Authorized Signatory]")).toBe(true);
     expect(isAllowlistedSignatureToken("[INSERT PAYMENT TERMS]")).toBe(false);
+  });
+
+  it("rejects [EMAIL_1] in operative notices section (not signature block)", () => {
+    const body =
+      "AGREEMENT among Acme LLC and Beta Inc.\n\n2. NOTICES\nNotice email: [EMAIL_1] for correspondence.\n" +
+      "x".repeat(4000) +
+      "\nIN WITNESS WHEREOF:\n[NAME]";
+    const idx = body.indexOf("[EMAIL_1]");
+    const d = classifyTemplateFragment("[EMAIL_1]", body, idx, {
+      partyNames: ["Acme LLC", "Beta Inc."],
+    });
+    expect(d.fatal).toBe(true);
+    const fin = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: "between Acme LLC and Beta Inc.",
+      partyNames: ["Acme LLC", "Beta Inc."],
+      surface: "test",
+    });
+    expect(fin.ok).toBe(false);
+    expect(fin.remainingFatal.some((x) => /EMAIL/i.test(x))).toBe(true);
+  });
+
+  it("classifies numbered signature/contact tokens (EMAIL_1, SIGNER_EMAIL_2)", () => {
+    expect(normalizePlaceholderToken("[EMAIL_1]")).toBe("EMAIL_1");
+    expect(isNumberedSignatureContactNormalized("EMAIL_1")).toBe(true);
+    expect(isNumberedSignatureContactNormalized("SIGNER_EMAIL_2")).toBe(true);
+    expect(isNumberedSignatureContactNormalized("PARTY_1")).toBe(false);
+    expect(isNumberedSignatureContactToken("[EMAIL_5]")).toBe(true);
+    const raw =
+      "AGREEMENT between Acme LLC and Beta Inc.\n" +
+      "x".repeat(8000) +
+      "\nIN WITNESS WHEREOF:\nAcme LLC\nEmail: [EMAIL_1]\nBeta Inc.\nEmail: [EMAIL_2]";
+    const idx = raw.indexOf("[EMAIL_1]");
+    const d = classifyTemplateFragment("[EMAIL_1]", raw, idx, {
+      partyNames: ["Acme LLC", "Beta Inc."],
+    });
+    expect(d.fatal).toBe(false);
+    expect(d.category).toBe("signature_line_stub");
   });
 
   it("still flags mustache party placeholders when not in intake", () => {
