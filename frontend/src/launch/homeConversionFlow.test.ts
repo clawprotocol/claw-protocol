@@ -72,11 +72,16 @@ describe("LaunchHomePage routing (static)", () => {
     expect(page).toContain('navigate("/app/create")');
   });
 
-  it("example chips populate textarea only", () => {
+  it("example chips populate textarea only and sit below primary CTA", () => {
     expect(page).toContain("logHomeExampleSelected");
     const chipBlock = page.slice(page.indexOf("HOME_EXAMPLE_PROMPTS.map"), page.indexOf("HOME_EXAMPLE_PROMPTS.map") + 700);
     expect(chipBlock).toContain("setHeroInput(ex.text)");
+    expect(chipBlock).toContain("claw-seo-example-chip");
     expect(chipBlock).not.toContain("navigate(");
+    const ctaIdx = page.indexOf("claw-seo-btn-primary");
+    const chipIdx = page.indexOf("claw-seo-example-chip");
+    expect(ctaIdx).toBeGreaterThan(0);
+    expect(chipIdx).toBeGreaterThan(ctaIdx);
   });
 
   it("uses simplified hero copy constants", () => {
@@ -99,9 +104,11 @@ describe("LaunchHomePage routing (static)", () => {
     }
   });
 
-  it("keeps legal footer disclosures", () => {
+  it("keeps legal footer disclosures with compressed mobile footer", () => {
     expect(page).toContain("DisclosureFooter");
     expect(page).toContain("NOT_LEGAL_ADVICE");
+    expect(page).toContain("claw-seo-cta-legal");
+    expect(page).toMatch(/DisclosureFooter[\s\S]*slim/);
   });
 
   it("uses responsive auto-resize textarea with smart-intake styling", () => {
@@ -111,13 +118,20 @@ describe("LaunchHomePage routing (static)", () => {
     expect(page).toContain('rows={3}');
     expect(page).toContain("claw-seo-input--hero");
     expect(page).toContain("claw-seo-hero-intake-wrap");
-    expect(page).toContain("claw-seo-hero-intake-fade");
+    expect(page).toContain("claw-seo-hero-intake-fade--gutter");
     expect(page).toContain("heroTextareaShowFade");
+    expect(page).toContain("hero-intake-bottom-fade");
+    expect(page).toContain("heroBottomFadeOverlayEnabled");
     expect(page).toContain("Large agreement detected");
     expect(page).toContain("resize-none");
-    expect(page).toContain("pb-14");
-    expect(page).toContain("pr-14");
-    expect(page).toContain("overflow-hidden");
+    expect(page).toContain("pb-16");
+    expect(page).toContain("pr-16");
+    expect(page).toContain("data-height-tier");
+    expect(page).toContain("heroViewportWidth");
+    expect(page).toContain("claw-seo-example-chip");
+    expect(page).toContain("claw-seo-btn-secondary--quiet");
+    expect(page).toContain("claw-seo-cta-legal");
+    expect(page).toContain("overflow-x-hidden");
     expect(page).not.toContain("min-h-[6.5rem]");
     expect(page).not.toMatch(/textarea[\s\S]*max-h-/);
     const textareaBlock = page.slice(page.indexOf('id="claw-hero-intake"'), page.indexOf('id="claw-hero-intake"') + 900);

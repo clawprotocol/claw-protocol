@@ -58,7 +58,11 @@ export function LaunchHomePage() {
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [homeTransitionActive, setHomeTransitionActive] = useState(false);
   const intakeRef = useRef<HTMLTextAreaElement | null>(null);
-  const heroTextareaMaxPx = useResponsiveTextareaMaxPx();
+  const {
+    maxPx: heroTextareaMaxPx,
+    bottomFadeOverlayEnabled: heroBottomFadeOverlayEnabled,
+    viewportWidth: heroViewportWidth,
+  } = useResponsiveTextareaMaxPx();
   const {
     sync: syncHeroTextarea,
     onPaste: onHeroTextareaPaste,
@@ -66,7 +70,13 @@ export function LaunchHomePage() {
     showBottomFade: heroTextareaShowFade,
     onScroll: onHeroTextareaScroll,
     contentLineCount: heroContentLineCount,
-  } = useAutoResizeTextarea(intakeRef, heroInput, { minRows: 3, maxPx: heroTextareaMaxPx });
+    heightTier: heroTextareaHeightTier,
+  } = useAutoResizeTextarea(intakeRef, heroInput, {
+    minRows: 3,
+    maxPx: heroTextareaMaxPx,
+    viewportWidth: heroViewportWidth,
+    bottomFadeOverlayEnabled: heroBottomFadeOverlayEnabled,
+  });
   const heroLargeAgreementHint =
     heroContentLineCount > HOMEPAGE_TEXTAREA_LARGE_LINE_THRESHOLD;
   const heroDictationEnabled = useMemo(
@@ -227,7 +237,7 @@ export function LaunchHomePage() {
             <label htmlFor="claw-hero-intake" className="sr-only">
               Describe your agreement
             </label>
-            <div className="claw-seo-hero-intake-wrap relative min-h-0 overflow-hidden">
+            <div className="claw-seo-hero-intake-wrap relative min-h-0 overflow-x-hidden">
               <textarea
                 ref={intakeRef}
                 id="claw-hero-intake"
@@ -250,11 +260,13 @@ export function LaunchHomePage() {
                 aria-describedby={
                   heroLargeAgreementHint ? "claw-hero-intake-large-hint" : undefined
                 }
-                className="claw-seo-input claw-seo-input--hero block w-full max-w-full resize-none px-3.5 py-3 pb-14 pr-14 text-[15px] leading-[1.5] placeholder:text-[15px] transition-[height] duration-150 ease-out sm:px-4 sm:py-3.5 sm:pb-14 sm:pr-16 sm:text-base sm:leading-relaxed sm:placeholder:text-base lg:text-[17px] lg:leading-normal lg:placeholder:text-[17px]"
+                data-height-tier={heroTextareaHeightTier}
+                className="claw-seo-input claw-seo-input--hero block w-full max-w-full resize-none px-3.5 py-3 pb-16 pr-16 text-[15px] leading-[1.5] placeholder:text-[15px] sm:px-4 sm:py-3.5 sm:pb-16 sm:pr-16 sm:text-base sm:leading-relaxed sm:placeholder:text-base lg:text-[17px] lg:leading-normal lg:placeholder:text-[17px]"
               />
               {heroTextareaShowFade ? (
                 <div
-                  className="claw-seo-hero-intake-fade pointer-events-none absolute inset-x-0 bottom-12 h-5 sm:bottom-[3.25rem]"
+                  className="claw-seo-hero-intake-fade claw-seo-hero-intake-fade--gutter pointer-events-none absolute"
+                  data-testid="hero-intake-bottom-fade"
                   aria-hidden
                 />
               ) : null}
@@ -274,33 +286,15 @@ export function LaunchHomePage() {
             {heroLargeAgreementHint ? (
               <p
                 id="claw-hero-intake-large-hint"
-                className="mt-2 text-xs font-medium text-emerald-800/90 sm:text-sm"
+                className="mt-2 text-xs font-medium text-slate-600 sm:text-sm"
               >
                 Large agreement detected ✓
               </p>
             ) : null}
 
-            <div className="mt-2.5 flex flex-wrap justify-center gap-2 sm:mt-3 sm:justify-start" aria-label="Example prompts">
-              {HOME_EXAMPLE_PROMPTS.map((ex) => (
-                <button
-                  key={ex.key}
-                  type="button"
-                  disabled={handoffBusy}
-                  className="min-h-9 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-emerald-500/55 hover:text-emerald-900 disabled:opacity-50"
-                  onClick={() => {
-                    setHeroInput(ex.text);
-                    logHomeExampleSelected(ex.key, ex.text.length);
-                    intakeRef.current?.focus();
-                    requestAnimationFrame(() => syncHeroTextarea());
-                  }}
-                >
-                  {ex.label}
-                </button>
-              ))}
-            </div>
 
             <p
-              className={`mt-3 text-sm leading-relaxed sm:text-base ${confidenceHint ? "font-medium text-emerald-800" : "text-slate-500"}`}
+              className={`mt-3 text-sm leading-relaxed sm:text-base ${confidenceHint ? "font-medium text-slate-700" : "text-slate-500"}`}
               aria-live="polite"
             >
               {homeTransitionActive
@@ -327,27 +321,49 @@ export function LaunchHomePage() {
               </p>
             ) : null}
 
-            <div className="mt-4 flex flex-col items-stretch gap-2 sm:mt-5 sm:flex-row sm:items-center">
+            <div className="mt-4 flex flex-col items-stretch gap-2.5 sm:mt-5 sm:flex-row sm:items-center sm:gap-3">
               <button
                 type="submit"
                 disabled={handoffBusy || homeTransitionActive}
                 aria-busy={handoffBusy || homeTransitionActive}
-                className="claw-seo-btn-primary min-h-12 flex-1 px-6 py-3.5 text-base font-semibold disabled:cursor-not-allowed disabled:opacity-55 sm:min-h-[3.25rem] sm:text-lg"
+                className="claw-seo-btn-primary min-h-12 w-full flex-1 px-6 py-3.5 text-base font-semibold disabled:cursor-not-allowed disabled:opacity-55 sm:min-h-[3.25rem] sm:text-lg"
               >
                 {primaryLabel}
               </button>
               <button
                 type="button"
-                className="claw-seo-btn-secondary min-h-12 px-6 py-3 text-base font-medium text-slate-600 sm:min-h-[3.25rem]"
+                className="claw-seo-btn-secondary claw-seo-btn-secondary--quiet min-h-11 w-full px-5 py-2.5 text-sm font-medium sm:min-h-[3.25rem] sm:min-w-[10.5rem] sm:flex-none sm:px-6 sm:py-3 sm:text-base"
                 onClick={scrollToHowItWorks}
               >
                 {HOMEPAGE_CTA_VIEW_EXAMPLE}
               </button>
             </div>
 
-            <p className="mt-3 text-center text-xs leading-snug text-slate-500 sm:text-left">
+            <p className="claw-seo-cta-legal mt-2.5 text-center text-[11px] leading-snug text-slate-500 sm:mt-3 sm:text-left sm:text-xs">
               {NOTHING_SENT_UNTIL_CONFIRM} {NOT_LEGAL_ADVICE}
             </p>
+
+            <div
+              className="mt-3 flex flex-wrap justify-center gap-1.5 sm:mt-4 sm:justify-start sm:gap-2"
+              aria-label="Example prompts"
+            >
+              {HOME_EXAMPLE_PROMPTS.map((ex) => (
+                <button
+                  key={ex.key}
+                  type="button"
+                  disabled={handoffBusy}
+                  className="claw-seo-example-chip min-h-8 rounded-full px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 sm:min-h-9 sm:px-3.5 sm:py-2 sm:text-sm"
+                  onClick={() => {
+                    setHeroInput(ex.text);
+                    logHomeExampleSelected(ex.key, ex.text.length);
+                    intakeRef.current?.focus();
+                    requestAnimationFrame(() => syncHeroTextarea());
+                  }}
+                >
+                  {ex.label}
+                </button>
+              ))}
+            </div>
           </form>
 
           {!firstSessionHome ? (
@@ -376,7 +392,7 @@ export function LaunchHomePage() {
 
         <PricingGuaranteePanel
           variant="light"
-          className="mx-auto mt-8 max-w-3xl !border-slate-200/90 !bg-slate-50/90 !shadow-none ring-1 ring-slate-200/70 lg:max-w-4xl"
+          className="mx-auto mt-6 max-w-3xl !border-slate-200/90 !bg-slate-50/90 !shadow-none ring-1 ring-slate-200/70 sm:mt-8 lg:max-w-4xl"
         />
 
         <section
@@ -419,9 +435,14 @@ export function LaunchHomePage() {
           </div>
         </section>
 
-        <footer className="mx-auto mt-12 max-w-3xl border-t border-slate-200 pt-8 lg:max-w-4xl">
-          <JoySocialFooter className="mb-5 p-2 text-sm leading-snug text-slate-600" />
-          <DisclosureFooter tone="light" className="border-0 text-slate-600 !space-y-2 !pt-3 !text-sm !leading-snug" />
+        <footer className="claw-seo-page-footer mx-auto mt-10 max-w-3xl border-t border-slate-200 pt-6 sm:mt-12 sm:pt-8 lg:max-w-4xl">
+          <JoySocialFooter className="mb-4 hidden p-2 text-sm leading-snug text-slate-600 sm:block sm:mb-5" />
+          <DisclosureFooter
+            tone="light"
+            slim
+            dense
+            className="claw-seo-footer-disclosure border-0 text-slate-500 !space-y-2 !pt-0 !text-xs !leading-snug sm:!text-sm"
+          />
         </footer>
       </div>
     </div>

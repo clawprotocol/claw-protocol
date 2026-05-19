@@ -2,11 +2,18 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BOTTOM_FADE_OVERLAY_MIN_VIEWPORT_PX,
+  BOTTOM_FADE_SCROLL_THRESHOLD_PX,
   HOMEPAGE_TEXTAREA_LARGE_LINE_THRESHOLD,
   HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP,
   HOMEPAGE_TEXTAREA_MAX_PX_MOBILE,
   HOMEPAGE_TEXTAREA_MAX_PX_TABLET,
+  HOMEPAGE_TEXTAREA_MIC_INSET_PX,
+  computeShowBottomFade,
   estimateTextareaContentLineCount,
+  getHomepageTextareaHeightTier,
+  isBottomFadeOverlayEnabled,
+  isHomepageTextareaTieredViewport,
   resolveHomepageTextareaMaxPx,
   scrollTextareaCaretIntoView,
   syncTextareaSize,
@@ -33,7 +40,7 @@ function mountTextareaLikeHomepage(widthPx = 560) {
   el.style.width = `${widthPx}px`;
   el.style.lineHeight = "24px";
   el.style.paddingTop = "12px";
-  el.style.paddingBottom = "48px";
+  el.style.paddingBottom = `${HOMEPAGE_TEXTAREA_MIC_INSET_PX}px`;
   el.style.paddingLeft = "14px";
   el.style.paddingRight = "56px";
   el.style.border = "1px solid #cbd5e1";
@@ -102,14 +109,20 @@ describe("syncTextareaSize", () => {
 
   it("respects mobile and tablet caps", () => {
     const el = document.createElement("textarea");
+    el.value = "line\n".repeat(120);
     document.body.appendChild(el);
     Object.defineProperty(el, "scrollHeight", {
       configurable: true,
       get: () => 500,
     });
 
-    const mobile = syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_MOBILE });
+    const mobile = syncTextareaSize(el, {
+      minRows: 3,
+      maxPx: HOMEPAGE_TEXTAREA_MAX_PX_MOBILE,
+      viewportWidth: 390,
+    });
     expect(mobile.heightPx).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+    expect(mobile.heightTier).toBe("scroll");
     expect(mobile.overflowAuto).toBe(true);
 
     const tablet = syncTextareaSize(el, { minRows: 3, maxPx: HOMEPAGE_TEXTAREA_MAX_PX_TABLET });
@@ -260,7 +273,7 @@ describe("useAutoResizeTextarea", () => {
     raf.mockRestore();
   });
 
-  it("useResponsiveTextareaMaxPx follows viewport breakpoints", () => {
+  it("useResponsiveTextareaMaxPx follows viewport breakpoints and fade overlay gate", () => {
     const matchMedia = vi.fn().mockImplementation(() => ({
       matches: false,
       addEventListener: vi.fn(),
@@ -270,17 +283,77 @@ describe("useAutoResizeTextarea", () => {
 
     Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 390 });
     const { result: mobile, unmount: u1 } = renderHook(() => useResponsiveTextareaMaxPx());
-    expect(mobile.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+    expect(mobile.current.maxPx).toBe(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+    expect(mobile.current.tieredMobile).toBe(true);
+    expect(mobile.current.bottomFadeOverlayEnabled).toBe(false);
     u1();
 
     Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 768 });
     const { result: tablet, unmount: u2 } = renderHook(() => useResponsiveTextareaMaxPx());
-    expect(tablet.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_TABLET);
+    expect(tablet.current.maxPx).toBe(HOMEPAGE_TEXTAREA_MAX_PX_TABLET);
+    expect(tablet.current.bottomFadeOverlayEnabled).toBe(true);
     u2();
 
     Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1280 });
     const { result: desktop } = renderHook(() => useResponsiveTextareaMaxPx());
-    expect(desktop.current).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
+    expect(desktop.current.maxPx).toBe(HOMEPAGE_TEXTAREA_MAX_PX_DESKTOP);
+    expect(desktop.current.bottomFadeOverlayEnabled).toBe(true);
+  });
+});
+
+describe("homepage textarea height tiers", () => {
+  it("uses compact, medium, scroll tiers on mobile by scroll height", () => {
+    expect(isHomepageTextareaTieredViewport(390)).toBe(true);
+    expect(isHomepageTextareaTieredViewport(640)).toBe(false);
+    expect(
+      getHomepageTextareaHeightTier({ valueLength: 0, scrollHeight: 90, viewportWidth: 390 }),
+    ).toBe("compact");
+    expect(
+      getHomepageTextareaHeightTier({ valueLength: 40, scrollHeight: 150, viewportWidth: 390 }),
+    ).toBe("medium");
+    expect(
+      getHomepageTextareaHeightTier({ valueLength: 400, scrollHeight: 420, viewportWidth: 390 }),
+    ).toBe("scroll");
+    expect(
+      getHomepageTextareaHeightTier({ valueLength: 400, scrollHeight: 420, viewportWidth: 1280 }),
+    ).toBe("fluid");
+  });
+
+  it("snaps mobile height to tier caps instead of continuous growth", () => {
+    const el = mountTextareaLikeHomepage(390);
+    el.value = "Short prompt for services.";
+    const compact = syncTextareaSize(el, {
+      minRows: 3,
+      maxPx: HOMEPAGE_TEXTAREA_MAX_PX_MOBILE,
+      viewportWidth: 390,
+    });
+    expect(compact.heightTier).toBe("compact");
+    expect(compact.heightPx).toBeLessThan(HOMEPAGE_TEXTAREA_MAX_PX_MOBILE);
+    expect(compact.overflowAuto).toBe(false);
+    document.body.removeChild(el);
+  });
+});
+
+describe("bottom fade visibility helpers", () => {
+  it("computeShowBottomFade respects overflow and bottom threshold", () => {
+    const el = mountTextareaLikeHomepage();
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 400 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 400 });
+    el.scrollTop = 0;
+    expect(computeShowBottomFade(el)).toBe(false);
+
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 900 });
+    el.scrollTop = 0;
+    expect(computeShowBottomFade(el, BOTTOM_FADE_SCROLL_THRESHOLD_PX)).toBe(true);
+
+    el.scrollTop = 500;
+    expect(computeShowBottomFade(el, BOTTOM_FADE_SCROLL_THRESHOLD_PX)).toBe(false);
+    document.body.removeChild(el);
+  });
+
+  it("isBottomFadeOverlayEnabled is false below 480px viewport", () => {
+    expect(isBottomFadeOverlayEnabled(BOTTOM_FADE_OVERLAY_MIN_VIEWPORT_PX - 1)).toBe(false);
+    expect(isBottomFadeOverlayEnabled(BOTTOM_FADE_OVERLAY_MIN_VIEWPORT_PX)).toBe(true);
   });
 });
 
@@ -333,6 +406,29 @@ describe("textarea scroll fade UX", () => {
     act(() => result.current.onScroll());
     expect(result.current.overflowActive).toBe(true);
     expect(result.current.showBottomFade).toBe(true);
+    document.body.removeChild(el);
+  });
+
+  it("never shows bottom fade on mobile when overlay is disabled", () => {
+    const el = mountTextareaLikeHomepage(390);
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 900 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 400 });
+    el.scrollTop = 0;
+
+    const ref = { current: el };
+    const long = `${IRONCLAD_HOMEPAGE_PROMPT}\n${"line\n".repeat(80)}`;
+    el.value = long;
+    const { result } = renderHook(() =>
+      useAutoResizeTextarea(ref, long, {
+        minRows: 3,
+        maxPx: HOMEPAGE_TEXTAREA_MAX_PX_MOBILE,
+        bottomFadeOverlayEnabled: false,
+      }),
+    );
+    act(() => result.current.sync());
+    act(() => result.current.onScroll());
+    expect(result.current.overflowActive).toBe(true);
+    expect(result.current.showBottomFade).toBe(false);
     document.body.removeChild(el);
   });
 });

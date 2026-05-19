@@ -29,15 +29,28 @@
 .claw-seo-root .claw-seo-input {
   box-sizing: border-box;
   border-radius: 0.875rem;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #e2e8f0;
   background: #fff;
   color: #0f172a;
-  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .claw-seo-root .claw-seo-input--hero {
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .claw-seo-root .claw-seo-input,
+  .claw-seo-root .claw-seo-btn-primary,
+  .claw-seo-root .claw-seo-btn-secondary,
+  .claw-seo-root .claw-seo-example-chip {
+    transition: none;
+  }
 }
 
 .claw-seo-root .claw-seo-input--hero::-webkit-scrollbar {
@@ -63,14 +76,25 @@
   border-radius: 0.875rem;
 }
 
-.claw-seo-root .claw-seo-hero-intake-fade {
+/* Decorative scroll hint — gutter only (never over readable text / mic column). */
+.claw-seo-root .claw-seo-hero-intake-fade--gutter {
   z-index: 1;
+  left: 0;
+  right: 4rem;
+  bottom: 3.75rem;
+  height: 0.75rem;
   background: linear-gradient(
     to top,
     #fff 0%,
-    rgba(255, 255, 255, 0.72) 50%,
+    rgba(255, 255, 255, 0.55) 55%,
     transparent 100%
   );
+}
+
+@media (max-width: 479px) {
+  .claw-seo-root .claw-seo-hero-intake-fade--gutter {
+    display: none;
+  }
 }
 
 .claw-seo-root .claw-seo-input::placeholder {
@@ -79,8 +103,13 @@
 
 .claw-seo-root .claw-seo-input:focus {
   outline: none;
-  border-color: #0d9488;
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.2);
+  border-color: #94a3b8;
+  box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.14);
+  background: #fff;
+}
+
+.claw-seo-root .claw-seo-input--hero:hover:not(:focus):not(:disabled) {
+  border-color: #cbd5e1;
 }
 
 .claw-seo-btn-primary {
@@ -126,6 +155,64 @@
 
 .claw-seo-btn-secondary:hover {
   background: #f0fdfa;
+}
+
+.claw-seo-root .claw-seo-btn-secondary--quiet {
+  border-width: 1px;
+  border-color: #e2e8f0;
+  color: #64748b;
+  font-weight: 500;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+@media (max-width: 639px) {
+  .claw-seo-root .claw-seo-btn-secondary--quiet {
+    min-height: 2.75rem;
+  }
+}
+
+.claw-seo-root .claw-seo-btn-secondary--quiet:hover {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.claw-seo-root .claw-seo-example-chip {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+  box-shadow: none;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.claw-seo-root .claw-seo-example-chip:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.claw-seo-root .claw-seo-cta-legal {
+  max-width: 36rem;
+}
+
+.claw-seo-root .claw-seo-page-footer .claw-seo-footer-disclosure [role="note"] p {
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+
+@media (max-width: 639px) {
+  .claw-seo-root .claw-seo-page-footer .claw-seo-footer-disclosure [role="note"] p:not(:first-child) {
+    display: none;
+  }
+
+  .claw-seo-root .claw-seo-page-footer .claw-seo-footer-disclosure p {
+    font-size: 0.6875rem;
+  }
 }
 
 .claw-seo-seo-block h2 {
