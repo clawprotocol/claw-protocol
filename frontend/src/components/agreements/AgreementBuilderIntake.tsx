@@ -441,6 +441,7 @@ import {
   PREMIUM_RETURN_RETRY_GENERATION_LABEL,
   PREMIUM_RETURN_USE_STARTER_LABEL,
   logPremiumProWaitSuccessTransition,
+  resetPremiumReviewScrollToTop,
   resolvePremiumProWaitModalView,
   resolvePremiumProWaitVisualPhase,
   shouldLogPremiumReturnLateSuccess,
@@ -4509,9 +4510,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           window.setTimeout(() => {
             setPremiumProWaitSuccessFlash(false);
             setPremiumPostCheckoutPhase(null);
-            document.getElementById("claw-agreement-preview-editor")?.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
+            resetPremiumReviewScrollToTop({
+              reason: "payment_success_authoritative_apply",
+              force: true,
             });
           }, 1400);
         } else {
@@ -4545,6 +4546,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumModalExtendedWaitActiveRef.current = false;
         premiumPostCheckoutModalHardFailopenRef.current = false;
         bumpPremiumSurfaceGateTick();
+        resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply" });
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-success-immediate-visible-commit] after", {
@@ -5436,16 +5438,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         } catch {
           /* ignore */
         }
-        window.requestAnimationFrame(() => {
-          document.getElementById("claw-agreement-preview-editor")?.scrollIntoView({
-            behavior: "smooth",
-            block: "start",
-          }) ??
-            document.getElementById("claw-simple-create-preview")?.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-        });
+        if (usePaidAuthoritativeBody && !shouldImmediateAuthoritativeCommit) {
+          resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply" });
+        }
         } finally {
           if (extendedWaitAtApplyStart) {
             premiumModalExtendedWaitActiveRef.current = false;
@@ -5594,16 +5589,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         } catch {
           /* ignore */
         }
-        window.requestAnimationFrame(() => {
-          document.getElementById("claw-agreement-preview-editor")?.scrollIntoView({
-            behavior: "smooth",
-            block: "start",
-          }) ??
-            document.getElementById("claw-simple-create-preview")?.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-        });
       };
 
       let modalSoftProgressTimerId = 0;

@@ -29,6 +29,14 @@ describe("premium Pro generation wait (static)", () => {
     expect(intake).toContain("logPremiumProWaitSuccessTransition");
   });
 
+  it("resets scroll to Pro review heading after authoritative payment success", () => {
+    expect(intake).toContain("resetPremiumReviewScrollToTop");
+    expect(intake).toContain('reason: "payment_success_authoritative_apply"');
+    const createPage = readFileSync(join(__dirname, "../../launch/simpleProduct/SimpleCreatePage.tsx"), "utf8");
+    expect(createPage).toContain("PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID");
+    expect(createPage).toContain("titleHeadingId={paidProReviewReadyShell");
+  });
+
   it("panel logs wait view and uses compact progress pills", () => {
     expect(panel).toContain("logPremiumProWaitView");
     expect(panel).toContain("ProgressPill");

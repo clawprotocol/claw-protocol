@@ -7,7 +7,8 @@ const DOC_STYLES = `
 .premium-readonly-doc h1 + p{margin-top:0;margin-bottom:1.45rem}
 .premium-readonly-doc h2{font-size:0.72rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#292524;margin:2.65rem 0 0.85rem;line-height:1.45;padding-bottom:0.2rem;border-bottom:1px solid rgba(28,25,23,0.12)}
 .premium-readonly-doc h1 + h2{margin-top:1.5rem}
-.premium-readonly-doc p{font-size:15px;line-height:1.92;margin:0 0 1.2rem;color:#292524;text-align:justify;text-justify:inter-word}
+.premium-readonly-doc p{font-size:15px;line-height:1.75;margin:0 0 1.2rem;color:#292524;text-align:left;word-spacing:normal}
+@media (min-width:640px){.premium-readonly-doc p{line-height:1.92}}
 .premium-readonly-doc p:last-child{margin-bottom:0}
 .premium-readonly-doc h2 + p{margin-top:0}
 .premium-readonly-doc p + h2{margin-top:0.25rem}

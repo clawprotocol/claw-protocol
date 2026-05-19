@@ -27,6 +27,8 @@ export function SimpleFlowShell(props: {
   subtitleClassName?: string;
   /** Optional class on the main H1 (e.g. checkout conversion typography). */
   titleClassName?: string;
+  /** Optional id on the page H1 for post-checkout scroll/focus restore. */
+  titleHeadingId?: string;
   /** Optional progress: highlights current step only; earlier steps show as completed. */
   step?: Step;
   /** Override nav labels (4- or 5-step flows, e.g. checkout upgrade path). */
@@ -41,6 +43,7 @@ export function SimpleFlowShell(props: {
     subtitle,
     subtitleClassName,
     titleClassName,
+    titleHeadingId,
     step,
     progressLabels = DEFAULT_PROGRESS,
   } = props;
@@ -116,6 +119,7 @@ export function SimpleFlowShell(props: {
             </p>
           ) : null}
           <h1
+            id={titleHeadingId}
             className={`vs01-header-title text-xl sm:text-3xl md:text-[1.875rem] lg:text-[2.25rem] lg:leading-[1.15] ${titleClassName ?? ""}`}
           >
             {title}

@@ -254,6 +254,64 @@ export function logPremiumProWaitSuccessTransition(): void {
   console.info("[premium-pro-wait-success-transition]");
 }
 
+/** Stable focus target for post-checkout Pro review (matches SimpleFlowShell paid-Pro title). */
+export const PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID = "premium-pro-review-scroll-anchor";
+
+export type PremiumReviewScrollResetReason =
+  | "payment_success_authoritative_apply"
+  | "premium_completion_hydrate"
+  | "premium_return_restore";
+
+let premiumReviewScrollResetConsumed = false;
+
+/** Reset scroll/focus to top of Pro review shell after authoritative draft commit (once per success). */
+export function resetPremiumReviewScrollToTop(args: {
+  reason: PremiumReviewScrollResetReason;
+  force?: boolean;
+}): void {
+  if (premiumReviewScrollResetConsumed && !args.force) {
+    console.info("[premium-review-scroll-reset]", { reason: args.reason, applied: false });
+    return;
+  }
+  premiumReviewScrollResetConsumed = true;
+
+  const run = () => {
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    } catch {
+      /* ignore */
+    }
+    const anchor = document.getElementById(PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID);
+    if (anchor) {
+      if (typeof anchor.scrollIntoView === "function") {
+        anchor.scrollIntoView({ behavior: "auto", block: "start" });
+      }
+      if (!anchor.hasAttribute("tabindex")) anchor.setAttribute("tabindex", "-1");
+      try {
+        anchor.focus({ preventScroll: true });
+      } catch {
+        anchor.focus();
+      }
+    }
+    const preview = document.getElementById("claw-agreement-preview-editor");
+    if (preview && "scrollTop" in preview) {
+      (preview as HTMLElement).scrollTop = 0;
+    }
+    const readonly = document.querySelector<HTMLElement>(".premium-readonly-doc");
+    if (readonly) readonly.scrollTop = 0;
+    console.info("[premium-review-scroll-reset]", { reason: args.reason, applied: true });
+  };
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(run);
+  });
+}
+
+/** Test-only: allow repeated scroll-reset assertions. */
+export function resetPremiumReviewScrollResetConsumedForTests(): void {
+  premiumReviewScrollResetConsumed = false;
+}
+
 export {
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,

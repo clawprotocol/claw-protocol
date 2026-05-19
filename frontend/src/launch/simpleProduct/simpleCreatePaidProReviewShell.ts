@@ -8,6 +8,9 @@ import type { PremiumSendIntent } from "./premiumSendIntent";
 
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE = "Review your Pro agreement";
 
+/** Focus/scroll anchor id on paid-Pro review shell title (post-checkout). */
+export { PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID } from "../../lib/premiumPostCheckoutReturnUx";
+
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE =
   "Your agreement is ready. Edit it, send it for review, or start signatures.";
 

@@ -5,7 +5,10 @@
 
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { maskProtectedSpans, unmaskProtectedSpans } from "./paidProEmailMask";
-import { resolveFullLegalPartiesFromIntake } from "./paidProPartyNamePreserve";
+import {
+  isDisallowedPartyPhrase,
+  resolveAuthoritativePartiesForRecitalPolish,
+} from "./paidProPartyNamePreserve";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company|DAO|Foundation|Trust)\.?$/i;
@@ -80,7 +83,9 @@ export function definedShortNameFromLegalEntity(full: string): string {
   if (words.length <= 1) return words[0] || full;
   if (words.length === 2) return words[0];
   if (!CORP_GENERIC_SECOND.test(words[1])) return `${words[0]} ${words[1]}`;
-  return words[0];
+  const short = words[0];
+  if (isDisallowedPartyPhrase(short)) return full.slice(0, 48);
+  return short;
 }
 
 export function buildPartyEntries(fullNames: readonly string[]): PartyEntry[] {
@@ -124,8 +129,24 @@ function oxfordJoin(items: string[]): string {
 }
 
 function partyListFragment(parties: readonly PartyEntry[]): string {
-  const labels = parties.map((p) => `${p.full} (“${p.short}”)`);
+  const labels = parties
+    .filter((p) => !isDisallowedPartyPhrase(p.short) && !isDisallowedPartyPhrase(p.full))
+    .map((p) => `${p.full} (“${p.short}”)`);
   return oxfordJoin(labels);
+}
+
+const DEFINED_SHORT_IN_HEAD_RE =
+  /(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP)\s*\([“"][^”"]{1,48}[”"]\)/gi;
+
+/** Count entity (“Short”) defined-name marks in the opening slice — corruption guard. */
+export function countDefinedShortMarksInHead(text: string, maxLen = 500): number {
+  const slice = text.slice(0, maxLen);
+  return (slice.match(DEFINED_SHORT_IN_HEAD_RE) || []).length;
+}
+
+function headCorruptionExceedsPartyBudget(head: string, authoritativePartyCount: number): boolean {
+  if (authoritativePartyCount < 2) return true;
+  return countDefinedShortMarksInHead(head) > authoritativePartyCount + 1;
 }
 
 function collectivePhrase(partyCount: number): string {
@@ -154,9 +175,14 @@ function recitalAlreadyPolished(recitalSlice: string, parties: readonly PartyEnt
   const slice = normalizeQuotes(recitalSlice);
   if (!parties.every((p) => slice.includes(p.full))) return false;
   const definedMarks = parties.filter(
-    (p) => slice.includes(`${p.full} (`) && slice.includes(`"${p.short}"`),
+    (p) =>
+      !isDisallowedPartyPhrase(p.short) &&
+      slice.includes(`${p.full} (`) &&
+      (slice.includes(`"${p.short}"`) || slice.includes(`“${p.short}”`)),
   ).length;
-  return definedMarks >= parties.length;
+  if (definedMarks < parties.length) return false;
+  if (headCorruptionExceedsPartyBudget(slice, parties.length)) return false;
+  return true;
 }
 
 type RecitalSpan = {
@@ -216,6 +242,10 @@ function findRecitalSpan(head: string): RecitalSpan | null {
   const rest = head.slice(partyStart);
   let partyListEnd = -1;
   let suffix = ".";
+
+  const hardStop = rest.search(
+    /\n\s*1\.\s+[A-Z]|\.\s+The\s+Parties\s+agree\b|\.\s*\n\s*(?:WHEREAS|NOW,?\s*THEREFORE|ARTICLE\s+1\b|Section\s+1\b)/i,
+  );
   const structuredEnd = rest.match(
     /^([\s\S]+?)(\.\s*(?:(?:\n\s*(?:WHEREAS|NOW,?\s*THEREFORE|ARTICLE|TERM\b|\d+\.\s+[A-Z]))|(?:\(?\s*each\s+a\s+["'“”]?Party|collectively|Each\s+Party))|;\s)/i,
   );
@@ -228,11 +258,15 @@ function findRecitalSpan(head: string): RecitalSpan | null {
     partyListEnd = plainDot;
     suffix = rest.slice(plainDot, plainDot + 1);
   }
+  if (hardStop >= 0 && hardStop < partyListEnd) {
+    partyListEnd = hardStop;
+    suffix = rest.slice(hardStop).match(/^\./) ? "." : ".";
+  }
   if (partyListEnd > 900) {
     const plainDot = rest.indexOf(".");
     if (plainDot < 0) return null;
-    partyListEnd = plainDot;
-    suffix = rest.slice(plainDot, plainDot + 1);
+    partyListEnd = Math.min(plainDot, hardStop >= 0 ? hardStop : plainDot);
+    suffix = rest.slice(partyListEnd, partyListEnd + 1) || ".";
   }
 
   const partyList = rest.slice(0, partyListEnd).trim();
@@ -266,13 +300,14 @@ export function normalizeOpeningRecital(
   confidence: PartyExtractionConfidence,
   opts?: { skipInternalMask?: boolean },
 ): { text: string; log: RecitalPolishLog } {
+  const authoritativeCount = parties.length;
   const baseLog: RecitalPolishLog = {
     applied: false,
-    partyCount: parties.length,
+    partyCount: authoritativeCount,
     confidence,
     reason: "not_applied",
   };
-  if (confidence === "low" || parties.length < 2) {
+  if (confidence === "low" || authoritativeCount < 2) {
     return { text, log: { ...baseLog, reason: "low_confidence" } };
   }
 
@@ -327,10 +362,16 @@ export function normalizeOpeningRecital(
   const newHead =
     maskedHead.slice(0, recital.start) + replacement + recital.suffix + maskedHead.slice(recital.end);
   const unmaskedHead = opts?.skipInternalMask ? newHead : unmaskProtectedSpans(newHead, emails, urls);
+  if (headCorruptionExceedsPartyBudget(unmaskedHead, authoritativeCount)) {
+    return {
+      text,
+      log: { ...baseLog, reason: "corruption_guard" },
+    };
+  }
   const tail = text.slice(headLen);
   return {
     text: unmaskedHead + tail,
-    log: { ...baseLog, applied: true, reason: "rewrote_recital" },
+    log: { ...baseLog, applied: true, partyCount: authoritativeCount, reason: "rewrote_recital" },
   };
 }
 
@@ -582,13 +623,17 @@ export function polishPaidProAgreementText(
   opts?: { surface?: string; explicitPartyList?: boolean; skipInternalMask?: boolean },
 ): PaidProAgreementPolishResult {
   const explicitPartyList = opts?.explicitPartyList ?? (partyNames?.length ?? 0) >= 2;
-  const fullNames = resolveFullLegalPartiesFromIntake(partyNames, intakeRaw);
-  const parties = buildPartyEntries(fullNames);
-  const { confidence } = assessPartyExtractionConfidence(
-    fullNames,
+  const authoritativeFullNames = resolveAuthoritativePartiesForRecitalPolish(partyNames, intakeRaw);
+  const parties = buildPartyEntries(authoritativeFullNames);
+  const { confidence: assessed } = assessPartyExtractionConfidence(
+    authoritativeFullNames,
     intakeRaw,
     explicitPartyList,
   );
+  const confidence =
+    authoritativeFullNames.length < 2
+      ? ("low" as const)
+      : assessed;
 
   const recital = normalizeOpeningRecital(text, parties, confidence, {
     skipInternalMask: opts?.skipInternalMask,

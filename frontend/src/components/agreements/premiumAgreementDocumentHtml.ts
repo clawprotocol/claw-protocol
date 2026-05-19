@@ -111,7 +111,7 @@ export function buildPremiumSignatureSectionHtml(
   <h2 style="font-size:0.72rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#292524;margin:0 0 0.75rem;line-height:1.45;padding-bottom:0.2rem;border-bottom:1px solid rgba(28,25,23,0.12)">${escapeHtml(
     head,
   )}</h2>
-  <p style="font-size:12px;color:#44403c;margin:0 0 1.35rem;line-height:1.65;max-width:44rem;text-align:justify">${escapeHtml(lead)}</p>
+  <p style="font-size:12px;color:#44403c;margin:0 0 1.35rem;line-height:1.65;max-width:44rem;text-align:left">${escapeHtml(lead)}</p>
   <div style="margin-left:-0.125rem;margin-right:-0.125rem;padding:1.5rem 1.25rem 1.35rem;border-radius:5px;border:1px solid #d6d3cd;background:linear-gradient(180deg,#f6f2e8 0%,#efe9de 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,0.65),0 6px 20px -8px rgba(28,25,23,0.12)">
     ${formatted
       .map((f, index) =>

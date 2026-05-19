@@ -57,6 +57,7 @@ import { getOrgId } from "../orgContext";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import {
+  PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID,
   SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE,
   SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE,
   SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE,
@@ -270,6 +271,7 @@ export function SimpleCreatePage() {
       }
       title={shellTitle}
       subtitle={shellSubtitle}
+      titleHeadingId={paidProReviewReadyShell ? PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID : undefined}
     >
       {paidProReviewReadyShell ? (
         <p className="mb-4 text-center text-xs leading-relaxed text-slate-500 sm:mb-5 sm:text-left sm:text-sm">

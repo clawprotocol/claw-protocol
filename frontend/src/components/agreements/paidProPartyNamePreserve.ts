@@ -34,6 +34,46 @@ export function shortFormsFromLegalName(full: string): string[] {
   return [...new Set(forms)].filter((f) => f.length >= 3 && f.length < t.length).sort((a, b) => b.length - a.length);
 }
 
+/** Hard cap for paid-Pro recital/signature party lists (never body-derived phrase lists). */
+export const MAX_AUTHORITATIVE_RECITAL_PARTIES = 12;
+
+const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
+  /^the\s+parties$/i,
+  /^collectively$/i,
+  /^each\s+a\s+["']?party["']?$/i,
+  /^party$/i,
+  /^parties$/i,
+  /^the$/i,
+  /^agreement$/i,
+  /^ownership\s+of\b/i,
+  /^implementation\b/i,
+  /^milestone\s+approvals?$/i,
+  /^technical\s+specifications?$/i,
+  /^or\s+other\b/i,
+  /^project\s+deliverables?$/i,
+  /^deliverables?$/i,
+];
+
+function normPartyLabel(s: string): string {
+  return s.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/** Reject contract prose fragments mistaken for party names. */
+export function isDisallowedPartyPhrase(name: string): boolean {
+  const t = normPartyLabel(name);
+  if (!t || t.length < 3) return true;
+  return DISALLOWED_PARTY_PHRASE_RE.some((re) => re.test(t));
+}
+
+/** True when the label looks like a full legal entity (intake-authoritative), not body prose. */
+export function isAuthoritativeLegalEntityName(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
+  if (ENTITY_SUFFIX.test(t)) return true;
+  const words = t.split(/\s+/);
+  return words.length >= 3 && words.every((w) => /^[A-Z0-9]/.test(w) || /^[&.,'-]+$/.test(w));
+}
+
 /** Authoritative ordered full legal parties from intake "between …" list or explicit partyNames. */
 export function resolveFullLegalPartiesFromIntake(
   partyNames: readonly string[] | null | undefined,
@@ -46,6 +86,45 @@ export function resolveFullLegalPartiesFromIntake(
   const fromBetween = extractBetweenPartyNameList(String(intakeRaw || ""));
   if (fromBetween.length >= 2) return fromBetween;
   return extractAgreementEntityCandidates(String(intakeRaw || ""));
+}
+
+/**
+ * Recital/signature polish: intake-authoritative entities only — never draft.parties[] blobs
+ * or body-derived phrase lists from generated agreement text.
+ */
+export function resolveAuthoritativePartiesForRecitalPolish(
+  partyNames: readonly string[] | null | undefined,
+  intakeRaw: string | null | undefined,
+): string[] {
+  const intake = String(intakeRaw || "").trim();
+  const fromBetween = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+  const fromIntakeEntities = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
+
+  let authoritative: string[] = [];
+  if (fromBetween.length >= 2) {
+    authoritative = fromBetween;
+  } else if (fromIntakeEntities.length >= 2) {
+    authoritative = fromIntakeEntities;
+  }
+
+  const fromArgs = (partyNames || [])
+    .map((n) => String(n || "").replace(/\s+/g, " ").trim())
+    .filter(isAuthoritativeLegalEntityName);
+
+  const rawArgCount = (partyNames || []).map((n) => String(n || "").trim()).filter((n) => n.length >= 2).length;
+
+  if (authoritative.length >= 2) {
+    if (rawArgCount > authoritative.length + 1) {
+      return authoritative.slice(0, MAX_AUTHORITATIVE_RECITAL_PARTIES);
+    }
+    return authoritative.slice(0, MAX_AUTHORITATIVE_RECITAL_PARTIES);
+  }
+
+  if (fromArgs.length >= 2 && fromArgs.length <= MAX_AUTHORITATIVE_RECITAL_PARTIES) {
+    return fromArgs;
+  }
+
+  return [];
 }
 
 function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly string[]): string {
