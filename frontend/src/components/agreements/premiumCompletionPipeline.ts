@@ -1272,7 +1272,10 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   const premiumRejectCtx = {
     intakeLower: intakeLowerGlobal,
     intakeText: rawForSoT || rawIntake,
-    partyNames: merged.parties?.map((p) => p.name) ?? null,
+    partyNames:
+      (merged.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean).length >= 2
+        ? merged.parties?.map((p) => p.name) ?? null
+        : null,
   };
   let premiumRenderSource: PremiumRenderSource = "fallback_preview";
   let founderDetailsGateMessage: string | null = null;
@@ -1698,7 +1701,9 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           }
           logPremiumCompletionDebug({
             stage: "pipeline_placeholder_blocked",
-            remaining: ph.remaining,
+            remaining: ph.remainingFatal,
+            remaining_fatal: ph.remainingFatal,
+            remaining_nonfatal: ph.remainingDetail.filter((d) => !d.fatal).map((d) => d.token),
             repaired: ph.repaired,
             accepted: false,
           });
@@ -1746,6 +1751,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         logPremiumCompletionDebug({
           stage: "pipeline_client_gates_passed",
           docLen: doc.length,
+          placeholder_fatal_count: 0,
           generationOutcome: (effectiveFull.generation_outcome || "").trim(),
           degraded: serverGenDegraded,
           failureCode: serverGenDegraded ? (effectiveFull.server_generation_failure_code || "").trim() : undefined,

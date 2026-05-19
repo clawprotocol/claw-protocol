@@ -8,6 +8,8 @@ export const CHIP_VERSION_STARTER = "Starter Draft";
 export const CHIP_STATE_READY = "Draft ready to review";
 export const CHIP_STATE_INITIAL_READY = "Initial draft ready";
 export const CHIP_VERSION_PRO = "LawDog Pro Draft";
+/** Shown when paid Pro body was rejected and the user is reviewing a fallback/current draft. */
+export const CHIP_VERSION_CURRENT_DRAFT = "Current draft";
 export const CHIP_STATE_COMMERCIAL = "Commercial Version Ready";
 /** Upgraded / paid path but Pro body did not pass truth gate (no fake “ready” chip). */
 export const CHIP_STATE_PRO_NEEDS_DRAFT = "Pro — finish draft first";

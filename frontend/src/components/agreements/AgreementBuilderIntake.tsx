@@ -96,6 +96,7 @@ import { PremiumProGenerationWaitPanel } from "./PremiumProGenerationWaitPanel";
 import {
   CHIP_STATE_COMMERCIAL,
   CHIP_STATE_PRO_NEEDS_DRAFT,
+  CHIP_VERSION_CURRENT_DRAFT,
   CHIP_VERSION_PRO,
   CHIP_STATE_INITIAL_READY,
   CHIP_VERSION_STARTER,
@@ -10627,6 +10628,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
     if (premiumPaidDocumentSurface) {
+      const pipe = (premiumTruthPipelineSource || lastPremiumPipelineRenderSourceRef.current || "").trim();
+      const paidBodyRejected =
+        shouldShowPaidRetry ||
+        pipe === "rejected_paid_corpus" ||
+        pipe === "fallback_preview" ||
+        pipe === "fallback_preview_error";
+      if (paidBodyRejected) {
+        return { version: CHIP_VERSION_CURRENT_DRAFT, state: CHIP_STATE_PRO_NEEDS_DRAFT };
+      }
       const g = premiumProTruthGate;
       if (g && g.state === "premium_success" && (g.successBannerAllowed || g.signerCtaAllowed)) {
         return { version: CHIP_VERSION_PRO, state: CHIP_STATE_COMMERCIAL };
@@ -10640,7 +10650,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return { version: "", state: REVIEW_AHA_CHIP };
     }
     return { version: CHIP_VERSION_STARTER, state: CHIP_STATE_INITIAL_READY };
-  }, [createUiStage, draft, premiumPaidDocumentSurface, premiumProTruthGate, isFreeStreamlineDraftReview]);
+  }, [
+    createUiStage,
+    draft,
+    premiumPaidDocumentSurface,
+    premiumProTruthGate,
+    isFreeStreamlineDraftReview,
+    premiumTruthPipelineSource,
+    shouldShowPaidRetry,
+  ]);
 
   /**
    * If checkout occurred and strict truth gate blocks success, emit a second (non-once)

@@ -3,7 +3,11 @@
  * this rejects obvious contamination / starter-shell masquerading as Pro).
  */
 
-import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
+import {
+  finalizeUserVisibleAgreementPlainText,
+  prepareAgreementTextForPlaceholderScan,
+  resolvePlaceholderPartyNames,
+} from "./agreementTemplatePlaceholderSafety";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const BANNED_SUBSTRINGS = [
@@ -118,12 +122,19 @@ export function rejectPremiumBodyForProRender(
   const uniq = [...new Set(reasons)];
   if (uniq.length > 0) return { ok: false, reasons: uniq };
   const intakeRaw = ((opts?.intakeText ?? "") || "").trim() || (opts?.intakeLower ?? "");
-  const ph = finalizeUserVisibleAgreementPlainText((body || "").trim(), {
+  const partyNames = resolvePlaceholderPartyNames({
     intakeRaw,
     partyNames: opts?.partyNames ?? null,
-    agreementFamily: null,
-    surface: "rejectPremiumBodyForProRender",
   });
+  const ph = finalizeUserVisibleAgreementPlainText(
+    prepareAgreementTextForPlaceholderScan((body || "").trim()),
+    {
+      intakeRaw,
+      partyNames,
+      agreementFamily: null,
+      surface: "rejectPremiumBodyForProRender",
+    },
+  );
   if (!ph.ok) {
     return {
       ok: false,
