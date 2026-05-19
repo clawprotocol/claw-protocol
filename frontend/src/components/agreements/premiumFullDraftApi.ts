@@ -22,6 +22,7 @@ import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import { logDevPostPremiumFullDraftHttp } from "./premiumFullDraftPostResponseTrace";
 import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance";
 import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGuard";
+import { enrichPremiumContextWithOperationalSynthesis } from "./proOperationalSynthesis";
 
 const MAX_CONTEXT_CHARS = 22_000;
 
@@ -202,7 +203,8 @@ export function buildPremiumFullDraftContextForProRequest(
   intent: AgreementIntentContract = resolveAgreementIntentContract(rawIntake),
 ): PremiumFullDraftContextPayload {
   const withTitle = buildPremiumFullDraftContextWithIntentMapping(rawIntake, draft);
-  return { ...withTitle, intent_contract: buildIntentContractApiPayload(intent) };
+  const withIntent = { ...withTitle, intent_contract: buildIntentContractApiPayload(intent) };
+  return enrichPremiumContextWithOperationalSynthesis(withIntent, rawIntake, draft);
 }
 
 /** P0: second-chance call after a dev-leak in model output; strips repo/env/path echo from all prompt fields. */

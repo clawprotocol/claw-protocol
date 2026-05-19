@@ -9,6 +9,10 @@ import {
   isDisallowedPartyPhrase,
   resolveAuthoritativePartiesForRecitalPolish,
 } from "./paidProPartyNamePreserve";
+import {
+  applyProOperationalSynthesisPasses,
+  buildProOperationalSynthesis,
+} from "./proOperationalSynthesis";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company|DAO|Foundation|Trust)\.?$/i;
@@ -643,6 +647,20 @@ export function polishPaidProAgreementText(
     skipInternalMask: opts?.skipInternalMask,
   });
   working = signature.text;
+  const synthesis = buildProOperationalSynthesis(intakeRaw || "", {
+    parties: parties.map((p) => ({ name: p.full, role: "" })),
+    title: "",
+    jurisdiction: "",
+    purpose: "",
+    payment_terms: "",
+    payment: { amount: null, cadence: null, valid: false },
+    duration: null,
+    due_date: null,
+    effective_date: null,
+  });
+  const operational = applyProOperationalSynthesisPasses(working, intakeRaw || "", synthesis);
+  working = operational.text;
+
   const enterprise = applyEnterpriseClausePolish(working);
   working = enterprise.text;
 
