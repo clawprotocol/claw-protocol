@@ -19,12 +19,14 @@ export function AppShell(props: {
   subtitle?: ReactNode;
   /** Paid Pro agreement → VS01 bridge: fewer distractions, no duplicate Home. */
   navMode?: AppShellNavMode;
+  /** Slim footer: shorter legal strip on mobile-first app surfaces (e.g. partner / pre-payment). */
+  compactFooter?: boolean;
 }) {
   const { navigate } = useLaunchNav();
   const { navigateToReuse, navigateToWorkProduct } = usePowerGatedNavigation();
   const access = useAccess();
   const affiliateNav = useFeatureGate("affiliate_opportunity_enabled");
-  const { children, title, subtitle, navMode = "default" } = props;
+  const { children, title, subtitle, navMode = "default", compactFooter = false } = props;
   const showLegacyQuickPath = access.tier === "free";
   const esignBridgeNav = navMode === "esign_bridge_focused";
 
@@ -164,9 +166,17 @@ export function AppShell(props: {
 
         <main className="vs01-main vs01-main--lawdog-funnel">{children}</main>
 
-        <footer className="vs01-footer !mt-8 !border-t !border-slate-900/40 !pt-3">
-          <JoySocialFooter className="mb-3 px-2 text-[10px] font-normal normal-case leading-snug tracking-normal text-slate-500 opacity-90" />
-          <DisclosureFooter dense className="!border-t-0 !pt-2 text-xs text-slate-500" />
+        <footer
+          className={`vs01-footer !mt-8 !border-t !border-slate-900/40 !pt-3 ${compactFooter ? "claw-app-footer-compact" : ""}`.trim()}
+        >
+          <JoySocialFooter
+            className={`mb-3 px-2 text-[10px] font-normal normal-case leading-snug tracking-normal text-slate-500 opacity-90 ${compactFooter ? "hidden sm:block" : ""}`.trim()}
+          />
+          <DisclosureFooter
+            dense
+            slim={compactFooter}
+            className="!border-t-0 !pt-2 text-xs text-slate-500"
+          />
         </footer>
       </div>
     </div>

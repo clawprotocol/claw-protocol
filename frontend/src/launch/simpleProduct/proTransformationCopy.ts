@@ -3,7 +3,11 @@
  * Calm, operational; no hype or full-draft exposure.
  */
 
-export const PRO_IMPROVED_HEADING = "What Pro upgraded";
+/** Upgrade teaser heading — future tense; user has not paid yet. */
+export const PRO_CAN_IMPROVE_HEADING = "What Pro can improve";
+
+/** @deprecated Use {@link PRO_CAN_IMPROVE_HEADING} */
+export const PRO_IMPROVED_HEADING = PRO_CAN_IMPROVE_HEADING;
 
 export const PRO_IMPROVED_BULLETS: readonly string[] = [
   "Clearer agreement structure",
@@ -13,14 +17,17 @@ export const PRO_IMPROVED_BULLETS: readonly string[] = [
   "Tracked signing and verification support",
 ] as const;
 
-export const PRO_TRANSFORMATION_PREVIEW_LABEL = "Pro improved this section";
+export const PRO_TRANSFORMATION_PREVIEW_LABEL = "Example upgrade preview";
 
 /** Sample snippet only — not the user's full agreement. */
 export const PRO_TRANSFORMATION_PREVIEW_SAMPLE =
   'This Agreement is entered into by and among Acme Widgets LLC ("Acme") and Beta Supply Inc. ("Beta") (each a "Party" and together, the "Parties"), effective as of the date of the last signature below.';
 
 export const PRO_TRANSFORMATION_PREVIEW_FOOTNOTE =
-  "Preview only — your full Pro agreement unlocks after upgrade.";
+  "Preview only — your Pro agreement unlocks after upgrade.";
+
+/** Stale pre-payment copy — must not appear inside free draft document body. */
+export const STALE_PRO_IMPROVED_SECTION_LABEL = "Pro improved this section";
 
 /** Compressed checkout sidebar — replaces long “LawDog Pro helps” bullet list. */
 export const CHECKOUT_PRO_CONTEXT_TITLE = "Pro for this agreement";

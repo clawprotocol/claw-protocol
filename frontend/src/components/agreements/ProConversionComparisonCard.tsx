@@ -19,6 +19,7 @@ import {
   STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME,
 } from "./starterReviewPremiumUpsellCopy";
 import { ProImprovedSummary } from "./ProImprovedSummary";
+import { ProTransformationPreview } from "./ProTransformationPreview";
 
 type Props = {
   id?: string;
@@ -96,6 +97,8 @@ export function ProConversionComparisonCard(props: Props) {
       <p className="mt-4 text-center text-sm font-medium leading-relaxed text-slate-300/90 sm:text-left">
         {PRO_UPGRADE_BRIDGE_LINE}
       </p>
+
+      <ProTransformationPreview className="mt-4" />
 
       <div className="mt-5 flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
         <button

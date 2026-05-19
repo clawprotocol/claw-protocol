@@ -19,6 +19,12 @@
   margin-right: auto;
 }
 
+@media (max-width: 639px) {
+  .claw-app-footer-compact [role="note"] p:not(:first-child) {
+    display: none;
+  }
+}
+
 .claw-hero-marketing {
   max-width: 42rem;
   margin: 0 auto;

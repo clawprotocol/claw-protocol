@@ -13,7 +13,6 @@ import {
   FREE_DRAFT_COPY_TEXT_FAILED,
   FREE_DRAFT_COPY_TEXT_LABEL,
 } from "../../launch/simpleProduct/proConversionCopy";
-import { ProTransformationPreview } from "./ProTransformationPreview";
 
 function splitAgreementDisplay(text: string): { title: string; body: string } {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -171,7 +170,6 @@ export function StarterDraftDocumentSurface(props: {
           ) : (
             <p className="mt-6 text-stone-600">{value.trim() || "Your agreement text will appear here."}</p>
           )}
-          <ProTransformationPreview variant="paper" />
           <AgreementSignaturePlaceholderGrid
             partyNames={signaturePartyNames}
             className="mt-10 border-t border-dashed border-stone-300/80 pt-6"

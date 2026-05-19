@@ -25,10 +25,10 @@ const TRANSFORMATION_SURFACE_PATHS: readonly string[] = [
 
 describe("proTransformationCopy", () => {
   it("exports compact pro-improved summary and preview cue copy", () => {
-    expect(PRO_IMPROVED_HEADING).toBe("What Pro upgraded");
+    expect(PRO_IMPROVED_HEADING).toBe("What Pro can improve");
     expect(PRO_IMPROVED_BULLETS).toHaveLength(5);
     expect(PRO_IMPROVED_BULLETS.join(" ").toLowerCase()).not.toMatch(/ai-powered|guarantee/);
-    expect(PRO_TRANSFORMATION_PREVIEW_LABEL).toBe("Pro improved this section");
+    expect(PRO_TRANSFORMATION_PREVIEW_LABEL).toBe("Example upgrade preview");
     expect(PRO_TRANSFORMATION_PREVIEW_SAMPLE.length).toBeGreaterThan(40);
     expect(PRO_TRANSFORMATION_PREVIEW_FOOTNOTE).toMatch(/preview only/i);
   });
@@ -46,15 +46,15 @@ describe("proTransformationCopy", () => {
       "utf8",
     );
     expect(card).toContain("ProImprovedSummary");
-    expect(card).not.toContain("ProTransformationPreview");
+    expect(card).toContain("ProTransformationPreview");
     expect(card).toContain("pro-conversion-comparison-card");
 
     const draft = readFileSync(
       join(__dirname, "../../components/agreements/StarterDraftDocumentSurface.tsx"),
       "utf8",
     );
-    expect(draft).toContain('variant="paper"');
-    expect(draft).toContain("ProTransformationPreview");
+    expect(draft).not.toContain("ProTransformationPreview");
+    expect(draft).not.toContain("pro-upgrade-teaser-preview");
   });
 
   it("does not expose full pro draft unlock language on conversion surfaces", () => {

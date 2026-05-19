@@ -84,25 +84,43 @@ export {
 export type { CheckoutCtaVariantKey } from "./checkoutTrustCopy";
 export { CHECKOUT_CREATE_FLOW_FOOTER as CHECKOUT_FOOTER } from "./checkoutTrustCopy";
 
-export const EARN_HERO_TITLE = "Earn with LawDog";
-export const EARN_HERO_SUBHEAD = "Share LawDog. Earn when people upgrade.";
-export const EARN_CTA_START = "Start earning";
+export const EARN_HERO_TITLE = "Genesis Dogs Partner Access";
+export const EARN_HERO_SUBHEAD =
+  "Help launch LawDog. Share useful agreement workflows. Earn when people upgrade.";
+export const EARN_CTA_START = "Request partner access";
+export const EARN_CTA_BACK = "Back to dashboard";
 export const EARN_BENEFIT_CARDS: readonly { title: string; body: string }[] = [
   {
-    title: "Subscribers unlock affiliate access",
-    body: "Paid LawDog subscribers can create a referral link and start sharing right away.",
+    title: "Paid subscribers",
+    body: "Paid LawDog subscribers can unlock referral access from their account.",
   },
   {
-    title: "Doginal holders get early access",
-    body: "Doginal Dog holders and approved partners may request early access during private beta.",
+    title: "Genesis Dogs & early partners",
+    body: "Genesis Dogs and approved early partners may request early affiliate access during private launch.",
   },
   {
     title: "Monthly payouts",
-    body: "Earn when people upgrade. Payouts run monthly when you meet the minimum balance.",
+    body: "Payouts run monthly when minimum balance and compliance requirements are met.",
   },
 ] as const;
-export const EARN_EARLY_ACCESS_NOTE =
-  "Subscribers unlock affiliate access instantly. Doginal Dog holders and approved partners may request early access.";
+export const EARN_BEHAVIOR_NOTE =
+  "Share responsibly. No spam, no legal advice claims, no guaranteed outcomes.";
+export const EARN_PAYOUT_NOTE =
+  "Payouts run monthly when minimum balance and compliance requirements are met.";
+export const EARN_ACCESS_NOTE =
+  "Paid LawDog subscribers can unlock referral access from their account. Genesis Dogs may receive early access during launch.";
+
+/** @deprecated Use {@link EARN_ACCESS_NOTE} */
+export const EARN_EARLY_ACCESS_NOTE = EARN_ACCESS_NOTE;
+
+/** Stale Earn page strings — must not return to primary partner surfaces. */
+export const STALE_EARN_PARTNER_STRINGS: readonly string[] = [
+  "Earn with LawDog",
+  "Doginal Dog holders",
+  "Doginal holders get early access",
+  "Subscribers unlock affiliate access instantly",
+  "Start earning",
+] as const;
 
 /** Stale CTA / fear-copy strings that must not appear in primary conversion surfaces. */
 export const STALE_PRO_CONVERSION_STRINGS: readonly string[] = [

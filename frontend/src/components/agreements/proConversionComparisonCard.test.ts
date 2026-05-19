@@ -50,7 +50,7 @@ describe("Pro conversion comparison copy", () => {
     expect(card).toContain("PRO_UPGRADE_FREE_COLUMN_HELPER");
     expect(card).toContain("ProConversionComparisonCard");
     expect(card).toContain("ProImprovedSummary");
-    expect(card).not.toContain("ProTransformationPreview");
+    expect(card).toContain("ProTransformationPreview");
     expect(card).toContain("pro-conversion-comparison-card");
     expect(card.toLowerCase()).not.toMatch(/download/);
   });

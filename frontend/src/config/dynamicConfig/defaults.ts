@@ -45,7 +45,7 @@ export const DYNAMIC_CONFIG_DEFAULTS: DynamicConfigRoot = {
     },
   },
   opportunity: {
-    shellTitle: "Earn with LawDog",
+    shellTitle: "Genesis Dogs Partner Access",
     shellSubtitle: "Share your link. Earn when people use LawDog.",
     leaderboardTitle: "Activity board",
     leaderboardSubtext:

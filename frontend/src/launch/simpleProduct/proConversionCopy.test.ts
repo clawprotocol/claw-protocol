@@ -58,8 +58,8 @@ describe("proConversionCopy", () => {
     expect(CHECKOUT_CTA).toBe("Continue with Pro");
     expect(CHECKOUT_FOOTER).toMatch(/Draft saved/i);
     expect(DRAFT_LOADING_STRUCTURING).toBe("Structuring key terms…");
-    expect(EARN_HERO_TITLE).toBe("Earn with LawDog");
-    expect(EARN_CTA_START).toBe("Start earning");
+    expect(EARN_HERO_TITLE).toBe("Genesis Dogs Partner Access");
+    expect(EARN_CTA_START).toBe("Request partner access");
   });
 
   it("starter upgrade checkout stepper keeps Upgrade active", () => {
@@ -95,15 +95,26 @@ describe("proConversionCopy", () => {
 });
 
 describe("ClawOpportunityPage earn landing (static)", () => {
-  it("renders simplified hero before Start earning expands details", () => {
+  it("renders simplified hero before partner access expands details", () => {
     const page = readFileSync(join(__dirname, "../affiliate/ClawOpportunityPage.tsx"), "utf8");
     expect(page).toContain("EARN_HERO_TITLE");
     expect(page).toContain("EARN_CTA_START");
     expect(page).toContain("earnDetailsOpen");
+    expect(page).toContain("compactFooter");
     expect(page).not.toContain("OpportunityIntroCards");
+    expect(page).not.toContain("Doginal Dog holders");
     const affiliatePanelIdx = page.indexOf("<AffiliateDashboardPanel");
     const startIdx = page.indexOf("earnDetailsOpen");
     expect(startIdx).toBeGreaterThanOrEqual(0);
     expect(affiliatePanelIdx).toBeGreaterThan(startIdx);
+  });
+});
+
+describe("earn partner copy", () => {
+  it("does not expose stale Doginal affiliate strings on primary surfaces", () => {
+    const page = readFileSync(join(__dirname, "../affiliate/ClawOpportunityPage.tsx"), "utf8");
+    for (const stale of ["Doginal Dog holders", "Doginal holders get early access", "Start earning"]) {
+      expect(page.includes(stale), `ClawOpportunityPage must not include "${stale}"`).toBe(false);
+    }
   });
 });

@@ -1,4 +1,5 @@
 import {
+  PRO_CAN_IMPROVE_HEADING,
   PRO_TRANSFORMATION_PREVIEW_FOOTNOTE,
   PRO_TRANSFORMATION_PREVIEW_LABEL,
   PRO_TRANSFORMATION_PREVIEW_SAMPLE,
@@ -6,38 +7,31 @@ import {
 
 type Props = {
   className?: string;
-  /** Paper-styled variant sits inside the free draft document surface. */
-  variant?: "dark" | "paper";
 };
 
-export function ProTransformationPreview({ className = "", variant = "dark" }: Props) {
-  const shell =
-    variant === "paper"
-      ? "mt-6 rounded-lg border border-amber-300/50 bg-amber-50/90 px-3 py-3 sm:px-4"
-      : "rounded-lg border border-amber-500/25 bg-amber-950/20 px-3 py-3 sm:px-4";
-
-  const labelClass =
-    variant === "paper"
-      ? "text-[11px] font-medium text-amber-900/80"
-      : "text-[11px] font-medium text-amber-200/85";
-
-  const sampleClass =
-    variant === "paper"
-      ? "mt-1.5 font-serif text-sm leading-relaxed text-stone-800"
-      : "mt-1.5 font-serif text-sm leading-relaxed text-slate-200/95";
-
-  const footnoteClass =
-    variant === "paper" ? "mt-2 text-[11px] leading-snug text-stone-600" : "mt-2 text-[11px] leading-snug text-slate-500";
-
+/**
+ * Upgrade teaser — separate from the free draft document (not contract paper styling).
+ */
+export function ProTransformationPreview({ className = "" }: Props) {
   return (
     <aside
-      className={[shell, className].filter(Boolean).join(" ")}
-      data-testid="pro-transformation-preview"
-      aria-label={PRO_TRANSFORMATION_PREVIEW_LABEL}
+      className={[
+        "pro-upgrade-teaser-preview rounded-lg border border-slate-700/70 bg-slate-900/55 px-3 py-3 font-sans sm:px-4",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-testid="pro-upgrade-teaser-preview"
+      aria-labelledby="pro-upgrade-teaser-heading"
     >
-      <p className={labelClass}>{PRO_TRANSFORMATION_PREVIEW_LABEL}</p>
-      <p className={sampleClass}>{PRO_TRANSFORMATION_PREVIEW_SAMPLE}</p>
-      <p className={footnoteClass}>{PRO_TRANSFORMATION_PREVIEW_FOOTNOTE}</p>
+      <p id="pro-upgrade-teaser-heading" className="text-xs font-medium text-slate-300 sm:text-[13px]">
+        {PRO_CAN_IMPROVE_HEADING}
+      </p>
+      <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-amber-200/75">
+        {PRO_TRANSFORMATION_PREVIEW_LABEL}
+      </p>
+      <p className="mt-1.5 text-sm leading-snug text-slate-400">{PRO_TRANSFORMATION_PREVIEW_SAMPLE}</p>
+      <p className="mt-2 text-[11px] leading-snug text-slate-500">{PRO_TRANSFORMATION_PREVIEW_FOOTNOTE}</p>
     </aside>
   );
 }
