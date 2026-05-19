@@ -14,6 +14,13 @@ describe("checkout back → starter review restore (static)", () => {
     expect(createPage).not.toMatch(/homeHeroAutoGenerate\s*=\s*\n?\s*heroHandoff\?\.autoGenerate[\s\S]*!hasStoredCreateReviewState/);
   });
 
+  it("starter review Continue with Pro uses launch_pro_checkout (not continue_basic_draft)", () => {
+    expect(intake).toContain('action: "launch_pro_checkout"');
+    expect(intake).toContain("restored_starter_review_cta");
+    expect(intake).toContain('case "launch_pro_checkout"');
+    expect(intake).toMatch(/if \(showUpgradeToFullDraftOnReview\)[\s\S]*launch_pro_checkout/);
+  });
+
   it("AgreementBuilderIntake restores checkout snapshot before home auto-generate", () => {
     expect(intake).toContain("logCheckoutBackRestoreStart");
     expect(intake).toContain("persistStarterReviewBeforeCheckout");

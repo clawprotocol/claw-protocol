@@ -988,6 +988,7 @@ type PrimaryCtaAction =
   | "keep_reviewing"
   | "fix_review"
   | "continue_basic_draft"
+  | "launch_pro_checkout"
   | "continue_to_recipients"
   | "premium_continue_to_signers"
   | "complete_recipient_details"
@@ -1765,6 +1766,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const productionResumeHydratedRef = useRef(false);
   const freeReviewSnapshotHydratedRef = useRef(false);
   const checkoutBackRestoreHydratedRef = useRef(false);
+  const launchCreateFlowProCheckoutRef = useRef<
+    (
+      draftOverride?: ParsedDraftShape | null,
+      opts?: {
+        starterProRefineCtaExperiment?: "control" | "variant";
+        checkoutSource?: string;
+        skipProCardScroll?: boolean;
+      },
+    ) => void
+  >(() => {});
   /** Paid Pro “Edit Draft” → /app/create: suppress auto-generate / Retry Pro until user edits inline. */
   const [paidProEditReturnResumeActive, setPaidProEditReturnResumeActive] = useState(false);
   const [followUpEnterReady, setFollowUpEnterReady] = useState(false);
@@ -6312,35 +6323,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       console.warn("[premium-flow] upgrade_modal_aborted", { reason: "empty_raw_intake", source: "starter_continue_cta" });
       return;
     }
-    console.info("[premium-flow] button_click", { button: "upgrade_to_full_draft_modal", source: "continue_basic_draft" });
-    logProductEvent("upgrade_clicked", { surface: "agreement_optional_full_draft", intent: "full_draft_upgrade" });
-    trackAgreementFunnelEvent(
-      "premium_upgrade_clicked",
-      { surface: "agreement_optional_full_draft" },
-      { planTier: String(tier) },
-    );
-    setPendingUpgradePrompt(raw);
-    pendingUpgradePromptRef.current = raw;
-    setUpgradeIntentDetected(true);
-    syncUpgradeIntentRefs(true);
-    stashCreateComplexityResume({
-      rawIntake: raw,
-      pending: gateDraft,
-      awaitingProCheckout: true,
-      resume_kind: "optional_full_upgrade",
+    launchCreateFlowProCheckoutRef.current?.(null, {
+      checkoutSource: "starter_continue_cta",
+      skipProCardScroll: true,
     });
-    armPaidProStarterSignatureSendFromCreateFlow();
-    persistPremiumForkUserSendMode("signature");
-    paidProPremiumSendIntentRef.current = "signature";
-    setPremiumSendModeUserChoice("signature");
-    setPremiumSendModeTouched(true);
-    setPremiumSignatureSenderFirst(true);
-    clearPremiumCollaborateFirstDefaultPrimed();
-    stashUpgradeCheckoutContext(upgradeContextReasons, {
-      completionLabel: buildUpgradeCheckoutCompletionLabel(gateDraft),
-      intentSignals: detectUpgradeIntentSignals(`${raw}\n${agreementDocumentText}`),
-    });
-    setAdvancedFullDraftPaywallOpen(true);
   }, [
     createProductionTwoPane,
     draft,
@@ -6348,9 +6334,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
     resolveRawIntakeForPremiumCheckout,
-    syncUpgradeIntentRefs,
-    upgradeContextReasons,
-    agreementDocumentText,
     runEntitledPremiumImprovementRewrite,
   ]);
 
@@ -6963,7 +6946,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const beginAdvancedFullDraftCheckout = React.useCallback(
     (
     draftOverride?: ParsedDraftShape | null,
-    opts?: { starterProRefineCtaExperiment?: "control" | "variant" },
+    opts?: {
+      starterProRefineCtaExperiment?: "control" | "variant";
+      checkoutSource?: string;
+      skipProCardScroll?: boolean;
+    },
   ) => {
     console.info("[premium-flow] button_click", { button: "unlock_premium_rewrite_checkout" });
     const gateDraft = draftOverride ?? draft;
@@ -6994,8 +6981,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const resumeKind: CreateComplexityResumeKind =
       complexityPendingParsedRef.current != null ? "complexity_gate" : "optional_full_upgrade";
-    scrollToPremiumPosAnchor();
-    console.info("[premium-flow] checkout_launch", { surface: "advanced_full_draft_stripe", rawLen: raw.length });
+    const skipProCardScroll =
+      opts?.skipProCardScroll === true ||
+      Boolean(
+        opts?.checkoutSource &&
+          /starter_review|restored_starter|starter_continue/.test(opts.checkoutSource),
+      );
+    if (!skipProCardScroll) {
+      scrollToPremiumPosAnchor();
+    }
+    console.info("[premium-flow] checkout_launch", {
+      surface: "advanced_full_draft_stripe",
+      source: opts?.checkoutSource ?? "starter_pro_refine_card",
+      rawLen: raw.length,
+    });
     stashCreateComplexityResume({
       rawIntake: raw,
       pending,
@@ -7008,6 +7007,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       starterProRefineCtaExperiment: opts?.starterProRefineCtaExperiment,
     });
     persistPremiumRecipientHandoffFromDraftAndUi(pending);
+    armPaidProStarterSignatureSendFromCreateFlow();
+    persistPremiumForkUserSendMode("signature");
+    paidProPremiumSendIntentRef.current = "signature";
+    setPremiumSendModeUserChoice("signature");
+    setPremiumSendModeTouched(true);
+    setPremiumSignatureSenderFirst(true);
+    clearPremiumCollaborateFirstDefaultPrimed();
     persistStarterReviewBeforeCheckout({
       intakeText: raw,
       draft: pending,
@@ -7037,6 +7043,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     runEntitledPremiumImprovementRewrite,
   ],
 );
+
+  useLayoutEffect(() => {
+    launchCreateFlowProCheckoutRef.current = beginAdvancedFullDraftCheckout;
+  }, [beginAdvancedFullDraftCheckout]);
 
   const beginAdvancedFullDraftBilling = React.useCallback(() => {
     const resumeSnap = readCreateComplexityResume();
@@ -9350,6 +9360,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     void beginAdvancedFullDraftCheckout(null, {
       starterProRefineCtaExperiment,
+      checkoutSource: "starter_pro_refine_card",
     });
   }, [starterProRefineCtaExperiment, tier, beginAdvancedFullDraftCheckout]);
 
@@ -12198,7 +12209,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : PRO_CTA_CONTINUE;
           return {
             label: proRequiredCtaLabel,
-            action: "continue_basic_draft",
+            action: "launch_pro_checkout",
             disabled: !draft,
             reason: !draft ? "no_draft" : undefined,
           };
@@ -12292,7 +12303,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (freeTrackBlocksRecipientAdvance) {
           return {
             label: PRO_CTA_CONTINUE,
-            action: "continue_basic_draft",
+            action: "launch_pro_checkout",
             disabled: !draft,
             reason: !draft ? "no_draft" : undefined,
           };
@@ -12635,7 +12646,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!sendRelated) return;
     devSendCtaTrace("render: send-related snapshot", {
       stickyVisible: simpleCreateStickyBottomBarVisible,
-      inlineFallback: simpleCreateUnifiedBottomCta && !simpleCreateStickyBottomBarVisible,
+      inlineFallback:
+        simpleCreateUnifiedBottomCta &&
+        !simpleCreateStickyBottomBarVisible &&
+        !isFreeStreamlineDraftReview,
       label: simpleCreateUnifiedBottomCta ? unifiedPrimaryCta.label : primaryIntakeCtaLabel,
       primaryIntakeCtaDisabled: effectivePrimaryCtaDisabled,
       createUiStage,
@@ -13432,6 +13446,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             await handOffProductionDraftToRecipients();
             return;
           }
+          case "launch_pro_checkout": {
+            setHardError(null);
+            const checkoutSource = checkoutBackRestoreActive
+              ? "restored_starter_review_cta"
+              : "starter_review_bottom_cta";
+            launchCreateFlowProCheckoutRef.current?.(null, {
+              checkoutSource,
+              skipProCardScroll: true,
+            });
+            return;
+          }
           case "continue_basic_draft": {
             const eligibleForRecipientSetupAfterStarterPreview =
               (paidProAuthoritative && premiumSignersSurfaceReady) ||
@@ -13442,7 +13467,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               if (import.meta.env.DEV) {
                 console.log("[FSM] continue_basic_draft → upgrade_checkout");
               }
-              await launchUpgradeCheckoutFromStarterDraft();
+              launchCreateFlowProCheckoutRef.current?.(null, {
+                checkoutSource: checkoutBackRestoreActive
+                  ? "restored_starter_review_cta"
+                  : "starter_continue_cta",
+                skipProCardScroll: true,
+              });
               return;
             }
             if (import.meta.env.DEV) {
@@ -16807,9 +16837,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   createProductionTwoPane &&
                   createUiStage === CreateUiStage.DRAFT &&
                   (unifiedPrimaryCta.action === "continue_to_recipients" ||
-                    unifiedPrimaryCta.action === "continue_basic_draft") ? (
+                    unifiedPrimaryCta.action === "launch_pro_checkout") ? (
                     <div className="mb-3 space-y-1 text-center">
-                      {unifiedPrimaryCta.action === "continue_basic_draft" ? (
+                      {unifiedPrimaryCta.action === "launch_pro_checkout" ? (
                         <>
                           <p className="text-xs leading-relaxed text-slate-300 sm:text-sm">
                             Nothing is sent automatically. The primary button opens LawDog Pro checkout — send,

@@ -75,6 +75,7 @@ describe("free streamline draft review wiring (static)", () => {
     expect(intake).toContain("hideStickyForStarterProContinuation");
     expect(intake).toContain("isFreeStreamlineDraftReview");
     expect(intake).toContain("freeTrackBlocksRecipientAdvance");
+    expect(intake).toMatch(/inlineFallback:[\s\S]*!isFreeStreamlineDraftReview/);
   });
 
   it("commit patch normalizes review display phase", () => {
