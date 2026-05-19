@@ -9,6 +9,7 @@ import {
 } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { resolveIntakeEmailForContactSlot } from "./paidProIntakeContactSubstitution";
+import { buildPartyEntries, normalizeSignatureBlockHeadings } from "./paidProAgreementPolish";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
@@ -1025,10 +1026,15 @@ export function finalizeUserVisibleAgreementPlainText(
   prepared = polish.text;
   const scanCtx = { intakeRaw, partyNames: partyResolution.names };
   const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(prepared, scanCtx);
-  let remainingDetail = analyzeTemplatePlaceholderFragments(repairedText, scanCtx);
+  const signatureFinal = normalizeSignatureBlockHeadings(
+    repairedText,
+    buildPartyEntries(partyResolution.names),
+  );
+  const postRepairText = signatureFinal.text;
+  let remainingDetail = analyzeTemplatePlaceholderFragments(postRepairText, scanCtx);
   const demotion = demotePaidProSignatureOnlyFatals(
     remainingDetail,
-    repairedText.length,
+    postRepairText.length,
     partyResolution,
   );
   remainingDetail = demotion.decisions;
@@ -1038,7 +1044,7 @@ export function finalizeUserVisibleAgreementPlainText(
 
   logPaidProPlaceholderGateDecision({
     surface: ctx.surface,
-    docLen: repairedText.length,
+    docLen: postRepairText.length,
     scannedCount: remainingDetail.length,
     fatalCount: remainingFatal.length,
     nonfatalCount: remainingDetail.length - remainingFatal.length,
@@ -1058,7 +1064,7 @@ export function finalizeUserVisibleAgreementPlainText(
     fatalCount: remainingFatal.length,
     nonfatalCount: remainingDetail.length - remainingFatal.length,
     repairedCount: repaired.length,
-    bodyLen: repairedText.length,
+    bodyLen: postRepairText.length,
     partyCount: partyResolution.partyCount,
     ok,
     anchorsFound: partyResolution.anchorsFound,
@@ -1105,7 +1111,7 @@ export function finalizeUserVisibleAgreementPlainText(
   }
   return {
     ok,
-    text: repairedText,
+    text: postRepairText,
     repaired,
     remaining,
     remainingFatal,

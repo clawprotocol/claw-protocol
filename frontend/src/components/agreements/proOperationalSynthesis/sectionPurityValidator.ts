@@ -138,5 +138,20 @@ export function applySectionPurityPass(text: string): { text: string; issues: Se
     processSentences(sentencesFromBody(sigBody), "signatures", "SIGNATURES");
   }
 
+  out = scrubNoticesContactsDisputeLeakage(out);
   return { text: out, issues };
+}
+
+/** Remove dispute/arbitration sentences that belong only in the Dispute section. */
+function scrubNoticesContactsDisputeLeakage(text: string): string {
+  let out = text;
+  const blockRe =
+    /(\n\s*NOTICES\s*\n)([\s\S]*?)(?=\n\s*KEY\s+CONTACTS\s*\n|\n\s*IN WITNESS WHEREOF\b)/i;
+  out = out.replace(blockRe, (_m, head: string, body: string) => {
+    const cleaned = body
+      .replace(/\bAny\s+dispute\s+shall\s+be\s+resolved[^.!?]*[.!?]\s*/gi, "")
+      .replace(/\bbinding\s+arbitration\b[^.!?]*[.!?]\s*/gi, "");
+    return `${head}${cleaned}`;
+  });
+  return out;
 }

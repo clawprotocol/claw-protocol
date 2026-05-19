@@ -11,6 +11,8 @@ import {
 } from "./paidProPartyNamePreserve";
 import {
   applyProOperationalSynthesisPasses,
+  applyMilestoneTableGeneration,
+  applySectionPurityPass,
   buildProOperationalSynthesis,
 } from "./proOperationalSynthesis";
 
@@ -387,8 +389,17 @@ function isSignatureHeadingLine(line: string, parties: readonly PartyEntry[]): P
   }
   if (/@|https?:\/\//i.test(trimmed)) return null;
   if (ENTITY_SUFFIX.test(trimmed)) return null;
-  const hit = parties.find((p) => normParty(trimmed) === normParty(p.short));
-  return hit ?? null;
+  const t = normParty(trimmed);
+  const matches = parties.filter((p) => {
+    const s = normParty(p.short);
+    const f = normParty(p.full);
+    if (t === s || t === f) return true;
+    if (s.startsWith(`${t} `) || s.startsWith(t)) return true;
+    const first = s.split(/\s+/)[0];
+    return first === t;
+  });
+  if (!matches.length) return null;
+  return matches.sort((a, b) => b.full.length - a.full.length)[0] ?? null;
 }
 
 export function normalizeSignatureBlockHeadings(
@@ -426,9 +437,15 @@ export function normalizeSignatureBlockHeadings(
     return `${indent}${hit.full}`;
   });
 
-  const polishedSig = opts?.skipInternalMask
+  let polishedSig = opts?.skipInternalMask
     ? outLines.join("\n")
     : unmaskProtectedSpans(outLines.join("\n"), emails, urls);
+  for (const p of [...parties].sort((a, b) => b.short.length - a.short.length)) {
+    polishedSig = polishedSig.replace(
+      new RegExp(`^(\\s*)${escapeRe(p.short)}(\\s*)$`, "gim"),
+      `$1${p.full}$2`,
+    );
+  }
   return { text: before + polishedSig, log: { replacedCount } };
 }
 
@@ -658,15 +675,35 @@ export function polishPaidProAgreementText(
     due_date: null,
     effective_date: null,
   });
-  const operational = applyProOperationalSynthesisPasses(working, intakeRaw || "", synthesis);
+  const operational = applyProOperationalSynthesisPasses(working, intakeRaw || "", synthesis, {
+    paymentTerms: intakeRaw || "",
+  });
   working = operational.text;
 
   const enterprise = applyEnterpriseClausePolish(working);
   working = enterprise.text;
 
+  const signatureFinal = normalizeSignatureBlockHeadings(working, parties, {
+    skipInternalMask: opts?.skipInternalMask,
+  });
+  working = signatureFinal.text;
+
+  const purityFinal = applySectionPurityPass(working);
+  working = purityFinal.text;
+
+  const milestoneFinal = applyMilestoneTableGeneration(
+    working,
+    intakeRaw || "",
+    intakeRaw || "",
+    synthesis.responsibilities,
+  );
+  working = milestoneFinal.text;
+
   const log: PaidProAgreementPolishLog = {
     recital: recital.log,
-    signature: signature.log,
+    signature: {
+      replacedCount: signature.log.replacedCount + signatureFinal.log.replacedCount,
+    },
     enterprise: enterprise.log,
   };
 

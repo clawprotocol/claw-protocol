@@ -6,7 +6,7 @@ import { definedShortNameFromLegalEntity } from "../paidProAgreementPolish";
 import type { PartyResponsibilityProfile } from "./types";
 
 const MILESTONE_INTAKE_RE =
-  /\b(?:milestone|phase\s+\d|deliverable|acceptance|payment\s+upon|installment|implementation\s+schedule)\b/i;
+  /\b(?:milestones?|phase\s+\d|deliverables?|acceptance|payment\s+upon|installment|implementation\s+schedule)\b/i;
 
 const EXISTING_TABLE_RE = /\|\s*milestone\s*\|/i;
 const EXISTING_SECTION_RE = /\bIMPLEMENTATION\s+MILESTONES\b/i;
@@ -58,7 +58,7 @@ export function applyMilestoneTableGeneration(
   ].join("\n");
 
   const sigIdx = text.search(/\b(?:IN WITNESS WHEREOF|SIGNATURES?)\b/i);
-  if (sigIdx > 200) {
+  if (sigIdx >= 0) {
     return {
       text: `${text.slice(0, sigIdx).trimEnd()}\n\n${block}\n\n${text.slice(sigIdx)}`,
       inserted: true,

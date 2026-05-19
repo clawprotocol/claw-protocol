@@ -14,6 +14,8 @@ import {
   applyMilestoneTableGeneration,
   mergePartyRolesFromResponsibilities,
 } from "./milestoneTableGeneration";
+
+export { applyMilestoneTableGeneration } from "./milestoneTableGeneration";
 import { applyEnterpriseReadabilityPass } from "./enterpriseReadabilityPass";
 import type {
   ProOperationalSynthesisPassLog,
@@ -70,6 +72,9 @@ export function buildProOperationalSynthesis(
   }
   if (dealDna.governanceComplexity === "enterprise") {
     materialAskLines.push("Include governance: steering cadence, escalation, and cross-party dependencies.");
+  }
+  if (/\bmilestones?\b/i.test(rawIntake)) {
+    materialAskLines.push("Include milestone schedule, acceptance criteria, and implementation dependencies.");
   }
 
   const base = { responsibilities, dealDna, materialAskLines };

@@ -4,7 +4,10 @@
 
 import { extractBetweenPartyNameList } from "../partyBetweenParse";
 import { definedShortNameFromLegalEntity } from "../paidProAgreementPolish";
-import { resolveAuthoritativePartiesForRecitalPolish } from "../paidProPartyNamePreserve";
+import {
+  isAuthoritativeLegalEntityName,
+  resolveAuthoritativePartiesForRecitalPolish,
+} from "../paidProPartyNamePreserve";
 import type { PartyResponsibilityProfile } from "./types";
 
 const ROLE_CUES: readonly { re: RegExp; role: string }[] = [
@@ -97,7 +100,14 @@ export function extractPartyResponsibilities(
   partyNames: readonly string[] | null | undefined,
 ): PartyResponsibilityProfile[] {
   const intake = String(intakeRaw || "").replace(/\s+/g, " ").trim();
-  const parties = resolveAuthoritativePartiesForRecitalPolish(partyNames, intake);
+  const explicit = (partyNames || []).map((n) => String(n || "").trim()).filter((n) => n.length >= 2);
+  const explicitAuthoritative = explicit.filter(isAuthoritativeLegalEntityName);
+  let parties = resolveAuthoritativePartiesForRecitalPolish(partyNames, intake);
+  if (explicit.length >= 2) {
+    parties = explicitAuthoritative.length >= 2 ? explicitAuthoritative : explicit;
+  } else if (parties.length > explicit.length + 1 && explicit.length >= 2) {
+    parties = explicit;
+  }
   if (parties.length < 1) {
     const fallback = extractBetweenPartyNameList(intake);
     if (fallback.length >= 2) {

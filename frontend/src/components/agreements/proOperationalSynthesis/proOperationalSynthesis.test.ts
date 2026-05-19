@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildPremiumFullDraftContextForProRequest } from "../premiumFullDraftApi";
 import { polishPaidProAgreementText } from "../paidProAgreementPolish";
 import {
+  applyMilestoneTableGeneration,
   applyProOperationalSynthesisPasses,
   applySectionPurityPass,
   buildProOperationalSynthesis,
@@ -101,6 +102,33 @@ describe("premium context enrichment", () => {
     });
     expect(ctx.additional_terms).toContain("operational synthesis");
     expect(ctx.material_asks?.some((m) => m.includes("Ironclad"))).toBe(true);
+  });
+});
+
+describe("milestone table generation", () => {
+  it("inserts implementation milestone block for milestone intake", () => {
+    const body = "SCOPE\n\nMilestone payments on acceptance.\n\nIN WITNESS WHEREOF\n\nParty\nBy: ___\n";
+    const { inserted, text } = applyMilestoneTableGeneration(
+      body,
+      "Milestone payments upon phase acceptance.",
+      "Milestone schedule with installments.",
+      [],
+    );
+    expect(inserted).toBe(true);
+    expect(text).toContain("IMPLEMENTATION MILESTONES");
+    expect(text).toContain("| Milestone |");
+  });
+
+  it("inserts for plural commercialization milestones in intake", () => {
+    const body = "SCOPE\n\nPhased commercialization milestones.\n\nIN WITNESS WHEREOF\n\nParty\nBy: ___\n";
+    const { inserted, text } = applyMilestoneTableGeneration(
+      body,
+      "Parties co-develop pilots with phased commercialization milestones.",
+      "",
+      [],
+    );
+    expect(inserted).toBe(true);
+    expect(text).toContain("IMPLEMENTATION MILESTONES");
   });
 });
 
