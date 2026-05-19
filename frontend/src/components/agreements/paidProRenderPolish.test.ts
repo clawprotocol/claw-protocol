@@ -83,10 +83,11 @@ describe("applyPaidProRenderPolish", () => {
     const { text } = applyPaidProRenderPolish(body, IRONCLAD_JOINT_ROLLOUT_INTAKE, [...IRONCLAD_PARTIES], {
       surface: "test",
     });
-    const opening = text.slice(0, 1000);
+    const opening = text.slice(0, 1200);
     for (const party of IRONCLAD_PARTIES) {
       expect(opening).toContain(party);
     }
+    expect(opening).toMatch(/\(.*Ironclad.*\)/);
     expect(opening).not.toMatch(/among Ironclad, Harborline, Northwind, Silver Mesa, and VertexGrid/i);
   });
 

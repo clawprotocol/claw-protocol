@@ -7,10 +7,7 @@ import {
   substitutePaidProIntakeContactPlaceholders,
   type PaidProContactSubstitutionResult,
 } from "./paidProIntakeContactSubstitution";
-import {
-  preserveFullLegalPartyNamesInOpeningAndSignatures,
-  resolveFullLegalPartiesFromIntake,
-} from "./paidProPartyNamePreserve";
+import { polishPaidProAgreementText } from "./paidProAgreementPolish";
 import { textContainsCorruptedEntityEmail } from "./paidProEmailMask";
 
 export type EmailMutationGuardResult = {
@@ -81,14 +78,14 @@ export function logPaidProEmailMutationGuard(
 export type PaidProRenderPolishResult = {
   text: string;
   contactSub: PaidProContactSubstitutionResult;
+  agreementPolish: ReturnType<typeof polishPaidProAgreementText>["log"];
   emailGuard: EmailMutationGuardResult;
 };
 
 /**
- * a) resolve intake parties/contacts
- * b) expand full legal party names (not inside emails)
- * c) substitute [EMAIL_N] placeholders with exact intake emails
- * d) verify no intake email was mutated; repair when possible
+ * a) substitute [EMAIL_N] placeholders with exact intake emails
+ * b) universal agreement polish (recital, signatures, enterprise clauses)
+ * c) verify no intake email was mutated; repair when possible
  */
 export function applyPaidProRenderPolish(
   text: string,
@@ -97,12 +94,16 @@ export function applyPaidProRenderPolish(
   opts?: { surface?: string },
 ): PaidProRenderPolishResult {
   const surface = opts?.surface ?? "unknown";
-  const parties = resolveFullLegalPartiesFromIntake(partyNames, intakeRaw);
+  const explicitPartyList = (partyNames?.length ?? 0) >= 2;
 
-  let working = preserveFullLegalPartyNamesInOpeningAndSignatures(text, parties, intakeRaw);
+  const contactSub = substitutePaidProIntakeContactPlaceholders(text, intakeRaw, { surface });
+  let working = contactSub.text;
 
-  const contactSub = substitutePaidProIntakeContactPlaceholders(working, intakeRaw, { surface });
-  working = contactSub.text;
+  const agreementPolish = polishPaidProAgreementText(working, intakeRaw, partyNames, {
+    surface,
+    explicitPartyList,
+  });
+  working = agreementPolish.text;
 
   let emailGuard = verifyIntakeEmailsPreserved(intakeRaw, working);
   if (emailGuard.mutatedEmailCount > 0) {
@@ -112,5 +113,5 @@ export function applyPaidProRenderPolish(
 
   logPaidProEmailMutationGuard({ surface, ...emailGuard });
 
-  return { text: working, contactSub, emailGuard };
+  return { text: working, contactSub, agreementPolish: agreementPolish.log, emailGuard };
 }
