@@ -8,9 +8,8 @@ import {
   substitutePartyPlaceholdersInUserFacingText,
 } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
-import { substitutePaidProIntakeContactPlaceholders } from "./paidProIntakeContactSubstitution";
-import { preserveFullLegalPartyNamesInOpening } from "./paidProPartyNamePreserve";
 import { resolveIntakeEmailForContactSlot } from "./paidProIntakeContactSubstitution";
+import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -1016,15 +1015,14 @@ export function finalizeUserVisibleAgreementPlainText(
 ): PlaceholderSafetyOutcome {
   const intakeRaw = (ctx.intakeRaw ?? "").trim();
   let prepared = prepareAgreementTextForPlaceholderScan(text);
-  const contactSub = substitutePaidProIntakeContactPlaceholders(prepared, intakeRaw, {
-    surface: `${ctx.surface}_contact`,
-  });
-  prepared = contactSub.text;
   const partyResolution = resolvePlaceholderPartyNamesWithMeta(
     { ...ctx, intakeRaw },
     prepared,
   );
-  prepared = preserveFullLegalPartyNamesInOpening(prepared, partyResolution.names, intakeRaw);
+  const polish = applyPaidProRenderPolish(prepared, intakeRaw, partyResolution.names, {
+    surface: ctx.surface,
+  });
+  prepared = polish.text;
   const scanCtx = { intakeRaw, partyNames: partyResolution.names };
   const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(prepared, scanCtx);
   let remainingDetail = analyzeTemplatePlaceholderFragments(repairedText, scanCtx);

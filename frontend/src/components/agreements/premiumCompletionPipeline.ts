@@ -87,8 +87,7 @@ import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
-import { substitutePaidProIntakeContactPlaceholders } from "./paidProIntakeContactSubstitution";
-import { preserveFullLegalPartyNamesInOpening } from "./paidProPartyNamePreserve";
+import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 
 export type PremiumCompletionInput = {
   intakeText: string;
@@ -1381,10 +1380,9 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       let doc = (effectiveFull.document_text || "").trim();
       if (doc) {
         const preGateIntake = (rawForSoT || rawIntake).trim();
-        doc = substitutePaidProIntakeContactPlaceholders(doc, preGateIntake, {
+        doc = applyPaidProRenderPolish(doc, preGateIntake, premiumRejectCtx.partyNames, {
           surface: "premium_completion_pipeline_pre_gate",
         }).text;
-        doc = preserveFullLegalPartyNamesInOpening(doc, premiumRejectCtx.partyNames, preGateIntake);
         effectiveFull = { ...effectiveFull, document_text: doc };
       }
       const firstCallOutcomeDegraded = (full.generation_outcome || "").trim() === "degraded";

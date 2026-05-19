@@ -21,7 +21,8 @@ import {
   extractIntakeContacts,
   substitutePaidProIntakeContactPlaceholders,
 } from "./paidProIntakeContactSubstitution";
-import { preserveFullLegalPartyNamesInOpening } from "./paidProPartyNamePreserve";
+import { applyPaidProRenderPolish } from "./paidProRenderPolish";
+import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
 
 const IRONCLAD_EMAILS = [
   "ethan.cole@ironcladsg.com",
@@ -90,6 +91,26 @@ describe("paidProIntakeContactSubstitution", () => {
     expect(fin.remainingFatal.some((x) => /EMAIL/i.test(x))).toBe(true);
   });
 
+  it("applyPaidProRenderPolish keeps exact emails when party names appear in email domains", () => {
+    const contacts = IRONCLAD_PARTIES.map((p, i) => `${p}\nEmail: [EMAIL_${i + 1}]`).join("\n\n");
+    const body = padOperative(
+      [
+        "entered into by and among Ironclad, Harborline, Northwind, Silver Mesa, and VertexGrid.",
+        "KEY CONTACTS",
+        contacts,
+      ].join("\n"),
+      20_000,
+    );
+    const polished = applyPaidProRenderPolish(body, IRONCLAD_JOINT_ROLLOUT_INTAKE, [...IRONCLAD_PARTIES], {
+      surface: "test",
+    });
+    for (const email of IRONCLAD_EMAILS) {
+      expect(polished.text).toContain(email);
+    }
+    expect(polished.text).not.toMatch(/@Ironclad Systems Group LLC/i);
+    expect(polished.emailGuard.mutatedEmailCount).toBe(0);
+  });
+
   it("finalize replaces numbered emails and preserves full legal party names in preamble", () => {
     const sig = IRONCLAD_PARTIES.map((p, i) => `${p}\nEmail: [EMAIL_${i + 1}]`).join("\n\n");
     const body = padOperative(
@@ -118,7 +139,11 @@ describe("paidProIntakeContactSubstitution", () => {
 describe("paidProPartyNamePreserve", () => {
   it("expands short party labels to full legal names in opening only", () => {
     const short = "AGREEMENT among Ironclad, Harborline, and VertexGrid Technologies LLC.";
-    const out = preserveFullLegalPartyNamesInOpening(short, IRONCLAD_PARTIES, IRONCLAD_JOINT_ROLLOUT_INTAKE);
+    const out = preserveFullLegalPartyNamesInOpeningAndSignatures(
+      short,
+      IRONCLAD_PARTIES,
+      IRONCLAD_JOINT_ROLLOUT_INTAKE,
+    );
     expect(out).toContain("Ironclad Systems Group LLC");
     expect(out).toContain("Harborline Data Solutions Inc.");
   });

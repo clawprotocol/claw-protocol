@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shortFormsFromLegalName, preserveFullLegalPartyNamesInOpening } from "./paidProPartyNamePreserve";
+import {
+  shortFormsFromLegalName,
+  preserveFullLegalPartyNamesInOpeningAndSignatures,
+} from "./paidProPartyNamePreserve";
 
 describe("paidProPartyNamePreserve", () => {
   it("derives short forms from legal entity names", () => {
@@ -14,7 +17,7 @@ describe("paidProPartyNamePreserve", () => {
       "Northwind Automation Partners LLC",
     ];
     const body = "This Agreement is among Ironclad, Harborline, and Northwind.";
-    const out = preserveFullLegalPartyNamesInOpening(body, parties, null);
+    const out = preserveFullLegalPartyNamesInOpeningAndSignatures(body, parties, null);
     expect(out).toContain("Ironclad Systems Group LLC");
     expect(out).toContain("Harborline Data Solutions Inc.");
     expect(out).toContain("Northwind Automation Partners LLC");
