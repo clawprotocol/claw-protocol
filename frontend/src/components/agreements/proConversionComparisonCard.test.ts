@@ -21,7 +21,7 @@ const card = readFileSync(join(__dirname, "ProConversionComparisonCard.tsx"), "u
 describe("Pro conversion comparison copy", () => {
   it("exports draft-to-deal heading and free vs pro framing", () => {
     expect(PRO_UPGRADE_CARD_HEADING).toBe("Ready to move this from draft to deal?");
-    expect(PRO_UPGRADE_CARD_BODY).toMatch(/Free gives you the draft\. Pro gives you the workflow/i);
+    expect(PRO_UPGRADE_CARD_BODY).toMatch(/Free gives you the draft\. Pro unlocks/i);
     expect(PRO_UPGRADE_BRIDGE_LINE).toMatch(/another person needs to review/i);
     expect(PRO_UPGRADE_REASSURANCE).toBe("You review everything before anything is shared.");
   });
@@ -49,6 +49,9 @@ describe("Pro conversion comparison copy", () => {
     expect(card).toContain("PRO_UPGRADE_CARD_HEADING");
     expect(card).toContain("PRO_UPGRADE_FREE_COLUMN_HELPER");
     expect(card).toContain("ProConversionComparisonCard");
+    expect(card).toContain("ProImprovedSummary");
+    expect(card).not.toContain("ProTransformationPreview");
+    expect(card).toContain("pro-conversion-comparison-card");
     expect(card.toLowerCase()).not.toMatch(/download/);
   });
 });

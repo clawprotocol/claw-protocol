@@ -38,6 +38,9 @@ const CONVERSION_SURFACE_PATHS: readonly string[] = [
   join(__dirname, "../affiliate/ClawOpportunityPage.tsx"),
   join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx"),
   join(__dirname, "../../components/agreements/ProConversionComparisonCard.tsx"),
+  join(__dirname, "../../components/agreements/ProTransformationPreview.tsx"),
+  join(__dirname, "../../components/agreements/ProImprovedSummary.tsx"),
+  join(__dirname, "proTransformationCopy.ts"),
 ];
 
 describe("proConversionCopy", () => {
@@ -51,9 +54,9 @@ describe("proConversionCopy", () => {
     expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/proof records/i);
     expect(PRO_UPGRADE_PRO_BULLETS.length).toBeGreaterThan(0);
     expect(CHECKOUT_TITLE).toBe("Continue with Pro");
-    expect(CHECKOUT_SUBTITLE).toMatch(/Review it before anything is shared, sent, or signed/i);
+    expect(CHECKOUT_SUBTITLE).toMatch(/review and edit it before anything is sent or signed/i);
     expect(CHECKOUT_CTA).toBe("Continue with Pro");
-    expect(CHECKOUT_FOOTER).toMatch(/Review before anything moves/i);
+    expect(CHECKOUT_FOOTER).toMatch(/Draft saved/i);
     expect(DRAFT_LOADING_STRUCTURING).toBe("Structuring key terms…");
     expect(EARN_HERO_TITLE).toBe("Earn with LawDog");
     expect(EARN_CTA_START).toBe("Start earning");

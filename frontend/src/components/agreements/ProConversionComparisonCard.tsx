@@ -18,6 +18,7 @@ import {
   STARTER_REVIEW_PREMIUM_LIST_GLYPH_CLASSNAME,
   STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME,
 } from "./starterReviewPremiumUpsellCopy";
+import { ProImprovedSummary } from "./ProImprovedSummary";
 
 type Props = {
   id?: string;
@@ -63,12 +64,14 @@ export function ProConversionComparisonCard(props: Props) {
       ref={panelRef}
       role="region"
       aria-label={PRO_UPGRADE_CARD_HEADING}
-      className={`scroll-mt-4 p-4 sm:p-5 ${STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME} ${className}`.trim()}
+      className={`pro-conversion-comparison-card scroll-mt-4 p-4 sm:p-5 ${STARTER_REVIEW_PREMIUM_PANEL_CLASSNAME} ${className}`.trim()}
     >
       <h3 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">{PRO_UPGRADE_CARD_HEADING}</h3>
       <p className="mt-2 text-sm leading-relaxed text-slate-400 sm:text-[15px]">{PRO_UPGRADE_CARD_BODY}</p>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 sm:gap-4">
+      <ProImprovedSummary className="mt-4" />
+
+      <div className="mt-5 hidden gap-3 sm:grid sm:grid-cols-2 sm:gap-4">
         <div className="rounded-lg border border-slate-700/60 bg-slate-950/60 p-3.5 sm:p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{PRO_UPGRADE_FREE_COLUMN_LABEL}</p>
           <ul className="mt-2.5 space-y-2 text-slate-300/95">

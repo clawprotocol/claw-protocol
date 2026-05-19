@@ -3,8 +3,13 @@ import { useDynamicConfig } from "../../config/dynamicConfig/useDynamicConfig";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalytics";
 import { CHECKOUT_STARTER_UPGRADE_SUBTITLE, resolveCheckoutFlowProgress } from "./checkoutFlowProgress";
-import { CHECKOUT_CTA, CHECKOUT_FOOTER, CHECKOUT_TITLE } from "./proConversionCopy";
+import { CHECKOUT_LEGAL_DISCLAIMER } from "./checkoutTrustCopy";
 import { CheckoutTrustPanel } from "./CheckoutTrustPanel";
+import { CHECKOUT_CTA, CHECKOUT_FOOTER, CHECKOUT_TITLE } from "./proConversionCopy";
+import {
+  CHECKOUT_CARD_ACTIVATION_LINE,
+  CHECKOUT_CARD_PROCESSING_LINE,
+} from "./proTransformationCopy";
 import {
   createFiatToCryptoOnrampIntent,
   demoConfirmFiatToCryptoOnrampFromCard,
@@ -470,10 +475,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
             <AgreementCompletionCheckoutContextPanel
               reasons={upgradeCheckoutSnap?.reasons}
               completionLabel={upgradeCheckoutSnap?.completionLabel}
-              className="min-w-0"
+              className="min-w-0 order-2 lg:order-1"
+              compact
             />
           ) : null}
-          <div className={isCreateAgreementCheckout ? "min-w-0" : "min-w-0 space-y-8"}>
+          <div className={isCreateAgreementCheckout ? "min-w-0 order-1 lg:order-2" : "min-w-0 space-y-8"}>
         {isCreateAgreementCheckout ? (
           <section
             className="rounded-2xl border border-slate-800/90 bg-gradient-to-b from-slate-900/92 via-slate-950/96 to-slate-950 p-5 shadow-xl shadow-black/35 ring-1 ring-white/[0.04] sm:p-6 lg:p-8"
@@ -495,8 +501,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
               className="border-t border-slate-800/80 pt-6 sm:pt-8"
               aria-labelledby="checkout-payment-heading"
             >
-              <p id="checkout-payment-heading" className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 sm:text-xs">
-                Payment — same plan as above
+              <p id="checkout-payment-heading" className="text-sm font-medium text-slate-300">
+                Payment
               </p>
               <p className="mt-2 text-sm leading-snug text-slate-300">
                 <span className="font-medium text-slate-100">{tier.name}</span>
@@ -506,15 +512,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                 <span className="text-slate-200">{priceLine}</span>
               </p>
 
-              <div className={`mt-5 min-w-0 space-y-3 ${isCreateAgreementCheckout ? "sm:space-y-4" : ""}`}>
-                <CheckoutTrustPanel
-                  surface="create_flow_checkout"
-                  cadence={cadence}
-                  showAnnualRenewal={!isSingleAgreementCheckout}
-                />
-                <div>
+              <div className="mt-5 min-w-0 rounded-xl border border-slate-800/70 bg-slate-950/35 p-4 sm:p-5">
+                <CheckoutTrustPanel surface="create_flow_checkout" />
+                <div className="mt-3 border-t border-slate-800/60 pt-3 sm:mt-4 sm:pt-4">
                   <p className="text-sm font-medium text-slate-200">Pay with card</p>
-                  <p className="text-sm leading-7 text-slate-300">{ck.trustLines.cardProcessing}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-400">{ck.trustLines.cardProcessing}</p>
                 </div>
                 {wrappedDisclosure}
                 <form className="space-y-3 pt-1" onSubmit={(e) => void onCardPay(e)}>
@@ -543,8 +545,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                   value={cardNumber}
                   onChange={(e) => setCardNumber(e.target.value)}
                 />
-                <p className="mt-1 text-sm leading-7 text-slate-400">
-                  Use your card on file with your payment provider. Your plan activates after payment succeeds.
+                <p className="mt-1 text-sm leading-snug text-slate-400">
+                  {CHECKOUT_CARD_PROCESSING_LINE} {CHECKOUT_CARD_ACTIVATION_LINE}
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -595,16 +597,16 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                 )}
               </button>
             </form>
-            {devPaymentBypassActive ? (
-              <p
-                className="mt-3 rounded-md border border-amber-600/50 bg-amber-950/40 px-3 py-2 text-center text-[11px] font-medium uppercase tracking-wide text-amber-200/95 sm:text-left sm:text-xs"
-                role="note"
-              >
-                DEV: one-click payment success into premium return flow (no real Stripe). Set
-                VITE_ENABLE_DEV_PAYMENT_BYPASS=0 to require demo card fields.
-              </p>
-            ) : null}
               </div>
+              {devPaymentBypassActive ? (
+                <p
+                  className="mt-3 rounded-md border border-amber-600/50 bg-amber-950/40 px-3 py-2 text-center text-[11px] font-medium uppercase tracking-wide text-amber-200/95 sm:text-left sm:text-xs"
+                  role="note"
+                >
+                  DEV: one-click payment success into premium return flow (no real Stripe). Set
+                  VITE_ENABLE_DEV_PAYMENT_BYPASS=0 to require demo card fields.
+                </p>
+              ) : null}
             </div>
           </section>
         ) : (
@@ -651,11 +653,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
               </p>
 
               <div className="mt-5 space-y-4">
-                <CheckoutTrustPanel
-                  surface="checkout"
-                  cadence={cadence}
-                  showAnnualRenewal={!isSingleAgreementCheckout}
-                />
+                <CheckoutTrustPanel surface="checkout" />
                 <div>
                   <p className="text-sm font-medium text-slate-200">Pay with card</p>
                   <p className="text-sm leading-7 text-slate-300">{ck.trustLines.cardProcessing}</p>
@@ -687,8 +685,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                       value={cardNumber}
                       onChange={(e) => setCardNumber(e.target.value)}
                     />
-                    <p className="mt-1 text-sm leading-7 text-slate-400">
-                      Use your card on file with your payment provider. Your plan activates after payment succeeds.
+                    <p className="mt-1 text-sm leading-snug text-slate-400">
+                      {CHECKOUT_CARD_PROCESSING_LINE} {CHECKOUT_CARD_ACTIVATION_LINE}
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -758,6 +756,9 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                 ? CHECKOUT_FOOTER
                 : "Payment via card processor · Plans activate after payment is confirmed · Nothing is sent until you confirm · You control all actions"}
           </p>
+          {isCreateAgreementCheckout ? (
+            <p className="text-xs leading-relaxed text-slate-500">{CHECKOUT_LEGAL_DISCLAIMER}</p>
+          ) : null}
           {!isCreateAgreementCheckout ? <p className="text-sm text-slate-400">{ck.trustLines.footnote}</p> : null}
           {returnParsed ? (
             <p>

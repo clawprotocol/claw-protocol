@@ -68,7 +68,7 @@ describe("SimpleCheckoutPage checkout copy (static)", () => {
     expect(page).not.toContain(
       "Full send, collaboration, and tracked signing — then back to your agreement",
     );
-    expect(CHECKOUT_STARTER_UPGRADE_SUBTITLE).toMatch(/Review it before anything is shared, sent, or signed/i);
+    expect(CHECKOUT_STARTER_UPGRADE_SUBTITLE).toMatch(/before anything is sent or signed/i);
     expect(page).toContain("CHECKOUT_FOOTER");
     expect(page).toContain("CHECKOUT_CTA");
     expect(page).toContain("checkoutFlowProgress.step");

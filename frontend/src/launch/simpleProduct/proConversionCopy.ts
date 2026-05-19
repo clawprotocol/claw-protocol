@@ -24,7 +24,7 @@ export const PRO_CTA_EDIT_THIS_DRAFT = PRO_CTA_EDIT_FREE_DRAFT;
 
 export const PRO_UPGRADE_CARD_HEADING = "Ready to move this from draft to deal?";
 export const PRO_UPGRADE_CARD_BODY =
-  "Free gives you the draft. Pro gives you the workflow to review it with the other side, collect signatures, and keep the proof record.";
+  "Free gives you the draft. Pro unlocks review, signatures, and proof records — you approve every step before anything goes out.";
 
 export const PRO_UPGRADE_FREE_COLUMN_LABEL = "Free";
 export const PRO_UPGRADE_FREE_BULLETS: readonly string[] = [
@@ -61,7 +61,7 @@ export const PRO_UPGRADE_REASSURANCE = "You review everything before anything is
 
 export const CHECKOUT_TITLE = "Continue with Pro";
 export const CHECKOUT_SUBTITLE =
-  "Upgrade this agreement into a professional version. Review it before anything is shared, sent, or signed.";
+  "Upgrade this draft into a Pro agreement. You'll review and edit it before anything is sent or signed.";
 
 export const CHECKOUT_PRO_HELPS_INTRO = "LawDog Pro helps:";
 export const CHECKOUT_PRO_HELPS_BULLETS: readonly string[] = [
@@ -82,7 +82,7 @@ export {
   resolveCheckoutCta,
 } from "./checkoutTrustCopy";
 export type { CheckoutCtaVariantKey } from "./checkoutTrustCopy";
-export const CHECKOUT_FOOTER = "Secured checkout · Draft saved · Review before anything moves";
+export { CHECKOUT_CREATE_FLOW_FOOTER as CHECKOUT_FOOTER } from "./checkoutTrustCopy";
 
 export const EARN_HERO_TITLE = "Earn with LawDog";
 export const EARN_HERO_SUBHEAD = "Share LawDog. Earn when people upgrade.";

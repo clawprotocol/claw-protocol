@@ -4,10 +4,11 @@
  */
 
 import {
-  CHECKOUT_PRO_HELPS_BULLETS,
-  CHECKOUT_PRO_HELPS_INTRO,
-  PRO_UPGRADE_REASSURANCE,
-} from "../../launch/simpleProduct/proConversionCopy";
+  CHECKOUT_PRO_CONTEXT_COMPLETING_LABEL,
+  CHECKOUT_PRO_CONTEXT_LINES,
+  CHECKOUT_PRO_CONTEXT_TITLE,
+} from "../../launch/simpleProduct/proTransformationCopy";
+import { PRO_UPGRADE_REASSURANCE } from "../../launch/simpleProduct/proConversionCopy";
 
 function completingLabel(raw: string | null | undefined): string {
   const t = (raw || "").trim();
@@ -24,17 +25,20 @@ export function AgreementCompletionCheckoutContextPanel(props: {
 
   if (compact) {
     return (
-      <div className={`space-y-4 ${className}`.trim()}>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">LawDog Pro</p>
-        <p className="text-[15px] font-medium leading-7 text-slate-200 sm:text-base">{CHECKOUT_PRO_HELPS_INTRO}</p>
-        <ul className="list-disc space-y-2.5 pl-4 text-[15px] leading-7 text-slate-200 sm:text-base">
-          {CHECKOUT_PRO_HELPS_BULLETS.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-        <p className="text-sm leading-7 text-slate-300">{PRO_UPGRADE_REASSURANCE}</p>
-        <p className="text-sm text-slate-400">
-          Completing: <span className="text-slate-200">{completingLabel(completionLabel)}</span>
+      <div
+        className={`checkout-pro-context-compact min-w-0 space-y-3 sm:space-y-3.5 ${className}`.trim()}
+        data-testid="checkout-pro-context-compact"
+      >
+        <p className="text-sm font-medium text-slate-300">{CHECKOUT_PRO_CONTEXT_TITLE}</p>
+        {CHECKOUT_PRO_CONTEXT_LINES.map((line) => (
+          <p key={line} className="text-sm leading-relaxed text-slate-400">
+            {line}
+          </p>
+        ))}
+        <p className="text-xs leading-snug text-slate-500">{PRO_UPGRADE_REASSURANCE}</p>
+        <p className="text-xs text-slate-500">
+          {CHECKOUT_PRO_CONTEXT_COMPLETING_LABEL}:{" "}
+          <span className="text-slate-300">{completingLabel(completionLabel)}</span>
         </p>
       </div>
     );
@@ -42,40 +46,33 @@ export function AgreementCompletionCheckoutContextPanel(props: {
 
   return (
     <div
-      className={`rounded-2xl border border-slate-800/80 bg-slate-950/25 p-5 sm:p-6 lg:p-7 ${className}`.trim()}
+      className={`checkout-pro-context rounded-2xl border border-slate-800/80 bg-slate-950/25 p-4 sm:p-5 lg:p-6 ${className}`.trim()}
+      data-testid="checkout-pro-context"
     >
-      <div className="space-y-6 sm:space-y-7 lg:space-y-8">
+      <div className="space-y-4 sm:space-y-5">
         <section>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-xs">LawDog Pro</p>
-          <p className="mt-2 text-[15px] font-medium leading-7 text-slate-100 tracking-tight sm:text-base">
-            {CHECKOUT_PRO_HELPS_INTRO}
-          </p>
-          <ul className="mt-3 space-y-2.5 text-[15px] leading-7 text-slate-200 sm:text-base">
-            {CHECKOUT_PRO_HELPS_BULLETS.map((r) => (
-              <li key={r} className="flex gap-2">
-                <span className="shrink-0 text-slate-400" aria-hidden>
-                  •
-                </span>
-                <span>{r}</span>
-              </li>
-            ))}
-          </ul>
+          <p className="text-sm font-medium text-slate-300">{CHECKOUT_PRO_CONTEXT_TITLE}</p>
+          {CHECKOUT_PRO_CONTEXT_LINES.map((line) => (
+            <p key={line} className="mt-2 text-sm leading-relaxed text-slate-400">
+              {line}
+            </p>
+          ))}
         </section>
 
         <hr className="border-slate-800/60" />
 
         <section>
-          <p className="text-[15px] font-semibold leading-7 text-slate-100 sm:text-base">{PRO_UPGRADE_REASSURANCE}</p>
-          <p className="mt-1 text-[15px] leading-7 text-slate-300 sm:text-base">
-            Review first, then share, send, or sign only when you confirm.
+          <p className="text-sm leading-relaxed text-slate-400">{PRO_UPGRADE_REASSURANCE}</p>
+          <p className="mt-1.5 text-sm leading-relaxed text-slate-500">
+            You review and edit in a secure workspace before anything is sent or signed.
           </p>
         </section>
 
         <hr className="border-slate-800/60" />
 
         <section>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-xs">Completing</p>
-          <p className="mt-2 text-lg sm:text-xl font-semibold tracking-tight text-slate-100">
+          <p className="text-xs text-slate-500">{CHECKOUT_PRO_CONTEXT_COMPLETING_LABEL}</p>
+          <p className="mt-1 text-base font-semibold tracking-tight text-slate-100 sm:text-lg">
             {completingLabel(completionLabel)}
           </p>
         </section>

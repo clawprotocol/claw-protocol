@@ -13,7 +13,10 @@ export const HOME_CREATE_TRANSITION_REASSURANCE =
   "Nothing is sent, signed, or shared automatically.";
 
 export const REVIEW_AHA_HEADING = "Your agreement is ready";
-export const REVIEW_AHA_SUBHEAD = "Review and edit everything before sending or signing.";
+export const REVIEW_SECURE_WORKSPACE_TAGLINE =
+  "Draft in plain language. Review in a secure workspace. Send only when ready.";
+
+export const REVIEW_AHA_SUBHEAD = REVIEW_SECURE_WORKSPACE_TAGLINE;
 export const REVIEW_AHA_CHIP = "Draft ready to review";
 export const REVIEW_AHA_REASSURANCE =
   "Nothing is sent or signed until you choose the next step.";

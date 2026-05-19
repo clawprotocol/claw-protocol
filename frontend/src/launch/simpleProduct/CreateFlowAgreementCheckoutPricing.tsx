@@ -1,7 +1,7 @@
 import type { LaunchPricingTier } from "../pricingTiersData";
 import type { PricingCadence } from "../pricingCadenceStorage";
 import { annualPrepayUsd, annualSavingsVsMonthlyUsd, formatMoneyUsdWhole } from "../pricingKeyMath";
-import { CHECKOUT_ANNUAL_WORKFLOW_LABEL, CHECKOUT_USED_FOR_LINE } from "./checkoutTrustCopy";
+import { CHECKOUT_ANNUAL_WORKFLOW_LABEL } from "./checkoutTrustCopy";
 
 type Props = {
   tier: LaunchPricingTier;
@@ -114,10 +114,6 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
 
       <p className="text-center text-[15px] font-medium leading-7 text-slate-200 sm:text-left sm:text-base">
         Unlimited agreements on your plan — revise, send, and sign on your timeline.
-      </p>
-
-      <p className="text-center text-xs leading-relaxed text-slate-500 sm:text-left sm:text-sm" data-testid="checkout-pricing-used-for">
-        {CHECKOUT_USED_FOR_LINE}
       </p>
 
       {planFootnote ? (

@@ -38,7 +38,7 @@ export const DYNAMIC_CONFIG_DEFAULTS: DynamicConfigRoot = {
   checkout: {
     pageSubtitle: "Send this agreement and track it with LawDog",
     trustLines: {
-      cardProcessing: "Card payments are processed securely by our payment provider.",
+      cardProcessing: "Payments are processed securely.",
       ctaPrimary: "Continue to payment",
       footnote:
         "You'll see the total before you confirm. Renewal terms follow your plan and the Terms of Service.",
