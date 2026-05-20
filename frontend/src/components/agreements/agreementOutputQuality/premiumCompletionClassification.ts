@@ -4,6 +4,9 @@
 
 import type { PremiumCompletionOutcome, RecommendedClarifications } from "./types";
 
+/** Align with premiumAcceptancePolicy — long HTTP-success bodies are commercially authoritative. */
+const LONG_AUTHORITATIVE_MIN_LEN = 15_000;
+
 const NEEDS_DETAILS_IN_BODY_RE =
   /\b(?:needs\s+details|to\s+be\s+completed\s+in\s+review|complete\s+in\s+review|unspecified\s+commercial\s+details|fill\s+in\s+with\s+counsel)\b/i;
 
@@ -56,6 +59,15 @@ export function classifyPremiumCompletionOutcome(args: {
 
   const clarifications = buildRecommendedClarifications(missing, { advisoryOnly: true });
   const hasAdvisory = clarifications.items.length > 0 || server === "needs_details";
+
+  if (
+    server === "needs_details" &&
+    len >= LONG_AUTHORITATIVE_MIN_LEN &&
+    !bodyContainsNeedsDetailsLanguage(body) &&
+    !args.validationFailed
+  ) {
+    return "authoritative_draft_complete_with_recommended_clarifications";
+  }
 
   if (hasAdvisory && len >= 900 && !bodyContainsNeedsDetailsLanguage(body)) {
     return "authoritative_draft_complete_with_recommended_clarifications";

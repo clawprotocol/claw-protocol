@@ -90,10 +90,21 @@ import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceh
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import {
   buildRecommendedClarifications,
-  classifyPremiumCompletionOutcome,
   isAuthoritativePremiumCompletionOutcome,
   legacyGenerationOutcomeFromClassification,
 } from "./agreementOutputQuality";
+import {
+  buildPremiumRecipientCandidatesFromIntake,
+  classifyLongPremiumHttpOutcome,
+  countStructuralFatals,
+  freezeAcceptedPremiumBodyForSession,
+  getFrozenPremiumBodyForSession,
+  isLongCommerciallyUsablePremiumBody,
+  logPremiumAcceptanceDecision,
+  resolvePremiumBodyAgainstSessionFreeze,
+  shouldPreserveLongPremiumDespiteSoftGateFailure,
+  shouldSuppressShortFallbackOverLongCandidate,
+} from "./premiumAcceptancePolicy";
 import type { PremiumCompletionOutcome, RecommendedClarifications } from "./agreementOutputQuality/types";
 
 export type PremiumCompletionInput = {
@@ -1435,10 +1446,12 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             docLen: doc.length,
           });
         }
-        const classified = classifyPremiumCompletionOutcome({
+        const classified = classifyLongPremiumHttpOutcome({
           documentText: doc,
           missingMaterial: effectiveFull.missing_material_info,
           serverOutcome: effectiveFull.generation_outcome,
+          fatalPlaceholderCount: 0,
+          httpOk: fullResp.ok,
         });
         premiumCompletionOutcome = classified;
         recommendedClarifications = buildRecommendedClarifications(
@@ -1470,7 +1483,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       {
         const firstOk =
           (full.generation_outcome || "ok") === "ok" && !firstCallOutcomeDegraded && doc.length >= 400;
-        if (firstOk && import.meta.env.MODE !== "test") {
+        if (firstOk && import.meta.env.MODE !== "test" && !isLongCommerciallyUsablePremiumBody(doc.length)) {
           const freeB = buildAgreementPreviewText(input.structuredDraft, { starterPreview: true });
           const sim0 = lexicalSimilarity(freeB, doc);
           if (sim0 > 0.75) {
@@ -1487,8 +1500,13 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
               if (d2.length >= 400 && (regenSim?.generation_outcome || "ok") === "ok") {
                 const sim1 = lexicalSimilarity(freeB, d2);
                 if (sim1 < sim0 - 0.01 || d2.length > doc.length * 1.08) {
+                  const frozenSim = resolvePremiumBodyAgainstSessionFreeze(
+                    input.agreementGenerationId,
+                    d2,
+                    "server_full_draft_retry",
+                  );
                   effectiveFull = regenSim;
-                  doc = d2;
+                  doc = frozenSim.body;
                   usedClientRetry = true;
                 }
               }
@@ -1509,7 +1527,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         generationOutcome: effGenNarrow,
         missingMaterialInfo: effectiveFull.missing_material_info,
       });
-      if (serverSchemaNeedsDetails) {
+      if (serverSchemaNeedsDetails && !isLongCommerciallyUsablePremiumBody(doc.length)) {
         const lines = (effectiveFull.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
         const tierARecoveryAttempt = tierAEnabled && doc.length >= 900;
         if (!tierARecoveryAttempt) {
@@ -1528,7 +1546,14 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         } else if (tierAEnabled) {
           tierADiag.serverTextClearReason = "kept_server_text_for_tier_a_recovery";
         }
-      } else if (tierBEarlyNeedsDetails) {
+      } else if (serverSchemaNeedsDetails && isLongCommerciallyUsablePremiumBody(doc.length)) {
+        tierADiag.serverTextClearReason = "long_body_needs_details_advisory_only";
+        premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
+        const lines = (effectiveFull.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
+        if (lines.length > 0) {
+          recommendedClarifications = buildRecommendedClarifications(lines, { advisoryOnly: true });
+        }
+      } else if (tierBEarlyNeedsDetails && !isLongCommerciallyUsablePremiumBody(doc.length)) {
         const lines = (effectiveFull.missing_material_info || []).filter(Boolean).slice(0, 8);
         proIntentGateMessage =
           lines.length > 0
@@ -1541,17 +1566,32 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           generation_outcome: "needs_details",
           schema_validation_reasons: lines,
         };
+      } else if (tierBEarlyNeedsDetails && isLongCommerciallyUsablePremiumBody(doc.length)) {
+        premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
+        recommendedClarifications = buildRecommendedClarifications(
+          effectiveFull.missing_material_info ?? [],
+          { advisoryOnly: true },
+        );
+      }
+      if (isLongCommerciallyUsablePremiumBody(doc.length)) {
+        freezeAcceptedPremiumBodyForSession(input.agreementGenerationId, doc, "server_full_draft");
       }
       {
         const acc0 = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
-        if (!acc0.ok && import.meta.env.MODE !== "test") {
+        if (!acc0.ok && import.meta.env.MODE !== "test" && !isLongCommerciallyUsablePremiumBody(doc.length)) {
           try {
             const full2 = await postPremiumFullDraftOnce({
               intakeText: rawForSoT || rawIntake,
               context: fullCtx,
               userGapAnswers: gapAns || null,
             });
-            doc = (full2.document_text || "").trim();
+            const nextDoc = (full2.document_text || "").trim();
+            const frozen = resolvePremiumBodyAgainstSessionFreeze(
+              input.agreementGenerationId,
+              nextDoc,
+              "server_full_draft_retry",
+            );
+            doc = frozen.body;
             usedClientRetry = true;
             effectiveFull = full2;
           } catch {
@@ -1765,13 +1805,15 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         effGen: (effectiveFull.generation_outcome || "").trim(),
       };
       let placeholderClientOk = true;
-      if (acc.ok && vPaid.ok) {
+      let fatalPlaceholderCount = 0;
+      if (acc.ok) {
         const ph = finalizeUserVisibleAgreementPlainText(doc, {
           intakeRaw: (rawForSoT || rawIntake || "").trim(),
           partyNames: (merged.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean),
           agreementFamily: merged.agreement_family ?? null,
           surface: "premium_completion_pipeline",
         });
+        fatalPlaceholderCount = ph.remainingFatal.length;
         if (!ph.ok) {
           placeholderClientOk = false;
           if (!proIntentGateMessage) {
@@ -1790,7 +1832,34 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           doc = ph.text;
         }
       }
-      if (acc.ok && vPaid.ok && placeholderClientOk) {
+      const structuralFatalCount = countStructuralFatals(acc.reasons);
+      const longAdvisoryAccept = shouldPreserveLongPremiumDespiteSoftGateFailure({
+        bodyLen: (doc || "").length,
+        fatalPlaceholderCount,
+        structuralFatalCount,
+        httpOk: true,
+      });
+      if (longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
+        if (!premiumCompletionOutcome) {
+          premiumCompletionOutcome = classifyLongPremiumHttpOutcome({
+            documentText: doc,
+            missingMaterial: effectiveFull.missing_material_info,
+            serverOutcome: effectiveFull.generation_outcome,
+            fatalPlaceholderCount,
+            httpOk: true,
+          });
+        }
+        if (!recommendedClarifications?.items.length) {
+          recommendedClarifications = buildRecommendedClarifications(
+            effectiveFull.missing_material_info ?? effectiveFull.schema_validation_reasons ?? [],
+            { advisoryOnly: true },
+          );
+        }
+        if (!proIntentGateMessage && vPaid.reasons.length > 0) {
+          proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, vPaid.reasons.slice(0, 6));
+        }
+      }
+      if ((acc.ok && vPaid.ok && placeholderClientOk) || longAdvisoryAccept) {
         const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
         const srvFull = (effectiveFull.server_full_document_text || "").trim();
         const srvRepair = (effectiveFull.server_repair_document_text || "").trim();
@@ -1827,14 +1896,31 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           // eslint-disable-next-line no-console
           console.info("[CLAW] premium accepted", { source: premiumRenderSource, doc_len: doc.length });
         }
+        freezeAcceptedPremiumBodyForSession(
+          input.agreementGenerationId,
+          doc,
+          usedClientRetry ? "server_full_draft_retry" : "server_full_draft",
+        );
+        logPremiumAcceptanceDecision({
+          accepted: true,
+          reason: longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
+            ? "long_body_advisory_accept"
+            : "client_gates_passed",
+          bodyLen: doc.length,
+          fatalPlaceholderCount,
+          structuralFatalCount,
+          generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+          renderSource: premiumRenderSource,
+        });
         logPremiumCompletionDebug({
           stage: "pipeline_client_gates_passed",
           docLen: doc.length,
-          placeholder_fatal_count: 0,
+          placeholder_fatal_count: fatalPlaceholderCount,
           generationOutcome: (effectiveFull.generation_outcome || "").trim(),
           degraded: serverGenDegraded,
           failureCode: serverGenDegraded ? (effectiveFull.server_generation_failure_code || "").trim() : undefined,
           accepted: true,
+          advisoryOnly: longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk),
         });
       } else {
         const intakeSForGate = (rawForSoT || rawIntake) || "";
@@ -1881,6 +1967,15 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             premium_gen_out: (effectiveFull.generation_outcome || "").trim(),
           });
         }
+        logPremiumAcceptanceDecision({
+          accepted: false,
+          reason: "client_gates_rejected",
+          bodyLen: (doc || "").length,
+          fatalPlaceholderCount,
+          structuralFatalCount,
+          generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+          renderSource: premiumRenderSource,
+        });
         if (!proIntentGateMessage && intentContract.pro_strict && (!acc.ok || !vPaid.ok)) {
           const gateReasons = !vPaid.ok ? vPaid.reasons : acc.reasons;
           if (!acc.ok && gateReasons.some((r) => r.startsWith("placeholder:"))) {
@@ -1889,7 +1984,40 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, gateReasons);
           }
         }
-        if (acc.ok || founderDetailsGateMessage || proIntentGateMessage) {
+        const frozenReject = getFrozenPremiumBodyForSession(input.agreementGenerationId);
+        if (
+          longAdvisoryAccept ||
+          (frozenReject && isLongCommerciallyUsablePremiumBody(frozenReject.body.length))
+        ) {
+          const preserved = frozenReject?.body || doc;
+          doc = preserved;
+          winningPremiumBodyText = preserved;
+          premiumRenderSource = (frozenReject?.source || "server_full_draft") as PremiumRenderSource;
+          const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
+          outMerged = stripClientPremiumArtifactBlocksFromDraft({
+            ...merged,
+            premium_full_document_text: preserved,
+            premium_server_full_document_text:
+              (effectiveFull.server_full_document_text || "").trim() || preserved,
+            premium_server_repair_document_text: (effectiveFull.server_repair_document_text || "").trim() || null,
+            premium_full_draft_key_terms: effectiveFull.key_terms_found,
+            premium_full_draft_missing_info: effectiveFull.missing_material_info,
+            title: (effectiveFull.title || "").trim() || merged.title,
+            ...(fam ? { agreement_family: fam } : {}),
+          });
+          premiumCompletionOutcome =
+            premiumCompletionOutcome ||
+            "authoritative_draft_complete_with_recommended_clarifications";
+          logPremiumAcceptanceDecision({
+            accepted: true,
+            reason: "preserved_long_corpus_after_soft_reject",
+            bodyLen: preserved.length,
+            fatalPlaceholderCount,
+            structuralFatalCount,
+            generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+            renderSource: premiumRenderSource,
+          });
+        } else if (acc.ok || founderDetailsGateMessage || proIntentGateMessage) {
           premiumRenderSource = "rejected_paid_corpus";
         }
       }
@@ -1943,7 +2071,28 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     } else {
       fb = phFb.text;
     }
-    if (import.meta.env.MODE === "test") {
+    const frozenFallback = getFrozenPremiumBodyForSession(input.agreementGenerationId);
+    const candidateLen = frozenFallback?.body.length ?? 0;
+    const fbLen = (fb || "").trim().length;
+    if (shouldSuppressShortFallbackOverLongCandidate(candidateLen, fbLen) && frozenFallback) {
+      winningPremiumBodyText = frozenFallback.body;
+      premiumRenderSource = frozenFallback.source as PremiumRenderSource;
+      outMerged = stripClientPremiumArtifactBlocksFromDraft({
+        ...outMerged,
+        premium_full_document_text: frozenFallback.body,
+      });
+      premiumCompletionOutcome =
+        premiumCompletionOutcome || "authoritative_draft_complete_with_recommended_clarifications";
+      logPremiumAcceptanceDecision({
+        accepted: true,
+        reason: "suppressed_short_fallback_over_frozen_long_corpus",
+        bodyLen: frozenFallback.body.length,
+        fatalPlaceholderCount: 0,
+        structuralFatalCount: 0,
+        generationOutcome: (tierADiag.backendGenerationOutcome || "needs_details").trim() || "needs_details",
+        renderSource: frozenFallback.source,
+      });
+    } else if (import.meta.env.MODE === "test") {
       winningPremiumBodyText = fb;
       premiumRenderSource = "fallback_preview";
     } else {
@@ -2017,11 +2166,10 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     role: nz(p.role) || "party",
   }));
 
-  const recipientCandidates: PremiumRecipientCandidate[] = premiumParties.map((p) => ({
-    name: p.name,
-    email: "",
-    role: "Party",
-  }));
+  const recipientCandidates: PremiumRecipientCandidate[] = buildPremiumRecipientCandidatesFromIntake(
+    premiumParties.map((p) => p.name),
+    rawForSoT || rawIntake,
+  );
 
   void input.guidedFlowId;
 

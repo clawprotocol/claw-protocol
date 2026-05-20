@@ -16,6 +16,7 @@ import {
 } from "./premiumFullDraftClientAcceptance";
 import { rejectDevContextLeakInPremiumBody } from "./premiumOutputDevContextGuard";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
+import { isLongCommerciallyUsablePremiumBody } from "./premiumAcceptancePolicy";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -332,6 +333,7 @@ export function isPaidProFinishedAgreement(args: {
     }
     return { ok: true, reasons: [] };
   }
+  const textLen = String(args.text || "").trim().length;
   const v = validatePaidProOutput({
     text: args.text,
     rawIntake: args.rawIntake,
@@ -339,6 +341,10 @@ export function isPaidProFinishedAgreement(args: {
     draft: args.draft ?? null,
     premiumPipelineSource: args.pipelineSource,
   });
+  const longServerAuthoritative =
+    isLongCommerciallyUsablePremiumBody(textLen) &&
+    isAuthoritativePremiumPipelineProvenance(args.pipelineSource) &&
+    !args.stale;
   if (args.intentContract) {
     const pLine = String(args.pipelineSource || "");
     const allowPaidSubstantiveStitch =
@@ -369,7 +375,31 @@ export function isPaidProFinishedAgreement(args: {
       }
       return { ok: true, reasons: [], gate: g };
     }
-    const textLen = String(args.text || "").trim().length;
+    if (
+      longServerAuthoritative &&
+      !args.qualityRetryActive &&
+      serverCoherentPath
+    ) {
+      const gLong: ReturnType<typeof canShowPremiumSuccess> = {
+        ...g,
+        state: "premium_success",
+        successBannerAllowed: true,
+        signerCtaAllowed: true,
+        successBannerReasons: [
+          ...g.successBannerReasons,
+          "long_server_body_authoritative_override",
+        ],
+        validation: { ok: true, reasons: [] },
+      };
+      if (import.meta.env.MODE !== "test") {
+        logPremiumTruthTelemetry({
+          ...gLong,
+          render_source: String(args.readonlyRenderSource),
+          premium_pipeline_source: String(args.pipelineSource),
+        });
+      }
+      return { ok: true, reasons: [], gate: gLong };
+    }
     if (
       v.ok &&
       !args.stale &&
