@@ -18,6 +18,8 @@ def test_health_and_healthz_include_recipient_pdf_export() -> None:
         r = client.get(path)
         assert r.status_code == 200
         body = r.json()
+        assert body.get("ok") is True
+        assert "subsystems" in body
         rpe = body.get("recipient_pdf_export")
         assert isinstance(rpe, dict), path
         assert "available" in rpe

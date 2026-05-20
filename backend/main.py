@@ -535,35 +535,19 @@ class EventPatchRequest(BaseModel):
 # -------------------------------------------------
 # Health + Version
 # -------------------------------------------------
-_LIVENESS_SUMMARY = (
-    "Process up only (no dependency probes). "
-    "Postgres readiness: GET /v1/readyz. Full matrix: GET /admin/deploy-readiness (admin)."
-)
-
-
-def _public_health_payload() -> dict:
-    """Liveness + lightweight capability flags (no secrets or file paths)."""
-    from backend.services.agreement_pdf_story_capability import assess_agreement_pdf_story_capability
-
-    cap = assess_agreement_pdf_story_capability()
-    return {
-        "ok": True,
-        "summary": _LIVENESS_SUMMARY,
-        "recipient_pdf_export": {
-            "available": bool(cap.get("available")),
-            "engine": cap.get("engine") or "fallback",
-        },
-    }
-
-
 @app.get("/health")
 async def health():
-    return JSONResponse(_public_health_payload())
+    """Diagnostic liveness — always HTTP 200; optional subsystems may report degraded/error."""
+    from backend.health.public_liveness import build_public_health_payload
+
+    return JSONResponse(build_public_health_payload())
 
 
 @app.get("/v1/healthz")
 async def healthz():
-    return JSONResponse(_public_health_payload())
+    from backend.health.public_liveness import build_public_health_payload
+
+    return JSONResponse(build_public_health_payload())
 
 
 @app.get("/v1/readyz")

@@ -60,6 +60,33 @@ def _log_capability_once(cap: AgreementPdfStoryCapability) -> None:
         log.warning("[recipient-pdf-export] pymupdf_story_unavailable reason=%s", reason[:500])
 
 
+def assess_agreement_pdf_story_capability_for_health() -> AgreementPdfStoryCapability:
+    """
+    Lightweight probe for GET /health — verifies import and Story API presence only.
+
+    Does not run an in-process PDF render (avoids native/render failures on constrained hosts).
+    Full export paths use ``assess_agreement_pdf_story_capability()`` with render smoke + cache.
+    """
+    fitz = _import_fitz_module()
+    if fitz is None:
+        return {
+            "available": False,
+            "engine": "fallback",
+            "reason": "pymupdf_import_failed",
+        }
+    if not hasattr(fitz, "Story") or not hasattr(fitz, "DocumentWriter"):
+        return {
+            "available": False,
+            "engine": "fallback",
+            "reason": "pymupdf_story_api_missing",
+        }
+    return {
+        "available": True,
+        "engine": "pymupdf-story",
+        "reason": "health_import_only_probe",
+    }
+
+
 def assess_agreement_pdf_story_capability() -> AgreementPdfStoryCapability:
     """
     Whether PyMuPDF can run a minimal HTML Story render (same API as agreement PDF export).
