@@ -22,14 +22,20 @@ import {
 import { writePremiumRecipientHandoffLinear } from "../../components/agreements/premiumPartyNamesHandoff";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 
+const IRONCLAD_MILESTONE_PAYMENT_TERMS =
+  "$187,500 paid over six milestone payments tied to deployment stages and launch targets.";
+
 function ironcladDraft(): ParsedDraftShape {
   return enrichStarterPreviewPartiesFromIntake(
     {
       title: "Joint AI Rollout",
       jurisdiction: "Texas",
       purpose: "Joint AI software rollout.",
-      payment_terms: "",
+      payment_terms: IRONCLAD_MILESTONE_PAYMENT_TERMS,
       duration: "24 months",
+      due_date: "",
+      effective_date: "Upon full execution by all parties",
+      payment: { amount: 187_500, cadence: null, valid: true },
       parties: IRONCLAD_PARTIES.map((name) => ({ name, role: "party" })),
       agreement_family: "generic_business_agreement",
     },
@@ -56,7 +62,8 @@ describe("Ironclad five-party fixture", () => {
     const milestone = formatMilestonePaymentTermsFromIntake(IRONCLAD_JOINT_ROLLOUT_INTAKE);
     expect(milestone).toMatch(/\$187,500/);
     expect(milestone).toMatch(/six milestone payments/i);
-    const d = { ...ironcladDraft(), payment_terms: milestone ?? "" };
+    const d = ironcladDraft();
+    expect(d.payment_terms).toMatch(/six milestone payments/i);
     const preview = buildAgreementPreviewText(d, {
       starterPreview: true,
       intakeText: IRONCLAD_JOINT_ROLLOUT_INTAKE,
