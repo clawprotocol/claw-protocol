@@ -531,7 +531,7 @@ describe("paid Pro sender-first VS01 route shape (static)", () => {
     expect(s).toContain("senderFirstVs01SeedFailure");
     expect(s).not.toContain("resolvePremiumSenderFirstSigningPath");
     expect(s).not.toContain("premiumSenderFirstSigningRoute");
-    const seedCall = s.indexOf("fetchAgreementVs01SigningSeed(id)");
+    const seedCall = s.indexOf("fetchAgreementVs01SigningSeed(id, finalBridgeDraft)");
     const blockedCall = s.indexOf("logAgreementVs01SeedBlocked(");
     expect(seedCall).toBeGreaterThanOrEqual(0);
     expect(blockedCall).toBeGreaterThan(seedCall);
