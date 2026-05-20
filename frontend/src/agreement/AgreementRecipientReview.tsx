@@ -101,6 +101,8 @@ import {
   RECIPIENT_PUBLIC_HERO_SUBTITLE,
   RECIPIENT_PUBLIC_HERO_TITLE,
   RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES,
+  RECIPIENT_REVIEW_TRUST_PRIVATE_LINK,
+  formatRecipientInviterContextLine,
   RECIPIENT_SIGN_FULLY_EXECUTED_HEADLINE,
   RECIPIENT_SIGN_ONE_DONE_HEADLINE,
   RECIPIENT_SIGN_RECORD_SUBLINE,
@@ -380,6 +382,9 @@ function recipientTrustCueStrip() {
     <ul className="mt-2 flex flex-wrap gap-2" aria-label="Trust cues">
       <li className="rounded-full border border-slate-700/80 bg-slate-950/35 px-2.5 py-1 text-[10px] font-medium text-slate-300">
         {RECIPIENT_REVIEW_TRUST_NOTHING_CHANGES}
+      </li>
+      <li className="rounded-full border border-slate-700/80 bg-slate-950/35 px-2.5 py-1 text-[10px] font-medium text-slate-400">
+        {RECIPIENT_REVIEW_TRUST_PRIVATE_LINK}
       </li>
     </ul>
   );
@@ -4025,13 +4030,19 @@ export function AgreementRecipientReview({
       });
     };
     return (
-      <div className="vs01-agreement-review-inner space-y-4 px-5 pb-36 pt-6 sm:space-y-5 sm:px-6 sm:pb-8 sm:pt-8">
+      <div className="vs01-agreement-review-inner space-y-4 px-5 pb-[max(9rem,env(safe-area-inset-bottom,0px))] pt-6 sm:space-y-5 sm:px-6 sm:pb-8 sm:pt-8">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-[1.65rem]">
               {RECIPIENT_PUBLIC_HERO_TITLE}
             </h1>
             <p className="mt-1 max-w-lg text-sm leading-relaxed text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
+            <p
+              className="mt-2 text-sm font-medium text-slate-200"
+              data-testid="recipient-inviter-context-line"
+            >
+              {formatRecipientInviterContextLine(inviterLine)}
+            </p>
             {viewerLike ? (
               <p className="mt-2 text-xs text-slate-500">
                 This link is view-only — you can read but can&apos;t suggest edits.

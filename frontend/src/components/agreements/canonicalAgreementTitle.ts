@@ -133,7 +133,13 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   if (/\bco[-\s]?ownership\s+(?:agreement|contract)\b/.test(low)) return "Co-Ownership Agreement";
   if (/\bproperty\s+management\s+(?:agreement|contract)\b/.test(low)) return "Property Management Agreement";
   if (/\blicense\s+agreement\b/.test(low)) return "License Agreement";
+  if (/\bcontent\s+license\s+agreement\b/.test(low)) return "Content License Agreement";
   if (/\bdistribution\s+agreement\b/.test(low)) return "Distribution Agreement";
+  if (/\b(?:influencer|creator|ugc|brand)\s+(?:services|partnership|collaboration)\s+agreement\b/.test(low)) {
+    return "Influencer Services Agreement";
+  }
+  if (/\bsettlement\s+(?:and\s+)?release\s+agreement\b/.test(low)) return "Settlement and Release Agreement";
+  if (/\bmutual\s+release\s+agreement\b/.test(low)) return "Mutual Release Agreement";
 
   // Event-family explicit intents (post-hardening polish #3). Order: most specific first
   // so "commercial event production agreement" beats plain "event production agreement".

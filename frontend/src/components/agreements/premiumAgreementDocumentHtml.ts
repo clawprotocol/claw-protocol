@@ -136,13 +136,26 @@ export type BuildPremiumAgreementReadonlyHtmlOpts = {
  * Convert plain agreement body (from `agreementDocumentText` or picked corpus) to HTML paragraphs and headings.
  * Always appends a professional signature section inside the paper document.
  */
+/** Remove free-tier starter disclaimer lines that must not appear on Pro paper or PDF exports. */
+export function stripStarterPreviewDisclaimerFromPlainText(plain: string): string {
+  const lines = (plain || "").replace(/\r\n/g, "\n").split("\n");
+  const filtered = lines.filter((ln) => {
+    const t = ln.trim().toLowerCase();
+    if (!t) return true;
+    if (t.includes("simplified starter preview")) return false;
+    if (t.includes("starter preview only")) return false;
+    return true;
+  });
+  return filtered.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
 export function buildPremiumAgreementReadonlyHtml(
   plain: string,
   opts: BuildPremiumAgreementReadonlyHtmlOpts,
 ): string {
   if (!(plain || "").trim()) return "";
   const hints = opts.renderHints ?? null;
-  const raw = (plain || "").replace(/\r\n/g, "\n").trimEnd();
+  const raw = stripStarterPreviewDisclaimerFromPlainText((plain || "").replace(/\r\n/g, "\n")).trimEnd();
   const chunks = raw.split(/\n\n+/);
   const out: string[] = [];
 
@@ -155,7 +168,9 @@ export function buildPremiumAgreementReadonlyHtml(
     if (oneLine && SECTION_HEADING.test(chunk)) {
       out.push(`<h2>${escapeHtml(chunk)}</h2>`);
       if (hints?.paymentNeedsFinalNumbers && /^2\.\s+PAYMENT\b/i.test(chunk)) {
-        out.push(premiumCallout("Needs final numbers — confirm amounts, cadence, and tax treatment before send."));
+        out.push(
+          premiumCallout("Confirm amounts, payment cadence, and tax treatment here before you send."),
+        );
       }
       if (hints?.jurisdictionNeedsSelection && /^4\.\s+GOVERNING\b/i.test(chunk)) {
         out.push(premiumCallout("Select jurisdiction before signing."));
@@ -164,8 +179,14 @@ export function buildPremiumAgreementReadonlyHtml(
     }
     if (oneLine && isStandaloneTitleLine(chunk)) {
       out.push(`<h1>${escapeHtml(chunk)}</h1>`);
+      if (hints?.executiveFramingLine) {
+        out.push(premiumCallout(hints.executiveFramingLine));
+      }
+      if (hints?.contradictionDocumentNote) {
+        out.push(premiumCallout(hints.contradictionDocumentNote));
+      }
       if (hints?.partiesNeedLegalNames) {
-        out.push(premiumCallout("Replace legal names before sending."));
+        out.push(premiumCallout("Replace legal entity names before sending."));
       }
       continue;
     }

@@ -1,101 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { buildPremiumAgreementReadonlyHtml, escapeHtml } from "./premiumAgreementDocumentHtml";
+import {
+  buildPremiumAgreementReadonlyHtml,
+  stripStarterPreviewDisclaimerFromPlainText,
+} from "./premiumAgreementDocumentHtml";
 
-describe("escapeHtml", () => {
-  it("escapes markup", () => {
-    expect(escapeHtml(`a<b>"c"`)).toBe("a&lt;b&gt;&quot;c&quot;");
+describe("stripStarterPreviewDisclaimerFromPlainText", () => {
+  it("removes simplified starter preview disclaimer lines", () => {
+    const plain = "SERVICES AGREEMENT\n\nThis is a simplified starter preview for review.\n\n1. SCOPE";
+    expect(stripStarterPreviewDisclaimerFromPlainText(plain)).not.toMatch(/simplified starter preview/i);
+    expect(stripStarterPreviewDisclaimerFromPlainText(plain)).toContain("1. SCOPE");
   });
 });
 
 describe("buildPremiumAgreementReadonlyHtml", () => {
-  const baseOpts = {
-    partyNames: ["A", "B"],
-  } as const;
-
-  it("wraps numbered section labels as h2 and body as p", () => {
-    const plain = `CONSULTING AGREEMENT
-
-Between parties.
-
-1. SCOPE OF SERVICES · PURPOSE
-
-Party A shall perform work.
-
-2. PAYMENT TERMS
-
-Net 30.`;
-    const html = buildPremiumAgreementReadonlyHtml(plain, {
-      ...baseOpts,
-      signatureSectionMode: "collaboration",
-    });
-    expect(html).toContain("<h1>CONSULTING AGREEMENT</h1>");
-    expect(html).toContain("<h2>1. SCOPE OF SERVICES · PURPOSE</h2>");
-    expect(html).toContain("<h2>2. PAYMENT TERMS</h2>");
-    expect(html).toContain("Party A shall perform work");
-    expect(html).not.toContain("<script");
+  it("does not render starter disclaimer in Pro readonly html", () => {
+    const html = buildPremiumAgreementReadonlyHtml(
+      "AGREEMENT\n\nThis is a simplified starter preview only.\n\n1. PAYMENT TERMS",
+      { signatureSectionMode: "collaboration", partyNames: ["A", "B"] },
+    );
+    expect(html).not.toMatch(/simplified starter preview/i);
+    expect(html).toContain("PAYMENT");
   });
 
-  it("injects payment callout after section 2 when hinted", () => {
-    const plain = `CONSULTING AGREEMENT
-
-2. PAYMENT TERMS
-
-Net 30.`;
-    const html = buildPremiumAgreementReadonlyHtml(plain, {
-      ...baseOpts,
+  it("renders executive framing callout under title when hints provided", () => {
+    const html = buildPremiumAgreementReadonlyHtml("INFLUENCER SERVICES AGREEMENT\n\n1. SCOPE", {
       signatureSectionMode: "collaboration",
+      partyNames: ["A", "B"],
       renderHints: {
-        paymentNeedsFinalNumbers: true,
+        paymentNeedsFinalNumbers: false,
         partiesNeedLegalNames: false,
         jurisdictionNeedsSelection: false,
+        executiveFramingLine: "Built for a paid creator or brand collaboration.",
+        contradictionDocumentNote: null,
       },
     });
-    expect(html).toContain("Needs final numbers");
-  });
-
-  it("always appends a signature section for collaboration and execution modes", () => {
-    const htmlCollab = buildPremiumAgreementReadonlyHtml("TITLE\n\nBody.", {
-      ...baseOpts,
-      partyNames: ["Acme LLC", "Beta LLC"],
-      signatureSectionMode: "collaboration",
-    });
-    expect(htmlCollab).toContain("Signatures");
-    expect(htmlCollab).toContain("Acme LLC");
-    expect(htmlCollab).toContain("Beta LLC");
-    expect(htmlCollab).toContain("Signature");
-    expect(htmlCollab).toMatch(/print name/i);
-    expect(htmlCollab).not.toContain("Initials");
-
-    const htmlExec = buildPremiumAgreementReadonlyHtml("TITLE\n\nBody.", {
-      ...baseOpts,
-      partyNames: ["Acme LLC", "Beta LLC"],
-      signatureSectionMode: "execution",
-    });
-    expect(htmlExec).toContain("Execution — Signatures");
-    expect(htmlExec).toContain("Initials");
-  });
-
-  it("uses tasteful placeholder labels when party names are generic", () => {
-    const html = buildPremiumAgreementReadonlyHtml("T\n\nB.", {
-      partyNames: ["Party A", "Party B"],
-      signatureSectionMode: "collaboration",
-    });
-    expect(html).toContain("Party A / Authorized Signer");
-    expect(html).toContain("Party B / Authorized Signer");
-  });
-
-  it("renders a signature block for each party when more than two are provided", () => {
-    const names = [
-      "Redwood Peak Ventures LLC",
-      "Atlas Harbor Technologies Inc.",
-      "Meridian Workforce Group LLC",
-    ];
-    const html = buildPremiumAgreementReadonlyHtml("TITLE\n\nBody.", {
-      partyNames: names,
-      signatureSectionMode: "collaboration",
-    });
-    for (const name of names) {
-      expect(html).toContain(name);
-    }
+    expect(html).toContain("premium-doc-callout");
+    expect(html).toMatch(/creator or brand collaboration/i);
   });
 });

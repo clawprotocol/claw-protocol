@@ -32,7 +32,7 @@ export const SIMPLE_CREATE_STARTER_CONTROL_LINE =
 export const PRO_REVIEW_DOCUMENT_PANEL_HEADING = "Review your draft";
 
 export const PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY =
-  "Send a private review link for comments and edits. Or start the signature flow when you're ready.";
+  "Built from your deal terms — share for comments, or move to signatures when it reads right.";
 
 /**
  * `/app/create` shell chrome: suppress generic “Create an agreement in minutes” marketing while authoritative

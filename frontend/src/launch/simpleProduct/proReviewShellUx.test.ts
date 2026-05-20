@@ -22,8 +22,8 @@ describe("Pro review shell UX", () => {
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE).toMatch(/ready\. Edit it/i);
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE).toMatch(/Nothing is sent or signed/i);
     expect(PRO_REVIEW_DOCUMENT_PANEL_HEADING).toBe("Review your draft");
-    expect(PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY).toMatch(/private review link/i);
-    expect(PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY).toMatch(/signature flow/i);
+    expect(PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY).toMatch(/Built from your deal terms/i);
+    expect(PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY).toMatch(/signatures/i);
   });
 
   it("highlights Review on paid Pro create shell and hides duplicate intake chrome", () => {

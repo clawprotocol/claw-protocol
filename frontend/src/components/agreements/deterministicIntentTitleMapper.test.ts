@@ -43,6 +43,27 @@ describe("deterministicIntentTitleMapper", () => {
     expect(resolveDeterministicIntentTitleAndSeed("Web design refresh for our site")?.id).toBe("web_presence");
   });
 
+  it("maps creator / influencer / brand deal", () => {
+    const r = resolveDeterministicIntentTitleAndSeed("TikTok influencer brand deal, 3 reels, whitelisting");
+    expect(r?.id).toBe("creator_influencer");
+    expect(r?.title).toBe("Influencer Marketing Agreement");
+    expect(r?.clausePackSeed).toMatch(/deliverable/i);
+  });
+
+  it("maps SaaS subscription", () => {
+    expect(resolveDeterministicIntentTitleAndSeed("B2B SaaS subscription with API access")?.id).toBe("saas_subscription");
+  });
+
+  it("maps settlement / mutual release", () => {
+    expect(resolveDeterministicIntentTitleAndSeed("Mutual release settlement for the dispute")?.title).toMatch(
+      /Settlement/i,
+    );
+  });
+
+  it("maps mutual NDA", () => {
+    expect(resolveDeterministicIntentTitleAndSeed("Mutual NDA before we share product roadmap")?.id).toBe("mutual_nda");
+  });
+
   it("maps loan / lent / borrow", () => {
     expect(resolveDeterministicIntentTitleAndSeed("I lent a friend $5,000 with monthly payback")?.title).toBe("Loan Agreement");
   });

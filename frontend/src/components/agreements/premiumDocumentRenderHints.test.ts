@@ -66,4 +66,23 @@ describe("computePremiumDocumentRenderHints", () => {
       true,
     );
   });
+
+  it("includes situation framing from intake", () => {
+    const d: ParsedDraftShape = {
+      title: "Agreement",
+      jurisdiction: "Texas",
+      parties: [
+        { name: "Acme LLC", role: "party" },
+        { name: "Beta LLC", role: "party" },
+      ],
+      purpose: "Services.",
+      payment_terms: "Net 30.",
+      duration: "12 months",
+      due_date: null,
+      effective_date: null,
+      payment: emptyPayment,
+    };
+    const h = computePremiumDocumentRenderHints(d, "", "B2B SaaS subscription for HR teams");
+    expect(h.executiveFramingLine).toMatch(/Software/i);
+  });
 });

@@ -4585,6 +4585,7 @@ button.vs01-upload-btn:disabled {
 
 .vs01-agreement-review-inner {
   min-width: 0;
+  padding-bottom: max(6rem, env(safe-area-inset-bottom, 0px));
 }
 
 .vs01-agreement-step-actions {

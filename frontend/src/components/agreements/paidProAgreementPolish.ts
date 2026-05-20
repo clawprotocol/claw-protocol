@@ -15,6 +15,7 @@ import {
   applySectionPurityPass,
   buildProOperationalSynthesis,
 } from "./proOperationalSynthesis";
+import { softenProDocumentTone } from "./premiumSituationIntelligence";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company|DAO|Foundation|Trust)\.?$/i;
@@ -698,6 +699,7 @@ export function polishPaidProAgreementText(
     synthesis.responsibilities,
   );
   working = milestoneFinal.text;
+  working = softenProDocumentTone(working);
 
   const log: PaidProAgreementPolishLog = {
     recital: recital.log,

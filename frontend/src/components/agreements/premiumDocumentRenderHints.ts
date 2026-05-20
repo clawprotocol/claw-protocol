@@ -1,4 +1,8 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  buildPremiumContradictionDocumentNote,
+  buildPremiumSituationProfile,
+} from "./premiumSituationIntelligence";
 import { isWeakStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
 import { PREMIUM_JURISDICTION_PLACEHOLDER } from "./premiumDraftTransform";
 import { draftHasPlaceholderParties } from "./reviewPlaceholderGuard";
@@ -7,6 +11,10 @@ export type PremiumDocumentRenderHints = {
   paymentNeedsFinalNumbers: boolean;
   partiesNeedLegalNames: boolean;
   jurisdictionNeedsSelection: boolean;
+  /** Situation-aware executive line (shown under document title on Pro paper). */
+  executiveFramingLine: string | null;
+  /** When intake had contradictory signals — single calm acknowledgment. */
+  contradictionDocumentNote: string | null;
 };
 
 function isThinCommercialPaymentLine(s: string): boolean {
@@ -22,9 +30,11 @@ function isThinCommercialPaymentLine(s: string): boolean {
 export function computePremiumDocumentRenderHints(
   draft: ParsedDraftShape | null,
   agreementDocumentText: string,
+  intakeText?: string | null,
 ): PremiumDocumentRenderHints {
   const pay = (draft?.payment_terms || "").trim();
   const doc = agreementDocumentText || "";
+  const intake = (intakeText || "").trim();
   const paymentNeedsFinalNumbers =
     !pay || isWeakStarterPaymentTermsForDisplay(pay) || isThinCommercialPaymentLine(pay);
   const partiesNeedLegalNames = Boolean(draft && draftHasPlaceholderParties(draft));
@@ -32,9 +42,13 @@ export function computePremiumDocumentRenderHints(
   const jurisdictionNeedsSelection =
     law === PREMIUM_JURISDICTION_PLACEHOLDER.trim() || doc.includes(PREMIUM_JURISDICTION_PLACEHOLDER);
 
+  const profile = intake ? buildPremiumSituationProfile(intake) : null;
+
   return {
     paymentNeedsFinalNumbers,
     partiesNeedLegalNames,
     jurisdictionNeedsSelection,
+    executiveFramingLine: profile?.executiveLine ?? null,
+    contradictionDocumentNote: intake ? buildPremiumContradictionDocumentNote(intake) : null,
   };
 }

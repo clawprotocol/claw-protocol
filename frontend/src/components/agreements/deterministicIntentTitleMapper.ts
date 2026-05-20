@@ -9,6 +9,10 @@ export const DETERMINISTIC_INTENT_IDS = [
   "logo_brand",
   "graphic_design",
   "web_presence",
+  "creator_influencer",
+  "saas_subscription",
+  "settlement_release",
+  "mutual_nda",
   "loan",
   "founder_equity",
 ] as const;
@@ -58,6 +62,56 @@ const WEB: DeterministicIntentResolution = {
   ].join(" "),
 };
 
+const CREATOR: DeterministicIntentResolution = {
+  id: "creator_influencer",
+  title: "Influencer Marketing Agreement",
+  clausePackSeed: [
+    "This is a paid creator/brand collaboration—not generic consulting or employment.",
+    "Deliverables (posts, reels, whitelisting window), approval workflow, and revision limits;",
+    "usage/license scope and term for brand use of content; exclusivity only if intake states it;",
+    "payment trigger (on post, on approval, milestones) and invoicing;",
+    "FTC-style disclosure / sponsored-content duties if ads or affiliate links are mentioned;",
+    "confidentiality on unreleased campaigns; termination and kill-fee only if stated.",
+  ].join(" "),
+};
+
+const SAAS: DeterministicIntentResolution = {
+  id: "saas_subscription",
+  title: "SaaS Subscription Agreement",
+  clausePackSeed: [
+    "Software-as-a-service or platform access—not a one-off design or loan.",
+    "Subscription term, fees, renewal, and payment method;",
+    "scope of access, seats/users, acceptable use, and support/SLA level if stated;",
+    "data use, security, and confidentiality for customer data;",
+    "limitation of liability and service credits only as appropriate to the intake;",
+    "suspension/termination for non-payment and export of customer data on exit.",
+  ].join(" "),
+};
+
+const SETTLEMENT: DeterministicIntentResolution = {
+  id: "settlement_release",
+  title: "Settlement and Mutual Release Agreement",
+  clausePackSeed: [
+    "Mutual release of claims related to the described dispute—no admission of liability unless intake says otherwise;",
+    "payment amount and schedule placeholders tied to stated figures;",
+    "confidentiality of settlement terms if requested;",
+    "no future claims/representations about the underlying matter except as carved out in intake;",
+    "governing law and dispute resolution for enforcing the settlement only.",
+  ].join(" "),
+};
+
+const NDA: DeterministicIntentResolution = {
+  id: "mutual_nda",
+  title: "Mutual Non-Disclosure Agreement",
+  clausePackSeed: [
+    "Mutual or one-way confidentiality as the intake implies;",
+    "definition of confidential information and standard exclusions;",
+    "permitted disclosures (advisors, legal compulsion) and return/destruction;",
+    "term of confidentiality obligations and survival;",
+    "no license to IP beyond what is necessary to evaluate the relationship.",
+  ].join(" "),
+};
+
 const LOAN: DeterministicIntentResolution = {
   id: "loan",
   title: "Loan Agreement",
@@ -94,6 +148,25 @@ function testWebsite(low: string): boolean {
   );
 }
 
+function testCreatorInfluencer(low: string): boolean {
+  return /\b(influencer|ugc|creator|tiktok|instagram|youtube|brand\s+deal|sponsorship|paid\s+post|whitelisting)\b/.test(
+    low,
+  );
+}
+
+function testSaasSubscription(low: string): boolean {
+  return /\b(saas|subscription|software\s+as\s+a\s+service|api\s+access|platform\s+terms)\b/.test(low);
+}
+
+function testSettlementRelease(low: string): boolean {
+  return /\b(settlement|mutual\s+release|release\s+of\s+claims)\b/.test(low);
+}
+
+function testMutualNda(low: string): boolean {
+  if (/\bmutual\s+(?:nda|non[-\s]?disclosure)\b/.test(low)) return true;
+  return /\b(?:nda|non[-\s]?disclosure)\b/.test(low) && !/\bemployment\b/.test(low);
+}
+
 function testLoan(low: string): boolean {
   return /\b(loan|loans|lent|lend(ing|s|ed)?|borrow(ing|s|ed|er|ers)?|borrows|iou|promissory|principal\s+and\s+interest)\b/i.test(
     low,
@@ -110,6 +183,10 @@ export function resolveDeterministicIntentTitleAndSeed(intakeText: string | null
   if (testLogoDesign(low)) return LOGO;
   if (testGraphicDesign(low)) return GRAPHIC;
   if (testWebsite(low)) return WEB;
+  if (testCreatorInfluencer(low)) return CREATOR;
+  if (testSaasSubscription(low)) return SAAS;
+  if (testSettlementRelease(low)) return SETTLEMENT;
+  if (testMutualNda(low)) return NDA;
   if (testLoan(low)) return LOAN;
   if (isFounderEquityVestingIntent(s)) return FOUNDER;
   return null;

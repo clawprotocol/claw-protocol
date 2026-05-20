@@ -93,6 +93,8 @@ import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
 import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
 import { PremiumProGenerationWaitPanel } from "./PremiumProGenerationWaitPanel";
+import { PremiumProWaitContinuityCard } from "./PremiumProWaitContinuityCard";
+import { buildIntakeContradictionWarning } from "./intakeContradictionHints";
 import {
   CHIP_STATE_COMMERCIAL,
   CHIP_STATE_PRO_NEEDS_DRAFT,
@@ -419,6 +421,10 @@ import {
   scorePremiumReadonlyCorpusCandidate,
 } from "./premiumReadonlyRenderCorpus";
 import { computePremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
+import {
+  buildPremiumReviewCardIntro,
+  resolveProReviewDocumentPanelHeading,
+} from "./premiumSituationIntelligence";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { FinalizeYourAgreementPanel } from "./FinalizeYourAgreementPanel";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
@@ -8676,6 +8682,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const intakeRefinementWarning = useMemo(() => {
     if (!simpleProductFlow || !liveWorkspaceTwoPane || isGenerating) return null;
+    const contradiction = buildIntakeContradictionWarning(intakeCombined);
+    if (contradiction) return contradiction;
     const ex = livePreviewModel.extraction;
     if (!ex) return null;
     const bits: string[] = [];
@@ -8713,6 +8721,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     liveWorkspaceTwoPane,
     isGenerating,
     livePreviewModel,
+    intakeCombined,
     scopeGuessConfirmed,
     termGuessConfirmed,
     createProductionTwoPane,
@@ -11131,7 +11140,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         text: corpus,
       });
     }
-    const renderHints = computePremiumDocumentRenderHints(rd, corpus);
+    const intakeForHints = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const renderHints = computePremiumDocumentRenderHints(rd, corpus, intakeForHints);
     return buildPremiumAgreementReadonlyHtml(corpus, {
       signatureSectionMode: effectivePremiumSendMode === "signature" ? "execution" : "collaboration",
       partyNames: signaturePartyNames,
@@ -11145,6 +11155,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDraft,
     draft,
     shouldShowPaidRetry,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
   ]);
 
   const preSendTrustLayer = useMemo(
@@ -15721,7 +15733,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               cardHeading="Review summary"
                               cardIntro={
                                 premiumPaidReadonlyPick.sourceUsed === "server_full_document_text"
-                                  ? "Summary of key terms — the full Pro agreement text is in the preview."
+                                  ? buildPremiumReviewCardIntro(
+                                      (currentPremiumMergedIntakeKey || intakeCombined || "").trim(),
+                                    )
                                   : undefined
                               }
                               onInlineCommit={undefined}
@@ -16045,7 +16059,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           </p>
                                         ) : null}
                                         <p className="mt-1 font-serif text-base font-semibold tracking-tight text-stone-900 sm:text-lg">
-                                          {PRO_REVIEW_DOCUMENT_PANEL_HEADING}
+                                          {resolveProReviewDocumentPanelHeading(
+                                            (currentPremiumMergedIntakeKey || intakeCombined || "").trim(),
+                                            (reviewDraft ?? draft)?.title,
+                                          )}
                                         </p>
                                         {import.meta.env.DEV ? (
                                           <p className="mt-1 text-[10px] font-medium tracking-wide text-stone-600">
@@ -16160,6 +16177,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     )}
                                   </div>
                                 </div>
+                                ) : premiumReturnWaitActive ? (
+                                  <PremiumProWaitContinuityCard />
                                 ) : null}
                               </>
                             ) : productionDraftPrimaryReviewSurface ? (
