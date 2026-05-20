@@ -10,7 +10,10 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
   server: {
-    allowedHosts: ['believable-gentleness-production-3ab6.up.railway.app'],
+    // Allow any host in dev (Railway preview, LAN, localhost). Set VITE_DEV_ALLOWED_HOST to restrict.
+    allowedHosts: process.env.VITE_DEV_ALLOWED_HOST
+      ? [process.env.VITE_DEV_ALLOWED_HOST]
+      : true,
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8000",

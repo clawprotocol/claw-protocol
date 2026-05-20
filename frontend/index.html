@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Optional meta claw-api-base: see clawApi.ts (runtime API when build env missing). -->
+    <!-- Optional runtime API origin (split static + API deploy). Prefer VITE_CLAW_API_BASE at build time. -->
+    <!-- <meta name="claw-api-base" content="https://api.example.com" /> -->
     <title>frontend</title>
   </head>
   <body>
     <div id="root"></div>
-    <script>window.__CLAW_PUBLIC_API_BASE__ = "https://claw-protocol-production.up.railway.app";</script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
