@@ -15,7 +15,6 @@ import {
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import { buildPremiumSituationProfile } from "./premiumSituationIntelligence";
 
 const FIXTURE_DIR = resolve(__dirname, "../../../../qa/fixtures");
@@ -60,21 +59,22 @@ function loadFixture(id: string): FixtureRow {
   throw new Error(`fixture not found: ${id}`);
 }
 
-function starterDraftFromIntake(intake: string): ParsedDraftShape {
-  const structured = parseIntakeToStructuredAgreement(intake);
-  const base: ParsedDraftShape = {
-    title: structured.title || "",
-    jurisdiction: structured.jurisdiction || "",
-    parties: structured.parties || [],
-    purpose: structured.purpose || "",
-    payment_terms: structured.payment_terms || "",
-    duration: structured.duration ?? null,
+function emptyDraft(): ParsedDraftShape {
+  return {
+    title: "",
+    jurisdiction: "",
+    parties: [],
+    purpose: "",
+    payment_terms: "",
+    duration: null,
     due_date: null,
     effective_date: null,
     payment: EMPTY_PAYMENT,
-    agreement_family: structured.agreement_family,
   };
-  return runIntakeDefaultsAndRoles(base, intake, true, defaultIntakePartyRoleLabels());
+}
+
+function starterDraftFromIntake(intake: string): ParsedDraftShape {
+  return runIntakeDefaultsAndRoles(emptyDraft(), intake, true, defaultIntakePartyRoleLabels());
 }
 
 function freeStarterPreview(intake: string): string {

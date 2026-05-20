@@ -39,43 +39,51 @@ export async function postGenesisReferralConvert(args: {
   }
 }
 
+function genesisCheckoutMetadataFallback(
+  orgId: string,
+  payload: GenesisReferralCheckoutPayload,
+  userId?: string,
+): Record<string, string> {
+  const out: Record<string, string> = {
+    org_id: orgId,
+    claw_org_id: orgId,
+    plan_code: "pro",
+    visitor_id: payload.visitor_id,
+  };
+  if (payload.referral_code) {
+    out.referral_code = payload.referral_code;
+  }
+  if (userId) {
+    out.user_id = userId;
+  }
+  return out;
+}
+
 export async function fetchGenesisCheckoutMetadata(
   orgId: string,
   payload: GenesisReferralCheckoutPayload,
   userId?: string,
 ): Promise<Record<string, string>> {
-  const body = {
-    org_id: orgId,
-    referral_code: payload.referral_code ?? undefined,
-    visitor_id: payload.visitor_id,
-    user_id: userId,
-    plan_code: "pro",
-  };
+  const fallback = genesisCheckoutMetadataFallback(orgId, payload, userId);
   try {
     const res = await fetch(apiUrl("/v1/genesis-referral/checkout-metadata"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        org_id: orgId,
+        referral_code: payload.referral_code ?? undefined,
+        visitor_id: payload.visitor_id,
+        user_id: userId,
+        plan_code: "pro",
+      }),
     });
     if (!res.ok) {
-      return {
-        org_id: orgId,
-        claw_org_id: orgId,
-        plan_code: "pro",
-        ...(payload.referral_code ? { referral_code: payload.referral_code } : {}),
-        visitor_id: payload.visitor_id,
-      };
+      return fallback;
     }
     const data = (await res.json()) as { metadata?: Record<string, string> };
-    return data.metadata ?? body;
+    return data.metadata ?? fallback;
   } catch {
-    return {
-      org_id: orgId,
-      claw_org_id: orgId,
-      plan_code: "pro",
-      ...(payload.referral_code ? { referral_code: payload.referral_code } : {}),
-      visitor_id: payload.visitor_id,
-    };
+    return fallback;
   }
 }
 

@@ -544,10 +544,7 @@ import {
   POST_CHECKOUT_PREMIUM_SUPPORT_BODY,
   POST_CHECKOUT_PREMIUM_SUPPORT_TITLE,
 } from "./postPaymentPremiumReviewSummary";
-import {
-  PRO_REVIEW_DOCUMENT_PANEL_HEADING,
-  PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY,
-} from "../../launch/simpleProduct/simpleCreatePaidProReviewShell";
+import { PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY } from "../../launch/simpleProduct/simpleCreatePaidProReviewShell";
 import {
   logFreeReviewApiLateMerge,
   logFreeReviewLegacySurfaceBlocked,
