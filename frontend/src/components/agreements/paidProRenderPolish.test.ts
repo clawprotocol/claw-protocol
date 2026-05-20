@@ -91,31 +91,33 @@ describe("applyPaidProRenderPolish", () => {
     expect(opening).not.toMatch(/among Ironclad, Harborline, Northwind, Silver Mesa, and VertexGrid/i);
   });
 
-  it("signature headings use full legal entity names", () => {
+  it("strips manual signature grids; full legal names stay in KEY CONTACTS not witness tail", () => {
     const body = padOperative(
       [
         `AGREEMENT among ${IRONCLAD_PARTIES.join(", ")}.`,
+        "KEY CONTACTS",
+        IRONCLAD_PARTIES.map((p, i) => `${p}\nEmail: [EMAIL_${i + 1}]`).join("\n\n"),
         "IN WITNESS WHEREOF:",
         "Ironclad\nBy: _________________________",
         "Harborline\nBy: _________________________",
         "Northwind\nBy: _________________________",
         "Silver Mesa\nBy: _________________________",
         "VertexGrid\nBy: _________________________",
-        "KEY CONTACTS\n[EMAIL_1]\n[EMAIL_2]\n[EMAIL_3]\n[EMAIL_4]\n[EMAIL_5]",
       ].join("\n"),
       22_000,
     );
     const { text } = applyPaidProRenderPolish(body, IRONCLAD_JOINT_ROLLOUT_INTAKE, [...IRONCLAD_PARTIES], {
       surface: "test",
     });
+    const contacts = text.slice(text.indexOf("KEY CONTACTS"), text.search(/IN WITNESS WHEREOF/i));
+    for (const party of IRONCLAD_PARTIES) {
+      expect(contacts).toContain(party);
+    }
     const sig = text.slice(text.search(/IN WITNESS WHEREOF/i));
-    expect(sig).toContain("Ironclad Systems Group LLC");
-    expect(sig).toContain("Harborline Data Solutions Inc.");
-    expect(sig).toContain("Northwind Automation Partners LLC");
-    expect(sig).toContain("Silver Mesa Analytics LP");
-    expect(sig).toContain("VertexGrid Technologies LLC");
+    expect(sig).toMatch(/LawDog signing workflow/i);
     expect(sig).not.toMatch(/\nIronclad\nBy:/);
     expect(sig).not.toMatch(/\nVertexGrid\nBy:/);
+    expect(sig).not.toContain("Signatory 1");
   });
 
   it("party expansion after email substitution does not corrupt domains (regression)", () => {

@@ -6,6 +6,7 @@ import { formatStarterPreviewForDisplay } from "../starterPreviewFormatting";
 import { stripAdvisoryLanguageFromAgreementBody } from "./premiumCompletionClassification";
 import { suppressRepeatedBoilerplate } from "./boilerplateContaminationGuard";
 import { validateAndRepairFinalRenderIntegrity } from "./finalRenderIntegrityValidator";
+import { applyPremiumExecutionNormalization } from "../premiumExecutionNormalization";
 import { applySectionIsolatedPolishPipeline } from "./sectionIsolatedPolish";
 import type { AgreementOutputQualityContext, IntegrityResult } from "./types";
 
@@ -42,6 +43,14 @@ export function finalizeAgreementOutput(
     const boiler = suppressRepeatedBoilerplate(working, { sectionPass: false });
     working = boiler.text;
     working = formatStarterPreviewForDisplay(working);
+  }
+
+  const executionNorm = applyPremiumExecutionNormalization(working, {
+    tier: ctx.tier === "premium" ? "premium" : "starter",
+  });
+  if (executionNorm.repairs.length > 0) {
+    working = executionNorm.text;
+    structureRepairs.push(...executionNorm.repairs);
   }
 
   const integrity = validateAndRepairFinalRenderIntegrity(working, ctx);

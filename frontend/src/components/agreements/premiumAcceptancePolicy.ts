@@ -6,6 +6,7 @@
 import type { PremiumCompletionOutcome } from "./agreementOutputQuality/types";
 import { classifyPremiumCompletionOutcome } from "./agreementOutputQuality/premiumCompletionClassification";
 import { extractIntakeContacts, type IntakeContactRecord } from "./paidProIntakeContactSubstitution";
+import { resolveFullLegalPartiesFromIntake } from "./paidProPartyNamePreserve";
 export type PremiumRecipientCandidate = { name: string; email: string; role: string };
 
 export type PremiumRenderSource =
@@ -187,9 +188,16 @@ export function buildPremiumRecipientCandidatesFromIntake(
   intakeText: string | null | undefined,
   defaultRole = "Party",
 ): PremiumRecipientCandidate[] {
+  const authoritative = resolveFullLegalPartiesFromIntake(partyNames, intakeText);
+  const slots =
+    authoritative.length >= partyNames.length && partyNames.length > 0
+      ? partyNames.map((slot, i) => authoritative[i] || slot)
+      : authoritative.length > 0
+        ? authoritative
+        : [...partyNames];
   const contacts = extractIntakeContacts(intakeText);
   const used = new Set<number>();
-  return partyNames.map((rawName) => {
+  return slots.map((rawName) => {
     const name = String(rawName || "").trim();
     let hitIdx = contacts.findIndex((c, i) => !used.has(i) && matchContactToParty(c, name));
     if (hitIdx < 0 && contacts.length === partyNames.length) {
