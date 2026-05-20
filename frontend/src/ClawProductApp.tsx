@@ -20,6 +20,8 @@ import { AffiliateLandingPage } from "./launch/affiliate/AffiliateLandingPage";
 import { parseAffiliateLandingPath } from "./launch/affiliate/affiliateLandingRoutes";
 import { ClawOpportunityPage } from "./launch/affiliate/ClawOpportunityPage";
 import { AffiliatePayoutOpsPage } from "./launch/affiliate/AffiliatePayoutOpsPage";
+import { GenesisAffiliateDashboardPage } from "./launch/genesisReferral/GenesisAffiliateDashboardPage";
+import { GenesisReferralOpsPage } from "./launch/genesisReferral/GenesisReferralOpsPage";
 import { AdminConsolePage } from "./launch/AdminConsolePage";
 import { canAccessOperatorGrowthDashboard, OperatorGrowthDashboard } from "./launch/ops/OperatorGrowthDashboard";
 import { OperatorPaidFunnelDashboard } from "./launch/ops/OperatorPaidFunnelDashboard";
@@ -600,6 +602,10 @@ export function ClawProductApp() {
         return <ClawOpportunityPage />;
       case "affiliatePayoutOps":
         return <AffiliatePayoutOpsPage />;
+      case "genesisReferral":
+        return <GenesisAffiliateDashboardPage />;
+      case "opsGenesisReferral":
+        return <GenesisReferralOpsPage />;
       case "opsGrowth":
         return (
           <AppShell title="Operator — Growth" subtitle="Funnel, experiments, and share metrics (local browser data).">

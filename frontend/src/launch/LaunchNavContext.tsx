@@ -8,6 +8,12 @@ import {
   syncLawdogTrafficSourceFromSearch,
 } from "../tracking/lawdogSession";
 import { rememberAffiliateCodeFromPathname, rememberAffiliateCodeFromSearch } from "./affiliate/affiliateAttributionContext";
+import {
+  captureGenesisReferralFromSearch,
+  getGenesisReferralCheckoutPayload,
+  getOrCreateGenesisVisitorId,
+} from "./genesisReferral/genesisReferralCapture";
+import { postGenesisReferralCapture } from "./genesisReferral/genesisReferralApi";
 import { hasCheckoutBackRestoreSnapshot } from "../components/agreements/checkoutBackRestore";
 import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
 import {
@@ -62,6 +68,18 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
     syncLawdogFlowFromPathname(window.location.pathname);
     rememberAffiliateCodeFromPathname(window.location.pathname);
     rememberAffiliateCodeFromSearch(window.location.search);
+    const genesisCode = captureGenesisReferralFromSearch(
+      window.location.search,
+      window.location.pathname,
+    );
+    if (genesisCode) {
+      getOrCreateGenesisVisitorId();
+      void postGenesisReferralCapture({
+        referral_code: genesisCode,
+        visitor_id: getGenesisReferralCheckoutPayload().visitor_id,
+        source_path: window.location.pathname,
+      });
+    }
   }, [tick]);
 
   const navigate = useCallback((to: string, options?: LaunchNavigateOptions) => {

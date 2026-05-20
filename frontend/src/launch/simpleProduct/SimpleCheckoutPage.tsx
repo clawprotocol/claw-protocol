@@ -50,6 +50,7 @@ import { checkoutLossAversionFromIntentSignals } from "../../components/agreemen
 import { CreateFlowAgreementCheckoutPricing } from "./CreateFlowAgreementCheckoutPricing";
 import { isDevCreateFlowPaymentBypassEnabled } from "../devPaymentBypass";
 import { ensureAffiliateAttributionForOrg, getAffiliateCodeForAttribution } from "../affiliate/affiliateAttributionContext";
+import { ensureGenesisReferralHandoffForCheckout } from "../genesisReferral/ensureGenesisReferralHandoff";
 import { getOrgId } from "../orgContext";
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
 import { SimpleFlowShell } from "./SimpleFlowShell";
@@ -310,6 +311,14 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         fail("We could not link this referral before payment. Reopen from the affiliate link and try again.");
         return;
       }
+    }
+    const genesisHandoff = await ensureGenesisReferralHandoffForCheckout();
+    if (!genesisHandoff.ok) {
+      fail("This referral link cannot be used for your own account.");
+      return;
+    }
+    if (import.meta.env.DEV && genesisHandoff.metadata.referral_code) {
+      console.info("[genesis-referral] checkout metadata", genesisHandoff.metadata);
     }
     if (devPaymentBypassActive) {
       console.info("[DEV PAYMENT BYPASS] simulating successful payment — reusing demo settlement + applyConfirmedSettlement");

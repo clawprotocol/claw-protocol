@@ -20,6 +20,8 @@ export type AppSection =
   | { kind: "opsGrowth" }
   | { kind: "opsPaidFunnel" }
   | { kind: "opsStarterProRefine" }
+  | { kind: "genesisReferral" }
+  | { kind: "opsGenesisReferral" }
   | { kind: "adminConsole" };
 
 export function matchAppPath(pathname: string): AppSection | null {
@@ -35,6 +37,8 @@ export function matchAppPath(pathname: string): AppSection | null {
   if (p === "/app/ops/growth") return { kind: "opsGrowth" };
   if (p === "/app/ops/paid-funnel") return { kind: "opsPaidFunnel" };
   if (p === "/app/ops/starter-pro-refine") return { kind: "opsStarterProRefine" };
+  if (p === "/app/genesis-referral") return { kind: "genesisReferral" };
+  if (p === "/app/ops/genesis-referral") return { kind: "opsGenesisReferral" };
   if (p === "/app/admin") return { kind: "adminConsole" };
   if (p === "/app/create") return { kind: "simpleCreate" };
   if (p === "/app/quick") return { kind: "quickSend" };
