@@ -300,8 +300,16 @@ def dispatch_stripe_event(economics: EconomicsStore, event: Dict[str, Any]) -> D
     data = (event.get("data") or {}).get("object")
     if not isinstance(data, dict):
         return {"ok": False, "error": "bad_event_payload"}
+    genesis_result: Dict[str, Any] = {}
+    try:
+        from backend.affiliates.genesis_stripe_handlers import dispatch_genesis_stripe_side_effect
+
+        genesis_result = dispatch_genesis_stripe_side_effect(economics, etype, data)
+    except Exception:
+        _log.exception("genesis_stripe_side_effect failed type=%s", etype)
     if etype == "invoice.paid":
-        return handle_invoice_paid(economics, data)
+        legacy = handle_invoice_paid(economics, data)
+        return {**legacy, "genesis": genesis_result}
     if etype == "customer.subscription.updated":
         return handle_subscription_updated(economics, data)
     if etype == "customer.subscription.deleted":
@@ -309,5 +317,8 @@ def dispatch_stripe_event(economics: EconomicsStore, event: Dict[str, Any]) -> D
     if etype == "charge.dispute.created":
         return handle_charge_dispute_created(economics, data)
     if etype == "charge.refunded":
-        return handle_charge_refunded(economics, data)
+        legacy = handle_charge_refunded(economics, data)
+        return {**legacy, "genesis": genesis_result}
+    if genesis_result and not genesis_result.get("ignored"):
+        return genesis_result
     return {"ok": True, "ignored": True, "reason": "event_type_not_handled", "type": etype}

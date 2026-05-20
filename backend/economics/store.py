@@ -467,6 +467,9 @@ class EconomicsStore:
                 from backend.economics.operator_alerts_postgres import ensure_operator_alerts_schema
 
                 ensure_operator_alerts_schema()
+            from backend.economics.genesis_referral_store import ensure_genesis_referral_schema
+
+            ensure_genesis_referral_schema(con)
             self._backfill_key_ledger(con)
 
     def _backfill_key_ledger(self, con: sqlite3.Connection) -> None:

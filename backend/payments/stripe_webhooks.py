@@ -49,9 +49,13 @@ async def stripe_webhook(request: Request) -> Dict[str, Any]:
     event_id = str(event.get("id") or "").strip()
     eco = get_economics_store()
     eco.init_schema()
+    # Idempotent at event-id boundary (Stripe retries). Handlers must also idempotency-key writes.
     if event_id and not eco.insert_stripe_webhook_event_once(event_id):
+        _log.info("stripe_webhook duplicate event_id=%s type=%s", event_id, event.get("type"))
         return {"ok": True, "duplicate": True, "event_id": event_id}
 
     result = dispatch_stripe_event(eco, event)
-    _log.info("stripe_webhook type=%s result=%s", event.get("type"), result)
+    # Log type + ok/ignored keys only — never log full invoice bodies or customer PII.
+    summary = {k: result.get(k) for k in ("ok", "ignored", "duplicate", "reason", "error") if k in result}
+    _log.info("stripe_webhook type=%s event_id=%s summary=%s", event.get("type"), event_id, summary)
     return {"ok": True, "event_id": event_id or None, "result": result}

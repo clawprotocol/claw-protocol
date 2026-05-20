@@ -109,6 +109,7 @@ from backend.routers.dev_storage_smoke_api import router as dev_storage_smoke_ro
 from backend.payments.webhooks import router as payments_onramp_webhook_router
 from backend.payments.stripe_webhooks import router as stripe_webhook_router
 from backend.routers.economics_v1_api import router as economics_v1_router
+from backend.routers.genesis_referral_api import router as genesis_referral_router
 from backend.routers.compliance_api import router as compliance_router
 from backend.routers.client_events_api import router as client_events_router
 from backend.routers.transcription_hero_api import router as transcription_hero_router
@@ -128,6 +129,10 @@ from backend.routers.admin_console_api import router as admin_console_router
 # -------------------------------------------------
 app = FastAPI(title="CLAW Backend")
 log_external_ai_policy_at_startup()
+
+from backend.config.env_bootstrap import log_env_warnings_at_startup  # noqa: E402
+
+log_env_warnings_at_startup()
 
 VERIFIER_ONLY = os.getenv("CLAW_VERIFIER_ONLY", "0") == "1"
 CLAW_PROTOCOL_VERSION = os.getenv("CLAW_PROTOCOL_VERSION", "claw-v1")
@@ -187,6 +192,19 @@ async def verifier_only_guard(request: Request, call_next):
         )
 
     return await call_next(request)
+
+
+@app.middleware("http")
+async def claw_cache_control(request: Request, call_next):
+    """Set Cache-Control on API responses; auth/webhook/health are always no-store."""
+    from backend.config.http_cache_policy import cache_control_for_path
+
+    response = await call_next(request)
+    if "cache-control" not in {k.lower() for k in response.headers.keys()}:
+        policy = cache_control_for_path(request.url.path, request.method)
+        if policy:
+            response.headers["Cache-Control"] = policy
+    return response
 
 
 @app.middleware("http")
@@ -1392,6 +1410,7 @@ if _relaxed_claw_environment() or os.getenv("CLAW_DEV_STORAGE_SMOKE", "").strip(
 app.include_router(payments_onramp_webhook_router)
 app.include_router(stripe_webhook_router)
 app.include_router(economics_v1_router)
+app.include_router(genesis_referral_router)
 app.include_router(compliance_router)
 app.include_router(client_events_router)
 app.include_router(transcription_hero_router)

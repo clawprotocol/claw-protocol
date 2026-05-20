@@ -1,5 +1,12 @@
 """
 Artifact / blob storage runtime (no secrets).
+
+Local PaaS note: ``CLAW_DATA_DIR`` / ``CLAW_BLOB_ROOT`` default to process-local paths suitable
+for Railway/Render/Fly volumes when mounted. Do not assume agreement PDFs or proof bundles
+persist on the container root filesystem without a volume.
+
+TODO(storage): Add object-store backend (S3/R2) behind ``CLAW_STORAGE_BACKEND=s3`` so durable
+artifacts are not tied to a single host filesystem — see ``public_runtime_storage_summary()``.
 """
 
 from __future__ import annotations

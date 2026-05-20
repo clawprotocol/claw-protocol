@@ -1,5 +1,7 @@
 # CLAW v1 Deployment Notes
 
+> **See also:** `docs/DEPLOYMENT.md` (platform guide), `docs/ENVIRONMENT.md` (env reference), `docs/LOCAL_DEV.md` (local setup).
+
 ## LawDog frontend — privacy / data-rights inbox (production)
 
 **Required for production LawDog sites:** at **Vite build time**, set **`VITE_LAWDOG_PRIVACY_EMAIL`** to a **real, monitored** address for privacy and data-rights inquiries. The value is baked into static assets (`import.meta.env`); changing it requires a rebuild and redeploy.
