@@ -88,6 +88,12 @@ import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryab
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
+import {
+  buildRecommendedClarifications,
+  classifyPremiumCompletionOutcome,
+  legacyGenerationOutcomeFromClassification,
+} from "./agreementOutputQuality";
+import type { PremiumCompletionOutcome, RecommendedClarifications } from "./agreementOutputQuality/types";
 
 export type PremiumCompletionInput = {
   intakeText: string;
@@ -167,6 +173,10 @@ export type PremiumCompletionResult = {
   premiumNetworkRetryable?: boolean;
   /** Recoverable server generation failure (e.g. airlock_blocked with empty document) — retry in modal. */
   premiumGenerationRetryable?: boolean;
+  /** Client classification after output-quality pipeline (authoritative vs advisory clarifications). */
+  premiumCompletionOutcome?: PremiumCompletionOutcome | null;
+  /** Non-authoritative clarifications surfaced outside agreement body. */
+  recommendedClarifications?: RecommendedClarifications | null;
 };
 
 /** @deprecated — positive stitched body is built in {@link buildPremiumPostCheckoutStitchedBody}. */
@@ -1294,6 +1304,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   let founderDetailsGateMessage: string | null = null;
   let proIntentGateMessage: string | null = null;
   let serverGenerationDegraded: { code: string; message: string } | null = null;
+  let premiumCompletionOutcome: PremiumCompletionOutcome | null = null;
+  let recommendedClarifications: RecommendedClarifications | null = null;
   const intentContract = resolveAgreementIntentContract(rawForSoT || rawIntake);
   const intentPreflightPolicy = resolvePremiumIntentPreflightPolicy(intentContract);
   const tierAEnabled = intentPreflightPolicy.tier === "A";
@@ -1422,7 +1434,20 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             docLen: doc.length,
           });
         }
-        effectiveFull = { ...effectiveFull, document_text: doc };
+        const classified = classifyPremiumCompletionOutcome({
+          documentText: doc,
+          missingMaterial: effectiveFull.missing_material_info,
+          serverOutcome: effectiveFull.generation_outcome,
+        });
+        premiumCompletionOutcome = classified;
+        recommendedClarifications = buildRecommendedClarifications(
+          effectiveFull.missing_material_info ?? [],
+        );
+        effectiveFull = {
+          ...effectiveFull,
+          document_text: doc,
+          generation_outcome: legacyGenerationOutcomeFromClassification(classified),
+        };
       }
       const firstCallOutcomeDegraded = (full.generation_outcome || "").trim() === "degraded";
       let serverGenDegraded = firstCallOutcomeDegraded;
@@ -2143,5 +2168,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     proIntentGateMessage: null,
     serverGenerationDegraded,
     tierADiagnostic: tierADiag,
+    premiumCompletionOutcome,
+    recommendedClarifications,
   };
 }

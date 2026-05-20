@@ -4,6 +4,7 @@
 
 import { hashPremiumDocText, premiumPolishCacheKey } from "../../lib/premiumDocFingerprint";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
+import { finalizeAgreementOutput } from "./agreementOutputQuality";
 import { validateAndRepairPremiumAgreementStructure } from "./premiumAgreementStructure";
 import {
   extractIntakeEmailsOrdered,
@@ -162,6 +163,14 @@ export function applyPaidProRenderPolish(
 
   const structure = validateAndRepairPremiumAgreementStructure(working);
   working = structure.text;
+
+  const quality = finalizeAgreementOutput(working, {
+    intakeRaw,
+    partyNames: partyNames ?? undefined,
+    surface,
+    tier: "premium",
+  });
+  working = quality.text;
 
   const result: PaidProRenderPolishResult = {
     text: working,

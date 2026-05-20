@@ -65,8 +65,16 @@ export type PremiumFullDraftResult = {
   server_repair_document_text?: string;
   key_terms_found: string[];
   missing_material_info: string[];
-  /** `needs_details` = validator/quality; `degraded` = model path failed, structured server fallback in `document_text`. */
-  generation_outcome?: "ok" | "needs_details" | "degraded";
+  /**
+   * Legacy wire field: `ok` | `needs_details` | `degraded`.
+   * Client may also classify into `authoritative_draft_complete` (+ `_with_recommended_clarifications`).
+   */
+  generation_outcome?:
+    | "ok"
+    | "needs_details"
+    | "degraded"
+    | "authoritative_draft_complete"
+    | "authoritative_draft_complete_with_recommended_clarifications";
   schema_validation_reasons?: string[];
   server_generation_failure_code?: string;
   server_generation_failure_message?: string;

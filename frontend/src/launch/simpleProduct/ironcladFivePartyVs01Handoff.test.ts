@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   IRONCLAD_JOINT_ROLLOUT_INTAKE,
   IRONCLAD_PARTIES,
+  buildIroncladPremiumFullDraftBody,
 } from "../../../e2e/fixtures/ironcladFivePartyRollout";
 import { buildRecipientAccessMintBody } from "../../agreement/recipientAccessMintPayload";
 import { extractIntakeContacts } from "../../components/agreements/paidProIntakeContactSubstitution";
@@ -12,6 +13,9 @@ import { buildAgreementPreviewText } from "../../components/agreements/agreement
 import { enrichStarterPreviewPartiesFromIntake } from "../../components/agreements/starterOpeningPartyPreserve";
 import { rejectPremiumDegradedFiller } from "../../components/agreements/premiumFullDraftClientAcceptance";
 import { validateAndRepairPremiumAgreementStructure } from "../../components/agreements/premiumAgreementStructure";
+import { applyPaidProRenderPolish, clearPaidProRenderPolishCacheForTests } from "../../components/agreements/paidProRenderPolish";
+import { finalizeAgreementOutput } from "../../components/agreements/agreementOutputQuality";
+import { validateAndRepairFinalRenderIntegrity } from "../../components/agreements/agreementOutputQuality/finalRenderIntegrityValidator";
 import { formatMilestonePaymentTermsFromIntake } from "../../components/agreements/intakeCurrencyParse";
 import type { ParsedDraftShape } from "../../components/agreements/intakeSmartDefaults";
 import {
@@ -56,6 +60,46 @@ describe("Ironclad five-party fixture", () => {
     expect(contacts[0]?.email).toBe("ethan.cole@ironcladsg.com");
     expect(contacts[1]?.title).toMatch(/CTO/i);
     expect(contacts[4]?.email).toBe("adrian.vale@vertexgridtech.com");
+  });
+
+  it("free starter preview passes final render integrity validator", () => {
+    const preview = buildAgreementPreviewText(ironcladDraft(), {
+      starterPreview: true,
+      intakeText: IRONCLAD_JOINT_ROLLOUT_INTAKE,
+    });
+    const integrity = validateAndRepairFinalRenderIntegrity(preview, {
+      intakeRaw: IRONCLAD_JOINT_ROLLOUT_INTAKE,
+      partyNames: [...IRONCLAD_PARTIES],
+      surface: "ironclad_starter",
+      tier: "starter",
+    });
+    expect(integrity.ok).toBe(true);
+    expect(integrity.text).not.toMatch(/^\s*\d+\.\s*$/m);
+  });
+
+  it("premium polish passes integrity and suppresses duplicate helper boilerplate", () => {
+    clearPaidProRenderPolishCacheForTests();
+    const filler =
+      "The Parties shall perform their obligations in good faith and in accordance with this Agreement.\n";
+    const body = filler.repeat(3) + buildIroncladPremiumFullDraftBody();
+    const { text } = applyPaidProRenderPolish(body, IRONCLAD_JOINT_ROLLOUT_INTAKE, [...IRONCLAD_PARTIES], {
+      surface: "ironclad_qa",
+      skipCache: true,
+    });
+    const quality = finalizeAgreementOutput(text, {
+      intakeRaw: IRONCLAD_JOINT_ROLLOUT_INTAKE,
+      partyNames: [...IRONCLAD_PARTIES],
+      surface: "ironclad_premium",
+      tier: "premium",
+    });
+    expect(quality.ok).toBe(true);
+    const goodFaithHits = (
+      quality.text.match(
+        /The Parties shall perform their obligations in good faith and in accordance with this Agreement/gi,
+      ) || []
+    ).length;
+    expect(goodFaithHits).toBeLessThanOrEqual(1);
+    expect(quality.text).not.toMatch(/\bneeds\s+details\b/i);
   });
 
   it("free starter preview avoids binding Systems, annual-only payment, and empty sections", () => {

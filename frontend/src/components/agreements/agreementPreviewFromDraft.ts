@@ -47,6 +47,9 @@ import {
 import { hydratePartyIntroductionParagraphs, hydratePartyListAndSignatureOrdinals } from "../../agreement/partyListOrdinalHydrate";
 import { finalizePremiumIdentityCorpusInPreview } from "./premiumIdentityCorpusPreviewGuard";
 import { finalizePartyDisplayNameForUserFacing } from "../../agreement/partyNameDisplayCasing";
+import { finalizeAgreementOutput } from "./agreementOutputQuality";
+import { formatMilestonePaymentTermsFromIntake } from "./intakeCurrencyParse";
+import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
 import {
   finalizeUserVisibleAgreementPlainText,
   PLACEHOLDER_SAFETY_PREVIEW_BLOCKED,
@@ -517,8 +520,15 @@ export function buildAgreementPreviewTextCore(
   const payStructuredLine = premiumDeliverable
     ? formatPaymentTermsLine(draft.payment ?? { amount: null, cadence: null, valid: true }).trim()
     : "";
+  const milestonePay =
+    starterPreview && options?.intakeText
+      ? formatMilestonePaymentTermsFromIntake(options.intakeText)
+      : null;
   const pay = starterPreview
-    ? normalizeStarterPaymentTermsForDisplay(draft.payment_terms) || MISSING
+    ? milestonePay ||
+      normalizeStarterPaymentTermsForDisplay(draft.payment_terms) ||
+      (draft.payment_terms || "").trim() ||
+      MISSING
     : premiumDeliverable
       ? payPrepared.trim() ||
         payStructuredLine ||
@@ -579,6 +589,9 @@ export function buildAgreementPreviewTextCore(
     lines.push(introGeneral, "");
   }
   if (premiumDeliverable) lines.push("");
+  const partyCount = (draft.parties || []).length;
+  const starterMultiParty =
+    starterPreview && partyCount >= 4 && Boolean((options?.intakeText || "").trim());
   lines.push(
     partiesBlock,
     "",
@@ -591,31 +604,62 @@ export function buildAgreementPreviewTextCore(
     premiumSectionHeading(3, termAndScheduleSectionHeading(draft), premiumDeliverable),
     termSection,
     "",
-    premiumSectionHeading(4, "Governing Law", premiumDeliverable),
+  );
+  let sectionNum = 4;
+  if (starterMultiParty) {
+    const primitiveIds = selectClausePrimitivesForIntake(options!.intakeText!, partyCount);
+    if (primitiveIds.includes("confidentiality_basic")) {
+      lines.push(
+        premiumSectionHeading(sectionNum++, "Confidentiality", false),
+        renderClausePrimitive("confidentiality_basic", { project_summary: "this project" }),
+        "",
+      );
+    }
+    if (primitiveIds.includes("data_security_basic")) {
+      lines.push(
+        premiumSectionHeading(sectionNum++, "Data Protection", false),
+        renderClausePrimitive("data_security_basic", { project_summary: "this project" }),
+        "",
+      );
+    }
+  }
+  const lawLineStarter =
     starterPreview && isJurisdictionDisplayLowConfidence(lawRaw)
       ? `Governing law: ${STARTER_GOVERNING_LAW_DISPLAY_FALLBACK}.`
-      : premiumDeliverable
-        ? lawBlockPremium
-        : `This Agreement shall be governed by the laws of ${
-            starterPreview ? sanitizeJurisdictionForStarterGoverningLaw(draft.jurisdiction) : nz(draft.jurisdiction)
-          }, without regard to conflict-of-law principles.`,
+      : starterPreview
+        ? `This Agreement shall be governed by the laws of ${sanitizeJurisdictionForStarterGoverningLaw(draft.jurisdiction)}, without regard to conflict-of-law principles.`
+        : premiumDeliverable
+          ? lawBlockPremium
+          : `This Agreement shall be governed by the laws of ${nz(draft.jurisdiction)}, without regard to conflict-of-law principles.`;
+  lines.push(
+    premiumSectionHeading(sectionNum++, "Governing Law", premiumDeliverable),
+    lawLineStarter,
     "",
-    premiumSectionHeading(5, "Termination", premiumDeliverable),
+    premiumSectionHeading(sectionNum++, "Termination", premiumDeliverable),
     termNotice,
     "",
   );
+  if (starterMultiParty) {
+    lines.push(
+      premiumSectionHeading(sectionNum++, "Electronic Signatures", false),
+      renderClausePrimitive("electronic_signatures", {}),
+      "",
+    );
+  }
   if (more) {
     if (premiumDeliverable) lines.push("");
     lines.push(
-      premiumSectionHeading(6, "Additional Terms", premiumDeliverable),
+      premiumSectionHeading(sectionNum++, "Additional Terms", premiumDeliverable),
       starterPreview ? compressStarterAdditionalTerms(more) : more,
       "",
     );
   }
   lines.push(AGREEMENT_PREVIEW_ESIGN_NOTICE, "");
-  const collapsed = collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
-  // Starter preview: humanize internal-process phrasing for customer-facing prose.
-  return starterPreview ? sanitizeStarterPreviewProse(collapsed) : collapsed;
+  let collapsed = collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
+  if (starterPreview) {
+    collapsed = sanitizeStarterPreviewProse(collapsed);
+  }
+  return collapsed;
 }
 
 /**
@@ -663,7 +707,15 @@ function applyAgreementPreviewPlaceholderGate(
   options: AgreementPreviewBuildOptions | undefined,
   surface: string,
 ): string {
-  const gate = finalizeUserVisibleAgreementPlainText(text, {
+  const tier = surface.includes("starter") ? "starter" : "premium";
+  const quality = finalizeAgreementOutput(text, {
+    intakeRaw: options?.intakeText ?? null,
+    partyNames: (draft.parties || []).map((p) => p.name),
+    agreementFamily: draft.agreement_family ?? null,
+    surface,
+    tier,
+  });
+  const gate = finalizeUserVisibleAgreementPlainText(quality.text, {
     intakeRaw: options?.intakeText ?? null,
     partyNames: (draft.parties || []).map((p) => p.name),
     agreementFamily: draft.agreement_family ?? null,
