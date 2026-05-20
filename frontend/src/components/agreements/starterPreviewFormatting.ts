@@ -6,6 +6,26 @@ const NUMBERED_HEADING_LINE_RE = /^(\d+)\.\s+(.+)$/;
 const MALFORMED_DOUBLE_NUM_RE = /^(\d+)\.\s+(\d+)\.\s+(.+)$/;
 const BLANK_NUMBERED_LINE_RE = /^(\d+)\.\s*$/;
 const ESIGN_LINE_RE = /executed electronically via lawdog/i;
+const ALL_CAPS_TITLE_RE = /^[A-Z][A-Z0-9\s/&.,'-]{4,80}$/;
+const INLINE_TITLE_PREAMBLE_RE = /^([A-Z][A-Z0-9\s/&.,'-]{4,72}?)\s+(This Agreement\b[\s\S]*)$/;
+const INLINE_SECTION_RE = /([.!?])\s+(\d+\.\s+[A-Z])/g;
+
+/**
+ * Repair collapsed inline layout before block normalization (production blob cases).
+ */
+export function repairInlineCollapsedStarterLayout(text: string): string {
+  let t = (text || "").replace(/\r\n/g, "\n");
+  t = t.replace(INLINE_SECTION_RE, "$1\n\n$2");
+  const lines = t.split("\n");
+  if (lines.length > 0) {
+    const m = lines[0].trim().match(INLINE_TITLE_PREAMBLE_RE);
+    if (m) {
+      lines.splice(0, 1, m[1].trim(), m[2].trim());
+      t = lines.join("\n");
+    }
+  }
+  return t;
+}
 
 /**
  * Repair lines like "4. 5. Termination" → "5. Termination" (drops empty leading number).
@@ -74,6 +94,9 @@ export function normalizeStarterPreviewBlockLayout(text: string): string {
       flush();
       continue;
     }
+    if (ALL_CAPS_TITLE_RE.test(trimmed) && buf.length > 0) {
+      flush();
+    }
     const isHeading = NUMBERED_HEADING_LINE_RE.test(trimmed) && trimmed.length < 90;
     const isEsign = ESIGN_LINE_RE.test(trimmed);
     if (isHeading || isEsign) {
@@ -93,5 +116,11 @@ export function normalizeStarterPreviewBlockLayout(text: string): string {
 
 /** Starter preview final pass: structure + numbering without collapsing intra-paragraph newlines. */
 export function formatStarterPreviewForDisplay(text: string): string {
-  return normalizeStarterPreviewBlockLayout(text);
+  return normalizeStarterPreviewBlockLayout(repairInlineCollapsedStarterLayout(text));
+}
+
+/** True when text has starter-style section breaks suitable for review UI. */
+export function starterPreviewHasParagraphSectionBreaks(text: string): boolean {
+  const t = (text || "").replace(/\r\n/g, "\n");
+  return /\n\n\d+\.\s+/m.test(t) && !/\bSERVICES AGREEMENT This Agreement\b/i.test(t);
 }

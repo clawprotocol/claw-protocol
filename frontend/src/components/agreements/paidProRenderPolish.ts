@@ -5,6 +5,7 @@
 import { hashPremiumDocText, premiumPolishCacheKey } from "../../lib/premiumDocFingerprint";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
+import { shouldSkipPaidProPolish } from "./agreementDocumentSurfacePolicy";
 import {
   isCanonicalCommittedText,
   isIdempotentPolishOutput,
@@ -113,6 +114,36 @@ export function applyPaidProRenderPolish(
   opts?: { surface?: string; skipCache?: boolean; mode?: "commit" | "validate_only"; forceCommit?: boolean },
 ): PaidProRenderPolishResult {
   const surface = opts?.surface ?? "unknown";
+  if (shouldSkipPaidProPolish({ surface })) {
+    const intakeEmails = extractIntakeEmailsOrdered(intakeRaw);
+    return {
+      text: text || "",
+      contactSub: {
+        text: text || "",
+        replacedEmailCount: 0,
+        unresolvedEmailTokens: [],
+        intakeContactCount: intakeEmails.length,
+      },
+      agreementPolish: {
+        recital: { applied: false, partyCount: 0, confidence: "high", reason: "starter_surface_blocked" },
+        signature: { replacedCount: 0 },
+        enterprise: {
+          effectiveDateAdded: false,
+          disputeWindowAdded: false,
+          uptimeTargetAdded: false,
+          survivalPolished: false,
+          attorneysFeesAdded: false,
+        },
+      },
+      emailGuard: {
+        originalEmailCount: intakeEmails.length,
+        finalExactEmailCount: intakeEmails.filter((e) => (text || "").includes(e)).length,
+        mutatedEmailCount: 0,
+        mutatedSamples: [],
+        repairedCount: 0,
+      },
+    };
+  }
   const polishMode = resolveCanonicalPolishMode(text, opts);
   const baseText = stripCanonicalCommitMarker(text);
   const docHash = hashPremiumDocText(baseText);

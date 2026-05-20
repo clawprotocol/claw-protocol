@@ -49,7 +49,10 @@ import { finalizePremiumIdentityCorpusInPreview } from "./premiumIdentityCorpusP
 import { finalizePartyDisplayNameForUserFacing } from "../../agreement/partyNameDisplayCasing";
 import { stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
 import { stripDuplicateSignatureBlocksForPreview } from "./signaturePreviewArchitecture";
-import { formatStarterPreviewForDisplay } from "./starterPreviewFormatting";
+import {
+  formatStarterPreviewForDisplay,
+  starterPreviewHasParagraphSectionBreaks,
+} from "./starterPreviewFormatting";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
 import { formatMilestonePaymentTermsFromIntake } from "./intakeCurrencyParse";
 import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
@@ -712,21 +715,44 @@ function applyAgreementPreviewPlaceholderGate(
   surface: string,
 ): string {
   const tier = surface.includes("starter") ? "starter" : "premium";
-  const quality = finalizeAgreementOutput(text, {
+  let working = text;
+  if (tier === "starter") {
+    working = formatStarterPreviewForDisplay(working);
+  }
+  const quality = finalizeAgreementOutput(working, {
     intakeRaw: options?.intakeText ?? null,
     partyNames: (draft.parties || []).map((p) => p.name),
     agreementFamily: draft.agreement_family ?? null,
     surface,
     tier,
   });
-  const gate = finalizeUserVisibleAgreementPlainText(quality.text, {
+  let display = tier === "starter" ? formatStarterPreviewForDisplay(quality.text) : quality.text;
+  const gate = finalizeUserVisibleAgreementPlainText(display, {
     intakeRaw: options?.intakeText ?? null,
     partyNames: (draft.parties || []).map((p) => p.name),
     agreementFamily: draft.agreement_family ?? null,
     surface,
   });
   if (!gate.ok) return PLACEHOLDER_SAFETY_PREVIEW_BLOCKED;
+  if (tier === "starter" && !starterPreviewHasParagraphSectionBreaks(gate.text)) {
+    return formatStarterPreviewForDisplay(gate.text);
+  }
   return gate.text;
+}
+
+/** Production review UI entry for free/starter tier — always paragraph-preserving. */
+export function buildStarterAgreementPreviewForReview(
+  draft: ParsedDraftShape,
+  options?: AgreementPreviewBuildOptions,
+): string {
+  const draftForBuild =
+    (options?.intakeText || "").trim().length > 0
+      ? enrichStarterPreviewPartiesFromIntake(draft, options?.intakeText)
+      : draft;
+  return buildAgreementPreviewText(
+    { ...draftForBuild },
+    { ...options, starterPreview: true, premiumDeliverablePreview: false },
+  );
 }
 
 /**

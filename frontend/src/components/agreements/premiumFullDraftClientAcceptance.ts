@@ -4,10 +4,9 @@
  */
 
 import {
-  finalizeUserVisibleAgreementPlainText,
+  analyzeTemplatePlaceholderFragments,
   resolvePlaceholderPartyNames,
 } from "./agreementTemplatePlaceholderSafety";
-import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const BANNED_SUBSTRINGS = [
@@ -128,29 +127,24 @@ export function rejectPremiumBodyForProRender(
   }
   const uniq = [...new Set(reasons)];
   if (uniq.length > 0) return { ok: false, reasons: uniq };
+  const bodyTrim = (body || "").trim();
   const intakeRaw = ((opts?.intakeText ?? "") || "").trim() || (opts?.intakeLower ?? "");
   const partyNames = resolvePlaceholderPartyNames(
     {
       intakeRaw,
       partyNames: opts?.partyNames ?? null,
     },
-    (body || "").trim(),
+    bodyTrim,
   );
-  let normalized = (body || "").trim();
-  normalized = applyPaidProRenderPolish(normalized, intakeRaw, partyNames, {
-    surface: "rejectPremiumBodyForProRender",
-    mode: "validate_only",
-  }).text;
-  const ph = finalizeUserVisibleAgreementPlainText(normalized, {
+  const remainingDetail = analyzeTemplatePlaceholderFragments(bodyTrim, {
     intakeRaw,
     partyNames,
-    agreementFamily: null,
-    surface: "rejectPremiumBodyForProRender",
   });
-  if (!ph.ok) {
+  const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
+  if (remainingFatal.length > 0) {
     return {
       ok: false,
-      reasons: ph.remainingFatal.slice(0, 12).map((x) => `placeholder:${x.slice(0, 48)}`),
+      reasons: remainingFatal.slice(0, 12).map((x) => `placeholder:${x.slice(0, 48)}`),
     };
   }
   return { ok: true, reasons: [] };

@@ -99,6 +99,16 @@ describe("rejectPremiumDegradedFiller", () => {
 });
 
 describe("rejectPremiumBodyForProRender", () => {
+  it("is validate-only and does not mutate the input string", () => {
+    const body =
+      "SOFTWARE MSA\n\nOperative milestone payment terms of $187,500.\n\n" +
+      "ethan.cole@ironcladsg.com\nmaya.bennett@harborlinedata.com\n";
+    const snapshot = body;
+    const r = rejectPremiumBodyForProRender(body, { intakeLower: "texas", intakeText: body });
+    expect(body).toBe(snapshot);
+    expect(r.ok).toBe(true);
+  });
+
   it("does not use schedule_a_filler when the document is long and operative (Schedule A may be a stub line)", () => {
     const intro =
       "SOFTWARE / WEB DEVELOPMENT MSA\n\n" +

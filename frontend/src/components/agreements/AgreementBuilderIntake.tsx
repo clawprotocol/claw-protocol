@@ -164,6 +164,7 @@ import { normalizeParsedDraftLegalConcepts } from "./intakeDraftLegalNormalize";
 import {
   buildAgreementPreviewText,
   buildAgreementPreviewTextCore,
+  buildStarterAgreementPreviewForReview,
   collapseDuplicateEsignNoticesInFullPreview,
   hydrateIdentityPlaceholdersInAgreementPreviewPlain,
 } from "./agreementPreviewFromDraft";
@@ -2145,9 +2146,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumSendPathUnlocked ||
         premiumPersistedFlowActive
       );
+      if (starterPreview) {
+        return buildStarterAgreementPreviewForReview(d, { intakeText: debouncedStepBuffer });
+      }
       return buildAgreementPreviewText(d, {
-        starterPreview,
-        premiumDeliverablePreview: !starterPreview,
+        starterPreview: false,
+        premiumDeliverablePreview: true,
         intakeText: debouncedStepBuffer,
       });
     },
@@ -7538,6 +7542,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setDraftNowCommitted(true);
           setPreviewPaneRevealed(true);
         } else {
+          const existingPreview = agreementDocumentTextRef.current.trim();
+          const localPreview = buildStarterAgreementPreviewForReview(parsed, {
+            intakeText: (finalTranscriptRef.current || intakeCombined).trim(),
+          });
+          if (localPreview.trim()) {
+            agreementDocumentDirtyRef.current = false;
+            if (!existingPreview || localPreview.length >= existingPreview.length) {
+              setAgreementDocumentText(localPreview);
+            }
+            setReviewDocRefreshTick((n) => n + 1);
+          }
           commitFreeDraftForReview({ source: "basic_parse_timeout" });
         }
         if (import.meta.env.PROD) {

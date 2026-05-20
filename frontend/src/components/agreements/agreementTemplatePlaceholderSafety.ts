@@ -12,6 +12,8 @@ import { resolveIntakeEmailForContactSlot } from "./paidProIntakeContactSubstitu
 import { buildPartyEntries, normalizeSignatureBlockHeadings } from "./paidProAgreementPolish";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import { isCanonicalCommittedText, stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
+import { isStarterDocumentSurface } from "./agreementDocumentSurfacePolicy";
+import { formatStarterPreviewForDisplay } from "./starterPreviewFormatting";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -1011,18 +1013,59 @@ export function analyzeTemplatePlaceholderFragments(
   );
 }
 
+/** Scan-only placeholder gate for starter/free surfaces — never mutates document text. */
+export function inspectStarterUserVisibleAgreementPlainText(
+  text: string,
+  ctx: PlaceholderSafetyContext,
+): PlaceholderSafetyOutcome {
+  const intakeRaw = (ctx.intakeRaw ?? "").trim();
+  const display = formatStarterPreviewForDisplay(stripCanonicalCommitMarker(text));
+  const partyResolution = resolvePlaceholderPartyNamesWithMeta(
+    { ...ctx, intakeRaw },
+    display,
+  );
+  const scanCtx = { intakeRaw, partyNames: partyResolution.names };
+  const remainingDetail = analyzeTemplatePlaceholderFragments(display, scanCtx);
+  const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
+  const remaining = [...new Set(remainingDetail.map((d) => d.token))].slice(0, 40);
+  const ok = remainingFatal.length === 0;
+  logPlaceholderScanResult({
+    surface: ctx.surface,
+    scannedCount: remainingDetail.length,
+    fatalCount: remainingFatal.length,
+    nonfatalCount: remainingDetail.length - remainingFatal.length,
+    repairedCount: 0,
+    bodyLen: display.length,
+    partyCount: partyResolution.partyCount,
+    ok,
+    anchorsFound: partyResolution.anchorsFound,
+    sources: partyResolution.sources,
+  });
+  return {
+    ok,
+    text: display,
+    repaired: [],
+    remaining,
+    remainingFatal,
+    remainingDetail,
+    partyResolution,
+  };
+}
+
 export function finalizeUserVisibleAgreementPlainText(
   text: string,
   ctx: PlaceholderSafetyContext,
 ): PlaceholderSafetyOutcome {
   const intakeRaw = (ctx.intakeRaw ?? "").trim();
+  if (isStarterDocumentSurface({ surface: ctx.surface })) {
+    return inspectStarterUserVisibleAgreementPlainText(text, ctx);
+  }
   let prepared = prepareAgreementTextForPlaceholderScan(text);
   const partyResolution = resolvePlaceholderPartyNamesWithMeta(
     { ...ctx, intakeRaw },
     prepared,
   );
-  const starterSurface = ctx.surface.includes("starter") || ctx.surface.includes("preview_starter");
-  if (isCanonicalCommittedText(prepared) || starterSurface) {
+  if (isCanonicalCommittedText(prepared)) {
     prepared = stripCanonicalCommitMarker(prepared);
   } else {
     const polish = applyPaidProRenderPolish(prepared, intakeRaw, partyResolution.names, {

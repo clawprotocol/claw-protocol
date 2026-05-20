@@ -9,7 +9,10 @@ import {
 } from "../../../e2e/fixtures/ironcladFivePartyRollout";
 import { buildRecipientAccessMintBody } from "../../agreement/recipientAccessMintPayload";
 import { extractIntakeContacts } from "../../components/agreements/paidProIntakeContactSubstitution";
-import { buildAgreementPreviewText } from "../../components/agreements/agreementPreviewFromDraft";
+import {
+  buildAgreementPreviewText,
+  buildStarterAgreementPreviewForReview,
+} from "../../components/agreements/agreementPreviewFromDraft";
 import { enrichStarterPreviewPartiesFromIntake } from "../../components/agreements/starterOpeningPartyPreserve";
 import { rejectPremiumDegradedFiller } from "../../components/agreements/premiumFullDraftClientAcceptance";
 import { validateAndRepairPremiumAgreementStructure } from "../../components/agreements/premiumAgreementStructure";
@@ -103,13 +106,14 @@ describe("Ironclad five-party fixture", () => {
   });
 
   it("free starter preview preserves paragraph spacing without 4. 5. numbering", () => {
-    const preview = buildAgreementPreviewText(ironcladDraft(), {
-      starterPreview: true,
+    const preview = buildStarterAgreementPreviewForReview(ironcladDraft(), {
       intakeText: IRONCLAD_JOINT_ROLLOUT_INTAKE,
     });
     expect(preview).not.toMatch(/4\.\s+5\./);
+    expect(preview).not.toMatch(/SERVICES AGREEMENT This Agreement/i);
     expect(preview.split("\n\n").length).toBeGreaterThan(4);
-    expect(preview).toMatch(/\n\n\d+\.\s+/);
+    expect(preview).toMatch(/\n\n1\.\s+Scope/i);
+    expect(preview).toMatch(/\n\n2\.\s+Payment/i);
   });
 
   it("free starter preview avoids binding Systems, annual-only payment, and empty sections", () => {

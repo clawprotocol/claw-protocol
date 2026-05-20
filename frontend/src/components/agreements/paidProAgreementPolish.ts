@@ -16,6 +16,7 @@ import {
   buildProOperationalSynthesis,
 } from "./proOperationalSynthesis";
 import { softenProDocumentTone } from "./premiumSituationIntelligence";
+import { shouldSkipPaidProPolish } from "./agreementDocumentSurfacePolicy";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company|DAO|Foundation|Trust)\.?$/i;
@@ -644,6 +645,22 @@ export function polishPaidProAgreementText(
   partyNames: readonly string[] | null | undefined,
   opts?: { surface?: string; explicitPartyList?: boolean; skipInternalMask?: boolean },
 ): PaidProAgreementPolishResult {
+  if (shouldSkipPaidProPolish({ surface: opts?.surface })) {
+    return {
+      text: text || "",
+      log: {
+        recital: { applied: false, partyCount: 0, confidence: "high", reason: "starter_surface_blocked" },
+        signature: { replacedCount: 0 },
+        enterprise: {
+          effectiveDateAdded: false,
+          disputeWindowAdded: false,
+          uptimeTargetAdded: false,
+          survivalPolished: false,
+          attorneysFeesAdded: false,
+        },
+      },
+    };
+  }
   const explicitPartyList = opts?.explicitPartyList ?? (partyNames?.length ?? 0) >= 2;
   const authoritativeFullNames = resolveAuthoritativePartiesForRecitalPolish(partyNames, intakeRaw);
   const parties = buildPartyEntries(authoritativeFullNames);

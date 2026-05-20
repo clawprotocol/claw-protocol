@@ -3,7 +3,7 @@ import {
   IRONCLAD_JOINT_ROLLOUT_INTAKE,
   IRONCLAD_PARTIES,
 } from "../../../e2e/fixtures/ironcladFivePartyRollout";
-import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
+import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
@@ -37,8 +37,7 @@ describe("starterPreviewFormatting", () => {
   });
 
   it("Ironclad free starter has paragraph breaks and no 4. 5. numbering", () => {
-    const preview = buildAgreementPreviewText(ironcladDraft(), {
-      starterPreview: true,
+    const preview = buildStarterAgreementPreviewForReview(ironcladDraft(), {
       intakeText: IRONCLAD_JOINT_ROLLOUT_INTAKE,
     });
     expect(preview).not.toMatch(/4\.\s+5\./);
