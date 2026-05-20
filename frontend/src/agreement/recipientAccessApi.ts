@@ -1,6 +1,12 @@
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
 import { resolveApiBase } from "../lib/clawApi";
 import {
+  buildRecipientAccessMintBody,
+  logRecipientAccessMint422,
+  logRecipientAccessMintPreflight,
+  type RecipientAccessMintBodyInput,
+} from "./recipientAccessMintPayload";
+import {
   normalizeMintRecipientAccessTokenBody,
   type MintRecipientAccessTokenSuccess,
 } from "./recipientAccessMintNormalize";
@@ -97,34 +103,43 @@ export type MintRecipientAccessTokenResult =
 /** Same as POST mint but surfaces HTTP status (e.g. 409) for recoverable routing without guessing from null. */
 export async function mintRecipientAccessTokenResult(
   agreementId: string,
-  body: {
-    mode?: "sign" | "review";
-    role?: "recipient" | "reviewer" | "signer";
-    ttl_seconds?: number;
-    recipient_party_id?: string;
-    inviter_display_name?: string;
-    single_use?: boolean;
-    recipient_subject?: string;
+  body: RecipientAccessMintBodyInput,
+  mintKey?: string,
+  preflight?: {
+    recipientCount?: number;
+    signerCount?: number;
+    hasDocumentText?: boolean;
+    documentTextLen?: number;
+    hasTitle?: boolean;
+    hasPartyLabels?: boolean;
   },
-  mintKey?: string
 ): Promise<MintRecipientAccessTokenResult> {
   const headers: Record<string, string> = {
     ...(clawAgreementHeaders({ "Content-Type": "application/json" }) as Record<string, string>),
   };
   if (mintKey?.trim()) headers["X-Claw-Recipient-Link-Mint-Key"] = mintKey.trim();
+  const payload = buildRecipientAccessMintBody(body);
+  logRecipientAccessMintPreflight({
+    agreementId,
+    body: payload,
+    ...preflight,
+  });
   const res = await fetch(
     `${API_BASE.replace(/\/$/, "")}/api/agreements/${encodeURIComponent(agreementId)}/recipient-access-token`,
-    { method: "POST", headers, body: JSON.stringify(body) }
+    { method: "POST", headers, body: JSON.stringify(payload) },
   );
   const raw = await res.json().catch(() => ({}));
   if (!res.ok) {
+    const d = raw && typeof raw === "object" ? (raw as { detail?: unknown }).detail : undefined;
+    if (res.status === 422) logRecipientAccessMint422(d, res.status);
     const detail =
-      raw && typeof raw === "object" && "detail" in raw
-        ? String((raw as { detail?: unknown }).detail ?? "")
-        : "";
+      typeof d === "string"
+        ? d
+        : d && typeof d === "object"
+          ? JSON.stringify(d).slice(0, 600)
+          : "";
     let code: string | undefined;
     let message: string | undefined;
-    const d = raw && typeof raw === "object" ? (raw as { detail?: unknown }).detail : undefined;
     if (d && typeof d === "object") {
       const o = d as Record<string, unknown>;
       if (typeof o.code === "string") code = o.code;
@@ -146,16 +161,8 @@ export async function mintRecipientAccessTokenResult(
 
 export async function mintRecipientAccessToken(
   agreementId: string,
-  body: {
-    mode?: "sign" | "review";
-    role?: "recipient" | "reviewer" | "signer";
-    ttl_seconds?: number;
-    recipient_party_id?: string;
-    inviter_display_name?: string;
-    single_use?: boolean;
-    recipient_subject?: string;
-  },
-  mintKey?: string
+  body: RecipientAccessMintBodyInput,
+  mintKey?: string,
 ): Promise<{ token: string; expires_in_seconds: number; locked_version_id: string } | null> {
   const r = await mintRecipientAccessTokenResult(agreementId, body, mintKey);
   if (!r.ok) return null;

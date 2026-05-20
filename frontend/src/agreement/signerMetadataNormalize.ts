@@ -3,12 +3,22 @@
  * Never use in controlled-input `onChange` handlers.
  */
 
+import {
+  evaluateSignerMetadataInput,
+  signerMetadataLooksLikeAgreementBody,
+  type SignerMetadataField,
+} from "./signerMetadataSanitizer";
+
 export function normalizeSignerMetadataForSave(
   value: string | null | undefined,
+  field: SignerMetadataField = "signerName",
 ): string | undefined {
-  const s = String(value ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const raw = String(value ?? "");
+  if (!raw.trim()) return undefined;
+  if (signerMetadataLooksLikeAgreementBody(raw)) return undefined;
+  const d = evaluateSignerMetadataInput(raw, "", field);
+  if (!d.accept) return undefined;
+  const s = d.value.replace(/\s+/g, " ").trim();
   return s || undefined;
 }
 

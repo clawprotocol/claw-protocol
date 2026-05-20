@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BORROWER_PRINCIPAL_INSTALLMENTS_SCHEDULE_A,
   extractIntakePayment,
+  formatMilestonePaymentTermsFromIntake,
   formatPaymentCadencePhrase,
   formatPaymentTermsLine,
   normalizeCurrency,
@@ -60,5 +61,18 @@ describe("formatPaymentTermsLine", () => {
     expect(formatPaymentTermsLine({ amount: 100, cadence: "custom_plan", valid: true })).toBe(
       "$100, payment schedule",
     );
+  });
+
+  it("prefers six milestone payments when intake states total + milestones", () => {
+    const intake =
+      "Total contract value is $187,500 paid over 6 milestone payments tied to deployment stages.";
+    expect(formatMilestonePaymentTermsFromIntake(intake)).toMatch(/\$187,500/);
+    expect(formatMilestonePaymentTermsFromIntake(intake)).toMatch(/six milestone payments/i);
+    expect(
+      formatPaymentTermsLine(
+        { amount: 187500, cadence: "annually", valid: true },
+        intake,
+      ),
+    ).toMatch(/six milestone payments/i);
   });
 });

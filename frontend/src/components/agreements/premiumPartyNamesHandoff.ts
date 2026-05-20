@@ -198,14 +198,15 @@ export function persistPremiumRecipientHandoff(patch: {
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
     logReviewLinkSignerMetadataHandoffWrite(payload);
-    const p1e = Boolean(String(party1.email || "").trim());
-    const p2e = Boolean(String(party2.email || "").trim());
-    if (p1e || p2e) {
+    const slots = linearPremiumRecipientSlots(payload, 2 + (partyIndexSlots?.length ?? 0));
+    const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
+    if (withEmail > 0) {
       // eslint-disable-next-line no-console
       console.info("[review-link-recipient-email-handoff-write]", {
-        partySlotsWithEmail: (p1e ? 1 : 0) + (p2e ? 1 : 0),
-        party1HasEmail: p1e,
-        party2HasEmail: p2e,
+        partySlots: slots.length,
+        partySlotsWithEmail: withEmail,
+        party1HasEmail: Boolean(String(party1.email || "").trim()),
+        party2HasEmail: Boolean(String(party2.email || "").trim()),
       });
     }
   } catch {
@@ -275,14 +276,15 @@ export function writePremiumRecipientHandoffExact(
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
     logReviewLinkSignerMetadataHandoffWrite(payload);
-    const p1e = Boolean(String(payload.party1.email || "").trim());
-    const p2e = Boolean(String(payload.party2.email || "").trim());
-    if (p1e || p2e) {
+    const slots = linearPremiumRecipientSlots(payload, 2 + (extra.length ?? 0));
+    const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
+    if (withEmail > 0) {
       // eslint-disable-next-line no-console
       console.info("[review-link-recipient-email-handoff-write]", {
-        partySlotsWithEmail: (p1e ? 1 : 0) + (p2e ? 1 : 0),
-        party1HasEmail: p1e,
-        party2HasEmail: p2e,
+        partySlots: slots.length,
+        partySlotsWithEmail: withEmail,
+        party1HasEmail: Boolean(String(payload.party1.email || "").trim()),
+        party2HasEmail: Boolean(String(payload.party2.email || "").trim()),
       });
     }
   } catch {

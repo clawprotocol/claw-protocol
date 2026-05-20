@@ -142,6 +142,22 @@ export function applyPaidProRenderPolish(
     }
   }
 
+  if (
+    intakeEmails.length > 0 &&
+    guard.finalExactEmailCount === 0 &&
+    guard.mutatedEmailCount > 0
+  ) {
+    const restored = restoreExactIntakeEmails(working, intakeEmails);
+    working = restored.text;
+    repairedCount += restored.repairedCount;
+    guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
+    logPaidProEmailMutationGuard({
+      surface: `${surface}:email_restore_retry`,
+      ...guard,
+      repairedCount,
+    });
+  }
+
   logPaidProEmailMutationGuard({ surface, ...guard, repairedCount });
 
   const structure = validateAndRepairPremiumAgreementStructure(working);

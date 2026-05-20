@@ -204,7 +204,6 @@ export function softenProDocumentTone(text: string): string {
     [/\bdevastating\b/gi, "material"],
     [/\bshall\s+sue\b/gi, "may bring a claim"],
     [/\bguaranteed\s+to\s+win\b/gi, "may be entitled to relief"],
-    [/\bironclad\b/gi, "binding"],
   ];
   for (const [re, rep] of rules) {
     t = t.replace(re, rep);

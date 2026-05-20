@@ -607,9 +607,52 @@ function vs01SeedFailureReason(detail: unknown, httpStatus: number): string {
   return `http_${httpStatus}`;
 }
 
-export async function fetchAgreementVs01SigningSeed(agreementId: string): Promise<AgreementVs01SigningSeedResult> {
+function logVs01SigningSeedPreflight(agreementId: string, draft: AgreementDraft | null): void {
+  if (import.meta.env.MODE === "test") return;
+  const parties = (draft?.parties ?? []) as AgreementParty[];
+  const docLen = Math.max(
+    String((draft as { document_text?: string })?.document_text ?? "").length,
+    String((draft as { premium_full_document_text?: string })?.premium_full_document_text ?? "").length,
+    String((draft as { server_full_document_text?: string })?.server_full_document_text ?? "").length,
+  );
+  const id = agreementId.trim();
+  // eslint-disable-next-line no-console
+  console.info("[vs01-signing-seed-preflight]", {
+    agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,
+    recipientCount: parties.filter((p) => (p.email || "").trim()).length,
+    signerCount: parties.filter((p) =>
+      Boolean(explicitSignerNameForEntity(p.signerName, (p.name || "").trim())),
+    ).length,
+    hasDocumentText: docLen > 0,
+    documentTextLen: docLen || null,
+    hasTitle: Boolean((draft?.title || "").trim()),
+    hasPartyLabels: parties.filter((p) => (p.name || "").trim()).length,
+    payloadKeys: [],
+  });
+}
+
+function logVs01SigningSeed422(detail: unknown, status: number): void {
+  if (import.meta.env.MODE === "test") return;
+  let code: string | undefined;
+  let message: string | undefined;
+  let stage: string | undefined;
+  if (detail && typeof detail === "object") {
+    const o = detail as Record<string, unknown>;
+    if (typeof o.code === "string") code = o.code;
+    if (typeof o.message === "string") message = o.message.slice(0, 400);
+    if (typeof o.stage === "string") stage = o.stage;
+  }
+  // eslint-disable-next-line no-console
+  console.warn("[vs01-signing-seed-422]", { status, code: code ?? null, message: message ?? null, stage: stage ?? null });
+}
+
+export async function fetchAgreementVs01SigningSeed(
+  agreementId: string,
+  draft?: AgreementDraft | null,
+): Promise<AgreementVs01SigningSeedResult> {
   const id = agreementId.trim();
   if (!id) return { ok: false, reason: "missing_agreement_id" };
+  logVs01SigningSeedPreflight(id, draft ?? null);
   try {
     const res = await fetch(
       `${resolveApiBase().replace(/\/$/, "")}/api/agreements/${encodeURIComponent(id)}/vs01-signing-seed`,
@@ -618,13 +661,15 @@ export async function fetchAgreementVs01SigningSeed(agreementId: string): Promis
     const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
       const d = j.detail;
+      if (res.status === 422) logVs01SigningSeed422(d, res.status);
       const reason = vs01SeedFailureReason(d, res.status);
       // eslint-disable-next-line no-console
       console.warn("[agreement-vs01-seed-failed]", {
         agreementId: id,
         status: res.status,
         detail: d,
-        raw: j,
+        code: d && typeof d === "object" ? (d as Record<string, unknown>).code : null,
+        stage: d && typeof d === "object" ? (d as Record<string, unknown>).stage : null,
       });
       return { ok: false, reason, httpStatus: res.status, detail: d };
     }
@@ -665,13 +710,13 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
 }): Promise<boolean> {
   const id = String(options.agreementId || "").trim();
   if (!id) return false;
-  const vs01Seed = await fetchAgreementVs01SigningSeed(id);
-  if (!vs01Seed.ok) return false;
   const resolvedSetup = resolveRecipientSetupForVs01Bridge(
     options.draft,
     options.recipientSetup ?? null,
   );
   const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, resolvedSetup);
+  const vs01Seed = await fetchAgreementVs01SigningSeed(id, merged);
+  if (!vs01Seed.ok) return false;
   logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
   logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
   const bridge = buildAgreementVs01BridgeSession({

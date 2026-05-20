@@ -5515,6 +5515,23 @@ def post_recipient_preview_export_pdf(
     )
 
 
+def _draft_placeholder_intake_corpus(draft: AgreementDraft) -> str:
+    """Best-effort intake allowlist for placeholder validation (party names, emails, purpose)."""
+    parts: List[str] = []
+    for p in draft.parties or []:
+        nm = str(p.name or "").strip()
+        em = str(p.email or "").strip()
+        if nm:
+            parts.append(nm)
+        if em:
+            parts.append(em)
+    for key in ("purpose", "payment_terms", "title", "jurisdiction"):
+        seg = str(getattr(draft, key, None) or "").strip()
+        if seg:
+            parts.append(seg)
+    return "\n".join(parts)
+
+
 def _vs01_signing_seed_error_detail(
     *,
     agreement_id: str,
@@ -5612,10 +5629,11 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
     # --- placeholder_template_safety (pre-render) ---
     party_names_vs = [str(p.name or "").strip() for p in (draft.parties or []) if str(p.name or "").strip()]
     field_key_vs, corpus_vs = primary_agreement_plain_field_and_value(draft)
+    intake_corpus_vs = _draft_placeholder_intake_corpus(draft)
     ok_ph_vs, fixed_corpus_vs, ph_diag_vs = validate_user_visible_agreement_text(
         corpus_vs,
         party_names=party_names_vs,
-        intake_raw="",
+        intake_raw=intake_corpus_vs,
         surface="vs01_signing_seed",
         agreement_family="",
     )

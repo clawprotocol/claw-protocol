@@ -419,27 +419,27 @@ export function SimpleSendPage(props: { agreementId: string }) {
         setSenderFirstVs01SeedFailure(null);
       }
 
-      const vs01Seed = await fetchAgreementVs01SigningSeed(id);
+      const live = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+      const ho = readPremiumRecipientHandoff();
+      const partyCap = Math.min((live?.parties ?? []).length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+      const explicitSetup =
+        live != null && ho && partyCap > 0
+          ? {
+              recipientPartyEmails: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.email || ""),
+              recipientPartySignerNames: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.signerName || ""),
+              recipientPartySignerTitles: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.signerTitle || ""),
+            }
+          : live != null
+            ? {
+                recipient1Email: (live.parties?.[0] as { email?: string } | undefined)?.email,
+                recipient2Email: (live.parties?.[1] as { email?: string } | undefined)?.email,
+              }
+            : null;
+      const recipientSetup = resolveRecipientSetupForVs01Bridge(live, explicitSetup);
+      const finalBridgeDraft = mergeLiveDraftWithRecipientSetupForVs01Bridge(live, recipientSetup);
+      const vs01Seed = await fetchAgreementVs01SigningSeed(id, finalBridgeDraft);
       if (!cancelled && vs01Seed.ok) {
         setSenderFirstVs01SeedFailure(null);
-        const live = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
-        const ho = readPremiumRecipientHandoff();
-        const partyCap = Math.min((live?.parties ?? []).length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
-        const explicitSetup =
-          live != null && ho && partyCap > 0
-            ? {
-                recipientPartyEmails: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.email || ""),
-                recipientPartySignerNames: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.signerName || ""),
-                recipientPartySignerTitles: linearPremiumRecipientSlots(ho, partyCap).map((s) => s.signerTitle || ""),
-              }
-            : live != null
-              ? {
-                  recipient1Email: (live.parties?.[0] as { email?: string } | undefined)?.email,
-                  recipient2Email: (live.parties?.[1] as { email?: string } | undefined)?.email,
-                }
-              : null;
-        const recipientSetup = resolveRecipientSetupForVs01Bridge(live, explicitSetup);
-        const finalBridgeDraft = mergeLiveDraftWithRecipientSetupForVs01Bridge(live, recipientSetup);
         logSignerMetadataBeforeVs01Bridge(finalBridgeDraft, recipientSetup);
         logAgreementVs01RecipientEmailMergeDiagnostics(
           finalBridgeDraft,

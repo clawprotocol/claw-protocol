@@ -36,6 +36,9 @@ const DEGRADED_FALLBACK_BANNED_SUBSTRINGS = [
 const REVIEW_COMPLETION_STUB =
   "specific commercial, payment, and liability terms should be completed in review";
 
+const REPEATED_GOOD_FAITH_FILLER =
+  "the parties shall perform their obligations in good faith and in accordance with this agreement";
+
 export type PremiumClientAcceptanceResult = { ok: boolean; reasons: string[] };
 
 function countLinesContaining(body: string, needleLower: string): number {
@@ -59,6 +62,10 @@ export function rejectPremiumDegradedFiller(body: string): PremiumClientAcceptan
   }
   if (countLinesContaining(body, REVIEW_COMPLETION_STUB) >= 3) {
     reasons.push("degraded_filler:repeated_review_completion_stub");
+  }
+  const goodFaithCount = countLinesContaining(body, REPEATED_GOOD_FAITH_FILLER);
+  if (goodFaithCount > 2) {
+    reasons.push("degraded_filler:repeated_good_faith_clause");
   }
   const uniq = [...new Set(reasons)];
   return { ok: uniq.length === 0, reasons: uniq };

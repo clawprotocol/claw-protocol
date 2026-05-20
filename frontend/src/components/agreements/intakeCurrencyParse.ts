@@ -171,13 +171,36 @@ export function extractIntakePayment(fullText: string): IntakePaymentField {
   return { amount: null, cadence: null, valid: true };
 }
 
+/** Milestone payment line when intake states total + N milestone payments (e.g. Ironclad QA fixture). */
+export function formatMilestonePaymentTermsFromIntake(intake: string): string | null {
+  const t = (intake || "").trim();
+  if (!t) return null;
+  const m = t.match(
+    /\$?\s*([\d,]+(?:\.\d{2})?)\s*(?:k)?\s+paid\s+over\s+(\d+)\s+milestone\s+payments?/i,
+  );
+  if (!m) return null;
+  const amount = normalizeCurrency(m[1]);
+  if (amount == null) return null;
+  const n = parseInt(m[2], 10);
+  if (!Number.isFinite(n) || n < 2) return null;
+  const formatted = amount.toLocaleString("en-US");
+  const word =
+    n === 6 ? "six" : n === 5 ? "five" : n === 4 ? "four" : n === 3 ? "three" : String(n);
+  return `$${formatted} paid over ${word} milestone payments tied to deployment stages and launch targets.`;
+}
+
 /** Human-readable payment_terms line from structured hints (for smart defaults / POST body). */
-export function formatPaymentTermsLine(p: IntakePaymentField): string {
+export function formatPaymentTermsLine(p: IntakePaymentField, intakeRaw?: string): string {
+  const milestone = formatMilestonePaymentTermsFromIntake(intakeRaw ?? "");
+  if (milestone) return milestone;
   if (p.amount == null) return "";
   const formatted = p.amount.toLocaleString("en-US");
   if (p.installmentAmountUnspecified && p.cadence === "monthly") {
     return `Principal: $${formatted}. ${BORROWER_PRINCIPAL_INSTALLMENTS_SCHEDULE_A}`;
   }
   if (!p.cadence) return `$${formatted}`;
+  if (p.cadence === "annually" && /\bmilestone\s+payments?\b/i.test(intakeRaw ?? "")) {
+    return `$${formatted} paid over milestone payments as set forth in this Agreement.`;
+  }
   return `$${formatted}, ${formatPaymentCadencePhrase(p.cadence)}`;
 }

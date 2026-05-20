@@ -629,6 +629,17 @@ export function SimpleCreatePage() {
                     agreementId,
                     draft: primed,
                     premiumSendIntent: resolvedIntent,
+                    recipientSetup: {
+                      recipientPartyEmails: (primed.parties ?? []).map((p) =>
+                        String((p as { email?: string }).email ?? "").trim(),
+                      ),
+                      recipientPartySignerNames: (primed.parties ?? []).map((p) =>
+                        String((p as { signerName?: string }).signerName ?? "").trim(),
+                      ),
+                      recipientPartySignerTitles: (primed.parties ?? []).map((p) =>
+                        String((p as { signerTitle?: string }).signerTitle ?? "").trim(),
+                      ),
+                    },
                     logSource: "create_flow_post_recipient_setup",
                   });
                   if (result.ok) {

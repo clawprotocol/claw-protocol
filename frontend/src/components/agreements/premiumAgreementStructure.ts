@@ -38,6 +38,9 @@ const DISPUTE_SENTENCE_RE =
 const MILESTONE_TABLE_INLINE_RE =
   /\n\s*IMPLEMENTATION MILESTONES\s*\n[\s\S]*?(?=\n\s*\d+\.\d+\s+[A-Z]|\n\s*\d+\.\s+[A-Z]|\n\s*[A-Z][A-Z0-9\s/&-]{4,}\s*\n|$)/gi;
 
+const REPEATED_GOOD_FAITH_FILLER =
+  "The Parties shall perform their obligations in good faith and in accordance with this Agreement.";
+
 const GENERIC_CLAUSE_BY_TOPIC: Record<string, string> = {
   payment:
     "Fees and invoicing follow the payment schedule in this Agreement. Invoices are due within thirty (30) days unless a different period is stated in a schedule.",
@@ -129,19 +132,55 @@ function scrubOrphanEffectiveDateSentence(text: string): { text: string; removed
   return { text: out.replace(/\n{3,}/g, "\n\n"), removed };
 }
 
-/** Remove milestone table blocks embedded inside non-milestone sections (e.g. mid 4.1). */
+/** Drop repeated generic good-faith filler beyond two occurrences. */
+function scrubRepeatedGoodFaithFiller(text: string): { text: string; removed: number } {
+  const low = REPEATED_GOOD_FAITH_FILLER.toLowerCase();
+  let removed = 0;
+  let count = 0;
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    if (line.toLowerCase().includes(low)) {
+      count += 1;
+      if (count > 2) {
+        removed += 1;
+        continue;
+      }
+    }
+    out.push(line);
+  }
+  return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), removed };
+}
+
+/** Remove milestone table blocks embedded inside non-milestone sections (e.g. mid 4.1 or Notices). */
 function scrubMisplacedMilestoneBlocks(text: string): { text: string; removed: number } {
   let removed = 0;
-  const out = text.replace(MILESTONE_TABLE_INLINE_RE, (block) => {
-    const before = text.slice(0, text.indexOf(block));
+  let searchFrom = 0;
+  let out = text;
+  for (;;) {
+    MILESTONE_TABLE_INLINE_RE.lastIndex = searchFrom;
+    const m = MILESTONE_TABLE_INLINE_RE.exec(out);
+    if (!m) break;
+    const block = m[0];
+    const offset = m.index;
+    const before = out.slice(0, offset);
+    const headWindow = before.slice(-600);
+    const inNotices = /\bnotices\b/i.test(headWindow) && !/\bimplementation\s+milestones\b/i.test(
+      headWindow.split("\n").slice(-2).join("\n"),
+    );
     const sections = parseAgreementSections(before + block);
     const last = sections[sections.length - 1];
-    if (last && (last.kind === "milestones" || /milestone|implementation\s+schedule/i.test(last.heading))) {
-      return block;
+    const inMilestoneSection =
+      last &&
+      (last.kind === "milestones" || /^(?:\d+\.\s+)?implementation\s+milestones\b/i.test(last.heading.trim()));
+    if (!inMilestoneSection || inNotices) {
+      out = out.slice(0, offset) + "\n" + out.slice(offset + block.length);
+      removed += 1;
+      searchFrom = offset;
+      continue;
     }
-    removed += 1;
-    return "\n";
-  });
+    searchFrom = offset + block.length;
+  }
   return { text: out.replace(/\n{3,}/g, "\n\n"), removed };
 }
 
@@ -227,6 +266,10 @@ export function validatePremiumAgreementStructure(text: string): PremiumStructur
   const milestone = scrubMisplacedMilestoneBlocks(working);
   working = milestone.text;
   if (milestone.removed > 0) repairs.push("misplaced_milestone_block");
+
+  const filler = scrubRepeatedGoodFaithFiller(working);
+  working = filler.text;
+  if (filler.removed > 0) repairs.push(`repeated_good_faith_removed:${filler.removed}`);
 
   const emptySubs = repairEmptyNumberedSubsections(working);
   working = emptySubs.text;

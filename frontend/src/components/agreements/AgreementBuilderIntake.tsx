@@ -398,6 +398,10 @@ import {
   signerMetadataInputRaw,
 } from "../../agreement/signerMetadataNormalize";
 import {
+  evaluateSignerMetadataInput,
+  logSignerMetadataInputRejected,
+} from "../../agreement/signerMetadataSanitizer";
+import {
   shouldBlockIntakeReviewDisplayPhaseForVs01,
   shouldSuppressReviewPipelineTelemetry,
 } from "../../vs01/vs01SignatureDashboardFlow";
@@ -1253,6 +1257,17 @@ function CreateFlowSendRecipientsPanel({
         const signerNameVal = signerMetadataInputRaw(partySignerNames[idx]);
         const signerTitleVal = signerMetadataInputRaw(partySignerTitles[idx]);
         const onSignerNameChange = (v: string) => {
+          const prev = signerMetadataInputRaw(partySignerNames[idx]);
+          const decision = evaluateSignerMetadataInput(v, prev, "signerName");
+          if (!decision.accept) {
+            logSignerMetadataInputRejected({
+              field: "signerName",
+              partyIndex: idx,
+              reason: decision.reason,
+              rawLen: v.length,
+            });
+            return;
+          }
           logSignerMetadataInputChange({ surface: "recipient_setup", field: "signerName", partyIndex: idx, raw: v });
           setPartySignerNames((prev) => {
             const next = [...prev];
@@ -1280,6 +1295,17 @@ function CreateFlowSendRecipientsPanel({
           });
         };
         const onSignerTitleChange = (v: string) => {
+          const prev = signerMetadataInputRaw(partySignerTitles[idx]);
+          const decision = evaluateSignerMetadataInput(v, prev, "signerTitle");
+          if (!decision.accept) {
+            logSignerMetadataInputRejected({
+              field: "signerTitle",
+              partyIndex: idx,
+              reason: decision.reason,
+              rawLen: v.length,
+            });
+            return;
+          }
           logSignerMetadataInputChange({ surface: "recipient_setup", field: "signerTitle", partyIndex: idx, raw: v });
           setPartySignerTitles((prev) => {
             const next = [...prev];

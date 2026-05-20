@@ -154,7 +154,7 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   }
 
   if (!(next.payment_terms || "").trim()) {
-    const fromStructured = formatPaymentTermsLine(payment);
+    const fromStructured = formatPaymentTermsLine(payment, intakeText);
     const structuredPayment = structured.payment.trim();
     /**
      * Semantic suppression: never let confidentiality / NDA tokens leak into Payment Terms
