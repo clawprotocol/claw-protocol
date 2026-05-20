@@ -1,0 +1,42 @@
+{
+  "run_id": "YYYY-MM-DD-run-name",
+  "date": "",
+  "tester": "",
+  "environment": "staging",
+  "commit": "",
+  "api_base": "",
+  "app_url": "",
+  "devices": [],
+  "summary": { "pass": 0, "fail": 0, "blocked": 0, "skip": 0 },
+  "matrix_rollup": {
+    "premium_vs_free": { "pass": 0, "fail": 0, "notes": "" },
+    "checkout_restore": { "pass": 0, "fail": 0, "notes": "" },
+    "signing_flow": { "pass": 0, "fail": 0, "notes": "" },
+    "recipient_experience": { "pass": 0, "fail": 0, "notes": "" },
+    "export_pdf": { "pass": 0, "fail": 0, "notes": "" },
+    "mobile": { "pass": 0, "fail": 0, "notes": "" },
+    "genesis_referral": { "pass": 0, "fail": 0, "notes": "" },
+    "failure_recovery": { "pass": 0, "fail": 0, "notes": "" }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "saas-001",
+      "status": "pass",
+      "aha_score": 4,
+      "notes": ""
+    }
+  ],
+  "defects": [
+    {
+      "id": "BUG-001",
+      "severity": "P1",
+      "summary": "",
+      "repro": ""
+    }
+  ],
+  "sign_off": {
+    "top_10_manual_complete": false,
+    "p0_open": false,
+    "release_smoke_run": false
+  }
+}

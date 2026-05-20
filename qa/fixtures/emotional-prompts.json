@@ -1,0 +1,42 @@
+[
+  {
+    "id": "emo-001",
+    "title": "Co-founder breakup",
+    "prompt": "My cofounder and I are splitting badly. I need something that says he can't use our customer list or code. I'm scared he'll launch a copycat this month.",
+    "tags": ["emotional", "founder", "nda"],
+    "premium_expectations": ["Calm professional tone", "Realistic remedies", "No fear-mongering"],
+    "risk_notes": ["Urgency may produce overbroad restrictions"]
+  },
+  {
+    "id": "emo-002",
+    "title": "Family loan",
+    "prompt": "Lending my brother $25k for his food truck. Mom says get it in writing. I don't want to ruin Thanksgiving.",
+    "tags": ["emotional", "settlement"],
+    "premium_expectations": ["Plain language", "Repayment schedule", "Default without drama"],
+    "risk_notes": ["Secured interest likely omitted by user"]
+  },
+  {
+    "id": "emo-003",
+    "title": "Harassment-adjacent workplace",
+    "prompt": "Employee complained about manager comments. HR wants a mutual release if they leave voluntarily. Sensitive — keep neutral.",
+    "tags": ["emotional", "settlement", "hr"],
+    "premium_expectations": ["Neutral legal tone", "No admission clause", "Confidentiality balanced"],
+    "risk_notes": ["High human review bar — not DIY litigation"]
+  },
+  {
+    "id": "emo-004",
+    "title": "Creator burned by brand",
+    "prompt": "Brand ghosted me after I posted. They used my video in paid ads anyway. I want damages lol. Need contract for NEXT time.",
+    "tags": ["emotional", "creator"],
+    "premium_expectations": ["Forward-looking usage caps", "Payment holdback", "Takedown/remedy language"],
+    "risk_notes": ["User wants backward damages — scope discipline"]
+  },
+  {
+    "id": "emo-005",
+    "title": "Vendor ransomware scare",
+    "prompt": "Vendor had breach. Our customers angry. Need a quick addendum about security and liability before we renew.",
+    "tags": ["emotional", "saas"],
+    "premium_expectations": ["Security exhibit hooks", "Breach notification", "Liability cap context"],
+    "risk_notes": ["May overpromise security outcomes"]
+  }
+]

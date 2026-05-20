@@ -158,6 +158,34 @@ def _generic_title(title: str, intake_norm: str) -> bool:
     return False
 
 
+def _brief_has_exclusive_scope_conflict(contradiction_notes: Optional[List[str]]) -> bool:
+    if not contradiction_notes:
+        return False
+    return any("exclusive vs non-exclusive" in (n or "").lower() for n in contradiction_notes)
+
+
+def _operative_exclusive_and_nonexclusive_binding(doc_low: str) -> bool:
+    """
+    True when the document appears to grant both exclusive and non-exclusive rights operatively.
+    Acknowledgment-only mentions of the conflict do not count.
+    """
+    has_non_exclusive = bool(
+        re.search(
+            r"\bnon[-\s]?exclusive\s+(?:license|right|grant)s?\b|"
+            r"\b(?:grants?|licenses?|licensed)\b[^.\n]{0,180}\bnon[-\s]?exclusive\b",
+            doc_low,
+        )
+    )
+    has_exclusive_grant = bool(
+        re.search(
+            r"(?<![a-z-])\bexclusive\s+(?:license|right|grant)s?\b|"
+            r"\b(?:grants?|licenses?|licensed)\b[^.\n]{0,180}(?<![a-z-])\bexclusive\b",
+            doc_low,
+        )
+    )
+    return has_non_exclusive and has_exclusive_grant
+
+
 def _irrelevant_non_solicit(doc_low: str, intake_low: str) -> bool:
     if re.search(r"\bnon[-\s]?solicit", doc_low) and not re.search(
         r"\b(?:non[-\s]?solicit|no[-\s]?hire|solicitation\s+of\s+(?:staff|employees?))\b",
@@ -245,6 +273,7 @@ def evaluate_premium_full_draft_quality(
     draft_family: str,
     draft_document_text: str,
     scenario_category: str,
+    contradiction_notes: Optional[List[str]] = None,
 ) -> Tuple[bool, List[str]]:
     """
     Returns (ok, rejection_reasons). Empty reasons => ok.
@@ -311,6 +340,15 @@ def evaluate_premium_full_draft_quality(
         ):
             reasons.append("irrelevant_enterprise_boilerplate")
 
+    exclusive_conflict_in_brief = _brief_has_exclusive_scope_conflict(contradiction_notes)
+    exclusive_conflict_in_intake = bool(
+        re.search(r"\bexclusive\b", intake_low) and re.search(r"\bnon-?exclusive\b", intake_low)
+    )
+    if (exclusive_conflict_in_brief or exclusive_conflict_in_intake) and _operative_exclusive_and_nonexclusive_binding(
+        doc_low
+    ):
+        reasons.append("contradictory_exclusive_and_nonexclusive_operative_grants")
+
     # Hard drift checks: do not let generic shells pass as "Pro" (wrong state, placeholder parties).
     if re.search(r"\boklahoma\b", intake_low) and "delaware" not in intake_low:
         if re.search(
@@ -350,6 +388,8 @@ def premium_full_draft_repair_system_prompt() -> str:
         "(logo/design vs founder equity vs loan) and do not substitute a generic commercial services or ‘review’ shell. "
         "Rewrite as a complete, tailored agreement for the user’s actual scenario. Do not use a fixed template. "
         "Do not include internal notes. Do not include irrelevant boilerplate. Address all material user asks in operative language.\n"
+        "If `generation_intelligence_brief` is present, follow its situation_line, tone_directive, and must_address; resolve "
+        "contradiction_notes with one coherent path. Use specific key_terms_found labels tied to stated facts.\n"
         "Output ONLY a single JSON object (no markdown, no code fences) with EXACT keys:\n"
         '{ "title": string, "agreement_family": string, "document_text": string, '
         '"key_terms_found": string array, "missing_material_info": string array }\n'
@@ -361,6 +401,8 @@ def premium_full_draft_repair_system_prompt() -> str:
         "- `key_terms_found`: 6–18 short labels for what you actually included.\n"
         "- `missing_material_info`: only true material unknowns after your rewrite, else [].\n"
         "- Preserve facts from the user materials; do not invent party names, amounts, or dates not supplied.\n"
+        "- If intake flagged exclusive vs non-exclusive conflict: choose **one** binding grant in operative text; "
+        "do not grant both exclusive and non-exclusive rights as binding law in the same document.\n"
     )
 
 

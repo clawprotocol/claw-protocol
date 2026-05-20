@@ -1,0 +1,42 @@
+[
+  {
+    "id": "creator-001",
+    "title": "UGC whitelisting",
+    "prompt": "UGC license for TikTok and Reels. Brand can whitelist ads for 90 days. Creator keeps moral rights for portfolio.",
+    "tags": ["creator", "licensing"],
+    "premium_expectations": ["Platform scope", "Paid usage window", "Credit/portfolio carve-out"],
+    "risk_notes": ["Moral rights US nuance"]
+  },
+  {
+    "id": "creator-002",
+    "title": "Affiliate disclosure",
+    "prompt": "Affiliate agreement for my newsletter. 20% rev share on LawDog Pro signups. FTC disclosure required in every email.",
+    "tags": ["creator", "affiliate", "genesis"],
+    "premium_expectations": ["Commission definition", "Disclosure duties", "Tracking attribution mention"],
+    "risk_notes": ["Meta — align with Genesis terms separately"]
+  },
+  {
+    "id": "creator-003",
+    "title": "Podcast sponsorship",
+    "prompt": "3-episode podcast sponsorship. Host reads ad script verbatim. Exclusivity in fintech category 60 days.",
+    "tags": ["creator"],
+    "premium_expectations": ["Exclusivity scope", "Approval of script changes", "Make-good episodes"],
+    "risk_notes": []
+  },
+  {
+    "id": "creator-004",
+    "title": "Talent release event",
+    "prompt": "Appearance release for conference photography and promotional video worldwide in perpetuity for event sponsor.",
+    "tags": ["creator", "licensing"],
+    "premium_expectations": ["Perpetuity flagged", "Suggests time/territory limits", "Consideration clear"],
+    "risk_notes": ["Perpetual global grant is aggressive"]
+  },
+  {
+    "id": "creator-005",
+    "title": "Manager commission",
+    "prompt": "Talent manager gets 15% of brand deals for 2 years after contract ends for deals introduced during term.",
+    "tags": ["creator", "consulting"],
+    "premium_expectations": ["Tail commission defined", "Sunset period", "Deal introduction definition"],
+    "risk_notes": ["Post-term commissions vary by state"]
+  }
+]

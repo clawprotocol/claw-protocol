@@ -1,0 +1,42 @@
+[
+  {
+    "id": "short-001",
+    "title": "Two-sentence NDA",
+    "prompt": "NDA between me and my freelancer Alex. 2 years, California.",
+    "tags": ["nda", "short", "contractor"],
+    "premium_expectations": ["Named parties", "Mutual or one-way NDA clarity", "Term and governing law"],
+    "risk_notes": ["May default mutual when user meant one-way"]
+  },
+  {
+    "id": "short-002",
+    "title": "SaaS one-liner",
+    "prompt": "Terms for my B2B SaaS. No refunds. Monthly subscription.",
+    "tags": ["saas", "short"],
+    "premium_expectations": ["Subscription/autorenewal language", "Limitation of liability", "Acceptable use"],
+    "risk_notes": ["Vague on data processing / DPA"]
+  },
+  {
+    "id": "short-003",
+    "title": "Consulting flat fee",
+    "prompt": "Consulting agreement. $5k fixed. Deliverables in 30 days.",
+    "tags": ["consulting", "short"],
+    "premium_expectations": ["Payment timing", "IP assignment or license", "Termination"],
+    "risk_notes": ["Missing expense reimbursement stance"]
+  },
+  {
+    "id": "short-004",
+    "title": "Creator shoutout",
+    "prompt": "Paid Instagram post for my skincare brand. $800. One reel + story.",
+    "tags": ["creator", "short"],
+    "premium_expectations": ["Deliverables", "Approval window", "FTC disclosure hint"],
+    "risk_notes": ["Platform policy not legal advice"]
+  },
+  {
+    "id": "short-005",
+    "title": "Settlement one-liner",
+    "prompt": "We owe each other money from a failed partnership. Want a clean release.",
+    "tags": ["settlement", "short", "emotional"],
+    "premium_expectations": ["Mutual release framing", "Payment schedule placeholder", "No admission"],
+    "risk_notes": ["Needs human review for amounts"]
+  }
+]

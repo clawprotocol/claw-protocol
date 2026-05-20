@@ -12,6 +12,7 @@ from backend.agreements.premium_full_draft_quality_gate import (
     build_free_reference_blob,
     evaluate_premium_full_draft_quality,
     premium_full_draft_repair_system_prompt,
+    _operative_exclusive_and_nonexclusive_binding,
 )
 from backend.main import app
 from backend.usage_economics import store as usage_economics_store_mod
@@ -204,6 +205,50 @@ class TestEvaluatePremiumFullDraftQuality:
         )
         assert ok is False
         assert any("irrelevant_reverse_engineering_boilerplate" in r for r in reasons)
+
+    def test_rejects_operative_exclusive_and_nonexclusive_grants(self):
+        contra_intake = (
+            "License my logo non-exclusive worldwide forever. "
+            "Also they get exclusive rights in North America. It's fine."
+        )
+        doc = _long_commercial_body(
+            "\nLicensor grants a non-exclusive license worldwide. "
+            "Licensor also grants exclusive rights in North America in perpetuity.\n"
+        )
+        notes = ["exclusive vs non-exclusive scope — pick one grant"]
+        assert _operative_exclusive_and_nonexclusive_binding(doc.lower())
+        ok, reasons = evaluate_premium_full_draft_quality(
+            intake=contra_intake,
+            context=_ctx(),
+            draft_title="Logo License Agreement",
+            draft_family="licensing",
+            draft_document_text=doc,
+            scenario_category="freelancer_service",
+            contradiction_notes=notes,
+        )
+        assert ok is False
+        assert any("contradictory_exclusive_and_nonexclusive" in r for r in reasons)
+
+    def test_allows_single_grant_when_exclusive_conflict_noted(self):
+        contra_intake = (
+            "License my logo non-exclusive worldwide forever. "
+            "Also they get exclusive rights in North America."
+        )
+        doc = _long_commercial_body(
+            "\nLicensor grants Licensee a non-exclusive worldwide license to use the logo. "
+            "Any exclusive territorial carve-out is excluded unless confirmed in writing.\n"
+        )
+        assert not _operative_exclusive_and_nonexclusive_binding(doc.lower())
+        ok, reasons = evaluate_premium_full_draft_quality(
+            intake=contra_intake,
+            context=_ctx(),
+            draft_title="Logo License Agreement",
+            draft_family="licensing",
+            draft_document_text=doc,
+            scenario_category="freelancer_service",
+            contradiction_notes=["exclusive vs non-exclusive scope — pick one grant"],
+        )
+        assert not any("contradictory_exclusive_and_nonexclusive" in r for r in reasons)
 
 
 def test_premium_full_draft_invokes_repair_on_quality_fail(monkeypatch, tmp_path):

@@ -51,6 +51,7 @@ from backend.agreements.premium_dev_context_leak import (
     sanitize_premium_intake_for_retry,
     serialize_context_clean,
 )
+from backend.agreements.premium_generation_intelligence import build_premium_generation_intelligence_brief
 from backend.agreements.premium_full_draft_quality_gate import (
     build_free_reference_blob,
     build_premium_full_draft_repair_user_payload,
@@ -931,6 +932,18 @@ def _detect_premium_scenario_category(intake: str, agreement_family: str = "") -
     if len(low) < 24:
         return "custom_mixed", ["short_intake"]
 
+    if re.search(
+        r"\b(influencer|ugc|creator|tiktok|instagram|youtube|podcast\s+sponsor|brand\s+deal|"
+        r"whitelisting|paid\s+post|sponsorship)\b",
+        low,
+    ):
+        push("creator_influencer")
+        return "business_commercial", signals
+
+    if re.search(r"\b(saas|subscription|software\s+as\s+a\s+service|api\s+access|platform\s+terms)\b", low):
+        push("saas_platform")
+        return "business_commercial", signals
+
     employment = bool(
         re.search(
             r"\b(employment|at-will|at\s+will|w-2|w2|salary|hourly\s+wage|employee\s+handbook|job\s+offer|position\s+title|"
@@ -1055,6 +1068,17 @@ def _premium_full_draft_system_prompt() -> str:
         "stack-and-dump templates, or unrelated enterprise packs.\n"
         "The reader should feel: “this is a real agreement for my situation, not a rearranged outline.” The draft should feel complete, "
         "fair, and appropriate for the deal type—without padding for its own sake.\n"
+        "**Generation intelligence brief (if present):** When `generation_intelligence_brief` is in the user JSON, treat "
+        "`situation_line`, `tone_directive`, `must_address`, and `contradiction_notes` as binding routing for this run. "
+        "Open with a recital that names **this** deal (who, relationship, commercial purpose) in plain language—not a context-free "
+        "“parties desire to set forth” opener.\n"
+        "**Contradictions:** If `contradiction_notes` is non-empty, choose **one** commercially reasonable interpretation, draft "
+        "operative terms accordingly, and put unresolved forks in `missing_material_info` as short decisions—never encode both "
+        "sides as binding law.\n"
+        "**key_terms_found:** Use **specific** labels when facts allow (e.g. “$5k fixed fee, Net 30” not only “Payment terms”). "
+        "8–16 items covering economics, scope, risk allocation, and lifecycle.\n"
+        "**Signals `creator_influencer` / `saas_platform`:** Calibrate to creator usage/deliverables/FTC-style disclosure hooks or "
+        "SaaS subscription/data/support/SLA patterns respectively—omit unrelated enterprise MSA packs.\n"
         "**Material LawDog Pro bar (not optional for this product):** The output must read as a **signed-ready** commercial agreement, not a reshuffled free outline. "
         "Use the **actual party names and roles** from the intake and `context.parties` (extract from raw text if needed; do not leave generic “Party A/B” when names are knowable). "
         "When payment, fees, or economics are stated, give a **clear numbered payment / compensation section** (e.g. 1. 2. 3. or 5.1 5.2) so terms are scannable. "
@@ -3880,6 +3904,11 @@ def build_premium_full_draft_user_payload_for_airlock(
     scen_cat, scen_sigs = _detect_premium_scenario_category(intake_s, fam_hint)
     user_payload["scenario_category"] = scen_cat
     user_payload["scenario_category_signals"] = scen_sigs[:12]
+    user_payload["generation_intelligence_brief"] = build_premium_generation_intelligence_brief(
+        intake_s,
+        scenario_category=scen_cat,
+        scenario_signals=scen_sigs,
+    )
     if intent_key is not None:
         user_payload["deterministic_premium_intent_key"] = intent_key.value
     if intent_skeleton:
@@ -4016,6 +4045,11 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         repair_body = ""
         out = out_primary
 
+        _brief_for_grade = user_payload.get("generation_intelligence_brief") or {}
+        _contradiction_notes = _brief_for_grade.get("contradiction_notes")
+        if not isinstance(_contradiction_notes, list):
+            _contradiction_notes = None
+
         def _grade_draft(graded: PremiumFullDraftResponse) -> Tuple[bool, List[str]]:
             ok_q, reasons_q = evaluate_premium_full_draft_quality(
                 intake=intake_s,
@@ -4024,6 +4058,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 draft_family=graded.agreement_family,
                 draft_document_text=graded.document_text,
                 scenario_category=scen_cat,
+                contradiction_notes=_contradiction_notes,
             )
             ok_s, reasons_s = evaluate_premium_intent_schema(
                 intent_key, graded.title, graded.document_text

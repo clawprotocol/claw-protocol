@@ -1,0 +1,42 @@
+[
+  {
+    "id": "messy-001",
+    "title": "Typos and missing parties",
+    "prompt": "ok so me and jordan (she/her) did a website thing, need somethin legal that says she cant steal my clients lol. like 1 yr? im in texas shes remote",
+    "tags": ["messy", "contractor", "non-compete"],
+    "premium_expectations": ["Clarifies enforceability limits in TX", "Non-solicit vs non-compete distinction", "Reasonable scope"],
+    "risk_notes": ["Non-compete may be unenforceable — should not over-promise"]
+  },
+  {
+    "id": "messy-002",
+    "title": "Voice-note style SaaS",
+    "prompt": "uh yeah its like notion but for contractors, subscription 29/mo, stripe handles billing, users upload jobsite photos, we need terms asap launching next week",
+    "tags": ["messy", "saas", "mobile"],
+    "premium_expectations": ["User content license", "Privacy/data retention mention", "Subscription terms"],
+    "risk_notes": ["Rush tone may skip indemnity depth"]
+  },
+  {
+    "id": "messy-003",
+    "title": "Agency SOW paste",
+    "prompt": "CLIENT: acme corp maybe?? AGENCY: us (bright pixel llc). scope: meta ads + landing page. budget 12k over 3 months. client keeps delaying feedback. need contract that protects us if they ghost",
+    "tags": ["messy", "agency"],
+    "premium_expectations": ["Client cooperation / delay clause", "Kill fee or pause rights", "IP on deliverables"],
+    "risk_notes": ["Party name ambiguity"]
+  },
+  {
+    "id": "messy-004",
+    "title": "Incomplete influencer deal",
+    "prompt": "influencer deal 3 tiktoks. paid after posting. brand can repost forever??? idk if thats fair",
+    "tags": ["messy", "creator"],
+    "premium_expectations": ["Usage term limits", "Payment trigger defined", "Whitelisting optional"],
+    "risk_notes": ["Forever license flagged as aggressive"]
+  },
+  {
+    "id": "messy-005",
+    "title": "Freelancer payment angst",
+    "prompt": "client owes me 4 invoices, wont reply on slack. want a demand letter style agreement addendum?? or whatever stops this",
+    "tags": ["messy", "freelancer", "emotional"],
+    "premium_expectations": ["Does not pretend to be litigation", "Suggests payment terms / late fees for future", "Professional tone"],
+    "risk_notes": ["User may expect enforceable demand — clarify limits"]
+  }
+]

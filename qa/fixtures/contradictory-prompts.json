@@ -1,0 +1,42 @@
+[
+  {
+    "id": "contra-001",
+    "title": "Exclusive vs non-exclusive",
+    "prompt": "License my logo non-exclusive worldwide forever. Also they get exclusive rights in North America. It's fine.",
+    "tags": ["contradictory", "licensing"],
+    "premium_expectations": ["Flags conflict", "Proposes resolution options", "Does not silently pick one"],
+    "risk_notes": ["May paper over conflict with vague grant"]
+  },
+  {
+    "id": "contra-002",
+    "title": "Refund yes and no",
+    "prompt": "SaaS subscription no refunds ever. Except full refund anytime for any reason. Enterprise only maybe?",
+    "tags": ["contradictory", "saas"],
+    "premium_expectations": ["Asks clarifying tier split", "Clear default for standard tier"],
+    "risk_notes": ["Consumer protection jurisdictions"]
+  },
+  {
+    "id": "contra-003",
+    "title": "Employee vs contractor",
+    "prompt": "Independent contractor agreement for my employee Sarah. She gets W-2 already but this is 1099 side project.",
+    "tags": ["contradictory", "contractor"],
+    "premium_expectations": ["Warns classification risk", "Does not reinforce misclassification"],
+    "risk_notes": ["Not legal advice disclaimer"]
+  },
+  {
+    "id": "contra-004",
+    "title": "Governing law mismatch",
+    "prompt": "California governing law, New York courts, UK data rules, we're a Delaware C-Corp.",
+    "tags": ["contradictory"],
+    "premium_expectations": ["Surfaces inconsistency", "Recommends single coherent choice"],
+    "risk_notes": ["May pick one without user confirm"]
+  },
+  {
+    "id": "contra-005",
+    "title": "Perpetual termination",
+    "prompt": "Either party can terminate anytime with 0 days notice. Term requires 90 days written notice. Perpetual term.",
+    "tags": ["contradictory"],
+    "premium_expectations": ["Harmonized termination section", "Explains tradeoff"],
+    "risk_notes": []
+  }
+]

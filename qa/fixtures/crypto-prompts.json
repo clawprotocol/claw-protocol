@@ -1,0 +1,42 @@
+[
+  {
+    "id": "crypto-001",
+    "title": "NFT license",
+    "prompt": "NFT purchase grants personal non-commercial display license. Commercial use requires 5% royalty to artist on secondary sales.",
+    "tags": ["crypto", "licensing"],
+    "premium_expectations": ["License grant clarity", "Royalty mechanics described", "No securities advice"],
+    "risk_notes": ["Securities / money transmission out of scope"]
+  },
+  {
+    "id": "crypto-002",
+    "title": "DAO contributor",
+    "prompt": "DAO contributor agreement. Paid in USDC monthly. IP assigned to DAO treasury. Governing law Cayman but contributors in US.",
+    "tags": ["crypto", "contractor"],
+    "premium_expectations": ["Token payment risk note", "IP assignment", "Jurisdiction friction surfaced"],
+    "risk_notes": ["Cayman vs US enforcement"]
+  },
+  {
+    "id": "crypto-003",
+    "title": "Token warrant disclaimer",
+    "prompt": "SAFT-style token warrant for accredited investors only. No guarantee of liquidity. Vesting 2 years cliff 6 months.",
+    "tags": ["crypto"],
+    "premium_expectations": ["Accredited investor reps", "Risk disclosures", "Not offering legal doc advice"],
+    "risk_notes": ["High regulatory sensitivity — human counsel"]
+  },
+  {
+    "id": "crypto-004",
+    "title": "Exchange API partner",
+    "prompt": "API integration partnership with centralized exchange. We route orders, they handle KYC. Revenue share 30%.",
+    "tags": ["crypto", "saas"],
+    "premium_expectations": ["Role split", "Compliance responsibilities", "Data/security"],
+    "risk_notes": ["May need MSB/partner compliance review"]
+  },
+  {
+    "id": "crypto-005",
+    "title": "Airdrop terms clickwrap",
+    "prompt": "Airdrop claim terms: eligibility snapshot, sybil prohibition, tax responsibility on recipient, no warranty.",
+    "tags": ["crypto"],
+    "premium_expectations": ["Eligibility criteria hooks", "Tax disclaimer", "As-is warranty disclaimer"],
+    "risk_notes": ["Securities characterization risk"]
+  }
+]

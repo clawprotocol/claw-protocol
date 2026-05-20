@@ -17,6 +17,7 @@ This index lists the authoritative documents for the CLAW v1 production release.
 - Anchoring launch (Bitcoin-first, mandatory Doge mirror, weekly cadence): `docs/ops/ANCHORING_LAUNCH_RUNBOOK.md`
 - Lean AWS anchoring (pruned nodes, EventBridge worker): `docs/ops/ANCHORING_AWS_LAUNCH.md`
 - Deploy smoke test (post-ship checks): `docs/ops/DEPLOY_SMOKE_TEST.md`
+- **GTM QA (premium, checkout, signing, Genesis):** `docs/QA_MATRIX.md`, `docs/GTM_SCENARIOS.md`, `docs/MANUAL_QA_RUNBOOK.md`, `docs/PREMIUM_AHA_RUBRIC.md`, `docs/QA_PHILOSOPHY.md`, `docs/FREE_VS_PRO_OUTPUT_QA.md`, fixtures `qa/fixtures/`
 - Environment topology / env vars by role: `docs/architecture/ENV_TOPOLOGY.md`
 - Legacy deployment notes: `docs/DEPLOY.md`
 
