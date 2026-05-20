@@ -73,6 +73,18 @@ describe("premiumAuthoritativeVisibleCommit", () => {
     ).toBe(true);
   });
 
+  it("shouldSkipAgreementDocLivePreviewSync during send workflow phases", () => {
+    expect(
+      shouldSkipAgreementDocLivePreviewSync({
+        premiumPersistedFlowActive: false,
+        snapshot: null,
+        pipelineRenderSourceRef: null,
+        hydratedBodyTrimmed: "",
+        createFlowPhase: "recipient_setup_required",
+      }),
+    ).toBe(true);
+  });
+
   it("needsAuthoritativeVisibleSurfaceRepair: modal soft timeout repair scenario — visible caught up with winning", () => {
     expect(
       needsAuthoritativeVisibleSurfaceRepair({

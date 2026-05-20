@@ -102,6 +102,16 @@ describe("Ironclad five-party fixture", () => {
     expect(quality.text).not.toMatch(/\bneeds\s+details\b/i);
   });
 
+  it("free starter preview preserves paragraph spacing without 4. 5. numbering", () => {
+    const preview = buildAgreementPreviewText(ironcladDraft(), {
+      starterPreview: true,
+      intakeText: IRONCLAD_JOINT_ROLLOUT_INTAKE,
+    });
+    expect(preview).not.toMatch(/4\.\s+5\./);
+    expect(preview.split("\n\n").length).toBeGreaterThan(4);
+    expect(preview).toMatch(/\n\n\d+\.\s+/);
+  });
+
   it("free starter preview avoids binding Systems, annual-only payment, and empty sections", () => {
     const milestone = formatMilestonePaymentTermsFromIntake(IRONCLAD_JOINT_ROLLOUT_INTAKE);
     expect(milestone).toMatch(/\$187,500/);

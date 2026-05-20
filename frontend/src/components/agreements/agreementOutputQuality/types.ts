@@ -42,6 +42,7 @@ export type RecommendedClarifications = {
 export type PremiumCompletionOutcome =
   | "authoritative_draft_complete"
   | "authoritative_draft_complete_with_recommended_clarifications"
+  | "clarification_required_before_authoritative_commit"
   | "needs_details"
   | "degraded"
   | "ok";

@@ -3,6 +3,7 @@
  */
 
 import { collectForbiddenTemplateFragments } from "../agreementTemplatePlaceholderSafety";
+import { repairMalformedSectionNumbering } from "../starterPreviewFormatting";
 import { parseAgreementSections } from "../proOperationalSynthesis/sectionPurityValidator";
 import { suppressRepeatedBoilerplate } from "./boilerplateContaminationGuard";
 import type { AgreementOutputQualityContext, IntegrityIssue, IntegrityResult } from "./types";
@@ -14,7 +15,52 @@ const DUPLICATE_SIGNATURE_RE =
   /(?:IN WITNESS WHEREOF|IN WITNESS WHERE OF)[\s\S]*?(?:IN WITNESS WHEREOF|IN WITNESS WHERE OF)/gi;
 const PAYMENT_IN_NON_PAYMENT_RE =
   /\b(?:invoice|milestone or service period)\b/i;
-const IMPLEMENTATION_IN_NOTICES_RE = /\bnotices?\b[\s\S]{0,600}implementation\s+milestones/i;
+const IMPLEMENTATION_IN_NOTICES_RE =
+  /\b(?:notices?|counterparts?|electronic\s+signatures?)\b[\s\S]{0,600}implementation\s+milestones/i;
+const MALFORMED_DOUBLE_NUM_LINE_RE = /^\s*\d+\.\s+\d+\.\s+\S/m;
+const COLLAPSED_HEADING_BODY_RE = /^\s*\d+\.\s+[^.\n]{2,72}\.\s+[A-Z][a-z]/m;
+
+function repairCollapsedHeadingLines(text: string): { text: string; fixed: number } {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let fixed = 0;
+  const out = lines.map((line) => {
+    const m = line.match(/^(\s*\d+\.\s+[^.\n]{2,72})\.\s+([A-Z][a-z].+)$/);
+    if (!m) return line;
+    fixed += 1;
+    return `${m[1]}\n${m[2]}`;
+  });
+  return { text: out.join("\n"), fixed };
+}
+
+function detectMissingSubsectionNumbers(text: string): IntegrityIssue[] {
+  const issues: IntegrityIssue[] = [];
+  const nums = [...text.matchAll(/^\s*(\d+)\.(\d+)\s+/gm)].map((m) => ({
+    major: parseInt(m[1], 10),
+    minor: parseInt(m[2], 10),
+  }));
+  if (nums.length < 3) return issues;
+  const byMajor = new Map<number, number[]>();
+  for (const n of nums) {
+    const arr = byMajor.get(n.major) ?? [];
+    arr.push(n.minor);
+    byMajor.set(n.major, arr);
+  }
+  for (const [major, minors] of byMajor) {
+    const sorted = [...new Set(minors)].sort((a, b) => a - b);
+    if (sorted.length < 2 || sorted[0] > 1) continue;
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] - sorted[i - 1] > 1) {
+        issues.push({
+          code: "missing_subsection_number",
+          message: `Gap in section ${major} numbering (${sorted[i - 1]} → ${sorted[i]})`,
+          repaired: false,
+        });
+        break;
+      }
+    }
+  }
+  return issues;
+}
 
 function repairBlankNumberedSections(text: string): { text: string; fixed: number } {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -93,6 +139,33 @@ export function validateAndRepairFinalRenderIntegrity(
   if (blank.fixed > 0) {
     working = blank.text;
     repairs.push(`blank_sections_removed:${blank.fixed}`);
+  }
+
+  const numbering = repairMalformedSectionNumbering(working);
+  if (numbering.fixed > 0) {
+    working = numbering.text;
+    repairs.push(`malformed_numbering_repaired:${numbering.fixed}`);
+  }
+
+  const collapsed = repairCollapsedHeadingLines(working);
+  if (collapsed.fixed > 0) {
+    working = collapsed.text;
+    repairs.push(`collapsed_heading_split:${collapsed.fixed}`);
+  }
+
+  if (MALFORMED_DOUBLE_NUM_LINE_RE.test(working)) {
+    issues.push({ code: "malformed_double_number", message: "Malformed section numbering (e.g. 4. 5.)" });
+  }
+  if (ctx.tier === "premium" && COLLAPSED_HEADING_BODY_RE.test(working)) {
+    issues.push({
+      code: "collapsed_heading_body",
+      message: "Section heading merged with body on same line",
+      repaired: collapsed.fixed > 0,
+    });
+  }
+
+  for (const sub of detectMissingSubsectionNumbers(working)) {
+    issues.push(sub);
   }
 
   const sig = repairDuplicateSignatureBlocks(working);

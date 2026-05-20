@@ -47,6 +47,9 @@ import {
 import { hydratePartyIntroductionParagraphs, hydratePartyListAndSignatureOrdinals } from "../../agreement/partyListOrdinalHydrate";
 import { finalizePremiumIdentityCorpusInPreview } from "./premiumIdentityCorpusPreviewGuard";
 import { finalizePartyDisplayNameForUserFacing } from "../../agreement/partyNameDisplayCasing";
+import { stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
+import { stripDuplicateSignatureBlocksForPreview } from "./signaturePreviewArchitecture";
+import { formatStarterPreviewForDisplay } from "./starterPreviewFormatting";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
 import { formatMilestonePaymentTermsFromIntake } from "./intakeCurrencyParse";
 import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
@@ -658,6 +661,7 @@ export function buildAgreementPreviewTextCore(
   let collapsed = collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
   if (starterPreview) {
     collapsed = sanitizeStarterPreviewProse(collapsed);
+    collapsed = formatStarterPreviewForDisplay(collapsed);
   }
   return collapsed;
 }
@@ -750,7 +754,8 @@ export function buildAgreementPreviewText(
         buildAgreementPreviewTextCore(draft, { ...options, starterPreview: false, premiumDeliverablePreview: true }),
     });
     if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
-    const collapsed = collapseDuplicateEsignNoticesInFullPreview(res.text);
+    let collapsed = collapseDuplicateEsignNoticesInFullPreview(stripCanonicalCommitMarker(res.text));
+    collapsed = stripDuplicateSignatureBlocksForPreview(collapsed).text;
     const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(collapsed, draftForBuild, options?.intakeText ?? null);
     return applyAgreementPreviewPlaceholderGate(hydrated, draftForBuild, options, "preview_premium_deliverable");
   }

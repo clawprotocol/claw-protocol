@@ -2,6 +2,7 @@
  * Unified agreement output quality pipeline — final gate for starter and premium bodies.
  */
 
+import { formatStarterPreviewForDisplay } from "../starterPreviewFormatting";
 import { stripAdvisoryLanguageFromAgreementBody } from "./premiumCompletionClassification";
 import { suppressRepeatedBoilerplate } from "./boilerplateContaminationGuard";
 import { validateAndRepairFinalRenderIntegrity } from "./finalRenderIntegrityValidator";
@@ -30,16 +31,23 @@ export function finalizeAgreementOutput(
     }
   }
 
-  const isolated = applySectionIsolatedPolishPipeline(working, ctx);
-  working = isolated.text;
-
-  const boiler = suppressRepeatedBoilerplate(working);
-  working = boiler.text;
+  const structureRepairs: string[] = [];
+  if (ctx.tier === "premium") {
+    const isolated = applySectionIsolatedPolishPipeline(working, ctx);
+    working = isolated.text;
+    structureRepairs.push(...isolated.repairs);
+    const boiler = suppressRepeatedBoilerplate(working);
+    working = boiler.text;
+  } else {
+    const boiler = suppressRepeatedBoilerplate(working, { sectionPass: false });
+    working = boiler.text;
+    working = formatStarterPreviewForDisplay(working);
+  }
 
   const integrity = validateAndRepairFinalRenderIntegrity(working, ctx);
   return {
     ...integrity,
     clarificationsStripped,
-    repairs: [...isolated.repairs, ...integrity.repairs],
+    repairs: [...structureRepairs, ...integrity.repairs],
   };
 }

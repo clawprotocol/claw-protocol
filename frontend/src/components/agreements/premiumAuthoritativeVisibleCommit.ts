@@ -1,4 +1,5 @@
 import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import { isPremiumSendWorkflowPhase } from "./committedReviewArtifact";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
 /**
@@ -10,7 +11,12 @@ export function shouldSkipAgreementDocLivePreviewSync(args: {
   snapshot: PremiumCompletionSnapshot | null;
   pipelineRenderSourceRef: string | null | undefined;
   hydratedBodyTrimmed: string;
+  createFlowPhase?: string | null;
+  createUiStage?: string | null;
 }): boolean {
+  if (isPremiumSendWorkflowPhase(args.createFlowPhase) || args.createUiStage === "RECIPIENTS") {
+    return true;
+  }
   const snap = args.snapshot;
   const snapBody = (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim();
 

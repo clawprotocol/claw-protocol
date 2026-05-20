@@ -46,10 +46,13 @@ export function classifyPremiumCompletionOutcome(args: {
   const server = (args.serverOutcome || "").trim().toLowerCase();
 
   if (server === "degraded") return "degraded";
-  if (args.validationFailed && len < 900) return "needs_details";
+  if (args.validationFailed && len < 900) return "clarification_required_before_authoritative_commit";
 
   const body = stripAdvisoryLanguageFromAgreementBody(args.documentText);
-  if (len < 400) return "needs_details";
+  if (len < 400) return "clarification_required_before_authoritative_commit";
+  if (bodyContainsNeedsDetailsLanguage(body) && len < 900) {
+    return "clarification_required_before_authoritative_commit";
+  }
 
   const clarifications = buildRecommendedClarifications(missing, { advisoryOnly: true });
   const hasAdvisory = clarifications.items.length > 0 || server === "needs_details";
@@ -68,7 +71,15 @@ export function classifyPremiumCompletionOutcome(args: {
       ? "authoritative_draft_complete_with_recommended_clarifications"
       : "authoritative_draft_complete";
   }
-  return "needs_details";
+  return "clarification_required_before_authoritative_commit";
+}
+
+export function isAuthoritativePremiumCompletionOutcome(outcome: PremiumCompletionOutcome): boolean {
+  return (
+    outcome === "authoritative_draft_complete" ||
+    outcome === "authoritative_draft_complete_with_recommended_clarifications" ||
+    outcome === "ok"
+  );
 }
 
 /** Map new outcome to legacy API field for backward compatibility. */
@@ -76,6 +87,11 @@ export function legacyGenerationOutcomeFromClassification(
   outcome: PremiumCompletionOutcome,
 ): "ok" | "needs_details" | "degraded" {
   if (outcome === "degraded") return "degraded";
-  if (outcome === "needs_details") return "needs_details";
+  if (
+    outcome === "needs_details" ||
+    outcome === "clarification_required_before_authoritative_commit"
+  ) {
+    return "needs_details";
+  }
   return "ok";
 }

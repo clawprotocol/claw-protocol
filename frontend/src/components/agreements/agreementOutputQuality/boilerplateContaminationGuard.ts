@@ -11,6 +11,8 @@ export const KNOWN_BOILERPLATE_SENTENCES: readonly string[] = [
   "invoices shall reference the applicable milestone or service period",
   "fees and invoicing follow the payment schedule in this agreement",
   "each party represents that it has authority to enter into this agreement",
+  "services are provided in a professional manner",
+  "except as expressly stated in this agreement",
   "operative terms. the parties intend to document",
   "specific commercial, payment, and liability terms should be completed in review",
   "needs details",
@@ -78,31 +80,52 @@ function dedupeBoilerplateSentences(
     removedCount += 1;
     if (!duplicateKeys.includes(boiler)) duplicateKeys.push(boiler);
   }
-  return { text: kept.join(" ").replace(/\s+/g, " ").trim(), removedCount };
+  const joined = kept.join(" ");
+  const text = joined.includes("\n") ? joined.replace(/[ \t]+/g, " ").trim() : joined.replace(/\s+/g, " ").trim();
+  return { text, removedCount };
+}
+
+function dedupeBoilerplatePreservingLines(body: string, sectionKind: string, globalSeen: Map<string, number>, duplicateKeys: string[]): { text: string; removedCount: number } {
+  if (!body.includes("\n")) {
+    return dedupeBoilerplateSentences(body, sectionKind, globalSeen, duplicateKeys);
+  }
+  const lines = body.split("\n");
+  let removed = 0;
+  const out = lines.map((line) => {
+    const r = dedupeBoilerplateSentences(line, sectionKind, globalSeen, duplicateKeys);
+    removed += r.removedCount;
+    return r.text;
+  });
+  return { text: out.join("\n"), removedCount: removed };
 }
 
 /**
  * Remove duplicate boilerplate sentences (keep first occurrence outside allowed sections).
  */
-export function suppressRepeatedBoilerplate(text: string): BoilerplateGuardResult {
-  const sections = parseAgreementSections(text);
+export function suppressRepeatedBoilerplate(
+  text: string,
+  opts?: { sectionPass?: boolean },
+): BoilerplateGuardResult {
   const globalSeen = new Map<string, number>();
   let removedCount = 0;
   const duplicateKeys: string[] = [];
   let out = text;
 
-  for (const sec of sections) {
-    const cleaned = dedupeBoilerplateSentences(sec.body, sec.kind, globalSeen, duplicateKeys);
-    removedCount += cleaned.removedCount;
-    if (cleaned.text !== sec.body) {
-      out = out.replace(sec.body, cleaned.text);
+  if (opts?.sectionPass !== false) {
+    const sections = parseAgreementSections(text);
+    for (const sec of sections) {
+      const cleaned = dedupeBoilerplatePreservingLines(sec.body, sec.kind, globalSeen, duplicateKeys);
+      removedCount += cleaned.removedCount;
+      if (cleaned.text !== sec.body) {
+        out = out.replace(sec.body, cleaned.text);
+      }
     }
   }
 
   const paras = out.split(/\n\n+/);
   const rebuilt: string[] = [];
   for (const para of paras) {
-    const cleaned = dedupeBoilerplateSentences(para, "general", globalSeen, duplicateKeys);
+    const cleaned = dedupeBoilerplatePreservingLines(para, "general", globalSeen, duplicateKeys);
     removedCount += cleaned.removedCount;
     rebuilt.push(cleaned.text);
   }

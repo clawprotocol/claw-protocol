@@ -139,6 +139,7 @@ export function rejectPremiumBodyForProRender(
   let normalized = (body || "").trim();
   normalized = applyPaidProRenderPolish(normalized, intakeRaw, partyNames, {
     surface: "rejectPremiumBodyForProRender",
+    mode: "validate_only",
   }).text;
   const ph = finalizeUserVisibleAgreementPlainText(normalized, {
     intakeRaw,

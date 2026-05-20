@@ -524,6 +524,10 @@ import {
   syncAuthoritativePremiumDocumentRefs,
   type AuthoritativePremiumDocumentRefs,
 } from "./commitAuthoritativePremiumDocument";
+import {
+  commitReviewArtifact,
+  shouldSuppressPremiumAuthoritativeRehydrate,
+} from "./committedReviewArtifact";
 import { shouldSkipAgreementDocLivePreviewSync } from "./premiumAuthoritativeVisibleCommit";
 import {
   endPremiumEnsureForIntake,
@@ -4568,6 +4572,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           pipelineSource,
           premiumRenderResolveSource: opts.premiumRenderResolveSource,
         });
+        commitReviewArtifact({ plainText: collapsedDoc, source: "premium_authoritative" });
         setHardError(null);
         setPremiumPipelineUserMessage(null);
         setProFullDraftCustomGateMessage(null);
@@ -8560,6 +8565,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         snapshot: snapGuard,
         pipelineRenderSourceRef: lastPremiumPipelineRenderSourceRef.current,
         hydratedBodyTrimmed: (hydratedPremiumBodyRef.current || "").trim(),
+        createFlowPhase: createFlowPhaseRef.current,
+        createUiStage: String(createUiStageRef.current),
       })
     ) {
       if (import.meta.env.DEV) {
@@ -10749,9 +10756,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const authoritativePremiumRepairLoggedRef = useRef(false);
+  const authoritativeRepairAppliedRef = useRef(false);
   useEffect(() => {
     if (!authoritativePremiumUiCommitted) {
       authoritativePremiumRepairLoggedRef.current = false;
+      authoritativeRepairAppliedRef.current = false;
+      return;
+    }
+    if (
+      shouldSuppressPremiumAuthoritativeRehydrate({
+        createFlowPhase: createFlowPhaseRef.current,
+        createUiStage: String(createUiStageRef.current),
+      })
+    ) {
       return;
     }
     if (proFullDraftQualityRetry) setProFullDraftQualityRetry(false);
@@ -10768,13 +10785,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPipelineOutputBodyRef.current ||
       ""
     ).trim();
-    if (corpus.length >= 500 && agreementDocumentTextRef.current.trim().length < 500) {
+    if (
+      !authoritativeRepairAppliedRef.current &&
+      corpus.length >= 500 &&
+      agreementDocumentTextRef.current.trim().length < 500
+    ) {
+      authoritativeRepairAppliedRef.current = true;
       const collapsed = collapseDuplicateEsignNoticesInFullPreview(corpus);
       syncAuthoritativePremiumDocumentRefs(collapsed, authoritativePremiumDocRefs, {
         pipelineSource:
           snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current ?? "server_full_draft",
         premiumRenderResolveSource: snap?.premiumRenderResolveSource ?? "server_full_document_text",
       });
+      commitReviewArtifact({ plainText: collapsed, source: "premium_authoritative", bumpApplyCount: false });
       setAgreementDocumentText(collapsed);
       agreementDocumentDirtyRef.current = false;
       setDisplayPhase("review");
@@ -10790,7 +10813,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       logPremiumAuthoritativeCommit({
         bodyLen: corpus.length,
         source: snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current,
-        generationOutcome: "needs_details",
+        generationOutcome: "ok",
       });
       logPremiumFallbackSuppressed("authoritative_doc_present");
     }

@@ -11,6 +11,7 @@ import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { resolveIntakeEmailForContactSlot } from "./paidProIntakeContactSubstitution";
 import { buildPartyEntries, normalizeSignatureBlockHeadings } from "./paidProAgreementPolish";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
+import { isCanonicalCommittedText, stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -1020,10 +1021,16 @@ export function finalizeUserVisibleAgreementPlainText(
     { ...ctx, intakeRaw },
     prepared,
   );
-  const polish = applyPaidProRenderPolish(prepared, intakeRaw, partyResolution.names, {
-    surface: ctx.surface,
-  });
-  prepared = polish.text;
+  const starterSurface = ctx.surface.includes("starter") || ctx.surface.includes("preview_starter");
+  if (isCanonicalCommittedText(prepared) || starterSurface) {
+    prepared = stripCanonicalCommitMarker(prepared);
+  } else {
+    const polish = applyPaidProRenderPolish(prepared, intakeRaw, partyResolution.names, {
+      surface: ctx.surface,
+      mode: ctx.surface.includes("reject") ? "validate_only" : "commit",
+    });
+    prepared = stripCanonicalCommitMarker(polish.text);
+  }
   const scanCtx = { intakeRaw, partyNames: partyResolution.names };
   const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(prepared, scanCtx);
   const signatureFinal = normalizeSignatureBlockHeadings(

@@ -5,6 +5,13 @@
 import { hashPremiumDocText, premiumPolishCacheKey } from "../../lib/premiumDocFingerprint";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
+import {
+  isCanonicalCommittedText,
+  isIdempotentPolishOutput,
+  markCanonicalCommittedText,
+  resolveCanonicalPolishMode,
+  stripCanonicalCommitMarker,
+} from "./canonicalAgreementDocument";
 import { validateAndRepairPremiumAgreementStructure } from "./premiumAgreementStructure";
 import {
   extractIntakeEmailsOrdered,
@@ -103,12 +110,14 @@ export function applyPaidProRenderPolish(
   text: string,
   intakeRaw: string | null | undefined,
   partyNames: readonly string[] | null | undefined,
-  opts?: { surface?: string; skipCache?: boolean },
+  opts?: { surface?: string; skipCache?: boolean; mode?: "commit" | "validate_only"; forceCommit?: boolean },
 ): PaidProRenderPolishResult {
   const surface = opts?.surface ?? "unknown";
-  const docHash = hashPremiumDocText(text);
+  const polishMode = resolveCanonicalPolishMode(text, opts);
+  const baseText = stripCanonicalCommitMarker(text);
+  const docHash = hashPremiumDocText(baseText);
   const intakeFp = shortIntakeFingerprint((intakeRaw || "").trim());
-  const cacheKey = premiumPolishCacheKey({ surface, docHash, intakeFingerprint: intakeFp });
+  const cacheKey = `${premiumPolishCacheKey({ surface, docHash, intakeFingerprint: intakeFp })}:${polishMode}`;
   if (!opts?.skipCache) {
     const cached = polishResultCache.get(cacheKey);
     if (cached) return cached;
@@ -117,7 +126,34 @@ export function applyPaidProRenderPolish(
   const explicitPartyList = (partyNames?.length ?? 0) >= 2;
   const intakeEmails = extractIntakeEmailsOrdered(intakeRaw);
 
-  const contactSub = substitutePaidProIntakeContactPlaceholders(text, intakeRaw, { surface });
+  if (polishMode === "validate_only") {
+    const guard = verifyIntakeEmailsPreserved(intakeRaw, baseText, intakeEmails);
+    logPaidProEmailMutationGuard({ surface: `${surface}:validate_only`, ...guard, repairedCount: 0 });
+    const result: PaidProRenderPolishResult = {
+      text: isCanonicalCommittedText(text) ? text : markCanonicalCommittedText(baseText),
+      contactSub: {
+        text: baseText,
+        replacedEmailCount: 0,
+        unresolvedEmailTokens: [],
+        intakeContactCount: intakeEmails.length,
+      },
+      agreementPolish: {
+        recital: { applied: false, partyCount: 0, confidence: "high", reason: "validate_only" },
+        signature: { replacedCount: 0 },
+        enterprise: {
+          effectiveDateAdded: false,
+          disputeWindowAdded: false,
+          uptimeTargetAdded: false,
+          survivalPolished: false,
+          attorneysFeesAdded: false,
+        },
+      },
+      emailGuard: guard,
+    };
+    return rememberPolishResult(cacheKey, result);
+  }
+
+  const contactSub = substitutePaidProIntakeContactPlaceholders(baseText, intakeRaw, { surface });
   let working = contactSub.text;
 
   const { text: masked, emails, urls } = maskProtectedSpans(working);
@@ -170,7 +206,12 @@ export function applyPaidProRenderPolish(
     surface,
     tier: "premium",
   });
-  working = quality.text;
+  working = markCanonicalCommittedText(quality.text);
+
+  if (!isIdempotentPolishOutput(baseText, working) && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.info("[paid-pro-polish-idempotency]", { surface, changed: true });
+  }
 
   const result: PaidProRenderPolishResult = {
     text: working,

@@ -91,6 +91,7 @@ import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import {
   buildRecommendedClarifications,
   classifyPremiumCompletionOutcome,
+  isAuthoritativePremiumCompletionOutcome,
   legacyGenerationOutcomeFromClassification,
 } from "./agreementOutputQuality";
 import type { PremiumCompletionOutcome, RecommendedClarifications } from "./agreementOutputQuality/types";
@@ -1443,6 +1444,12 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         recommendedClarifications = buildRecommendedClarifications(
           effectiveFull.missing_material_info ?? [],
         );
+        if (!isAuthoritativePremiumCompletionOutcome(classified)) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[premium-completion] blocked authoritative commit", { classified });
+          }
+        }
         effectiveFull = {
           ...effectiveFull,
           document_text: doc,

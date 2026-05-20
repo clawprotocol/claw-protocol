@@ -39,6 +39,15 @@ function ironcladDraft(): ParsedDraftShape {
 }
 
 describe("agreementOutputQuality (Ironclad five-party)", () => {
+  it("free starter preview has separate paragraphs and no collapsed 4. 5. headings", () => {
+    const preview = buildAgreementPreviewText(ironcladDraft(), {
+      starterPreview: true,
+      intakeText: IRONCLAD_JOINT_ROLLOUT_INTAKE,
+    });
+    expect(preview).not.toMatch(/4\.\s+5\./);
+    expect(preview.split("\n\n").length).toBeGreaterThan(4);
+  });
+
   it("free starter preview passes integrity validator with milestone payments", () => {
     const preview = buildAgreementPreviewText(ironcladDraft(), {
       starterPreview: true,
@@ -102,7 +111,7 @@ describe("agreementOutputQuality (Ironclad five-party)", () => {
     const out = finalizeAgreementOutput(raw, {
       intakeRaw: IRONCLAD_JOINT_ROLLOUT_INTAKE,
       surface: "test",
-      tier: "premium",
+      tier: "starter",
     });
     const norm = filler.slice(0, 40);
     const hits = (out.text.toLowerCase().match(new RegExp(norm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || [])
