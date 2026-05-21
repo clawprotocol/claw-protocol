@@ -121,9 +121,7 @@ import {
 } from "../../launch/simpleProduct/proConversionCopy";
 import {
   REVIEW_AHA_CHIP,
-  REVIEW_AHA_HEADING,
   REVIEW_AHA_REASSURANCE,
-  REVIEW_AHA_SUBHEAD,
   logProConversionCardVisible,
   logProConversionEditFreeClick,
   logProConversionKeepFreeClick,
@@ -600,6 +598,18 @@ import {
   resolveIsFreeStreamlineDraftReview,
   type FreeReviewSurfaceSource,
 } from "./freeStreamlineDraftReview";
+import {
+  FREE_STARTER_REVIEW_BADGE,
+  FREE_STARTER_REVIEW_SUBTITLE,
+  FREE_STARTER_REVIEW_TITLE,
+  logFreeReviewPaidShellBlocked,
+  logFreeReviewShellResolved,
+  logPaidReviewShellResolved,
+  resetStalePaidReviewShellForFreeStarter,
+  resolveFreeStarterReviewShellActive,
+  resolveReviewShellChrome,
+  shouldGateGuidedRenderAuthorityForFreeReview,
+} from "./freeStarterReviewShell";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -1021,8 +1031,8 @@ const PREMIUM_ORIGINAL_WORDING_PLACEHOLDER =
 const PREMIUM_ORIGINAL_WORDING_CTA = FUNNEL_CTA_SEND_WITH_PRO;
 const PREMIUM_ORIGINAL_WORDING_DETAILS_SUMMARY = "Use your exact wording (LawDog Pro)";
 
-const STARTER_REVIEW_HEADLINE = REVIEW_AHA_HEADING;
-const STARTER_REVIEW_SUBLINE = REVIEW_AHA_SUBHEAD;
+const STARTER_REVIEW_HEADLINE = FREE_STARTER_REVIEW_TITLE;
+const STARTER_REVIEW_SUBLINE = FREE_STARTER_REVIEW_SUBTITLE;
 const STARTER_REVIEW_HELPER = REVIEW_AHA_REASSURANCE;
 const STARTER_CONTINUE_TO_SEND_UPGRADE_NUDGE =
   "Closing soon? Continue with Pro for a calmer review surface, clearer terms, and professional delivery.";
@@ -6499,6 +6509,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const commitFreeDraftForReview = React.useCallback(
     (opts: { source: FreeReviewSurfaceSource; fromHomeAutoGenerate?: boolean }) => {
+      resetStalePaidReviewShellForFreeStarter(opts.source);
+      lastKnownGoodAuthoritativeDraftRef.current = "";
+      hydratedPremiumBodyRef.current = "";
+      lastPremiumWinningCorpusRef.current = "";
+      premiumPipelineOutputBodyRef.current = "";
+      setGuidedCompletionSession(null);
       setCreateFlowPhase("draft_ready_for_review");
       setCreateUiStage(CreateUiStage.DRAFT);
       setDisplayPhase("review");
@@ -6523,6 +6539,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const fromHomeHandoff =
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
     if (fromHomeHandoff) {
+      resetStalePaidReviewShellForFreeStarter("home_create_submit");
+      lastKnownGoodAuthoritativeDraftRef.current = "";
+      setGuidedCompletionSession(null);
       if (homeAutoGenerateConsumedRef.current) {
         logHomeAutoGenerateSkipped("already_consumed");
         return true;
@@ -8083,18 +8102,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProAuthoritativeRef.current = paidProAuthoritative;
   }, [paidProAuthoritative]);
 
-  const paidProReviewReady = computeSimpleCreatePaidProReviewReady({
+  const paidProReviewReadyBase = computeSimpleCreatePaidProReviewReady({
     simpleProductFlow,
     liveWorkspaceTwoPane,
     paidProAuthoritative,
     createUiStage,
     displayPhase,
   });
-
-  /** Paid Pro on `/app/create`: shell owns title/subtitle/control — suppress duplicate intake chrome. */
-  const paidProReviewCompactChrome = Boolean(
-    paidProReviewReady && createUiStage === CreateUiStage.DRAFT && displayPhase === "review",
-  );
 
   const ownerRecipientAcceptedAwaitingLock = useMemo(
     () =>
@@ -9112,6 +9126,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    */
   const premiumPaidDocumentSurface = useMemo(() => {
     if (!productionDraftPrimaryReviewSurface || createUiStage !== CreateUiStage.DRAFT) return false;
+    if (
+      resolveIsFreeStreamlineDraftReview({
+        simpleProductFlow: Boolean(simpleProductFlow),
+        liveWorkspaceTwoPane: Boolean(liveWorkspaceTwoPane),
+        createProductionTwoPane,
+        createUiStage,
+        createFlowPhase,
+        hasDraft: Boolean(draft),
+        paidProAuthoritative,
+        premiumPaidDocumentSurface: false,
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        hasPaidPremiumCompletionSession: hasPaidPremiumCompletionSession,
+        showUpgradeToFullDraftOnReview,
+      })
+    ) {
+      return false;
+    }
     const chromeEligible =
       proAgreementEntitled || (hasFullDraftAccess && !showUpgradeToFullDraftOnReview);
     if (!chromeEligible) return false;
@@ -9305,6 +9337,52 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const useStarterDocumentPaperSurface = Boolean(
     isFreeStreamlineDraftReview && createUiStage === CreateUiStage.DRAFT,
+  );
+
+  const freeStarterReviewShellActive = useMemo(
+    () =>
+      resolveFreeStarterReviewShellActive({
+        isFreeStreamlineDraftReview,
+        isFreeStarterReviewSurface,
+        premiumPaidDocumentSurface,
+        paidProAuthoritative,
+      }),
+    [
+      isFreeStreamlineDraftReview,
+      isFreeStarterReviewSurface,
+      premiumPaidDocumentSurface,
+      paidProAuthoritative,
+      premiumSurfaceGateTick,
+      reviewDocRefreshTick,
+    ],
+  );
+
+  const reviewShellChrome = useMemo(
+    () =>
+      resolveReviewShellChrome({
+        isFreeStreamlineDraftReview,
+        isFreeStarterReviewSurface,
+        premiumPaidDocumentSurface,
+        paidProAuthoritative,
+        paidProReviewReadyBase,
+        guidedCompletionActive: false,
+      }),
+    [
+      isFreeStreamlineDraftReview,
+      isFreeStarterReviewSurface,
+      premiumPaidDocumentSurface,
+      paidProAuthoritative,
+      paidProReviewReadyBase,
+      premiumSurfaceGateTick,
+      reviewDocRefreshTick,
+    ],
+  );
+
+  const paidProReviewReady = reviewShellChrome.paidProReviewReady;
+
+  /** Paid Pro on `/app/create`: shell owns title/subtitle/control — suppress duplicate intake chrome. */
+  const paidProReviewCompactChrome = Boolean(
+    paidProReviewReady && createUiStage === CreateUiStage.DRAFT && displayPhase === "review",
   );
 
   useLayoutEffect(() => {
@@ -11262,6 +11340,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const guidedActive = Boolean(
       premiumPaidDocumentSurface &&
         !proUpgradeUseStarterView &&
+        !shouldGateGuidedRenderAuthorityForFreeReview({
+          isFreeStreamlineDraftReview,
+          isFreeStarterReviewSurface,
+          premiumPaidDocumentSurface,
+        }) &&
         session &&
         !isGuidedCompletionComplete(session),
     );
@@ -13267,11 +13350,60 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     proReviewFooter.mode === "guided_completion" &&
       proReviewFooter.mountGuidedPanel &&
       guidedPanelMountedOnDocumentEditor &&
-      activeGuidedCompletionSession,
+      activeGuidedCompletionSession &&
+      !freeStarterReviewShellActive,
   );
+
+  useEffect(() => {
+    if (!simpleProductFlow || !liveWorkspaceTwoPane) return;
+    if (freeStarterReviewShellActive) {
+      if (paidProReviewReadyBase) {
+        logFreeReviewPaidShellBlocked({
+          reason: "free_starter_review_active",
+          paidProAuthoritative,
+          premiumPaidDocumentSurface,
+          isFreeStreamlineDraftReview,
+        });
+      }
+      logFreeReviewShellResolved({
+        source: "starter_document_surface",
+        surface: "starter_document_surface",
+        isPaidPro: false,
+        isGuidedCompletion: false,
+        title: reviewShellChrome.title,
+      });
+      return;
+    }
+    if (paidProReviewReady) {
+      logPaidReviewShellResolved({
+        source: "paid_pro_review",
+        surface: premiumPaidDocumentSurface ? "premium_paid_document_surface" : "paid_pro_authoritative",
+        isPaidPro: true,
+        isGuidedCompletion: Boolean(showPrimaryGuidedCompletion),
+        title: "Review your Pro agreement",
+      });
+    }
+  }, [
+    simpleProductFlow,
+    liveWorkspaceTwoPane,
+    freeStarterReviewShellActive,
+    paidProReviewReady,
+    paidProReviewReadyBase,
+    paidProAuthoritative,
+    premiumPaidDocumentSurface,
+    isFreeStreamlineDraftReview,
+    reviewShellChrome.title,
+    showPrimaryGuidedCompletion,
+  ]);
+
   const guidedCompletionActive = Boolean(
     premiumPaidDocumentSurface &&
       !proUpgradeUseStarterView &&
+      !shouldGateGuidedRenderAuthorityForFreeReview({
+        isFreeStreamlineDraftReview,
+        isFreeStarterReviewSurface,
+        premiumPaidDocumentSurface,
+      }) &&
       activeGuidedCompletionSession &&
       !isGuidedCompletionComplete(activeGuidedCompletionSession),
   );
@@ -16072,6 +16204,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </>
                             ) : isFreeStreamlineDraftReview ? (
                               <>
+                                <span className="rounded-full border border-slate-600/70 bg-slate-900/80 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 sm:text-[11px]">
+                                  {FREE_STARTER_REVIEW_BADGE}
+                                </span>
                                 <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
                                   {STARTER_REVIEW_HEADLINE}
                                 </h2>

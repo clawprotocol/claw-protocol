@@ -8,6 +8,7 @@ import {
   logFreeDraftCopyText,
   logStarterReviewDocumentRendered,
 } from "../../launch/simpleProduct/guidedWorkflowCopy";
+import { FREE_STARTER_REVIEW_BADGE } from "./freeStarterReviewShell";
 import {
   FREE_DRAFT_COPY_TEXT_COPIED,
   FREE_DRAFT_COPY_TEXT_FAILED,
@@ -111,7 +112,7 @@ export function StarterDraftDocumentSurface(props: {
   return (
     <div className={paperClass}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200/80 bg-[#f3efe6] px-[clamp(1.25rem,4vw,2.25rem)] py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Agreement preview</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">{FREE_STARTER_REVIEW_BADGE}</p>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"

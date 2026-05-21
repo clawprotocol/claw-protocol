@@ -64,11 +64,13 @@ describe("free streamline draft review wiring (static)", () => {
     );
   });
 
-  it("uses polished AHA headings whenever isFreeStreamlineDraftReview", () => {
+  it("uses free starter review headings whenever isFreeStreamlineDraftReview", () => {
     expect(intake).toContain("STARTER_REVIEW_HEADLINE");
+    expect(intake).toContain("FREE_STARTER_REVIEW_TITLE");
     expect(intake).toContain("isFreeStreamlineDraftReview ? (");
     expect(intake).toContain("STARTER_REVIEW_SUBLINE");
     expect(intake).toContain("STARTER_REVIEW_HELPER");
+    expect(intake).toContain("FREE_STARTER_REVIEW_BADGE");
   });
 
   it("blocks duplicate sticky Continue with Pro when free streamline review is active", () => {

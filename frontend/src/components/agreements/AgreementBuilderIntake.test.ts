@@ -154,14 +154,16 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const s = readFileSync(p, "utf8");
     const i = s.indexOf("const premiumPaidDocumentSurface = useMemo");
     expect(i).toBeGreaterThanOrEqual(0);
-    const frag = s.slice(i, i + 1400);
+    const frag = s.slice(i, i + 1600);
+    expect(frag).toContain("resolveIsFreeStreamlineDraftReview");
     expect(frag).toContain("CRITICAL INVARIANT:");
     expect(frag).toContain("!tierAllowsAdvancedFullDraftReveal(tier)");
     expect(frag).toContain(
       "return Boolean(hasPaidPremiumCompletionSession() || premiumPersistedFlowActive);",
     );
     expect(frag).not.toContain("peekAdvancedFullDraftCheckoutGrant()");
-    expect(frag).not.toContain("premiumSendPathUnlocked");
+    const invariantIdx = frag.indexOf("CRITICAL INVARIANT:");
+    expect(frag.slice(invariantIdx)).not.toContain("premiumSendPathUnlocked");
     expect(frag).toContain("return true");
   });
 
@@ -289,6 +291,13 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("{showTopProAdjustCard ?");
     expect(intake).toContain("FinalizeYourAgreementPanel");
     expect(intake).toContain("resolveProReviewFooterState");
+    expect(intake).toContain("FREE_STARTER_REVIEW_TITLE");
+    expect(intake).toContain("resetStalePaidReviewShellForFreeStarter");
+    expect(intake).toContain("freeStarterReviewShellActive");
+    expect(intake).toContain("logFreeReviewPaidShellBlocked");
+    expect(intake).not.toMatch(
+      /isFreeStreamlineDraftReview\s*\?[\s\S]{0,240}Review your Pro agreement/,
+    );
     expect(intake).toContain("lastKnownGoodAuthoritativeDraftRef");
     expect(intake).toContain("resolveGuidedCompletionRenderDocument");
     expect(intake).toContain("canDisplayPaidProAgreementDocument");
