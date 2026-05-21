@@ -559,10 +559,9 @@ describe("guidedDealCompletion", () => {
     const payment = vars.find((v) => v.id === "payment_structure");
     expect(payment).toBeDefined();
     const rec = resolveRecommendForMe(payment!, CONSULTING_DEV_QA_INTAKE);
-    expect(rec).not.toBeNull();
-    expect(rec!.explanation).toMatch(/evolving|milestone|retainer/i);
-    expect(rec!.choices.length).toBeGreaterThanOrEqual(1);
-    expect(rec!.choices.length).toBeLessThanOrEqual(2);
+    expect(rec.explanation).toMatch(/evolving|milestone|retainer/i);
+    expect(rec!.primary.value.length).toBeGreaterThan(0);
+    expect(rec!.alternatives.length).toBeLessThanOrEqual(2);
     expect(rec!.explanation).not.toMatch(/legally should|you must legally/i);
   });
 
@@ -707,9 +706,10 @@ describe("canRenderGuidedQuestions UI invariant", () => {
 
   it("never shows Needs details or below-copy when guided queue is not renderable", () => {
     const offState = resolveGuidedCompletionRenderState({
-      bodyText: migrationBody,
+      bodyText: "",
+      guidedSession: null,
       panelMountedSurface: null,
-      bodyUsable: true,
+      bodyUsable: false,
       rawReadiness: "needs_details",
     });
     expect(mayShowNeedsDetailsMessaging(offState)).toBe(false);

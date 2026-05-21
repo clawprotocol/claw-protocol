@@ -1,11 +1,24 @@
 import { analyzeConsultingIntake } from "./consultingGuidedIntake";
+import { analyzeServicesMigrationIntake } from "./servicesMigrationGuidedIntake";
 import type { DealVariable, DealVariableDefault } from "./types";
 
 export const RECOMMEND_PILL_ID = "recommend";
 
+export type RecommendChoice = { pillId: string; label: string; value: string };
+
 export type RecommendForMeResult = {
   explanation: string;
-  choices: Array<{ pillId: string; label: string; value: string }>;
+  why: string;
+  primary: RecommendChoice;
+  alternatives: RecommendChoice[];
+  /** When true, apply primary immediately (single clear best default). */
+  applyDirect: boolean;
+};
+
+/** @deprecated Use {@link RecommendForMeResult}.choices */
+export type LegacyRecommendForMeResult = {
+  explanation: string;
+  choices: RecommendChoice[];
 };
 
 function withRecommendPill(pills: DealVariableDefault[]): DealVariableDefault[] {
@@ -22,13 +35,78 @@ function withRecommendPill(pills: DealVariableDefault[]): DealVariableDefault[] 
   ];
 }
 
+function findPill(variable: DealVariable, pillId: string): DealVariableDefault | undefined {
+  return variable.suggestedDefaults.find((p) => p.id === pillId);
+}
+
+function choiceFromPill(variable: DealVariable, pillId: string, fallbackLabel?: string): RecommendChoice {
+  const pill = findPill(variable, pillId);
+  return {
+    pillId,
+    label: pill?.label ?? fallbackLabel ?? pillId,
+    value: (pill?.value ?? pill?.label ?? fallbackLabel ?? "").trim(),
+  };
+}
+
+/** Parse monthly fee hints like "monthly payment probably around 6k". */
+export function parseMonthlyPaymentUsdHint(intakeRaw?: string | null): number | null {
+  const intake = intakeRaw || "";
+  const monthlySlice =
+    intake.match(/(?:^|\n)[^\n]{0,120}\b(?:monthly|per\s+month|\/\s*mo)\b[^\n]{0,80}/i)?.[0] ?? intake;
+  const m =
+    monthlySlice.match(/(?:around|about|probably)?\s*\$?\s*(\d+(?:\.\d+)?)\s*(k\b)?/i) ??
+    intake.match(/\b(?:around|about|probably)\s*\$?\s*(\d+(?:\.\d+)?)\s*(k\b)?/i);
+  if (!m) return null;
+  let n = parseFloat(m[1]);
+  if (Number.isNaN(n) || n <= 0) return null;
+  if ((m[2] || "").toLowerCase().startsWith("k")) n *= 1000;
+  return n;
+}
+
+function buildRecommendResult(args: {
+  explanation: string;
+  why: string;
+  primary: RecommendChoice;
+  alternatives?: RecommendChoice[];
+  applyDirect?: boolean;
+}): RecommendForMeResult {
+  const alternatives = (args.alternatives ?? []).filter((a) => a.pillId !== args.primary.pillId);
+  return {
+    explanation: args.explanation,
+    why: args.why,
+    primary: args.primary,
+    alternatives,
+    applyDirect: args.applyDirect ?? alternatives.length === 0,
+  };
+}
+
 export function enrichDealVariableFromIntake(variable: DealVariable, intakeRaw?: string | null): DealVariable {
   const signals = analyzeConsultingIntake(intakeRaw);
+  const migration = analyzeServicesMigrationIntake(intakeRaw);
   const pills = withRecommendPill(variable.suggestedDefaults);
   let recommendedPillId: string | undefined;
   let recommendedLabel: string | undefined;
 
-  if (variable.id === "payment_structure") {
+  if (variable.id === "project_fee_phase_confirmation") {
+    if (migration.mentionsPhases && migration.mentionsSupport) {
+      recommendedPillId = "build_heavy";
+      recommendedLabel = "Recommended from your intake";
+    } else if (migration.mentionsPhases) {
+      recommendedPillId = "even_split";
+      recommendedLabel = "Recommended from your intake";
+    }
+  } else if (variable.id === "phase_payment_allocation") {
+    recommendedPillId = migration.mentionsSupport ? "build_heavy" : "even_thirds";
+    recommendedLabel = "Recommended from your intake";
+  } else if (variable.id === "total_fee_confirmation") {
+    if (parseMonthlyPaymentUsdHint(intakeRaw)) {
+      recommendedPillId = "confirm_intake";
+      recommendedLabel = "Recommended from your intake";
+    } else if (migration.vagueFee) {
+      recommendedPillId = "120k";
+      recommendedLabel = "Most likely fit";
+    }
+  } else if (variable.id === "payment_structure") {
     if (signals.evolvingScope || signals.aiRebuild) {
       recommendedPillId = signals.milestoneHints ? "milestone" : "retainer";
       recommendedLabel = "Recommended from your intake";
@@ -95,6 +173,11 @@ function whyThisMattersForVariable(id: string): string | undefined {
       "Governing law and venue affect how disputes and formal notices are handled.",
     payment_timing:
       "Clear payment timing keeps cash flow predictable for both sides.",
+    project_fee_phase_confirmation:
+      "Total fee and phase split drive invoices, milestones, and support economics.",
+    phase_payment_allocation:
+      "Phase allocation belongs in Schedule A so build, rollout, and support are enforceable.",
+    total_fee_confirmation: "A stated total fee avoids “to be confirmed” disputes at signing.",
   };
   return map[id];
 }
@@ -137,99 +220,238 @@ function pillExplanationsForVariable(id: string): Record<string, string> | undef
 export function resolveRecommendForMe(
   variable: DealVariable,
   intakeRaw?: string | null,
-): RecommendForMeResult | null {
+): RecommendForMeResult {
   const signals = analyzeConsultingIntake(intakeRaw);
-  const find = (pillId: string) => variable.suggestedDefaults.find((p) => p.id === pillId);
+  const migration = analyzeServicesMigrationIntake(intakeRaw);
+  const monthlyUsd = parseMonthlyPaymentUsdHint(intakeRaw);
+
+  if (variable.id === "project_fee_phase_confirmation") {
+    const buildHeavy = choiceFromPill(variable, "build_heavy");
+    const evenSplit = choiceFromPill(variable, "even_split");
+    if (monthlyUsd && monthlyUsd < 20_000) {
+      const generated: RecommendChoice = {
+        pillId: "generated_monthly_phases",
+        label: `~$${monthlyUsd.toLocaleString()}/month with phased build, rollout, and support`,
+        value: `Total engagement priced at approximately $${monthlyUsd.toLocaleString()} per month, with fees allocated across build, rollout, and support phases as set out in Schedule A (suggested starting split: one-third each phase unless the parties agree otherwise).`,
+      };
+      return buildRecommendResult({
+        explanation: `Your intake mentions about $${monthlyUsd.toLocaleString()} per month while the draft still needs a clear total and phase split.`,
+        why: "A monthly services frame with an even phase split is a practical default when the total project fee is still informal.",
+        primary: generated,
+        alternatives: [buildHeavy, evenSplit],
+        applyDirect: false,
+      });
+    }
+    if (migration.mentionsPhases && migration.mentionsSupport) {
+      return buildRecommendResult({
+        explanation: "Your intake mentions build, rollout, and support — a build-heavy split is a common default for automation projects.",
+        why: "More budget up front for build and rollout, with a smaller slice reserved for first-year support.",
+        primary: buildHeavy,
+        alternatives: [evenSplit],
+        applyDirect: true,
+      });
+    }
+    return buildRecommendResult({
+      explanation: "When phases are mentioned but amounts are vague, an even split across build, rollout, and support is a simple starting point.",
+      why: "Keeps phase economics balanced until you refine amounts in Schedule A.",
+      primary: evenSplit,
+      alternatives: [buildHeavy],
+      applyDirect: true,
+    });
+  }
+
+  if (variable.id === "phase_payment_allocation") {
+    const buildHeavy = choiceFromPill(variable, "build_heavy", "Build-heavy split");
+    const evenThirds = choiceFromPill(variable, "even_thirds", "Even thirds across phases");
+    const milestone = choiceFromPill(variable, "milestone", "Milestone triggers");
+    const primary = migration.mentionsSupport ? buildHeavy : evenThirds;
+    return buildRecommendResult({
+      explanation: "Schedule A should spell out how fees move across build, rollout, and support.",
+      why: migration.mentionsSupport
+        ? "Support is in scope — reserving part of the fee for post-launch support avoids surprises."
+        : "Even thirds is the simplest default when phase amounts are still open.",
+      primary,
+      alternatives: [milestone, migration.mentionsSupport ? evenThirds : buildHeavy],
+      applyDirect: true,
+    });
+  }
+
+  if (variable.id === "total_fee_confirmation") {
+    if (monthlyUsd) {
+      const annual = monthlyUsd * 12;
+      const generated: RecommendChoice = {
+        pillId: "generated_monthly_total",
+        label: `~$${monthlyUsd.toLocaleString()}/month (~$${annual.toLocaleString()}/year)`,
+        value: `Total contract value estimated at approximately $${annual.toLocaleString()} USD annually, based on about $${monthlyUsd.toLocaleString()} per month as stated in the intake.`,
+      };
+      return buildRecommendResult({
+        explanation: `Your intake suggests about $${monthlyUsd.toLocaleString()} per month — we can state an annual total for the agreement.`,
+        why: "Converting a monthly estimate to an annual total gives a concrete fee line while staying close to your intake.",
+        primary: generated,
+        alternatives: [choiceFromPill(variable, "120k"), choiceFromPill(variable, "confirm_intake")],
+        applyDirect: false,
+      });
+    }
+    const primary = choiceFromPill(variable, "120k");
+    return buildRecommendResult({
+      explanation: "Your intake references a rough project budget — confirming a total fee reduces disputes later.",
+      why: "A stated total fee is easier to enforce than “to be confirmed” language.",
+      primary,
+      alternatives: [choiceFromPill(variable, "confirm_intake")],
+      applyDirect: migration.vagueFee,
+    });
+  }
 
   if (variable.id === "payment_structure") {
     if (signals.evolvingScope || signals.aiRebuild) {
-      return {
+      const retainer = choiceFromPill(variable, "retainer", "Monthly retainer");
+      const milestone = choiceFromPill(variable, "milestone", "Milestone-based");
+      return buildRecommendResult({
         explanation:
-          "Because your intake described an evolving workflow rebuild with changing scope, milestone-based or monthly retainer structures are usually safer than fixed-fee pricing.",
-        choices: [
-          { pillId: "retainer", label: "Monthly retainer", value: find("retainer")?.value ?? "Monthly retainer with written approval for extra work." },
-          { pillId: "milestone", label: "Milestone-based", value: find("milestone")?.value ?? "Milestone-based fees with written approvals before each phase." },
-        ],
-      };
+          "Because your intake described evolving scope, milestone-based or monthly retainer structures are usually safer than a single fixed fee.",
+        why: "Retainers and milestones leave room for scope changes without renegotiating the whole deal.",
+        primary: monthlyUsd ? retainer : milestone,
+        alternatives: [monthlyUsd ? milestone : retainer],
+        applyDirect: false,
+      });
     }
-    return {
-      explanation: "For defined consulting deliverables, a fixed project fee or milestone schedule is often the simplest starting point.",
-      choices: [
-        { pillId: "fixed", label: "Fixed project fee", value: find("fixed")?.value ?? "Fixed project fee for agreed deliverables." },
-        { pillId: "milestone", label: "Milestone-based", value: find("milestone")?.value ?? "Milestone-based payments tied to deliverables." },
-      ],
-    };
+    const fixed = choiceFromPill(variable, "fixed", "Fixed project fee");
+    const milestone = choiceFromPill(variable, "milestone", "Milestone-based");
+    return buildRecommendResult({
+      explanation: "For defined deliverables, a fixed project fee or milestone schedule is often the simplest starting point.",
+      why: "Fixed or milestone pricing matches a scoped automation build when requirements are relatively stable.",
+      primary: fixed,
+      alternatives: [milestone],
+      applyDirect: false,
+    });
   }
 
   if (variable.id === "support_obligations") {
-    return {
+    const business = choiceFromPill(variable, "business_hours", "Business-hours support");
+    const handoff = choiceFromPill(variable, "handoff", "Reasonable handoff only");
+    return buildRecommendResult({
       explanation: signals.aiRebuild
-        ? "Rebuild projects usually include a short business-hours support window after launch, unless you plan a separate maintenance agreement."
-        : "Most teams start with reasonable handoff support, then add maintenance only if they need ongoing fixes.",
-      choices: [
-        { pillId: "business_hours", label: "Business-hours support", value: find("business_hours")?.value ?? "Business-hours support for 30 days after delivery." },
-        { pillId: "handoff", label: "Reasonable handoff only", value: find("handoff")?.value ?? "Reasonable handoff and knowledge transfer only." },
-      ],
-    };
+        ? "Rebuild projects usually include a short business-hours support window after launch."
+        : "Most teams start with reasonable handoff support, then add maintenance only if needed.",
+      why: signals.mentionsSupport
+        ? "Your intake mentions support — a short post-launch window is a practical default."
+        : "Handoff-only is the lightest option when ongoing support is not defined yet.",
+      primary: signals.mentionsSupport || signals.aiRebuild ? business : handoff,
+      alternatives: [signals.mentionsSupport || signals.aiRebuild ? handoff : business],
+      applyDirect: true,
+    });
   }
 
   if (variable.id === "scope_change_approval") {
-    return {
+    const email = choiceFromPill(variable, "email", "Email approval is enough");
+    const sow = choiceFromPill(variable, "sow", "Signed SOW / change order");
+    return buildRecommendResult({
       explanation: signals.evolvingScope
-        ? "Most teams in this situation use written email approvals so scope changes stay organized without slowing the project."
-        : "A signed change order is the clearest option when scope might grow materially.",
-      choices: [
-        { pillId: "email", label: "Email approval is enough", value: find("email")?.value ?? "Scope changes approved by email from an authorized contact." },
-        { pillId: "sow", label: "Signed SOW / change order", value: find("sow")?.value ?? "Material scope changes require a signed SOW or change order." },
-      ],
-    };
+        ? "Written email approvals keep evolving scope organized without slowing delivery."
+        : "A signed change order is clearest when scope might grow materially.",
+      why: signals.evolvingScope
+        ? "Matches flexible automation / workflow work where requirements change often."
+        : "Stronger control when extra work should not start without a signed change.",
+      primary: signals.evolvingScope ? email : sow,
+      alternatives: [signals.evolvingScope ? sow : email],
+      applyDirect: true,
+    });
   }
 
   if (variable.id === "ip_ownership" || variable.id === "ip_allocation") {
-    return {
+    const company = choiceFromPill(variable, "company_deliverables", "Company owns deliverables");
+    const developer = choiceFromPill(variable, "developer_tools", "Developer keeps reusable tools");
+    return buildRecommendResult({
       explanation: signals.aiRebuild
-        ? "For internal tooling and automation rebuilds, companies usually own project deliverables while the developer keeps general reusable tools."
-        : "Company ownership of project deliverables is the most common default for consulting work.",
-      choices: [
-        { pillId: "company_deliverables", label: "Company owns deliverables", value: find("company_deliverables")?.value ?? "Company owns project deliverables; developer retains pre-existing tools." },
-        { pillId: "developer_tools", label: "Developer keeps reusable tools", value: find("developer_tools")?.value ?? "Company owns deliverables; developer retains reusable libraries and tools." },
-      ],
-    };
+        ? "For internal automation work, the company usually owns deliverables while the developer keeps reusable tools."
+        : "Company ownership of project deliverables is the most common default for services work.",
+      why: "Aligns with your intake asking for ownership of what gets built.",
+      primary: company,
+      alternatives: [developer],
+      applyDirect: true,
+    });
   }
 
   if (variable.id === "ip_ownership_contradiction") {
-    return {
+    const split = choiceFromPill(variable, "split_tools", "Developer keeps tools; company owns custom work");
+    const companyAll = choiceFromPill(variable, "company_all", "Company owns all custom work product");
+    return buildRecommendResult({
       explanation:
-        "Your intake asks for both developer ownership and company exclusive ownership. Most founder-friendly contractor deals give the company the deliverables and let the developer keep reusable tools.",
-      choices: [
-        { pillId: "split_tools", label: "Developer keeps tools; company owns custom work", value: find("split_tools")?.value ?? "" },
-        { pillId: "company_all", label: "Company owns all custom work product", value: find("company_all")?.value ?? "" },
-      ],
-    };
+        "Your intake asks for both developer ownership and company exclusive ownership — a split is the usual fix.",
+      why: "Company gets custom work product; developer keeps reusable libraries and tools.",
+      primary: split,
+      alternatives: [companyAll],
+      applyDirect: false,
+    });
   }
 
   if (variable.id === "term_structure_contradiction") {
-    return {
-      explanation:
-        "Month-to-month billing with a three-year maximum term is a common way to honor both flexibility and a longer commitment window.",
-      choices: [
-        { pillId: "monthly_cap", label: "Month-to-month during a 3-year maximum term", value: find("monthly_cap")?.value ?? "" },
-        { pillId: "monthly_notice", label: "Month-to-month with notice", value: find("monthly_notice")?.value ?? "" },
-      ],
-    };
+    const cap = choiceFromPill(variable, "monthly_cap", "Month-to-month during a 3-year maximum term");
+    const notice = choiceFromPill(variable, "monthly_notice", "Month-to-month with notice");
+    return buildRecommendResult({
+      explanation: "Month-to-month with a maximum term window is a common way to balance flexibility and commitment.",
+      why: "Honors both month-to-month language and a longer cap mentioned in the intake.",
+      primary: cap,
+      alternatives: [notice],
+      applyDirect: true,
+    });
   }
 
   if (variable.id === "governing_law_notice" || variable.id === "governing_venue") {
-    return {
-      explanation: "Delaware is a common default for B2B services agreements when no home state is specified in your intake.",
-      choices: [
-        { pillId: "de", label: "Delaware", value: find("de")?.value ?? "Governed by the laws of the State of Delaware." },
-        { pillId: "ca", label: "California", value: find("ca")?.value ?? "Governed by the laws of the State of California." },
-      ],
-    };
+    const de = choiceFromPill(variable, "de", "Delaware");
+    const ca = choiceFromPill(variable, "ca", "California");
+    return buildRecommendResult({
+      explanation: "Delaware is a common B2B default when no home state is specified in your intake.",
+      why: "Neutral, widely used governing law for technology services agreements.",
+      primary: de,
+      alternatives: [ca],
+      applyDirect: true,
+    });
   }
 
-  return null;
+  return buildFallbackRecommendForMe(variable, intakeRaw);
+}
+
+/** Never return null — always surface a card or direct apply path. */
+export function buildFallbackRecommendForMe(
+  variable: DealVariable,
+  intakeRaw?: string | null,
+): RecommendForMeResult {
+  void intakeRaw;
+  if (variable.recommendedPillId) {
+    const primary = choiceFromPill(variable, variable.recommendedPillId);
+    if (primary.value) {
+      return buildRecommendResult({
+        explanation: variable.recommendedLabel
+          ? `${variable.recommendedLabel} for this question.`
+          : "LawDog picked the closest default for your intake.",
+        why: "Based on patterns in your prompt and agreement type.",
+        primary,
+        alternatives: variable.suggestedDefaults
+          .filter((p) => p.id !== RECOMMEND_PILL_ID && p.id !== "custom" && p.id !== variable.recommendedPillId && p.value)
+          .slice(0, 2)
+          .map((p) => ({ pillId: p.id, label: p.label, value: p.value })),
+        applyDirect: true,
+      });
+    }
+  }
+  const selectable = variable.suggestedDefaults.filter(
+    (p) => p.id !== RECOMMEND_PILL_ID && p.id !== "custom" && (p.value || "").trim().length > 0,
+  );
+  const primary = selectable[0]
+    ? { pillId: selectable[0].id, label: selectable[0].label, value: selectable[0].value }
+    : {
+        pillId: "custom",
+        label: "Custom",
+        value: "Use commercially reasonable terms typical for this type of agreement.",
+      };
+  return buildRecommendResult({
+    explanation: "LawDog does not have a single strong signal for this item — review the safest practical option below.",
+    why: "Pick the closest match, or use Custom to describe your preference in plain language.",
+    primary,
+    alternatives: selectable.slice(1, 3).map((p) => ({ pillId: p.id, label: p.label, value: p.value })),
+    applyDirect: false,
+  });
 }
 
 export function enrichDealVariables(intakeRaw: string | null | undefined, variables: DealVariable[]): DealVariable[] {

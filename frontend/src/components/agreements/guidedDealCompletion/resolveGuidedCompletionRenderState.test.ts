@@ -35,7 +35,7 @@ describe("resolveGuidedCompletionRenderState", () => {
     expect(state.canRenderGuidedQuestions).toBe(false);
     expect(state.shouldShowNeedsDetails).toBe(false);
     expect(state.shouldShowCompleteAgreementHeading).toBe(false);
-    expect(state.shouldShowUseCompleteBelowCopy).toBe(false);
+    expect(state.shouldShowUseCompleteBelowCopy).toBe(true);
     expect(state.readinessLabel).toBe("ready_to_review");
     expect(state.reason).toBe("guided_panel_not_mounted_on_surface");
   });
@@ -56,7 +56,8 @@ describe("resolveGuidedCompletionRenderState", () => {
     expect(state.canRenderGuidedQuestions).toBe(true);
     expect(state.unresolvedRenderableCount).toBeGreaterThan(0);
     expect(state.shouldShowNeedsDetails).toBe(true);
-    expect(state.shouldShowCompleteAgreementHeading).toBe(true);
+    expect(state.shouldShowCompleteAgreementHeading).toBe(false);
+    expect(state.shouldShowUseCompleteBelowCopy).toBe(false);
     const current = getCurrentVariable(session)!;
     expect(variableHasSelectableAnswerPath(current)).toBe(true);
   });
@@ -70,12 +71,12 @@ describe("resolveGuidedCompletionRenderState", () => {
     expect(countUnresolvedRenderableVariables(session)).toBeGreaterThan(0);
   });
 
-  it("finalize copy never claims below when panel not mounted", () => {
+  it("finalize copy never claims below when no renderable guided queue", () => {
     const state = resolveGuidedCompletionRenderState({
-      bodyText: migrationBody,
-      intakeText: LIGHTHOUSE_APEX_LOOSE_QA_INTAKE,
+      bodyText: "",
+      guidedSession: null,
       panelMountedSurface: null,
-      bodyUsable: true,
+      bodyUsable: false,
       rawReadiness: "needs_details",
     });
     expect(mayShowCompleteAgreementBelowCopy(state)).toBe(false);

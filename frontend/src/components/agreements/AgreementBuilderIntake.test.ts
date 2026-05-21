@@ -288,7 +288,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("Want to adjust this agreement?");
     expect(intake).toContain("{showTopProAdjustCard ?");
     expect(intake).toContain("FinalizeYourAgreementPanel");
-    expect(intake).toContain("hideFreeformRefineSection={showPrimaryGuidedCompletion}");
+    expect(intake).toContain("hideFreeformRefineSection={guidedCompletionRenderState.canRenderGuidedQuestions}");
     expect(intake).toContain("showPrimaryGuidedCompletion");
     expect(intake).toContain("guidedCompletionRenderState={guidedCompletionRenderState}");
     expect(intake).toContain("handleGuidedApplyAnswer");

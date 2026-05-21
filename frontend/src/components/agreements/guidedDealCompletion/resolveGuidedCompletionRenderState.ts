@@ -138,9 +138,12 @@ export function resolveGuidedCompletionRenderState(
 
   const readinessLabel = mapReadinessLabel(args.rawReadiness, canRenderGuidedQuestions);
   const shouldShowNeedsDetails = canRenderGuidedQuestions && readinessLabel === "needs_details";
-  const shouldShowCompleteAgreementHeading = canRenderGuidedQuestions;
+  /** Heading lives on GuidedDealCompletionPanel when mounted in the document editor — avoid duplicate in Finalize. */
+  const shouldShowCompleteAgreementHeading =
+    canRenderGuidedQuestions && args.panelMountedSurface !== "document_editor";
+  /** Pointer copy only when questions exist but the panel is not mounted on any surface (e.g. Finalize-only). */
   const shouldShowUseCompleteBelowCopy =
-    canRenderGuidedQuestions && args.panelMountedSurface === "document_editor";
+    sessionHasRenderableQueue && !panelMounted && canRenderGuidedQuestions === false;
 
   const currentVariableHasPills =
     current?.uiControlType === "pills" &&

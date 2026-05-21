@@ -127,6 +127,23 @@ export const LIGHTHOUSE_APEX_LOOSE_QA_INTAKE = [
 export const CONTRACTOR_DEVELOPER_QA_INTAKE =
   "Need a contractor agreement for a developer. They should own all their work product but we also need full exclusive ownership of everything they create. The arrangement is month-to-month but should automatically lock in for 3 years unless terminated. Need it simple and founder-friendly.";
 
+/** Casual AI automation services intake — monthly ~$6k, phases, support (guided recommend QA). */
+export const AI_AUTOMATION_SERVICES_QA_INTAKE = [
+  "hey need an agreement for somebody helping us with AI automation setup",
+  "",
+  "they'll help build workflows and dashboards and maybe manage some support stuff too",
+  "",
+  "monthly payment probably around 6k i think",
+  "",
+  "need:",
+  "- confidentiality",
+  "- ownership of what gets built",
+  "- basic support expectations",
+  "- ability to terminate if it's not working",
+  "",
+  "keep it simple not super lawyer sounding",
+].join("\n");
+
 /** QA intake for guided completion — evolving scope, support, IP, vague fees. */
 export const CONSULTING_DEV_QA_INTAKE =
   "Create a consulting agreement for a developer helping rebuild our internal workflow systems and AI automation stack. The engagement is remote and should include confidentiality, IP ownership, and support obligations. We want flexibility because scope may evolve over time.";

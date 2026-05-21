@@ -1,4 +1,5 @@
 import type { DealVariable } from "./types";
+import { isRecommendPillId } from "./guidedRecommendPillIds";
 
 /** Structured IP split when user picks Shared / custom without typing. */
 export const GUIDED_SHARED_IP_STRUCTURED_ANSWER =
@@ -15,7 +16,7 @@ export function resolveGuidedAnswerForPill(
   label: string,
   value: string,
 ): GuidedPillResolution {
-  if (pillId === "recommend") {
+  if (isRecommendPillId(pillId)) {
     return { action: "recommend" };
   }
   if (pillId === "custom") {

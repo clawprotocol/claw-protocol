@@ -11,7 +11,12 @@ import {
 } from "./guidedCompletionEngine";
 import { resolveGuidedAnswerForPill } from "./guidedAnswerResolution";
 import { GUIDED_COMPLETION_HEADING, GUIDED_COMPLETION_SUBHEADING } from "./friendlyProCompletionCopy";
-import { RECOMMEND_PILL_ID, resolveRecommendForMe, type RecommendForMeResult } from "./intakeRecommendationEngine";
+import {
+  RECOMMEND_PILL_ID,
+  resolveRecommendForMe,
+  type RecommendForMeResult,
+} from "./intakeRecommendationEngine";
+import { isRecommendPillId } from "./guidedRecommendPillIds";
 
 export type GuidedDealCompletionPanelProps = {
   session: GuidedCompletionSession;
@@ -72,10 +77,14 @@ export function GuidedDealCompletionPanel({
     });
   }, [current?.id, session, total]);
 
-  const runApply = async (displayAnswer: string, instructionAnswer: string, variableId: string) => {
-    if (!current || controlsDisabled || variableId !== current.id) return;
+  const runApply = async (
+    displayAnswer: string,
+    instructionAnswer: string,
+    variableId: string,
+  ): Promise<boolean> => {
+    if (!current || controlsDisabled || variableId !== current.id) return false;
     const instruction = formatRefineInstructionForAnswer(current, instructionAnswer);
-    if (!instruction.trim()) return;
+    if (!instruction.trim()) return false;
     setApplyingVariableId(variableId);
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -98,20 +107,72 @@ export function GuidedDealCompletionPanel({
         setCustomDraft("");
         setRecommendView(null);
       }
+      return ok;
     } finally {
       setApplyingVariableId(null);
     }
   };
 
+  const applyRecommendChoice = async (choice: { label: string; value: string }, variableId: string) => {
+    if (!current || controlsDisabled || variableId !== current.id) return;
+    const instructionAnswer = (choice.value || choice.label).trim();
+    if (!instructionAnswer) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[guided-recommend-noop-blocked]", {
+          variableId,
+          reason: "empty_recommendation_value",
+        });
+      }
+      setRecommendView(null);
+      setCustomOpen(true);
+      onCustomPillSelected?.();
+      return;
+    }
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[guided-recommend-apply-start]", { variableId });
+    }
+    const ok = await runApply(choice.label, instructionAnswer, variableId);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info(ok ? "[guided-recommend-apply-success]" : "[guided-recommend-apply-failed]", { variableId });
+    }
+  };
+
+  const handleRecommendForMe = async () => {
+    if (!current || controlsDisabled) return;
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[guided-recommend-click]", { variableId: current.id });
+    }
+    const rec = resolveRecommendForMe(current, intakeRaw);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[guided-recommend-resolved]", {
+        variableId: current.id,
+        applyDirect: rec.applyDirect,
+        primaryPillId: rec.primary.pillId,
+        alternativeCount: rec.alternatives.length,
+      });
+    }
+    setCustomOpen(false);
+    if (rec.applyDirect) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[guided-recommend-apply-start]", { variableId: current.id, mode: "direct" });
+      }
+      await applyRecommendChoice(rec.primary, current.id);
+      return;
+    }
+    setRecommendView(rec);
+  };
+
   const handlePill = (pillId: string, value: string, label: string) => {
     if (!current || controlsDisabled) return;
     const resolution = resolveGuidedAnswerForPill(current, pillId, label, value);
-    if (resolution.action === "recommend") {
-      const rec = resolveRecommendForMe(current, intakeRaw);
-      if (rec) {
-        setRecommendView(rec);
-        setCustomOpen(false);
-      }
+    if (resolution.action === "recommend" || isRecommendPillId(pillId)) {
+      void handleRecommendForMe();
       return;
     }
     if (resolution.action === "custom") {
@@ -195,37 +256,55 @@ export function GuidedDealCompletionPanel({
           ) : null}
 
           {recommendView ? (
-            <div className="mt-3 rounded-lg border border-sky-200/90 bg-sky-50/90 p-3">
-              <p className="text-xs font-medium text-sky-900">Suggested for your deal</p>
-              <p className="mt-1.5 text-xs leading-relaxed text-sky-950/90">{recommendView.explanation}</p>
-              <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-sky-800/80">Recommended</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {recommendView.choices.map((choice) => (
-                  <button
-                    key={choice.pillId}
-                    type="button"
-                    disabled={controlsDisabled}
-                    className="rounded-full border border-sky-400/80 bg-white px-3 py-1.5 text-left text-xs font-semibold text-sky-950 shadow-sm transition hover:border-sky-600 disabled:opacity-40 sm:text-sm"
-                    onClick={() =>
-                      void runApply(
-                        choice.label,
-                        choice.value || choice.label,
-                        current.id,
-                      )
+            <div className="mt-3 rounded-lg border border-sky-200/90 bg-sky-50/90 p-3" role="status" aria-live="polite">
+              <p className="text-xs font-medium text-sky-900">Based on your prompt, LawDog recommends</p>
+              <p className="mt-1 text-sm font-semibold text-sky-950">{recommendView.primary.label}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-sky-950/90">
+                <span className="font-medium text-sky-900">Why: </span>
+                {recommendView.why || recommendView.explanation}
+              </p>
+              {recommendView.explanation !== recommendView.why ? (
+                <p className="mt-1 text-[11px] leading-relaxed text-sky-900/85">{recommendView.explanation}</p>
+              ) : null}
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                <button
+                  type="button"
+                  disabled={controlsDisabled}
+                  className="rounded-lg bg-sky-800 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-sky-900 disabled:opacity-40 sm:text-sm"
+                  onClick={() => {
+                    if (import.meta.env.DEV) {
+                      // eslint-disable-next-line no-console
+                      console.info("[guided-recommend-apply-start]", {
+                        variableId: current.id,
+                        mode: "card_primary",
+                      });
                     }
-                  >
-                    {choice.label}
-                  </button>
-                ))}
+                    void applyRecommendChoice(recommendView.primary, current.id);
+                  }}
+                >
+                  {applyingVariableId === current.id ? "Applying…" : "Use this recommendation"}
+                </button>
+                <button
+                  type="button"
+                  disabled={controlsDisabled}
+                  className="rounded-lg border border-sky-400/80 bg-white px-3 py-2 text-xs font-semibold text-sky-950 hover:border-sky-600 disabled:opacity-40 sm:text-sm"
+                  onClick={() => setRecommendView(null)}
+                >
+                  Show other options
+                </button>
+                <button
+                  type="button"
+                  disabled={controlsDisabled}
+                  className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-800 hover:bg-stone-50 disabled:opacity-40 sm:text-sm"
+                  onClick={() => {
+                    setRecommendView(null);
+                    setCustomOpen(true);
+                    onCustomPillSelected?.();
+                  }}
+                >
+                  Custom
+                </button>
               </div>
-              <button
-                type="button"
-                className="mt-2 text-xs font-medium text-sky-800 underline-offset-2 hover:underline"
-                disabled={controlsDisabled}
-                onClick={() => setRecommendView(null)}
-              >
-                See all options
-              </button>
             </div>
           ) : (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -244,7 +323,9 @@ export function GuidedDealCompletionPanel({
                     }`}
                     onClick={() => handlePill(pill.id, pill.value, pill.label)}
                   >
-                    {isApplyingThis && pill.id !== "custom" ? "Applying…" : pill.label}
+                    {isApplyingThis && pill.id !== "custom" && !isRecommendPillId(pill.id)
+                      ? "Applying…"
+                      : pill.label}
                     {isRecommended && current.recommendedLabel ? (
                       <span className="mt-0.5 block text-[10px] font-normal text-emerald-800/90">
                         {current.recommendedLabel}
