@@ -11,14 +11,24 @@ const MAX_INTRO_LABELS = 3;
 
 /** Business-order priority for contractor/contradiction flows (lower = earlier). */
 const GUIDED_ID_PRIORITY: Record<string, number> = {
-  ip_ownership_contradiction: 0,
-  ip_ownership: 1,
-  term_structure_contradiction: 2,
-  payment_structure: 3,
-  license_background_tools: 4,
-  deliverables_scope: 5,
-  support_obligations: 6,
-  scope_change_approval: 7,
+  supplemental_schedule_confirmation: 0,
+  total_fee_confirmation: 1,
+  phase_payment_allocation: 2,
+  amount_to_be_confirmed: 2,
+  party_legal_names: 3,
+  ip_ownership_contradiction: 4,
+  ip_ownership: 5,
+  term_structure_contradiction: 6,
+  payment_structure: 7,
+  payment_timing: 8,
+  license_background_tools: 9,
+  saas_sla: 10,
+  security_obligations: 11,
+  renewal_notice: 12,
+  governing_law_notice: 13,
+  deliverables_scope: 14,
+  support_obligations: 15,
+  scope_change_approval: 16,
 };
 
 function guidedIdPriority(id: string): number {

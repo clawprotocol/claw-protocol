@@ -55,6 +55,14 @@ export { GuidedDealCompletionPanel } from "./GuidedDealCompletionPanel";
 export {
   shouldRenderGuidedCompletionPanel,
   shouldShowGuidedNeedsDetailsMessaging,
+  variableHasSelectableAnswerPath,
+  resolveDisplayReadinessWithGuidedInvariant,
+  guidedCompletionNeutralCopyWhenNotRenderable,
 } from "./shouldRenderGuidedCompletionPanel";
+export { scanBodyMaterialPlaceholders, bodyHasLoosePhaseScheduleBeforeSignatures } from "./bodyMaterialPlaceholderScanner";
+export {
+  analyzeServicesMigrationIntake,
+  isServicesMigrationIntake,
+} from "./servicesMigrationGuidedIntake";
 export { detectContradictoryTerms, detectIpOwnershipContradiction, detectTermStructureContradiction } from "./detectContradictoryTerms";
 export { isContractorDeveloperIntake } from "./contractorGuidedIntake";

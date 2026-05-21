@@ -13,7 +13,11 @@ import {
 } from "../proAgreementCompleteness/revisionQuestionEngine";
 import { enrichDealVariableFromIntake, RECOMMEND_PILL_ID, resolveRecommendForMe } from "./intakeRecommendationEngine";
 import { GUIDED_COMPLETION_HEADING } from "./friendlyProCompletionCopy";
-import { shouldRenderGuidedCompletionPanel } from "./shouldRenderGuidedCompletionPanel";
+import {
+  resolveDisplayReadinessWithGuidedInvariant,
+  shouldRenderGuidedCompletionPanel,
+  shouldShowGuidedNeedsDetailsMessaging,
+} from "./shouldRenderGuidedCompletionPanel";
 import { finalizeAgreementOutput } from "../agreementOutputQuality/agreementOutputQualityPipeline";
 import { validateAgreementIntegrity } from "./agreementIntegrityValidator";
 import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
@@ -636,6 +640,19 @@ describe("guidedDealCompletion", () => {
   it("consulting dev prompt is registered in manual QA corpus", () => {
     const p = QA_MANUAL_TEN_PROMPTS.find((x) => x.id === "consulting-dev-qa");
     expect(p?.intake).toContain("workflow systems");
+  });
+
+  it("needs-details invariant downgrades readiness when panel is not renderable", () => {
+    expect(resolveDisplayReadinessWithGuidedInvariant("needs_details", false)).toBe("ready_for_review");
+    expect(shouldShowGuidedNeedsDetailsMessaging(false)).toBe(false);
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      body: consultingAuthoritativeBodyFixture(),
+    });
+    const renderable = shouldRenderGuidedCompletionPanel({ bodyUsable: true, session, body: consultingAuthoritativeBodyFixture() });
+    if (renderable) {
+      expect(shouldShowGuidedNeedsDetailsMessaging(true)).toBe(true);
+    }
   });
 
   it("shouldRenderGuidedCompletionPanel is false when session queue is empty", () => {

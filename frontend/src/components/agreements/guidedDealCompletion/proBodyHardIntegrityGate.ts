@@ -7,6 +7,8 @@ import { parseAgreementSections } from "../proOperationalSynthesis/sectionPurity
 import type { ProCompletenessContext } from "../proAgreementCompleteness/types";
 import { isConsultingDevIntake } from "./consultingGuidedIntake";
 import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
+import { bodyHasLoosePhaseScheduleBeforeSignatures } from "./bodyMaterialPlaceholderScanner";
+import { isServicesMigrationIntake } from "./servicesMigrationGuidedIntake";
 import { neutralFallbackForTopic } from "../proAgreementCompleteness/familyFallbackLanguage";
 
 const BANNED_LINE_PATTERNS: readonly RegExp[] = [
@@ -34,7 +36,7 @@ const ORPHAN_BODY_RE =
 const SCHEDULE_A_STUB =
   "Specific compensation mechanics will be completed in Schedule A before execution.";
 
-const SCHEDULE_A_HEADER = "SCHEDULE A\nCOMPENSATION TERMS";
+const SCHEDULE_A_HEADER = "SCHEDULE A — Phase, Payment, and Support Terms";
 
 const MUTUAL_CONFIDENTIALITY_FALLBACK =
   "Each Party may disclose Confidential Information to the other in connection with this Agreement. Each receiving Party will protect such information using reasonable care, use it only for the permitted purpose, and not disclose it except as allowed herein. These obligations survive termination as stated in this Agreement.";
@@ -135,6 +137,15 @@ function safeFallbackForHeading(heading: string, ctx: ProCompletenessContext): s
   if (contractor && /electronic\s+sign|signature|execution/i.test(h)) {
     return "This Agreement may be executed electronically in accordance with applicable law. Electronic signatures are intended to have the same effect as original signatures.";
   }
+  if (isServicesMigrationIntake(ctx.intakeRaw) && /indemn/i.test(h)) {
+    return "Each Party will indemnify the other for third-party claims arising from its breach of this Agreement or negligence, subject to the limitation of liability section.";
+  }
+  if (isServicesMigrationIntake(ctx.intakeRaw) && /sla|limit|uptime/i.test(h)) {
+    return "Service availability and response targets will be as stated in the Service Levels section or Schedule A. Remedies for downtime are limited to commercially reasonable service credits.";
+  }
+  if (isServicesMigrationIntake(ctx.intakeRaw) && /invoic/i.test(h)) {
+    return "Invoices are due Net thirty (30) days from receipt unless otherwise stated in a signed change order. Fee amounts and phase triggers are set out in Schedule A.";
+  }
   if (/protection\s+period|protected\s+opportunit/i.test(h)) {
     return REFERRAL_PROTECTION_FALLBACK;
   }
@@ -225,10 +236,59 @@ function scrubAdvisorOperationalSplice(text: string, intakeRaw?: string | null):
   return { text: working.replace(/\n{3,}/g, "\n\n"), repairs };
 }
 
+function hasDedicatedScheduleASection(text: string): boolean {
+  return /\n\s*SCHEDULE\s+A\s*(?:[-—]|—\s*Phase|\n)/i.test(text);
+}
+
+function scrubDeferredCommercialPlaceholders(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let working = text;
+  if (/\bto be confirmed in a supplemental schedule\b/i.test(working)) {
+    working = working.replace(
+      /\bto be confirmed in a supplemental schedule\b/gi,
+      "as set forth in Schedule A — Phase, Payment, and Support Terms (confirm before execution)",
+    );
+    repairs.push("supplemental_schedule→schedule_a_ref");
+  }
+  if (/\bamount:\s*to be confirmed\b/i.test(working)) {
+    working = working.replace(/\bamount:\s*to be confirmed\b/gi, "amount: see Schedule A");
+    repairs.push("amount_tbc→schedule_a");
+  }
+  if (/\bpayment timing:\s*to be confirmed\b/i.test(working)) {
+    working = working.replace(/\bpayment timing:\s*to be confirmed\b/gi, "payment timing: see Schedule A");
+    repairs.push("payment_timing_tbc→schedule_a");
+  }
+  return { text: working, repairs };
+}
+
+function wrapLoosePhaseBlockBeforeSignatures(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  if (!bodyHasLoosePhaseScheduleBeforeSignatures(text)) return { text, repairs };
+  if (hasDedicatedScheduleASection(text)) return { text, repairs };
+  const phaseLines = text.match(/^\s*Phase\s+\d+\s*[-–—:].+$/gim);
+  if (!phaseLines || phaseLines.length < 2) return { text, repairs };
+  const block = phaseLines.map((l) => l.trim()).join("\n");
+  const blockStart = text.indexOf(phaseLines[0].trim());
+  if (blockStart < 0) return { text, repairs };
+  const sigMatch = text.search(/\n\s*(?:IN WITNESS|EXECUTION|SIGNATURES?)\b/i);
+  const blockEnd = sigMatch >= 0 ? sigMatch : text.length;
+  const blockSlice = text.slice(blockStart, blockEnd).trim();
+  if (!blockSlice.includes(phaseLines[0].trim())) return { text, repairs };
+  const before = text.slice(0, blockStart).trimEnd();
+  const after = text.slice(blockEnd);
+  const wrapped = `${before}\n\n${SCHEDULE_A_HEADER}\n\n${block}\n`;
+  repairs.push("loose_phase_block→schedule_a");
+  return { text: `${wrapped}${after}`, repairs };
+}
+
 /** Normalize loose Schedule bullets into a headed block or replace with stub reference. */
 export function normalizeScheduleAContent(text: string, ctx: ProCompletenessContext): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let working = text;
+
+  const phaseWrap = wrapLoosePhaseBlockBeforeSignatures(working);
+  working = phaseWrap.text;
+  repairs.push(...phaseWrap.repairs);
 
   const looseScheduleBullets =
     /\n\s*[-•]\s+(?:compensation|revenue\s+share|referral\s+fee|payout|protected)[^\n]*(?:\n\s*[-•]\s+[^\n]+){0,8}/gi;
@@ -239,13 +299,17 @@ export function normalizeScheduleAContent(text: string, ctx: ProCompletenessCont
   }
 
   if (/\bSCHEDULE\s+A\b/i.test(working)) {
-    const hasHeader = /\bSCHEDULE\s+A\s*\n\s*COMPENSATION\s+TERMS\b/i.test(working);
-    if (!hasHeader) {
+    const hasModernHeader = /\bSCHEDULE\s+A\s*[-—]\s*Phase/i.test(working);
+    const hasLegacyHeader = /\bSCHEDULE\s+A\s*\n\s*COMPENSATION\s+TERMS\b/i.test(working);
+    if (!hasModernHeader && !hasLegacyHeader) {
       working = working.replace(/\bSCHEDULE\s+A\b/i, SCHEDULE_A_HEADER);
       repairs.push("schedule_a_header_normalized");
     }
-  } else if (isReferralChannelIntake(ctx.intakeRaw) && !working.includes(SCHEDULE_A_STUB)) {
-    working = `${working.trim()}\n\n${SCHEDULE_A_STUB}\n`;
+  } else if (
+    (isReferralChannelIntake(ctx.intakeRaw) || isServicesMigrationIntake(ctx.intakeRaw, working)) &&
+    !working.includes(SCHEDULE_A_STUB)
+  ) {
+    working = `${working.trim()}\n\n${SCHEDULE_A_HEADER}\n\n${SCHEDULE_A_STUB}\n`;
     repairs.push("schedule_a_stub_appended");
   }
 
@@ -259,6 +323,14 @@ export function applyProBodyHardIntegrityGate(
   const repairs: string[] = [];
   let working = (text || "").trim();
   if (!working) return { text: "", repairs };
+
+  const deferred = scrubDeferredCommercialPlaceholders(working);
+  working = deferred.text;
+  repairs.push(...deferred.repairs);
+
+  const phaseEarly = wrapLoosePhaseBlockBeforeSignatures(working);
+  working = phaseEarly.text;
+  repairs.push(...phaseEarly.repairs);
 
   const sig = stripManualSignatureBlocks(working);
   working = sig.text;

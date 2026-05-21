@@ -20,10 +20,19 @@ export function sanitizeProUserMessage(message: string | null | undefined): stri
   return m;
 }
 
-export function friendlyLowConfidenceCopy(session: GuidedCompletionSession | null): {
+export function friendlyLowConfidenceCopy(
+  session: GuidedCompletionSession | null,
+  panelRenderable = true,
+): {
   title: string;
   body: string;
 } {
+  if (!panelRenderable) {
+    return {
+      title: "Ready to review.",
+      body: "Ready to review — add any final edits below.",
+    };
+  }
   if (!session) {
     return {
       title: "We're almost done.",

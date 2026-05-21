@@ -1,9 +1,11 @@
 import { detectAgreementFamily, type AgreementFamily } from "../agreementFamilyRouter";
+import { scanBodyMaterialPlaceholders } from "../guidedDealCompletion/bodyMaterialPlaceholderScanner";
 import { isConsultingDevIntake } from "../guidedDealCompletion/consultingGuidedIntake";
+import { isServicesMigrationIntake } from "../guidedDealCompletion/servicesMigrationGuidedIntake";
 import type { CommercialFamilyHint, MaterialMissingItem } from "./types";
 
 const VAGUE_COMMERCIAL_RE =
-  /\b(to be agreed|tbd|as discussed|standard terms|mutually agreed|confirm in writing|supplemental schedule)\b/i;
+  /\b(to be agreed|tbd|as discussed|standard terms|mutually agreed|confirm in writing|supplemental schedule|to be confirmed)\b/i;
 
 function detectCommercialFamilyHint(intake: string, body: string): CommercialFamilyHint {
   const low = `${intake}\n${body}`.toLowerCase();
@@ -374,6 +376,138 @@ function familyQuestions(
     );
   }
 
+  if (isServicesMigrationIntake(intake, body)) {
+    if (
+      /\b(?:between|among)\s+[A-Za-z]/i.test(intake) &&
+      !/\b(?:LLC|Inc\.|Corp\.|L\.P\.)\b/i.test(body.slice(0, 800))
+    ) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "party_legal_names",
+          severity: "material",
+          label: "Party legal names",
+          question: "What are the full legal names of each party (and signer titles)?",
+          whyItMatters: "Informal party labels need legal entity names for execution and notices.",
+          suggestedAnswerFormat: "e.g. Lighthouse Digital LLC; Apex Ops Inc.",
+          affectsSections: ["Parties", "Notices", "Signatures"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+    if (
+      VAGUE_COMMERCIAL_RE.test(body) ||
+      VAGUE_COMMERCIAL_RE.test(intakeLow) ||
+      /\b(?:maybe|approximately)\s*\$?\s*[\d,]+/i.test(intake)
+    ) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "total_fee_confirmation",
+          severity: "material",
+          label: "Total fee",
+          question: "What is the total contract fee and currency?",
+          whyItMatters: "Fee is vague or deferred — confirm the total before execution.",
+          suggestedAnswerFormat: "e.g. $120,000 USD total",
+          affectsSections: ["Compensation", "Fees", "Schedule A"],
+          canProceedWithoutAnswer: false,
+        },
+        family,
+      );
+    }
+    if (
+      /\b(?:phase|build|rollout|support)\b/i.test(intakeLow) ||
+      /\bto be confirmed in a supplemental schedule\b/i.test(body)
+    ) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "phase_payment_allocation",
+          severity: "material",
+          label: "Phase payment allocation",
+          question: "How should fees split across build, rollout, and support phases?",
+          whyItMatters: "Phase economics are open — allocate amounts and triggers in Schedule A.",
+          suggestedAnswerFormat: "e.g. 40% build, 40% rollout, 20% support year-one",
+          affectsSections: ["Schedule A", "Milestones", "Payment"],
+          canProceedWithoutAnswer: false,
+        },
+        family,
+      );
+    }
+    if (!/\b(?:net\s+\d+|due within|invoice.*due|payment timing)\b/i.test(low) || VAGUE_COMMERCIAL_RE.test(body)) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "payment_timing",
+          severity: "material",
+          label: "Invoice timing",
+          question: "When are invoices due and what triggers each phase payment?",
+          whyItMatters: "Invoice due dates and triggers must be explicit for enforcement.",
+          suggestedAnswerFormat: "e.g. Net 30; invoice on phase acceptance",
+          affectsSections: ["Payment", "Invoicing"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+    if (/\b(?:support|sla|uptime)\b/i.test(intakeLow) && !/\b\d+\s*%|\b(?:hour|business\s+day)\b/i.test(low)) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "saas_sla",
+          severity: "material",
+          label: "Support / SLA level",
+          question: "What support hours, response times, and uptime target apply?",
+          whyItMatters: "Support and SLA expectations must be measurable after go-live.",
+          suggestedAnswerFormat: "e.g. 99.5% uptime; 4h critical response; business-hours support",
+          affectsSections: ["Support", "SLA", "Service Levels"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+    if (/\b(?:security|cyber|data\s+protection)\b/i.test(intakeLow) && !/\b(?:soc|encrypt|breach|incident)\b/i.test(low)) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "security_obligations",
+          severity: "material",
+          label: "Security obligations",
+          question: "What security and data-protection obligations apply?",
+          whyItMatters: "Migration and SaaS deals need clear security baselines and breach notice.",
+          suggestedAnswerFormat: "e.g. encryption in transit/at rest; 72h breach notice",
+          affectsSections: ["Security", "Data Protection"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+    if (/\b(?:renew|auto[-\s]?renew|month[-\s]?to[-\s]?month)\b/i.test(intakeLow) && !/\b\d+\s+days?\b/i.test(low)) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "renewal_notice",
+          severity: "material",
+          label: "Renewal / non-renewal",
+          question: "How does renewal work and how much notice is required to terminate?",
+          whyItMatters: "Renewal and notice periods control how either side exits the deal.",
+          suggestedAnswerFormat: "e.g. 30 days notice to terminate; auto-renew 12 months",
+          affectsSections: ["Term", "Renewal"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+  }
+
   if (/\baudit\b/i.test(intakeLow) && !/\baudit\b[\s\S]{0,120}\b(?:notice|scope|records)\b/i.test(low)) {
     pushItem(
       items,
@@ -406,6 +540,10 @@ export function buildMaterialMissingItems(args: {
   const family = detectCommercialFamilyHint(intake, body);
   const items = familyQuestions(family, body, intake);
   const seen = new Set(items.map((i) => i.id));
+
+  for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
+    pushItem(items, seen, bodyItem, family);
+  }
 
   for (const code of args.structuralIssues || []) {
     if (code.code === "empty_clause") {

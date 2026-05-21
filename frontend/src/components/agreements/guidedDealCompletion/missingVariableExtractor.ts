@@ -4,8 +4,10 @@
 
 import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQuestionEngine";
 import type { MaterialMissingItem, MaterialSeverity } from "../proAgreementCompleteness/types";
+import { scanBodyMaterialPlaceholders } from "./bodyMaterialPlaceholderScanner";
 import { isConsultingDevIntake } from "./consultingGuidedIntake";
 import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
+import { analyzeServicesMigrationIntake, isServicesMigrationIntake } from "./servicesMigrationGuidedIntake";
 import { detectContradictoryTerms, detectIpOwnershipContradiction } from "./detectContradictoryTerms";
 import { enrichDealVariables } from "./intakeRecommendationEngine";
 import { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
@@ -38,6 +40,16 @@ const ID_TO_CATEGORY: Record<string, DealVariableCategory> = {
   exclusivity_scope: "exclusivity",
   audit_scope: "audit",
   license_scope: "ip_ownership",
+  party_legal_names: "notices",
+  total_fee_confirmation: "compensation",
+  phase_payment_allocation: "milestones",
+  security_obligations: "general",
+  renewal_notice: "termination",
+  supplemental_schedule_confirmation: "milestones",
+  writing_before_execution: "general",
+  amount_to_be_confirmed: "compensation",
+  payment_timing_to_be_confirmed: "payment_timing",
+  as_specified_in_schedule_a: "milestones",
   jv_contributions: "governance",
   jv_ip_governance: "governance",
   ai_deployment: "milestones",
@@ -67,6 +79,16 @@ const PRESERVE_MATERIAL_IDS = new Set([
   "ip_ownership_contradiction",
   "term_structure_contradiction",
   "license_background_tools",
+  "party_legal_names",
+  "total_fee_confirmation",
+  "phase_payment_allocation",
+  "security_obligations",
+  "renewal_notice",
+  "supplemental_schedule_confirmation",
+  "writing_before_execution",
+  "amount_to_be_confirmed",
+  "payment_timing_to_be_confirmed",
+  "as_specified_in_schedule_a",
 ]);
 
 function remapMaterialId(item: MaterialMissingItem, intakeRaw?: string | null): string {
@@ -269,23 +291,153 @@ function inferContractorVariablesFromIntake(
   return dedupeVariables(inferred.map((i) => materialItemToDealVariable(i, intakeRaw)));
 }
 
+function inferServicesMigrationVariablesFromIntake(
+  intakeRaw: string,
+  body: string,
+  family: MaterialMissingItem["agreementFamily"],
+): DealVariable[] {
+  if (!isServicesMigrationIntake(intakeRaw, body)) return [];
+  const signals = analyzeServicesMigrationIntake(intakeRaw, body);
+  const low = body.toLowerCase();
+  const inferred: MaterialMissingItem[] = [];
+  const push = (item: Omit<MaterialMissingItem, "agreementFamily">) => {
+    inferred.push({ ...item, agreementFamily: family });
+  };
+
+  if (signals.informalParties && !/\b(?:LLC|Inc\.|Corp\.)\b/i.test(body.slice(0, 1200))) {
+    push({
+      id: "party_legal_names",
+      severity: "material",
+      label: "Party legal names",
+      question: "What are the full legal names of each party (and signer titles)?",
+      whyItMatters: "Informal party labels need legal entity names for execution and notices.",
+      suggestedAnswerFormat: "e.g. Lighthouse Digital LLC; Apex Ops Inc.",
+      affectsSections: ["Parties", "Notices"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+  if (signals.vagueFee || /\bto be confirmed\b/i.test(low)) {
+    push({
+      id: "total_fee_confirmation",
+      severity: "material",
+      label: "Total fee",
+      question: "What is the total contract fee and currency?",
+      whyItMatters: "Fee is vague or deferred — confirm the total before execution.",
+      suggestedAnswerFormat: "e.g. $120,000 USD",
+      affectsSections: ["Compensation", "Schedule A"],
+      canProceedWithoutAnswer: false,
+    });
+  }
+  if (signals.mentionsPhases) {
+    push({
+      id: "phase_payment_allocation",
+      severity: "material",
+      label: "Phase payment allocation",
+      question: "How should fees split across build, rollout, and support phases?",
+      whyItMatters: "Phase economics belong in Schedule A with clear triggers.",
+      suggestedAnswerFormat: "e.g. 40% build, 40% rollout, 20% support",
+      affectsSections: ["Schedule A", "Milestones"],
+      canProceedWithoutAnswer: false,
+    });
+  }
+  if (!/\bnet\s+\d+\b/i.test(low) || /\bpayment timing:\s*to be confirmed\b/i.test(low)) {
+    push({
+      id: "payment_timing",
+      severity: "material",
+      label: "Invoice timing",
+      question: "When are invoices due and what triggers each phase payment?",
+      whyItMatters: "Invoice due dates must be explicit for enforcement.",
+      suggestedAnswerFormat: "e.g. Net 30; due on phase acceptance",
+      affectsSections: ["Payment", "Invoicing"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+  if (signals.mentionsSupport || signals.mentionsSla) {
+    push({
+      id: "saas_sla",
+      severity: "material",
+      label: "Support / SLA level",
+      question: "What support hours, response times, and uptime target apply?",
+      whyItMatters: "Support and SLA expectations must be measurable after go-live.",
+      suggestedAnswerFormat: "e.g. 99.5% uptime; 4h critical response",
+      affectsSections: ["Support", "SLA"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+  if (signals.mentionsSecurity) {
+    push({
+      id: "security_obligations",
+      severity: "material",
+      label: "Security obligations",
+      question: "What security and data-protection obligations apply?",
+      whyItMatters: "Migration deals need clear security baselines and breach notice.",
+      suggestedAnswerFormat: "e.g. encryption; 72h breach notice",
+      affectsSections: ["Security", "Data Protection"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+  if (signals.mentionsIp && !/\b(?:assign|owns|ownership)\b[\s\S]{0,80}\bdeliverable/i.test(low)) {
+    push({
+      id: "ip_ownership",
+      severity: "material",
+      label: "IP / deliverables ownership",
+      question: "Who owns deliverables, dashboards, and custom work product?",
+      whyItMatters: "IP ownership controls use, modification, and resale of deliverables.",
+      suggestedAnswerFormat: "e.g. Client owns custom deliverables; vendor retains tools",
+      affectsSections: ["Intellectual Property", "Work Product"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+  if (signals.vagueRenewal) {
+    push({
+      id: "renewal_notice",
+      severity: "material",
+      label: "Renewal / non-renewal",
+      question: "How does renewal work and how much notice is required to terminate?",
+      whyItMatters: "Renewal and notice periods control how either side exits.",
+      suggestedAnswerFormat: "e.g. 30 days notice; auto-renew 12 months",
+      affectsSections: ["Term", "Renewal"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+  if (signals.vagueGoverningLaw || !/\blaws of the state of\b/i.test(low)) {
+    push({
+      id: "governing_law_notice",
+      severity: "material",
+      label: "Governing law",
+      question: "Which state's law governs this agreement?",
+      whyItMatters: "Governing law affects enforceability and dispute forum.",
+      suggestedAnswerFormat: "e.g. Texas",
+      affectsSections: ["Governing Law"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+
+  return dedupeVariables(inferred.map((i) => materialItemToDealVariable(i, intakeRaw)));
+}
+
 function synthesizeFallbackGuidedVariables(
   intakeRaw: string,
   body: string,
   family: MaterialMissingItem["agreementFamily"],
 ): DealVariable[] {
   const intake = intakeRaw.trim();
-  if (!intake) return [];
+  if (!intake && !body.trim()) return [];
   const items: MaterialMissingItem[] = [];
   for (const signal of detectContradictoryTerms(intake, family)) {
     items.push(signal.item);
   }
+  for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
+    if (!items.some((x) => x.id === bodyItem.id)) items.push(bodyItem);
+  }
   const contractor = inferContractorVariablesFromIntake(intake, body, family);
   const consulting = inferConsultingVariablesFromIntake(intake, body, family);
+  const services = inferServicesMigrationVariablesFromIntake(intake, body, family);
   const vars = [
     ...items.map((m) => materialItemToDealVariable(m, intake)),
     ...contractor,
     ...consulting,
+    ...services,
   ];
   return dedupeVariables(vars);
 }
@@ -311,6 +463,10 @@ export function extractDealVariables(args: {
   let vars = dedupeVariables(material.map((m) => materialItemToDealVariable(m, intake)));
   const synthesized = synthesizeFallbackGuidedVariables(intake, body, family);
   for (const v of synthesized) {
+    if (!vars.some((x) => x.id === v.id)) vars.push(v);
+  }
+  for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
+    const v = materialItemToDealVariable(bodyItem, intake);
     if (!vars.some((x) => x.id === v.id)) vars.push(v);
   }
   vars = dedupeVariables(vars);

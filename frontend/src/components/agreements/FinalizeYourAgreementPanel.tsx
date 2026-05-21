@@ -227,10 +227,10 @@ export function FinalizeYourAgreementPanel({
   const displayReadiness = useMemo((): FinalizeReadiness => {
     if (guidedCompletionRenderable) return readiness;
     if (readiness === "needs_details") {
-      return missingLines.length > 0 ? "good_draft" : "ready_for_review";
+      return "ready_for_review";
     }
     return readiness;
-  }, [guidedCompletionRenderable, readiness, missingLines.length]);
+  }, [guidedCompletionRenderable, readiness]);
 
   const suppressNeedsDetailsCopy = !guidedCompletionRenderable && !hideMissingLinesBulletList;
 
@@ -613,8 +613,8 @@ export function FinalizeYourAgreementPanel({
         </ul>
       ) : (
         <p className="mt-3 text-sm text-slate-500 sm:mt-4">
-          {suppressNeedsDetailsCopy && missingLines.length > 0
-            ? "Ready to send — no key missing business decisions detected."
+          {suppressNeedsDetailsCopy
+            ? "Ready to review — add any final edits below."
             : "Looking good on the quick scan — add tweaks below if needed."}
         </p>
       )}

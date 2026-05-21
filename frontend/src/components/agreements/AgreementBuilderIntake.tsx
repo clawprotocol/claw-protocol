@@ -13025,10 +13025,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDocRefreshTick,
     authoritativePremiumUiCommitted,
   ]);
-  const guidedCompletionFriendlyCopy = useMemo(
-    () => friendlyLowConfidenceCopy(guidedCompletionSession ?? guidedCompletionSessionBase),
-    [guidedCompletionSession, guidedCompletionSessionBase],
-  );
   const activeGuidedCompletionSession = guidedCompletionSession ?? guidedCompletionSessionBase;
   guidedCompletionSessionRef.current = activeGuidedCompletionSession;
   const guidedCompletionRenderable = useMemo(() => {
@@ -13055,6 +13051,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
     reviewDocRefreshTick,
   ]);
+  const guidedCompletionFriendlyCopy = useMemo(
+    () =>
+      friendlyLowConfidenceCopy(
+        guidedCompletionSession ?? guidedCompletionSessionBase,
+        guidedCompletionRenderable,
+      ),
+    [guidedCompletionSession, guidedCompletionSessionBase, guidedCompletionRenderable],
+  );
   const showPrimaryGuidedCompletion = guidedCompletionRenderable;
   /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
   const showTopProAdjustCard = Boolean(

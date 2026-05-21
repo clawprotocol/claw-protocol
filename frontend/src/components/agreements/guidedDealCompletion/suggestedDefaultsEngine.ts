@@ -133,6 +133,36 @@ const TERM_CONTRADICTION: DealVariableDefault[] = [
   { id: "custom", label: "Custom", value: "" },
 ];
 
+const PHASE_PAYMENT: DealVariableDefault[] = [
+  { id: "even_thirds", label: "Even thirds across phases", value: "Fees split evenly across build, rollout, and support phases (approximately one-third each)." },
+  { id: "build_heavy", label: "Build-heavy split", value: "40% on build acceptance, 40% on rollout go-live, 20% for first-year support." },
+  { id: "milestone", label: "Milestone triggers", value: "Payments due on written acceptance of each phase deliverable per Schedule A." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const TOTAL_FEE: DealVariableDefault[] = [
+  { id: "120k", label: "$120,000 total", value: "Total contract fee of $120,000 USD." },
+  { id: "confirm_intake", label: "Use intake estimate", value: "Total fee as stated in the parties' intake (confirm exact amount in Schedule A)." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const PARTY_LEGAL: DealVariableDefault[] = [
+  { id: "llc_pair", label: "Add LLC suffixes", value: "Use full legal entity names with LLC/Inc. suffixes for each party listed in the agreement." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const SECURITY_OBLIGATIONS: DealVariableDefault[] = [
+  { id: "baseline", label: "Commercially reasonable security", value: "Commercially reasonable administrative, technical, and physical safeguards for Customer data." },
+  { id: "enterprise", label: "Enterprise baseline", value: "Encryption in transit and at rest; access controls; 72-hour breach notification; annual security questionnaire." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const RENEWAL_NOTICE: DealVariableDefault[] = [
+  { id: "30_day", label: "30 days notice", value: "Either Party may terminate on thirty (30) days written notice; auto-renewal requires the same notice." },
+  { id: "60_day", label: "60 days notice", value: "Either Party may terminate on sixty (60) days written notice before renewal." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
 const LICENSE_BACKGROUND: DealVariableDefault[] = [
   {
     id: "perpetual_embedded",
@@ -157,6 +187,15 @@ const DELIVERABLES_SCOPE: DealVariableDefault[] = [
 ];
 
 const ID_DEFAULTS: Partial<Record<string, (family: CommercialFamilyHint) => DealVariableDefault[]>> = {
+  phase_payment_allocation: () => PHASE_PAYMENT,
+  total_fee_confirmation: () => TOTAL_FEE,
+  party_legal_names: () => PARTY_LEGAL,
+  security_obligations: () => SECURITY_OBLIGATIONS,
+  renewal_notice: () => RENEWAL_NOTICE,
+  supplemental_schedule_confirmation: () => PHASE_PAYMENT,
+  as_specified_in_schedule_a: () => PHASE_PAYMENT,
+  amount_to_be_confirmed: () => TOTAL_FEE,
+  payment_timing_to_be_confirmed: DEFAULTS_BY_CATEGORY.payment_timing!,
   saas_sla: DEFAULTS_BY_CATEGORY.sla!,
   referral_economics: DEFAULTS_BY_CATEGORY.referral_economics!,
   payment_timing: DEFAULTS_BY_CATEGORY.payment_timing!,

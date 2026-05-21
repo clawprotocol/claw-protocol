@@ -93,6 +93,10 @@ export const QA_MANUAL_TEN_PROMPTS: readonly QaManualPromptFixture[] = [
   },
 ] as const;
 
+/** AI migration / tech services — Lighthouse Digital × Apex Ops archetype. */
+export const LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE =
+  "Create a technology services agreement between Lighthouse Digital and Apex Ops for AI migration, custom analytics dashboards, onboarding, and ongoing support. Total fee maybe $120,000 across build, rollout, and support phases. Month-to-month with renewal unless terminated. Texas law maybe. Include confidentiality, IP ownership, security obligations, and SLA uptime.";
+
 /** Contractor/developer intake with IP and term contradictions. */
 export const CONTRACTOR_DEVELOPER_QA_INTAKE =
   "Need a contractor agreement for a developer. They should own all their work product but we also need full exclusive ownership of everything they create. The arrangement is month-to-month but should automatically lock in for 3 years unless terminated. Need it simple and founder-friendly.";
@@ -136,6 +140,43 @@ export function consultingAuthoritativeBodyFixture(): string {
     "9. GENERAL",
     filler.repeat(2) + "Survival and wind-down obligations apply as stated herein.",
     "Direct damages are limited to fees paid in the prior three months.",
+    "",
+    "IN WITNESS WHEREOF, the parties may execute this Agreement.",
+    "By: ____________________",
+  ].join("\n");
+}
+
+/** Services/migration Pro body — supplemental schedule placeholders, empty headings, loose phases. */
+export function lighthouseApexMigrationBodyFixture(): string {
+  const filler =
+    "The parties will cooperate in good faith and use commercially reasonable efforts on the migration program. ";
+  return [
+    "TECHNOLOGY SERVICES AGREEMENT",
+    "This Agreement is between Lighthouse Digital and Apex Ops.",
+    "",
+    "1. SERVICES",
+    filler.repeat(2) + "Provider will deliver AI migration, dashboards, onboarding, and support services.",
+    "",
+    "2. COMPENSATION",
+    filler.repeat(1) + "Total fees to be confirmed in a supplemental schedule.",
+    "amount: to be confirmed",
+    "payment timing: to be confirmed",
+    "",
+    "3. INVOICING",
+    "3.3 Invoices.",
+    "",
+    "4. SERVICE LEVELS",
+    "4.3 SLA Limits.",
+    "",
+    "5. SECURITY",
+    filler.repeat(1) + "Security measures will follow standard commercial practice.",
+    "",
+    "9. INDEMNITY",
+    "9.1 Lighthouse Indemnity.",
+    "",
+    "Phase 1 — Build: amounts and timing to be confirmed in writing before execution.",
+    "Phase 2 — Rollout: amounts and timing to be confirmed.",
+    "Phase 3 — Support: support level to be confirmed.",
     "",
     "IN WITNESS WHEREOF, the parties may execute this Agreement.",
     "By: ____________________",

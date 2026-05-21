@@ -13,6 +13,16 @@ const PATTERNS: { re: RegExp; label: string }[] = [
   { re: /\bname not provided\b/i, label: "Unresolved: “name not provided” still appears" },
   { re: /\bplaceholder party\b/i, label: "Placeholder party language still appears" },
   { re: /\[insert/i, label: "Bracket/insert-style placeholder still appears" },
+  {
+    re: /\bto be confirmed in a supplemental schedule\b/i,
+    label: "Unresolved: supplemental schedule confirmation still appears",
+  },
+  {
+    re: /\bto be confirmed in writing before execution\b/i,
+    label: "Unresolved: pre-execution confirmation still appears",
+  },
+  { re: /\bamount:\s*to be confirmed\b/i, label: "Unresolved: fee amount still open" },
+  { re: /\bpayment timing:\s*to be confirmed\b/i, label: "Unresolved: payment timing still open" },
 ];
 
 function normalizeKey(s: string): string {

@@ -155,6 +155,12 @@ const WHAT_CHANGED_BY_ID: Record<string, string> = {
   jv_ip_governance: "Added joint venture IP governance terms.",
   ai_deployment: "Added deployment milestone terms.",
   ai_ops_economics: "Added operational economics terms.",
+  party_legal_names: "Added party legal names and notice details.",
+  total_fee_confirmation: "Added total fee confirmation.",
+  phase_payment_allocation: "Added phase payment allocation in Schedule A.",
+  security_obligations: "Added security and data protection obligations.",
+  renewal_notice: "Clarified renewal and termination notice.",
+  supplemental_schedule_confirmation: "Added Schedule A phase and payment terms.",
 };
 
 const WHAT_CHANGED_BY_CATEGORY: Partial<Record<DealVariableCategory, string>> = {
