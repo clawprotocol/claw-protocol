@@ -557,6 +557,18 @@ import {
   type GuidedCompletionSession,
 } from "./guidedDealCompletion";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
+import {
+  isSourceComparisonReviewMode,
+  logReviewMode,
+  readProRedlinePending,
+  resolveAgreementReviewMode,
+  type AgreementReviewMode,
+} from "./agreementReviewMode";
+import {
+  readUploadedSourceDocument,
+  writeUploadedSourceDocument,
+} from "./uploadedSourceDocumentStorage";
+import { SourceComparisonReviewPanel } from "./SourceComparisonReviewPanel";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   countDistinctValidRecipientEmails,
@@ -5537,11 +5549,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (usePaidAuthoritativeBody) {
           const snapGen = result.agreementGenerationId;
           void (async () => {
+            const acceptAgreementId =
+              (reviewDraft as { id?: string } | null)?.id ??
+              (draft as { id?: string } | null)?.id ??
+              reviewAgreementIdRef.current ??
+              "";
+            const reviewModeAtAccept = resolveAgreementReviewMode({
+              draft: mergedDraftPersist,
+              uploadedSourceText: readUploadedSourceDocument(acceptAgreementId)?.text,
+              currentRevisedText: snapshotPlain,
+            }).mode;
             const out = await fetchPremiumAdvisoryEnrichmentAfterAccept({
               draft: mergedDraftPersist,
               rawIntakeForSot: mergedIntake,
               userGapAnswers: premiumLastGapAnswersRef.current || null,
               winningBodyText: snapshotPlain,
+              reviewMode: reviewModeAtAccept,
             });
             const cur = readPremiumCompletionSnapshot();
             if (!cur || String(cur.agreementGenerationId || "") !== String(snapGen ?? "")) {
@@ -11034,6 +11057,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
         body: paidBodyForChip,
       });
+      const chipReviewMode = resolveAgreementReviewMode({
+        draft: (reviewDraft ?? draft) as import("./intakeSmartDefaults").ParsedDraftShape | null,
+        uploadedSourceText:
+          readUploadedSourceDocument(
+            (reviewDraft as { id?: string } | null)?.id ?? (draft as { id?: string } | null)?.id ?? "",
+          )?.text ??
+          readPremiumCompletionSnapshot()?.uploadedSourceDocumentText,
+        currentRevisedText: paidBodyForChip,
+      }).mode;
+      if (isSourceComparisonReviewMode(chipReviewMode)) {
+        return { version: CHIP_VERSION_PRO, state: CHIP_STATE_COMMERCIAL };
+      }
       const guidedPending =
         paidBodyForChip.length >= 500 &&
         resolveGuidedCompletionRenderState({
@@ -13025,6 +13060,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   const activeGuidedCompletionSession = guidedCompletionSession ?? guidedCompletionSessionBase;
   guidedCompletionSessionRef.current = activeGuidedCompletionSession;
+
+  const agreementIdForReview =
+    (reviewDraft as { id?: string } | null)?.id ?? (draft as { id?: string } | null)?.id ?? null;
+  const uploadedSourceRecord = useMemo(
+    () => (agreementIdForReview ? readUploadedSourceDocument(agreementIdForReview) : null),
+    [agreementIdForReview, premiumSurfaceGateTick, reviewDocRefreshTick],
+  );
+  const resolvedAgreementReview = useMemo(() => {
+    const snap = readPremiumCompletionSnapshot();
+    return resolveAgreementReviewMode({
+      explicitMode: (snap?.premiumDraft as { review_mode?: AgreementReviewMode } | undefined)?.review_mode,
+      draft: (reviewDraft ?? draft) as import("./intakeSmartDefaults").ParsedDraftShape | null,
+      uploadedSourceText: uploadedSourceRecord?.text ?? snap?.uploadedSourceDocumentText,
+      proRedlinePending: readProRedlinePending(reviewDraft ?? draft),
+      currentRevisedText: paidBodyForGuidedCompletion,
+    });
+  }, [
+    reviewDraft,
+    draft,
+    uploadedSourceRecord?.text,
+    paidBodyForGuidedCompletion,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
+  const agreementReviewMode = resolvedAgreementReview.mode;
+  useEffect(() => {
+    logReviewMode(agreementReviewMode, resolvedAgreementReview.reason);
+  }, [agreementReviewMode, resolvedAgreementReview.reason]);
+
   const guidedBodyUsable = Boolean(
     premiumPaidDocumentSurface &&
       !proUpgradeUseStarterView &&
@@ -13061,6 +13125,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const guidedPanelMountedOnRecovery = showGuidedCompletionRecovery;
   const guidedCompletionRenderState = useMemo((): GuidedCompletionRenderState => {
+    if (isSourceComparisonReviewMode(agreementReviewMode)) {
+      return resolveGuidedCompletionRenderState({
+        bodyText: paidBodyForGuidedCompletion,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        guidedSession: null,
+        panelMountedSurface: null,
+        bodyUsable: false,
+        draftState: "source_comparison",
+      });
+    }
     const panelMountedSurface = guidedPanelMountedOnDocumentEditor
       ? ("document_editor" as const)
       : guidedPanelMountedOnRecovery
@@ -13085,6 +13159,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPaidDocumentSurface,
     premiumSurfaceGateTick,
     reviewDocRefreshTick,
+    agreementReviewMode,
   ]);
   useEffect(() => {
     if (!premiumPaidDocumentSurface || !import.meta.env.DEV) return;
@@ -13098,7 +13173,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ),
     [guidedCompletionSession, guidedCompletionSessionBase, guidedCompletionRenderState],
   );
-  const showPrimaryGuidedCompletion = guidedPanelMountedOnDocumentEditor;
+  const showPrimaryGuidedCompletion =
+    !isSourceComparisonReviewMode(agreementReviewMode) && guidedPanelMountedOnDocumentEditor;
   /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
   const showTopProAdjustCard = Boolean(
     createUiStage === CreateUiStage.DRAFT &&
@@ -16709,10 +16785,57 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 {reviewRefineUserMessage}
                               </p>
                             ) : null}
-                            {showProLawdogRefineAndFinalize ? (
+                            {showProLawdogRefineAndFinalize &&
+                            isSourceComparisonReviewMode(agreementReviewMode) ? (
+                              <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
+                                <SourceComparisonReviewPanel
+                                  agreementId={agreementIdForReview}
+                                  sourceText={resolvedAgreementReview.sourceText ?? ""}
+                                  revisedText={
+                                    resolvedAgreementReview.revisedText ?? proRefineCurrentDocumentTextForProPanels
+                                  }
+                                  extractionState={
+                                    (resolvedAgreementReview.sourceText ?? "").trim().length >= 200
+                                      ? { ok: true }
+                                      : {
+                                          ok: false,
+                                          reason: resolvedAgreementReview.reason,
+                                        }
+                                  }
+                                  onSourceTextChange={(text, fileName) => {
+                                    if (!agreementIdForReview) return;
+                                    writeUploadedSourceDocument(agreementIdForReview, {
+                                      text,
+                                      fileName,
+                                      savedAt: Date.now(),
+                                    });
+                                    const snap = readPremiumCompletionSnapshot();
+                                    if (snap) {
+                                      persistPremiumCompletionSnapshot({
+                                        ...snap,
+                                        uploadedSourceDocumentText: text,
+                                        premiumDraft: {
+                                          ...snap.premiumDraft,
+                                          review_mode: "source_comparison",
+                                          uploaded_source_document_text: text,
+                                        },
+                                      });
+                                    }
+                                    bumpPremiumSurfaceGateTick();
+                                  }}
+                                  onEditWording={() => void openPaidProDraftCardEditor()}
+                                  onSendForSignature={() => void handleProSendForSignature()}
+                                  onAcceptChanges={() => void savePaidProDraftCardEditor()}
+                                  onContinueAsNewDraft={() => void handleProUpgradeUseStarterInstead()}
+                                />
+                              </div>
+                            ) : null}
+                            {showProLawdogRefineAndFinalize &&
+                            !isSourceComparisonReviewMode(agreementReviewMode) ? (
                               <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
                                 <FinalizeYourAgreementPanel
                                   guidedCompletionRenderState={guidedCompletionRenderState}
+                                  reviewMode={agreementReviewMode}
                                   hideFreeformRefineSection={guidedCompletionRenderState.canRenderGuidedQuestions}
                                   draft={reviewDraft ?? draft}
                                   currentDocumentText={proRefineCurrentDocumentTextForProPanels}

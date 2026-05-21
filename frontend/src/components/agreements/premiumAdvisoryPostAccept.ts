@@ -13,6 +13,11 @@ import { buildPremiumFinalizeAuditContext, postPremiumFinalizeAuditWithRetry } f
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import { postPremiumReviewRouteWithRetry } from "./premiumReviewRouteApi";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
+import {
+  isSourceComparisonReviewMode,
+  logSourceCompareSuppressed,
+  type AgreementReviewMode,
+} from "./agreementReviewMode";
 
 const postAcceptLog = { logPostAcceptFailure: true } as const;
 
@@ -28,7 +33,12 @@ export async function fetchPremiumAdvisoryEnrichmentAfterAccept(args: {
   rawIntakeForSot: string;
   userGapAnswers: string | null | undefined;
   winningBodyText: string;
+  reviewMode?: AgreementReviewMode;
 }): Promise<PremiumAdvisoryPostAcceptResult> {
+  if (args.reviewMode && isSourceComparisonReviewMode(args.reviewMode)) {
+    logSourceCompareSuppressed();
+    return { premiumReview: null, premiumFinalizeAudit: null, premiumReviewRoute: null };
+  }
   const doc = (args.winningBodyText || "").trim();
   const soT = (args.rawIntakeForSot || "").trim();
   if (doc.length < 80 || soT.length < 1) {

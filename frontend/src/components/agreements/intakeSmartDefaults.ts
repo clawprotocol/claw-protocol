@@ -42,6 +42,10 @@ export type ParsedDraftShape = {
   /** Audit labels from the full-draft model. Omitted from POST /draft. */
   premium_full_draft_key_terms?: string[] | null;
   premium_full_draft_missing_info?: string[] | null;
+  /** Client-only: review surface mode. */
+  review_mode?: "source_comparison" | "generated_agreement_review" | null;
+  /** Client-only: uploaded source document plain text for deterministic compare. */
+  uploaded_source_document_text?: string | null;
   /** Premium parse extract: grounded bullets; merged into additional_terms for review. Omitted from POST /draft. */
   material_asks?: string[];
   /** Operating-agreement shell: company display name when known. */

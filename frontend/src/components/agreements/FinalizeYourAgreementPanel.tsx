@@ -42,6 +42,10 @@ import {
   type GuidedCompletionRenderState,
 } from "./guidedDealCompletion/resolveGuidedCompletionRenderState";
 import { resolveDisplayReadinessWithGuidedInvariant } from "./guidedDealCompletion/shouldRenderGuidedCompletionPanel";
+import {
+  isSourceComparisonReviewMode,
+  type AgreementReviewMode,
+} from "./agreementReviewMode";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 
@@ -91,6 +95,7 @@ type Props = {
   hideMissingLinesBulletList?: boolean;
   /** Authoritative guided render state from AgreementBuilderIntake (single source of truth). */
   guidedCompletionRenderState?: GuidedCompletionRenderState;
+  reviewMode?: AgreementReviewMode;
   /** @deprecated use guidedCompletionRenderState */
   canRenderGuidedQuestions?: boolean;
   /** @deprecated use guidedCompletionRenderState */
@@ -180,6 +185,7 @@ export function FinalizeYourAgreementPanel({
   hideFreeformRefineSection = false,
   hideMissingLinesBulletList = false,
   guidedCompletionRenderState: guidedCompletionRenderStateProp,
+  reviewMode = "generated_agreement_review",
   canRenderGuidedQuestions: canRenderGuidedQuestionsProp,
   guidedCompletionRenderable = false,
   devProRefineContext,
@@ -635,6 +641,10 @@ export function FinalizeYourAgreementPanel({
     onApplyDocumentText,
     onProRefineWhatChanged,
   ]);
+
+  if (isSourceComparisonReviewMode(reviewMode)) {
+    return null;
+  }
 
   return (
     <div

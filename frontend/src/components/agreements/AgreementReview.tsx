@@ -174,6 +174,15 @@ import {
   rowReadyForReviewLinkInvite,
 } from "../../launch/simpleProduct/reviewLinkRecipientEmailMerge";
 import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
+import {
+  isSourceComparisonReviewMode,
+  logReviewMode,
+  readProRedlinePending,
+  resolveAgreementReviewMode,
+} from "./agreementReviewMode";
+import { SourceComparisonReviewPanel } from "./SourceComparisonReviewPanel";
+import { readUploadedSourceDocument, writeUploadedSourceDocument } from "./uploadedSourceDocumentStorage";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { ProRedlineOwnerPanel } from "./ProRedlineOwnerPanel";
 import { normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
 import { mintRecipientAccessToken, putSigningLock } from "../../agreement/recipientAccessApi";
@@ -2005,6 +2014,37 @@ const AgreementReview: React.FC<Props> = ({
   const plainForDirectCompare = useMemo(
     () => htmlToPlainText(previewHtmlDisplay || renderedHtmlDisplay || ""),
     [previewHtmlDisplay, renderedHtmlDisplay],
+  );
+
+  const uploadedSourceForReview = useMemo(
+    () => (agreementId ? readUploadedSourceDocument(agreementId) : null),
+    [agreementId, draft?.updated_at],
+  );
+
+  const resolvedAgreementReview = useMemo(
+    () =>
+      resolveAgreementReviewMode({
+        draft: draft as ParsedDraftShape | null,
+        uploadedSourceText: uploadedSourceForReview?.text,
+        proRedlinePending: readProRedlinePending(draft),
+        currentRevisedText: authoritativeCorpusPick?.text ?? plainForDirectCompare,
+      }),
+    [draft, uploadedSourceForReview?.text, authoritativeCorpusPick?.text, plainForDirectCompare],
+  );
+
+  const agreementReviewMode = resolvedAgreementReview.mode;
+
+  useEffect(() => {
+    if (!draft || !import.meta.env.DEV) return;
+    logReviewMode(agreementReviewMode, resolvedAgreementReview.reason);
+  }, [draft, agreementReviewMode, resolvedAgreementReview.reason]);
+
+  const showSourceComparisonReviewPanel = Boolean(
+    draft &&
+      isPaidProAgreementAuthoritative({ draft, agreementId }) &&
+      isSourceComparisonReviewMode(agreementReviewMode) &&
+      (resolvedAgreementReview.sourceText ?? "").trim().length >= 200 &&
+      (resolvedAgreementReview.revisedText ?? "").trim().length >= 200,
   );
 
   const recipientProposalHtmlDisplay = useMemo(
@@ -6457,18 +6497,49 @@ const AgreementReview: React.FC<Props> = ({
               )}
               {draft && isPaidProAgreementAuthoritative({ draft, agreementId }) && !simpleSendReviewIntent ? (
                 <div className="mt-6">
-                  <ProRedlineOwnerPanel
-                    agreementId={agreementId}
-                    draft={draft}
-                    intakeTextFallback={[draft.title, draft.jurisdiction, draft.purpose, draft.payment_terms]
-                      .map((x) => String(x || "").trim())
-                      .filter(Boolean)
-                      .join("\n\n")}
-                    onDraftReplaced={(next) => {
-                      const norm = normalizeAgreementDraftFromApi(next, { fallbackAgreementId: agreementId });
-                      if (norm) setDraft(norm);
-                    }}
-                  />
+                  {showSourceComparisonReviewPanel ? (
+                    <SourceComparisonReviewPanel
+                      agreementId={agreementId}
+                      sourceText={resolvedAgreementReview.sourceText ?? ""}
+                      revisedText={resolvedAgreementReview.revisedText ?? ""}
+                      extractionState={{ ok: true }}
+                      onSourceTextChange={(text, fileName) => {
+                        if (!agreementId) return;
+                        writeUploadedSourceDocument(agreementId, {
+                          text,
+                          fileName,
+                          savedAt: Date.now(),
+                        });
+                        setDraft((prev) =>
+                          prev
+                            ? ({
+                                ...prev,
+                                review_mode: "source_comparison",
+                                uploaded_source_document_text: text,
+                              } as AgreementDraft)
+                            : prev,
+                        );
+                      }}
+                      onEditWording={() => {
+                        const el = document.getElementById("simple-flow-revise");
+                        el?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                      onSendForSignature={() => void onSimpleFlowContinue?.()}
+                    />
+                  ) : (
+                    <ProRedlineOwnerPanel
+                      agreementId={agreementId}
+                      draft={draft}
+                      intakeTextFallback={[draft.title, draft.jurisdiction, draft.purpose, draft.payment_terms]
+                        .map((x) => String(x || "").trim())
+                        .filter(Boolean)
+                        .join("\n\n")}
+                      onDraftReplaced={(next) => {
+                        const norm = normalizeAgreementDraftFromApi(next, { fallbackAgreementId: agreementId });
+                        if (norm) setDraft(norm);
+                      }}
+                    />
+                  )}
                 </div>
               ) : null}
               {isSimpleHomeReview && savingField === "conversation" && !pendingRevision ? (

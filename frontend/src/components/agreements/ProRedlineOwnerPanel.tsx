@@ -1,11 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import type { ProRedlineDiffBlock } from "../../agreement/proRedlineReviewApi";
 import {
   downloadExportDraftDocx,
   downloadExportDraftTxt,
   postProRedlineAcceptImport,
-  postProRedlineImportFile,
   postProRedlineImportText,
   postProRedlineRejectImport,
   postProRedlineSuggestionMarkApplied,
@@ -14,6 +12,14 @@ import {
 import { executePremiumRefineUpdate } from "./premiumRefineLateFeeFallback";
 import { pickAuthoritativeProCorpusForRefine, PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED } from "./premiumRefineAcceptance";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { SourceComparisonReviewPanel } from "./SourceComparisonReviewPanel";
+import {
+  extractRevisedDraftPlainText,
+  REVISED_DRAFT_FILE_INPUT_ACCEPT,
+} from "../../agreement/recipientRevisedDraftImportText";
+import { logReviewMode } from "./agreementReviewMode";
+import { pickAuthoritativePlainForSendHandoff } from "./sendHandoffAuthoritativeCorpus";
+import { readUploadedSourceDocument, writeUploadedSourceDocument } from "./uploadedSourceDocumentStorage";
 
 export type ProRedlineSuggestionRow = {
   id: string;
@@ -42,7 +48,10 @@ type ProRedlineV1 = {
   version_events?: ProRedlineVersionEvent[];
   pending_import?: {
     id?: string;
-    diff_summary_json?: { blocks: ProRedlineDiffBlock[]; changed_block_count: number };
+    base_document_text?: string;
+    imported_document_text?: string;
+    imported_text?: string;
+    diff_summary_json?: { changed_block_count?: number };
     imported_len?: number;
     base_len?: number;
   } | null;
@@ -78,18 +87,6 @@ function versionEventLabel(ev: ProRedlineVersionEvent): string {
   return src ? src.replace(/_/g, " ") : "Event";
 }
 
-function isDiffBlock(b: unknown): b is ProRedlineDiffBlock {
-  if (!b || typeof b !== "object") return false;
-  const k = (b as { kind?: string }).kind;
-  if (k === "equal" || k === "added" || k === "removed") return typeof (b as { text?: unknown }).text === "string";
-  if (k === "changed")
-    return (
-      typeof (b as { removed_text?: unknown }).removed_text === "string" &&
-      typeof (b as { added_text?: unknown }).added_text === "string"
-    );
-  return false;
-}
-
 export function ProRedlineOwnerPanel(props: {
   agreementId: string;
   draft: AgreementDraft | null;
@@ -99,9 +96,12 @@ export function ProRedlineOwnerPanel(props: {
   const { agreementId, draft, intakeTextFallback, onDraftReplaced } = props;
   const pr = useMemo(() => readProRedline(draft), [draft]);
   const pending = pr.pending_import ?? null;
-  const blocks = (pending?.diff_summary_json?.blocks ?? []).filter(isDiffBlock);
-  const changedCount = pending?.diff_summary_json?.changed_block_count ?? 0;
   const suggestions = (pr.suggestions ?? []).filter((s) => (s.status || "pending") === "pending");
+  const uploadedSource = useMemo(() => readUploadedSourceDocument(agreementId), [agreementId, draft]);
+  const currentDraftText = useMemo(() => {
+    const pick = pickAuthoritativePlainForSendHandoff(draft as unknown as ParsedDraftShape);
+    return (pick?.text ?? "").trim();
+  }, [draft]);
   const versionEvents = useMemo(() => {
     const ve = pr.version_events;
     if (!Array.isArray(ve)) return [];
@@ -151,7 +151,18 @@ export function ProRedlineOwnerPanel(props: {
       setMsg(null);
       setBusy("import");
       try {
-        const r = await postProRedlineImportFile(agreementId, f);
+        const extracted = await extractRevisedDraftPlainText(f);
+        if (!extracted.ok) {
+          setMsg(extracted.error || "Could not read file.");
+          return;
+        }
+        writeUploadedSourceDocument(agreementId, {
+          text: extracted.text,
+          fileName: f.name,
+          savedAt: Date.now(),
+        });
+        logReviewMode("source_comparison", "pro_redline_file_import");
+        const r = await postProRedlineImportText(agreementId, extracted.text);
         if (!r.ok) {
           setMsg(r.error || "Import failed.");
           return;
@@ -167,6 +178,15 @@ export function ProRedlineOwnerPanel(props: {
     [agreementId, onDraftReplaced],
   );
 
+  const pendingSourceText = String(
+    (pending as { base_document_text?: string } | null)?.base_document_text ?? "",
+  ).trim();
+  const pendingRevisedText = String(
+    (pending as { imported_document_text?: string; imported_text?: string } | null)?.imported_document_text ??
+      (pending as { imported_text?: string } | null)?.imported_text ??
+      "",
+  ).trim();
+
   return (
     <section
       className="rounded-xl border border-slate-700/70 bg-slate-950/40 px-4 py-4 sm:px-5 sm:py-5"
@@ -176,10 +196,10 @@ export function ProRedlineOwnerPanel(props: {
         <h2 id="pro-redline-heading" className="text-sm font-semibold tracking-tight text-slate-100">
           Review changes
         </h2>
-        <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Redline</span>
+        <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Change comparison</span>
       </div>
       <p className="mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm">
-        Edit anywhere — Word, Google Docs, another AI tool, or with counsel. Import it back and LawDog will compare it.
+        LawDog shows only what changed from your uploaded file or import. No AI legal review is applied.
       </p>
 
       <div className="mt-4 border-t border-slate-800/80 pt-4">
@@ -237,12 +257,12 @@ export function ProRedlineOwnerPanel(props: {
 
       <div className="mt-4 space-y-2 border-t border-slate-800/80 pt-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Import edited draft</p>
-        <p className="text-[11px] text-slate-600">Plain text (.txt) or paste — v1 does not use OCR.</p>
+        <p className="text-[11px] text-slate-600">PDF, TXT, or Markdown — deterministic compare only (no AI review).</p>
         <label className="block text-xs text-slate-400">
-          <span className="sr-only">Choose .txt file</span>
+          <span className="sr-only">Choose file</span>
           <input
             type="file"
-            accept=".txt,text/plain"
+            accept={REVISED_DRAFT_FILE_INPUT_ACCEPT}
             className="block w-full max-w-md text-xs text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-xs file:text-slate-100"
             disabled={busy !== null}
             onChange={(e) => void onPickFile(e.target.files?.[0] ?? null)}
@@ -266,81 +286,33 @@ export function ProRedlineOwnerPanel(props: {
         </button>
       </div>
 
-      {pending ? (
-        <div className="mt-5 space-y-3 border-t border-slate-800/80 pt-4">
-          <p className="text-sm font-semibold text-slate-100">
-            {changedCount === 0 ? "No changes detected." : "Changes detected"}
-          </p>
-          {changedCount > 0 ? (
-            <p className="text-xs text-slate-500">Review imported changes before accepting.</p>
-          ) : null}
-          <p className="text-xs text-slate-500">
-            Base length {pending.base_len ?? "—"} · Imported length {pending.imported_len ?? "—"} · Changed blocks{" "}
-            {changedCount}
-          </p>
-          <div className="max-h-[min(28rem,50vh)] space-y-2 overflow-y-auto rounded-lg border border-slate-800/80 bg-slate-950/60 p-3">
-            {blocks.map((b, i) => {
-              if (b.kind === "equal")
-                return (
-                  <details key={i} className="rounded border border-slate-800/50 bg-slate-950/40">
-                    <summary className="cursor-pointer px-2 py-1 text-[11px] text-slate-500">Unchanged (hidden)</summary>
-                    <pre className="whitespace-pre-wrap px-2 pb-2 text-[11px] text-slate-500">{b.text}</pre>
-                  </details>
-                );
-              if (b.kind === "removed")
-                return (
-                  <div key={i} className="rounded border border-rose-900/40 bg-rose-950/20 px-2 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-200/90">Removed</p>
-                    <pre className="mt-1 whitespace-pre-wrap text-xs text-rose-100/90">{b.text}</pre>
-                  </div>
-                );
-              if (b.kind === "changed")
-                return (
-                  <div key={i} className="rounded border border-amber-900/45 bg-amber-950/25 px-2 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-200/90">Changed</p>
-                    <div className="mt-2 rounded border border-rose-900/30 bg-rose-950/15 px-2 py-1.5">
-                      <p className="text-[9px] font-semibold uppercase text-rose-200/80">Removed</p>
-                      <pre className="mt-0.5 whitespace-pre-wrap text-[11px] text-rose-100/90">{b.removed_text}</pre>
-                    </div>
-                    <div className="mt-2 rounded border border-emerald-900/30 bg-emerald-950/15 px-2 py-1.5">
-                      <p className="text-[9px] font-semibold uppercase text-emerald-200/80">Added</p>
-                      <pre className="mt-0.5 whitespace-pre-wrap text-[11px] text-emerald-100/90">{b.added_text}</pre>
-                    </div>
-                  </div>
-                );
-              return (
-                <div key={i} className="rounded border border-emerald-900/40 bg-emerald-950/20 px-2 py-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-200/90">Added</p>
-                  <pre className="mt-1 whitespace-pre-wrap text-xs text-emerald-100/90">{b.text}</pre>
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-50 sm:text-sm"
-              disabled={busy !== null}
-              onClick={async () => {
-                setBusy("accept");
-                setMsg(null);
-                try {
-                  const r = await postProRedlineAcceptImport(agreementId);
-                  if (!r.ok || !r.draft) setMsg(r.error || "Could not accept.");
-                  else {
-                    onDraftReplaced(r.draft);
-                    const vn = r.version_number;
-                    setMsg(
-                      typeof vn === "number" ? `Imported version accepted (version ${vn}).` : "Imported version accepted.",
-                    );
-                  }
-                } finally {
-                  setBusy(null);
+      {pending && pendingSourceText.length >= 200 && pendingRevisedText.length >= 200 ? (
+        <div className="mt-5 border-t border-slate-800/80 pt-4">
+          <SourceComparisonReviewPanel
+            agreementId={agreementId}
+            sourceText={pendingSourceText}
+            revisedText={pendingRevisedText}
+            extractionState={{ ok: true }}
+            onAcceptChanges={async () => {
+              setBusy("accept");
+              setMsg(null);
+              try {
+                const r = await postProRedlineAcceptImport(agreementId);
+                if (!r.ok || !r.draft) setMsg(r.error || "Could not accept.");
+                else {
+                  onDraftReplaced(r.draft);
+                  const vn = r.version_number;
+                  setMsg(
+                    typeof vn === "number" ? `Imported version accepted (version ${vn}).` : "Imported version accepted.",
+                  );
                 }
-              }}
-            >
-              Accept imported version
-            </button>
+              } finally {
+                setBusy(null);
+              }
+            }}
+            disabled={busy !== null}
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
               className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-900 disabled:opacity-50 sm:text-sm"
@@ -363,6 +335,22 @@ export function ProRedlineOwnerPanel(props: {
               Reject imported version
             </button>
           </div>
+        </div>
+      ) : pending ? (
+        <p className="mt-4 text-xs text-amber-200/90">Import pending — waiting for readable source text snapshots.</p>
+      ) : (uploadedSource?.text ?? "").trim().length >= 200 && currentDraftText.length >= 200 ? (
+        <div className="mt-5 border-t border-slate-800/80 pt-4">
+          <SourceComparisonReviewPanel
+            agreementId={agreementId}
+            sourceText={(uploadedSource?.text ?? "").trim()}
+            revisedText={currentDraftText}
+            extractionState={{ ok: true }}
+            onEditWording={() => {
+              const el = document.getElementById("simple-flow-revise");
+              el?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            disabled={busy !== null}
+          />
         </div>
       ) : null}
 

@@ -98,6 +98,10 @@ export type PremiumCompletionSnapshot = {
   serverGenerationDegraded?: { code: string; message: string } | null;
   /** Structured Ask LawDog material questions (not shown in agreement body). */
   materialMissingItems?: MaterialMissingItem[];
+  /** Review UX mode — source_comparison disables AI advisory + guided completion. */
+  review_mode?: "source_comparison" | "generated_agreement_review";
+  /** Plain text extracted from uploaded PDF/DOCX/txt for source comparison. */
+  uploadedSourceDocumentText?: string | null;
   /** Malformed/empty pipeline failure — distinct from advisory material gaps. */
   structuralCatastrophic?: boolean;
 };
