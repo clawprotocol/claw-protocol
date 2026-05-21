@@ -53,6 +53,14 @@ export {
 } from "./friendlyProCompletionCopy";
 export { GuidedDealCompletionPanel } from "./GuidedDealCompletionPanel";
 export {
+  resolveProReviewFooterState,
+  logProReviewFooterState,
+  type ProReviewFooterMode,
+  type ProReviewFooterState,
+  type ResolveProReviewFooterStateArgs,
+} from "./resolveProReviewFooterState";
+export { isAutomationServicesIntake } from "./servicesMigrationGuidedIntake";
+export {
   shouldRenderGuidedCompletionPanel,
   shouldShowGuidedNeedsDetailsMessaging,
   variableHasSelectableAnswerPath,

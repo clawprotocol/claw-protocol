@@ -85,9 +85,12 @@ export function applyRawReadinessToGuidedRenderState(
     ...state,
     readinessLabel,
     shouldShowNeedsDetails: state.canRenderGuidedQuestions && readinessLabel === "needs_details",
-    shouldShowCompleteAgreementHeading: state.canRenderGuidedQuestions,
+    shouldShowCompleteAgreementHeading:
+      state.canRenderGuidedQuestions && state.panelMountedSurface !== "document_editor",
     shouldShowUseCompleteBelowCopy:
-      state.canRenderGuidedQuestions && state.panelMountedSurface === "document_editor",
+      state.sessionHasRenderableQueue &&
+      !state.canRenderGuidedQuestions &&
+      state.panelMountedSurface == null,
   };
 }
 

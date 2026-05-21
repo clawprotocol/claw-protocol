@@ -46,6 +46,7 @@ import {
   isSourceComparisonReviewMode,
   type AgreementReviewMode,
 } from "./agreementReviewMode";
+import type { ProReviewFooterMode } from "./guidedDealCompletion/resolveProReviewFooterState";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 
@@ -96,6 +97,8 @@ type Props = {
   /** Authoritative guided render state from AgreementBuilderIntake (single source of truth). */
   guidedCompletionRenderState?: GuidedCompletionRenderState;
   reviewMode?: AgreementReviewMode;
+  /** Central footer contract — guided_completion shows collapsed send/sign only. */
+  proReviewFooterMode?: ProReviewFooterMode;
   /** @deprecated use guidedCompletionRenderState */
   canRenderGuidedQuestions?: boolean;
   /** @deprecated use guidedCompletionRenderState */
@@ -186,6 +189,7 @@ export function FinalizeYourAgreementPanel({
   hideMissingLinesBulletList = false,
   guidedCompletionRenderState: guidedCompletionRenderStateProp,
   reviewMode = "generated_agreement_review",
+  proReviewFooterMode = "freeform_edit",
   canRenderGuidedQuestions: canRenderGuidedQuestionsProp,
   guidedCompletionRenderable = false,
   devProRefineContext,
@@ -646,6 +650,42 @@ export function FinalizeYourAgreementPanel({
     return null;
   }
 
+  if (proReviewFooterMode === "guided_completion") {
+    return (
+      <details className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+          Send or sign when ready
+        </summary>
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">
+          Finish the questions above first. You can send for review or signature when you are ready.
+        </p>
+        {deliveryCtasOnDraftCard ? null : (
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              className="inline-flex min-h-[2.75rem] flex-1 items-center justify-center rounded-lg border border-slate-500/55 bg-slate-950/50 px-3.5 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:bg-slate-900/60 disabled:opacity-50"
+              disabled={disabled || busy}
+              onClick={() => onReadyForReview()}
+            >
+              Send for review
+            </button>
+            <button
+              type="button"
+              className="inline-flex min-h-[2.75rem] flex-1 items-center justify-center rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-sm transition hover:bg-emerald-400 disabled:opacity-50"
+              disabled={disabled || busy}
+              onClick={() => onSendForSignature()}
+            >
+              Send for signature
+            </button>
+          </div>
+        )}
+      </details>
+    );
+  }
+
+  const suppressFinalizeAdvisory = proReviewFooterMode === "freeform_edit";
+  const suppressGapBullets = suppressFinalizeAdvisory || hideMissingLinesBulletList;
+
   return (
     <div
       className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5"
@@ -666,11 +706,11 @@ export function FinalizeYourAgreementPanel({
         </p>
       </div>
 
-      {mayShowCompleteAgreementBelowCopy(guidedRenderState) && missingLines.length > 0 ? (
+      {mayShowCompleteAgreementBelowCopy(guidedRenderState) && missingLines.length > 0 && !suppressGapBullets ? (
         <p className="mt-3 text-sm text-slate-400 sm:mt-4">
           Use Complete your agreement in the document editor above to finish key business decisions.
         </p>
-      ) : !guidedRenderState.canRenderGuidedQuestions && !hideMissingLinesBulletList && missingLines.length > 0 ? (
+      ) : !guidedRenderState.canRenderGuidedQuestions && !suppressGapBullets && missingLines.length > 0 ? (
         <ul className="mt-3 list-disc space-y-1.5 pl-4 text-sm leading-relaxed text-slate-200/95 sm:mt-4 sm:text-[15px]">
           {missingLines.map((line) => (
             <li key={line}>{line}</li>
@@ -683,7 +723,7 @@ export function FinalizeYourAgreementPanel({
             : "Looking good on the quick scan — add tweaks below if needed."}
         </p>
       )}
-      {reviewRoute && sendMode !== "review" ? (
+      {reviewRoute && sendMode !== "review" && !suppressFinalizeAdvisory ? (
         <div className="mt-4 rounded-xl border border-cyan-500/25 bg-cyan-950/15 p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-cyan-100">{routeBadge}</p>
@@ -785,7 +825,7 @@ export function FinalizeYourAgreementPanel({
               : PRO_REFINE_REVISE_HELPER}
         </p>
       ) : null}
-      {hideFreeformRefineSection ? null : (
+      {hideFreeformRefineSection || proReviewFooterMode !== "freeform_edit" ? null : (
       <form onSubmit={runUpdate} className="mt-4 space-y-3 border-t border-slate-700/50 pt-4">
         <VoiceAugmentedTextArea
           ref={refineTextareaRef}

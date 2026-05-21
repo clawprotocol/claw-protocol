@@ -19,6 +19,8 @@ const BANNED_LINE_PATTERNS: readonly RegExp[] = [
   /^\s*direct\s+damages\s+are\s+limited/i,
   /date of last signature below/i,
   /^\s*IN WITNESS WHEREOF\b/i,
+  /^\s*the\s+parties\s+shall\s+perform\s+their\s+obligations\b/i,
+  /^\s*each\s+party\s+shall\s+perform\s+its\s+obligations\b/i,
 ];
 
 const BANNED_SENTENCE_PATTERNS: readonly RegExp[] = [
@@ -168,10 +170,13 @@ function safeFallbackForHeading(heading: string, ctx: ProCompletenessContext): s
     return "Each Party will keep introduced opportunity details confidential and use them only for evaluating and pursuing the introduced business.";
   }
   if (/wind-?down|survival/i.test(h)) {
-    if (consulting) {
+    if (consulting || isServicesMigrationIntake(ctx.intakeRaw, "")) {
       return "Confidentiality, payment, and IP provisions survive termination as stated in this Agreement.";
     }
-    return "Survival and wind-down obligations apply to payment, confidentiality, and referral protection terms as stated in this Agreement.";
+    if (referral) {
+      return "Survival and wind-down obligations apply to payment, confidentiality, and referral protection terms as stated in this Agreement.";
+    }
+    return "Confidentiality, payment, and IP provisions survive termination as stated in this Agreement.";
   }
   if (/invoic|payment|compensation|fee|referral|commission|revenue/i.test(h)) {
     if (referral || advisor) {
@@ -389,6 +394,14 @@ export function applyProBodyHardIntegrityGate(
   working = dedupe.text;
   repairs.push(...dedupe.repairs);
 
+  const referralScrub = scrubReferralLanguageUnlessReferralIntake(working, ctx.intakeRaw);
+  working = referralScrub.text;
+  repairs.push(...referralScrub.repairs);
+
+  const invoiceScrub = scrubMisplacedInvoiceLines(working);
+  working = invoiceScrub.text;
+  repairs.push(...invoiceScrub.repairs);
+
   const coherence = applyClauseCoherenceEngine(working);
   working = coherence.text;
   repairs.push(...coherence.repairs);
@@ -406,6 +419,59 @@ function boilerplateContentKey(block: string): string {
 }
 
 /** Remove duplicate indemnity/confidentiality/fallback paragraphs (keep first occurrence). */
+function scrubReferralLanguageUnlessReferralIntake(
+  text: string,
+  intakeRaw?: string | null,
+): { text: string; repairs: string[] } {
+  if (isReferralChannelIntake(intakeRaw)) return { text, repairs: [] };
+  const repairs: string[] = [];
+  let working = text;
+  const patterns = [
+    /\breferral\s+protection\s+terms?\b[^.!?]*[.!?]?/gi,
+    /\bprotected\s+opportunit(?:y|ies)\b[^.!?]*[.!?]?/gi,
+    /\breferral\s+fee\b[^.!?]*[.!?]?/gi,
+    /\brevenue\s+share\s+on\s+introduced\b[^.!?]*[.!?]?/gi,
+  ];
+  for (const re of patterns) {
+    if (re.test(working)) {
+      re.lastIndex = 0;
+      working = working.replace(re, "");
+      repairs.push("referral_language_removed_non_referral");
+    }
+    re.lastIndex = 0;
+  }
+  return { text: working.replace(/\n{3,}/g, "\n\n"), repairs };
+}
+
+/** Remove invoice/payment sentences stranded under Out of Scope / Exclusions headings. */
+function scrubMisplacedInvoiceLines(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let inNonPaymentSection = false;
+  for (const line of lines) {
+    const heading = line.match(HEADING_ONLY_RE);
+    if (heading) {
+      const title = heading[2].toLowerCase();
+      inNonPaymentSection =
+        /out\s+of\s+scope|exclusion|disclosure|return\s+of\s+access|equitable\s+relief|effect\s+of\s+termination|survival|client\s+responsib/i.test(
+          title,
+        ) && !/invoic|payment|fee|compensation/i.test(title);
+      out.push(line);
+      continue;
+    }
+    if (
+      inNonPaymentSection &&
+      /\b(?:invoice|invoic|net\s+\d+|payment\s+timing|fees?\s+are\s+due)\b/i.test(line)
+    ) {
+      repairs.push("misplaced_invoice_line_removed");
+      continue;
+    }
+    out.push(line);
+  }
+  return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), repairs };
+}
+
 function dedupeRepeatedBoilerplateParagraphs(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   const blocks = text.replace(/\r\n/g, "\n").split(/\n{2,}/);
@@ -416,7 +482,7 @@ function dedupeRepeatedBoilerplateParagraphs(text: string): { text: string; repa
     if (!trimmed) continue;
     const contentKey = boilerplateContentKey(trimmed);
     const isBoilerplate =
-      /\b(?:each party will indemnify|provider will indemnify|confidential information|commercially reasonable efforts|fees and payment timing will be confirmed)\b/i.test(
+      /\b(?:each party will indemnify|provider will indemnify|confidential information|each party may disclose confidential|commercially reasonable efforts|fees and payment timing will be confirmed|mutual confidentiality)\b/i.test(
         trimmed,
       );
     if (isBoilerplate && contentKey.length >= 40 && seen.has(contentKey)) {

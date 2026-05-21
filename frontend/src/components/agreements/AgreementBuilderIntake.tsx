@@ -555,6 +555,8 @@ import {
   logGuidedRenderState,
   type GuidedCompletionRenderState,
   type GuidedCompletionSession,
+  logProReviewFooterState,
+  resolveProReviewFooterState,
 } from "./guidedDealCompletion";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import {
@@ -13108,10 +13110,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumReturnWaitActive = Boolean(
     premiumPostCheckoutPhase || premiumAuthoritativeRequestInFlightUi || premiumReturnPatienceExtended,
   );
-  const guidedPanelMountedOnDocumentEditor = Boolean(
-    guidedSessionRenderable &&
-      premiumReviewDocEditorOpen &&
+  const primaryGuidedFooter = useMemo(
+    () =>
+      resolveProReviewFooterState({
+        bodyText: paidBodyForGuidedCompletion,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        materialMissingItems: readPremiumCompletionSnapshot()?.materialMissingItems,
+        guidedSession: activeGuidedCompletionSession,
+        agreementReviewMode,
+        proReviewSurfaceActive: Boolean(premiumPaidDocumentSurface && showProLawdogRefineAndFinalize),
+        canProceedWithPaidProDocument: true,
+        recoveryPanelMounted: false,
+        bodyUsable: guidedBodyUsable,
+      }),
+    [
+      paidBodyForGuidedCompletion,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
       activeGuidedCompletionSession,
+      agreementReviewMode,
+      premiumPaidDocumentSurface,
+      showProLawdogRefineAndFinalize,
+      guidedBodyUsable,
+      premiumSurfaceGateTick,
+      reviewDocRefreshTick,
+    ],
+  );
+  const guidedPanelMountedOnDocumentEditor = Boolean(
+    primaryGuidedFooter.mountGuidedPanel &&
+      activeGuidedCompletionSession &&
+      canProceedWithPaidProDocument,
   );
   const showGuidedCompletionRecovery = Boolean(
     premiumPaidDocumentSurface &&
@@ -13123,7 +13151,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedSessionRenderable &&
       !guidedPanelMountedOnDocumentEditor,
   );
-  const guidedPanelMountedOnRecovery = showGuidedCompletionRecovery;
+  const proReviewFooter = useMemo(
+    () =>
+      resolveProReviewFooterState({
+        bodyText: paidBodyForGuidedCompletion,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        materialMissingItems: readPremiumCompletionSnapshot()?.materialMissingItems,
+        guidedSession: activeGuidedCompletionSession,
+        agreementReviewMode,
+        proReviewSurfaceActive: Boolean(premiumPaidDocumentSurface && showProLawdogRefineAndFinalize),
+        canProceedWithPaidProDocument,
+        recoveryPanelMounted: showGuidedCompletionRecovery,
+        bodyUsable: guidedBodyUsable,
+      }),
+    [
+      paidBodyForGuidedCompletion,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      activeGuidedCompletionSession,
+      agreementReviewMode,
+      premiumPaidDocumentSurface,
+      showProLawdogRefineAndFinalize,
+      canProceedWithPaidProDocument,
+      showGuidedCompletionRecovery,
+      guidedBodyUsable,
+      premiumSurfaceGateTick,
+      reviewDocRefreshTick,
+    ],
+  );
+  useEffect(() => {
+    if (!premiumPaidDocumentSurface || !import.meta.env.DEV) return;
+    logProReviewFooterState(proReviewFooter);
+  }, [proReviewFooter, premiumPaidDocumentSurface]);
   const guidedCompletionRenderState = useMemo((): GuidedCompletionRenderState => {
     if (isSourceComparisonReviewMode(agreementReviewMode)) {
       return resolveGuidedCompletionRenderState({
@@ -13135,32 +13194,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draftState: "source_comparison",
       });
     }
-    const panelMountedSurface = guidedPanelMountedOnDocumentEditor
-      ? ("document_editor" as const)
-      : guidedPanelMountedOnRecovery
-        ? ("recovery_banner" as const)
-        : null;
-    return resolveGuidedCompletionRenderState({
-      bodyText: paidBodyForGuidedCompletion,
-      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
-      guidedSession: activeGuidedCompletionSession,
-      panelMountedSurface,
-      bodyUsable: guidedBodyUsable,
-      draftState: premiumPaidDocumentSurface ? "paid_pro" : "starter",
-    });
-  }, [
-    paidBodyForGuidedCompletion,
-    currentPremiumMergedIntakeKey,
-    intakeCombined,
-    activeGuidedCompletionSession,
-    guidedPanelMountedOnDocumentEditor,
-    guidedPanelMountedOnRecovery,
-    guidedBodyUsable,
-    premiumPaidDocumentSurface,
-    premiumSurfaceGateTick,
-    reviewDocRefreshTick,
-    agreementReviewMode,
-  ]);
+    return proReviewFooter.guidedRenderState;
+  }, [agreementReviewMode, paidBodyForGuidedCompletion, currentPremiumMergedIntakeKey, intakeCombined, proReviewFooter]);
   useEffect(() => {
     if (!premiumPaidDocumentSurface || !import.meta.env.DEV) return;
     logGuidedRenderState(guidedCompletionRenderState, { draftState: "paid_pro" });
@@ -13173,8 +13208,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ),
     [guidedCompletionSession, guidedCompletionSessionBase, guidedCompletionRenderState],
   );
-  const showPrimaryGuidedCompletion =
-    !isSourceComparisonReviewMode(agreementReviewMode) && guidedPanelMountedOnDocumentEditor;
+  const showPrimaryGuidedCompletion = Boolean(
+    proReviewFooter.mode === "guided_completion" &&
+      proReviewFooter.mountGuidedPanel &&
+      guidedPanelMountedOnDocumentEditor &&
+      activeGuidedCompletionSession,
+  );
   /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
   const showTopProAdjustCard = Boolean(
     createUiStage === CreateUiStage.DRAFT &&
@@ -16547,42 +16586,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       </div>
                                     </div>
                                     {premiumReviewDocEditorOpen ? (
-                                      <>
-                                        <textarea
-                                          ref={agreementPreviewEditorRef}
-                                          id="claw-agreement-preview-editor"
-                                          className="min-h-[min(68vh,44rem)] max-h-[min(78vh,54rem)] w-full resize-y border-0 bg-transparent px-[clamp(1.35rem,4.5vw,2.65rem)] pb-8 pt-9 font-serif text-[15px] leading-[1.88] tracking-[0.012em] text-stone-900 antialiased outline-none [text-wrap:pretty] selection:bg-amber-200/80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/90 sm:text-[15.5px] sm:leading-[1.9]"
-                                          style={{ fontFeatureSettings: '"kern" 1, "liga" 1, "onum" 1' }}
-                                          value={paidProCardEditDraft ?? ""}
-                                          onChange={(e) => setPaidProCardEditDraft(e.target.value)}
-                                          spellCheck
-                                          disabled={(isGenerating && !draft) || upgradeLockActive || loading}
-                                          aria-label="Agreement document"
+                                      <textarea
+                                        ref={agreementPreviewEditorRef}
+                                        id="claw-agreement-preview-editor"
+                                        className="min-h-[min(68vh,44rem)] max-h-[min(78vh,54rem)] w-full resize-y border-0 bg-transparent px-[clamp(1.35rem,4.5vw,2.65rem)] pb-8 pt-9 font-serif text-[15px] leading-[1.88] tracking-[0.012em] text-stone-900 antialiased outline-none [text-wrap:pretty] selection:bg-amber-200/80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/90 sm:text-[15.5px] sm:leading-[1.9]"
+                                        style={{ fontFeatureSettings: '"kern" 1, "liga" 1, "onum" 1' }}
+                                        value={paidProCardEditDraft ?? ""}
+                                        onChange={(e) => setPaidProCardEditDraft(e.target.value)}
+                                        spellCheck
+                                        disabled={(isGenerating && !draft) || upgradeLockActive || loading}
+                                        aria-label="Agreement document"
+                                      />
+                                    ) : (
+                                      <PremiumAgreementReadonlyView html={premiumReadonlyAgreementHtml} />
+                                    )}
+                                    {showPrimaryGuidedCompletion && activeGuidedCompletionSession ? (
+                                      <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
+                                        <GuidedDealCompletionPanel
+                                          session={activeGuidedCompletionSession}
+                                          intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
+                                          onSessionChange={handleGuidedCompletionSessionChange}
+                                          onApplyAnswer={handleGuidedApplyAnswer}
+                                          onCustomPillSelected={() => {
+                                            void openPaidProDraftCardEditor();
+                                            customInstructionSectionRef.current?.setAttribute("open", "");
+                                          }}
+                                          externallyFrozen={draftPreCommitFreeze}
+                                          compact
                                         />
-                                        <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
-                                          {showPrimaryGuidedCompletion && !showGuidedCompletionRecovery && activeGuidedCompletionSession ? (
-                                            <GuidedDealCompletionPanel
-                                              session={activeGuidedCompletionSession}
-                                              intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
-                                              onSessionChange={handleGuidedCompletionSessionChange}
-                                              onApplyAnswer={handleGuidedApplyAnswer}
-                                              onCustomPillSelected={() => {
-                                                customInstructionSectionRef.current?.setAttribute("open", "");
-                                              }}
-                                              externallyFrozen={draftPreCommitFreeze}
-                                              compact
-                                            />
-                                          ) : (
-                                            <p className="text-xs leading-relaxed text-stone-600">
-                                              {GUIDED_NEUTRAL_REVIEW_COPY}
-                                            </p>
-                                          )}
-                                          <details ref={customInstructionSectionRef} className="mt-3 group">
-                                            <summary className="cursor-pointer text-xs font-medium text-stone-600 hover:text-stone-900">
-                                              {activeGuidedCompletionSession?.queue.length
-                                                ? "Add a custom instruction"
-                                                : "Or describe a change in your own words"}
-                                            </summary>
+                                      </div>
+                                    ) : proReviewFooter.showFreeformEdit ? (
+                                      <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
+                                        <p className="text-xs leading-relaxed text-stone-600">{GUIDED_NEUTRAL_REVIEW_COPY}</p>
+                                        <details ref={customInstructionSectionRef} className="mt-3 group">
+                                          <summary className="cursor-pointer text-xs font-medium text-stone-600 hover:text-stone-900">
+                                            Edit agreement or add notes
+                                          </summary>
                                           <div className="relative mt-2">
                                             <VoiceAugmentedTextArea
                                               value={paidProCardAiInstruction}
@@ -16616,12 +16655,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               {PRO_REFINE_APPLY_REVISION_BUTTON_LABEL}
                                             </button>
                                           </div>
-                                          </details>
-                                        </div>
-                                      </>
-                                    ) : (
-                                      <PremiumAgreementReadonlyView html={premiumReadonlyAgreementHtml} />
-                                    )}
+                                        </details>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </div>
                                 ) : premiumReturnWaitActive ? (
@@ -16836,7 +16872,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 <FinalizeYourAgreementPanel
                                   guidedCompletionRenderState={guidedCompletionRenderState}
                                   reviewMode={agreementReviewMode}
-                                  hideFreeformRefineSection={guidedCompletionRenderState.canRenderGuidedQuestions}
+                                  proReviewFooterMode={proReviewFooter.mode}
+                                  hideFreeformRefineSection={proReviewFooter.mode !== "freeform_edit"}
+                                  hideMissingLinesBulletList={proReviewFooter.hideFinalizeGapBullets}
                                   draft={reviewDraft ?? draft}
                                   currentDocumentText={proRefineCurrentDocumentTextForProPanels}
                                   intakeText={proRefineIntakeTextForProPanels}

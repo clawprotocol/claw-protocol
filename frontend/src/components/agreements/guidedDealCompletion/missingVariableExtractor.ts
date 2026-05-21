@@ -7,7 +7,12 @@ import type { MaterialMissingItem, MaterialSeverity } from "../proAgreementCompl
 import { scanBodyMaterialPlaceholders } from "./bodyMaterialPlaceholderScanner";
 import { isConsultingDevIntake } from "./consultingGuidedIntake";
 import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
-import { analyzeServicesMigrationIntake, isServicesMigrationIntake } from "./servicesMigrationGuidedIntake";
+import {
+  analyzeServicesMigrationIntake,
+  isAutomationServicesIntake,
+  isServicesMigrationIntake,
+} from "./servicesMigrationGuidedIntake";
+import { parseMonthlyPaymentUsdHint } from "./intakeRecommendationEngine";
 import {
   detectSemanticContractGaps,
   hasSemanticMaterialGaps,
@@ -301,12 +306,94 @@ function inferContractorVariablesFromIntake(
   return dedupeVariables(inferred.map((i) => materialItemToDealVariable(i, intakeRaw)));
 }
 
+function inferAutomationServicesVariablesFromIntake(
+  intakeRaw: string,
+  body: string,
+  family: MaterialMissingItem["agreementFamily"],
+): DealVariable[] {
+  if (!isAutomationServicesIntake(intakeRaw, body)) return [];
+  const signals = analyzeServicesMigrationIntake(intakeRaw, body);
+  const low = body.toLowerCase();
+  const inferred: MaterialMissingItem[] = [];
+  const push = (item: Omit<MaterialMissingItem, "agreementFamily">) => {
+    inferred.push({ ...item, agreementFamily: family });
+  };
+  const monthly = parseMonthlyPaymentUsdHint(intakeRaw);
+  if (monthly || signals.vagueFee || /\bmonthly\b/i.test(intakeRaw)) {
+    push({
+      id: "payment_timing",
+      severity: "material",
+      label: "Monthly fee and invoicing",
+      question: monthly
+        ? `Confirm the monthly fee (about $${monthly.toLocaleString()}/month) and when invoices are due.`
+        : "Confirm the monthly fee and when invoices are due.",
+      whyItMatters: "Monthly services need a clear fee and payment timing before execution.",
+      suggestedAnswerFormat: "e.g. $6,000/month, Net 15, due on the 1st",
+      affectsSections: ["Compensation", "Payment", "Invoicing"],
+      canProceedWithoutAnswer: false,
+    });
+  }
+  if (
+    signals.mentionsIp ||
+    /\bownership\b/i.test(intakeRaw) ||
+    /\bto be confirmed\b/i.test(low)
+  ) {
+    push({
+      id: "ip_ownership",
+      severity: "material",
+      label: "Ownership of work product",
+      question: "Who owns workflows, dashboards, automations, and other deliverables built under this agreement?",
+      whyItMatters: "Ownership of what gets built should be explicit for AI/automation work.",
+      suggestedAnswerFormat: "e.g. Client owns custom deliverables; provider retains reusable tools",
+      affectsSections: ["Intellectual Property", "Work Product"],
+      canProceedWithoutAnswer: false,
+    });
+  }
+  if (signals.mentionsSupport || /\bsupport\b/i.test(intakeRaw)) {
+    push({
+      id: "saas_sla",
+      severity: "material",
+      label: "Support expectations",
+      question: "What support coverage and response expectations apply after go-live?",
+      whyItMatters: "Support scope and response times prevent disputes after launch.",
+      suggestedAnswerFormat: "e.g. business-hours email support; 1 business day response",
+      affectsSections: ["Support", "SLA"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+  if (/\bterminat/i.test(intakeRaw) || signals.vagueRenewal) {
+    push({
+      id: "renewal_notice",
+      severity: "material",
+      label: "Termination notice",
+      question: "How much notice does either side need to terminate if the arrangement is not working?",
+      whyItMatters: "A clear notice period keeps exit expectations practical and fair.",
+      suggestedAnswerFormat: "e.g. 30 days written notice",
+      affectsSections: ["Term", "Termination"],
+      canProceedWithoutAnswer: false,
+    });
+  }
+  if (!/\bconfidential/i.test(low) && /\bconfidential/i.test(intakeRaw)) {
+    push({
+      id: "security_obligations",
+      severity: "material",
+      label: "Confidentiality baseline",
+      question: "Confirm confidentiality covers shared business data and automation configurations.",
+      whyItMatters: "Confidentiality should match what each side will share during the engagement.",
+      suggestedAnswerFormat: "Standard mutual confidentiality with reasonable care",
+      affectsSections: ["Confidentiality"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+  return dedupeVariables(inferred.map((i) => materialItemToDealVariable(i, intakeRaw)));
+}
+
 function inferServicesMigrationVariablesFromIntake(
   intakeRaw: string,
   body: string,
   family: MaterialMissingItem["agreementFamily"],
 ): DealVariable[] {
-  if (!isServicesMigrationIntake(intakeRaw, body)) return [];
+  if (!isServicesMigrationIntake(intakeRaw, body) && !isAutomationServicesIntake(intakeRaw, body)) return [];
   const signals = analyzeServicesMigrationIntake(intakeRaw, body);
   const low = body.toLowerCase();
   const inferred: MaterialMissingItem[] = [];
@@ -463,11 +550,15 @@ function synthesizeFallbackGuidedVariables(
   const contractor = inferContractorVariablesFromIntake(intake, body, family);
   const consulting = inferConsultingVariablesFromIntake(intake, body, family);
   const services = inferServicesMigrationVariablesFromIntake(intake, body, family);
+  const automation = isAutomationServicesIntake(intake, body)
+    ? inferAutomationServicesVariablesFromIntake(intake, body, family)
+    : [];
   const vars = [
     ...items.map((m) => materialItemToDealVariable(m, intake)),
     ...contractor,
     ...consulting,
     ...services,
+    ...automation,
   ];
   return dedupeVariables(vars);
 }
@@ -503,6 +594,12 @@ export function extractDealVariables(args: {
   const body = (args.body ?? "").trim();
   const family = material[0]?.agreementFamily ?? "generic_business_agreement";
   let vars = dedupeVariables(material.map((m) => materialItemToDealVariable(m, intake)));
+  if (isAutomationServicesIntake(intake, body)) {
+    for (const v of inferAutomationServicesVariablesFromIntake(intake, body, family)) {
+      if (!vars.some((x) => x.id === v.id)) vars.push(v);
+    }
+    vars = dedupeVariables(vars);
+  }
   if (!explicitMaterial) {
     const synthesized = synthesizeFallbackGuidedVariables(intake, body, family);
     for (const v of synthesized) {
@@ -526,10 +623,9 @@ export function extractDealVariables(args: {
         severity: "material",
         agreementFamily: familyHint,
         label: "Confirm remaining deal terms",
-        question:
-          "Do you want LawDog to use standard commercial assumptions or answer key terms yourself?",
+        question: "Do you want LawDog to fill standard practical terms for the unresolved items?",
         whyItMatters: "The draft still contains unresolved business language.",
-        suggestedAnswerFormat: "Standard terms, guided questions, or custom instructions",
+        suggestedAnswerFormat: "Practical standard terms, key questions, or custom details",
         affectsSections: ["General"],
         canProceedWithoutAnswer: true,
       });
@@ -554,10 +650,9 @@ export function ensureRenderableGuidedVariables(
     severity: "material",
     agreementFamily: family,
     label: "Confirm remaining deal terms",
-    question:
-      "Do you want LawDog to use standard commercial assumptions or answer key terms yourself?",
+    question: "Do you want LawDog to fill standard practical terms for the unresolved items?",
     whyItMatters: "The draft still contains unresolved business language.",
-    suggestedAnswerFormat: "Standard terms, guided questions, or custom instructions",
+    suggestedAnswerFormat: "Practical standard terms, key questions, or custom details",
     affectsSections: ["General"],
     canProceedWithoutAnswer: true,
   };

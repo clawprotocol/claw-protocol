@@ -77,3 +77,15 @@ export function analyzeServicesMigrationIntake(
 export function isServicesMigrationIntake(intakeRaw?: string | null, body?: string | null): boolean {
   return analyzeServicesMigrationIntake(intakeRaw, body).isServicesMigration;
 }
+
+/** AI automation setup / workflow support agreements (casual monthly-fee services). */
+export function isAutomationServicesIntake(intakeRaw?: string | null, body?: string | null): boolean {
+  const intake = (intakeRaw || "").toLowerCase();
+  const bodyLow = (body || "").toLowerCase();
+  const combined = `${intake}\n${bodyLow}`;
+  const automation =
+    /\b(?:ai\s+automation|automation\s+setup|workflow|dashboard|automations?)\b/.test(combined) &&
+    /\b(?:support|agreement|helping|service\s+provider|monthly|confidential|ownership|terminat)\b/.test(combined);
+  const referralInIntake = /\breferral\s+protection\b|\bchannel\s+partner\b|\brevenue\s+share\s+on\s+intro/.test(intake);
+  return automation && !referralInIntake;
+}

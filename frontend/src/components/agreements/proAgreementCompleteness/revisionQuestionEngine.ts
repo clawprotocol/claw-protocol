@@ -340,7 +340,14 @@ function familyQuestions(
     );
   }
 
-  if (!/\b(?:intellectual property|work product|assignment|ownership)\b/i.test(low) && /\bdeliverable|work product|ip\b/i.test(intakeLow)) {
+  const vagueOwnershipInBody =
+    /\bownership\b/i.test(low) &&
+    /\b(?:to be confirmed|tbd|as specified)\b/i.test(low);
+  if (
+    (!/\b(?:intellectual property|work product|assignment|ownership)\b/i.test(low) &&
+      /\bdeliverable|work product|ip\b/i.test(intakeLow)) ||
+    (vagueOwnershipInBody && /\b(?:ownership|deliverable|work product|ip)\b/i.test(intakeLow))
+  ) {
     pushItem(
       items,
       seen,
