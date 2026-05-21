@@ -100,6 +100,7 @@ export function mapDeterministicIntentIdToAgreementIntentId(
         web_presence: "software_web_dev",
         loan: "loan_repayment",
         founder_equity: "founder_equity_vesting",
+        growth_advisor: "consulting_services",
       } as const satisfies Record<string, AgreementIntentId>
     )[detId] ?? null
   );
@@ -160,6 +161,12 @@ function fromDeterministic(
       extraTerms: ["vesting", "equity", "founder"],
       minSec: "Vesting, grants/repurchase, IP, confidentiality, roles; not generic B2B services only.",
       forbid: ["estate bequest to siblings", "logo revision rounds for brand agency"],
+    },
+    growth_advisor: {
+      intent: "consulting_services",
+      extraTerms: ["advisor", "advisory", "growth", "revenue share", "services"],
+      minSec: "Advisory scope, compensation (retainer, hourly, or revenue share), confidentiality, IP, and term.",
+      forbid: ["founder vesting schedule", "cap table repurchase", "estate administration"],
     },
   };
   const row = idMap[det.id];
@@ -310,6 +317,33 @@ export function resolveAgreementIntentContract(rawIntake: string | null | undefi
   if (RENT.test(raw)) {
     return contractRent(raw);
   }
+  if (
+    /\b(growth\s+advisor|advisory\s+agreement|consulting\s+advisor|board\s+advisor)\b/i.test(low) &&
+    !/\b(?:founder\s+vesting|cap\s+table)\b/i.test(low)
+  ) {
+    return contractConsulting(raw);
+  }
+  if (
+    /\b(referral\s+agreement|referral\s+fee|channel\s+partner)\b/i.test(raw) ||
+    (/\b(revenue\s+share|commission)\b/i.test(raw) &&
+      /\b(?:referral|introduc(?:e|es|ing))\b/i.test(raw) &&
+      !/\b(?:growth\s+advisor|advisory\s+agreement)\b/i.test(low))
+  ) {
+    return contractConsulting(raw);
+  }
+  if (
+    /\b(joint\s+venture|jv\b)\b/i.test(low) ||
+    (/\b(profit\s+split|deadlock|contribu|earnest\s+money)\b/i.test(low) &&
+      /\b(project|rehab|houses?|collaborat)\b/i.test(low))
+  ) {
+    return contractConsulting(raw);
+  }
+  if (
+    /\b(software\s+)?license\s+agreement\b/i.test(low) ||
+    (/\bsoftware\s+licen[cs]e\b/i.test(low) && !/\b(?:develop|implementation)\b/i.test(low))
+  ) {
+    return contractConsulting(raw);
+  }
   if (isFounderEquityVestingIntent(raw)) {
     return fromDeterministic(
       { id: "founder_equity", title: "Founder Vesting Agreement", clausePackSeed: "" } as DeterministicIntentResolution,
@@ -346,7 +380,11 @@ export function resolveAgreementIntentContract(rawIntake: string | null | undefi
       raw,
     );
   }
-  if (CONSULT.test(raw) || C1099.test(raw)) {
+  if (
+    CONSULT.test(raw) ||
+    C1099.test(raw) ||
+    /\b(growth\s+advisor|advisory\s+agreement|consulting\s+agreement)\b/i.test(low)
+  ) {
     return contractConsulting(raw);
   }
   return contractUnknown(factSummary(raw), raw.length);

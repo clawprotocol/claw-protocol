@@ -89,6 +89,17 @@ import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } 
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import {
+  buildMaterialMissingItems,
+  isCatastrophicStructuralFailure,
+  type MaterialMissingItem,
+} from "./proAgreementCompleteness";
+import {
+  detectHeadingOnlyClauses,
+  detectPlaceholderLeakage,
+  detectSpliceContamination,
+  detectStructuralNumberingIssues,
+} from "./proAgreementCompleteness/proStructuralDetection";
+import {
   buildRecommendedClarifications,
   isAuthoritativePremiumCompletionOutcome,
   legacyGenerationOutcomeFromClassification,
@@ -189,6 +200,10 @@ export type PremiumCompletionResult = {
   premiumCompletionOutcome?: PremiumCompletionOutcome | null;
   /** Non-authoritative clarifications surfaced outside agreement body. */
   recommendedClarifications?: RecommendedClarifications | null;
+  /** True only for malformed/empty/corrupt bodies — not material Ask LawDog items alone. */
+  structuralCatastrophic?: boolean;
+  /** Structured material questions for Ask LawDog to revise. */
+  materialMissingItems?: MaterialMissingItem[];
 };
 
 /** @deprecated — positive stitched body is built in {@link buildPremiumPostCheckoutStitchedBody}. */
@@ -1318,6 +1333,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   let serverGenerationDegraded: { code: string; message: string } | null = null;
   let premiumCompletionOutcome: PremiumCompletionOutcome | null = null;
   let recommendedClarifications: RecommendedClarifications | null = null;
+  let structuralCatastrophic = false;
+  let materialMissingItems: MaterialMissingItem[] = [];
   const intentContract = resolveAgreementIntentContract(rawForSoT || rawIntake);
   const intentPreflightPolicy = resolvePremiumIntentPreflightPolicy(intentContract);
   const tierAEnabled = intentPreflightPolicy.tier === "A";
@@ -1435,6 +1452,27 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         doc = applyPaidProRenderPolish(doc, preGateIntake, premiumRejectCtx.partyNames, {
           surface: "premium_completion_pipeline_pre_gate",
         }).text;
+        const completenessCtx = {
+          intakeRaw: preGateIntake,
+          partyNames: premiumRejectCtx.partyNames ?? undefined,
+        };
+        const structuralIssues = [
+          ...detectHeadingOnlyClauses(doc),
+          ...detectPlaceholderLeakage(doc, completenessCtx),
+          ...detectStructuralNumberingIssues(doc),
+          ...detectSpliceContamination(doc),
+        ];
+        structuralCatastrophic = isCatastrophicStructuralFailure({
+          text: doc,
+          issues: structuralIssues,
+          partyNames: premiumRejectCtx.partyNames ?? undefined,
+        });
+        materialMissingItems = buildMaterialMissingItems({
+          intakeRaw: preGateIntake,
+          body: doc,
+          structuralIssues,
+          serverMissing: effectiveFull.missing_material_info ?? undefined,
+        });
         const postProcessMs = Math.round(
           (typeof performance !== "undefined" ? performance.now() : Date.now()) - postProcessStartedAt,
         );
@@ -1454,9 +1492,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           httpOk: fullResp.ok,
         });
         premiumCompletionOutcome = classified;
-        recommendedClarifications = buildRecommendedClarifications(
-          effectiveFull.missing_material_info ?? [],
-        );
+        const clarificationLines = [
+          ...materialMissingItems.map((i) => i.question),
+          ...(effectiveFull.missing_material_info ?? []),
+        ];
+        recommendedClarifications = buildRecommendedClarifications(clarificationLines);
         if (!isAuthoritativePremiumCompletionOutcome(classified)) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
@@ -2325,5 +2365,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     tierADiagnostic: tierADiag,
     premiumCompletionOutcome,
     recommendedClarifications,
+    structuralCatastrophic,
+    materialMissingItems: materialMissingItems.length ? materialMissingItems : undefined,
   };
 }

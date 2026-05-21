@@ -115,8 +115,18 @@ const MISPLACED_CLAUSE_RULES: readonly {
   },
   {
     id: "limitation_outside_lol",
-    sentenceRe: /\bexcept\s+as\s+expressly\s+stated\s+in\s+this\s+agreement\b/i,
+    sentenceRe: /\bexcept\s+as\s+expressly\s+stated,?\s+neither\s+party\s+is\s+liable\b/i,
     allowedHeadingRe: /^(?:\d+\.?\s+)?(?:limitation\s+of\s+liability|liability)\b/i,
+  },
+  {
+    id: "invoice_due_thirty_non_payment",
+    sentenceRe: /\binvoices?\s+are\s+due\s+within\s+thirty\s*\(30\)\s+days\b/i,
+    allowedHeadingRe: /^(?:\d+\.?\s+)?(?:fees?|payment|compensation|pricing|invoic|milestones?)\b/i,
+  },
+  {
+    id: "payment_schedule_non_payment",
+    sentenceRe: /\bfees\s+and\s+invoicing\s+follow\s+the\s+payment\s+schedule\b/i,
+    allowedHeadingRe: /^(?:\d+\.?\s+)?(?:fees?|payment|compensation|pricing|invoic)\b/i,
   },
   {
     id: "survival_outside_termination",
@@ -221,12 +231,12 @@ export function applyPremiumExecutionNormalization(
   working = witness.text;
   working = dedupeEsignNotices(working);
 
+  const misplaced = suppressMisplacedClauseSplices(working);
+  if (misplaced.removed > 0) {
+    working = misplaced.text;
+    repairs.push(`misplaced_clause_splices:${misplaced.removed}`);
+  }
   if (tier === "premium") {
-    const misplaced = suppressMisplacedClauseSplices(working);
-    if (misplaced.removed > 0) {
-      working = misplaced.text;
-      repairs.push(`misplaced_clause_splices:${misplaced.removed}`);
-    }
     const purity = applySectionPurityPass(working);
     if (purity.issues.length > 0) {
       working = purity.text;

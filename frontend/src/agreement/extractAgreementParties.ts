@@ -5,6 +5,7 @@ import { extractAgreementEntityCandidates } from "./partyPlaceholderDisplay";
 import { isHighConfidencePartyNameForAutoPopulation } from "../components/agreements/partyNameConfidence";
 import { isPlaceholderPartyName } from "../components/agreements/starterPartyLimits";
 import { sanitizeStarterPartyNameForDisplay } from "../components/agreements/starterPreviewProseSanitize";
+import { resolveSignerCardPartyNames } from "../components/agreements/signerFullLegalName";
 
 const ENTITY_SUFFIX =
   /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|PC|P\.C\.|LP|L\.P\.)\b/i;
@@ -74,6 +75,11 @@ function extractPartiesFromEntityCandidates(context: string): string[] {
  * Falls back to Party A / Party B only when nothing usable is detected.
  */
 export function extractAgreementParties(input: ExtractAgreementPartiesInput): string[] {
+  const resolved = resolveSignerCardPartyNames(input);
+  if (resolved.length > 0 && !(resolved.length === 2 && resolved[0] === "Party A")) {
+    return dedupePreserveOrder(resolved);
+  }
+
   const intakeText = (input.intakeText || "").trim();
   const fromDraft = dedupePreserveOrder(
     orderedAuthoritativePartyDisplayNames(

@@ -60,6 +60,37 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
   const ndaDominant = commercialSignals.nda && !serviceCommerceSignals;
 
   if (
+    /\b(?:growth\s+advisor|advisory\s+agreement|consulting\s+advisor)\b/i.test(low) &&
+    !/\b(?:founder\s+vesting|cap\s+table|60\s*\/\s*40\s+vesting)\b/i.test(low)
+  ) {
+    return "consulting_agreement";
+  }
+
+  if (
+    /\b(?:referral\s+agreement|revenue\s+share|referral\s+fee|channel\s+partner)\b/i.test(low) ||
+    (commercialSignals.referralLike && commercialSignals.commission)
+  ) {
+    if (!/\b(?:founder\s+vesting|cap\s+table)\b/i.test(low)) {
+      return "services_agreement";
+    }
+  }
+
+  if (
+    /\b(?:joint\s+venture|jv\b)\b/i.test(low) ||
+    (/\b(?:profit\s+split|deadlock|earnest\s+money|contribu)\b/i.test(low) &&
+      /\b(?:project|rehab|houses?|collaborat)\b/i.test(low))
+  ) {
+    return "generic_business_agreement";
+  }
+
+  if (
+    /\b(?:software\s+)?license\s+agreement\b/i.test(low) ||
+    (/\bsoftware\s+licen[cs]e\b/i.test(low) && !/\b(?:develop|implementation|services)\b/i.test(low))
+  ) {
+    return "generic_business_agreement";
+  }
+
+  if (
     /\boperating\s+agreement\b/i.test(t) ||
     /\bllc\s+agreement\b/i.test(low) ||
     /\bmember[-\s]?managed\b/i.test(t) ||
@@ -90,7 +121,6 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     /\bstatement\s+of\s+work\b/i.test(low) ||
     /\b(?:design|creative|marketing|branding)\s+(?:services?|agreement|contract)\b/i.test(low) ||
     /\bcollaboration\s+agreement\b/i.test(low) ||
-    /\bjoint\s+venture\b/i.test(low) ||
     /\b(?:monthly|weekly|hourly)\s+(?:rate|fee|retainer)\b/i.test(low) ||
     /\bdeliverables?\b/i.test(low);
 

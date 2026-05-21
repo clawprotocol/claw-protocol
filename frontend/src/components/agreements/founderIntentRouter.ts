@@ -8,16 +8,31 @@ export const REQUIRED_FOUNDER_PREMIUM_TITLES = [
   "Equity Vesting Agreement",
 ] as const;
 
-/** Intake should trigger the founder-vesting title gate. */
+/** Commercial advisor / referral / intro deals must not route to founder vesting. */
+const ADVISOR_REFERRAL_COMMERCIAL_EXCLUDE =
+  /\b(?:growth\s+advisor|referral\s+agreement|referral\s+fee|referral\s+partner|revenue\s+share|commission|introduc(?:e|es|ing)|channel\s+partner|finder'?s?\s+fee|consulting\s+advisor|advisory\s+agreement|board\s+advisor)\b/i;
+
+/** Strong founder-cap-table signals (not generic "founder" in "growth advisor for founders"). */
+const FOUNDER_EQUITY_STRICT =
+  /\b(?:founder\s+vesting|founders?\s+agreement|equity\s+vesting|cap\s+table|60\s*\/\s*40|40\s*\/\s*60|cliff|vesting\s+schedule|startup\s+equity|reprice|seed\s+round)\b/i;
+
+/** Weaker founder cues — only used when commercial-advisor exclusions do not apply. */
 const FOUNDER_EQUITY_INTENT = new RegExp(
   [
-    "\\b(founder|founders?|vesting|equit(y|ies?)|startup|60\\s*\\/\\s*40|40\\s*\\/\\s*60)\\b",
+    "\\b(founder|founders?|vesting|equit(y|ies?)|startup)\\b",
   ].join(""),
   "i",
 );
 
 export function isFounderEquityVestingIntent(intakeText: string | null | undefined): boolean {
-  return FOUNDER_EQUITY_INTENT.test((intakeText || "").replace(/\r\n/g, "\n").trim());
+  const t = (intakeText || "").replace(/\r\n/g, "\n").trim();
+  if (!t) return false;
+  if (ADVISOR_REFERRAL_COMMERCIAL_EXCLUDE.test(t) && !FOUNDER_EQUITY_STRICT.test(t)) {
+    return false;
+  }
+  if (FOUNDER_EQUITY_STRICT.test(t)) return true;
+  if (/\b(?:referral|revenue\s+share|growth\s+advisor)\b/i.test(t)) return false;
+  return FOUNDER_EQUITY_INTENT.test(t);
 }
 
 const REQUIRED_LOWER: readonly string[] = [

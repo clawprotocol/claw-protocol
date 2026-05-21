@@ -15,6 +15,7 @@ export const DETERMINISTIC_INTENT_IDS = [
   "mutual_nda",
   "loan",
   "founder_equity",
+  "growth_advisor",
 ] as const;
 
 export type DeterministicIntentId = (typeof DETERMINISTIC_INTENT_IDS)[number];
@@ -122,6 +123,50 @@ const LOAN: DeterministicIntentResolution = {
   ].join(" "),
 };
 
+const REFERRAL: DeterministicIntentResolution = {
+  id: "creator_influencer",
+  title: "Referral Agreement",
+  clausePackSeed: [
+    "Referral or channel introduction economics — not founder equity vesting.",
+    "Commission or revenue-share formula, payout timing, clawbacks, and audit if stated;",
+    "definition of qualified referral / introduced customer; tail period;",
+    "no side deals; confidentiality; term and termination.",
+  ].join(" "),
+};
+
+const GROWTH_ADVISOR: DeterministicIntentResolution = {
+  id: "growth_advisor",
+  title: "Growth Advisor Agreement",
+  clausePackSeed: [
+    "Advisory / growth advisor engagement — not founder cap-table vesting.",
+    "Scope of advisory services, time commitment, and deliverables;",
+    "fee structure: retainer, hourly, success fee, or revenue share as stated;",
+    "confidentiality; IP in work product; term and termination.",
+  ].join(" "),
+};
+
+const JOINT_VENTURE: DeterministicIntentResolution = {
+  id: "settlement_release",
+  title: "Joint Venture Agreement",
+  clausePackSeed: [
+    "Multi-party project collaboration — contributions, profit splits, governance.",
+    "Each party's role, capital or sweat contributions, and approval rights;",
+    "profit allocation by project; deadlock resolution;",
+    "IP ownership of project work product; exit / buyout if a party withdraws.",
+  ].join(" "),
+};
+
+const SOFTWARE_LICENSE: DeterministicIntentResolution = {
+  id: "saas_subscription",
+  title: "Software License Agreement",
+  clausePackSeed: [
+    "Software license grant — not a custom development MSA unless intake says build.",
+    "Permitted use, restrictions, and sublicense policy;",
+    "fees and payment; support level if any;",
+    "IP ownership of licensed materials; confidentiality; term and termination.",
+  ].join(" "),
+};
+
 const FOUNDER: DeterministicIntentResolution = {
   id: "founder_equity",
   title: "Founder Vesting Agreement",
@@ -173,6 +218,37 @@ function testLoan(low: string): boolean {
   );
 }
 
+function testReferral(low: string): boolean {
+  if (/\b(?:growth\s+advisor|advisory\s+agreement|consulting\s+advisor)\b/i.test(low)) return false;
+  return (
+    /\b(referral\s+agreement|referral\s+fee|channel\s+partner)\b/i.test(low) ||
+    (/\brevenue\s+share\b/i.test(low) &&
+      /\b(?:referral|introduc(?:e|es|ing)\s+(?:leads?|accounts?|deals?))\b/i.test(low))
+  ) && !/\b(?:founder\s+vesting|cap\s+table|60\s*\/\s*40\s+vesting)\b/i.test(low);
+}
+
+function testGrowthAdvisor(low: string): boolean {
+  return (
+    /\b(growth\s+advisor|advisory\s+agreement|consulting\s+advisor|board\s+advisor)\b/i.test(low) &&
+    !/\b(?:founder\s+vesting|cap\s+table|60\s*\/\s*40\s+vesting)\b/i.test(low)
+  );
+}
+
+function testJointVenture(low: string): boolean {
+  return (
+    /\b(joint\s+venture\s+agreement|jv\s+agreement)\b/i.test(low) ||
+    (/\b(joint\s+venture|jv\b)\b/i.test(low) &&
+      /\b(profit\s+split|deadlock|contribu|earnest\s+money|rehab|distressed)\b/i.test(low))
+  );
+}
+
+function testSoftwareLicense(low: string): boolean {
+  return (
+    /\b(software\s+)?license\s+agreement\b/i.test(low) ||
+    (/\bsoftware\s+licen[cs]e\b/i.test(low) && !/\b(?:develop|implementation|integration)\b/i.test(low))
+  );
+}
+
 /**
  * Resolves a deterministic (title, clause pack) pair from raw intake, or `null` if no rule matches.
  */
@@ -188,6 +264,10 @@ export function resolveDeterministicIntentTitleAndSeed(intakeText: string | null
   if (testSettlementRelease(low)) return SETTLEMENT;
   if (testMutualNda(low)) return NDA;
   if (testLoan(low)) return LOAN;
+  if (testGrowthAdvisor(low)) return GROWTH_ADVISOR;
+  if (testReferral(low)) return REFERRAL;
+  if (testJointVenture(low)) return JOINT_VENTURE;
+  if (testSoftwareLicense(low)) return SOFTWARE_LICENSE;
   if (isFounderEquityVestingIntent(s)) return FOUNDER;
   return null;
 }

@@ -9,7 +9,8 @@ export type FreeReviewSurfaceSource =
   | "api_hydrate"
   | "api_late_merge"
   | "session_restore"
-  | "display_phase_guard";
+  | "display_phase_guard"
+  | "complexity_gate_starter";
 
 export type ResolveIsFreeStreamlineDraftReviewInput = {
   simpleProductFlow: boolean;

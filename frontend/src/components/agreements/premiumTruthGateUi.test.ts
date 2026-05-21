@@ -71,4 +71,27 @@ describe("premium truth gate UI helpers", () => {
       }),
     ).toBe(false);
   });
+
+  it("does not show retry for long authoritative body with material questions only", () => {
+    expect(
+      shouldShowRetryNeedsDetailsPanel({
+        proFullDraftQualityRetry: true,
+        premiumProTruthGate: strictBlockedGate,
+        bodyLen: 20_000,
+        structuralCatastrophic: false,
+        renderSource: "server_full_draft",
+      }),
+    ).toBe(false);
+  });
+
+  it("shows retry for catastrophic structural failure on short body", () => {
+    expect(
+      shouldShowRetryNeedsDetailsPanel({
+        proFullDraftQualityRetry: true,
+        premiumProTruthGate: null,
+        bodyLen: 200,
+        structuralCatastrophic: true,
+      }),
+    ).toBe(true);
+  });
 });

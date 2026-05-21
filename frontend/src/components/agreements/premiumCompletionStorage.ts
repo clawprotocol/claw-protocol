@@ -3,6 +3,7 @@ import type { PremiumRecipientCandidate } from "./premiumCompletionPipeline";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
+import type { MaterialMissingItem } from "./proAgreementCompleteness";
 import { clearPremiumPartyNamesHandoff } from "./premiumPartyNamesHandoff";
 import { clearPremiumForkUserSendMode } from "./premiumSendForkDefaults";
 import {
@@ -95,6 +96,10 @@ export type PremiumCompletionSnapshot = {
   premiumAccepted?: boolean;
   /** Set when the server used a non-model structured fallback (LawDog Pro checkout still valid). */
   serverGenerationDegraded?: { code: string; message: string } | null;
+  /** Structured Ask LawDog material questions (not shown in agreement body). */
+  materialMissingItems?: MaterialMissingItem[];
+  /** Malformed/empty pipeline failure — distinct from advisory material gaps. */
+  structuralCatastrophic?: boolean;
 };
 
 export function persistPremiumCompletionSnapshot(snap: Omit<PremiumCompletionSnapshot, "savedAt">): void {

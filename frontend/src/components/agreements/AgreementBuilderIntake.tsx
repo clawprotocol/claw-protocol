@@ -539,6 +539,7 @@ import {
   tryBeginPremiumEnsureForIntake,
 } from "./premiumAuthoritativeVisibleSurface";
 import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPanel";
+import { formatMaterialItemsForRevisePanel } from "./proAgreementCompleteness";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
@@ -5088,7 +5089,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumRenderResolveSource: resolvedPersist.premium_render_source,
             generationOutcome: result.serverGenerationDegraded ? "degraded" : "needs_details",
           });
-          if (!fin.ok && !authoritativeCommittedForGate.committed) {
+          const skipQualityRetryForAdvisoryOnly =
+            authoritativeCommittedForGate.committed ||
+            (winning.length >= 15_000 && !result.structuralCatastrophic);
+          if (!fin.ok && !skipQualityRetryForAdvisoryOnly) {
             setPremiumServerGenerationDegraded(null);
             if (contractIc.pro_strict) {
               const d = buildPremiumDetailsGateCopy(contractIc, fin.gate?.validation.reasons ?? fin.reasons);
@@ -5258,6 +5262,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumRenderResolveSource: resolvedPersist.premium_render_source,
           premiumAccepted: true,
           serverGenerationDegraded: result.serverGenerationDegraded ?? null,
+          materialMissingItems: result.materialMissingItems,
+          structuralCatastrophic: result.structuralCatastrophic,
         });
         if (usePaidAuthoritativeBody) {
           bumpPremiumSurfaceGateTick();
@@ -6553,12 +6559,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           awaitingProCheckout: false,
           resume_kind: "complexity_gate",
         });
-        setReviewShowsSimplifiedAdvancedDraft(false);
         setComplexityPendingParsed(parsed);
-        setDraft(null);
+        let starterDraft = simplifyParsedDraftForInstantPath(parsed, rawIntake);
+        starterDraft = runIntakeDefaultsAndRoles(starterDraft, rawIntake, simpleProductFlow, intakePartyRoleLabels);
+        starterDraft = alignParsedWithCanonicalType(starterDraft, rawIntake);
+        starterDraft = normalizeParsedDraftLegalConcepts(starterDraft, rawIntake);
+        starterDraft = canonicalizeStarterDraftForReview(starterDraft);
+        setReviewShowsSimplifiedAdvancedDraft(true);
+        setDraft(starterDraft);
+        setFollowUpDetailTotal(0);
+        setIntakeStepBuffer("");
+        setDebouncedStepBuffer("");
+        agreementDocumentDirtyRef.current = false;
+        setReviewDocRefreshTick((n) => n + 1);
+        writeCreateReviewDraftReadyMarker();
+        writeCreateReviewDraftSnapshot(starterDraft);
+        commitFreeDraftForReview({ source: "complexity_gate_starter" });
         setCreateFlowPhase("complexity_choice_required");
-        setDisplayPhase("intake");
+        setDisplayPhase("review");
         setCreateUiStage(CreateUiStage.DRAFT);
+        setPreviewPaneRevealed(true);
         setLoading(false);
         return false;
       }
@@ -12858,11 +12878,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const stickyPrimaryButtonNativeDisabled = effectivePrimaryCtaDisabled && !stickyRecipientBlockedNudge;
   const blockedPreviewRenderSource =
     (premiumTruthPipelineSource || premiumPaidReadonlyPick.sourceUsed || lastPremiumPipelineRenderSourceRef.current || "").trim();
+  const premiumMaterialReviseHints = useMemo(() => {
+    const snap = readPremiumCompletionSnapshot();
+    return formatMaterialItemsForRevisePanel(snap?.materialMissingItems ?? []);
+  }, [premiumSurfaceGateTick, reviewDocRefreshTick, authoritativePremiumUiCommitted]);
   const showStrictRetryNeedsDetailsPanel =
     !authoritativePremiumUiCommitted &&
     shouldShowRetryNeedsDetailsPanel({
       proFullDraftQualityRetry: shouldShowPaidRetry,
       premiumProTruthGate,
+      structuralCatastrophic: readPremiumCompletionSnapshot()?.structuralCatastrophic,
+      bodyLen: (premiumPaidReadonlyPick.plainText || agreementDocumentText || "").trim().length,
+      renderSource: blockedPreviewRenderSource,
     });
   const showStrictBlockedDraftPreviewLabel =
     !authoritativePremiumUiCommitted &&
@@ -16197,6 +16224,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
                                           <p className="text-xs font-medium text-stone-700">{PRO_REFINE_REVISE_SECTION_HEADING}</p>
                                           <p className="mt-1 text-xs leading-relaxed text-stone-600">{PRO_REFINE_REVISE_HELPER}</p>
+                                          {premiumMaterialReviseHints ? (
+                                            <pre className="mt-2 whitespace-pre-wrap rounded-md border border-amber-200/80 bg-amber-50/60 px-3 py-2 font-sans text-[11px] leading-relaxed text-stone-700">
+                                              {premiumMaterialReviseHints}
+                                            </pre>
+                                          ) : null}
                                           <div className="relative mt-2">
                                             <VoiceAugmentedTextArea
                                               value={paidProCardAiInstruction}

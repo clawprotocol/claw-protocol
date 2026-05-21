@@ -132,6 +132,9 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   }
   if (/\bco[-\s]?ownership\s+(?:agreement|contract)\b/.test(low)) return "Co-Ownership Agreement";
   if (/\bproperty\s+management\s+(?:agreement|contract)\b/.test(low)) return "Property Management Agreement";
+  if (/\breferral\s+agreement\b/.test(low)) return "Referral Agreement";
+  if (/\b(?:growth\s+advisor|advisory)\s+agreement\b/.test(low)) return "Growth Advisor Agreement";
+  if (/\bjoint\s+venture\b/.test(low) && /\b(?:agreement|contract|jv)\b/.test(low)) return "Joint Venture Agreement";
   if (/\blicense\s+agreement\b/.test(low)) return "License Agreement";
   if (/\bcontent\s+license\s+agreement\b/.test(low)) return "Content License Agreement";
   if (/\bdistribution\s+agreement\b/.test(low)) return "Distribution Agreement";

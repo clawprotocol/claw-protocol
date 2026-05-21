@@ -6,12 +6,18 @@ import { formatStarterPreviewForDisplay } from "../starterPreviewFormatting";
 import { stripAdvisoryLanguageFromAgreementBody } from "./premiumCompletionClassification";
 import { suppressRepeatedBoilerplate } from "./boilerplateContaminationGuard";
 import { validateAndRepairFinalRenderIntegrity } from "./finalRenderIntegrityValidator";
+import { detectAgreementFamily } from "../agreementFamilyRouter";
 import { applyPremiumExecutionNormalization } from "../premiumExecutionNormalization";
+import { applyProAgreementCompletenessPipeline } from "../proAgreementCompleteness";
+import { applyVisibleBodyQualityGate } from "../visibleBodyQualityGate";
 import { applySectionIsolatedPolishPipeline } from "./sectionIsolatedPolish";
-import type { AgreementOutputQualityContext, IntegrityResult } from "./types";
+import type { AgreementOutputQualityContext, IntegrityResult, MaterialMissingItem } from "./types";
 
 export type AgreementOutputQualityResult = IntegrityResult & {
   clarificationsStripped: boolean;
+  materialMissingItems?: MaterialMissingItem[];
+  structuralCatastrophic?: boolean;
+  structuralOk?: boolean;
 };
 
 /**
@@ -53,10 +59,44 @@ export function finalizeAgreementOutput(
     structureRepairs.push(...executionNorm.repairs);
   }
 
+  const visibleGate = applyVisibleBodyQualityGate(working, {
+    intakeRaw: ctx.intakeRaw,
+    partyNames: ctx.partyNames,
+    agreementFamily:
+      (ctx.agreementFamily as import("../agreementFamilyRouter").AgreementFamily | null) ??
+      detectAgreementFamily(ctx.intakeRaw || ""),
+    surface: ctx.surface,
+  });
+  working = visibleGate.text;
+  structureRepairs.push(...visibleGate.repairs);
+
   const integrity = validateAndRepairFinalRenderIntegrity(working, ctx);
+
+  if (ctx.tier === "starter") {
+    return {
+      ...integrity,
+      clarificationsStripped,
+      repairs: [...structureRepairs, ...integrity.repairs],
+    };
+  }
+
+  const completeness = applyProAgreementCompletenessPipeline(integrity.text, {
+    intakeRaw: ctx.intakeRaw,
+    partyNames: ctx.partyNames,
+    agreementFamily:
+      (ctx.agreementFamily as import("../agreementFamilyRouter").AgreementFamily | null) ??
+      detectAgreementFamily(ctx.intakeRaw || ""),
+    surface: ctx.surface,
+  });
   return {
     ...integrity,
+    ok: integrity.ok && completeness.structuralOk,
+    text: completeness.text,
+    issues: [...integrity.issues, ...completeness.issues],
+    repairs: [...structureRepairs, ...integrity.repairs, ...completeness.repairs],
     clarificationsStripped,
-    repairs: [...structureRepairs, ...integrity.repairs],
+    materialMissingItems: completeness.materialMissingItems,
+    structuralCatastrophic: completeness.structuralCatastrophic,
+    structuralOk: completeness.structuralOk,
   };
 }

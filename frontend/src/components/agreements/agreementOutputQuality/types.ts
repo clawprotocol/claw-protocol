@@ -47,6 +47,8 @@ export type PremiumCompletionOutcome =
   | "degraded"
   | "ok";
 
+export type { MaterialMissingItem, MaterialSeverity } from "../proAgreementCompleteness/types";
+
 /** Section kinds where repeated boilerplate is allowed (signature blocks, notices). */
 export const BOILERPLATE_REPEAT_ALLOWED_KINDS: ReadonlySet<SectionSemanticKind> = new Set([
   "signatures",
