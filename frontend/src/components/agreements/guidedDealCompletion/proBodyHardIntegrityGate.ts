@@ -5,6 +5,7 @@
 import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
 import { parseAgreementSections } from "../proOperationalSynthesis/sectionPurityValidator";
 import type { ProCompletenessContext } from "../proAgreementCompleteness/types";
+import { isConsultingDevIntake } from "./consultingGuidedIntake";
 import { neutralFallbackForTopic } from "../proAgreementCompleteness/familyFallbackLanguage";
 
 const BANNED_LINE_PATTERNS: readonly RegExp[] = [
@@ -12,11 +13,13 @@ const BANNED_LINE_PATTERNS: readonly RegExp[] = [
   /Until then, this Section is intentionally left for completion before signing/i,
   /^\s*signature\.\s*$/i,
   /Sections that by their nature should/i,
+  /^\s*direct\s+damages\s+are\s+limited/i,
 ];
 
 const BANNED_SENTENCE_PATTERNS: readonly RegExp[] = [
   /\bunless a different period is stated in a schedule\b[^.!?]*[.!?]?/gi,
   /\bUntil then, this Section is intentionally left for completion before signing\b[^.!?]*[.!?]?/gi,
+  /\bdirect\s+damages\s+are\s+limited\b[^.!?]*[.!?]?/gi,
 ];
 
 const HEADING_ONLY_RE = /^\s*(\d+(?:\.\d+)*)\s+(.+?)\.?\s*$/;
@@ -110,7 +113,8 @@ function stripManualSignatureBlocks(text: string): { text: string; repairs: stri
 function safeFallbackForHeading(heading: string, ctx: ProCompletenessContext): string {
   const h = heading.toLowerCase();
   const advisor = isGrowthAdvisorIntake(ctx.intakeRaw);
-  const referral = isReferralChannelIntake(ctx.intakeRaw);
+  const referral = isReferralChannelIntake(ctx.intakeRaw) && !isConsultingDevIntake(ctx.intakeRaw);
+  const consulting = isConsultingDevIntake(ctx.intakeRaw);
   if (/confidential/i.test(h)) {
     return MUTUAL_CONFIDENTIALITY_FALLBACK;
   }
@@ -121,11 +125,17 @@ function safeFallbackForHeading(heading: string, ctx: ProCompletenessContext): s
     return "Each Party will keep introduced opportunity details confidential and use them only for evaluating and pursuing the introduced business.";
   }
   if (/wind-?down|survival/i.test(h)) {
+    if (consulting) {
+      return "Confidentiality, payment, and IP provisions survive termination as stated in this Agreement.";
+    }
     return "Survival and wind-down obligations apply to payment, confidentiality, and referral protection terms as stated in this Agreement.";
   }
   if (/invoic|payment|compensation|fee|referral|commission|revenue/i.test(h)) {
     if (referral || advisor) {
       return REFERRAL_REVENUE_STUB;
+    }
+    if (consulting) {
+      return "Compensation, invoicing, and payment timing will be documented in a schedule or written statement agreed before work begins.";
     }
     return "Fees and payment timing will be confirmed in writing before execution.";
   }

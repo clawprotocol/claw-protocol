@@ -10925,17 +10925,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumProTruthGate?.successBannerAllowed || premiumProTruthGate?.signerCtaAllowed,
   );
 
-  /** Upper “Want to adjust…” card — hidden for paid authoritative Pro; `FinalizeYourAgreementPanel` below owns refine. */
-  const showTopProAdjustCard = Boolean(
-    createUiStage === CreateUiStage.DRAFT &&
-      createProductionTwoPane &&
-      simpleProductFlow &&
-      !premiumPostCheckoutPhase &&
-      hasUsablePaidBody &&
-      (postCheckoutAdvisoryGaps.length > 0 || postCheckoutProReadyForCompactRefineUx) &&
-      !paidProAuthoritative,
-  );
-
   const canProceedWithPaidProDocument = useMemo(() => {
     if (authoritativePremiumUiCommitted) return true;
     if (!premiumPaidDocumentSurface) return true;
@@ -11039,6 +11028,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
     if (premiumPaidDocumentSurface) {
+      const snap = readPremiumCompletionSnapshot();
+      const paidBodyForChip = (premiumPaidReadonlyPick.plainText || agreementDocumentText || "").trim();
+      const guidedPending =
+        paidBodyForChip.length >= 500 &&
+        (snap?.materialMissingItems?.length ?? 0) > 0 &&
+        (() => {
+          const session = buildGuidedSessionFromAgreement({
+            intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
+            body: paidBodyForChip,
+            materialItems: snap?.materialMissingItems,
+          });
+          return Boolean(session && !isGuidedCompletionComplete(session));
+        })();
+      if (guidedPending) {
+        return { version: CHIP_VERSION_PRO, state: CHIP_STATE_PRO_NEEDS_DRAFT };
+      }
       if (authoritativePremiumUiCommitted) {
         return { version: CHIP_VERSION_PRO, state: CHIP_STATE_COMMERCIAL };
       }
@@ -11073,6 +11078,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumTruthPipelineSource,
     shouldShowPaidRetry,
     authoritativePremiumUiCommitted,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    premiumPaidReadonlyPick.plainText,
+    agreementDocumentText,
+    premiumSurfaceGateTick,
   ]);
 
   /**
@@ -13001,6 +13011,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hasUsableBody: paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody,
       structuralCatastrophic: snap?.structuralCatastrophic,
       variableCount: guidedCompletionSession?.queue.length ?? guidedCompletionSessionBase?.queue.length ?? 0,
+      materialGapCount: snap?.materialMissingItems?.length ?? 0,
     });
   }, [
     paidBodyForGuidedCompletion,
@@ -13017,13 +13028,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const activeGuidedCompletionSession = guidedCompletionSession ?? guidedCompletionSessionBase;
   guidedCompletionSessionRef.current = activeGuidedCompletionSession;
-  const showGuidedCompletionInEditor = Boolean(
+  const showPrimaryGuidedCompletion = Boolean(
     premiumPaidDocumentSurface &&
-      canProceedWithPaidProDocument &&
       !proUpgradeUseStarterView &&
+      (paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody || authoritativePremiumUiCommitted) &&
       activeGuidedCompletionSession &&
       activeGuidedCompletionSession.queue.length > 0 &&
       !isGuidedCompletionComplete(activeGuidedCompletionSession),
+  );
+  /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
+  const showTopProAdjustCard = Boolean(
+    createUiStage === CreateUiStage.DRAFT &&
+      createProductionTwoPane &&
+      simpleProductFlow &&
+      !premiumPostCheckoutPhase &&
+      hasUsablePaidBody &&
+      (postCheckoutAdvisoryGaps.length > 0 || postCheckoutProReadyForCompactRefineUx) &&
+      !paidProAuthoritative &&
+      !showPrimaryGuidedCompletion,
   );
   const showStrictRetryNeedsDetailsPanel =
     !authoritativePremiumUiCommitted &&
@@ -13051,8 +13073,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !premiumReturnWaitActive &&
       preferGuidedCompletionOverRetry &&
       (activeGuidedCompletionSession?.queue.length ?? 0) > 0 &&
-      !showGuidedCompletionInEditor,
+      !showPrimaryGuidedCompletion,
   );
+
+  useEffect(() => {
+    if (showPrimaryGuidedCompletion && postCheckoutAdvisoryGaps.length > 0) {
+      setPostCheckoutAdvisoryGaps([]);
+    }
+  }, [showPrimaryGuidedCompletion, postCheckoutAdvisoryGaps.length]);
+
   const showProAmberRecoveryPanel = Boolean(
     premiumPaidDocumentSurface &&
       !authoritativePremiumUiCommitted &&
@@ -16159,6 +16188,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       <div className="mt-4">
                                         <GuidedDealCompletionPanel
                                           session={activeGuidedCompletionSession}
+                                          intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
                                           onSessionChange={handleGuidedCompletionSessionChange}
                                           onApplyAnswer={handleGuidedApplyAnswer}
                                           externallyFrozen={draftPreCommitFreeze}
@@ -16405,10 +16435,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           aria-label="Agreement document"
                                         />
                                         <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
-                                          {activeGuidedCompletionSession &&
-                                          activeGuidedCompletionSession.queue.length > 0 ? (
+                                          {showPrimaryGuidedCompletion && !showGuidedCompletionRecovery && activeGuidedCompletionSession ? (
                                             <GuidedDealCompletionPanel
                                               session={activeGuidedCompletionSession}
+                                              intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
                                               onSessionChange={handleGuidedCompletionSessionChange}
                                               onApplyAnswer={handleGuidedApplyAnswer}
                                               onCustomPillSelected={() => {
@@ -16638,7 +16668,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             {showProLawdogRefineAndFinalize ? (
                               <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
                                 <FinalizeYourAgreementPanel
-                                  hideFreeformRefineSection={showGuidedCompletionInEditor}
+                                  hideFreeformRefineSection={showPrimaryGuidedCompletion}
+                                  hideMissingLinesBulletList={showPrimaryGuidedCompletion}
                                   draft={reviewDraft ?? draft}
                                   currentDocumentText={proRefineCurrentDocumentTextForProPanels}
                                   intakeText={proRefineIntakeTextForProPanels}

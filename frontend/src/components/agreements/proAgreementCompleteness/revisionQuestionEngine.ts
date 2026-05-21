@@ -1,4 +1,5 @@
 import { detectAgreementFamily, type AgreementFamily } from "../agreementFamilyRouter";
+import { isConsultingDevIntake } from "../guidedDealCompletion/consultingGuidedIntake";
 import type { CommercialFamilyHint, MaterialMissingItem } from "./types";
 
 const VAGUE_COMMERCIAL_RE =
@@ -39,20 +40,94 @@ function familyQuestions(
   const low = body.toLowerCase();
   const intakeLow = intake.toLowerCase();
 
+  const consultingDev = isConsultingDevIntake(intake, body);
+
+  if (consultingDev) {
+    const vaguePayment =
+      !/\b(?:hourly|fixed fee|retainer|milestone|per hour|project fee)\b/i.test(low) ||
+      VAGUE_COMMERCIAL_RE.test(intakeLow) ||
+      /\b(?:fee structure|payment structure)\b/i.test(intakeLow);
+    if (vaguePayment) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "payment_structure",
+          severity: "material",
+          label: "Payment structure",
+          question: "How should the developer be paid?",
+          whyItMatters: "Clear payment structure reduces disputes if scope expands later.",
+          suggestedAnswerFormat: "e.g. monthly retainer, milestone-based, hourly",
+          affectsSections: ["Compensation", "Fees", "Payment"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+
+    if (
+      /\bsupport\b/i.test(intakeLow) &&
+      !/\b(?:support|maintenance|handoff)\b[\s\S]{0,120}\b(?:included|hours|days|period|business)\b/i.test(low)
+    ) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "support_obligations",
+          severity: "material",
+          label: "Support obligations",
+          question: "What support should be included after delivery?",
+          whyItMatters: "This determines whether bug fixes and maintenance are included after delivery.",
+          suggestedAnswerFormat: "e.g. 30-day business-hours support, handoff only",
+          affectsSections: ["Support", "Services"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+
+    if (
+      /\b(?:evolv|flexib|chang|scope may)\b/i.test(intakeLow) &&
+      !/\b(?:change order|sow|written approval|email approval)\b/i.test(low)
+    ) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: "scope_change_approval",
+          severity: "material",
+          label: "Scope change approvals",
+          question: "How should evolving scope be approved?",
+          whyItMatters: "This helps prevent disagreements when requirements evolve.",
+          suggestedAnswerFormat: "e.g. email approval, signed change order",
+          affectsSections: ["Scope", "Change Control"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+  }
+
   const needsPayment =
     !/\b(?:invoice|due within|net\s+\d+|payment|fee|compensation)\b/i.test(low) ||
     VAGUE_COMMERCIAL_RE.test(intakeLow);
-  if (needsPayment) {
+  if (needsPayment && !seen.has("payment_structure")) {
     pushItem(
       items,
       seen,
       {
-        id: "payment_timing",
+        id: consultingDev ? "payment_structure" : "payment_timing",
         severity: "material",
-        label: "Payment timing",
-        question: "Confirm invoice due date, late payment policy, and currency.",
-        whyItMatters: "Payment timing affects cash flow, default risk, and enforceability.",
-        suggestedAnswerFormat: "e.g. Net 30, 1.5% monthly late fee, USD",
+        label: consultingDev ? "Payment structure" : "Payment timing",
+        question: consultingDev
+          ? "How should the developer be paid?"
+          : "Confirm invoice due date, late payment policy, and currency.",
+        whyItMatters: consultingDev
+          ? "Clear payment structure reduces disputes if scope expands later."
+          : "Payment timing affects cash flow, default risk, and enforceability.",
+        suggestedAnswerFormat: consultingDev
+          ? "e.g. monthly retainer, milestone-based, hourly"
+          : "e.g. Net 30, 1.5% monthly late fee, USD",
         affectsSections: ["Payment", "Fees", "Invoicing"],
         canProceedWithoutAnswer: true,
       },
@@ -264,11 +339,15 @@ function familyQuestions(
       items,
       seen,
       {
-        id: "ip_allocation",
+        id: consultingDev ? "ip_ownership" : "ip_allocation",
         severity: "material",
-        label: "IP / deliverables ownership",
-        question: "Confirm ownership of deliverables and pre-existing IP.",
-        whyItMatters: "IP allocation is often the core commercial term in services deals.",
+        label: consultingDev ? "IP ownership" : "IP / deliverables ownership",
+        question: consultingDev
+          ? "Who should own the work product?"
+          : "Confirm ownership of deliverables and pre-existing IP.",
+        whyItMatters: consultingDev
+          ? "Ownership rules control who can use, modify, and resell the work product."
+          : "IP allocation is often the core commercial term in services deals.",
         suggestedAnswerFormat: "e.g. Client owns deliverables; consultant retains pre-existing IP",
         affectsSections: ["Intellectual Property", "Work Product"],
         canProceedWithoutAnswer: true,

@@ -6,7 +6,7 @@ const SEVERITY_RANK: Record<DealVariableSeverity, number> = {
   optional: 2,
 };
 
-const MAX_GUIDED_QUEUE = 7;
+const MAX_GUIDED_QUEUE = 5;
 const MAX_INTRO_LABELS = 3;
 
 export function prioritizeDealVariables(variables: readonly DealVariable[]): DealVariable[] {

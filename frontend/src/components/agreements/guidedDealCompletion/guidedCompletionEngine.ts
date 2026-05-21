@@ -112,6 +112,11 @@ export function importantVariableCount(session: GuidedCompletionSession): number
 }
 
 const WHAT_CHANGED_BY_ID: Record<string, string> = {
+  payment_structure: "What changed: Added payment structure and invoicing terms.",
+  support_obligations: "What changed: Defined post-launch support obligations.",
+  scope_change_approval: "What changed: Clarified approval process for evolving scope.",
+  ip_ownership: "What changed: Added intellectual property ownership terms.",
+  governing_law_notice: "What changed: Added governing law and notice terms.",
   referral_economics: "What changed: Added referral compensation terms.",
   payment_timing: "What changed: Added payment timing terms.",
   saas_sla: "What changed: Added service level and uptime terms.",
@@ -146,10 +151,10 @@ export function whatChangedLineForGuidedVariable(
   variables: readonly DealVariable[],
 ): string | null {
   if (!variableId) return null;
+  const byId = WHAT_CHANGED_BY_ID[variableId];
+  if (byId) return byId;
   const v = variables.find((x) => x.id === variableId);
   if (!v) return null;
-  const byId = WHAT_CHANGED_BY_ID[v.id];
-  if (byId) return byId;
   const byCat = WHAT_CHANGED_BY_CATEGORY[v.category];
   if (byCat) return byCat;
   return `What changed: Added ${v.label.toLowerCase()} terms.`;

@@ -56,6 +56,16 @@ const CONCEPT_PATTERNS: readonly { id: string; re: RegExp; allowedHeadingRe: Reg
     re: /\bthe\s+parties\s+shall\s+perform\s+their\s+obligations\s+in\s+good\s+faith\b[^.!?]*[.!?]\s*/gi,
     allowedHeadingRe: /general|miscellaneous|term/i,
   },
+  {
+    id: "direct_damages_limited",
+    re: /\bdirect\s+damages\s+are\s+limited\b[^.!?]*[.!?]\s*/gi,
+    allowedHeadingRe: /limitation|liability|damages/i,
+  },
+  {
+    id: "survival_winddown_misplaced",
+    re: /\bsurvival\s+and\s+wind[- ]?down\s+obligations\b[^.!?]*[.!?]\s*/gi,
+    allowedHeadingRe: /survival|wind[- ]?down|termination|general/i,
+  },
 ];
 
 function scrubConceptOutsideAllowedSections(text: string): { text: string; removed: number } {

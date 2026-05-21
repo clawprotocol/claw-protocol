@@ -288,8 +288,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("Want to adjust this agreement?");
     expect(intake).toContain("{showTopProAdjustCard ?");
     expect(intake).toContain("FinalizeYourAgreementPanel");
-    expect(intake).toContain("hideFreeformRefineSection={showGuidedCompletionInEditor}");
-    expect(intake).toContain("showGuidedCompletionInEditor");
+    expect(intake).toContain("hideFreeformRefineSection={showPrimaryGuidedCompletion}");
+    expect(intake).toContain("showPrimaryGuidedCompletion");
+    expect(intake).toContain("hideMissingLinesBulletList={showPrimaryGuidedCompletion}");
     expect(intake).toContain("handleGuidedApplyAnswer");
     expect(intake).toContain("showProLawdogRefineAndFinalize");
     const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");

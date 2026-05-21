@@ -9,9 +9,11 @@ import {
   skipGuidedVariable,
 } from "./guidedCompletionEngine";
 import { GUIDED_COMPLETION_HEADING, GUIDED_COMPLETION_SUBHEADING } from "./friendlyProCompletionCopy";
+import { RECOMMEND_PILL_ID, resolveRecommendForMe, type RecommendForMeResult } from "./intakeRecommendationEngine";
 
 export type GuidedDealCompletionPanelProps = {
   session: GuidedCompletionSession;
+  intakeRaw?: string | null;
   onSessionChange: (next: GuidedCompletionSession) => void;
   /**
    * Applies guided refine; returns true on success. Session advance happens in parent on success only.
@@ -33,6 +35,7 @@ function logGuidedDisabledState(args: Record<string, unknown>) {
 
 export function GuidedDealCompletionPanel({
   session,
+  intakeRaw,
   onSessionChange,
   onApplyAnswer,
   onCustomPillSelected,
@@ -48,8 +51,17 @@ export function GuidedDealCompletionPanel({
   const [customOpen, setCustomOpen] = useState(false);
   const [customDraft, setCustomDraft] = useState("");
   const [isLocalApplying, setIsLocalApplying] = useState(false);
+  const [helpExpanded, setHelpExpanded] = useState(false);
+  const [recommendView, setRecommendView] = useState<RecommendForMeResult | null>(null);
 
   const controlsDisabled = externallyFrozen || isLocalApplying;
+
+  useEffect(() => {
+    setRecommendView(null);
+    setHelpExpanded(false);
+    setCustomOpen(false);
+    setCustomDraft("");
+  }, [current?.id]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -74,6 +86,7 @@ export function GuidedDealCompletionPanel({
       if (ok) {
         setCustomOpen(false);
         setCustomDraft("");
+        setRecommendView(null);
       }
     } finally {
       setIsLocalApplying(false);
@@ -82,9 +95,18 @@ export function GuidedDealCompletionPanel({
 
   const handlePill = (pillId: string, value: string, label: string) => {
     if (!current || controlsDisabled) return;
+    if (pillId === RECOMMEND_PILL_ID) {
+      const rec = resolveRecommendForMe(current, intakeRaw);
+      if (rec) {
+        setRecommendView(rec);
+        setCustomOpen(false);
+      }
+      return;
+    }
     if (pillId === "custom") {
       // eslint-disable-next-line no-console
       if (import.meta.env.DEV) console.info("[guided-panel-custom-open]", { variableId: current.id });
+      setRecommendView(null);
       setCustomOpen(true);
       onCustomPillSelected?.();
       return;
@@ -99,6 +121,7 @@ export function GuidedDealCompletionPanel({
     onSessionChange(skipGuidedVariable(session, current.id));
     setCustomOpen(false);
     setCustomDraft("");
+    setRecommendView(null);
   };
 
   if (done) {
@@ -115,6 +138,8 @@ export function GuidedDealCompletionPanel({
       </div>
     );
   }
+
+  const hasPillHelp = Boolean(current?.pillExplanations && Object.keys(current.pillExplanations).length > 0);
 
   return (
     <div
@@ -148,26 +173,93 @@ export function GuidedDealCompletionPanel({
           </p>
           <p className="mt-2 text-sm font-medium text-stone-900">{current.question}</p>
           {current.agreementImpact ? (
-            <p className="mt-1 text-xs leading-relaxed text-stone-600">{current.agreementImpact}</p>
+            <p className="mt-2 text-xs leading-relaxed text-stone-600">
+              <span className="font-medium text-stone-700">Why this matters: </span>
+              {current.agreementImpact}
+            </p>
           ) : null}
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            {current.suggestedDefaults.map((pill) => (
+          {recommendView ? (
+            <div className="mt-3 rounded-lg border border-sky-200/90 bg-sky-50/90 p-3">
+              <p className="text-xs font-medium text-sky-900">Suggested for your deal</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-sky-950/90">{recommendView.explanation}</p>
+              <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-sky-800/80">Recommended</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {recommendView.choices.map((choice) => (
+                  <button
+                    key={choice.pillId}
+                    type="button"
+                    disabled={controlsDisabled}
+                    className="rounded-full border border-sky-400/80 bg-white px-3 py-1.5 text-left text-xs font-semibold text-sky-950 shadow-sm transition hover:border-sky-600 disabled:opacity-40 sm:text-sm"
+                    onClick={() => void runApply(choice.value || choice.label)}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
               <button
-                key={pill.id}
                 type="button"
-                disabled={controlsDisabled}
-                className="rounded-full border border-stone-300 bg-white px-3 py-1.5 text-left text-xs font-medium text-stone-800 shadow-sm transition hover:border-stone-500 hover:bg-stone-50 disabled:opacity-40 sm:text-sm"
-                onClick={() => handlePill(pill.id, pill.value, pill.label)}
+                className="mt-2 text-xs font-medium text-sky-800 underline-offset-2 hover:underline"
+                onClick={() => setRecommendView(null)}
               >
-                {pill.label}
+                See all options
               </button>
-            ))}
-          </div>
-          {current.suggestedDefaults.find((p) => p.rationale)?.rationale ? (
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {current.suggestedDefaults.map((pill) => {
+                const isRecommended = pill.id === current.recommendedPillId;
+                return (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    disabled={controlsDisabled}
+                    className={`rounded-full border px-3 py-1.5 text-left text-xs font-medium shadow-sm transition disabled:opacity-40 sm:text-sm ${
+                      isRecommended
+                        ? "border-emerald-500/70 bg-emerald-50 text-emerald-950 hover:border-emerald-600"
+                        : "border-stone-300 bg-white text-stone-800 hover:border-stone-500 hover:bg-stone-50"
+                    }`}
+                    onClick={() => handlePill(pill.id, pill.value, pill.label)}
+                  >
+                    {pill.label}
+                    {isRecommended && current.recommendedLabel ? (
+                      <span className="mt-0.5 block text-[10px] font-normal text-emerald-800/90">
+                        {current.recommendedLabel}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {!recommendView && current.suggestedDefaults.find((p) => p.rationale && p.id !== RECOMMEND_PILL_ID)?.rationale ? (
             <p className="mt-2 text-[11px] italic text-stone-500">
-              {current.suggestedDefaults.find((p) => p.rationale)?.rationale}
+              {current.suggestedDefaults.find((p) => p.rationale && p.id !== RECOMMEND_PILL_ID)?.rationale}
             </p>
+          ) : null}
+
+          {hasPillHelp ? (
+            <details
+              className="mt-2"
+              open={helpExpanded}
+              onToggle={(e) => setHelpExpanded((e.target as HTMLDetailsElement).open)}
+            >
+              <summary className="cursor-pointer text-xs font-medium text-stone-600 hover:text-stone-900">
+                What&apos;s the difference?
+              </summary>
+              <ul className="mt-1.5 list-none space-y-1 text-[11px] leading-relaxed text-stone-600">
+                {Object.entries(current.pillExplanations!).map(([pillId, text]) => {
+                  const label = current.suggestedDefaults.find((p) => p.id === pillId)?.label ?? pillId;
+                  return (
+                    <li key={pillId}>
+                      <span className="font-medium text-stone-700">{label}: </span>
+                      {text}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
           ) : null}
 
           {customOpen ? (

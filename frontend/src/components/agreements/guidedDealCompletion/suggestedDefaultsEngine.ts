@@ -73,13 +73,49 @@ const DEFAULTS_BY_CATEGORY: Partial<
   ],
 };
 
+const CONSULTING_PAYMENT_STRUCTURE: DealVariableDefault[] = [
+  { id: "hourly", label: "Hourly", value: "Consultant is paid hourly at the agreed rate, invoiced monthly." },
+  { id: "fixed", label: "Fixed project fee", value: "Fixed project fee for the agreed scope and deliverables." },
+  { id: "retainer", label: "Monthly retainer", value: "Monthly retainer for ongoing services, with extra work approved in writing." },
+  { id: "milestone", label: "Milestone-based", value: "Fees tied to defined milestones or deliverables with written acceptance." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const CONSULTING_SUPPORT: DealVariableDefault[] = [
+  { id: "handoff", label: "Reasonable handoff only", value: "Reasonable handoff and knowledge transfer after delivery; no ongoing maintenance." },
+  { id: "business_hours", label: "Business-hours support", value: "Business-hours support for 30 days after delivery for material defects." },
+  { id: "maintenance", label: "Monthly maintenance", value: "Monthly maintenance and bug-fix support under agreed hours or fees." },
+  { id: "separate_sow", label: "Separate SOW", value: "Post-delivery support provided only under a separate signed SOW." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const CONSULTING_SCOPE_APPROVAL: DealVariableDefault[] = [
+  { id: "email", label: "Email approval is enough", value: "Scope changes approved by email from an authorized company contact." },
+  { id: "sow", label: "Signed SOW / change order", value: "Material scope changes require a signed SOW or change order before work begins." },
+  { id: "ticket", label: "Ticket approval", value: "Scope changes approved through the parties' agreed project ticketing system." },
+  { id: "written", label: "Company written approval", value: "Scope changes require written approval from the company's authorized representative." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const CONSULTING_IP: DealVariableDefault[] = [
+  { id: "company_deliverables", label: "Company owns project deliverables", value: "Company owns all project deliverables; consultant retains pre-existing tools and know-how." },
+  { id: "developer_tools", label: "Developer keeps reusable tools", value: "Company owns deliverables; consultant retains reusable tools, libraries, and general methods." },
+  { id: "shared", label: "Shared / custom", value: "Custom IP allocation as described by the parties." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
 const ID_DEFAULTS: Partial<Record<string, (family: CommercialFamilyHint) => DealVariableDefault[]>> = {
   saas_sla: DEFAULTS_BY_CATEGORY.sla!,
   referral_economics: DEFAULTS_BY_CATEGORY.referral_economics!,
   payment_timing: DEFAULTS_BY_CATEGORY.payment_timing!,
+  payment_structure: () => CONSULTING_PAYMENT_STRUCTURE,
+  support_obligations: () => CONSULTING_SUPPORT,
+  scope_change_approval: () => CONSULTING_SCOPE_APPROVAL,
+  ip_ownership: () => CONSULTING_IP,
   milestone_schedule: DEFAULTS_BY_CATEGORY.milestones!,
   governing_venue: DEFAULTS_BY_CATEGORY.governing_law!,
-  ip_allocation: DEFAULTS_BY_CATEGORY.ip_ownership!,
+  governing_law_notice: DEFAULTS_BY_CATEGORY.governing_law!,
+  ip_allocation: () => CONSULTING_IP,
   jv_contributions: DEFAULTS_BY_CATEGORY.governance!,
   jv_ip_governance: DEFAULTS_BY_CATEGORY.governance!,
 };

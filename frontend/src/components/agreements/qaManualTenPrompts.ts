@@ -83,7 +83,60 @@ export const QA_MANUAL_TEN_PROMPTS: readonly QaManualPromptFixture[] = [
     expectNotTitle: "Founder Vesting",
     expectIntent: "consulting_services",
   },
+  {
+    id: "consulting-dev-qa",
+    title: "Consulting developer rebuild",
+    intake:
+      "Create a consulting agreement for a developer helping rebuild our internal workflow systems and AI automation stack. The engagement is remote and should include confidentiality, IP ownership, and support obligations. We want flexibility because scope may evolve over time.",
+    expectFamily: "consulting_agreement",
+    expectTitleIncludes: "Consulting",
+  },
 ] as const;
+
+/** QA intake for guided completion — evolving scope, support, IP, vague fees. */
+export const CONSULTING_DEV_QA_INTAKE =
+  "Create a consulting agreement for a developer helping rebuild our internal workflow systems and AI automation stack. The engagement is remote and should include confidentiality, IP ownership, and support obligations. We want flexibility because scope may evolve over time.";
+
+/** Authoritative-length consulting body with material business gaps and structural contamination. */
+export function consultingAuthoritativeBodyFixture(): string {
+  const filler = "The parties will cooperate in good faith and use commercially reasonable efforts. ";
+  return [
+    "CONSULTING AGREEMENT",
+    "This Agreement is between Acme Systems Inc. and Developer LLC.",
+    "",
+    "1. SERVICES",
+    filler.repeat(3) + "Developer will rebuild internal workflow systems and the AI automation stack remotely.",
+    "",
+    "2. COMPENSATION",
+    filler.repeat(2) + "Consultant will be compensated as mutually agreed between the parties.",
+    "Invoices will be sent to the billing contact identified in the Notices section.",
+    "",
+    "3. SUPPORT",
+    filler.repeat(2) + "Support obligations will be defined by the parties after delivery.",
+    "",
+    "4. SCOPE AND CHANGES",
+    filler.repeat(2) + "Scope may evolve during the engagement as requirements change.",
+    "",
+    "5. INTELLECTUAL PROPERTY",
+    filler.repeat(2) + "Work product ownership will be confirmed before final delivery.",
+    "",
+    "6. CONFIDENTIALITY",
+    filler.repeat(4) + "Each party will protect confidential information using reasonable care.",
+    "",
+    "7. LIMITATION OF LIABILITY",
+    filler.repeat(2) + "Direct damages are limited to fees paid in the prior three months.",
+    "",
+    "8. TERM",
+    filler.repeat(2) + "This Agreement continues until the services are complete unless terminated earlier.",
+    "",
+    "9. GENERAL",
+    filler.repeat(2) + "Survival and wind-down obligations apply as stated herein.",
+    "Direct damages are limited to fees paid in the prior three months.",
+    "",
+    "IN WITNESS WHEREOF, the parties may execute this Agreement.",
+    "By: ____________________",
+  ].join("\n");
+}
 
 /** Sample Pro body with known defects — exercises visible-body repair. */
 /** Growth advisor Pro body with empty shells and banned scaffolds — exercises hard integrity gate. */

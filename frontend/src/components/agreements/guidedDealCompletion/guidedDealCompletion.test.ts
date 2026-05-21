@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONSULTING_DEV_QA_INTAKE,
+  consultingAuthoritativeBodyFixture,
   defectiveProBodyFixture,
   growthAdvisorDefectiveBodyFixture,
   QA_MANUAL_TEN_PROMPTS,
 } from "../qaManualTenPrompts";
+import {
+  buildMaterialMissingItems,
+  formatMaterialItemsForRevisePanel,
+} from "../proAgreementCompleteness/revisionQuestionEngine";
+import { enrichDealVariableFromIntake, RECOMMEND_PILL_ID, resolveRecommendForMe } from "./intakeRecommendationEngine";
+import { GUIDED_COMPLETION_HEADING } from "./friendlyProCompletionCopy";
 import { finalizeAgreementOutput } from "../agreementOutputQuality/agreementOutputQualityPipeline";
 import { validateAgreementIntegrity } from "./agreementIntegrityValidator";
 import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
@@ -459,5 +467,134 @@ describe("guidedDealCompletion", () => {
     });
     expect(fin.text).not.toMatch(/unless a different period is stated in a schedule/i);
     expect(fin.text).not.toMatch(/^\s*signature\.\s*$/im);
+  });
+
+  it("consulting dev QA intake yields guided payment, support, and scope questions", () => {
+    const body = consultingAuthoritativeBodyFixture();
+    const material = buildMaterialMissingItems({ intakeRaw: CONSULTING_DEV_QA_INTAKE, body });
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      body,
+      materialItems: material,
+    });
+    expect(session).not.toBeNull();
+    const ids = session!.variables.map((v) => v.id);
+    expect(ids).toContain("payment_structure");
+    expect(ids).toContain("support_obligations");
+    expect(ids).toContain("scope_change_approval");
+    expect(session!.queue.length).toBeGreaterThanOrEqual(3);
+    expect(session!.queue.length).toBeLessThanOrEqual(5);
+    expect(getCurrentVariable(session!)?.question).toMatch(/How should the developer be paid/i);
+    expect(getCurrentVariable(session!)?.suggestedDefaults.some((p) => p.id === "custom")).toBe(true);
+  });
+
+  it("does not use legalistic revise-panel bullet wall as primary copy for consulting gaps", () => {
+    const material = buildMaterialMissingItems({
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      body: consultingAuthoritativeBodyFixture(),
+    });
+    const wall = formatMaterialItemsForRevisePanel(material);
+    expect(wall).toMatch(/Confirm these deal terms/i);
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      body: consultingAuthoritativeBodyFixture(),
+      materialItems: material,
+    })!;
+    expect(GUIDED_COMPLETION_HEADING).toBe("Complete your agreement");
+    expect(getCurrentVariable(session)?.question).not.toMatch(/Confirm invoice due date/i);
+  });
+
+  it("keeps frozen question count stable across rerender for consulting session", () => {
+    const material = buildMaterialMissingItems({
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      body: consultingAuthoritativeBodyFixture(),
+    });
+    const key = buildGuidedSessionKey("consulting-gen", "fp-dev");
+    const full = buildGuidedSessionFromAgreement({
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      body: consultingAuthoritativeBodyFixture(),
+      materialItems: material,
+    })!;
+    const locked = lockGuidedSession(full, key);
+    expect(frozenQuestionTotal(locked)).toBe(locked.queue.length);
+    const shrunk = buildGuidedSessionFromAgreement({
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      body: consultingAuthoritativeBodyFixture(),
+      materialItems: material.slice(0, 1),
+    });
+    const merged = mergeGuidedSessionOnBaseRefresh(locked, shrunk, null, key);
+    expect(frozenQuestionTotal(merged!)).toBe(locked.frozenTotalQuestions);
+  });
+
+  it("resolveRecommendForMe returns intake-aware choices for payment structure", () => {
+    const material = buildMaterialMissingItems({ intakeRaw: CONSULTING_DEV_QA_INTAKE, body: "" });
+    const vars = extractDealVariables({ intakeRaw: CONSULTING_DEV_QA_INTAKE, body: "", materialItems: material });
+    const payment = vars.find((v) => v.id === "payment_structure");
+    expect(payment).toBeDefined();
+    const rec = resolveRecommendForMe(payment!, CONSULTING_DEV_QA_INTAKE);
+    expect(rec).not.toBeNull();
+    expect(rec!.explanation).toMatch(/evolving|milestone|retainer/i);
+    expect(rec!.choices.length).toBeGreaterThanOrEqual(1);
+    expect(rec!.choices.length).toBeLessThanOrEqual(2);
+    expect(rec!.explanation).not.toMatch(/legally should|you must legally/i);
+  });
+
+  it("enriches variables with coaching, pill help, and recommend pill", () => {
+    const material = buildMaterialMissingItems({ intakeRaw: CONSULTING_DEV_QA_INTAKE, body: "" });
+    const vars = extractDealVariables({ intakeRaw: CONSULTING_DEV_QA_INTAKE, body: "", materialItems: material });
+    const payment = vars.find((v) => v.id === "payment_structure")!;
+    const enriched = enrichDealVariableFromIntake(payment, CONSULTING_DEV_QA_INTAKE);
+    expect(enriched.agreementImpact).toMatch(/payment structure|scope expands/i);
+    expect(enriched.suggestedDefaults.some((p) => p.id === RECOMMEND_PILL_ID)).toBe(true);
+    expect(enriched.pillExplanations?.hourly).toMatch(/time worked/i);
+    expect(enriched.agreementImpact).not.toMatch(/legally should/i);
+  });
+
+  it("skip and custom pill remain available on consulting guided session", () => {
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      body: consultingAuthoritativeBodyFixture(),
+      materialItems: buildMaterialMissingItems({
+        intakeRaw: CONSULTING_DEV_QA_INTAKE,
+        body: consultingAuthoritativeBodyFixture(),
+      }),
+    })!;
+    const first = getCurrentVariable(session)!;
+    expect(first.suggestedDefaults.find((p) => p.id === "custom")).toBeDefined();
+    const skipped = skipGuidedVariable(session, first.id);
+    expect(getCurrentVariable(skipped)?.id).not.toBe(first.id);
+  });
+
+  it("maps guided consulting answers to accurate what-changed lines", () => {
+    expect(whatChangedLineForGuidedVariable("payment_structure", [])).toMatch(/payment structure/i);
+    expect(whatChangedLineForGuidedVariable("support_obligations", [])).toMatch(/support obligations/i);
+    expect(whatChangedLineForGuidedVariable("scope_change_approval", [])).toMatch(/evolving scope/i);
+  });
+
+  it("consulting authoritative body integrity removes orphan LOL and duplicate direct damages", () => {
+    const out = validateAgreementIntegrity(consultingAuthoritativeBodyFixture(), {
+      intakeRaw: CONSULTING_DEV_QA_INTAKE,
+      surface: "test_consulting_integrity",
+      tier: "premium",
+    });
+    const directHits = (out.text.match(/Direct damages are limited/gi) || []).length;
+    expect(directHits).toBeLessThanOrEqual(1);
+    expect(out.text).not.toMatch(/^\s*By:\s*_{3,}/m);
+    expect(out.text.length).toBeGreaterThan(800);
+  });
+
+  it("prefers guided completion when material gaps exist even if variable queue not yet built", () => {
+    expect(
+      shouldPreferGuidedCompletionOverRetry({
+        hasUsableBody: true,
+        variableCount: 0,
+        materialGapCount: 4,
+      }),
+    ).toBe(true);
+  });
+
+  it("consulting dev prompt is registered in manual QA corpus", () => {
+    const p = QA_MANUAL_TEN_PROMPTS.find((x) => x.id === "consulting-dev-qa");
+    expect(p?.intake).toContain("workflow systems");
   });
 });

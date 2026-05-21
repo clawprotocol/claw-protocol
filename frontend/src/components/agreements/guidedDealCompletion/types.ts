@@ -44,6 +44,12 @@ export type DealVariable = {
   currentValue: string | null;
   confidence: number;
   affectsSections: string[];
+  /** Pill id to visually highlight from intake analysis. */
+  recommendedPillId?: string;
+  /** Short label shown on the recommended pill, e.g. "Recommended from your intake". */
+  recommendedLabel?: string;
+  /** Expandable "What's the difference?" copy keyed by pill id. */
+  pillExplanations?: Record<string, string>;
 };
 
 export type GuidedCompletionSession = {

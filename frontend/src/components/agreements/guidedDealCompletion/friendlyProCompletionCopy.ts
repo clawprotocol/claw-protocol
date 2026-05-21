@@ -45,8 +45,10 @@ export function shouldPreferGuidedCompletionOverRetry(args: {
   hasUsableBody: boolean;
   structuralCatastrophic?: boolean;
   variableCount: number;
+  materialGapCount?: number;
 }): boolean {
   if (args.structuralCatastrophic) return false;
   if (!args.hasUsableBody) return false;
-  return args.variableCount > 0;
+  if (args.variableCount > 0) return true;
+  return (args.materialGapCount ?? 0) > 0;
 }

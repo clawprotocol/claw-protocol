@@ -75,6 +75,8 @@ type Props = {
   deliveryCtasOnDraftCard?: boolean;
   /** When true, guided completion owns refine UX — hide duplicate freeform refine form here. */
   hideFreeformRefineSection?: boolean;
+  /** When true, hide static missing-term bullet list — guided completion is primary. */
+  hideMissingLinesBulletList?: boolean;
   /** Dev-only: logged when premium refine fails; parent supplies flags and ids. */
   devProRefineContext?: {
     handlerLabel: string;
@@ -158,6 +160,7 @@ export function FinalizeYourAgreementPanel({
   disabled = false,
   deliveryCtasOnDraftCard = false,
   hideFreeformRefineSection = false,
+  hideMissingLinesBulletList = false,
   devProRefineContext,
 }: Props) {
   const [prompt, setPrompt] = useState("");
@@ -585,14 +588,18 @@ export function FinalizeYourAgreementPanel({
         </p>
       </div>
 
-      {missingLines.length > 0 ? (
+      {!hideMissingLinesBulletList && missingLines.length > 0 ? (
         <ul className="mt-3 list-disc space-y-1.5 pl-4 text-sm leading-relaxed text-slate-200/95 sm:mt-4 sm:text-[15px]">
           {missingLines.map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
       ) : (
-        <p className="mt-3 text-sm text-slate-500 sm:mt-4">Looking good on the quick scan — add tweaks below if needed.</p>
+        <p className="mt-3 text-sm text-slate-500 sm:mt-4">
+          {hideMissingLinesBulletList && missingLines.length > 0
+            ? "Use Complete your agreement below to finish key business decisions."
+            : "Looking good on the quick scan — add tweaks below if needed."}
+        </p>
       )}
       {reviewRoute && sendMode !== "review" ? (
         <div className="mt-4 rounded-xl border border-cyan-500/25 bg-cyan-950/15 p-3.5">
