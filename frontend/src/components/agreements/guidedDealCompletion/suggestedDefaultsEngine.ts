@@ -157,6 +157,19 @@ const SECURITY_OBLIGATIONS: DealVariableDefault[] = [
   { id: "custom", label: "Custom", value: "" },
 ];
 
+const VENUE: DealVariableDefault[] = [
+  { id: "client_venue", label: "Client headquarters courts", value: "Exclusive venue in courts where Client is headquartered." },
+  { id: "neutral", label: "Neutral arbitration", value: "Disputes resolved by binding arbitration in a mutually agreed city." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const DEAL_TERMS: DealVariableDefault[] = [
+  { id: "fee", label: "Confirm fees", value: "Confirm total fees, currency, and payment triggers in the agreement." },
+  { id: "sla", label: "Confirm SLA", value: "Confirm uptime, response times, and SLA remedies." },
+  { id: "ip", label: "Confirm IP ownership", value: "Confirm ownership of deliverables and background IP." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
 const RENEWAL_NOTICE: DealVariableDefault[] = [
   { id: "30_day", label: "30 days notice", value: "Either Party may terminate on thirty (30) days written notice; auto-renewal requires the same notice." },
   { id: "60_day", label: "60 days notice", value: "Either Party may terminate on sixty (60) days written notice before renewal." },
@@ -192,6 +205,8 @@ const ID_DEFAULTS: Partial<Record<string, (family: CommercialFamilyHint) => Deal
   party_legal_names: () => PARTY_LEGAL,
   security_obligations: () => SECURITY_OBLIGATIONS,
   renewal_notice: () => RENEWAL_NOTICE,
+  governing_venue: () => VENUE,
+  deal_terms_confirmation: () => DEAL_TERMS,
   supplemental_schedule_confirmation: () => PHASE_PAYMENT,
   as_specified_in_schedule_a: () => PHASE_PAYMENT,
   amount_to_be_confirmed: () => TOTAL_FEE,
@@ -208,7 +223,6 @@ const ID_DEFAULTS: Partial<Record<string, (family: CommercialFamilyHint) => Deal
   license_background_tools: () => LICENSE_BACKGROUND,
   deliverables_scope: () => DELIVERABLES_SCOPE,
   milestone_schedule: DEFAULTS_BY_CATEGORY.milestones!,
-  governing_venue: DEFAULTS_BY_CATEGORY.governing_law!,
   governing_law_notice: DEFAULTS_BY_CATEGORY.governing_law!,
   ip_allocation: () => CONSULTING_IP,
   jv_contributions: DEFAULTS_BY_CATEGORY.governance!,

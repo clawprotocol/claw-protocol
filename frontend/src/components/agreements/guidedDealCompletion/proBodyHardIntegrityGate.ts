@@ -370,9 +370,45 @@ export function applyProBodyHardIntegrityGate(
   working = bannedFinal.text;
   repairs.push(...bannedFinal.repairs);
 
+  const dedupe = dedupeRepeatedBoilerplateParagraphs(working);
+  working = dedupe.text;
+  repairs.push(...dedupe.repairs);
+
   const coherence = applyClauseCoherenceEngine(working);
   working = coherence.text;
   repairs.push(...coherence.repairs);
 
   return { text: working, repairs };
+}
+
+function normalizeParagraphKey(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Remove duplicate indemnity/confidentiality/fallback paragraphs (keep first occurrence). */
+function dedupeRepeatedBoilerplateParagraphs(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const blocks = text.replace(/\r\n/g, "\n").split(/\n{2,}/);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (trimmed.length < 60) {
+      out.push(block);
+      continue;
+    }
+    const key = normalizeParagraphKey(trimmed);
+    const isBoilerplate =
+      /\b(?:each party will indemnify|confidential information|commercially reasonable efforts|fees and payment timing will be confirmed)\b/i.test(
+        trimmed,
+      );
+    if (isBoilerplate && seen.has(key)) {
+      repairs.push("duplicate_boilerplate_removed");
+      continue;
+    }
+    if (isBoilerplate) seen.add(key);
+    out.push(block);
+  }
+  if (!repairs.length) return { text, repairs };
+  return { text: out.join("\n\n").replace(/\n{3,}/g, "\n\n"), repairs };
 }

@@ -12933,11 +12933,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   const guidedCompletionSessionBase = useMemo(() => {
     if (!premiumPaidDocumentSurface || paidBodyForGuidedCompletion.length < 200) return null;
-    const snap = readPremiumCompletionSnapshot();
     return buildGuidedSessionFromAgreement({
       intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
       body: paidBodyForGuidedCompletion,
-      materialItems: snap?.materialMissingItems,
     });
   }, [
     premiumPaidDocumentSurface,

@@ -29,14 +29,14 @@ export function friendlyLowConfidenceCopy(
 } {
   if (!panelRenderable) {
     return {
-      title: "Ready to review.",
-      body: "Ready to review — add any final edits below.",
+      title: "Draft ready to review.",
+      body: "Draft ready to review — optional edits can still be made below.",
     };
   }
-  if (!session) {
+  if (!session || session.queue.length === 0) {
     return {
-      title: "We're almost done.",
-      body: "We need a few more details to finish your agreement. Use Complete your agreement below.",
+      title: "Draft ready to review.",
+      body: "Draft ready to review — optional edits can still be made below.",
     };
   }
   const intro = guidedSessionIntro(session);

@@ -58,11 +58,20 @@ export {
   variableHasSelectableAnswerPath,
   resolveDisplayReadinessWithGuidedInvariant,
   guidedCompletionNeutralCopyWhenNotRenderable,
+  guidedQueueHasRenderableQuestion,
+  enforceNeedsDetailsGuidedInvariant,
 } from "./shouldRenderGuidedCompletionPanel";
 export { scanBodyMaterialPlaceholders, bodyHasLoosePhaseScheduleBeforeSignatures } from "./bodyMaterialPlaceholderScanner";
 export {
   analyzeServicesMigrationIntake,
   isServicesMigrationIntake,
 } from "./servicesMigrationGuidedIntake";
+export {
+  detectSemanticContractGaps,
+  semanticGapsToMaterialItems,
+  computeSemanticIncompleteScore,
+  hasSemanticMaterialGaps,
+  semanticGapScanLines,
+} from "./semanticContractCompleteness";
 export { detectContradictoryTerms, detectIpOwnershipContradiction, detectTermStructureContradiction } from "./detectContradictoryTerms";
 export { isContractorDeveloperIntake } from "./contractorGuidedIntake";

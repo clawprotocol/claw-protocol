@@ -1,5 +1,9 @@
 import { detectAgreementFamily, type AgreementFamily } from "../agreementFamilyRouter";
 import { scanBodyMaterialPlaceholders } from "../guidedDealCompletion/bodyMaterialPlaceholderScanner";
+import {
+  detectSemanticContractGaps,
+  semanticGapsToMaterialItems,
+} from "../guidedDealCompletion/semanticContractCompleteness";
 import { isConsultingDevIntake } from "../guidedDealCompletion/consultingGuidedIntake";
 import { isServicesMigrationIntake } from "../guidedDealCompletion/servicesMigrationGuidedIntake";
 import type { CommercialFamilyHint, MaterialMissingItem } from "./types";
@@ -543,6 +547,11 @@ export function buildMaterialMissingItems(args: {
 
   for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
     pushItem(items, seen, bodyItem, family);
+  }
+
+  const semanticGaps = detectSemanticContractGaps({ body, intakeRaw: intake, agreementFamily: family });
+  for (const semItem of semanticGapsToMaterialItems(semanticGaps, family)) {
+    pushItem(items, seen, semItem, family);
   }
 
   for (const code of args.structuralIssues || []) {

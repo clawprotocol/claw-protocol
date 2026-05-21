@@ -56,5 +56,41 @@ export function resolveDisplayReadinessWithGuidedInvariant(
 }
 
 export function guidedCompletionNeutralCopyWhenNotRenderable(): string {
-  return "Ready to review — add any final edits below.";
+  return "Draft ready to review — optional edits can still be made below.";
+}
+
+/** True when session has at least one unanswered, renderable question in the frozen queue. */
+export function guidedQueueHasRenderableQuestion(session: GuidedCompletionSession | null | undefined): boolean {
+  if (!session || session.queue.length === 0) return false;
+  for (const id of session.queue) {
+    if (session.answered[id] || session.skipped.has(id)) continue;
+    const v = session.variables.find((x) => x.id === id);
+    if (v && variableHasSelectableAnswerPath(v) && v.question.trim().length > 8) return true;
+  }
+  return false;
+}
+
+/**
+ * Global invariant: NEEDS_DETAILS display requires a renderable guided queue (length >= 1).
+ */
+export function enforceNeedsDetailsGuidedInvariant(args: {
+  readiness: "needs_details" | "good_draft" | "ready_for_review" | "ready_for_signature";
+  session: GuidedCompletionSession | null | undefined;
+  bodyUsable?: boolean;
+}): {
+  displayReadiness: "needs_details" | "good_draft" | "ready_for_review" | "ready_for_signature";
+  panelRenderable: boolean;
+  showNeedsDetailsMessaging: boolean;
+} {
+  const bodyUsable = args.bodyUsable ?? true;
+  const panelRenderable = shouldRenderGuidedCompletionPanel({
+    bodyUsable,
+    session: args.session,
+  });
+  const displayReadiness = resolveDisplayReadinessWithGuidedInvariant(args.readiness, panelRenderable);
+  return {
+    displayReadiness,
+    panelRenderable,
+    showNeedsDetailsMessaging: panelRenderable && displayReadiness === "needs_details",
+  };
 }

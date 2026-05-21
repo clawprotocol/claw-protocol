@@ -614,7 +614,7 @@ export function FinalizeYourAgreementPanel({
       ) : (
         <p className="mt-3 text-sm text-slate-500 sm:mt-4">
           {suppressNeedsDetailsCopy
-            ? "Ready to review — add any final edits below."
+            ? "Draft ready to review — optional edits can still be made below."
             : "Looking good on the quick scan — add tweaks below if needed."}
         </p>
       )}

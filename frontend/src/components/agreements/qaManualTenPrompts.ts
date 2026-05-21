@@ -276,6 +276,35 @@ export function referralDefectiveBodyFixture(): string {
   ].join("\n");
 }
 
+/** Legally-shaped Pro body with semantic gaps but zero literal TBD/INSERT hits. */
+export function semanticallyIncompleteProBodyFixture(): string {
+  return [
+    "MASTER SERVICES AGREEMENT",
+    "This Agreement is between Acme Digital and Beta Ops.",
+    "",
+    "2. COMPENSATION",
+    "Total fees will be confirmed in a supplemental schedule before execution.",
+    "amount: to be confirmed",
+    "",
+    "5.2 Project Deliverables.",
+    "",
+    "10.4 Effect of Termination.",
+    "",
+    "12.1 Venue.",
+    "",
+    "Each Party will indemnify the other for third-party claims arising from its breach.",
+    "Each Party will indemnify the other for third-party claims arising from its breach.",
+    "",
+    "Each Party may disclose Confidential Information to the other in connection with this Agreement.",
+    "Each Party may disclose Confidential Information to the other in connection with this Agreement.",
+    "",
+    "Phase 1 — Build: pricing to be confirmed",
+    "Phase 2 — Rollout: support may include business-hours assistance",
+    "",
+    "IN WITNESS WHEREOF, the parties may execute this Agreement.",
+  ].join("\n");
+}
+
 export function defectiveProBodyFixture(): string {
   return [
     "SERVICES AGREEMENT",

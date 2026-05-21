@@ -9,6 +9,7 @@ import { applyProBodyHardIntegrityGate } from "./proBodyHardIntegrityGate";
 import {
   bodyHasLoosePhaseScheduleBeforeSignatures,
   buildGuidedSessionFromAgreement,
+  enforceNeedsDetailsGuidedInvariant,
   extractDealVariables,
   getCurrentVariable,
   resolveDisplayReadinessWithGuidedInvariant,
@@ -98,6 +99,9 @@ describe("servicesMigrationGuidedCompletion", () => {
     if (!renderable) {
       expect(shouldShowGuidedNeedsDetailsMessaging(false)).toBe(false);
       expect(resolveDisplayReadinessWithGuidedInvariant("needs_details", false)).toBe("ready_for_review");
+    expect(enforceNeedsDetailsGuidedInvariant({ readiness: "needs_details", session: null }).showNeedsDetailsMessaging).toBe(
+      false,
+    );
     }
   });
 

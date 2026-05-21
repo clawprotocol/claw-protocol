@@ -8,6 +8,11 @@ import { scanBodyMaterialPlaceholders } from "./bodyMaterialPlaceholderScanner";
 import { isConsultingDevIntake } from "./consultingGuidedIntake";
 import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
 import { analyzeServicesMigrationIntake, isServicesMigrationIntake } from "./servicesMigrationGuidedIntake";
+import {
+  detectSemanticContractGaps,
+  hasSemanticMaterialGaps,
+  semanticGapsToMaterialItems,
+} from "./semanticContractCompleteness";
 import { detectContradictoryTerms, detectIpOwnershipContradiction } from "./detectContradictoryTerms";
 import { enrichDealVariables } from "./intakeRecommendationEngine";
 import { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
@@ -89,6 +94,9 @@ const PRESERVE_MATERIAL_IDS = new Set([
   "amount_to_be_confirmed",
   "payment_timing_to_be_confirmed",
   "as_specified_in_schedule_a",
+  "deal_terms_confirmation",
+  "governing_venue",
+  "duplicate_boilerplate_cleanup",
 ]);
 
 function remapMaterialId(item: MaterialMissingItem, intakeRaw?: string | null): string {
@@ -430,6 +438,12 @@ function synthesizeFallbackGuidedVariables(
   for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
     if (!items.some((x) => x.id === bodyItem.id)) items.push(bodyItem);
   }
+  for (const semItem of semanticGapsToMaterialItems(
+    detectSemanticContractGaps({ body, intakeRaw: intake, agreementFamily: family }),
+    family,
+  )) {
+    if (!items.some((x) => x.id === semItem.id)) items.push(semItem);
+  }
   const contractor = inferContractorVariablesFromIntake(intake, body, family);
   const consulting = inferConsultingVariablesFromIntake(intake, body, family);
   const services = inferServicesMigrationVariablesFromIntake(intake, body, family);
@@ -442,6 +456,24 @@ function synthesizeFallbackGuidedVariables(
   return dedupeVariables(vars);
 }
 
+function resolveMaterialItemsForExtraction(args: {
+  intakeRaw?: string | null;
+  body?: string;
+  materialItems?: readonly MaterialMissingItem[];
+  structuralIssues?: readonly { code: string; message: string }[];
+  serverMissing?: readonly string[];
+}): MaterialMissingItem[] {
+  const built = buildMaterialMissingItems({
+    intakeRaw: args.intakeRaw,
+    body: args.body ?? "",
+    structuralIssues: args.structuralIssues,
+    serverMissing: args.serverMissing,
+  });
+  const extra = args.materialItems;
+  if (extra && extra.length > 0) return [...extra];
+  return built;
+}
+
 export function extractDealVariables(args: {
   intakeRaw?: string | null;
   body?: string;
@@ -449,27 +481,44 @@ export function extractDealVariables(args: {
   structuralIssues?: readonly { code: string; message: string }[];
   serverMissing?: readonly string[];
 }): DealVariable[] {
-  const material =
-    args.materialItems ??
-    buildMaterialMissingItems({
-      intakeRaw: args.intakeRaw,
-      body: args.body ?? "",
-      structuralIssues: args.structuralIssues,
-      serverMissing: args.serverMissing,
-    });
+  const explicitMaterial = Boolean(args.materialItems && args.materialItems.length > 0);
+  const material = resolveMaterialItemsForExtraction(args);
   const intake = (args.intakeRaw || "").trim();
   const body = (args.body ?? "").trim();
   const family = material[0]?.agreementFamily ?? "generic_business_agreement";
   let vars = dedupeVariables(material.map((m) => materialItemToDealVariable(m, intake)));
-  const synthesized = synthesizeFallbackGuidedVariables(intake, body, family);
-  for (const v of synthesized) {
-    if (!vars.some((x) => x.id === v.id)) vars.push(v);
+  if (!explicitMaterial) {
+    const synthesized = synthesizeFallbackGuidedVariables(intake, body, family);
+    for (const v of synthesized) {
+      if (!vars.some((x) => x.id === v.id)) vars.push(v);
+    }
+    for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
+      const v = materialItemToDealVariable(bodyItem, intake);
+      if (!vars.some((x) => x.id === v.id)) vars.push(v);
+    }
+    vars = dedupeVariables(vars);
   }
-  for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
-    const v = materialItemToDealVariable(bodyItem, intake);
-    if (!vars.some((x) => x.id === v.id)) vars.push(v);
+  if (!vars.length && body.length >= 400 && hasSemanticMaterialGaps(body, intake)) {
+    const familyHint = family;
+    const fallbackItems = semanticGapsToMaterialItems(
+      detectSemanticContractGaps({ body, intakeRaw: intake, agreementFamily: familyHint }),
+      familyHint,
+    );
+    if (!fallbackItems.length) {
+      fallbackItems.push({
+        id: "deal_terms_confirmation",
+        severity: "material",
+        agreementFamily: familyHint,
+        label: "Key commercial terms",
+        question: "What key commercial term should we confirm next in this agreement?",
+        whyItMatters: "The draft still contains unresolved business language.",
+        suggestedAnswerFormat: "Specific fee, SLA, ownership, or venue term",
+        affectsSections: ["General"],
+        canProceedWithoutAnswer: true,
+      });
+    }
+    vars = dedupeVariables(fallbackItems.map((m) => materialItemToDealVariable(m, intake)));
   }
-  vars = dedupeVariables(vars);
   return enrichDealVariables(intake || null, vars);
 }
 

@@ -14,6 +14,7 @@ import {
 import { enrichDealVariableFromIntake, RECOMMEND_PILL_ID, resolveRecommendForMe } from "./intakeRecommendationEngine";
 import { GUIDED_COMPLETION_HEADING } from "./friendlyProCompletionCopy";
 import {
+  enforceNeedsDetailsGuidedInvariant,
   resolveDisplayReadinessWithGuidedInvariant,
   shouldRenderGuidedCompletionPanel,
   shouldShowGuidedNeedsDetailsMessaging,
@@ -494,7 +495,9 @@ describe("guidedDealCompletion", () => {
     expect(session!.queue.length).toBeGreaterThanOrEqual(3);
     expect(session!.queue.length).toBeLessThanOrEqual(5);
     const firstQ = getCurrentVariable(session!)?.question ?? "";
-    expect(firstQ).toMatch(/How should the developer be paid|Who should own the work product/i);
+    expect(firstQ).toMatch(
+      /How should the developer be paid|Who should own the work product|total contract fee/i,
+    );
     expect(getCurrentVariable(session!)?.suggestedDefaults.some((p) => p.id === "custom")).toBe(true);
   });
 
@@ -644,6 +647,9 @@ describe("guidedDealCompletion", () => {
 
   it("needs-details invariant downgrades readiness when panel is not renderable", () => {
     expect(resolveDisplayReadinessWithGuidedInvariant("needs_details", false)).toBe("ready_for_review");
+    expect(enforceNeedsDetailsGuidedInvariant({ readiness: "needs_details", session: null }).showNeedsDetailsMessaging).toBe(
+      false,
+    );
     expect(shouldShowGuidedNeedsDetailsMessaging(false)).toBe(false);
     const session = buildGuidedSessionFromAgreement({
       intakeRaw: CONSULTING_DEV_QA_INTAKE,

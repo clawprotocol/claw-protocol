@@ -1,6 +1,8 @@
+import { semanticGapScanLines } from "./guidedDealCompletion/semanticContractCompleteness";
+
 /**
  * Deterministic scan for obvious unresolved drafting language in agreement text.
- * Stays in sync with backend _PLACEHOLDER_SUBSTRINGS patterns (high level).
+ * Merges literal patterns with semantic contract completeness signals.
  */
 const PATTERNS: { re: RegExp; label: string }[] = [
   { re: /\bto be agreed\b/i, label: "Unresolved: “to be agreed” still appears" },
@@ -44,6 +46,14 @@ export function scanDocumentPlaceholderLines(text: string, max = 5): string[] {
     if (re.test(t) && !seen.has(normalizeKey(label))) {
       seen.add(normalizeKey(label));
       out.push(label);
+    }
+  }
+  for (const line of semanticGapScanLines(t, max)) {
+    if (out.length >= max) break;
+    const k = normalizeKey(line);
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(line);
     }
   }
   return out;
