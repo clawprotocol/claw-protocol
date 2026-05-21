@@ -108,11 +108,15 @@ export type PremiumRefineRequiredSectionsPresence = {
   ownershipOrConfidentiality: boolean;
 };
 
-/** Paid Pro refine panel heading (Finalize + draft card). */
-export const PRO_REFINE_REVISE_SECTION_HEADING = "Ask LawDog to revise.";
+/** Paid Pro guided completion heading (Finalize + draft card). */
+export const PRO_REFINE_REVISE_SECTION_HEADING = "Complete your agreement";
 
-/** Short helper under the revise heading (matches paid Pro textarea placeholder). */
-export const PRO_REFINE_REVISE_HELPER = PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER;
+/** Short helper under the guided completion flow. */
+export const PRO_REFINE_REVISE_HELPER =
+  "Finish key business terms one at a time — we'll update your draft as you go.";
+
+/** @deprecated Use guided completion panel; freeform refine still uses placeholder. */
+export const PRO_REFINE_FREEFORM_PLACEHOLDER = PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER;
 
 /** Primary CTA label for applying a premium refine instruction. */
 export const PRO_REFINE_APPLY_REVISION_BUTTON_LABEL = "Apply revision.";

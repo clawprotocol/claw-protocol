@@ -8,7 +8,9 @@ import { suppressRepeatedBoilerplate } from "./boilerplateContaminationGuard";
 import { validateAndRepairFinalRenderIntegrity } from "./finalRenderIntegrityValidator";
 import { detectAgreementFamily } from "../agreementFamilyRouter";
 import { applyPremiumExecutionNormalization } from "../premiumExecutionNormalization";
-import { applyProAgreementCompletenessPipeline } from "../proAgreementCompleteness";
+import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQuestionEngine";
+import { isCatastrophicStructuralFailure } from "../proAgreementCompleteness/proStructuralDetection";
+import { validateAgreementIntegrity } from "../guidedDealCompletion/agreementIntegrityValidator";
 import { applyVisibleBodyQualityGate } from "../visibleBodyQualityGate";
 import { applySectionIsolatedPolishPipeline } from "./sectionIsolatedPolish";
 import type { AgreementOutputQualityContext, IntegrityResult, MaterialMissingItem } from "./types";
@@ -59,20 +61,20 @@ export function finalizeAgreementOutput(
     structureRepairs.push(...executionNorm.repairs);
   }
 
-  const visibleGate = applyVisibleBodyQualityGate(working, {
+  const qualityCtx = {
     intakeRaw: ctx.intakeRaw,
     partyNames: ctx.partyNames,
     agreementFamily:
       (ctx.agreementFamily as import("../agreementFamilyRouter").AgreementFamily | null) ??
       detectAgreementFamily(ctx.intakeRaw || ""),
     surface: ctx.surface,
-  });
-  working = visibleGate.text;
-  structureRepairs.push(...visibleGate.repairs);
-
-  const integrity = validateAndRepairFinalRenderIntegrity(working, ctx);
+  };
 
   if (ctx.tier === "starter") {
+    const visibleGate = applyVisibleBodyQualityGate(working, qualityCtx);
+    working = visibleGate.text;
+    structureRepairs.push(...visibleGate.repairs);
+    const integrity = validateAndRepairFinalRenderIntegrity(working, ctx);
     return {
       ...integrity,
       clarificationsStripped,
@@ -80,23 +82,32 @@ export function finalizeAgreementOutput(
     };
   }
 
-  const completeness = applyProAgreementCompletenessPipeline(integrity.text, {
+  const integrityPass = validateAgreementIntegrity(working, { ...ctx, ...qualityCtx });
+  working = integrityPass.text;
+  structureRepairs.push(...integrityPass.repairs);
+  const materialMissingItems = buildMaterialMissingItems({
     intakeRaw: ctx.intakeRaw,
-    partyNames: ctx.partyNames,
-    agreementFamily:
-      (ctx.agreementFamily as import("../agreementFamilyRouter").AgreementFamily | null) ??
-      detectAgreementFamily(ctx.intakeRaw || ""),
-    surface: ctx.surface,
+    body: working,
   });
+  const structuralCatastrophic =
+    integrityPass.catastrophic ||
+    isCatastrophicStructuralFailure({
+      text: working,
+      issues: [],
+      partyNames: ctx.partyNames,
+    });
   return {
-    ...integrity,
-    ok: integrity.ok && completeness.structuralOk,
-    text: completeness.text,
-    issues: [...integrity.issues, ...completeness.issues],
-    repairs: [...structureRepairs, ...integrity.repairs, ...completeness.repairs],
+    ok: integrityPass.ok,
+    text: working,
+    issues: integrityPass.issues.map((i) => ({
+      code: i.code,
+      message: i.message,
+      repaired: i.repaired,
+    })),
+    repairs: [...structureRepairs, ...integrityPass.repairs],
     clarificationsStripped,
-    materialMissingItems: completeness.materialMissingItems,
-    structuralCatastrophic: completeness.structuralCatastrophic,
-    structuralOk: completeness.structuralOk,
+    materialMissingItems,
+    structuralCatastrophic,
+    structuralOk: integrityPass.ok && !structuralCatastrophic,
   };
 }

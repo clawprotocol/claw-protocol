@@ -15,7 +15,8 @@ describe("Paid Pro refine textarea helper + placeholder", () => {
   it("matches unified edits + reviewer-notes copy across constants and surfaces", () => {
     expect(PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER).toContain("Edit the agreement OR add notes for the reviewer");
     expect(PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER).toContain("Add late fee");
-    expect(PRO_REFINE_REVISE_HELPER).toBe(PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER);
+    expect(PRO_REFINE_REVISE_HELPER).toContain("one at a time");
+    expect(PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER).toContain("Edit the agreement");
     const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY).toContain("Appended reviewer note");
@@ -32,7 +33,7 @@ describe("Paid Pro refine textarea helper + placeholder", () => {
     expect(intake).toContain("PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY");
     expect(finalize).toContain("PRO_REFINE_REVISE_HELPER");
     expect(finalize).toContain("PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER");
-    expect(intake).toContain("PRO_REFINE_REVISE_HELPER");
+    expect(intake).toContain("GuidedDealCompletionPanel");
     expect(intake).toContain("PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER");
   });
 });

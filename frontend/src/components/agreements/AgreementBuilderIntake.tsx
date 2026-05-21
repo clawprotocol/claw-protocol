@@ -539,7 +539,14 @@ import {
   tryBeginPremiumEnsureForIntake,
 } from "./premiumAuthoritativeVisibleSurface";
 import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPanel";
-import { formatMaterialItemsForRevisePanel } from "./proAgreementCompleteness";
+import {
+  GuidedDealCompletionPanel,
+  buildGuidedSessionFromAgreement,
+  friendlyLowConfidenceCopy,
+  sanitizeProUserMessage,
+  shouldPreferGuidedCompletionOverRetry,
+  type GuidedCompletionSession,
+} from "./guidedDealCompletion";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
@@ -2239,6 +2246,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [paidProCardEditDraft, setPaidProCardEditDraft] = useState<string | null>(null);
   /** Paid Pro draft card: instruction text for premium-refine when user taps Apply revision. */
   const [paidProCardAiInstruction, setPaidProCardAiInstruction] = useState("");
+  /** Guided deal completion: one question at a time (preserves answered/skipped across regen). */
+  const [guidedCompletionSession, setGuidedCompletionSession] = useState<GuidedCompletionSession | null>(null);
   const paidProCardDictationRef = useRef<VoiceDictationControl | null>(null);
   const [premiumSendModeUserChoice, setPremiumSendModeUserChoice] = useState<PremiumSendIntent | null>(() =>
     peekPremiumForkUserSendMode() ?? peekPremiumSendIntent(),
@@ -12878,10 +12887,77 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const stickyPrimaryButtonNativeDisabled = effectivePrimaryCtaDisabled && !stickyRecipientBlockedNudge;
   const blockedPreviewRenderSource =
     (premiumTruthPipelineSource || premiumPaidReadonlyPick.sourceUsed || lastPremiumPipelineRenderSourceRef.current || "").trim();
-  const premiumMaterialReviseHints = useMemo(() => {
+  const paidBodyForGuidedCompletion = useMemo(() => {
     const snap = readPremiumCompletionSnapshot();
-    return formatMaterialItemsForRevisePanel(snap?.materialMissingItems ?? []);
-  }, [premiumSurfaceGateTick, reviewDocRefreshTick, authoritativePremiumUiCommitted]);
+    return (
+      premiumPaidReadonlyPick.plainText ||
+      agreementDocumentText ||
+      snap?.premiumWinningBodyText ||
+      ""
+    ).trim();
+  }, [
+    premiumPaidReadonlyPick.plainText,
+    agreementDocumentText,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+    authoritativePremiumUiCommitted,
+  ]);
+  const guidedCompletionSessionBase = useMemo(() => {
+    if (!premiumPaidDocumentSurface || paidBodyForGuidedCompletion.length < 200) return null;
+    const snap = readPremiumCompletionSnapshot();
+    return buildGuidedSessionFromAgreement({
+      intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
+      body: paidBodyForGuidedCompletion,
+      materialItems: snap?.materialMissingItems,
+    });
+  }, [
+    premiumPaidDocumentSurface,
+    paidBodyForGuidedCompletion,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+    authoritativePremiumUiCommitted,
+  ]);
+  useEffect(() => {
+    if (!guidedCompletionSessionBase) {
+      setGuidedCompletionSession(null);
+      return;
+    }
+    setGuidedCompletionSession((prev) => {
+      if (!prev) return guidedCompletionSessionBase;
+      if (prev.queue.join("|") !== guidedCompletionSessionBase.queue.join("|")) {
+        return guidedCompletionSessionBase;
+      }
+      return {
+        ...guidedCompletionSessionBase,
+        answered: prev.answered,
+        skipped: prev.skipped,
+        currentIndex: prev.currentIndex,
+      };
+    });
+  }, [guidedCompletionSessionBase]);
+  const preferGuidedCompletionOverRetry = useMemo(() => {
+    const snap = readPremiumCompletionSnapshot();
+    return shouldPreferGuidedCompletionOverRetry({
+      hasUsableBody: paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody,
+      structuralCatastrophic: snap?.structuralCatastrophic,
+      variableCount: guidedCompletionSession?.queue.length ?? guidedCompletionSessionBase?.queue.length ?? 0,
+    });
+  }, [
+    paidBodyForGuidedCompletion,
+    hasUsablePaidBody,
+    guidedCompletionSession?.queue.length,
+    guidedCompletionSessionBase?.queue.length,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+    authoritativePremiumUiCommitted,
+  ]);
+  const guidedCompletionFriendlyCopy = useMemo(
+    () => friendlyLowConfidenceCopy(guidedCompletionSession ?? guidedCompletionSessionBase),
+    [guidedCompletionSession, guidedCompletionSessionBase],
+  );
+  const activeGuidedCompletionSession = guidedCompletionSession ?? guidedCompletionSessionBase;
   const showStrictRetryNeedsDetailsPanel =
     !authoritativePremiumUiCommitted &&
     shouldShowRetryNeedsDetailsPanel({
@@ -12900,12 +12976,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumReturnWaitActive = Boolean(
     premiumPostCheckoutPhase || premiumAuthoritativeRequestInFlightUi || premiumReturnPatienceExtended,
   );
+  const showGuidedCompletionRecovery = Boolean(
+    premiumPaidDocumentSurface &&
+      !authoritativePremiumUiCommitted &&
+      !proUpgradeUseStarterView &&
+      !canProceedWithPaidProDocument &&
+      !premiumReturnWaitActive &&
+      preferGuidedCompletionOverRetry &&
+      (activeGuidedCompletionSession?.queue.length ?? 0) > 0,
+  );
   const showProAmberRecoveryPanel = Boolean(
     premiumPaidDocumentSurface &&
       !authoritativePremiumUiCommitted &&
       !proUpgradeUseStarterView &&
       !canProceedWithPaidProDocument &&
-      !premiumReturnWaitActive,
+      !premiumReturnWaitActive &&
+      !showGuidedCompletionRecovery,
   );
   const showRetryAsPrimaryCta = Boolean(
     simpleCreateUnifiedBottomCta &&
@@ -15989,6 +16075,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           >
                             {premiumPaidDocumentSurface ? (
                               <>
+                                {showGuidedCompletionRecovery && activeGuidedCompletionSession ? (
+                                  <div className="mx-auto mb-4 w-full max-w-[850px] px-0 sm:px-1">
+                                    <div
+                                      className="rounded-lg border border-stone-400/40 bg-stone-50/95 px-4 py-5 sm:px-6 sm:py-6"
+                                      role="status"
+                                      aria-live="polite"
+                                    >
+                                      <p className="text-sm font-semibold text-stone-900 sm:text-[0.9375rem]">
+                                        {guidedCompletionFriendlyCopy.title}
+                                      </p>
+                                      <p className="mt-2 text-xs leading-relaxed text-stone-700 sm:text-sm">
+                                        {guidedCompletionFriendlyCopy.body}
+                                      </p>
+                                      <div className="mt-4">
+                                        <GuidedDealCompletionPanel
+                                          session={activeGuidedCompletionSession}
+                                          onSessionChange={setGuidedCompletionSession}
+                                          onApplyAnswer={(instruction) => {
+                                            setPaidProCardAiInstruction(instruction);
+                                            void applyPaidProCardAiWithLawDog();
+                                          }}
+                                          disabled={loading || draftPreCommitFreeze}
+                                          compact
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : null}
                                 {showProAmberRecoveryPanel ? (
                                   showStrictRetryNeedsDetailsPanel ? (
                                     <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
@@ -15999,8 +16113,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       >
                                         <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
                                           {hasPaidPremiumCompletionSession()
-                                            ? proFullDraftCustomGateMessage || PAID_PREMIUM_CONNECTION_RECOVERY_COPY
-                                            : proFullDraftCustomGateMessage ||
+                                            ? sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
+                                              guidedCompletionFriendlyCopy.body ||
+                                              PAID_PREMIUM_CONNECTION_RECOVERY_COPY
+                                            : sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
+                                              guidedCompletionFriendlyCopy.body ||
                                               "Use the document below to review and edit when it appears. Nothing is sent from this step."}
                                         </p>
                                         <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
@@ -16044,7 +16161,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         aria-live="polite"
                                       >
                                         <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
-                                          {proFullDraftCustomGateMessage ||
+                                          {sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
+                                            guidedCompletionFriendlyCopy.body ||
                                             (hasPaidPremiumCompletionSession()
                                               ? "We couldn’t safely finalize the Pro version. Your current draft is still here."
                                               : "We couldn’t safely finalize the Pro version. Your current draft is still here.")}
@@ -16222,13 +16340,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           aria-label="Agreement document"
                                         />
                                         <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
-                                          <p className="text-xs font-medium text-stone-700">{PRO_REFINE_REVISE_SECTION_HEADING}</p>
-                                          <p className="mt-1 text-xs leading-relaxed text-stone-600">{PRO_REFINE_REVISE_HELPER}</p>
-                                          {premiumMaterialReviseHints ? (
-                                            <pre className="mt-2 whitespace-pre-wrap rounded-md border border-amber-200/80 bg-amber-50/60 px-3 py-2 font-sans text-[11px] leading-relaxed text-stone-700">
-                                              {premiumMaterialReviseHints}
-                                            </pre>
-                                          ) : null}
+                                          {activeGuidedCompletionSession &&
+                                          activeGuidedCompletionSession.queue.length > 0 ? (
+                                            <GuidedDealCompletionPanel
+                                              session={activeGuidedCompletionSession}
+                                              onSessionChange={setGuidedCompletionSession}
+                                              onApplyAnswer={(instruction) => {
+                                                setPaidProCardAiInstruction(instruction);
+                                                void applyPaidProCardAiWithLawDog();
+                                              }}
+                                              disabled={
+                                                (isGenerating && !draft) ||
+                                                upgradeLockActive ||
+                                                loading ||
+                                                draftPreCommitFreeze
+                                              }
+                                              compact
+                                            />
+                                          ) : (
+                                            <>
+                                              <p className="text-xs font-medium text-stone-700">
+                                                {PRO_REFINE_REVISE_SECTION_HEADING}
+                                              </p>
+                                              <p className="mt-1 text-xs leading-relaxed text-stone-600">
+                                                {PRO_REFINE_REVISE_HELPER}
+                                              </p>
+                                            </>
+                                          )}
+                                          <details className="mt-3 group">
+                                            <summary className="cursor-pointer text-xs font-medium text-stone-600 hover:text-stone-900">
+                                              {activeGuidedCompletionSession?.queue.length
+                                                ? "Add a custom instruction"
+                                                : "Or describe a change in your own words"}
+                                            </summary>
                                           <div className="relative mt-2">
                                             <VoiceAugmentedTextArea
                                               value={paidProCardAiInstruction}
@@ -16263,6 +16407,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               {PRO_REFINE_APPLY_REVISION_BUTTON_LABEL}
                                             </button>
                                           </div>
+                                          </details>
                                         </div>
                                       </>
                                     ) : (
