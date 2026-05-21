@@ -20,9 +20,11 @@ type Props = {
   html: string;
   /** Shown when html is empty */
   emptyFallback?: string;
+  /** When true, never show empty placeholder (guided completion keeps last-known-good visible). */
+  suppressEmptyFallback?: boolean;
 };
 
-export function PremiumAgreementReadonlyView({ html, emptyFallback }: Props) {
+export function PremiumAgreementReadonlyView({ html, emptyFallback, suppressEmptyFallback = false }: Props) {
   const sid = useId().replace(/:/g, "");
   const safe = html.trim();
   return (
@@ -35,6 +37,8 @@ export function PremiumAgreementReadonlyView({ html, emptyFallback }: Props) {
       >
         {safe ? (
           <div className="premium-doc-body" dangerouslySetInnerHTML={{ __html: safe }} />
+        ) : suppressEmptyFallback ? (
+          <div className="premium-doc-body min-h-[12rem]" aria-hidden />
         ) : (
           <p className="text-sm text-stone-500">{emptyFallback ?? "No document text yet."}</p>
         )}

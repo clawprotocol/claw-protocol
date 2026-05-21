@@ -17,6 +17,7 @@ import {
   type RecommendForMeResult,
 } from "./intakeRecommendationEngine";
 import { isRecommendPillId } from "./guidedRecommendPillIds";
+import { normalizeWhatChangedDisplayLine } from "./guidedCompletionEngine";
 
 export type GuidedDealCompletionPanelProps = {
   session: GuidedCompletionSession;
@@ -31,6 +32,8 @@ export type GuidedDealCompletionPanelProps = {
   /** Document commit freeze only — not global premium loading. */
   externallyFrozen?: boolean;
   compact?: boolean;
+  /** Shown under the active question card after a successful apply (not on the document surface). */
+  recentWhatChanged?: string | null;
 };
 
 export function GuidedDealCompletionPanel({
@@ -41,6 +44,7 @@ export function GuidedDealCompletionPanel({
   onCustomPillSelected,
   externallyFrozen = false,
   compact = false,
+  recentWhatChanged = null,
 }: GuidedDealCompletionPanelProps) {
   const intro = useMemo(() => guidedSessionIntro(session), [session]);
   const current = getCurrentVariable(session);
@@ -252,6 +256,23 @@ export function GuidedDealCompletionPanel({
             <p className="mt-2 text-xs leading-relaxed text-stone-600">
               <span className="font-medium text-stone-700">Why this matters: </span>
               {current.agreementImpact}
+            </p>
+          ) : null}
+
+          {isLocalApplying ? (
+            <p className="mt-2 text-xs font-medium text-stone-600" role="status" aria-live="polite">
+              Applying update…
+            </p>
+          ) : null}
+
+          {recentWhatChanged && !isLocalApplying ? (
+            <p
+              className="mt-2 rounded-md border border-emerald-200/90 bg-emerald-50/90 px-2.5 py-2 text-xs leading-relaxed text-emerald-950"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="font-medium text-emerald-900">What changed: </span>
+              {normalizeWhatChangedDisplayLine(recentWhatChanged)}
             </p>
           ) : null}
 

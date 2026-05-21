@@ -86,6 +86,18 @@ export {
   logGuidedRenderState,
   warnGuidedInvariantViolation,
 } from "./resolveGuidedCompletionRenderState";
+export {
+  GUIDED_MIN_AUTHORITATIVE_BODY_LEN,
+  canDisplayPaidProAgreementDuringGuided,
+  logGuidedQuestionApply,
+  logGuidedReviewTransition,
+  logGuidedSignTransition,
+  resolveGuidedCompletionRenderDocument,
+  shouldBlockProEmptyDocumentFallback,
+  updateLastKnownGoodAuthoritativeDraftRef,
+  type GuidedRenderDocumentResolution,
+  type GuidedRenderDocumentSource,
+} from "./guidedCompletionRenderAuthority";
 export type {
   GuidedCompletionRenderState,
   GuidedPanelMountedSurface,

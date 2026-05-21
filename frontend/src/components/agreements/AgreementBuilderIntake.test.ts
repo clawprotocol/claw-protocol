@@ -289,6 +289,11 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("{showTopProAdjustCard ?");
     expect(intake).toContain("FinalizeYourAgreementPanel");
     expect(intake).toContain("resolveProReviewFooterState");
+    expect(intake).toContain("lastKnownGoodAuthoritativeDraftRef");
+    expect(intake).toContain("resolveGuidedCompletionRenderDocument");
+    expect(intake).toContain("canDisplayPaidProAgreementDocument");
+    expect(intake).toContain('key="paid-pro-agreement-document-stable"');
+    expect(intake).toContain("suppressEmptyFallback={blockProEmptyDocumentFallback}");
     expect(intake).toContain("proReviewFooterMode={proReviewFooter.mode}");
     expect(intake).toContain('hideFreeformRefineSection={proReviewFooter.mode !== "freeform_edit"}');
     expect(intake).toContain("showPrimaryGuidedCompletion");

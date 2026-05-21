@@ -557,6 +557,14 @@ import {
   type GuidedCompletionSession,
   logProReviewFooterState,
   resolveProReviewFooterState,
+  canDisplayPaidProAgreementDuringGuided,
+  isGuidedCompletionComplete,
+  logGuidedQuestionApply,
+  logGuidedReviewTransition,
+  logGuidedSignTransition,
+  resolveGuidedCompletionRenderDocument,
+  shouldBlockProEmptyDocumentFallback,
+  updateLastKnownGoodAuthoritativeDraftRef,
 } from "./guidedDealCompletion";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import {
@@ -1950,6 +1958,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const hydratedPremiumBodyRef = useRef("");
   /** Winning paid corpus ref — preferred over length-heuristic merges for authoritative pipeline picks. */
   const lastPremiumWinningCorpusRef = useRef("");
+  /** Survives guided question transitions, refine races, and review/sign mode switches. */
+  const lastKnownGoodAuthoritativeDraftRef = useRef("");
   const authoritativePremiumDocRefs = useMemo(
     (): AuthoritativePremiumDocumentRefs => ({
       agreementDocumentTextRef,
@@ -8641,6 +8651,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!productionDraftPrimaryReviewSurface) return;
     if (!draft) {
+      if (lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 500 && premiumPersistedFlowActive) {
+        return;
+      }
       setAgreementDocumentText("");
       return;
     }
@@ -8717,9 +8730,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       newDocLen: normalized.length,
       containsReviewerSection: normalized.includes("## REVIEWER NOTE"),
     });
+    updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, normalized, "pro_refine_ui_apply");
     agreementDocumentDirtyRef.current = true;
     premiumPipelineOutputBodyRef.current = normalized;
     hydratedPremiumBodyRef.current = normalized;
+    lastPremiumWinningCorpusRef.current = normalized;
     setDraft((prev) =>
       prev
         ? {
@@ -10711,6 +10726,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumTruthPipelineSource,
   ]);
 
+  useEffect(() => {
+    const corpus =
+      premiumPaidReadonlyPick.plainText ||
+      hydratedPremiumBodyRef.current ||
+      lastPremiumWinningCorpusRef.current ||
+      agreementDocumentText;
+    updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, corpus, "readonly_corpus_sync");
+  }, [premiumPaidReadonlyPick.plainText, agreementDocumentText, reviewDocRefreshTick, premiumSurfaceGateTick]);
+
   const authoritativePickForSendUi = useMemo(() => pickAuthoritativePlainForSendHandoff(draft), [draft]);
 
   const minimalProSendRecipientChrome = useMemo(
@@ -11233,10 +11257,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const premiumReadonlyAgreementHtml = useMemo(() => {
     if (!premiumPaidDocumentSurface) return "";
-    if (!canProceedWithPaidProDocument) return "";
     if (shouldShowPaidRetry) return "";
+    const session = guidedCompletionSessionRef.current;
+    const guidedActive = Boolean(
+      premiumPaidDocumentSurface &&
+        !proUpgradeUseStarterView &&
+        session &&
+        !isGuidedCompletionComplete(session),
+    );
+    const renderDoc = resolveGuidedCompletionRenderDocument({
+      guidedCompletionActive: guidedActive,
+      authoritativeHydratedPlain:
+        lastPremiumWinningCorpusRef.current || hydratedPremiumBodyRef.current || premiumPipelineOutputBodyRef.current,
+      pickerPlain: premiumPaidReadonlyPick.plainText,
+      pickerSource: premiumPaidReadonlyPick.sourceUsed,
+      agreementDocumentPlain: agreementDocumentText,
+      renderedPreviewPlain: renderedAgreementPreview,
+      lastKnownGoodPlain: lastKnownGoodAuthoritativeDraftRef.current,
+    });
+    const blockEmpty = shouldBlockProEmptyDocumentFallback(renderDoc);
+    if (!canProceedWithPaidProDocument && !blockEmpty) return "";
     const rd = reviewDraft ?? draft;
-    const corpus = premiumPaidReadonlyPick.plainText;
+    const corpus = renderDoc.plainText || premiumPaidReadonlyPick.plainText;
     const signaturePartyNames = extractAgreementParties({
       parties: rd?.parties,
       intakeText: intakeCombined,
@@ -11313,6 +11355,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     shouldShowPaidRetry,
     currentPremiumMergedIntakeKey,
     intakeCombined,
+    proUpgradeUseStarterView,
+    renderedAgreementPreview,
+    agreementDocumentText,
+    guidedCompletionSession,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
   ]);
 
   const preSendTrustLayer = useMemo(
@@ -13024,7 +13072,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleGuidedApplyAnswer = React.useCallback(
     async (instruction: string, variableId: string, displayAnswer: string): Promise<boolean> => {
       lastGuidedAnswerVariableIdRef.current = variableId;
-      const bodyLen = (paidProCardEditDraft ?? paidBodyForGuidedCompletion ?? "").trim().length;
+      const stableBefore =
+        lastKnownGoodAuthoritativeDraftRef.current ||
+        hydratedPremiumBodyRef.current ||
+        lastPremiumWinningCorpusRef.current ||
+        paidBodyForGuidedCompletion;
+      updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, stableBefore, "guided_apply_start");
+      const bodyLen = stableBefore.trim().length;
+      logGuidedQuestionApply(variableId, bodyLen);
       const ok = await runPersistedRefineFromStepBuffer(instruction, {
         premiumRefineDocumentOverride:
           (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim() || null,
@@ -13214,6 +13269,47 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedPanelMountedOnDocumentEditor &&
       activeGuidedCompletionSession,
   );
+  const guidedCompletionActive = Boolean(
+    premiumPaidDocumentSurface &&
+      !proUpgradeUseStarterView &&
+      activeGuidedCompletionSession &&
+      !isGuidedCompletionComplete(activeGuidedCompletionSession),
+  );
+  const guidedCompletionRenderDocument = useMemo(
+    () =>
+      resolveGuidedCompletionRenderDocument({
+        guidedCompletionActive,
+        authoritativeHydratedPlain:
+          lastPremiumWinningCorpusRef.current ||
+          hydratedPremiumBodyRef.current ||
+          premiumPipelineOutputBodyRef.current,
+        pickerPlain: premiumPaidReadonlyPick.plainText,
+        pickerSource: premiumPaidReadonlyPick.sourceUsed,
+        agreementDocumentPlain: agreementDocumentText,
+        renderedPreviewPlain: renderedAgreementPreview,
+        lastKnownGoodPlain: lastKnownGoodAuthoritativeDraftRef.current,
+      }),
+    [
+      guidedCompletionActive,
+      premiumPaidReadonlyPick.plainText,
+      premiumPaidReadonlyPick.sourceUsed,
+      agreementDocumentText,
+      renderedAgreementPreview,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+      guidedCompletionSession,
+    ],
+  );
+  const canDisplayPaidProAgreementDocument = useMemo(
+    () =>
+      canDisplayPaidProAgreementDuringGuided({
+        canProceedWithPaidProDocument,
+        guidedCompletionActive,
+        renderDocument: guidedCompletionRenderDocument,
+      }),
+    [canProceedWithPaidProDocument, guidedCompletionActive, guidedCompletionRenderDocument],
+  );
+  const blockProEmptyDocumentFallback = shouldBlockProEmptyDocumentFallback(guidedCompletionRenderDocument);
   /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
   const showTopProAdjustCard = Boolean(
     createUiStage === CreateUiStage.DRAFT &&
@@ -13715,6 +13811,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleProSendForSignature = React.useCallback(() => {
+    if (guidedCompletionActive) {
+      logGuidedSignTransition({
+        bodyLen: guidedCompletionRenderDocument.plainText.length,
+        source: guidedCompletionRenderDocument.source,
+      });
+    }
     const rawId = (reviewAgreementIdRef.current || reviewAgreementId || "").trim();
     const agreementIdShort =
       rawId.length > 12 ? `${rawId.slice(0, 8)}…` : rawId.length > 0 ? rawId : "(local)";
@@ -13751,12 +13853,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     persistPremiumRecipientHandoffFromDraftAndUi,
     bumpPremiumSurfaceGateTick,
     handlePremiumReviewFirstContinueToSigners,
+    guidedCompletionActive,
+    guidedCompletionRenderDocument.plainText,
+    guidedCompletionRenderDocument.source,
   ]);
 
   const handleFinalizeRoutePrimaryAction = React.useCallback(
     (mode: PremiumSendIntent) => {
       devTracePremiumSendIntent("finalize_panel_cta", mode, peekPremiumSenderSignFirst());
       devPremiumSendChoice(mode, peekPremiumSenderSignFirst());
+      if (mode === "review" && guidedCompletionActive) {
+        logGuidedReviewTransition({
+          bodyLen: guidedCompletionRenderDocument.plainText.length,
+          source: guidedCompletionRenderDocument.source,
+        });
+      }
       if (mode === "signature" && paidProAuthoritative) {
         void handleProSendForSignature();
         return;
@@ -13772,6 +13883,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       handlePremiumReviewFirstContinueToSigners,
       paidProAuthoritative,
       handleProSendForSignature,
+      guidedCompletionActive,
+      guidedCompletionRenderDocument.plainText,
+      guidedCompletionRenderDocument.source,
     ],
   );
 
@@ -16493,8 +16607,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       />
                                     </div>
                                   </div>
-                                ) : canProceedWithPaidProDocument ? (
-                                <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
+                                ) : canDisplayPaidProAgreementDocument ? (
+                                <div
+                                  key="paid-pro-agreement-document-stable"
+                                  className="mx-auto w-full max-w-[850px] px-0 sm:px-1"
+                                >
                                   {premiumServerGenerationDegraded ? (
                                     <div
                                       className="mb-4 rounded-lg border border-sky-500/40 bg-slate-900/50 px-4 py-3 sm:px-5 sm:py-3.5"
@@ -16598,7 +16715,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         aria-label="Agreement document"
                                       />
                                     ) : (
-                                      <PremiumAgreementReadonlyView html={premiumReadonlyAgreementHtml} />
+                                      <PremiumAgreementReadonlyView
+                                        html={premiumReadonlyAgreementHtml}
+                                        suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                      />
                                     )}
                                     {showPrimaryGuidedCompletion && activeGuidedCompletionSession ? (
                                       <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
@@ -16607,6 +16727,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
                                           onSessionChange={handleGuidedCompletionSessionChange}
                                           onApplyAnswer={handleGuidedApplyAnswer}
+                                          recentWhatChanged={proRefineWhatChangedSummary}
                                           onCustomPillSelected={() => {
                                             void openPaidProDraftCardEditor();
                                             customInstructionSectionRef.current?.setAttribute("open", "");
@@ -16723,7 +16844,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 {buildPreviewForCurrentTier(draft)}
                               </pre>
                             )}
-                            {proRefineWhatChangedSummary && productionDraftPrimaryReviewSurface ? (
+                            {proRefineWhatChangedSummary &&
+                            productionDraftPrimaryReviewSurface &&
+                            !(premiumPaidDocumentSurface && showPrimaryGuidedCompletion) ? (
                               <p
                                 className="mt-3 max-w-[min(100%,58rem)] rounded-lg border border-emerald-500/20 bg-emerald-950/15 px-3 py-2 text-sm leading-relaxed text-slate-200/95"
                                 role="status"
