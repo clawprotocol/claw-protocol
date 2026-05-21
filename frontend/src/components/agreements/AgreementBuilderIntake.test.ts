@@ -290,7 +290,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("FinalizeYourAgreementPanel");
     expect(intake).toContain("hideFreeformRefineSection={showPrimaryGuidedCompletion}");
     expect(intake).toContain("showPrimaryGuidedCompletion");
-    expect(intake).toContain("hideMissingLinesBulletList={showPrimaryGuidedCompletion}");
+    expect(intake).toContain("guidedCompletionRenderable={guidedCompletionRenderable}");
     expect(intake).toContain("handleGuidedApplyAnswer");
     expect(intake).toContain("showProLawdogRefineAndFinalize");
     const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");

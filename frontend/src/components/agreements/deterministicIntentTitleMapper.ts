@@ -14,6 +14,7 @@ export const DETERMINISTIC_INTENT_IDS = [
   "settlement_release",
   "mutual_nda",
   "loan",
+  "contractor_developer",
   "founder_equity",
   "growth_advisor",
 ] as const;
@@ -167,6 +168,24 @@ const SOFTWARE_LICENSE: DeterministicIntentResolution = {
   ].join(" "),
 };
 
+function resolveContractorDeveloperTitle(low: string): string {
+  if (/\bdeveloper\b/i.test(low)) return "Developer Contractor Agreement";
+  return "Independent Contractor Agreement";
+}
+
+const CONTRACTOR_DEVELOPER: DeterministicIntentResolution = {
+  id: "contractor_developer",
+  title: "Independent Contractor Agreement",
+  clausePackSeed: [
+    "Independent contractor / developer engagement — not founder equity vesting.",
+    "Scope, deliverables, and acceptance for development or product work;",
+    "payment structure (retainer, hourly, fixed fee, or milestones as stated);",
+    "IP: resolve whether the company owns deliverables, contractor owns tools, or exclusive license;",
+    "term: month-to-month vs fixed term — explain notice and termination clearly;",
+    "confidentiality; warranties; limitation of liability; governing law.",
+  ].join(" "),
+};
+
 const FOUNDER: DeterministicIntentResolution = {
   id: "founder_equity",
   title: "Founder Vesting Agreement",
@@ -215,6 +234,18 @@ function testMutualNda(low: string): boolean {
 function testLoan(low: string): boolean {
   return /\b(loan|loans|lent|lend(ing|s|ed)?|borrow(ing|s|ed|er|ers)?|borrows|iou|promissory|principal\s+and\s+interest)\b/i.test(
     low,
+  );
+}
+
+function testContractorDeveloper(low: string): boolean {
+  if (/\b(?:founder\s+vesting|cap\s+table|equity\s+vesting|vesting\s+schedule)\b/i.test(low)) {
+    return false;
+  }
+  return (
+    /\bcontractor\s+agreement\b/i.test(low) ||
+    /\bindependent\s+contractor\b/i.test(low) ||
+    (/\bcontractor\b/i.test(low) && /\bdeveloper\b/i.test(low)) ||
+    (/\bdeveloper\b/i.test(low) && /\bwork\s+product\b/i.test(low) && /\bown(?:s|ership)\b/i.test(low))
   );
 }
 
@@ -268,6 +299,9 @@ export function resolveDeterministicIntentTitleAndSeed(intakeText: string | null
   if (testReferral(low)) return REFERRAL;
   if (testJointVenture(low)) return JOINT_VENTURE;
   if (testSoftwareLicense(low)) return SOFTWARE_LICENSE;
+  if (testContractorDeveloper(low)) {
+    return { ...CONTRACTOR_DEVELOPER, title: resolveContractorDeveloperTitle(low) };
+  }
   if (isFounderEquityVestingIntent(s)) return FOUNDER;
   return null;
 }

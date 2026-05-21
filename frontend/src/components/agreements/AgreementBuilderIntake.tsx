@@ -545,13 +545,13 @@ import {
   buildGuidedSessionFromAgreement,
   buildGuidedSessionKey,
   friendlyLowConfidenceCopy,
-  isGuidedCompletionComplete,
   lockGuidedSession,
   mergeGuidedSessionOnBaseRefresh,
   persistGuidedSession,
   readPersistedGuidedSession,
   sanitizeProUserMessage,
   shouldPreferGuidedCompletionOverRetry,
+  shouldRenderGuidedCompletionPanel,
   whatChangedLineForGuidedVariable,
   type GuidedCompletionSession,
 } from "./guidedDealCompletion";
@@ -11032,15 +11032,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const paidBodyForChip = (premiumPaidReadonlyPick.plainText || agreementDocumentText || "").trim();
       const guidedPending =
         paidBodyForChip.length >= 500 &&
-        (snap?.materialMissingItems?.length ?? 0) > 0 &&
-        (() => {
-          const session = buildGuidedSessionFromAgreement({
+        shouldRenderGuidedCompletionPanel({
+          bodyUsable: true,
+          session: buildGuidedSessionFromAgreement({
             intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
             body: paidBodyForChip,
             materialItems: snap?.materialMissingItems,
-          });
-          return Boolean(session && !isGuidedCompletionComplete(session));
-        })();
+          }),
+          materialItems: snap?.materialMissingItems,
+          intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
+          body: paidBodyForChip,
+        });
       if (guidedPending) {
         return { version: CHIP_VERSION_PRO, state: CHIP_STATE_PRO_NEEDS_DRAFT };
       }
@@ -13028,14 +13030,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const activeGuidedCompletionSession = guidedCompletionSession ?? guidedCompletionSessionBase;
   guidedCompletionSessionRef.current = activeGuidedCompletionSession;
-  const showPrimaryGuidedCompletion = Boolean(
-    premiumPaidDocumentSurface &&
-      !proUpgradeUseStarterView &&
-      (paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody || authoritativePremiumUiCommitted) &&
-      activeGuidedCompletionSession &&
-      activeGuidedCompletionSession.queue.length > 0 &&
-      !isGuidedCompletionComplete(activeGuidedCompletionSession),
-  );
+  const guidedCompletionRenderable = useMemo(() => {
+    if (!premiumPaidDocumentSurface || proUpgradeUseStarterView) return false;
+    const bodyUsable =
+      paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody || authoritativePremiumUiCommitted;
+    const snap = readPremiumCompletionSnapshot();
+    return shouldRenderGuidedCompletionPanel({
+      bodyUsable,
+      session: activeGuidedCompletionSession,
+      materialItems: snap?.materialMissingItems,
+      intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
+      body: paidBodyForGuidedCompletion,
+    });
+  }, [
+    premiumPaidDocumentSurface,
+    proUpgradeUseStarterView,
+    paidBodyForGuidedCompletion,
+    hasUsablePaidBody,
+    authoritativePremiumUiCommitted,
+    activeGuidedCompletionSession,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
+  const showPrimaryGuidedCompletion = guidedCompletionRenderable;
   /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
   const showTopProAdjustCard = Boolean(
     createUiStage === CreateUiStage.DRAFT &&
@@ -13072,7 +13091,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !canProceedWithPaidProDocument &&
       !premiumReturnWaitActive &&
       preferGuidedCompletionOverRetry &&
-      (activeGuidedCompletionSession?.queue.length ?? 0) > 0 &&
+      guidedCompletionRenderable &&
       !showPrimaryGuidedCompletion,
   );
 
@@ -16668,8 +16687,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             {showProLawdogRefineAndFinalize ? (
                               <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
                                 <FinalizeYourAgreementPanel
-                                  hideFreeformRefineSection={showPrimaryGuidedCompletion}
-                                  hideMissingLinesBulletList={showPrimaryGuidedCompletion}
+                                  hideFreeformRefineSection={guidedCompletionRenderable}
+                                  guidedCompletionRenderable={guidedCompletionRenderable}
                                   draft={reviewDraft ?? draft}
                                   currentDocumentText={proRefineCurrentDocumentTextForProPanels}
                                   intakeText={proRefineIntakeTextForProPanels}

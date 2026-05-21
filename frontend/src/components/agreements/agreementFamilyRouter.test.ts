@@ -22,6 +22,14 @@ describe("detectAgreementFamily", () => {
     );
   });
 
+  it("routes contractor agreement for developer before generic business", () => {
+    expect(
+      detectAgreementFamily(
+        "Need a contractor agreement for a developer. Work product ownership and month-to-month term.",
+      ),
+    ).toBe("independent_contractor_agreement");
+  });
+
   it("defaults generic business", () => {
     expect(detectAgreementFamily("Simple agreement between two companies to share leads.")).toBe(
       "generic_business_agreement",

@@ -104,6 +104,27 @@ const CONSULTING_IP: DealVariableDefault[] = [
   { id: "custom", label: "Custom", value: "" },
 ];
 
+const IP_CONTRADICTION: DealVariableDefault[] = [
+  { id: "company_all", label: "Company owns all custom work product", value: "Company owns all custom work product created under this Agreement." },
+  { id: "exclusive_license", label: "Developer owns; company gets exclusive license", value: "Contractor owns work product and grants Company an exclusive, perpetual license to use deliverables for its business." },
+  { id: "split_tools", label: "Developer keeps background tools; company owns custom work", value: "Company owns project deliverables; Contractor retains pre-existing tools, libraries, and general methods." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const TERM_CONTRADICTION: DealVariableDefault[] = [
+  { id: "monthly_notice", label: "Month-to-month, either side may terminate on notice", value: "Month-to-month term; either Party may terminate on thirty (30) days written notice." },
+  { id: "three_year_early", label: "3-year commitment with early termination rights", value: "Initial term of three (3) years with early termination for material breach or by mutual written agreement." },
+  { id: "monthly_cap", label: "Month-to-month billing during a 3-year maximum term", value: "Services continue month-to-month for up to three (3) years unless terminated on thirty (30) days written notice." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const DELIVERABLES_SCOPE: DealVariableDefault[] = [
+  { id: "software_dev", label: "Software development and bug fixes", value: "Software development, implementation, and reasonable bug fixes for delivered work." },
+  { id: "product_build", label: "App / product buildout", value: "Application or product buildout as described in the agreed scope." },
+  { id: "maintenance", label: "Maintenance and support", value: "Ongoing maintenance and support for delivered systems." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
 const ID_DEFAULTS: Partial<Record<string, (family: CommercialFamilyHint) => DealVariableDefault[]>> = {
   saas_sla: DEFAULTS_BY_CATEGORY.sla!,
   referral_economics: DEFAULTS_BY_CATEGORY.referral_economics!,
@@ -112,6 +133,9 @@ const ID_DEFAULTS: Partial<Record<string, (family: CommercialFamilyHint) => Deal
   support_obligations: () => CONSULTING_SUPPORT,
   scope_change_approval: () => CONSULTING_SCOPE_APPROVAL,
   ip_ownership: () => CONSULTING_IP,
+  ip_ownership_contradiction: () => IP_CONTRADICTION,
+  term_structure_contradiction: () => TERM_CONTRADICTION,
+  deliverables_scope: () => DELIVERABLES_SCOPE,
   milestone_schedule: DEFAULTS_BY_CATEGORY.milestones!,
   governing_venue: DEFAULTS_BY_CATEGORY.governing_law!,
   governing_law_notice: DEFAULTS_BY_CATEGORY.governing_law!,

@@ -45,6 +45,15 @@ export function enrichDealVariableFromIntake(variable: DealVariable, intakeRaw?:
   } else if (variable.id === "ip_ownership" || variable.id === "ip_allocation") {
     recommendedPillId = signals.aiRebuild || signals.mentionsIp ? "company_deliverables" : "company_deliverables";
     recommendedLabel = "Most likely fit";
+  } else if (variable.id === "ip_ownership_contradiction") {
+    recommendedPillId = "split_tools";
+    recommendedLabel = "Recommended from your intake";
+  } else if (variable.id === "term_structure_contradiction") {
+    recommendedPillId = "monthly_cap";
+    recommendedLabel = "Recommended from your intake";
+  } else if (variable.id === "payment_structure" && /\bmonth[-\s]?to[-\s]?month\b/i.test(intakeRaw || "")) {
+    recommendedPillId = "retainer";
+    recommendedLabel = "Recommended from your intake";
   } else if (variable.id === "governing_law_notice" || variable.id === "governing_venue") {
     recommendedPillId = "de";
   }
@@ -65,6 +74,11 @@ export function enrichDealVariableFromIntake(variable: DealVariable, intakeRaw?:
 
 function whyThisMattersForVariable(id: string): string | undefined {
   const map: Record<string, string> = {
+    ip_ownership_contradiction:
+      "The prompt says both the developer owns the work and the company gets exclusive ownership. The agreement needs one clear rule.",
+    term_structure_contradiction:
+      "Month-to-month and locked for 3 years can conflict unless the agreement explains how termination works.",
+    deliverables_scope: "Defined deliverables set expectations for what is in and out of scope.",
     payment_structure:
       "Clear payment structure reduces disputes if scope expands later.",
     support_obligations:
@@ -179,6 +193,28 @@ export function resolveRecommendForMe(
       choices: [
         { pillId: "company_deliverables", label: "Company owns deliverables", value: find("company_deliverables")?.value ?? "Company owns project deliverables; developer retains pre-existing tools." },
         { pillId: "developer_tools", label: "Developer keeps reusable tools", value: find("developer_tools")?.value ?? "Company owns deliverables; developer retains reusable libraries and tools." },
+      ],
+    };
+  }
+
+  if (variable.id === "ip_ownership_contradiction") {
+    return {
+      explanation:
+        "Your intake asks for both developer ownership and company exclusive ownership. Most founder-friendly contractor deals give the company the deliverables and let the developer keep reusable tools.",
+      choices: [
+        { pillId: "split_tools", label: "Developer keeps tools; company owns custom work", value: find("split_tools")?.value ?? "" },
+        { pillId: "company_all", label: "Company owns all custom work product", value: find("company_all")?.value ?? "" },
+      ],
+    };
+  }
+
+  if (variable.id === "term_structure_contradiction") {
+    return {
+      explanation:
+        "Month-to-month billing with a three-year maximum term is a common way to honor both flexibility and a longer commitment window.",
+      choices: [
+        { pillId: "monthly_cap", label: "Month-to-month during a 3-year maximum term", value: find("monthly_cap")?.value ?? "" },
+        { pillId: "monthly_notice", label: "Month-to-month with notice", value: find("monthly_notice")?.value ?? "" },
       ],
     };
   }

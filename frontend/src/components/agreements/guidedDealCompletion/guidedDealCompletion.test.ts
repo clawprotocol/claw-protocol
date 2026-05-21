@@ -12,6 +12,7 @@ import {
 } from "../proAgreementCompleteness/revisionQuestionEngine";
 import { enrichDealVariableFromIntake, RECOMMEND_PILL_ID, resolveRecommendForMe } from "./intakeRecommendationEngine";
 import { GUIDED_COMPLETION_HEADING } from "./friendlyProCompletionCopy";
+import { shouldRenderGuidedCompletionPanel } from "./shouldRenderGuidedCompletionPanel";
 import { finalizeAgreementOutput } from "../agreementOutputQuality/agreementOutputQualityPipeline";
 import { validateAgreementIntegrity } from "./agreementIntegrityValidator";
 import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
@@ -596,5 +597,15 @@ describe("guidedDealCompletion", () => {
   it("consulting dev prompt is registered in manual QA corpus", () => {
     const p = QA_MANUAL_TEN_PROMPTS.find((x) => x.id === "consulting-dev-qa");
     expect(p?.intake).toContain("workflow systems");
+  });
+
+  it("shouldRenderGuidedCompletionPanel is false when session queue is empty", () => {
+    expect(
+      shouldRenderGuidedCompletionPanel({
+        bodyUsable: true,
+        session: null,
+        materialItems: [{ id: "x", label: "x", question: "Confirm something?", severity: "material", agreementFamily: "generic_business_agreement", whyItMatters: "x", suggestedAnswerFormat: "x", canProceedWithoutAnswer: true, affectsSections: [] }],
+      }),
+    ).toBe(false);
   });
 });

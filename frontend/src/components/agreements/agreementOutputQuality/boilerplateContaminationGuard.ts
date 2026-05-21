@@ -20,6 +20,7 @@ export const KNOWN_BOILERPLATE_SENTENCES: readonly string[] = [
   "commercial details are unspecified",
   "direct damages are limited to fees paid",
   "survival and wind-down obligations apply as stated herein",
+  "compensation, invoicing, and payment timing will be documented in a schedule",
 ];
 
 function normalizeSentenceKey(s: string): string {

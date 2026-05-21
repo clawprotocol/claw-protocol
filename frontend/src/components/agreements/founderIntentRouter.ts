@@ -12,6 +12,13 @@ export const REQUIRED_FOUNDER_PREMIUM_TITLES = [
 const ADVISOR_REFERRAL_COMMERCIAL_EXCLUDE =
   /\b(?:growth\s+advisor|referral\s+agreement|referral\s+fee|referral\s+partner|revenue\s+share|commission|introduc(?:e|es|ing)|channel\s+partner|finder'?s?\s+fee|consulting\s+advisor|advisory\s+agreement|board\s+advisor)\b/i;
 
+/** Contractor / developer commercial deals — not cap-table founder vesting. */
+const CONTRACTOR_DEVELOPER_EXCLUDE =
+  /\b(?:contractor\s+agreement|independent\s+contractor|developer|work\s+product|1099)\b/i;
+
+/** “Founder-friendly” tone — not an equity vesting request. */
+const FOUNDER_FRIENDLY_TONE = /\bfounder[-\s]?friendly\b/i;
+
 /** Strong founder-cap-table signals (not generic "founder" in "growth advisor for founders"). */
 const FOUNDER_EQUITY_STRICT =
   /\b(?:founder\s+vesting|founders?\s+agreement|equity\s+vesting|cap\s+table|60\s*\/\s*40|40\s*\/\s*60|cliff|vesting\s+schedule|startup\s+equity|reprice|seed\s+round)\b/i;
@@ -28,6 +35,12 @@ export function isFounderEquityVestingIntent(intakeText: string | null | undefin
   const t = (intakeText || "").replace(/\r\n/g, "\n").trim();
   if (!t) return false;
   if (ADVISOR_REFERRAL_COMMERCIAL_EXCLUDE.test(t) && !FOUNDER_EQUITY_STRICT.test(t)) {
+    return false;
+  }
+  if (CONTRACTOR_DEVELOPER_EXCLUDE.test(t) && !FOUNDER_EQUITY_STRICT.test(t)) {
+    return false;
+  }
+  if (FOUNDER_FRIENDLY_TONE.test(t) && !FOUNDER_EQUITY_STRICT.test(t)) {
     return false;
   }
   if (FOUNDER_EQUITY_STRICT.test(t)) return true;

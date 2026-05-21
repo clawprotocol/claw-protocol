@@ -35,6 +35,14 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     return "services_agreement";
   }
 
+  if (
+    /\bcontractor\s+agreement\b/i.test(low) ||
+    (/\bcontractor\b/i.test(low) && /\bdeveloper\b/i.test(low)) ||
+    (/\bindependent\s+contractor\b/i.test(low) && /\b(?:developer|work\s+product|software)\b/i.test(low))
+  ) {
+    return "independent_contractor_agreement";
+  }
+
   const commercialSignals = {
     referralLike: /\b(referral|channel\s+partner|introduced?\s+accounts?|introduced?\s+deals?|sourced\s+deals?|growth\s+partner|business\s+development)\b/i.test(low),
     commission: /\bcommission|referral\s+fee|%\s*(?:of\s+)?(?:sales|revenue|net|gross)\b/i.test(low),

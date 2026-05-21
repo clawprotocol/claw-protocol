@@ -5,6 +5,8 @@
 import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQuestionEngine";
 import type { MaterialMissingItem, MaterialSeverity } from "../proAgreementCompleteness/types";
 import { isConsultingDevIntake } from "./consultingGuidedIntake";
+import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
+import { detectContradictoryTerms } from "./detectContradictoryTerms";
 import { enrichDealVariables } from "./intakeRecommendationEngine";
 import { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
 import type { DealVariable, DealVariableCategory, DealVariableSeverity } from "./types";
@@ -23,6 +25,9 @@ const ID_TO_CATEGORY: Record<string, DealVariableCategory> = {
   scope_change_approval: "general",
   governing_law_notice: "governing_law",
   ip_ownership: "ip_ownership",
+  ip_ownership_contradiction: "ip_ownership",
+  term_structure_contradiction: "termination",
+  deliverables_scope: "milestones",
   saas_sla: "sla",
   referral_economics: "referral_economics",
   milestone_schedule: "milestones",
@@ -188,6 +193,72 @@ function inferConsultingVariablesFromIntake(
   return dedupeVariables(inferred.map((i) => materialItemToDealVariable(i, intakeRaw)));
 }
 
+function inferContractorVariablesFromIntake(
+  intakeRaw: string,
+  body: string,
+  family: MaterialMissingItem["agreementFamily"],
+): DealVariable[] {
+  if (!isContractorDeveloperIntake(intakeRaw)) return [];
+  const low = body.toLowerCase();
+  const intakeLow = intakeRaw.toLowerCase();
+  const inferred: MaterialMissingItem[] = [];
+  const push = (item: Omit<MaterialMissingItem, "agreementFamily">) => {
+    inferred.push({ ...item, agreementFamily: family });
+  };
+
+  if (
+    !/\b(?:hourly|fixed fee|retainer|milestone|per hour|monthly)\b/i.test(low) &&
+    !/\b(?:hourly|fixed fee|retainer|milestone|month[-\s]?to[-\s]?month)\b/i.test(intakeLow)
+  ) {
+    push({
+      id: "payment_structure",
+      severity: "material",
+      label: "Payment structure",
+      question: "How should the developer be paid?",
+      whyItMatters: "Clear payment structure keeps month-to-month or project billing predictable.",
+      suggestedAnswerFormat: "e.g. monthly retainer, hourly, fixed fee",
+      affectsSections: ["Compensation", "Fees", "Payment"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+
+  if (!/\b(?:deliverable|scope of work|services include|will deliver)\b/i.test(low)) {
+    push({
+      id: "deliverables_scope",
+      severity: "material",
+      label: "Deliverables",
+      question: "What will the developer deliver?",
+      whyItMatters: "Defined deliverables set expectations for what is in and out of scope.",
+      suggestedAnswerFormat: "e.g. software development, product buildout",
+      affectsSections: ["Services", "Deliverables", "Scope"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+
+  return dedupeVariables(inferred.map((i) => materialItemToDealVariable(i, intakeRaw)));
+}
+
+function synthesizeFallbackGuidedVariables(
+  intakeRaw: string,
+  body: string,
+  family: MaterialMissingItem["agreementFamily"],
+): DealVariable[] {
+  const intake = intakeRaw.trim();
+  if (!intake) return [];
+  const items: MaterialMissingItem[] = [];
+  for (const signal of detectContradictoryTerms(intake, family)) {
+    items.push(signal.item);
+  }
+  const contractor = inferContractorVariablesFromIntake(intake, body, family);
+  const consulting = inferConsultingVariablesFromIntake(intake, body, family);
+  const vars = [
+    ...items.map((m) => materialItemToDealVariable(m, intake)),
+    ...contractor,
+    ...consulting,
+  ];
+  return dedupeVariables(vars);
+}
+
 export function extractDealVariables(args: {
   intakeRaw?: string | null;
   body?: string;
@@ -207,8 +278,8 @@ export function extractDealVariables(args: {
   const body = (args.body ?? "").trim();
   const family = material[0]?.agreementFamily ?? "generic_business_agreement";
   let vars = dedupeVariables(material.map((m) => materialItemToDealVariable(m, intake)));
-  const inferred = inferConsultingVariablesFromIntake(intake, body, family);
-  for (const v of inferred) {
+  const synthesized = synthesizeFallbackGuidedVariables(intake, body, family);
+  for (const v of synthesized) {
     if (!vars.some((x) => x.id === v.id)) vars.push(v);
   }
   vars = dedupeVariables(vars);

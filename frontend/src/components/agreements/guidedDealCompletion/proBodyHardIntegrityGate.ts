@@ -14,12 +14,15 @@ const BANNED_LINE_PATTERNS: readonly RegExp[] = [
   /^\s*signature\.\s*$/i,
   /Sections that by their nature should/i,
   /^\s*direct\s+damages\s+are\s+limited/i,
+  /date of last signature below/i,
+  /^\s*IN WITNESS WHEREOF\b/i,
 ];
 
 const BANNED_SENTENCE_PATTERNS: readonly RegExp[] = [
   /\bunless a different period is stated in a schedule\b[^.!?]*[.!?]?/gi,
   /\bUntil then, this Section is intentionally left for completion before signing\b[^.!?]*[.!?]?/gi,
   /\bdirect\s+damages\s+are\s+limited\b[^.!?]*[.!?]?/gi,
+  /\bdate of last signature below\b[^.!?]*[.!?]?/gi,
 ];
 
 const HEADING_ONLY_RE = /^\s*(\d+(?:\.\d+)*)\s+(.+?)\.?\s*$/;

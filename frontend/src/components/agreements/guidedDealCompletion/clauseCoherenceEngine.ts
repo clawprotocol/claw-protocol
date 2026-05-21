@@ -32,6 +32,16 @@ const CONCEPT_PATTERNS: readonly { id: string; re: RegExp; allowedHeadingRe: Reg
     allowedHeadingRe: /payment|fee|compensation|invoic|referral|commission/i,
   },
   {
+    id: "compensation_schedule_documented",
+    re: /\bCompensation, invoicing, and payment timing will be documented in a schedule\b[^.!?]*[.!?]\s*/gi,
+    allowedHeadingRe: /payment|fee|compensation|invoic|schedule/i,
+  },
+  {
+    id: "compensation_schedule_short",
+    re: /\bcompensation, invoicing, and payment timing will be documented\b[^.!?]*[.!?]\s*/gi,
+    allowedHeadingRe: /payment|fee|compensation|invoic|schedule/i,
+  },
+  {
     id: "orphan_lol_fragment",
     re: /\bfor\s+indirect\s+or\s+consequential\s+damages\b[^.!?]*[.!?]\s*/gi,
     allowedHeadingRe: /limitation|liability/i,

@@ -74,6 +74,15 @@ describe("deterministicIntentTitleMapper", () => {
     expect(r?.title).toBe("Founder Vesting Agreement");
   });
 
+  it("maps contractor developer intake to Developer Contractor Agreement, not Founder Vesting", () => {
+    const intake =
+      "Need a contractor agreement for a developer. They should own all their work product but we also need full exclusive ownership of everything they create. Month-to-month but lock in for 3 years. Founder-friendly.";
+    const r = resolveDeterministicIntentTitleAndSeed(intake);
+    expect(r?.id).toBe("contractor_developer");
+    expect(r?.title).toBe("Developer Contractor Agreement");
+    expect(r?.title).not.toMatch(/Founder Vesting/i);
+  });
+
   it("apply overwrites context title and adds seed + id", () => {
     const base = buildPremiumFullDraftContext(minimalDraft());
     const out = applyDeterministicIntentToPremiumFullDraftContext("Simple logo for our café", base);

@@ -49,3 +49,9 @@ export {
   shouldPreferGuidedCompletionOverRetry,
 } from "./friendlyProCompletionCopy";
 export { GuidedDealCompletionPanel } from "./GuidedDealCompletionPanel";
+export {
+  shouldRenderGuidedCompletionPanel,
+  shouldShowGuidedNeedsDetailsMessaging,
+} from "./shouldRenderGuidedCompletionPanel";
+export { detectContradictoryTerms, detectIpOwnershipContradiction, detectTermStructureContradiction } from "./detectContradictoryTerms";
+export { isContractorDeveloperIntake } from "./contractorGuidedIntake";

@@ -77,6 +77,8 @@ type Props = {
   hideFreeformRefineSection?: boolean;
   /** When true, hide static missing-term bullet list — guided completion is primary. */
   hideMissingLinesBulletList?: boolean;
+  /** True only when guided panel can render an actionable question (suppresses empty Needs-details UX). */
+  guidedCompletionRenderable?: boolean;
   /** Dev-only: logged when premium refine fails; parent supplies flags and ids. */
   devProRefineContext?: {
     handlerLabel: string;
@@ -161,6 +163,7 @@ export function FinalizeYourAgreementPanel({
   deliveryCtasOnDraftCard = false,
   hideFreeformRefineSection = false,
   hideMissingLinesBulletList = false,
+  guidedCompletionRenderable = false,
   devProRefineContext,
 }: Props) {
   const [prompt, setPrompt] = useState("");
@@ -221,9 +224,19 @@ export function FinalizeYourAgreementPanel({
     [sendMode, sendModeTouched, notOkCount, priorityScore, lastRefine, finalizeAudit, effectiveCurrentDocumentText],
   );
 
+  const displayReadiness = useMemo((): FinalizeReadiness => {
+    if (guidedCompletionRenderable) return readiness;
+    if (readiness === "needs_details") {
+      return missingLines.length > 0 ? "good_draft" : "ready_for_review";
+    }
+    return readiness;
+  }, [guidedCompletionRenderable, readiness, missingLines.length]);
+
+  const suppressNeedsDetailsCopy = !guidedCompletionRenderable && !hideMissingLinesBulletList;
+
   const tagline = useMemo(
-    () => finalizeTagline(missingLines.length, readiness),
-    [missingLines.length, readiness],
+    () => finalizeTagline(missingLines.length, displayReadiness),
+    [missingLines.length, displayReadiness],
   );
   const routeBadge = useMemo(() => {
     if (!reviewRoute) return null;
@@ -582,13 +595,17 @@ export function FinalizeYourAgreementPanel({
           <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">{tagline}</p>
         </div>
         <p
-          className={`shrink-0 self-start rounded-lg border px-3 py-1.5 text-center text-[11px] font-semibold sm:text-xs ${readinessPillClass(readiness)}`}
+          className={`shrink-0 self-start rounded-lg border px-3 py-1.5 text-center text-[11px] font-semibold sm:text-xs ${readinessPillClass(displayReadiness)}`}
         >
-          {formatFinalizeReadiness(readiness)}
+          {formatFinalizeReadiness(displayReadiness)}
         </p>
       </div>
 
-      {!hideMissingLinesBulletList && missingLines.length > 0 ? (
+      {guidedCompletionRenderable && missingLines.length > 0 ? (
+        <p className="mt-3 text-sm text-slate-400 sm:mt-4">
+          Use Complete your agreement below to finish key business decisions.
+        </p>
+      ) : !guidedCompletionRenderable && !hideMissingLinesBulletList && missingLines.length > 0 ? (
         <ul className="mt-3 list-disc space-y-1.5 pl-4 text-sm leading-relaxed text-slate-200/95 sm:mt-4 sm:text-[15px]">
           {missingLines.map((line) => (
             <li key={line}>{line}</li>
@@ -596,8 +613,8 @@ export function FinalizeYourAgreementPanel({
         </ul>
       ) : (
         <p className="mt-3 text-sm text-slate-500 sm:mt-4">
-          {hideMissingLinesBulletList && missingLines.length > 0
-            ? "Use Complete your agreement below to finish key business decisions."
+          {suppressNeedsDetailsCopy && missingLines.length > 0
+            ? "Ready to send — no key missing business decisions detected."
             : "Looking good on the quick scan — add tweaks below if needed."}
         </p>
       )}
