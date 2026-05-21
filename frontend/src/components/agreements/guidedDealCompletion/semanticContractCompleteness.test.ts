@@ -5,8 +5,11 @@ import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQ
 import {
   semanticallyIncompleteProBodyFixture,
   lighthouseApexMigrationBodyFixture,
+  LIGHTHOUSE_APEX_LOOSE_QA_INTAKE,
   LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE,
 } from "../qaManualTenPrompts";
+import { computeCanRenderGuidedQuestions } from "./canRenderGuidedQuestions";
+import { detectIntakePhaseTableGaps } from "./semanticContractCompleteness";
 import {
   buildGuidedSessionFromAgreement,
   detectSemanticContractGaps,
@@ -86,6 +89,11 @@ describe("semanticContractCompleteness", () => {
     expect(enforced.showNeedsDetailsMessaging).toBe(false);
   });
 
+  it("detectIntakePhaseTableGaps flags loose pasted table with TBD/???", () => {
+    const gaps = detectIntakePhaseTableGaps(LIGHTHOUSE_APEX_LOOSE_QA_INTAKE);
+    expect(gaps.some((g) => g.id === "project_fee_phase_confirmation")).toBe(true);
+  });
+
   it("lighthouse body has semantic gaps and renderable guided session", () => {
     const body = lighthouseApexMigrationBodyFixture();
     expect(hasSemanticMaterialGaps(body, LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE)).toBe(true);
@@ -102,5 +110,6 @@ describe("semanticContractCompleteness", () => {
         intakeRaw: LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE,
       }),
     ).toBe(true);
+    expect(computeCanRenderGuidedQuestions({ bodyUsable: true, session })).toBe(true);
   });
 });

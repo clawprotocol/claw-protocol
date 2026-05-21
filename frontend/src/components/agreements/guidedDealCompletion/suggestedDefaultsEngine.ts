@@ -164,9 +164,30 @@ const VENUE: DealVariableDefault[] = [
 ];
 
 const DEAL_TERMS: DealVariableDefault[] = [
-  { id: "fee", label: "Confirm fees", value: "Confirm total fees, currency, and payment triggers in the agreement." },
-  { id: "sla", label: "Confirm SLA", value: "Confirm uptime, response times, and SLA remedies." },
-  { id: "ip", label: "Confirm IP ownership", value: "Confirm ownership of deliverables and background IP." },
+  {
+    id: "standard",
+    label: "Use standard commercial terms",
+    value: "Use commercially reasonable standard terms typical for this type of agreement.",
+  },
+  {
+    id: "schedule_a",
+    label: "Keep flexible / confirm later in Schedule A",
+    value: "Defer detailed commercial terms to Schedule A to be confirmed before execution.",
+  },
+  { id: "custom", label: "Add custom details", value: "" },
+];
+
+const PROJECT_FEE_PHASE: DealVariableDefault[] = [
+  {
+    id: "even_split",
+    label: "$120k even across phases",
+    value: "Total fee $120,000 USD split evenly across build, rollout, and support phases.",
+  },
+  {
+    id: "build_heavy",
+    label: "Build-heavy split",
+    value: "Total $120,000: 40% on build acceptance, 40% on rollout go-live, 20% for year-one support.",
+  },
   { id: "custom", label: "Custom", value: "" },
 ];
 
@@ -207,6 +228,7 @@ const ID_DEFAULTS: Partial<Record<string, (family: CommercialFamilyHint) => Deal
   renewal_notice: () => RENEWAL_NOTICE,
   governing_venue: () => VENUE,
   deal_terms_confirmation: () => DEAL_TERMS,
+  project_fee_phase_confirmation: () => PROJECT_FEE_PHASE,
   supplemental_schedule_confirmation: () => PHASE_PAYMENT,
   as_specified_in_schedule_a: () => PHASE_PAYMENT,
   amount_to_be_confirmed: () => TOTAL_FEE,

@@ -61,6 +61,17 @@ export {
   guidedQueueHasRenderableQuestion,
   enforceNeedsDetailsGuidedInvariant,
 } from "./shouldRenderGuidedCompletionPanel";
+export {
+  computeCanRenderGuidedQuestions,
+  GUIDED_NEUTRAL_REVIEW_COPY,
+  GUIDED_NEUTRAL_REVIEW_TITLE,
+  guidedCompletionHeading,
+  guidedCompletionSubcopy,
+  mayShowNeedsDetailsMessaging,
+  mayShowCompleteAgreementBelowCopy,
+  finalizeTaglineForGuidedState,
+} from "./canRenderGuidedQuestions";
+export type { CanRenderGuidedQuestionsArgs } from "./canRenderGuidedQuestions";
 export { scanBodyMaterialPlaceholders, bodyHasLoosePhaseScheduleBeforeSignatures } from "./bodyMaterialPlaceholderScanner";
 export {
   analyzeServicesMigrationIntake,

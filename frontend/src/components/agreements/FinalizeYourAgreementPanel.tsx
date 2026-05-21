@@ -8,7 +8,6 @@ import {
   PRO_REFINE_APPLY_REVISION_BUTTON_LABEL,
   PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
   PRO_REFINE_REVISE_HELPER,
-  PRO_REFINE_REVISE_SECTION_HEADING,
   PRO_REFINE_SURGICAL_REJECTED_SHORT_EXHAUSTED,
   PRO_REFINE_SURGICAL_POSTCONDITION_FAILED_MESSAGE,
   shouldUseProRefineAdvisoryAppendSuccessCopy,
@@ -25,11 +24,16 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
 import {
   buildFinalizeMissingLinesPriority,
-  finalizeTagline,
   formatFinalizeReadiness,
   resolveFinalizeReadiness,
   type FinalizeReadiness,
 } from "./finalizeReadinessModel";
+import {
+  GUIDED_NEUTRAL_REVIEW_COPY,
+  finalizeTaglineForGuidedState,
+  guidedCompletionHeading,
+  mayShowCompleteAgreementBelowCopy,
+} from "./guidedDealCompletion/canRenderGuidedQuestions";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 
@@ -78,6 +82,9 @@ type Props = {
   /** When true, hide static missing-term bullet list — guided completion is primary. */
   hideMissingLinesBulletList?: boolean;
   /** True only when guided panel can render an actionable question (suppresses empty Needs-details UX). */
+  /** When true, guided questions are mounted below — enables Needs-details / Complete-your-agreement copy. */
+  canRenderGuidedQuestions?: boolean;
+  /** @deprecated use canRenderGuidedQuestions */
   guidedCompletionRenderable?: boolean;
   /** Dev-only: logged when premium refine fails; parent supplies flags and ids. */
   devProRefineContext?: {
@@ -163,9 +170,11 @@ export function FinalizeYourAgreementPanel({
   deliveryCtasOnDraftCard = false,
   hideFreeformRefineSection = false,
   hideMissingLinesBulletList = false,
+  canRenderGuidedQuestions: canRenderGuidedQuestionsProp,
   guidedCompletionRenderable = false,
   devProRefineContext,
 }: Props) {
+  const canRenderGuidedQuestions = canRenderGuidedQuestionsProp ?? guidedCompletionRenderable;
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -225,19 +234,20 @@ export function FinalizeYourAgreementPanel({
   );
 
   const displayReadiness = useMemo((): FinalizeReadiness => {
-    if (guidedCompletionRenderable) return readiness;
+    if (canRenderGuidedQuestions) return readiness;
     if (readiness === "needs_details") {
       return "ready_for_review";
     }
     return readiness;
-  }, [guidedCompletionRenderable, readiness]);
+  }, [canRenderGuidedQuestions, readiness]);
 
-  const suppressNeedsDetailsCopy = !guidedCompletionRenderable && !hideMissingLinesBulletList;
+  const suppressNeedsDetailsCopy = !canRenderGuidedQuestions && !hideMissingLinesBulletList;
 
   const tagline = useMemo(
-    () => finalizeTagline(missingLines.length, displayReadiness),
-    [missingLines.length, displayReadiness],
+    () => finalizeTaglineForGuidedState(missingLines.length, displayReadiness, canRenderGuidedQuestions),
+    [missingLines.length, displayReadiness, canRenderGuidedQuestions],
   );
+  const refineSectionHeading = guidedCompletionHeading(canRenderGuidedQuestions);
   const routeBadge = useMemo(() => {
     if (!reviewRoute) return null;
     if (reviewRoute.route === "signature") return "Ready to sign";
@@ -585,12 +595,12 @@ export function FinalizeYourAgreementPanel({
     <div
       className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5"
       role="region"
-      aria-label={deliveryCtasOnDraftCard ? PRO_REFINE_REVISE_SECTION_HEADING : "Choose how to deliver your agreement"}
+      aria-label={deliveryCtasOnDraftCard ? refineSectionHeading : "Choose how to deliver your agreement"}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-base font-semibold tracking-tight text-slate-100 sm:text-lg">
-            {deliveryCtasOnDraftCard || sendMode === "review" ? PRO_REFINE_REVISE_SECTION_HEADING : "Choose how to deliver"}
+            {deliveryCtasOnDraftCard || sendMode === "review" ? refineSectionHeading : "Choose how to deliver"}
           </h3>
           <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">{tagline}</p>
         </div>
@@ -601,11 +611,11 @@ export function FinalizeYourAgreementPanel({
         </p>
       </div>
 
-      {guidedCompletionRenderable && missingLines.length > 0 ? (
+      {mayShowCompleteAgreementBelowCopy(canRenderGuidedQuestions) && missingLines.length > 0 ? (
         <p className="mt-3 text-sm text-slate-400 sm:mt-4">
           Use Complete your agreement below to finish key business decisions.
         </p>
-      ) : !guidedCompletionRenderable && !hideMissingLinesBulletList && missingLines.length > 0 ? (
+      ) : !canRenderGuidedQuestions && !hideMissingLinesBulletList && missingLines.length > 0 ? (
         <ul className="mt-3 list-disc space-y-1.5 pl-4 text-sm leading-relaxed text-slate-200/95 sm:mt-4 sm:text-[15px]">
           {missingLines.map((line) => (
             <li key={line}>{line}</li>
@@ -614,7 +624,7 @@ export function FinalizeYourAgreementPanel({
       ) : (
         <p className="mt-3 text-sm text-slate-500 sm:mt-4">
           {suppressNeedsDetailsCopy
-            ? "Draft ready to review — optional edits can still be made below."
+            ? GUIDED_NEUTRAL_REVIEW_COPY
             : "Looking good on the quick scan — add tweaks below if needed."}
         </p>
       )}
@@ -713,9 +723,11 @@ export function FinalizeYourAgreementPanel({
 
       {deliveryCtasOnDraftCard || sendMode === "review" ? (
         <p className="mt-3 text-xs leading-relaxed text-slate-400 sm:mt-4 sm:text-sm">
-          {hideFreeformRefineSection
+          {hideFreeformRefineSection && mayShowCompleteAgreementBelowCopy(canRenderGuidedQuestions)
             ? "Use Complete your agreement in the document editor above to finish key terms."
-            : PRO_REFINE_REVISE_HELPER}
+            : hideFreeformRefineSection
+              ? GUIDED_NEUTRAL_REVIEW_COPY
+              : PRO_REFINE_REVISE_HELPER}
         </p>
       ) : null}
       {hideFreeformRefineSection ? null : (

@@ -1,6 +1,9 @@
 import type { MaterialMissingItem } from "../proAgreementCompleteness/types";
-import { getCurrentVariable } from "./guidedCompletionEngine";
+import { computeCanRenderGuidedQuestions } from "./canRenderGuidedQuestions";
 import type { DealVariable, GuidedCompletionSession } from "./types";
+
+export { computeCanRenderGuidedQuestions } from "./canRenderGuidedQuestions";
+export type { CanRenderGuidedQuestionsArgs } from "./canRenderGuidedQuestions";
 
 export type ShouldRenderGuidedCompletionPanelArgs = {
   bodyUsable: boolean;
@@ -23,19 +26,11 @@ export function variableHasSelectableAnswerPath(variable: DealVariable): boolean
 
 /** True only when the guided panel can show a real, actionable question. */
 export function shouldRenderGuidedCompletionPanel(args: ShouldRenderGuidedCompletionPanelArgs): boolean {
-  if (!args.bodyUsable) return false;
-  const session = args.session;
-  if (!session || session.queue.length === 0) return false;
-
-  const hasUnresolved = session.queue.some(
-    (id) => !session.answered[id] && !session.skipped.has(id),
-  );
-  if (!hasUnresolved) return false;
-
-  const current = getCurrentVariable(session);
-  if (!current) return false;
-
-  return variableHasSelectableAnswerPath(current) && current.question.trim().length > 8;
+  return computeCanRenderGuidedQuestions({
+    bodyUsable: args.bodyUsable,
+    session: args.session,
+    guidedPanelMounted: true,
+  });
 }
 
 /** When false, callers must not show Needs-details / tighten-items / empty guided wrapper copy. */

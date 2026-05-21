@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { resolveFinalizeReadiness } from "../finalizeReadinessModel";
 import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQuestionEngine";
 import {
+  LIGHTHOUSE_APEX_LOOSE_QA_INTAKE,
   LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE,
   lighthouseApexMigrationBodyFixture,
 } from "../qaManualTenPrompts";
+import { computeCanRenderGuidedQuestions } from "./canRenderGuidedQuestions";
 import { applyProBodyHardIntegrityGate } from "./proBodyHardIntegrityGate";
 import {
   bodyHasLoosePhaseScheduleBeforeSignatures,
@@ -134,5 +136,20 @@ describe("servicesMigrationGuidedCompletion", () => {
     const out = applyProBodyHardIntegrityGate(body, gateCtx);
     expect(out.text.toLowerCase()).not.toMatch(/to be confirmed in a supplemental schedule/);
     expect(out.repairs).toContain("supplemental_schedule→schedule_a_ref");
+  });
+
+  it("loose lighthouse intake with TBD/??? table: canRenderGuidedQuestions and fee/phase Q1", () => {
+    const looseSession = buildGuidedSessionFromAgreement({
+      intakeRaw: LIGHTHOUSE_APEX_LOOSE_QA_INTAKE,
+      body,
+    })!;
+    expect(
+      computeCanRenderGuidedQuestions({ bodyUsable: true, session: looseSession, guidedPanelMounted: true }),
+    ).toBe(true);
+    const q1 = getCurrentVariable(looseSession)!;
+    expect(variableHasSelectableAnswerPath(q1)).toBe(true);
+    expect(
+      ["project_fee_phase_confirmation", "total_fee_confirmation", "phase_payment_allocation", "supplemental_schedule_confirmation"],
+    ).toContain(q1.id);
   });
 });

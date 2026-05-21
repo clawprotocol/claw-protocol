@@ -13,6 +13,7 @@ const MAX_INTRO_LABELS = 3;
 const GUIDED_ID_PRIORITY: Record<string, number> = {
   ip_ownership_contradiction: -2,
   term_structure_contradiction: -1,
+  project_fee_phase_confirmation: 0,
   supplemental_schedule_confirmation: 0,
   total_fee_confirmation: 1,
   phase_payment_allocation: 2,

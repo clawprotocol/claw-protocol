@@ -13,6 +13,7 @@ import {
   hasSemanticMaterialGaps,
   semanticGapsToMaterialItems,
 } from "./semanticContractCompleteness";
+import { variableHasSelectableAnswerPath } from "./shouldRenderGuidedCompletionPanel";
 import { detectContradictoryTerms, detectIpOwnershipContradiction } from "./detectContradictoryTerms";
 import { enrichDealVariables } from "./intakeRecommendationEngine";
 import { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
@@ -95,6 +96,7 @@ const PRESERVE_MATERIAL_IDS = new Set([
   "payment_timing_to_be_confirmed",
   "as_specified_in_schedule_a",
   "deal_terms_confirmation",
+  "project_fee_phase_confirmation",
   "governing_venue",
   "duplicate_boilerplate_cleanup",
 ]);
@@ -324,7 +326,21 @@ function inferServicesMigrationVariablesFromIntake(
       canProceedWithoutAnswer: true,
     });
   }
-  if (signals.vagueFee || /\bto be confirmed\b/i.test(low)) {
+  if (
+    (signals.vagueFee || /\bto be confirmed\b/i.test(low)) &&
+    (signals.mentionsPhases || /\b(?:TBD|\?\?\?)\b/i.test(intakeRaw))
+  ) {
+    push({
+      id: "project_fee_phase_confirmation",
+      severity: "material",
+      label: "Project fee and phases",
+      question: "Confirm the total project fee and how it splits across build, rollout, and support phases.",
+      whyItMatters: "Fee and phase economics are still open — confirm before execution.",
+      suggestedAnswerFormat: "e.g. $120,000 total: 40% build, 40% rollout, 20% support",
+      affectsSections: ["Compensation", "Schedule A", "Milestones"],
+      canProceedWithoutAnswer: false,
+    });
+  } else if (signals.vagueFee || /\bto be confirmed\b/i.test(low)) {
     push({
       id: "total_fee_confirmation",
       severity: "material",
@@ -509,8 +525,8 @@ export function extractDealVariables(args: {
         id: "deal_terms_confirmation",
         severity: "material",
         agreementFamily: familyHint,
-        label: "Key commercial terms",
-        question: "What key commercial term should we confirm next in this agreement?",
+        label: "Confirm remaining deal terms",
+        question: "Which deal terms should LawDog lock before signature?",
         whyItMatters: "The draft still contains unresolved business language.",
         suggestedAnswerFormat: "Specific fee, SLA, ownership, or venue term",
         affectsSections: ["General"],
@@ -519,7 +535,31 @@ export function extractDealVariables(args: {
     }
     vars = dedupeVariables(fallbackItems.map((m) => materialItemToDealVariable(m, intake)));
   }
+  vars = ensureRenderableGuidedVariables(vars, intake, body, family);
   return enrichDealVariables(intake || null, vars);
+}
+
+/** Guarantee at least one variable with selectable pills when gaps exist. */
+export function ensureRenderableGuidedVariables(
+  variables: DealVariable[],
+  intake: string,
+  body: string,
+  family: MaterialMissingItem["agreementFamily"],
+): DealVariable[] {
+  if (variables.some((v) => variableHasSelectableAnswerPath(v))) return variables;
+  if (!hasSemanticMaterialGaps(body, intake) && body.length < 400) return variables;
+  const fallback: MaterialMissingItem = {
+    id: "deal_terms_confirmation",
+    severity: "material",
+    agreementFamily: family,
+    label: "Confirm remaining deal terms",
+    question: "Which deal terms should LawDog lock before signature?",
+    whyItMatters: "The draft still contains unresolved business language.",
+    suggestedAnswerFormat: "Use standard terms or add custom details",
+    affectsSections: ["General"],
+    canProceedWithoutAnswer: true,
+  };
+  return dedupeVariables([...variables, materialItemToDealVariable(fallback, intake)]);
 }
 
 export function dealVariablesFromMaterialItems(

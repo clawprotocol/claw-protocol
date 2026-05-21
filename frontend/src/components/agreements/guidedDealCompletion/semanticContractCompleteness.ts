@@ -60,6 +60,13 @@ const COMMERCIAL_AMBIGUITY_RES: readonly { re: RegExp; id: string; label: string
   { re: /\bto be confirmed in writing\b/i, id: "writing_before_execution", label: "Written confirmation" },
   { re: /\bmutually agreed\b/i, id: "payment_structure", label: "Mutually agreed terms" },
   { re: /\bto be agreed\b/i, id: "payment_structure", label: "To be agreed" },
+  { re: /\bwill be confirmed\b/i, id: "writing_before_execution", label: "Will be confirmed" },
+  { re: /\bmaybe\b/i, id: "total_fee_confirmation", label: "Uncertain fee (maybe)" },
+  { re: /\b\?\?\?\b/, id: "phase_payment_allocation", label: "Unresolved phase value" },
+  { re: /\b(?:build|rollout|support)\b[^\n]{0,40}\bTBD\b/i, id: "phase_payment_allocation", label: "Phase TBD" },
+  { re: /\bsupport details to be confirmed\b/i, id: "support_obligations", label: "Support TBD" },
+  { re: /\bpossible total\b/i, id: "total_fee_confirmation", label: "Possible total fee" },
+  { re: /\bas set forth in schedule a\b/i, id: "as_specified_in_schedule_a", label: "Schedule A reference" },
 ];
 
 const GENERIC_FALLBACK_SNIPPETS: readonly RegExp[] = [
@@ -223,11 +230,21 @@ const GAP_TEMPLATES: Record<
   deal_terms_confirmation: {
     kind: "commercial_ambiguity",
     id: "deal_terms_confirmation",
-    label: "Key commercial terms",
-    question: "What key commercial term should we confirm next in this agreement?",
+    label: "Confirm remaining deal terms",
+    question: "Which deal terms should LawDog lock before signature?",
     whyItMatters: "The draft still contains unresolved business language.",
     suggestedAnswerFormat: "Specific fee, SLA, ownership, or venue term",
     affectsSections: ["General"],
+    severity: "material",
+  },
+  project_fee_phase_confirmation: {
+    kind: "operational_phase",
+    id: "project_fee_phase_confirmation",
+    label: "Project fee and phases",
+    question: "Confirm the total project fee and how it splits across build, rollout, and support phases.",
+    whyItMatters: "Fee and phase economics are still open — confirm before execution.",
+    suggestedAnswerFormat: "e.g. $120,000 total: 40% build, 40% rollout, 20% support",
+    affectsSections: ["Compensation", "Schedule A", "Milestones"],
     severity: "material",
   },
 };
@@ -397,6 +414,26 @@ function detectOperationalIncompleteness(
   return out;
 }
 
+function hasIncompleteScheduleAReference(body: string): boolean {
+  if (!/\b(?:as set forth in|see|per)\s+schedule\s+a\b/i.test(body)) return false;
+  return !/\n\s*SCHEDULE\s+A\s*(?:[-—]|—\s*Phase|\n)/i.test(body);
+}
+
+/** Pasted intake tables with TBD / ??? in phase rows. */
+export function detectIntakePhaseTableGaps(intakeRaw?: string | null): SemanticContractGap[] {
+  const intake = (intakeRaw || "").trim();
+  if (!intake) return [];
+  const hasTable =
+    /\|[^\n]*\|/.test(intake) ||
+    (/\b(?:build|rollout|support)\b/i.test(intake) && /\b(?:TBD|\?\?\?)\b/i.test(intake));
+  if (!hasTable) return [];
+  const out: SemanticContractGap[] = [];
+  if (/\b(?:TBD|\?\?\?|maybe)\b/i.test(intake)) {
+    out.push(templateForId("project_fee_phase_confirmation"));
+  }
+  return out;
+}
+
 export function detectSemanticContractGaps(args: {
   body: string;
   intakeRaw?: string | null;
@@ -422,6 +459,19 @@ export function detectSemanticContractGaps(args: {
   for (const gap of detectEmptyClauseHeadings(body)) push(gap);
   for (const gap of detectDuplicateParagraphContamination(body)) push(gap);
   for (const gap of detectOperationalIncompleteness(body, intake, family)) push(gap);
+  for (const gap of detectIntakePhaseTableGaps(intake)) push(gap);
+
+  if (hasIncompleteScheduleAReference(body) && !seen.has("as_specified_in_schedule_a")) {
+    push(templateForId("as_specified_in_schedule_a"));
+  }
+
+  if (
+    isServicesMigrationIntake(intake, body) &&
+    (/\b(?:maybe|approximately|about)\b/i.test(intake) || /\bto be confirmed\b/i.test(body)) &&
+    !seen.has("project_fee_phase_confirmation")
+  ) {
+    push(templateForId("project_fee_phase_confirmation"));
+  }
 
   const genericHits = GENERIC_FALLBACK_SNIPPETS.filter((re) => re.test(body)).length;
   if (genericHits >= 3 && !seen.has("deal_terms_confirmation")) {

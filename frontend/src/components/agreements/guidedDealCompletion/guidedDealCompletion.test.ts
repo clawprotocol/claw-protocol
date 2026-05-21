@@ -4,7 +4,11 @@ import {
   consultingAuthoritativeBodyFixture,
   defectiveProBodyFixture,
   growthAdvisorDefectiveBodyFixture,
+  LIGHTHOUSE_APEX_LOOSE_QA_INTAKE,
+  LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE,
+  lighthouseApexMigrationBodyFixture,
   QA_MANUAL_TEN_PROMPTS,
+  semanticallyIncompleteProBodyFixture,
 } from "../qaManualTenPrompts";
 import { CONTRACTOR_DEVELOPER_QA_INTAKE, contractorDeveloperBodyFixture } from "../qaManualTenPrompts";
 import {
@@ -14,10 +18,18 @@ import {
 import { enrichDealVariableFromIntake, RECOMMEND_PILL_ID, resolveRecommendForMe } from "./intakeRecommendationEngine";
 import { GUIDED_COMPLETION_HEADING } from "./friendlyProCompletionCopy";
 import {
+  computeCanRenderGuidedQuestions,
+  finalizeTaglineForGuidedState,
+  GUIDED_NEUTRAL_REVIEW_COPY,
+  mayShowCompleteAgreementBelowCopy,
+  mayShowNeedsDetailsMessaging,
+} from "./canRenderGuidedQuestions";
+import {
   enforceNeedsDetailsGuidedInvariant,
   resolveDisplayReadinessWithGuidedInvariant,
   shouldRenderGuidedCompletionPanel,
   shouldShowGuidedNeedsDetailsMessaging,
+  variableHasSelectableAnswerPath,
 } from "./shouldRenderGuidedCompletionPanel";
 import { finalizeAgreementOutput } from "../agreementOutputQuality/agreementOutputQualityPipeline";
 import { validateAgreementIntegrity } from "./agreementIntegrityValidator";
@@ -180,7 +192,8 @@ describe("guidedDealCompletion", () => {
             affectsSections: ["compensation"],
           },
         ],
-      }),
+      })!,
+      true,
     );
     expect(copy.title).toContain("almost done");
     expect(copy.body).not.toMatch(/employment contractor/i);
@@ -669,5 +682,85 @@ describe("guidedDealCompletion", () => {
         materialItems: [{ id: "x", label: "x", question: "Confirm something?", severity: "material", agreementFamily: "generic_business_agreement", whyItMatters: "x", suggestedAnswerFormat: "x", canProceedWithoutAnswer: true, affectsSections: [] }],
       }),
     ).toBe(false);
+  });
+});
+
+describe("canRenderGuidedQuestions UI invariant", () => {
+  const migrationBody = lighthouseApexMigrationBodyFixture();
+
+  it("lighthouse loose intake: canRenderGuidedQuestions true and first question is selectable", () => {
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: LIGHTHOUSE_APEX_LOOSE_QA_INTAKE,
+      body: migrationBody,
+    })!;
+    expect(
+      computeCanRenderGuidedQuestions({ bodyUsable: true, session, guidedPanelMounted: true }),
+    ).toBe(true);
+    const current = getCurrentVariable(session)!;
+    expect(variableHasSelectableAnswerPath(current)).toBe(true);
+    expect(current.question.trim().length).toBeGreaterThan(8);
+    expect(
+      ["project_fee_phase_confirmation", "total_fee_confirmation", "phase_payment_allocation", "supplemental_schedule_confirmation"],
+    ).toContain(current.id);
+  });
+
+  it("never shows Needs details or below-copy when guided queue is not renderable", () => {
+    expect(mayShowNeedsDetailsMessaging(false, "needs_details")).toBe(false);
+    expect(mayShowCompleteAgreementBelowCopy(false)).toBe(false);
+    expect(finalizeTaglineForGuidedState(3, "needs_details", false)).toBe(GUIDED_NEUTRAL_REVIEW_COPY);
+    expect(finalizeTaglineForGuidedState(3, "needs_details", false)).not.toMatch(/Complete your agreement/i);
+    expect(finalizeTaglineForGuidedState(3, "needs_details", false)).not.toMatch(/Tighten the items below/i);
+  });
+
+  it("semantic placeholders without literal TBD still enable canRenderGuidedQuestions", () => {
+    const body = semanticallyIncompleteProBodyFixture();
+    const session = buildGuidedSessionFromAgreement({
+      body,
+      intakeRaw: "Services agreement. Fee maybe $50k.",
+    })!;
+    expect(computeCanRenderGuidedQuestions({ bodyUsable: true, session })).toBe(true);
+  });
+
+  it("malformed pasted phase table with TBD/??? generates fee/phase guided variables", () => {
+    const vars = extractDealVariables({
+      intakeRaw: LIGHTHOUSE_APEX_LOOSE_QA_INTAKE,
+      body: migrationBody,
+    });
+    expect(vars.some((v) => v.id === "project_fee_phase_confirmation")).toBe(true);
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: LIGHTHOUSE_APEX_LOOSE_QA_INTAKE,
+      body: migrationBody,
+    })!;
+    expect(session.queue.length).toBeGreaterThan(0);
+  });
+
+  it("lighthouse canonical intake still builds renderable guided session", () => {
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE,
+      body: migrationBody,
+    })!;
+    expect(computeCanRenderGuidedQuestions({ bodyUsable: true, session })).toBe(true);
+  });
+
+  it("hard gate removes duplicate indemnity fragments and orphan survival lines from services body", () => {
+    const dupBody = [
+      migrationBody,
+      "",
+      "9. INDEMNITY",
+      "Provider will indemnify Client for third-party claims arising from negligence.",
+      "",
+      "9. INDEMNITY",
+      "Provider will indemnify Client for third-party claims arising from negligence.",
+      "",
+      "Survival and wind-down obligations apply as stated herein.",
+    ].join("\n");
+    const out = applyProBodyHardIntegrityGate(dupBody, {
+      intakeRaw: LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE,
+      agreementFamily: "services_agreement",
+      surface: "pro",
+    });
+    const indemnityHits = (out.text.match(/Provider will indemnify Client for third-party claims/gi) || []).length;
+    expect(indemnityHits).toBeLessThanOrEqual(1);
+    expect(out.text).not.toMatch(/\n\s*Survival and wind-down[^\n]+\n\s*IN WITNESS/i);
   });
 });

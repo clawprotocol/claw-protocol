@@ -1,3 +1,8 @@
+import {
+  GUIDED_NEUTRAL_REVIEW_COPY,
+  GUIDED_NEUTRAL_REVIEW_TITLE,
+  computeCanRenderGuidedQuestions,
+} from "./canRenderGuidedQuestions";
 import type { GuidedCompletionSession } from "./types";
 import { guidedSessionIntro, importantVariableCount } from "./guidedCompletionEngine";
 
@@ -22,25 +27,22 @@ export function sanitizeProUserMessage(message: string | null | undefined): stri
 
 export function friendlyLowConfidenceCopy(
   session: GuidedCompletionSession | null,
-  panelRenderable = true,
+  canRenderGuidedQuestions = false,
 ): {
   title: string;
   body: string;
 } {
-  if (!panelRenderable) {
+  const canRender =
+    canRenderGuidedQuestions &&
+    computeCanRenderGuidedQuestions({ bodyUsable: true, session, guidedPanelMounted: true });
+  if (!canRender) {
     return {
-      title: "Draft ready to review.",
-      body: "Draft ready to review — optional edits can still be made below.",
+      title: GUIDED_NEUTRAL_REVIEW_TITLE,
+      body: GUIDED_NEUTRAL_REVIEW_COPY,
     };
   }
-  if (!session || session.queue.length === 0) {
-    return {
-      title: "Draft ready to review.",
-      body: "Draft ready to review — optional edits can still be made below.",
-    };
-  }
-  const intro = guidedSessionIntro(session);
-  const n = importantVariableCount(session);
+  const intro = guidedSessionIntro(session!);
+  const n = importantVariableCount(session!);
   return {
     title: "We're almost done.",
     body:

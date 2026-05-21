@@ -385,6 +385,11 @@ function normalizeParagraphKey(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function boilerplateContentKey(block: string): string {
+  const withoutHeadings = block.replace(/^\s*\d+(?:\.\d+)*\s+[^\n]+\n?/gm, "").trim();
+  return normalizeParagraphKey(withoutHeadings || block);
+}
+
 /** Remove duplicate indemnity/confidentiality/fallback paragraphs (keep first occurrence). */
 function dedupeRepeatedBoilerplateParagraphs(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
@@ -393,22 +398,37 @@ function dedupeRepeatedBoilerplateParagraphs(text: string): { text: string; repa
   const out: string[] = [];
   for (const block of blocks) {
     const trimmed = block.trim();
-    if (trimmed.length < 60) {
-      out.push(block);
-      continue;
-    }
-    const key = normalizeParagraphKey(trimmed);
+    if (!trimmed) continue;
+    const contentKey = boilerplateContentKey(trimmed);
     const isBoilerplate =
-      /\b(?:each party will indemnify|confidential information|commercially reasonable efforts|fees and payment timing will be confirmed)\b/i.test(
+      /\b(?:each party will indemnify|provider will indemnify|confidential information|commercially reasonable efforts|fees and payment timing will be confirmed)\b/i.test(
         trimmed,
       );
-    if (isBoilerplate && seen.has(key)) {
+    if (isBoilerplate && contentKey.length >= 40 && seen.has(contentKey)) {
       repairs.push("duplicate_boilerplate_removed");
       continue;
     }
-    if (isBoilerplate) seen.add(key);
+    if (isBoilerplate && contentKey.length >= 40) seen.add(contentKey);
     out.push(block);
   }
+  let working = out.join("\n\n").replace(/\n{3,}/g, "\n\n");
+  const lineSeen = new Set<string>();
+  const lines = working.split("\n");
+  const lineOut: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    const lineKey = normalizeParagraphKey(t);
+    if (
+      /\bprovider will indemnify client for third-party claims\b/i.test(t) &&
+      lineSeen.has(lineKey)
+    ) {
+      repairs.push("duplicate_boilerplate_removed");
+      continue;
+    }
+    if (/\bprovider will indemnify\b/i.test(t)) lineSeen.add(lineKey);
+    lineOut.push(line);
+  }
+  working = lineOut.join("\n");
   if (!repairs.length) return { text, repairs };
-  return { text: out.join("\n\n").replace(/\n{3,}/g, "\n\n"), repairs };
+  return { text: working, repairs };
 }

@@ -97,6 +97,17 @@ export const QA_MANUAL_TEN_PROMPTS: readonly QaManualPromptFixture[] = [
 export const LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE =
   "Create a technology services agreement between Lighthouse Digital and Apex Ops for AI migration, custom analytics dashboards, onboarding, and ongoing support. Total fee maybe $120,000 across build, rollout, and support phases. Month-to-month with renewal unless terminated. Texas law maybe. Include confidentiality, IP ownership, security obligations, and SLA uptime.";
 
+/** Loose Lighthouse/Apex intake with malformed phase table — reproduces empty Needs-details panel QA. */
+export const LIGHTHOUSE_APEX_LOOSE_QA_INTAKE = [
+  "Create a technology services agreement between Lighthouse Digital and Apex Ops for AI migration, custom analytics dashboards, onboarding, and ongoing support.",
+  "Total project fee maybe $120,000. Term probably 12 months. Auto renew? Texas law maybe.",
+  "",
+  "| Phase | Amount | Timing |",
+  "| Build | TBD | TBD |",
+  "| Rollout | TBD | TBD |",
+  "| Support | ??? | ??? |",
+].join("\n");
+
 /** Contractor/developer intake with IP and term contradictions. */
 export const CONTRACTOR_DEVELOPER_QA_INTAKE =
   "Need a contractor agreement for a developer. They should own all their work product but we also need full exclusive ownership of everything they create. The arrangement is month-to-month but should automatically lock in for 3 years unless terminated. Need it simple and founder-friendly.";

@@ -1,5 +1,5 @@
 import type { MaterialMissingItem } from "../proAgreementCompleteness/types";
-import { extractDealVariables } from "./missingVariableExtractor";
+import { ensureRenderableGuidedVariables, extractDealVariables } from "./missingVariableExtractor";
 import {
   buildGuidedCompletionIntro,
   computeCompletenessPercent,
@@ -14,13 +14,17 @@ export function buildGuidedSessionFromAgreement(args: {
   materialItems?: readonly MaterialMissingItem[];
   agreementFamily?: CommercialFamilyHint;
 }): GuidedCompletionSession | null {
-  const variables = extractDealVariables({
+  const intake = (args.intakeRaw || "").trim();
+  const body = (args.body || "").trim();
+  let variables = extractDealVariables({
     intakeRaw: args.intakeRaw,
     body: args.body,
     materialItems: args.materialItems,
   });
+  const family =
+    args.agreementFamily ?? variables[0]?.applicableAgreementFamilies[0] ?? "generic_business_agreement";
+  variables = ensureRenderableGuidedVariables(variables, intake, body, family);
   if (!variables.length) return null;
-  const family = args.agreementFamily ?? variables[0]?.applicableAgreementFamilies[0] ?? "generic_business_agreement";
   return createGuidedCompletionSession({
     variables,
     agreementFamily: family,
@@ -157,7 +161,9 @@ const WHAT_CHANGED_BY_ID: Record<string, string> = {
   ai_ops_economics: "Added operational economics terms.",
   party_legal_names: "Added party legal names and notice details.",
   total_fee_confirmation: "Added total fee confirmation.",
+  project_fee_phase_confirmation: "Confirmed total project fee and phase allocation.",
   phase_payment_allocation: "Added phase payment allocation in Schedule A.",
+  deal_terms_confirmation: "Confirmed remaining deal terms.",
   security_obligations: "Added security and data protection obligations.",
   renewal_notice: "Clarified renewal and termination notice.",
   supplemental_schedule_confirmation: "Added Schedule A phase and payment terms.",
