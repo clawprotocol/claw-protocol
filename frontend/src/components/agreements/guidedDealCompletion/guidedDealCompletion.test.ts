@@ -210,6 +210,9 @@ describe("guidedDealCompletion", () => {
       materialItems: material,
     })!;
     const locked = lockGuidedSession(full, key);
+    expect(locked.sessionKey).toBe(key);
+    expect(locked.frozenTotalQuestions).toBe(4);
+    expect(locked.variables.length).toBeGreaterThan(0);
     const persisted = {
       sessionKey: key,
       frozenTotalQuestions: 4,
