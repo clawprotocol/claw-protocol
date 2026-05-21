@@ -93,6 +93,10 @@ export const QA_MANUAL_TEN_PROMPTS: readonly QaManualPromptFixture[] = [
   },
 ] as const;
 
+/** Contractor/developer intake with IP and term contradictions. */
+export const CONTRACTOR_DEVELOPER_QA_INTAKE =
+  "Need a contractor agreement for a developer. They should own all their work product but we also need full exclusive ownership of everything they create. The arrangement is month-to-month but should automatically lock in for 3 years unless terminated. Need it simple and founder-friendly.";
+
 /** QA intake for guided completion — evolving scope, support, IP, vague fees. */
 export const CONSULTING_DEV_QA_INTAKE =
   "Create a consulting agreement for a developer helping rebuild our internal workflow systems and AI automation stack. The engagement is remote and should include confidentiality, IP ownership, and support obligations. We want flexibility because scope may evolve over time.";
@@ -134,6 +138,43 @@ export function consultingAuthoritativeBodyFixture(): string {
     "Direct damages are limited to fees paid in the prior three months.",
     "",
     "IN WITNESS WHEREOF, the parties may execute this Agreement.",
+    "By: ____________________",
+  ].join("\n");
+}
+
+/** Contractor Pro body with empty headings and compensation splices. */
+export function contractorDeveloperBodyFixture(): string {
+  return [
+    "DEVELOPER CONTRACTOR AGREEMENT",
+    "This Agreement is between Company and Contractor.",
+    "",
+    "1. SERVICES",
+    "Contractor will provide development services.",
+    "",
+    "1.2 Deliverables.",
+    "",
+    "2. COMPENSATION",
+    "Compensation, invoicing, and payment timing will be documented in a schedule or written statement agreed before work begins.",
+    "",
+    "3. INTELLECTUAL PROPERTY",
+    "3.1 Work Made for Hire; Assignment.",
+    "Compensation, invoicing, and payment timing will be documented in a schedule or written statement agreed before work begins.",
+    "3.5 No Conflicting Rights.",
+    "",
+    "6. WARRANTIES",
+    "6.2 Contractor Warranties.",
+    "",
+    "7. Pre-Existing Materials and Background Tools.",
+    "",
+    "9. Confidentiality.",
+    "",
+    "11. Contractor Representations and Warranties.",
+    "",
+    "7. TERM AND TERMINATION",
+    "7.6 Effect of Termination.",
+    "7.7 Survival.",
+    "",
+    "IN WITNESS WHEREOF, the parties may execute this Agreement on the date of last signature below.",
     "By: ____________________",
   ].join("\n");
 }
