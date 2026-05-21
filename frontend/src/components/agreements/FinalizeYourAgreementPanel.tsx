@@ -659,7 +659,7 @@ export function FinalizeYourAgreementPanel({
         className="mb-4 rounded-xl border border-slate-600/45 bg-slate-950/60 px-4 py-3 text-xs leading-relaxed text-slate-400 sm:mb-5 sm:text-sm"
         role="status"
       >
-        Finish the remaining questions first — we&apos;ll keep updating your draft.
+        Finish guided completion first — we&apos;ll apply your answers in one clean pass.
       </p>
     );
   }

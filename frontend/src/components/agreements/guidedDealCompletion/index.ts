@@ -18,6 +18,7 @@ export {
   getCurrentVariable,
   applyGuidedAnswer,
   applyGuidedAnswerTransaction,
+  clearGuidedAnswer,
   skipGuidedVariable,
   formatRefineInstructionForAnswer,
   isGuidedCompletionComplete,
@@ -52,6 +53,32 @@ export {
   shouldPreferGuidedCompletionOverRetry,
 } from "./friendlyProCompletionCopy";
 export { GuidedDealCompletionPanel } from "./GuidedDealCompletionPanel";
+export type { GuidedCompletionPhase } from "./guidedCompletionPhase";
+export { guidedPhaseSuppressesSendCta, guidedPhaseBlocksDocumentSwap } from "./guidedCompletionPhase";
+export { resolveImplementationPreview } from "./guidedImplementationPreview";
+export {
+  resolveGuidedQuestionConfig,
+  resolveOptionDisplayCopy,
+  buildBulkApplyChecklist,
+  buildFinalAppliedAreaLabels,
+  normalizeWhyText,
+  resolveQuestionNumber,
+} from "./guidedQuestionConfig";
+export { GuidedQuestionOptionCard } from "./GuidedQuestionOptionCard";
+export { GuidedBulkApplyChecklist } from "./GuidedBulkApplyChecklist";
+export { GuidedAppliedAreasSummary } from "./GuidedAppliedAreasSummary";
+export {
+  buildConsolidatedGuidedRegenerationPrompt,
+  buildAppliedChangesFromSession,
+  validateGuidedBulkRegeneration,
+  GUIDED_BULK_FAIL_USER_MESSAGE,
+  sessionReadyForBulkApply,
+  logGuidedAllAnswersReady,
+  logGuidedBulkRegenerationStart,
+  logGuidedBulkRegenerationSuccess,
+  logGuidedBulkRegenerationFailed,
+} from "./guidedBulkRegeneration";
+export type { GuidedAnswerMeta } from "./types";
 export type { GuidedAppliedChange } from "./guidedChangeTypes";
 export { GuidedChangeCard } from "./GuidedChangeCard";
 export { GuidedAppliedChangesReview } from "./GuidedAppliedChangesReview";

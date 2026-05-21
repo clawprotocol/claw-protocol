@@ -6,7 +6,7 @@ import {
   createGuidedCompletionSession,
 } from "./variablePrioritizationLayer";
 import type { CommercialFamilyHint } from "../proAgreementCompleteness/types";
-import type { DealVariable, DealVariableCategory, GuidedCompletionSession } from "./types";
+import type { DealVariable, DealVariableCategory, GuidedAnswerMeta, GuidedCompletionSession } from "./types";
 
 export function buildGuidedSessionFromAgreement(args: {
   intakeRaw?: string | null;
@@ -71,6 +71,7 @@ export function applyGuidedAnswerTransaction(
   variableId: string,
   answer: string,
   bodyLen?: number,
+  meta?: GuidedAnswerMeta,
 ): GuidedCompletionSession {
   const trimmed = (answer || "").trim();
   const answered = { ...session.answered, [variableId]: trimmed };
@@ -78,10 +79,49 @@ export function applyGuidedAnswerTransaction(
     ...(session.answeredAt ?? {}),
     [variableId]: Date.now(),
   };
+  const answeredMeta = meta
+    ? { ...(session.answeredMeta ?? {}), [variableId]: meta }
+    : session.answeredMeta;
   const next: GuidedCompletionSession = {
     ...session,
     answered,
     answeredAt,
+    answeredMeta,
+    queue: [...session.queue],
+    variables: [...session.variables],
+    frozenTotalQuestions: session.frozenTotalQuestions ?? session.queue.length,
+    skipped: new Set(session.skipped),
+  };
+  const idx = resolveGuidedCurrentIndex(next);
+  return {
+    ...next,
+    currentIndex: idx,
+    completenessPercent: computeCompletenessPercent({
+      totalVariables: next.frozenTotalQuestions ?? next.queue.length,
+      answeredCount: Object.keys(answered).length,
+      skippedCount: next.skipped.size,
+      bodyLen,
+    }),
+  };
+}
+
+/** Remove a saved answer so the user can re-answer before bulk apply. */
+export function clearGuidedAnswer(
+  session: GuidedCompletionSession,
+  variableId: string,
+  bodyLen?: number,
+): GuidedCompletionSession {
+  const answered = { ...session.answered };
+  delete answered[variableId];
+  const answeredAt = { ...(session.answeredAt ?? {}) };
+  delete answeredAt[variableId];
+  const answeredMeta = { ...(session.answeredMeta ?? {}) };
+  delete answeredMeta[variableId];
+  const next: GuidedCompletionSession = {
+    ...session,
+    answered,
+    answeredAt,
+    answeredMeta,
     queue: [...session.queue],
     variables: [...session.variables],
     frozenTotalQuestions: session.frozenTotalQuestions ?? session.queue.length,

@@ -67,6 +67,8 @@ export type GuidedCompletionSession = {
   sessionKey?: string;
   /** Frozen at first lock — stable "Question X of Y" for the review session. */
   frozenTotalQuestions?: number;
+  /** Per-answer UX metadata (reason, implementation preview) — not required for refine. */
+  answeredMeta?: Record<string, GuidedAnswerMeta>;
 };
 
 export type GuidedCompletionIntro = {
@@ -74,4 +76,10 @@ export type GuidedCompletionIntro = {
   subline: string;
   completenessPercent: number;
   remainingLabels: string[];
+};
+
+export type GuidedAnswerMeta = {
+  recommendationReason: string | null;
+  implementationPreview: string;
+  targetSectionLabel: string;
 };

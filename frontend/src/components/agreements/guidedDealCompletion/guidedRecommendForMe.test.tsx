@@ -131,21 +131,22 @@ describe("GuidedDealCompletionPanel recommend click", () => {
     cleanup();
   });
 
-  it("fires onApplyAnswer when Recommend for me is clicked (direct or card)", async () => {
+  it("fires onSaveAnswer when Recommend for me is clicked (direct or card)", async () => {
     const session = buildGuidedSessionFromAgreement({
       intakeRaw: AI_AUTOMATION_SERVICES_QA_INTAKE,
       body,
       materialItems: buildMaterialMissingItems({ intakeRaw: AI_AUTOMATION_SERVICES_QA_INTAKE, body }),
     })!;
-    const onApplyAnswer = vi.fn().mockResolvedValue(true);
+    const onSaveAnswer = vi.fn();
     const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
     render(
       <GuidedDealCompletionPanel
         session={session}
         intakeRaw={AI_AUTOMATION_SERVICES_QA_INTAKE}
+        phase="collecting_answers"
         onSessionChange={() => {}}
-        onApplyAnswer={onApplyAnswer}
+        onSaveAnswer={onSaveAnswer}
       />,
     );
 
@@ -154,7 +155,7 @@ describe("GuidedDealCompletionPanel recommend click", () => {
 
     await waitFor(() => {
       const clicked = logSpy.mock.calls.some((c) => c[0] === "[guided-recommend-click]");
-      const applied = onApplyAnswer.mock.calls.length > 0;
+      const applied = onSaveAnswer.mock.calls.length > 0;
       const cardShown = screen.queryByText(/Use this recommendation/i);
       expect(clicked || applied || cardShown).toBeTruthy();
     });
@@ -162,13 +163,13 @@ describe("GuidedDealCompletionPanel recommend click", () => {
     const resolved = logSpy.mock.calls.some((c) => c[0] === "[guided-recommend-resolved]");
     expect(resolved).toBe(true);
 
-    if (onApplyAnswer.mock.calls.length === 0) {
+    if (onSaveAnswer.mock.calls.length === 0) {
       const useBtn = screen.getByRole("button", { name: /Use this recommendation/i });
       fireEvent.click(useBtn);
-      await waitFor(() => expect(onApplyAnswer).toHaveBeenCalled());
+      await waitFor(() => expect(onSaveAnswer).toHaveBeenCalled());
     }
 
-    expect(onApplyAnswer.mock.calls[0][2].length).toBeGreaterThan(0);
+    expect(onSaveAnswer.mock.calls[0][1].length).toBeGreaterThan(0);
     logSpy.mockRestore();
   });
 });
