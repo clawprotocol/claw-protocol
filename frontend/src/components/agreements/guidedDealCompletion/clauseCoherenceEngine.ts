@@ -22,6 +22,26 @@ const CONCEPT_PATTERNS: readonly { id: string; re: RegExp; allowedHeadingRe: Reg
     allowedHeadingRe: /payment|fee|compensation|invoic/i,
   },
   {
+    id: "invoice_billing_contact",
+    re: /\binvoices?\s+will\s+be\s+sent\s+to\s+the\s+billing\s+contact\b[^.!?]*[.!?]\s*/gi,
+    allowedHeadingRe: /payment|fee|compensation|invoic|billing/i,
+  },
+  {
+    id: "payment_timing_confirm",
+    re: /\bfees\s+and\s+payment\s+timing\s+will\s+be\s+confirmed\b[^.!?]*[.!?]\s*/gi,
+    allowedHeadingRe: /payment|fee|compensation|invoic|referral|commission/i,
+  },
+  {
+    id: "orphan_lol_fragment",
+    re: /\bfor\s+indirect\s+or\s+consequential\s+damages\b[^.!?]*[.!?]\s*/gi,
+    allowedHeadingRe: /limitation|liability/i,
+  },
+  {
+    id: "orphan_authority_fragment",
+    re: /\bto\s+enter\s+into\s+this\s+agreement\b[^.!?]*[.!?]\s*/gi,
+    allowedHeadingRe: /warrant|represent|authority|execution/i,
+  },
+  {
     id: "lol_except",
     re: /\bexcept\s+as\s+expressly\s+stated,?\s+neither\s+party\s+is\s+liable\b[^.!?]*[.!?]\s*/gi,
     allowedHeadingRe: /limitation|liability/i,

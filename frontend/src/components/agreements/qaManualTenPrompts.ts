@@ -109,6 +109,38 @@ export function growthAdvisorDefectiveBodyFixture(): string {
   ].join("\n");
 }
 
+/** Referral/channel Pro body with invoice splices and empty headings. */
+export function referralDefectiveBodyFixture(): string {
+  return [
+    "REFERRAL PARTNER AGREEMENT",
+    "This Agreement is between ChannelCo LLC and Partner Inc.",
+    "",
+    "1. Referral Services",
+    "Partner may introduce qualified enterprise customers.",
+    "Invoices will be sent to the billing contact identified in the Notices section.",
+    "2. Compensation",
+    "2.6 Protection Period.",
+    "Fees and payment timing will be confirmed in writing before execution.",
+    "4. Confidentiality",
+    "4.1 Deal Visibility.",
+    "Invoices will be sent to the billing contact identified in the Notices section.",
+    "6.1 Confidentiality Obligations.",
+    "for indirect or consequential damages unless otherwise stated.",
+    "10. Termination",
+    "10.5 Wind-Down Cooperation.",
+    "10.7 Survival.",
+    "to enter into this Agreement upon execution.",
+    "",
+    "SIGNATURES",
+    "By: _________________________",
+    "Name:",
+    "Title:",
+    "Email:",
+    "",
+    "IN WITNESS WHEREOF, the Parties agree to execute this Agreement.",
+  ].join("\n");
+}
+
 export function defectiveProBodyFixture(): string {
   return [
     "SERVICES AGREEMENT",

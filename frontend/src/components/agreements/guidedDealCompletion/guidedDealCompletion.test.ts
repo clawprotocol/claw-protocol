@@ -14,6 +14,7 @@ import {
   frozenQuestionTotal,
   getCurrentVariable,
   isGuidedCompletionComplete,
+  skipGuidedVariable,
   whatChangedLineForGuidedVariable,
 } from "./guidedCompletionEngine";
 import { extractDealVariables } from "./missingVariableExtractor";
@@ -28,8 +29,11 @@ import {
 import {
   buildGuidedSessionKey,
   lockGuidedSession,
-  mergeGuidedSessionWithPersistence,
+  mergeGuidedSessionOnBaseRefresh,
+  preserveGuidedSessionProgress,
 } from "./guidedSessionPersistence";
+import { applyProBodyHardIntegrityGate } from "./proBodyHardIntegrityGate";
+import { referralDefectiveBodyFixture } from "../qaManualTenPrompts";
 import type { DealVariable } from "./types";
 
 describe("guidedDealCompletion", () => {
@@ -229,7 +233,12 @@ describe("guidedDealCompletion", () => {
       body: "1. Services.\nHosted software.",
       materialItems: material.slice(0, 2),
     });
-    const merged = mergeGuidedSessionWithPersistence(shrunk, persisted, key);
+    const merged = mergeGuidedSessionOnBaseRefresh(
+      locked,
+      shrunk,
+      persisted,
+      key,
+    );
     expect(merged).not.toBeNull();
     expect(frozenQuestionTotal(merged!)).toBe(4);
     expect(merged!.queue.length).toBe(4);
@@ -307,6 +316,138 @@ describe("guidedDealCompletion", () => {
       out.text.includes("Specific compensation mechanics will be completed in Schedule A") ||
         /\bSCHEDULE\s+A\b/i.test(out.text),
     ).toBe(true);
+  });
+
+  it("preserves progress after answering question 1 when base shrinks on rerender", () => {
+    const key = buildGuidedSessionKey("gen-q1", "fp-q1");
+    const items = ["referral_economics", "payment_timing", "governing_venue"] as const;
+    const material = items.map((id) => ({
+      id,
+      label: id.replace(/_/g, " "),
+      question: `Q for ${id}?`,
+      severity: "material" as const,
+      agreementFamily: "referral" as const,
+      whyItMatters: "Matters.",
+      suggestedAnswerFormat: "e.g.",
+      canProceedWithoutAnswer: true,
+      affectsSections: ["general"],
+    }));
+    const full = buildGuidedSessionFromAgreement({
+      intakeRaw: "Referral partner",
+      body: "1. Referral.\nPartner refers.",
+      materialItems: material,
+    })!;
+    const afterQ1 = applyGuidedAnswer(full, "referral_economics", "10% net revenue");
+    const merged = mergeGuidedSessionOnBaseRefresh(
+      afterQ1,
+      buildGuidedSessionFromAgreement({
+        intakeRaw: "Referral partner",
+        body: "1. Referral.\nPartner refers.",
+        materialItems: material.slice(0, 1),
+      }),
+      {
+        sessionKey: key,
+        frozenTotalQuestions: 3,
+        queue: [...items],
+        variables: full.variables,
+        answered: afterQ1.answered,
+        skippedIds: [],
+        currentIndex: afterQ1.currentIndex,
+        agreementFamily: "referral",
+      },
+      key,
+    );
+    expect(merged).not.toBeNull();
+    expect(frozenQuestionTotal(merged!)).toBe(3);
+    expect(merged!.answered.referral_economics).toBe("10% net revenue");
+    expect(getCurrentVariable(merged!)?.id).toBe("payment_timing");
+  });
+
+  it("skip advances to next variable on question 2", () => {
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: "Referral",
+      body: "1. Referral.\nPartner refers.",
+      materialItems: [
+        {
+          id: "referral_economics",
+          label: "Revenue share",
+          question: "How should referral payments work?",
+          severity: "critical",
+          agreementFamily: "referral",
+          whyItMatters: "Defines compensation.",
+          suggestedAnswerFormat: "e.g. 10%",
+          canProceedWithoutAnswer: false,
+          affectsSections: ["compensation"],
+        },
+        {
+          id: "payment_timing",
+          label: "Payment timing",
+          question: "When are referral fees paid?",
+          severity: "material",
+          agreementFamily: "referral",
+          whyItMatters: "Cash flow.",
+          suggestedAnswerFormat: "e.g. Net 30",
+          canProceedWithoutAnswer: true,
+          affectsSections: ["payment"],
+        },
+      ],
+    })!;
+    const skippedFirst = skipGuidedVariable(session, "referral_economics");
+    expect(getCurrentVariable(skippedFirst)?.id).toBe("payment_timing");
+  });
+
+  it("referral hard gate removes global invoice splices and fills empty headings", () => {
+    const intake = "Referral partner introduces enterprise accounts. Revenue share not finalized.";
+    const out = applyProBodyHardIntegrityGate(referralDefectiveBodyFixture(), {
+      intakeRaw: intake,
+      surface: "test_referral_hard",
+    });
+    const invoiceHits = (out.text.match(/Invoices will be sent to the billing contact/gi) || []).length;
+    expect(invoiceHits).toBeLessThanOrEqual(1);
+    expect(out.text).not.toMatch(/^\s*By:\s*_{3,}/m);
+    expect(out.text).not.toMatch(/\bSIGNATURES\b/i);
+    const protection = out.text.match(/2\.6 Protection Period\.[\s\S]{0,180}/)?.[0] ?? "";
+    expect(protection.length).toBeGreaterThan(50);
+    expect(protection).toMatch(/protected|twelve|Schedule A/i);
+    const confidentiality = out.text.match(/6\.1 Confidentiality Obligations\.[\s\S]{0,220}/)?.[0] ?? "";
+    expect(confidentiality.length).toBeGreaterThan(60);
+    expect(confidentiality).toMatch(/Confidential Information/i);
+  });
+
+  it("preserveGuidedSessionProgress never shrinks frozen queue", () => {
+    const key = buildGuidedSessionKey("gen-p", "fp-p");
+    const prev = lockGuidedSession(
+      {
+        variables: [],
+        queue: ["a", "b", "c"],
+        answered: { a: "yes" },
+        skipped: new Set(),
+        currentIndex: 1,
+        completenessPercent: 50,
+        agreementFamily: "referral",
+        frozenTotalQuestions: 3,
+        sessionKey: key,
+      },
+      key,
+    );
+    const incoming = lockGuidedSession(
+      {
+        variables: [],
+        queue: ["a"],
+        answered: {},
+        skipped: new Set(),
+        currentIndex: 0,
+        completenessPercent: 40,
+        agreementFamily: "referral",
+        frozenTotalQuestions: 1,
+        sessionKey: key,
+      },
+      key,
+    );
+    const kept = preserveGuidedSessionProgress(prev, incoming);
+    expect(kept.queue).toEqual(["a", "b", "c"]);
+    expect(kept.frozenTotalQuestions).toBe(3);
+    expect(kept.answered.a).toBe("yes");
   });
 
   it("finalizeAgreementOutput removes banned phrases from defective Pro body", () => {

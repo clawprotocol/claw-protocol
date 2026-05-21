@@ -20,6 +20,7 @@ export {
   skipGuidedVariable,
   formatRefineInstructionForAnswer,
   isGuidedCompletionComplete,
+  resolveGuidedCurrentIndex,
   guidedSessionIntro,
   importantVariableCount,
   whatChangedLineForGuidedVariable,
@@ -31,6 +32,9 @@ export {
   persistGuidedSession,
   clearPersistedGuidedSession,
   mergeGuidedSessionWithPersistence,
+  mergeGuidedSessionOnBaseRefresh,
+  supplementGuidedSessionFromBase,
+  preserveGuidedSessionProgress,
   lockGuidedSession,
 } from "./guidedSessionPersistence";
 export { applyProBodyHardIntegrityGate, normalizeScheduleAContent } from "./proBodyHardIntegrityGate";

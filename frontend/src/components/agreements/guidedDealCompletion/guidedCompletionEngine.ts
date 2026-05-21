@@ -28,16 +28,22 @@ export function buildGuidedSessionFromAgreement(args: {
   });
 }
 
-export function getCurrentVariable(session: GuidedCompletionSession): DealVariable | null {
-  while (session.currentIndex < session.queue.length) {
-    const id = session.queue[session.currentIndex];
-    if (session.answered[id] || session.skipped.has(id)) {
-      session.currentIndex += 1;
-      continue;
-    }
-    return session.variables.find((v) => v.id === id) ?? null;
+/** Pure resolver — never mutates session (avoids stale React state / inert controls). */
+export function resolveGuidedCurrentIndex(session: GuidedCompletionSession): number {
+  let idx = session.currentIndex;
+  while (idx < session.queue.length) {
+    const id = session.queue[idx];
+    if (!session.answered[id] && !session.skipped.has(id)) break;
+    idx += 1;
   }
-  return null;
+  return idx;
+}
+
+export function getCurrentVariable(session: GuidedCompletionSession): DealVariable | null {
+  const idx = resolveGuidedCurrentIndex(session);
+  if (idx >= session.queue.length) return null;
+  const id = session.queue[idx];
+  return session.variables.find((v) => v.id === id) ?? null;
 }
 
 export function formatRefineInstructionForAnswer(variable: DealVariable, answer: string): string {
@@ -53,12 +59,10 @@ export function applyGuidedAnswer(
   bodyLen?: number,
 ): GuidedCompletionSession {
   const answered = { ...session.answered, [variableId]: answer.trim() };
-  let idx = session.currentIndex;
-  while (idx < session.queue.length) {
-    const id = session.queue[idx];
-    if (!answered[id] && !session.skipped.has(id)) break;
-    idx += 1;
-  }
+  const idx = resolveGuidedCurrentIndex({
+    ...session,
+    answered,
+  });
   return {
     ...session,
     answered,
@@ -75,12 +79,10 @@ export function applyGuidedAnswer(
 export function skipGuidedVariable(session: GuidedCompletionSession, variableId: string, bodyLen?: number): GuidedCompletionSession {
   const skipped = new Set(session.skipped);
   skipped.add(variableId);
-  let idx = session.currentIndex;
-  while (idx < session.queue.length) {
-    const id = session.queue[idx];
-    if (!session.answered[id] && !skipped.has(id)) break;
-    idx += 1;
-  }
+  const idx = resolveGuidedCurrentIndex({
+    ...session,
+    skipped,
+  });
   return {
     ...session,
     skipped,

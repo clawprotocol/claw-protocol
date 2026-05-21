@@ -73,6 +73,8 @@ type Props = {
   disabled?: boolean;
   /** When true, hide Send for review / Send for signature row (host shows them on the paid Pro draft card). */
   deliveryCtasOnDraftCard?: boolean;
+  /** When true, guided completion owns refine UX — hide duplicate freeform refine form here. */
+  hideFreeformRefineSection?: boolean;
   /** Dev-only: logged when premium refine fails; parent supplies flags and ids. */
   devProRefineContext?: {
     handlerLabel: string;
@@ -155,6 +157,7 @@ export function FinalizeYourAgreementPanel({
   sendModeTouched,
   disabled = false,
   deliveryCtasOnDraftCard = false,
+  hideFreeformRefineSection = false,
   devProRefineContext,
 }: Props) {
   const [prompt, setPrompt] = useState("");
@@ -685,8 +688,13 @@ export function FinalizeYourAgreementPanel({
       ) : null}
 
       {deliveryCtasOnDraftCard || sendMode === "review" ? (
-        <p className="mt-3 text-xs leading-relaxed text-slate-400 sm:mt-4 sm:text-sm">{PRO_REFINE_REVISE_HELPER}</p>
+        <p className="mt-3 text-xs leading-relaxed text-slate-400 sm:mt-4 sm:text-sm">
+          {hideFreeformRefineSection
+            ? "Use Complete your agreement in the document editor above to finish key terms."
+            : PRO_REFINE_REVISE_HELPER}
+        </p>
       ) : null}
+      {hideFreeformRefineSection ? null : (
       <form onSubmit={runUpdate} className="mt-4 space-y-3 border-t border-slate-700/50 pt-4">
         <VoiceAugmentedTextArea
           ref={refineTextareaRef}
@@ -749,6 +757,7 @@ export function FinalizeYourAgreementPanel({
           </button>
         </div>
       </form>
+      )}
     </div>
   );
 }
