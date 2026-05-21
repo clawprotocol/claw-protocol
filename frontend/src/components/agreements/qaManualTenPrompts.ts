@@ -86,6 +86,29 @@ export const QA_MANUAL_TEN_PROMPTS: readonly QaManualPromptFixture[] = [
 ] as const;
 
 /** Sample Pro body with known defects — exercises visible-body repair. */
+/** Growth advisor Pro body with empty shells and banned scaffolds — exercises hard integrity gate. */
+export function growthAdvisorDefectiveBodyFixture(): string {
+  return [
+    "GROWTH ADVISOR AGREEMENT",
+    "This Agreement is between StartupCo Inc and Advisor LLC.",
+    "",
+    "1. Services",
+    "Advisor will support enterprise customer development.",
+    "The implementation plan and milestone payments shall be tracked quarterly.",
+    "2. Compensation",
+    "2.3 Invoicing and Payment.",
+    "unless a different period is stated in a schedule.",
+    "4. Confidentiality",
+    "4.1 Confidentiality Obligations.",
+    "Until then, this Section is intentionally left for completion before signing.",
+    "9.7 General",
+    "- 10% revenue share on qualified introductions",
+    "- 12-month protected opportunity period",
+    "",
+    "IN WITNESS WHEREOF, the Parties agree to execute this Agreement.",
+  ].join("\n");
+}
+
 export function defectiveProBodyFixture(): string {
   return [
     "SERVICES AGREEMENT",

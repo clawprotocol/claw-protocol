@@ -6,7 +6,7 @@ import {
   createGuidedCompletionSession,
 } from "./variablePrioritizationLayer";
 import type { CommercialFamilyHint } from "../proAgreementCompleteness/types";
-import type { DealVariable, GuidedCompletionSession } from "./types";
+import type { DealVariable, DealVariableCategory, GuidedCompletionSession } from "./types";
 
 export function buildGuidedSessionFromAgreement(args: {
   intakeRaw?: string | null;
@@ -64,7 +64,7 @@ export function applyGuidedAnswer(
     answered,
     currentIndex: idx,
     completenessPercent: computeCompletenessPercent({
-      totalVariables: session.queue.length,
+      totalVariables: session.frozenTotalQuestions ?? session.queue.length,
       answeredCount: Object.keys(answered).length,
       skippedCount: session.skipped.size,
       bodyLen,
@@ -86,7 +86,7 @@ export function skipGuidedVariable(session: GuidedCompletionSession, variableId:
     skipped,
     currentIndex: idx,
     completenessPercent: computeCompletenessPercent({
-      totalVariables: session.queue.length,
+      totalVariables: session.frozenTotalQuestions ?? session.queue.length,
       answeredCount: Object.keys(session.answered).length,
       skippedCount: skipped.size,
       bodyLen,
@@ -107,4 +107,52 @@ export function importantVariableCount(session: GuidedCompletionSession): number
     const v = session.variables.find((x) => x.id === id);
     return v && (v.severity === "critical" || v.severity === "important");
   }).length;
+}
+
+const WHAT_CHANGED_BY_ID: Record<string, string> = {
+  referral_economics: "What changed: Added referral compensation terms.",
+  payment_timing: "What changed: Added payment timing terms.",
+  saas_sla: "What changed: Added service level and uptime terms.",
+  milestone_schedule: "What changed: Added milestone and deliverable terms.",
+  governing_venue: "What changed: Added governing law and venue terms.",
+  ip_allocation: "What changed: Added intellectual property allocation terms.",
+  nda_survival: "What changed: Added confidentiality survival terms.",
+  exclusivity_scope: "What changed: Added exclusivity scope terms.",
+  audit_scope: "What changed: Added audit rights terms.",
+  license_scope: "What changed: Added license scope terms.",
+  jv_contributions: "What changed: Added joint venture contribution terms.",
+  jv_ip_governance: "What changed: Added joint venture IP governance terms.",
+  ai_deployment: "What changed: Added deployment milestone terms.",
+  ai_ops_economics: "What changed: Added operational economics terms.",
+};
+
+const WHAT_CHANGED_BY_CATEGORY: Partial<Record<DealVariableCategory, string>> = {
+  referral_economics: "What changed: Added referral compensation terms.",
+  compensation: "What changed: Added compensation terms.",
+  payment_timing: "What changed: Added payment timing terms.",
+  sla: "What changed: Added service level terms.",
+  governing_law: "What changed: Added governing law and venue terms.",
+  termination: "What changed: Added termination and notice terms.",
+  confidentiality: "What changed: Added confidentiality terms.",
+  milestones: "What changed: Added milestone terms.",
+  ip_ownership: "What changed: Added intellectual property terms.",
+};
+
+/** User-facing success line tied to the guided variable that was answered. */
+export function whatChangedLineForGuidedVariable(
+  variableId: string | null | undefined,
+  variables: readonly DealVariable[],
+): string | null {
+  if (!variableId) return null;
+  const v = variables.find((x) => x.id === variableId);
+  if (!v) return null;
+  const byId = WHAT_CHANGED_BY_ID[v.id];
+  if (byId) return byId;
+  const byCat = WHAT_CHANGED_BY_CATEGORY[v.category];
+  if (byCat) return byCat;
+  return `What changed: Added ${v.label.toLowerCase()} terms.`;
+}
+
+export function frozenQuestionTotal(session: GuidedCompletionSession): number {
+  return session.frozenTotalQuestions ?? session.queue.length;
 }

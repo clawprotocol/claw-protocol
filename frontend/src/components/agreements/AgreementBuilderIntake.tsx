@@ -106,7 +106,6 @@ import {
   PRO_REPLACED_STARTER_PREVIEW,
 } from "./draftPreviewLabels";
 import {
-  PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER,
   refineFieldHeading,
   REFINE_PERSISTED_UPDATE_FAIL_INLINE,
   REFINE_THIS_DRAFT_PLACEHOLDER,
@@ -541,10 +540,16 @@ import {
 import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPanel";
 import {
   GuidedDealCompletionPanel,
+  GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER,
   buildGuidedSessionFromAgreement,
+  buildGuidedSessionKey,
   friendlyLowConfidenceCopy,
+  mergeGuidedSessionWithPersistence,
+  persistGuidedSession,
+  readPersistedGuidedSession,
   sanitizeProUserMessage,
   shouldPreferGuidedCompletionOverRetry,
+  whatChangedLineForGuidedVariable,
   type GuidedCompletionSession,
 } from "./guidedDealCompletion";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
@@ -2248,6 +2253,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [paidProCardAiInstruction, setPaidProCardAiInstruction] = useState("");
   /** Guided deal completion: one question at a time (preserves answered/skipped across regen). */
   const [guidedCompletionSession, setGuidedCompletionSession] = useState<GuidedCompletionSession | null>(null);
+  const lastGuidedAnswerVariableIdRef = useRef<string | null>(null);
+  const guidedCompletionSessionRef = useRef<GuidedCompletionSession | null>(null);
+  const customInstructionSectionRef = useRef<HTMLDetailsElement | null>(null);
   const paidProCardDictationRef = useRef<VoiceDictationControl | null>(null);
   const [premiumSendModeUserChoice, setPremiumSendModeUserChoice] = useState<PremiumSendIntent | null>(() =>
     peekPremiumForkUserSendMode() ?? peekPremiumSendIntent(),
@@ -6887,12 +6895,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
             : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
         );
+        const guidedWhatChanged = whatChangedLineForGuidedVariable(
+          lastGuidedAnswerVariableIdRef.current,
+          guidedCompletionSessionRef.current?.variables ?? [],
+        );
+        lastGuidedAnswerVariableIdRef.current = null;
         setProRefineWhatChangedSummary(
-          useAdvisoryAppendSuccessCopy
-            ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
-            : whatChangedLine?.trim()
-              ? whatChangedLine.trim()
-              : null,
+          guidedWhatChanged ??
+            (useAdvisoryAppendSuccessCopy
+              ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
+              : whatChangedLine?.trim()
+                ? whatChangedLine.trim()
+                : null),
         );
         applyProRefineOutputToProSurfaceRef.current?.(out, {
           clearStepBuffer: true,
@@ -12919,24 +12933,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDocRefreshTick,
     authoritativePremiumUiCommitted,
   ]);
+  const guidedSessionKey = useMemo(() => {
+    const snap = readPremiumCompletionSnapshot();
+    const genId = snap?.agreementGenerationId ?? getOrInitSessionAgreementGenerationId();
+    const fp = shortIntakeFingerprint((currentPremiumMergedIntakeKey || intakeCombined).trim());
+    return buildGuidedSessionKey(String(genId), fp);
+  }, [
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+    authoritativePremiumUiCommitted,
+  ]);
   useEffect(() => {
-    if (!guidedCompletionSessionBase) {
-      setGuidedCompletionSession(null);
-      return;
+    const merged = mergeGuidedSessionWithPersistence(guidedCompletionSessionBase, readPersistedGuidedSession(), guidedSessionKey);
+    setGuidedCompletionSession(merged);
+    if (merged?.queue.length) {
+      persistGuidedSession(merged, guidedSessionKey);
     }
-    setGuidedCompletionSession((prev) => {
-      if (!prev) return guidedCompletionSessionBase;
-      if (prev.queue.join("|") !== guidedCompletionSessionBase.queue.join("|")) {
-        return guidedCompletionSessionBase;
-      }
-      return {
-        ...guidedCompletionSessionBase,
-        answered: prev.answered,
-        skipped: prev.skipped,
-        currentIndex: prev.currentIndex,
-      };
-    });
-  }, [guidedCompletionSessionBase]);
+  }, [guidedCompletionSessionBase, guidedSessionKey]);
+  const handleGuidedCompletionSessionChange = React.useCallback(
+    (next: GuidedCompletionSession) => {
+      setGuidedCompletionSession(next);
+      if (next.sessionKey) persistGuidedSession(next, next.sessionKey);
+      else if (guidedSessionKey) persistGuidedSession({ ...next, sessionKey: guidedSessionKey }, guidedSessionKey);
+    },
+    [guidedSessionKey],
+  );
   const preferGuidedCompletionOverRetry = useMemo(() => {
     const snap = readPremiumCompletionSnapshot();
     return shouldPreferGuidedCompletionOverRetry({
@@ -12958,6 +12981,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [guidedCompletionSession, guidedCompletionSessionBase],
   );
   const activeGuidedCompletionSession = guidedCompletionSession ?? guidedCompletionSessionBase;
+  guidedCompletionSessionRef.current = activeGuidedCompletionSession;
   const showStrictRetryNeedsDetailsPanel =
     !authoritativePremiumUiCommitted &&
     shouldShowRetryNeedsDetailsPanel({
@@ -16091,10 +16115,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       <div className="mt-4">
                                         <GuidedDealCompletionPanel
                                           session={activeGuidedCompletionSession}
-                                          onSessionChange={setGuidedCompletionSession}
-                                          onApplyAnswer={(instruction) => {
-                                            setPaidProCardAiInstruction(instruction);
-                                            void applyPaidProCardAiWithLawDog();
+                                          onSessionChange={handleGuidedCompletionSessionChange}
+                                          onApplyAnswer={(instruction, variableId) => {
+                                            lastGuidedAnswerVariableIdRef.current = variableId;
+                                            void runPersistedRefineFromStepBuffer(instruction, {
+                                              premiumRefineDocumentOverride:
+                                                (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim() ||
+                                                null,
+                                            });
                                           }}
                                           disabled={loading || draftPreCommitFreeze}
                                           compact
@@ -16344,10 +16372,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           activeGuidedCompletionSession.queue.length > 0 ? (
                                             <GuidedDealCompletionPanel
                                               session={activeGuidedCompletionSession}
-                                              onSessionChange={setGuidedCompletionSession}
-                                              onApplyAnswer={(instruction) => {
-                                                setPaidProCardAiInstruction(instruction);
-                                                void applyPaidProCardAiWithLawDog();
+                                              onSessionChange={handleGuidedCompletionSessionChange}
+                                              onApplyAnswer={(instruction, variableId) => {
+                                                lastGuidedAnswerVariableIdRef.current = variableId;
+                                                void runPersistedRefineFromStepBuffer(instruction, {
+                                                  premiumRefineDocumentOverride:
+                                                    (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim() ||
+                                                    null,
+                                                });
+                                              }}
+                                              onCustomPillSelected={() => {
+                                                customInstructionSectionRef.current?.setAttribute("open", "");
                                               }}
                                               disabled={
                                                 (isGenerating && !draft) ||
@@ -16367,7 +16402,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               </p>
                                             </>
                                           )}
-                                          <details className="mt-3 group">
+                                          <details ref={customInstructionSectionRef} className="mt-3 group">
                                             <summary className="cursor-pointer text-xs font-medium text-stone-600 hover:text-stone-900">
                                               {activeGuidedCompletionSession?.queue.length
                                                 ? "Add a custom instruction"
@@ -16389,8 +16424,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               autosize
                                               autosizeMaxPx={260}
                                               className="min-h-[6.5rem] w-full rounded-lg border border-stone-300/90 bg-white px-3 py-3 pb-11 pr-11 text-sm leading-relaxed text-stone-900 placeholder:text-stone-500"
-                                              placeholder={PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER}
-                                              aria-label="LawDog Pro instruction for this agreement"
+                                              placeholder={GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER}
+                                              aria-label="Additional details for LawDog"
                                             />
                                           </div>
                                           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -16402,7 +16437,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                 loading ||
                                                 draftPreCommitFreeze
                                               }
-                                              onClick={() => void applyPaidProCardAiWithLawDog()}
+                                              onClick={() => {
+                                                lastGuidedAnswerVariableIdRef.current = null;
+                                                void applyPaidProCardAiWithLawDog();
+                                              }}
                                             >
                                               {PRO_REFINE_APPLY_REVISION_BUTTON_LABEL}
                                             </button>

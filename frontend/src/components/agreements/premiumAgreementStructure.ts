@@ -42,10 +42,8 @@ const REPEATED_GOOD_FAITH_FILLER =
   "The Parties shall perform their obligations in good faith and in accordance with this Agreement.";
 
 const GENERIC_CLAUSE_BY_TOPIC: Record<string, string> = {
-  payment:
-    "Fees and invoicing follow the payment schedule in this Agreement. Invoices are due within thirty (30) days unless a different period is stated in a schedule.",
-  invoicing:
-    "Invoices shall reference the applicable milestone or service period and be sent to the billing contact in the Notices section.",
+  payment: "Fees and payment timing will be confirmed in writing before execution.",
+  invoicing: "Invoices will be sent to the billing contact identified in the Notices section.",
   warranty:
     "Each Party represents that it has authority to enter into this Agreement. Services are provided in a professional manner consistent with industry standards.",
   liability:

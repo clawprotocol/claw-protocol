@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { GuidedCompletionSession } from "./types";
 import {
   applyGuidedAnswer,
   formatRefineInstructionForAnswer,
+  frozenQuestionTotal,
   getCurrentVariable,
   guidedSessionIntro,
   isGuidedCompletionComplete,
@@ -13,8 +14,10 @@ import { GUIDED_COMPLETION_HEADING, GUIDED_COMPLETION_SUBHEADING } from "./frien
 export type GuidedDealCompletionPanelProps = {
   session: GuidedCompletionSession;
   onSessionChange: (next: GuidedCompletionSession) => void;
-  /** Called with LawDog refine instruction when user picks an answer. */
+  /** Called with LawDog refine instruction when user picks an answer (not shown in user textarea). */
   onApplyAnswer: (instruction: string, variableId: string) => void;
+  /** Focus the freeform custom instruction area when user picks Custom. */
+  onCustomPillSelected?: () => void;
   disabled?: boolean;
   compact?: boolean;
 };
@@ -23,28 +26,53 @@ export function GuidedDealCompletionPanel({
   session,
   onSessionChange,
   onApplyAnswer,
+  onCustomPillSelected,
   disabled = false,
   compact = false,
 }: GuidedDealCompletionPanelProps) {
   const intro = useMemo(() => guidedSessionIntro(session), [session]);
   const current = getCurrentVariable(session);
   const done = isGuidedCompletionComplete(session);
-  const total = session.queue.length;
+  const total = frozenQuestionTotal(session);
   const answered = Object.keys(session.answered).length;
   const stepNum = Math.min(total, answered + session.skipped.size + (current ? 1 : 0));
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customDraft, setCustomDraft] = useState("");
 
-  const handlePill = (value: string) => {
+  const submitCustom = () => {
     if (!current || disabled) return;
+    const value = customDraft.trim();
+    if (!value) return;
     const instruction = formatRefineInstructionForAnswer(current, value);
     if (!instruction.trim()) return;
     const next = applyGuidedAnswer(session, current.id, value);
     onSessionChange(next);
     onApplyAnswer(instruction, current.id);
+    setCustomOpen(false);
+    setCustomDraft("");
+  };
+
+  const handlePill = (pillId: string, value: string, label: string) => {
+    if (!current || disabled) return;
+    if (pillId === "custom") {
+      setCustomOpen(true);
+      onCustomPillSelected?.();
+      return;
+    }
+    const instruction = formatRefineInstructionForAnswer(current, value || label);
+    if (!instruction.trim()) return;
+    const next = applyGuidedAnswer(session, current.id, value || label);
+    onSessionChange(next);
+    onApplyAnswer(instruction, current.id);
+    setCustomOpen(false);
+    setCustomDraft("");
   };
 
   const handleSkip = () => {
     if (!current || disabled) return;
     onSessionChange(skipGuidedVariable(session, current.id));
+    setCustomOpen(false);
+    setCustomDraft("");
   };
 
   if (done) {
@@ -98,22 +126,49 @@ export function GuidedDealCompletionPanel({
           ) : null}
 
           <div className="mt-3 flex flex-wrap gap-2">
-            {current.suggestedDefaults.map((pill) => (
-              <button
-                key={pill.id}
-                type="button"
-                disabled={disabled || (pill.id === "custom" && !pill.value)}
-                className="rounded-full border border-stone-300 bg-white px-3 py-1.5 text-left text-xs font-medium text-stone-800 shadow-sm transition hover:border-stone-500 hover:bg-stone-50 disabled:opacity-40 sm:text-sm"
-                onClick={() => handlePill(pill.value || pill.label)}
-              >
-                {pill.label}
-              </button>
-            ))}
+            {current.suggestedDefaults
+              .filter((pill) => pill.id !== "custom" || pill.label)
+              .map((pill) => (
+                <button
+                  key={pill.id}
+                  type="button"
+                  disabled={disabled}
+                  className="rounded-full border border-stone-300 bg-white px-3 py-1.5 text-left text-xs font-medium text-stone-800 shadow-sm transition hover:border-stone-500 hover:bg-stone-50 disabled:opacity-40 sm:text-sm"
+                  onClick={() => handlePill(pill.id, pill.value, pill.label)}
+                >
+                  {pill.label}
+                </button>
+              ))}
           </div>
           {current.suggestedDefaults.find((p) => p.rationale)?.rationale ? (
             <p className="mt-2 text-[11px] italic text-stone-500">
               {current.suggestedDefaults.find((p) => p.rationale)?.rationale}
             </p>
+          ) : null}
+
+          {customOpen ? (
+            <div className="mt-3 space-y-2">
+              <input
+                type="text"
+                className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-500"
+                placeholder={`Your answer for ${current.label.toLowerCase()}…`}
+                value={customDraft}
+                disabled={disabled}
+                onChange={(e) => setCustomDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitCustom();
+                }}
+                aria-label={`Custom answer for ${current.label}`}
+              />
+              <button
+                type="button"
+                className="rounded-lg bg-stone-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-45"
+                disabled={disabled || !customDraft.trim()}
+                onClick={submitCustom}
+              >
+                Apply custom answer
+              </button>
+            </div>
           ) : null}
 
           <button

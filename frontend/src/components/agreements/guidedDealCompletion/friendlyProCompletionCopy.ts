@@ -9,6 +9,9 @@ export const GUIDED_COMPLETION_HEADING = "Complete your agreement";
 export const GUIDED_COMPLETION_SUBHEADING =
   "Finish a few business decisions — we'll update your draft as you go.";
 
+export const GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER =
+  "Add anything important LawDog should know — e.g., payment details, excluded prospects, notice addresses, governing law, or special deal terms.";
+
 export function sanitizeProUserMessage(message: string | null | undefined): string | null {
   const m = (message || "").trim();
   if (!m) return null;

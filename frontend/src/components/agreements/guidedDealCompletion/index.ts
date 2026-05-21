@@ -22,12 +22,24 @@ export {
   isGuidedCompletionComplete,
   guidedSessionIntro,
   importantVariableCount,
+  whatChangedLineForGuidedVariable,
+  frozenQuestionTotal,
 } from "./guidedCompletionEngine";
+export {
+  buildGuidedSessionKey,
+  readPersistedGuidedSession,
+  persistGuidedSession,
+  clearPersistedGuidedSession,
+  mergeGuidedSessionWithPersistence,
+  lockGuidedSession,
+} from "./guidedSessionPersistence";
+export { applyProBodyHardIntegrityGate, normalizeScheduleAContent } from "./proBodyHardIntegrityGate";
 export { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
 export { validateAgreementIntegrity } from "./agreementIntegrityValidator";
 export {
   GUIDED_COMPLETION_HEADING,
   GUIDED_COMPLETION_SUBHEADING,
+  GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER,
   friendlyLowConfidenceCopy,
   sanitizeProUserMessage,
   shouldPreferGuidedCompletionOverRetry,

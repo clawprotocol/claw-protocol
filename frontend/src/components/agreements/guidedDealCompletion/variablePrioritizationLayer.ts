@@ -86,5 +86,6 @@ export function createGuidedCompletionSession(args: {
       bodyLen: args.bodyLen,
     }),
     agreementFamily: args.agreementFamily,
+    frozenTotalQuestions: queue.length,
   };
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { defectiveProBodyFixture } from "../qaManualTenPrompts";
+import {
+  defectiveProBodyFixture,
+  growthAdvisorDefectiveBodyFixture,
+  QA_MANUAL_TEN_PROMPTS,
+} from "../qaManualTenPrompts";
 import { finalizeAgreementOutput } from "../agreementOutputQuality/agreementOutputQualityPipeline";
 import { validateAgreementIntegrity } from "./agreementIntegrityValidator";
 import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
@@ -7,16 +11,26 @@ import {
   applyGuidedAnswer,
   buildGuidedSessionFromAgreement,
   formatRefineInstructionForAnswer,
+  frozenQuestionTotal,
   getCurrentVariable,
   isGuidedCompletionComplete,
+  whatChangedLineForGuidedVariable,
 } from "./guidedCompletionEngine";
 import { extractDealVariables } from "./missingVariableExtractor";
+import { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
 import { prioritizeDealVariables } from "./variablePrioritizationLayer";
 import {
   friendlyLowConfidenceCopy,
+  GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER,
   sanitizeProUserMessage,
   shouldPreferGuidedCompletionOverRetry,
 } from "./friendlyProCompletionCopy";
+import {
+  buildGuidedSessionKey,
+  lockGuidedSession,
+  mergeGuidedSessionWithPersistence,
+} from "./guidedSessionPersistence";
+import type { DealVariable } from "./types";
 
 describe("guidedDealCompletion", () => {
   it("extracts typed actionable variables from material items", () => {
@@ -169,5 +183,137 @@ describe("guidedDealCompletion", () => {
     const raw = `1. SCOPE.\nScope here.\n\n${line}\n\n${line}`;
     const { text } = applyClauseCoherenceEngine(raw);
     expect((text.match(/good faith/gi) || []).length).toBeLessThanOrEqual(1);
+  });
+
+  it("keeps guided queue length stable when material extraction shrinks on rerender", () => {
+    const key = buildGuidedSessionKey("gen-stable", "fp-abc");
+    const fourItems = [
+      "payment_timing",
+      "referral_economics",
+      "governing_venue",
+      "saas_sla",
+    ] as const;
+    const material = fourItems.map((id) => ({
+      id,
+      label: id.replace(/_/g, " "),
+      question: `Question for ${id}?`,
+      severity: "material" as const,
+      agreementFamily: "saas_msa" as const,
+      whyItMatters: "Matters.",
+      suggestedAnswerFormat: "e.g. terms",
+      canProceedWithoutAnswer: true,
+      affectsSections: ["general"],
+    }));
+    const full = buildGuidedSessionFromAgreement({
+      intakeRaw: "SaaS MSA",
+      body: "1. Services.\nHosted software.",
+      materialItems: material,
+    })!;
+    const locked = lockGuidedSession(full, key);
+    const persisted = {
+      sessionKey: key,
+      frozenTotalQuestions: 4,
+      queue: [...fourItems],
+      variables: full.variables,
+      answered: {},
+      skippedIds: [] as string[],
+      currentIndex: 0,
+      agreementFamily: "saas_msa" as const,
+    };
+
+    const shrunk = buildGuidedSessionFromAgreement({
+      intakeRaw: "SaaS MSA",
+      body: "1. Services.\nHosted software.",
+      materialItems: material.slice(0, 2),
+    });
+    const merged = mergeGuidedSessionWithPersistence(shrunk, persisted, key);
+    expect(merged).not.toBeNull();
+    expect(frozenQuestionTotal(merged!)).toBe(4);
+    expect(merged!.queue.length).toBe(4);
+  });
+
+  it("exposes selectable Custom pill defaults for referral economics", () => {
+    const pills = suggestedDefaultsForVariable({
+      id: "referral_economics",
+      category: "referral_economics",
+      family: "referral",
+    });
+    const custom = pills.find((p) => p.id === "custom");
+    expect(custom).toBeDefined();
+    expect(custom!.label).toBe("Custom");
+  });
+
+  it("formats custom guided answers without prefilling user textarea placeholder", () => {
+    expect(GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER).toContain("Add anything important LawDog should know");
+    expect(GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER).not.toContain("Update the agreement to reflect");
+  });
+
+  it("maps referral compensation answer to accurate what-changed copy", () => {
+    const vars: DealVariable[] = [
+      {
+        id: "referral_economics",
+        category: "referral_economics",
+        label: "Revenue share",
+        question: "How should referral payments work?",
+        severity: "critical",
+        suggestedDefaults: [],
+        agreementImpact: "",
+        requiredForExecution: true,
+        applicableAgreementFamilies: ["referral"],
+        uiControlType: "pills",
+        currentValue: null,
+        confidence: 0.4,
+        affectsSections: [],
+      },
+    ];
+    expect(whatChangedLineForGuidedVariable("referral_economics", vars)).toBe(
+      "What changed: Added referral compensation terms.",
+    );
+  });
+
+  it("growth advisor prompt produces no empty sections or banned orphan phrases", () => {
+    const growth = QA_MANUAL_TEN_PROMPTS.find((p) => p.id === "growth-advisor")!;
+    const out = validateAgreementIntegrity(growthAdvisorDefectiveBodyFixture(), {
+      intakeRaw: growth.intake,
+      surface: "test_growth_advisor",
+      tier: "premium",
+    });
+    expect(out.text).not.toMatch(/unless a different period is stated in a schedule/i);
+    expect(out.text).not.toMatch(/intentionally left for completion before signing/i);
+    expect(out.text).not.toMatch(/implementation plan and milestone payments/i);
+    const invoicingBlock = out.text.match(/2\.3 Invoicing and Payment\.[\s\S]{0,200}/)?.[0] ?? "";
+    expect(invoicingBlock.length).toBeGreaterThan(60);
+    expect(invoicingBlock).toMatch(/Compensation|payment|Schedule/i);
+    const confidentialityBlock = out.text.match(/4\.1 Confidentiality Obligations\.[\s\S]{0,200}/)?.[0] ?? "";
+    expect(confidentialityBlock.length).toBeGreaterThan(60);
+    expect(confidentialityBlock).toMatch(/Confidential/i);
+    expect(out.text.length).toBeGreaterThan(200);
+  });
+
+  it("normalizes Schedule A or uses compensation stub for growth advisor", () => {
+    const growth = QA_MANUAL_TEN_PROMPTS.find((p) => p.id === "growth-advisor")!;
+    const out = validateAgreementIntegrity(growthAdvisorDefectiveBodyFixture(), {
+      intakeRaw: growth.intake,
+      surface: "test_schedule_a",
+      tier: "premium",
+    });
+    const looseBulletsOnly =
+      /^\s*[-•]\s+10% revenue share/im.test(out.text) && !/\bSCHEDULE\s+A\b/i.test(out.text);
+    expect(looseBulletsOnly).toBe(false);
+    expect(
+      out.text.includes("Specific compensation mechanics will be completed in Schedule A") ||
+        /\bSCHEDULE\s+A\b/i.test(out.text),
+    ).toBe(true);
+  });
+
+  it("finalizeAgreementOutput removes banned phrases from defective Pro body", () => {
+    const fin = finalizeAgreementOutput(defectiveProBodyFixture(), {
+      intakeRaw: "Growth advisor for startup. Revenue share on intros.",
+      partyNames: ["Acme LLC", "Beta Inc"],
+      surface: "test_finalize_growth",
+      tier: "premium",
+    });
+    expect(fin.text).not.toMatch(/unless a different period is stated in a schedule/i);
+    expect(fin.text).not.toMatch(/^\s*signature\.\s*$/im);
   });
 });

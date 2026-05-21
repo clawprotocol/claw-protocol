@@ -55,6 +55,10 @@ export type GuidedCompletionSession = {
   currentIndex: number;
   completenessPercent: number;
   agreementFamily: CommercialFamilyHint;
+  /** Binds queue to premium generation + intake fingerprint. */
+  sessionKey?: string;
+  /** Frozen at first lock — stable "Question X of Y" for the review session. */
+  frozenTotalQuestions?: number;
 };
 
 export type GuidedCompletionIntro = {

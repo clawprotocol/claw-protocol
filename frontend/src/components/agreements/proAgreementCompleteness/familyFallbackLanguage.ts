@@ -3,8 +3,7 @@ import type { CommercialFamilyHint } from "./types";
 const FALLBACK_BY_TOPIC: Record<string, string> = {
   sla:
     "Service levels will be commercially reasonable for the services described, with maintenance windows and remedies to be confirmed before execution.",
-  payment:
-    "Fees and invoicing follow the payment schedule in this Agreement. Invoices are due within thirty (30) days unless a different period is stated in a schedule.",
+  payment: "Fees and payment timing will be confirmed in writing before execution.",
   milestone:
     "Milestones and deliverables will be defined in a mutually agreed implementation schedule attached or confirmed before launch.",
   referral:

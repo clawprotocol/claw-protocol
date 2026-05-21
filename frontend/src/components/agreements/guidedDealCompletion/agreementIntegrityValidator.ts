@@ -6,6 +6,7 @@ import { validateAndRepairFinalRenderIntegrity } from "../agreementOutputQuality
 import type { AgreementOutputQualityContext } from "../agreementOutputQuality/types";
 import { applyVisibleBodyQualityGate } from "../visibleBodyQualityGate";
 import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
+import { applyProBodyHardIntegrityGate } from "./proBodyHardIntegrityGate";
 import type { ProCompletenessContext } from "../proAgreementCompleteness/types";
 
 export type IntegrityValidationIssue = {
@@ -69,6 +70,10 @@ export function validateAgreementIntegrity(
   const coherence = applyClauseCoherenceEngine(working);
   working = coherence.text;
   repairs.push(...coherence.repairs);
+
+  const hard = applyProBodyHardIntegrityGate(working, ctx);
+  working = hard.text;
+  repairs.push(...hard.repairs);
 
   const integrity = validateAndRepairFinalRenderIntegrity(working, ctx);
   working = integrity.text;
