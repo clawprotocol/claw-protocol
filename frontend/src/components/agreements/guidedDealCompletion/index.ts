@@ -52,6 +52,30 @@ export {
   shouldPreferGuidedCompletionOverRetry,
 } from "./friendlyProCompletionCopy";
 export { GuidedDealCompletionPanel } from "./GuidedDealCompletionPanel";
+export type { GuidedAppliedChange } from "./guidedChangeTypes";
+export { GuidedChangeCard } from "./GuidedChangeCard";
+export { GuidedAppliedChangesReview } from "./GuidedAppliedChangesReview";
+export {
+  resolveGuidedQuestionTarget,
+  buildSectionOnlyRefineInstruction,
+  findSectionAnchor,
+  computeChangedSectionRange,
+  validateGuidedPatchPlacement,
+  buildGuidedChangeSummary,
+  resolveRecommendReasonForPill,
+  GUIDED_PLACEMENT_RETRY_USER_MESSAGE,
+  logGuidedRefineTargetResolved,
+  logGuidedRefinePlacementAccepted,
+  logGuidedRefinePlacementRejected,
+  logGuidedRefineAnchorFound,
+  logGuidedRefineAnchorMissing,
+} from "./guidedRevisionAnchors";
+export {
+  captureGuidedScrollSnapshot,
+  restoreGuidedScrollSnapshot,
+  runWithGuidedScrollPreserved,
+  highlightGuidedSectionInDocument,
+} from "./guidedSectionScroll";
 export {
   resolveProReviewFooterState,
   logProReviewFooterState,

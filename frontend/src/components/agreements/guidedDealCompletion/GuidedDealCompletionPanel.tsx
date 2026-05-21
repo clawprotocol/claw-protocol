@@ -17,7 +17,12 @@ import {
   type RecommendForMeResult,
 } from "./intakeRecommendationEngine";
 import { isRecommendPillId } from "./guidedRecommendPillIds";
-import { normalizeWhatChangedDisplayLine } from "./guidedCompletionEngine";
+import { resolveRecommendReasonForPill } from "./guidedRevisionAnchors";
+import type { GuidedAppliedChange } from "./guidedChangeTypes";
+import { GuidedChangeCard } from "./GuidedChangeCard";
+import { GuidedAppliedChangesReview } from "./GuidedAppliedChangesReview";
+import { highlightGuidedSectionInDocument } from "./guidedSectionScroll";
+import { resolveGuidedQuestionTarget } from "./guidedRevisionAnchors";
 
 export type GuidedDealCompletionPanelProps = {
   session: GuidedCompletionSession;
@@ -26,14 +31,22 @@ export type GuidedDealCompletionPanelProps = {
   /**
    * Applies guided refine; returns true on success. Session advance happens in parent on success only.
    */
-  onApplyAnswer: (instruction: string, variableId: string, displayAnswer: string) => Promise<boolean> | boolean;
+  onApplyAnswer: (
+    instruction: string,
+    variableId: string,
+    displayAnswer: string,
+    meta?: { recommendationReason?: string | null },
+  ) => Promise<boolean> | boolean;
   /** Focus the freeform custom instruction area when user picks Custom. */
   onCustomPillSelected?: () => void;
   /** Document commit freeze only — not global premium loading. */
   externallyFrozen?: boolean;
   compact?: boolean;
-  /** Shown under the active question card after a successful apply (not on the document surface). */
-  recentWhatChanged?: string | null;
+  /** Section-aware change card after successful apply. */
+  lastGuidedChange?: GuidedAppliedChange | null;
+  /** All successful applies — shown when session completes. */
+  appliedGuidedChanges?: readonly GuidedAppliedChange[];
+  onDismissChangeCard?: () => void;
 };
 
 export function GuidedDealCompletionPanel({
@@ -44,7 +57,9 @@ export function GuidedDealCompletionPanel({
   onCustomPillSelected,
   externallyFrozen = false,
   compact = false,
-  recentWhatChanged = null,
+  lastGuidedChange = null,
+  appliedGuidedChanges = [],
+  onDismissChangeCard,
 }: GuidedDealCompletionPanelProps) {
   const intro = useMemo(() => guidedSessionIntro(session), [session]);
   const current = getCurrentVariable(session);
@@ -57,9 +72,11 @@ export function GuidedDealCompletionPanel({
   const [applyingVariableId, setApplyingVariableId] = useState<string | null>(null);
   const [helpExpanded, setHelpExpanded] = useState(false);
   const [recommendView, setRecommendView] = useState<RecommendForMeResult | null>(null);
+  const [pendingAdvance, setPendingAdvance] = useState(false);
 
   const isLocalApplying = applyingVariableId !== null;
   const controlsDisabled = externallyFrozen || isLocalApplying;
+  const showChangeCard = Boolean(lastGuidedChange && !isLocalApplying && pendingAdvance);
 
   useEffect(() => {
     setRecommendView(null);
@@ -67,7 +84,18 @@ export function GuidedDealCompletionPanel({
     setCustomOpen(false);
     setCustomDraft("");
     setApplyingVariableId(null);
+    setPendingAdvance(false);
   }, [current?.id]);
+
+  useEffect(() => {
+    if (lastGuidedChange) setPendingAdvance(true);
+  }, [lastGuidedChange?.timestamp]);
+
+  useEffect(() => {
+    if (!showChangeCard || !lastGuidedChange || !import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info("[guided-change-card-rendered]", { questionKey: lastGuidedChange.questionKey });
+  }, [showChangeCard, lastGuidedChange?.questionKey]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !current) return;
@@ -81,10 +109,17 @@ export function GuidedDealCompletionPanel({
     });
   }, [current?.id, session, total]);
 
+  const logReasonRendered = (variableId: string, pillId: string, reason: string | null) => {
+    if (!import.meta.env.DEV || !reason) return;
+    // eslint-disable-next-line no-console
+    console.info("[guided-option-reason-rendered]", { variableId, pillId, reason });
+  };
+
   const runApply = async (
     displayAnswer: string,
     instructionAnswer: string,
     variableId: string,
+    recommendationReason?: string | null,
   ): Promise<boolean> => {
     if (!current || controlsDisabled || variableId !== current.id) return false;
     const instruction = formatRefineInstructionForAnswer(current, instructionAnswer);
@@ -92,21 +127,19 @@ export function GuidedDealCompletionPanel({
     setApplyingVariableId(variableId);
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.info("[guided-answer-click]", { variableId, displayAnswer });
+      console.info("[guided-answer-selected]", { variableId, displayAnswer });
       // eslint-disable-next-line no-console
       console.info("[guided-answer-refine-start]", { variableId });
     }
     try {
-      const ok = await Promise.resolve(onApplyAnswer(instruction, variableId, displayAnswer));
+      const ok = await Promise.resolve(
+        onApplyAnswer(instruction, variableId, displayAnswer, { recommendationReason }),
+      );
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.info(ok ? "[guided-answer-refine-success]" : "[guided-answer-refine-failed]", { variableId });
       }
       if (ok) {
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.info("[guided-answer-advance]", { variableId });
-        }
         setCustomOpen(false);
         setCustomDraft("");
         setRecommendView(null);
@@ -117,27 +150,25 @@ export function GuidedDealCompletionPanel({
     }
   };
 
-  const applyRecommendChoice = async (choice: { label: string; value: string }, variableId: string) => {
+  const advanceAfterChangeAck = () => {
+    setPendingAdvance(false);
+    onDismissChangeCard?.();
+  };
+
+  const applyRecommendChoice = async (
+    choice: { label: string; value: string },
+    variableId: string,
+    recommendationReason?: string | null,
+  ) => {
     if (!current || controlsDisabled || variableId !== current.id) return;
     const instructionAnswer = (choice.value || choice.label).trim();
     if (!instructionAnswer) {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.info("[guided-recommend-noop-blocked]", {
-          variableId,
-          reason: "empty_recommendation_value",
-        });
-      }
       setRecommendView(null);
       setCustomOpen(true);
       onCustomPillSelected?.();
       return;
     }
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.info("[guided-recommend-apply-start]", { variableId });
-    }
-    const ok = await runApply(choice.label, instructionAnswer, variableId);
+    const ok = await runApply(choice.label, instructionAnswer, variableId, recommendationReason);
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.info(ok ? "[guided-recommend-apply-success]" : "[guided-recommend-apply-failed]", { variableId });
@@ -156,17 +187,13 @@ export function GuidedDealCompletionPanel({
       console.info("[guided-recommend-resolved]", {
         variableId: current.id,
         applyDirect: rec.applyDirect,
-        primaryPillId: rec.primary.pillId,
-        alternativeCount: rec.alternatives.length,
+        why: rec.why,
       });
     }
+    logReasonRendered(current.id, RECOMMEND_PILL_ID, rec.why || rec.explanation);
     setCustomOpen(false);
     if (rec.applyDirect) {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.info("[guided-recommend-apply-start]", { variableId: current.id, mode: "direct" });
-      }
-      await applyRecommendChoice(rec.primary, current.id);
+      await applyRecommendChoice(rec.primary, current.id, rec.why || rec.explanation);
       return;
     }
     setRecommendView(rec);
@@ -174,47 +201,56 @@ export function GuidedDealCompletionPanel({
 
   const handlePill = (pillId: string, value: string, label: string) => {
     if (!current || controlsDisabled) return;
+    const reason = resolveRecommendReasonForPill(current.id, pillId, intakeRaw);
+    if (reason) logReasonRendered(current.id, pillId, reason);
     const resolution = resolveGuidedAnswerForPill(current, pillId, label, value);
     if (resolution.action === "recommend" || isRecommendPillId(pillId)) {
       void handleRecommendForMe();
       return;
     }
     if (resolution.action === "custom") {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.info("[guided-panel-custom-open]", { variableId: current.id });
-      }
       setRecommendView(null);
       setCustomOpen(true);
       onCustomPillSelected?.();
       return;
     }
-    void runApply(resolution.displayAnswer, resolution.instructionAnswer, current.id);
+    void runApply(resolution.displayAnswer, resolution.instructionAnswer, current.id, reason);
   };
 
   const handleSkip = () => {
     if (!current || controlsDisabled) return;
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.info("[guided-panel-skip]", { variableId: current.id });
-    }
     onSessionChange(skipGuidedVariable(session, current.id));
     setCustomOpen(false);
     setCustomDraft("");
     setRecommendView(null);
+    setPendingAdvance(false);
+    onDismissChangeCard?.();
+  };
+
+  const handleViewChange = () => {
+    if (!lastGuidedChange) return;
+    const target = resolveGuidedQuestionTarget(lastGuidedChange.questionKey);
+    const found = highlightGuidedSectionInDocument(target);
+    if (!found && import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[guided-refine-anchor-missing]", { questionKey: lastGuidedChange.questionKey });
+    }
   };
 
   if (done) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[guided-final-review-list-rendered]", { count: appliedGuidedChanges.length });
+    }
     return (
-      <div
-        className={`rounded-xl border border-emerald-200/90 bg-emerald-50/80 ${compact ? "p-3" : "p-4"}`}
-        role="status"
-      >
-        <p className="text-sm font-semibold text-emerald-900">{intro.headline}</p>
-        <p className="mt-1 text-xs leading-relaxed text-emerald-800/90">{intro.subline}</p>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-emerald-200/60">
-          <div className="h-full rounded-full bg-emerald-600 transition-all" style={{ width: "100%" }} />
-        </div>
+      <div data-guided-completion-panel="true" className={compact ? "pb-6" : "pb-8"}>
+        <GuidedAppliedChangesReview
+          changes={appliedGuidedChanges}
+          onJumpToSection={(c) => {
+            const target = resolveGuidedQuestionTarget(c.questionKey);
+            highlightGuidedSectionInDocument(target);
+          }}
+        />
       </div>
     );
   }
@@ -223,7 +259,8 @@ export function GuidedDealCompletionPanel({
 
   return (
     <div
-      className={`rounded-xl border border-stone-300/90 bg-white shadow-sm ${compact ? "p-3" : "p-4 sm:p-5"}`}
+      data-guided-completion-panel="true"
+      className={`rounded-xl border border-stone-300/90 bg-white shadow-sm ${compact ? "p-3 pb-28 sm:pb-4" : "p-4 pb-28 sm:p-5 sm:pb-8"}`}
       role="region"
       aria-label={GUIDED_COMPLETION_HEADING}
     >
@@ -265,43 +302,39 @@ export function GuidedDealCompletionPanel({
             </p>
           ) : null}
 
-          {recentWhatChanged && !isLocalApplying ? (
-            <p
-              className="mt-2 rounded-md border border-emerald-200/90 bg-emerald-50/90 px-2.5 py-2 text-xs leading-relaxed text-emerald-950"
-              role="status"
-              aria-live="polite"
-            >
-              <span className="font-medium text-emerald-900">What changed: </span>
-              {normalizeWhatChangedDisplayLine(recentWhatChanged)}
-            </p>
+          {showChangeCard && lastGuidedChange ? (
+            <GuidedChangeCard
+              change={lastGuidedChange}
+              onViewChange={handleViewChange}
+              onContinue={() => {
+                advanceAfterChangeAck();
+              }}
+              onLooksGood={() => {
+                advanceAfterChangeAck();
+              }}
+            />
           ) : null}
 
-          {recommendView ? (
+          {!showChangeCard && recommendView ? (
             <div className="mt-3 rounded-lg border border-sky-200/90 bg-sky-50/90 p-3" role="status" aria-live="polite">
               <p className="text-xs font-medium text-sky-900">Based on your prompt, LawDog recommends</p>
               <p className="mt-1 text-sm font-semibold text-sky-950">{recommendView.primary.label}</p>
               <p className="mt-1.5 text-xs leading-relaxed text-sky-950/90">
-                <span className="font-medium text-sky-900">Why: </span>
-                {recommendView.why || recommendView.explanation}
+                <span className="font-medium text-sky-900">Recommended because </span>
+                {(recommendView.why || recommendView.explanation).replace(/^Recommended because\s*/i, "")}
               </p>
-              {recommendView.explanation !== recommendView.why ? (
-                <p className="mt-1 text-[11px] leading-relaxed text-sky-900/85">{recommendView.explanation}</p>
-              ) : null}
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <button
                   type="button"
                   disabled={controlsDisabled}
                   className="rounded-lg bg-sky-800 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-sky-900 disabled:opacity-40 sm:text-sm"
-                  onClick={() => {
-                    if (import.meta.env.DEV) {
-                      // eslint-disable-next-line no-console
-                      console.info("[guided-recommend-apply-start]", {
-                        variableId: current.id,
-                        mode: "card_primary",
-                      });
-                    }
-                    void applyRecommendChoice(recommendView.primary, current.id);
-                  }}
+                  onClick={() =>
+                    void applyRecommendChoice(
+                      recommendView.primary,
+                      current.id,
+                      recommendView.why || recommendView.explanation,
+                    )
+                  }
                 >
                   {applyingVariableId === current.id ? "Applying…" : "Use this recommendation"}
                 </button>
@@ -327,11 +360,11 @@ export function GuidedDealCompletionPanel({
                 </button>
               </div>
             </div>
-          ) : (
+          ) : !showChangeCard ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {current.suggestedDefaults.map((pill) => {
                 const isRecommended = pill.id === current.recommendedPillId;
-                const isApplyingThis = applyingVariableId === current.id;
+                const pillReason = resolveRecommendReasonForPill(current.id, pill.id, intakeRaw);
                 return (
                   <button
                     key={pill.id}
@@ -344,10 +377,14 @@ export function GuidedDealCompletionPanel({
                     }`}
                     onClick={() => handlePill(pill.id, pill.value, pill.label)}
                   >
-                    {isApplyingThis && pill.id !== "custom" && !isRecommendPillId(pill.id)
+                    {applyingVariableId === current.id && pill.id !== "custom" && !isRecommendPillId(pill.id)
                       ? "Applying…"
                       : pill.label}
-                    {isRecommended && current.recommendedLabel ? (
+                    {isRecommended && pillReason ? (
+                      <span className="mt-0.5 block text-[10px] font-normal leading-snug text-emerald-800/90">
+                        {pillReason}
+                      </span>
+                    ) : isRecommended && current.recommendedLabel ? (
                       <span className="mt-0.5 block text-[10px] font-normal text-emerald-800/90">
                         {current.recommendedLabel}
                       </span>
@@ -356,15 +393,15 @@ export function GuidedDealCompletionPanel({
                 );
               })}
             </div>
-          )}
+          ) : null}
 
-          {!recommendView && current.suggestedDefaults.find((p) => p.rationale && p.id !== RECOMMEND_PILL_ID)?.rationale ? (
+          {!showChangeCard && !recommendView && current.suggestedDefaults.find((p) => p.rationale && p.id !== RECOMMEND_PILL_ID)?.rationale ? (
             <p className="mt-2 text-[11px] italic text-stone-500">
               {current.suggestedDefaults.find((p) => p.rationale && p.id !== RECOMMEND_PILL_ID)?.rationale}
             </p>
           ) : null}
 
-          {hasPillHelp ? (
+          {!showChangeCard && hasPillHelp ? (
             <details
               className="mt-2"
               open={helpExpanded}
@@ -387,7 +424,7 @@ export function GuidedDealCompletionPanel({
             </details>
           ) : null}
 
-          {customOpen ? (
+          {!showChangeCard && customOpen ? (
             <div className="mt-3 space-y-2">
               <input
                 type="text"
@@ -414,14 +451,16 @@ export function GuidedDealCompletionPanel({
             </div>
           ) : null}
 
-          <button
-            type="button"
-            className="mt-3 text-xs font-medium text-stone-600 underline-offset-2 hover:text-stone-900 hover:underline disabled:opacity-40"
-            disabled={controlsDisabled}
-            onClick={handleSkip}
-          >
-            Skip for now
-          </button>
+          {!showChangeCard ? (
+            <button
+              type="button"
+              className="mt-3 text-xs font-medium text-stone-600 underline-offset-2 hover:text-stone-900 hover:underline disabled:opacity-40"
+              disabled={controlsDisabled}
+              onClick={handleSkip}
+            >
+              Skip for now
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

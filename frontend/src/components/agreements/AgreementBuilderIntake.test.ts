@@ -308,9 +308,22 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("showPrimaryGuidedCompletion");
     expect(intake).toContain("guidedCompletionRenderState={guidedCompletionRenderState}");
     expect(intake).toContain("handleGuidedApplyAnswer");
+    expect(intake).toContain("handleGuidedChangeAck");
+    expect(intake).toContain("lastGuidedChange");
+    expect(intake).toContain("appliedGuidedChanges");
+    expect(intake).toContain("validateGuidedPatchPlacement");
+    expect(intake).toContain("buildSectionOnlyRefineInstruction");
+    expect(intake).toContain("runWithGuidedScrollPreserved");
+    expect(intake).toContain("guidedApplyInFlightRef");
+    expect(intake).toContain("hideStickyForGuidedInProgress");
+    expect(intake).toContain("guidedQuestionsRemain");
+    expect(intake).toContain("onDismissChangeCard={handleGuidedChangeAck}");
+    expect(intake).toContain("scrollToReview: false");
     expect(intake).toContain("showProLawdogRefineAndFinalize");
     const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");
     expect(finalize).toContain("Choose how to deliver");
+    expect(finalize).toContain("Finish the remaining questions first");
+    expect(finalize).toContain("guidedQuestionsRemain");
   });
 
   it("paid Pro finalize routes: review and signature advance via canonical recipient/sign handoff", () => {
@@ -456,8 +469,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("hideStickyForPaidProFinalizeDeliveryChoice");
     expect(intake).toContain("simpleCreateStickyBottomBarVisibleBase");
+    expect(intake).toContain("hideStickyForGuidedInProgress");
     expect(intake).toMatch(
-      /simpleCreateStickyBottomBarVisible\s*=\s*simpleCreateStickyBottomBarVisibleBase\s*&&\s*!hideStickyForPaidProFinalizeDeliveryChoice/,
+      /simpleCreateStickyBottomBarVisible\s*=\s*simpleCreateStickyBottomBarVisibleBaseGated\s*&&\s*!hideStickyForGuidedInProgress/,
     );
   });
 

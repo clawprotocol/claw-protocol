@@ -99,6 +99,8 @@ type Props = {
   reviewMode?: AgreementReviewMode;
   /** Central footer contract — guided_completion shows collapsed send/sign only. */
   proReviewFooterMode?: ProReviewFooterMode;
+  /** True while guided question queue still has unanswered items. */
+  guidedQuestionsRemain?: boolean;
   /** @deprecated use guidedCompletionRenderState */
   canRenderGuidedQuestions?: boolean;
   /** @deprecated use guidedCompletionRenderState */
@@ -190,6 +192,7 @@ export function FinalizeYourAgreementPanel({
   guidedCompletionRenderState: guidedCompletionRenderStateProp,
   reviewMode = "generated_agreement_review",
   proReviewFooterMode = "freeform_edit",
+  guidedQuestionsRemain = false,
   canRenderGuidedQuestions: canRenderGuidedQuestionsProp,
   guidedCompletionRenderable = false,
   devProRefineContext,
@@ -650,6 +653,17 @@ export function FinalizeYourAgreementPanel({
     return null;
   }
 
+  if (proReviewFooterMode === "guided_completion" && guidedQuestionsRemain) {
+    return (
+      <p
+        className="mb-4 rounded-xl border border-slate-600/45 bg-slate-950/60 px-4 py-3 text-xs leading-relaxed text-slate-400 sm:mb-5 sm:text-sm"
+        role="status"
+      >
+        Finish the remaining questions first — we&apos;ll keep updating your draft.
+      </p>
+    );
+  }
+
   if (proReviewFooterMode === "guided_completion") {
     return (
       <details className="mb-4 rounded-2xl border border-slate-600/50 bg-slate-950/80 p-4 shadow-md ring-1 ring-slate-700/40 sm:mb-5 sm:p-5">
@@ -657,7 +671,7 @@ export function FinalizeYourAgreementPanel({
           Send or sign when ready
         </summary>
         <p className="mt-2 text-xs leading-relaxed text-slate-500">
-          Finish the questions above first. You can send for review or signature when you are ready.
+          All key questions are filled in. Send for review or signature when you are ready.
         </p>
         {deliveryCtasOnDraftCard ? null : (
           <div className="mt-3 flex flex-col gap-2 sm:flex-row">

@@ -564,6 +564,22 @@ import {
   shouldBlockProEmptyDocumentFallback,
   updateLastKnownGoodAuthoritativeDraftRef,
 } from "./guidedDealCompletion";
+import type { GuidedAppliedChange } from "./guidedDealCompletion/guidedChangeTypes";
+import {
+  buildGuidedChangeSummary,
+  buildSectionOnlyRefineInstruction,
+  findSectionAnchor,
+  computeChangedSectionRange,
+  validateGuidedPatchPlacement,
+  resolveGuidedQuestionTarget,
+  logGuidedRefineTargetResolved,
+  logGuidedRefinePlacementAccepted,
+  logGuidedRefinePlacementRejected,
+  logGuidedRefineAnchorFound,
+  logGuidedRefineAnchorMissing,
+  GUIDED_PLACEMENT_RETRY_USER_MESSAGE,
+} from "./guidedDealCompletion/guidedRevisionAnchors";
+import { runWithGuidedScrollPreserved } from "./guidedDealCompletion/guidedSectionScroll";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import {
   isSourceComparisonReviewMode,
@@ -2292,6 +2308,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Guided deal completion: one question at a time (preserves answered/skipped across regen). */
   const [guidedCompletionSession, setGuidedCompletionSession] = useState<GuidedCompletionSession | null>(null);
   const lastGuidedAnswerVariableIdRef = useRef<string | null>(null);
+  const guidedApplyInFlightRef = useRef(false);
+  const pendingGuidedAdvanceRef = useRef<{ variableId: string; displayAnswer: string } | null>(null);
+  const [lastGuidedChange, setLastGuidedChange] = useState<GuidedAppliedChange | null>(null);
+  const [appliedGuidedChanges, setAppliedGuidedChanges] = useState<GuidedAppliedChange[]>([]);
   const guidedCompletionSessionRef = useRef<GuidedCompletionSession | null>(null);
   const customInstructionSectionRef = useRef<HTMLDetailsElement | null>(null);
   const paidProCardDictationRef = useRef<VoiceDictationControl | null>(null);
@@ -6793,7 +6813,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const runPersistedRefineFromStepBuffer = React.useCallback(
     async (
       instructionOverride?: string | null,
-      opts?: { premiumRefineDocumentOverride?: string | null },
+      opts?: {
+        premiumRefineDocumentOverride?: string | null;
+        scrollToReview?: boolean;
+        validateRefinedOutput?: (out: string) => boolean;
+        skipGuidedWhatChangedSummary?: boolean;
+      },
     ): Promise<boolean> => {
     if (isFreeStarterReviewSurfaceRef.current) return false;
     if (!premiumPaidDocumentSurfaceRef.current) return false;
@@ -6953,22 +6978,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
             : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
         );
-        const guidedWhatChanged = whatChangedLineForGuidedVariable(
-          lastGuidedAnswerVariableIdRef.current,
-          guidedCompletionSessionRef.current?.variables ?? [],
-        );
-        lastGuidedAnswerVariableIdRef.current = null;
-        setProRefineWhatChangedSummary(
-          guidedWhatChanged ??
-            (useAdvisoryAppendSuccessCopy
-              ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
-              : whatChangedLine?.trim()
-                ? whatChangedLine.trim()
-                : null),
-        );
+        if (opts?.validateRefinedOutput && !opts.validateRefinedOutput(out)) {
+          return false;
+        }
+        const guidedApplyActive = guidedApplyInFlightRef.current;
+        if (!opts?.skipGuidedWhatChangedSummary && !guidedApplyActive) {
+          const guidedWhatChanged = whatChangedLineForGuidedVariable(
+            lastGuidedAnswerVariableIdRef.current,
+            guidedCompletionSessionRef.current?.variables ?? [],
+          );
+          lastGuidedAnswerVariableIdRef.current = null;
+          setProRefineWhatChangedSummary(
+            guidedWhatChanged ??
+              (useAdvisoryAppendSuccessCopy
+                ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
+                : whatChangedLine?.trim()
+                  ? whatChangedLine.trim()
+                  : null),
+          );
+        } else if (guidedApplyActive) {
+          lastGuidedAnswerVariableIdRef.current = null;
+        }
+        const scrollToReview =
+          opts?.scrollToReview !== undefined
+            ? opts.scrollToReview
+            : !guidedApplyInFlightRef.current;
         applyProRefineOutputToProSurfaceRef.current?.(out, {
           clearStepBuffer: true,
-          scrollToReview: true,
+          scrollToReview,
           scrollReviewerNoteToVisible: usedAppendReviewerNotePreserve,
         });
         return true;
@@ -11128,7 +11165,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   /** Paid Pro: bottom sticky duplicates “Send for review / signature” on the finalize panel — hide until recipients. */
-  const hideStickyForPaidProFinalizeDeliveryChoice = Boolean(
+  const hideStickyForPaidProFinalizeDeliveryChoiceBase = Boolean(
     paidProAuthoritative &&
       createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
@@ -11143,15 +11180,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     isFreeStreamlineDraftReview && freeTrackBlocksRecipientAdvance,
   );
 
-  const simpleCreateStickyBottomBarVisible =
+  const simpleCreateStickyBottomBarVisibleBaseGated =
     simpleCreateStickyBottomBarVisibleBase &&
-    !hideStickyForPaidProFinalizeDeliveryChoice &&
+    !hideStickyForPaidProFinalizeDeliveryChoiceBase &&
     !hideStickyForStarterProContinuation;
 
-  useEffect(() => {
-    if (!import.meta.env.DEV || !hideStickyForPaidProFinalizeDeliveryChoice) return;
-    devPremiumSendShellGuard("sticky_bar_hidden_finalize_panel_delivery_choice");
-  }, [hideStickyForPaidProFinalizeDeliveryChoice]);
 
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
@@ -13152,8 +13185,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
     [guidedSessionKey],
   );
+  const handleGuidedChangeAck = React.useCallback(() => {
+    const pending = pendingGuidedAdvanceRef.current;
+    if (pending) {
+      const bodyLen = (
+        hydratedPremiumBodyRef.current ||
+        lastKnownGoodAuthoritativeDraftRef.current ||
+        paidBodyForGuidedCompletion
+      ).trim().length;
+      setGuidedCompletionSession((prev) => {
+        if (!prev) return prev;
+        const next = applyGuidedAnswerTransaction(prev, pending.variableId, pending.displayAnswer, bodyLen);
+        const keyed = { ...next, sessionKey: guidedSessionKey };
+        persistGuidedSession(keyed, guidedSessionKey);
+        guidedCompletionSessionRef.current = keyed;
+        return keyed;
+      });
+      pendingGuidedAdvanceRef.current = null;
+    }
+    setLastGuidedChange(null);
+    setProRefineWhatChangedSummary(null);
+  }, [guidedSessionKey, paidBodyForGuidedCompletion]);
+
   const handleGuidedApplyAnswer = React.useCallback(
-    async (instruction: string, variableId: string, displayAnswer: string): Promise<boolean> => {
+    async (
+      _instruction: string,
+      variableId: string,
+      displayAnswer: string,
+      meta?: { recommendationReason?: string | null },
+    ): Promise<boolean> => {
       lastGuidedAnswerVariableIdRef.current = variableId;
       const stableBefore =
         lastKnownGoodAuthoritativeDraftRef.current ||
@@ -13163,20 +13223,80 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, stableBefore, "guided_apply_start");
       const bodyLen = stableBefore.trim().length;
       logGuidedQuestionApply(variableId, bodyLen);
-      const ok = await runPersistedRefineFromStepBuffer(instruction, {
-        premiumRefineDocumentOverride:
-          (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim() || null,
-      });
-      if (ok) {
-        setGuidedCompletionSession((prev) => {
-          if (!prev) return prev;
-          const next = applyGuidedAnswerTransaction(prev, variableId, displayAnswer, bodyLen);
-          const keyed = { ...next, sessionKey: guidedSessionKey };
-          persistGuidedSession(keyed, guidedSessionKey);
-          guidedCompletionSessionRef.current = keyed;
-          return keyed;
+      const session = guidedCompletionSessionRef.current;
+      const variable = session?.variables.find((v) => v.id === variableId);
+      const variableLabel = variable?.label ?? variableId;
+      const target = resolveGuidedQuestionTarget(variableId);
+      logGuidedRefineTargetResolved(target);
+      const docOverride = (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim() || null;
+
+      const tryRefine = async (strict: boolean): Promise<boolean> => {
+        const sectionInstruction = buildSectionOnlyRefineInstruction(
+          target,
+          displayAnswer,
+          variableLabel,
+          strict,
+        );
+        if (!sectionInstruction.trim()) return false;
+        guidedApplyInFlightRef.current = true;
+        try {
+          return await runPersistedRefineFromStepBuffer(sectionInstruction, {
+            premiumRefineDocumentOverride: docOverride,
+            scrollToReview: false,
+            skipGuidedWhatChangedSummary: true,
+            validateRefinedOutput: (out) => {
+              const validation = validateGuidedPatchPlacement(stableBefore, out, target);
+              if (validation.ok) {
+                logGuidedRefinePlacementAccepted(variableId);
+                return true;
+              }
+              logGuidedRefinePlacementRejected(variableId, validation.reasons);
+              return false;
+            },
+          });
+        } finally {
+          guidedApplyInFlightRef.current = false;
+        }
+      };
+
+      const ok = await runWithGuidedScrollPreserved(async () => {
+        let applied = await tryRefine(false);
+        if (!applied) applied = await tryRefine(true);
+        if (!applied) {
+          setReviewRefineUserMessage(GUIDED_PLACEMENT_RETRY_USER_MESSAGE);
+          return false;
+        }
+        const afterText =
+          hydratedPremiumBodyRef.current ||
+          lastKnownGoodAuthoritativeDraftRef.current ||
+          agreementDocumentTextRef.current ||
+          "";
+        const anchor = findSectionAnchor(afterText, target);
+        if (anchor.found) {
+          logGuidedRefineAnchorFound(variableId, anchor.headingText);
+        } else {
+          logGuidedRefineAnchorMissing(variableId);
+        }
+        const { summary, sectionLabel } = buildGuidedChangeSummary({
+          questionKey: variableId,
+          answerLabel: displayAnswer,
+          target,
         });
-      }
+        const change: GuidedAppliedChange = {
+          questionKey: variableId,
+          answerLabel: displayAnswer,
+          recommendationReason: meta?.recommendationReason ?? null,
+          targetSectionLabel: sectionLabel,
+          summary,
+          anchorFound: anchor.found,
+          changedSnippet: computeChangedSectionRange(stableBefore, afterText, target),
+          timestamp: Date.now(),
+        };
+        setLastGuidedChange(change);
+        setAppliedGuidedChanges((prev) => [...prev, change]);
+        pendingGuidedAdvanceRef.current = { variableId, displayAnswer };
+        return true;
+      });
       return ok;
     },
     [guidedSessionKey, paidProCardEditDraft, paidBodyForGuidedCompletion, runPersistedRefineFromStepBuffer],
@@ -13407,6 +13527,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       activeGuidedCompletionSession &&
       !isGuidedCompletionComplete(activeGuidedCompletionSession),
   );
+  const hideStickyForGuidedInProgress = Boolean(
+    premiumPaidDocumentSurface && showPrimaryGuidedCompletion && guidedCompletionActive,
+  );
+  const hideStickyForPaidProFinalizeDeliveryChoice =
+    hideStickyForPaidProFinalizeDeliveryChoiceBase || hideStickyForGuidedInProgress;
+  const simpleCreateStickyBottomBarVisible =
+    simpleCreateStickyBottomBarVisibleBaseGated && !hideStickyForGuidedInProgress;
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !hideStickyForGuidedInProgress) return;
+    // eslint-disable-next-line no-console
+    console.info("[guided-send-sticky-suppressed]", { guidedCompletionActive });
+  }, [hideStickyForGuidedInProgress, guidedCompletionActive]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !hideStickyForPaidProFinalizeDeliveryChoice) return;
+    devPremiumSendShellGuard("sticky_bar_hidden_finalize_panel_delivery_choice");
+  }, [hideStickyForPaidProFinalizeDeliveryChoice]);
+
+  const guidedQuestionsRemain = Boolean(
+    proReviewFooter.mode === "guided_completion" &&
+      activeGuidedCompletionSession &&
+      !isGuidedCompletionComplete(activeGuidedCompletionSession),
+  );
+
   const guidedCompletionRenderDocument = useMemo(
     () =>
       resolveGuidedCompletionRenderDocument({
@@ -16604,6 +16749,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
                                           onSessionChange={handleGuidedCompletionSessionChange}
                                           onApplyAnswer={handleGuidedApplyAnswer}
+                                          lastGuidedChange={lastGuidedChange}
+                                          appliedGuidedChanges={appliedGuidedChanges}
+                                          onDismissChangeCard={handleGuidedChangeAck}
                                           externallyFrozen={draftPreCommitFreeze}
                                           compact
                                         />
@@ -16821,20 +16969,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             </button>
                                           </>
                                         )}
-                                        <button
-                                          type="button"
-                                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
-                                          onClick={() => handleFinalizeRoutePrimaryAction("review")}
-                                        >
-                                          Send for review
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
-                                          onClick={() => void handleProSendForSignature()}
-                                        >
-                                          Send for signature
-                                        </button>
+                                        {!guidedCompletionActive ? (
+                                          <>
+                                            <button
+                                              type="button"
+                                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
+                                              onClick={() => handleFinalizeRoutePrimaryAction("review")}
+                                            >
+                                              Send for review
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
+                                              onClick={() => void handleProSendForSignature()}
+                                            >
+                                              Send for signature
+                                            </button>
+                                          </>
+                                        ) : null}
                                       </div>
                                     </div>
                                     {premiumReviewDocEditorOpen ? (
@@ -16862,7 +17014,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
                                           onSessionChange={handleGuidedCompletionSessionChange}
                                           onApplyAnswer={handleGuidedApplyAnswer}
-                                          recentWhatChanged={proRefineWhatChangedSummary}
+                                          lastGuidedChange={lastGuidedChange}
+                                          appliedGuidedChanges={appliedGuidedChanges}
+                                          onDismissChangeCard={handleGuidedChangeAck}
                                           onCustomPillSelected={() => {
                                             void openPaidProDraftCardEditor();
                                             customInstructionSectionRef.current?.setAttribute("open", "");
@@ -17131,6 +17285,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   guidedCompletionRenderState={guidedCompletionRenderState}
                                   reviewMode={agreementReviewMode}
                                   proReviewFooterMode={proReviewFooter.mode}
+                                  guidedQuestionsRemain={guidedQuestionsRemain}
                                   hideFreeformRefineSection={proReviewFooter.mode !== "freeform_edit"}
                                   hideMissingLinesBulletList={proReviewFooter.hideFinalizeGapBullets}
                                   draft={reviewDraft ?? draft}
