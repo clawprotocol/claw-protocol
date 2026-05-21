@@ -34,6 +34,14 @@ import {
   guidedCompletionHeading,
   mayShowCompleteAgreementBelowCopy,
 } from "./guidedDealCompletion/canRenderGuidedQuestions";
+import {
+  applyRawReadinessToGuidedRenderState,
+  logGuidedRenderState,
+  resolveGuidedCompletionRenderState,
+  warnGuidedInvariantViolation,
+  type GuidedCompletionRenderState,
+} from "./guidedDealCompletion/resolveGuidedCompletionRenderState";
+import { resolveDisplayReadinessWithGuidedInvariant } from "./guidedDealCompletion/shouldRenderGuidedCompletionPanel";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 
@@ -81,10 +89,11 @@ type Props = {
   hideFreeformRefineSection?: boolean;
   /** When true, hide static missing-term bullet list — guided completion is primary. */
   hideMissingLinesBulletList?: boolean;
-  /** True only when guided panel can render an actionable question (suppresses empty Needs-details UX). */
-  /** When true, guided questions are mounted below — enables Needs-details / Complete-your-agreement copy. */
+  /** Authoritative guided render state from AgreementBuilderIntake (single source of truth). */
+  guidedCompletionRenderState?: GuidedCompletionRenderState;
+  /** @deprecated use guidedCompletionRenderState */
   canRenderGuidedQuestions?: boolean;
-  /** @deprecated use canRenderGuidedQuestions */
+  /** @deprecated use guidedCompletionRenderState */
   guidedCompletionRenderable?: boolean;
   /** Dev-only: logged when premium refine fails; parent supplies flags and ids. */
   devProRefineContext?: {
@@ -170,11 +179,11 @@ export function FinalizeYourAgreementPanel({
   deliveryCtasOnDraftCard = false,
   hideFreeformRefineSection = false,
   hideMissingLinesBulletList = false,
+  guidedCompletionRenderState: guidedCompletionRenderStateProp,
   canRenderGuidedQuestions: canRenderGuidedQuestionsProp,
   guidedCompletionRenderable = false,
   devProRefineContext,
 }: Props) {
-  const canRenderGuidedQuestions = canRenderGuidedQuestionsProp ?? guidedCompletionRenderable;
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -233,21 +242,57 @@ export function FinalizeYourAgreementPanel({
     [sendMode, sendModeTouched, notOkCount, priorityScore, lastRefine, finalizeAudit, effectiveCurrentDocumentText],
   );
 
-  const displayReadiness = useMemo((): FinalizeReadiness => {
-    if (canRenderGuidedQuestions) return readiness;
-    if (readiness === "needs_details") {
-      return "ready_for_review";
+  const guidedRenderState = useMemo((): GuidedCompletionRenderState => {
+    if (guidedCompletionRenderStateProp) {
+      return applyRawReadinessToGuidedRenderState(guidedCompletionRenderStateProp, readiness);
     }
-    return readiness;
-  }, [canRenderGuidedQuestions, readiness]);
+    const legacyCanRender = canRenderGuidedQuestionsProp ?? guidedCompletionRenderable;
+    return resolveGuidedCompletionRenderState({
+      bodyText: effectiveCurrentDocumentText,
+      intakeText: effectiveIntakeText,
+      panelMountedSurface: legacyCanRender ? "document_editor" : null,
+      bodyUsable: effectiveCurrentDocumentText.trim().length >= 200,
+      rawReadiness: readiness,
+    });
+  }, [
+    guidedCompletionRenderStateProp,
+    canRenderGuidedQuestionsProp,
+    guidedCompletionRenderable,
+    effectiveCurrentDocumentText,
+    effectiveIntakeText,
+    readiness,
+  ]);
 
-  const suppressNeedsDetailsCopy = !canRenderGuidedQuestions && !hideMissingLinesBulletList;
+  const displayReadiness = useMemo(
+    (): FinalizeReadiness =>
+      resolveDisplayReadinessWithGuidedInvariant(
+        readiness,
+        guidedRenderState.canRenderGuidedQuestions,
+      ),
+    [readiness, guidedRenderState.canRenderGuidedQuestions],
+  );
+
+  const suppressNeedsDetailsCopy = !guidedRenderState.canRenderGuidedQuestions && !hideMissingLinesBulletList;
 
   const tagline = useMemo(
-    () => finalizeTaglineForGuidedState(missingLines.length, displayReadiness, canRenderGuidedQuestions),
-    [missingLines.length, displayReadiness, canRenderGuidedQuestions],
+    () => finalizeTaglineForGuidedState(missingLines.length, displayReadiness, guidedRenderState),
+    [missingLines.length, displayReadiness, guidedRenderState],
   );
-  const refineSectionHeading = guidedCompletionHeading(canRenderGuidedQuestions);
+  const refineSectionHeading = guidedCompletionHeading(guidedRenderState);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    logGuidedRenderState(guidedRenderState, { draftState: "finalize_panel" });
+    const showedNeedsDetails =
+      displayReadiness === "needs_details" && formatFinalizeReadiness(displayReadiness) === "Needs details";
+    warnGuidedInvariantViolation(guidedRenderState, "FinalizeYourAgreementPanel", {
+      showedNeedsDetails,
+      showedCompleteHeading: refineSectionHeading === "Complete your agreement",
+      showedUseCompleteBelow:
+        mayShowCompleteAgreementBelowCopy(guidedRenderState) && missingLines.length > 0,
+      showedTightenBelow: tagline.includes("Tighten the items below"),
+    });
+  }, [guidedRenderState, displayReadiness, refineSectionHeading, tagline, missingLines.length]);
   const routeBadge = useMemo(() => {
     if (!reviewRoute) return null;
     if (reviewRoute.route === "signature") return "Ready to sign";
@@ -611,11 +656,11 @@ export function FinalizeYourAgreementPanel({
         </p>
       </div>
 
-      {mayShowCompleteAgreementBelowCopy(canRenderGuidedQuestions) && missingLines.length > 0 ? (
+      {mayShowCompleteAgreementBelowCopy(guidedRenderState) && missingLines.length > 0 ? (
         <p className="mt-3 text-sm text-slate-400 sm:mt-4">
-          Use Complete your agreement below to finish key business decisions.
+          Use Complete your agreement in the document editor above to finish key business decisions.
         </p>
-      ) : !canRenderGuidedQuestions && !hideMissingLinesBulletList && missingLines.length > 0 ? (
+      ) : !guidedRenderState.canRenderGuidedQuestions && !hideMissingLinesBulletList && missingLines.length > 0 ? (
         <ul className="mt-3 list-disc space-y-1.5 pl-4 text-sm leading-relaxed text-slate-200/95 sm:mt-4 sm:text-[15px]">
           {missingLines.map((line) => (
             <li key={line}>{line}</li>
@@ -723,7 +768,7 @@ export function FinalizeYourAgreementPanel({
 
       {deliveryCtasOnDraftCard || sendMode === "review" ? (
         <p className="mt-3 text-xs leading-relaxed text-slate-400 sm:mt-4 sm:text-sm">
-          {hideFreeformRefineSection && mayShowCompleteAgreementBelowCopy(canRenderGuidedQuestions)
+          {hideFreeformRefineSection && guidedRenderState.canRenderGuidedQuestions
             ? "Use Complete your agreement in the document editor above to finish key terms."
             : hideFreeformRefineSection
               ? GUIDED_NEUTRAL_REVIEW_COPY

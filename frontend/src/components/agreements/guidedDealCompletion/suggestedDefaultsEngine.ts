@@ -170,11 +170,11 @@ const DEAL_TERMS: DealVariableDefault[] = [
     value: "Use commercially reasonable standard terms typical for this type of agreement.",
   },
   {
-    id: "schedule_a",
-    label: "Keep flexible / confirm later in Schedule A",
-    value: "Defer detailed commercial terms to Schedule A to be confirmed before execution.",
+    id: "ask_questions",
+    label: "Ask me the key questions",
+    value: "Walk through fee, payment timing, support/SLA, renewal, governing law, IP ownership, and security before finalizing.",
   },
-  { id: "custom", label: "Add custom details", value: "" },
+  { id: "custom", label: "I'll add custom instructions", value: "" },
 ];
 
 const PROJECT_FEE_PHASE: DealVariableDefault[] = [

@@ -71,7 +71,19 @@ export {
   mayShowCompleteAgreementBelowCopy,
   finalizeTaglineForGuidedState,
 } from "./canRenderGuidedQuestions";
-export type { CanRenderGuidedQuestionsArgs } from "./canRenderGuidedQuestions";
+export {
+  resolveGuidedCompletionRenderState,
+  applyRawReadinessToGuidedRenderState,
+  countUnresolvedRenderableVariables,
+  logGuidedRenderState,
+  warnGuidedInvariantViolation,
+} from "./resolveGuidedCompletionRenderState";
+export type {
+  GuidedCompletionRenderState,
+  GuidedPanelMountedSurface,
+  GuidedReadinessLabel,
+  ResolveGuidedCompletionRenderStateArgs,
+} from "./resolveGuidedCompletionRenderState";
 export { scanBodyMaterialPlaceholders, bodyHasLoosePhaseScheduleBeforeSignatures } from "./bodyMaterialPlaceholderScanner";
 export {
   analyzeServicesMigrationIntake,

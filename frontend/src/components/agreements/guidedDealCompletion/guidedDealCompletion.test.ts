@@ -24,6 +24,7 @@ import {
   mayShowCompleteAgreementBelowCopy,
   mayShowNeedsDetailsMessaging,
 } from "./canRenderGuidedQuestions";
+import { resolveGuidedCompletionRenderState } from "./resolveGuidedCompletionRenderState";
 import {
   enforceNeedsDetailsGuidedInvariant,
   resolveDisplayReadinessWithGuidedInvariant,
@@ -705,11 +706,23 @@ describe("canRenderGuidedQuestions UI invariant", () => {
   });
 
   it("never shows Needs details or below-copy when guided queue is not renderable", () => {
-    expect(mayShowNeedsDetailsMessaging(false, "needs_details")).toBe(false);
-    expect(mayShowCompleteAgreementBelowCopy(false)).toBe(false);
-    expect(finalizeTaglineForGuidedState(3, "needs_details", false)).toBe(GUIDED_NEUTRAL_REVIEW_COPY);
-    expect(finalizeTaglineForGuidedState(3, "needs_details", false)).not.toMatch(/Complete your agreement/i);
-    expect(finalizeTaglineForGuidedState(3, "needs_details", false)).not.toMatch(/Tighten the items below/i);
+    const offState = resolveGuidedCompletionRenderState({
+      bodyText: migrationBody,
+      panelMountedSurface: null,
+      bodyUsable: true,
+      rawReadiness: "needs_details",
+    });
+    expect(mayShowNeedsDetailsMessaging(offState)).toBe(false);
+    expect(mayShowCompleteAgreementBelowCopy(offState)).toBe(false);
+    const neutralState = resolveGuidedCompletionRenderState({
+      bodyText: migrationBody,
+      panelMountedSurface: null,
+      bodyUsable: true,
+      rawReadiness: "needs_details",
+    });
+    expect(finalizeTaglineForGuidedState(3, "needs_details", neutralState)).toBe(GUIDED_NEUTRAL_REVIEW_COPY);
+    expect(finalizeTaglineForGuidedState(3, "needs_details", neutralState)).not.toMatch(/Complete your agreement/i);
+    expect(finalizeTaglineForGuidedState(3, "needs_details", neutralState)).not.toMatch(/Tighten the items below/i);
   });
 
   it("semantic placeholders without literal TBD still enable canRenderGuidedQuestions", () => {

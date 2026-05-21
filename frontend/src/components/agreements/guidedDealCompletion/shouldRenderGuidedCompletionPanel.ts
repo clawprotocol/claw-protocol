@@ -1,9 +1,20 @@
 import type { MaterialMissingItem } from "../proAgreementCompleteness/types";
-import { computeCanRenderGuidedQuestions } from "./canRenderGuidedQuestions";
+import { resolveGuidedCompletionRenderState } from "./resolveGuidedCompletionRenderState";
 import type { DealVariable, GuidedCompletionSession } from "./types";
 
-export { computeCanRenderGuidedQuestions } from "./canRenderGuidedQuestions";
-export type { CanRenderGuidedQuestionsArgs } from "./canRenderGuidedQuestions";
+export {
+  computeCanRenderGuidedQuestions,
+  resolveGuidedCompletionRenderState,
+  countUnresolvedRenderableVariables,
+  logGuidedRenderState,
+  warnGuidedInvariantViolation,
+} from "./resolveGuidedCompletionRenderState";
+export type {
+  GuidedCompletionRenderState,
+  GuidedPanelMountedSurface,
+  GuidedReadinessLabel,
+  ResolveGuidedCompletionRenderStateArgs,
+} from "./resolveGuidedCompletionRenderState";
 
 export type ShouldRenderGuidedCompletionPanelArgs = {
   bodyUsable: boolean;
@@ -24,13 +35,16 @@ export function variableHasSelectableAnswerPath(variable: DealVariable): boolean
   );
 }
 
-/** True only when the guided panel can show a real, actionable question. */
+/** True only when the guided panel can show a real, actionable question (session capability; not mount truth). */
 export function shouldRenderGuidedCompletionPanel(args: ShouldRenderGuidedCompletionPanelArgs): boolean {
-  return computeCanRenderGuidedQuestions({
+  return resolveGuidedCompletionRenderState({
     bodyUsable: args.bodyUsable,
-    session: args.session,
-    guidedPanelMounted: true,
-  });
+    bodyText: args.body,
+    intakeText: args.intakeRaw,
+    materialMissingItems: args.materialItems,
+    guidedSession: args.session,
+    panelMountedSurface: "document_editor",
+  }).sessionHasRenderableQueue;
 }
 
 /** When false, callers must not show Needs-details / tighten-items / empty guided wrapper copy. */
@@ -51,7 +65,7 @@ export function resolveDisplayReadinessWithGuidedInvariant(
 }
 
 export function guidedCompletionNeutralCopyWhenNotRenderable(): string {
-  return "Draft ready to review — optional edits can still be made below.";
+  return "Draft ready to review — add any final edits below.";
 }
 
 /** True when session has at least one unanswered, renderable question in the frozen queue. */
@@ -78,10 +92,11 @@ export function enforceNeedsDetailsGuidedInvariant(args: {
   showNeedsDetailsMessaging: boolean;
 } {
   const bodyUsable = args.bodyUsable ?? true;
-  const panelRenderable = shouldRenderGuidedCompletionPanel({
+  const panelRenderable = resolveGuidedCompletionRenderState({
     bodyUsable,
-    session: args.session,
-  });
+    guidedSession: args.session,
+    panelMountedSurface: "document_editor",
+  }).sessionHasRenderableQueue;
   const displayReadiness = resolveDisplayReadinessWithGuidedInvariant(args.readiness, panelRenderable);
   return {
     displayReadiness,

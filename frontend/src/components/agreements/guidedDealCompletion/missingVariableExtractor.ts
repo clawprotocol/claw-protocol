@@ -526,9 +526,10 @@ export function extractDealVariables(args: {
         severity: "material",
         agreementFamily: familyHint,
         label: "Confirm remaining deal terms",
-        question: "Which deal terms should LawDog lock before signature?",
+        question:
+          "Do you want LawDog to use standard commercial assumptions or answer key terms yourself?",
         whyItMatters: "The draft still contains unresolved business language.",
-        suggestedAnswerFormat: "Specific fee, SLA, ownership, or venue term",
+        suggestedAnswerFormat: "Standard terms, guided questions, or custom instructions",
         affectsSections: ["General"],
         canProceedWithoutAnswer: true,
       });
@@ -553,9 +554,10 @@ export function ensureRenderableGuidedVariables(
     severity: "material",
     agreementFamily: family,
     label: "Confirm remaining deal terms",
-    question: "Which deal terms should LawDog lock before signature?",
+    question:
+      "Do you want LawDog to use standard commercial assumptions or answer key terms yourself?",
     whyItMatters: "The draft still contains unresolved business language.",
-    suggestedAnswerFormat: "Use standard terms or add custom details",
+    suggestedAnswerFormat: "Standard terms, guided questions, or custom instructions",
     affectsSections: ["General"],
     canProceedWithoutAnswer: true,
   };

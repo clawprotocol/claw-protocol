@@ -146,6 +146,21 @@ function safeFallbackForHeading(heading: string, ctx: ProCompletenessContext): s
   if (isServicesMigrationIntake(ctx.intakeRaw) && /invoic/i.test(h)) {
     return "Invoices are due Net thirty (30) days from receipt unless otherwise stated in a signed change order. Fee amounts and phase triggers are set out in Schedule A.";
   }
+  if (isServicesMigrationIntake(ctx.intakeRaw) && /deliverable|included/i.test(h)) {
+    return "Provider will deliver the migration, dashboard, onboarding, and support services described in this Agreement and Schedule A, including documentation reasonably required for Client's use.";
+  }
+  if (isServicesMigrationIntake(ctx.intakeRaw) && /exclusion/i.test(h)) {
+    return "Confidential Information does not include information that is public through no fault of the receiving Party, was known before disclosure, is independently developed, or is rightfully received from a third party without restriction.";
+  }
+  if (isServicesMigrationIntake(ctx.intakeRaw) && /disclosure|required\s+disclosure/i.test(h)) {
+    return "A Party may disclose Confidential Information when required by law or court order, provided it gives reasonable notice to the other Party when permitted.";
+  }
+  if (isServicesMigrationIntake(ctx.intakeRaw) && /return|deletion/i.test(h)) {
+    return "Upon termination, each Party will return or destroy the other Party's Confidential Information within thirty (30) days, except copies retained for legal or backup compliance.";
+  }
+  if (isServicesMigrationIntake(ctx.intakeRaw) && /equitable\s+relief/i.test(h)) {
+    return "Each Party acknowledges that breach of confidentiality or IP provisions may cause irreparable harm and that injunctive relief may be sought in addition to other remedies.";
+  }
   if (/protection\s+period|protected\s+opportunit/i.test(h)) {
     return REFERRAL_PROTECTION_FALLBACK;
   }

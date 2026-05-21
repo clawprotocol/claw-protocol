@@ -31,7 +31,7 @@ export function analyzeServicesMigrationIntake(
     ) &&
     /\b(?:ai|automation|workflow|dashboard|analytics|saas|software|platform|support)\b/.test(combined);
   const services =
-    /\b(?:services?\s+agreement|master\s+services|msa|technology\s+services|professional\s+services)\b/.test(
+    /\b(?:services?\s+agreement|master\s+services|msa|technology\s+services|professional\s+services|make\s+(?:this\s+)?into\s+an?\s+agreement)\b/.test(
       combined,
     ) || /\b(?:white[-\s]?label|enterprise)\b/.test(combined);
   const lighthouseArchetype =
@@ -40,6 +40,7 @@ export function analyzeServicesMigrationIntake(
   return {
     isServicesMigration:
       lighthouseArchetype ||
+      (lighthouseArchetype && /\b(?:dashboard|onboarding|support|migration)\b/.test(combined)) ||
       (migration && services) ||
       /\b(?:ai\s+migration|cloud\s+migration|software\s+integration)\b/.test(combined),
     mentionsPhases:
@@ -47,12 +48,16 @@ export function analyzeServicesMigrationIntake(
       bodyHasLoosePhaseScheduleBeforeSignatures(body || ""),
     vagueFee:
       /\b(?:maybe|approximately|about|roughly|probably)\s*\$?\s*[\d,]+/i.test(intake) ||
+      /\b(?:maybe|probably)\s+[\d,]+k?\b/i.test(intake) ||
       /\b(?:TBD|\?\?\?)\b/.test(intake) ||
       /\bto be confirmed\b/i.test(bodyLow) ||
+      /\bamount\s+to\s+be\s+agreed\b/i.test(bodyLow) ||
+      /\bestimated\s+only\b/i.test(bodyLow) ||
       !/\$\s*[\d,]{3,}/.test(bodyLow),
     informalParties:
-      /\b(?:between|among)\s+[A-Za-z][^.]{0,40}\s+and\s+[A-Za-z][^.]{0,40}\b/i.test(intake) &&
-      !/\b(?:LLC|Inc\.|Corp\.|L\.P\.|LP)\b/i.test(intake.slice(0, 400)),
+      (lighthouseArchetype && !/\b(?:LLC|Inc\.|Corp\.|L\.P\.|LP)\b/i.test(bodyLow.slice(0, 1500))) ||
+      (/\b(?:between|among)\s+[A-Za-z][^.]{0,40}\s+and\s+[A-Za-z][^.]{0,40}\b/i.test(intake) &&
+        !/\b(?:LLC|Inc\.|Corp\.|L\.P\.|LP)\b/i.test(intake.slice(0, 400))),
     mentionsSupport: /\b(?:support|maintenance|handoff|hypercare)\b/.test(combined),
     mentionsSla: /\b(?:sla|uptime|availability|response\s+time)\b/.test(combined),
     mentionsSecurity: /\b(?:security|cyber|data\s+protection|privacy)\b/.test(combined),

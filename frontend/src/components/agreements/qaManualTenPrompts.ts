@@ -97,6 +97,21 @@ export const QA_MANUAL_TEN_PROMPTS: readonly QaManualPromptFixture[] = [
 export const LIGHTHOUSE_APEX_MIGRATION_QA_INTAKE =
   "Create a technology services agreement between Lighthouse Digital and Apex Ops for AI migration, custom analytics dashboards, onboarding, and ongoing support. Total fee maybe $120,000 across build, rollout, and support phases. Month-to-month with renewal unless terminated. Texas law maybe. Include confidentiality, IP ownership, security obligations, and SLA uptime.";
 
+/** Casual Lighthouse/Apex intake (production log16 / test10 style). */
+export const LIGHTHOUSE_APEX_CASUAL_QA_INTAKE = [
+  "hey can u make this into an agreement",
+  "- lighthouse digital",
+  "- apex ops",
+  "- AI migration thing",
+  "- support + dashboards + onboarding",
+  "- maybe 120k?",
+  "- probably 12 months",
+  "- auto renew?",
+  "- texas maybe",
+  "need confidentiality/security/sla/ownership/indemnity",
+  "phase table build TBD / rollout TBD / support ???",
+].join("\n");
+
 /** Loose Lighthouse/Apex intake with malformed phase table — reproduces empty Needs-details panel QA. */
 export const LIGHTHOUSE_APEX_LOOSE_QA_INTAKE = [
   "Create a technology services agreement between Lighthouse Digital and Apex Ops for AI migration, custom analytics dashboards, onboarding, and ongoing support.",

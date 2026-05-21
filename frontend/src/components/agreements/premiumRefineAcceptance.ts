@@ -111,6 +111,17 @@ export type PremiumRefineRequiredSectionsPresence = {
 /** Paid Pro guided completion heading (Finalize + draft card). */
 export const PRO_REFINE_REVISE_SECTION_HEADING = "Complete your agreement";
 
+/** Neutral Pro review heading when guided questions are not mounted. */
+export const PRO_REFINE_NEUTRAL_REVIEW_HEADING = "Draft ready to review";
+
+export function proRefineSectionHeadingForRenderState(
+  state: { shouldShowCompleteAgreementHeading: boolean } | null | undefined,
+): string {
+  return state?.shouldShowCompleteAgreementHeading
+    ? PRO_REFINE_REVISE_SECTION_HEADING
+    : PRO_REFINE_NEUTRAL_REVIEW_HEADING;
+}
+
 /** Short helper under the guided completion flow. */
 export const PRO_REFINE_REVISE_HELPER =
   "Finish key business terms one at a time — we'll update your draft as you go.";

@@ -1,8 +1,8 @@
 import {
   GUIDED_NEUTRAL_REVIEW_COPY,
   GUIDED_NEUTRAL_REVIEW_TITLE,
-  computeCanRenderGuidedQuestions,
 } from "./canRenderGuidedQuestions";
+import type { GuidedCompletionRenderState } from "./resolveGuidedCompletionRenderState";
 import type { GuidedCompletionSession } from "./types";
 import { guidedSessionIntro, importantVariableCount } from "./guidedCompletionEngine";
 
@@ -27,14 +27,13 @@ export function sanitizeProUserMessage(message: string | null | undefined): stri
 
 export function friendlyLowConfidenceCopy(
   session: GuidedCompletionSession | null,
-  canRenderGuidedQuestions = false,
+  renderState: Pick<GuidedCompletionRenderState, "canRenderGuidedQuestions"> | boolean = false,
 ): {
   title: string;
   body: string;
 } {
   const canRender =
-    canRenderGuidedQuestions &&
-    computeCanRenderGuidedQuestions({ bodyUsable: true, session, guidedPanelMounted: true });
+    typeof renderState === "boolean" ? renderState : renderState.canRenderGuidedQuestions;
   if (!canRender) {
     return {
       title: GUIDED_NEUTRAL_REVIEW_TITLE,

@@ -231,9 +231,10 @@ const GAP_TEMPLATES: Record<
     kind: "commercial_ambiguity",
     id: "deal_terms_confirmation",
     label: "Confirm remaining deal terms",
-    question: "Which deal terms should LawDog lock before signature?",
+    question:
+      "Do you want LawDog to use standard commercial assumptions or answer key terms yourself?",
     whyItMatters: "The draft still contains unresolved business language.",
-    suggestedAnswerFormat: "Specific fee, SLA, ownership, or venue term",
+    suggestedAnswerFormat: "Standard terms, guided questions, or custom instructions",
     affectsSections: ["General"],
     severity: "material",
   },

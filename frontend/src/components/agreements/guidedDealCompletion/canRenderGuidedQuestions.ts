@@ -1,69 +1,53 @@
 /**
- * Single source of truth: guided UX copy and readiness may only reference
- * questions "below" when this returns true.
+ * User-facing copy helpers — gated by resolveGuidedCompletionRenderState.
  */
 
-import { getCurrentVariable } from "./guidedCompletionEngine";
-import type { GuidedCompletionSession } from "./types";
-import { variableHasSelectableAnswerPath } from "./shouldRenderGuidedCompletionPanel";
+import type { FinalizeReadiness } from "../finalizeReadinessModel";
+import type { GuidedCompletionRenderState } from "./resolveGuidedCompletionRenderState";
 
-export type CanRenderGuidedQuestionsArgs = {
-  bodyUsable: boolean;
-  session: GuidedCompletionSession | null | undefined;
-  /** When false, never claim questions are visible (e.g. panel not mounted on this surface). */
-  guidedPanelMounted?: boolean;
-};
-
-export function computeCanRenderGuidedQuestions(args: CanRenderGuidedQuestionsArgs): boolean {
-  if (args.guidedPanelMounted === false) return false;
-  if (!args.bodyUsable) return false;
-  const session = args.session;
-  if (!session || session.queue.length === 0) return false;
-
-  const hasUnresolved = session.queue.some(
-    (id) => !session.answered[id] && !session.skipped.has(id),
-  );
-  if (!hasUnresolved) return false;
-
-  const current = getCurrentVariable(session);
-  if (!current) return false;
-
-  return variableHasSelectableAnswerPath(current) && current.question.trim().length > 8;
-}
+export {
+  computeCanRenderGuidedQuestions,
+  type GuidedCompletionRenderState,
+  type GuidedPanelMountedSurface,
+  type GuidedReadinessLabel,
+  type ResolveGuidedCompletionRenderStateArgs,
+  resolveGuidedCompletionRenderState,
+  countUnresolvedRenderableVariables,
+  logGuidedRenderState,
+  warnGuidedInvariantViolation,
+} from "./resolveGuidedCompletionRenderState";
 
 export const GUIDED_NEUTRAL_REVIEW_COPY =
   "Draft ready to review — add any final edits below.";
 
 export const GUIDED_NEUTRAL_REVIEW_TITLE = "Draft ready to review.";
 
-/** Heading shown only when guided questions are mounted directly below. */
-export function guidedCompletionHeading(canRender: boolean): string {
-  return canRender ? "Complete your agreement" : GUIDED_NEUTRAL_REVIEW_TITLE;
+export function guidedCompletionHeading(state: Pick<GuidedCompletionRenderState, "shouldShowCompleteAgreementHeading">): string {
+  return state.shouldShowCompleteAgreementHeading ? "Complete your agreement" : GUIDED_NEUTRAL_REVIEW_TITLE;
 }
 
-export function guidedCompletionSubcopy(canRender: boolean): string {
-  return canRender
+export function guidedCompletionSubcopy(state: Pick<GuidedCompletionRenderState, "canRenderGuidedQuestions">): string {
+  return state.canRenderGuidedQuestions
     ? "Finish a few business decisions — we'll update your draft as you go."
     : GUIDED_NEUTRAL_REVIEW_COPY;
 }
 
-export function mayShowNeedsDetailsMessaging(
-  canRender: boolean,
-  readiness: "needs_details" | "good_draft" | "ready_for_review" | "ready_for_signature",
-): boolean {
-  return canRender && readiness === "needs_details";
+export function mayShowNeedsDetailsMessaging(state: Pick<GuidedCompletionRenderState, "shouldShowNeedsDetails">): boolean {
+  return state.shouldShowNeedsDetails;
 }
 
-export function mayShowCompleteAgreementBelowCopy(canRender: boolean): boolean {
-  return canRender;
+export function mayShowCompleteAgreementBelowCopy(
+  state: Pick<GuidedCompletionRenderState, "shouldShowUseCompleteBelowCopy">,
+): boolean {
+  return state.shouldShowUseCompleteBelowCopy;
 }
 
 export function finalizeTaglineForGuidedState(
   missingCount: number,
-  readiness: "needs_details" | "good_draft" | "ready_for_review" | "ready_for_signature",
-  canRender: boolean,
+  readiness: FinalizeReadiness,
+  state: Pick<GuidedCompletionRenderState, "canRenderGuidedQuestions" | "shouldShowNeedsDetails">,
 ): string {
-  if (!canRender && readiness === "needs_details") {
+  if (!state.canRenderGuidedQuestions && readiness === "needs_details") {
     return GUIDED_NEUTRAL_REVIEW_COPY;
   }
   if (readiness === "ready_for_signature") {
@@ -77,7 +61,7 @@ export function finalizeTaglineForGuidedState(
   if (readiness === "good_draft") {
     return missingCount > 0 ? "A few things to double-check before you continue." : "Strong draft created.";
   }
-  if (!canRender) {
+  if (!state.canRenderGuidedQuestions) {
     return GUIDED_NEUTRAL_REVIEW_COPY;
   }
   return missingCount > 0

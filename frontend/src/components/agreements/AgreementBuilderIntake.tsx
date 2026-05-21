@@ -549,9 +549,11 @@ import {
   readPersistedGuidedSession,
   sanitizeProUserMessage,
   shouldPreferGuidedCompletionOverRetry,
-  computeCanRenderGuidedQuestions,
   whatChangedLineForGuidedVariable,
   GUIDED_NEUTRAL_REVIEW_COPY,
+  resolveGuidedCompletionRenderState,
+  logGuidedRenderState,
+  type GuidedCompletionRenderState,
   type GuidedCompletionSession,
 } from "./guidedDealCompletion";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
@@ -11034,11 +11036,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       const guidedPending =
         paidBodyForChip.length >= 500 &&
-        computeCanRenderGuidedQuestions({
+        resolveGuidedCompletionRenderState({
           bodyUsable: true,
-          session: guidedSessionForChip,
-          guidedPanelMounted: true,
-        });
+          bodyText: paidBodyForChip,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+          guidedSession: guidedSessionForChip,
+          panelMountedSurface: null,
+        }).sessionHasRenderableQueue;
       if (guidedPending) {
         return { version: CHIP_VERSION_PRO, state: CHIP_STATE_PRO_NEEDS_DRAFT };
       }
@@ -13021,36 +13025,80 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   const activeGuidedCompletionSession = guidedCompletionSession ?? guidedCompletionSessionBase;
   guidedCompletionSessionRef.current = activeGuidedCompletionSession;
-  const canRenderGuidedQuestions = useMemo(() => {
-    if (!premiumPaidDocumentSurface || proUpgradeUseStarterView) return false;
-    const bodyUsable =
-      paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody || authoritativePremiumUiCommitted;
-    return computeCanRenderGuidedQuestions({
-      bodyUsable,
-      session: activeGuidedCompletionSession,
-      guidedPanelMounted: true,
+  const guidedBodyUsable = Boolean(
+    premiumPaidDocumentSurface &&
+      !proUpgradeUseStarterView &&
+      (paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody || authoritativePremiumUiCommitted),
+  );
+  const guidedSessionRenderable = Boolean(
+    guidedBodyUsable &&
+      activeGuidedCompletionSession &&
+      resolveGuidedCompletionRenderState({
+        bodyUsable: true,
+        bodyText: paidBodyForGuidedCompletion,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        guidedSession: activeGuidedCompletionSession,
+        panelMountedSurface: null,
+      }).sessionHasRenderableQueue,
+  );
+  const premiumReturnWaitActive = Boolean(
+    premiumPostCheckoutPhase || premiumAuthoritativeRequestInFlightUi || premiumReturnPatienceExtended,
+  );
+  const guidedPanelMountedOnDocumentEditor = Boolean(
+    guidedSessionRenderable &&
+      premiumReviewDocEditorOpen &&
+      activeGuidedCompletionSession,
+  );
+  const showGuidedCompletionRecovery = Boolean(
+    premiumPaidDocumentSurface &&
+      !authoritativePremiumUiCommitted &&
+      !proUpgradeUseStarterView &&
+      !canProceedWithPaidProDocument &&
+      !premiumReturnWaitActive &&
+      preferGuidedCompletionOverRetry &&
+      guidedSessionRenderable &&
+      !guidedPanelMountedOnDocumentEditor,
+  );
+  const guidedPanelMountedOnRecovery = showGuidedCompletionRecovery;
+  const guidedCompletionRenderState = useMemo((): GuidedCompletionRenderState => {
+    const panelMountedSurface = guidedPanelMountedOnDocumentEditor
+      ? ("document_editor" as const)
+      : guidedPanelMountedOnRecovery
+        ? ("recovery_banner" as const)
+        : null;
+    return resolveGuidedCompletionRenderState({
+      bodyText: paidBodyForGuidedCompletion,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      guidedSession: activeGuidedCompletionSession,
+      panelMountedSurface,
+      bodyUsable: guidedBodyUsable,
+      draftState: premiumPaidDocumentSurface ? "paid_pro" : "starter",
     });
   }, [
-    premiumPaidDocumentSurface,
-    proUpgradeUseStarterView,
     paidBodyForGuidedCompletion,
-    hasUsablePaidBody,
-    authoritativePremiumUiCommitted,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
     activeGuidedCompletionSession,
+    guidedPanelMountedOnDocumentEditor,
+    guidedPanelMountedOnRecovery,
+    guidedBodyUsable,
+    premiumPaidDocumentSurface,
     premiumSurfaceGateTick,
     reviewDocRefreshTick,
   ]);
+  useEffect(() => {
+    if (!premiumPaidDocumentSurface || !import.meta.env.DEV) return;
+    logGuidedRenderState(guidedCompletionRenderState, { draftState: "paid_pro" });
+  }, [guidedCompletionRenderState, premiumPaidDocumentSurface]);
   const guidedCompletionFriendlyCopy = useMemo(
     () =>
       friendlyLowConfidenceCopy(
         guidedCompletionSession ?? guidedCompletionSessionBase,
-        canRenderGuidedQuestions,
+        guidedCompletionRenderState,
       ),
-    [guidedCompletionSession, guidedCompletionSessionBase, canRenderGuidedQuestions],
+    [guidedCompletionSession, guidedCompletionSessionBase, guidedCompletionRenderState],
   );
-  const showPrimaryGuidedCompletion = Boolean(
-    canRenderGuidedQuestions && activeGuidedCompletionSession,
-  );
+  const showPrimaryGuidedCompletion = guidedPanelMountedOnDocumentEditor;
   /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
   const showTopProAdjustCard = Boolean(
     createUiStage === CreateUiStage.DRAFT &&
@@ -13077,20 +13125,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumProTruthGate,
       renderSource: blockedPreviewRenderSource,
     });
-  const premiumReturnWaitActive = Boolean(
-    premiumPostCheckoutPhase || premiumAuthoritativeRequestInFlightUi || premiumReturnPatienceExtended,
-  );
-  const showGuidedCompletionRecovery = Boolean(
-    premiumPaidDocumentSurface &&
-      !authoritativePremiumUiCommitted &&
-      !proUpgradeUseStarterView &&
-      !canProceedWithPaidProDocument &&
-      !premiumReturnWaitActive &&
-      preferGuidedCompletionOverRetry &&
-      canRenderGuidedQuestions &&
-      !showPrimaryGuidedCompletion,
-  );
-
   useEffect(() => {
     if (showPrimaryGuidedCompletion && postCheckoutAdvisoryGaps.length > 0) {
       setPostCheckoutAdvisoryGaps([]);
@@ -16678,8 +16712,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             {showProLawdogRefineAndFinalize ? (
                               <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
                                 <FinalizeYourAgreementPanel
-                                  hideFreeformRefineSection={canRenderGuidedQuestions}
-                                  canRenderGuidedQuestions={canRenderGuidedQuestions}
+                                  guidedCompletionRenderState={guidedCompletionRenderState}
+                                  hideFreeformRefineSection={guidedCompletionRenderState.canRenderGuidedQuestions}
                                   draft={reviewDraft ?? draft}
                                   currentDocumentText={proRefineCurrentDocumentTextForProPanels}
                                   intakeText={proRefineIntakeTextForProPanels}
