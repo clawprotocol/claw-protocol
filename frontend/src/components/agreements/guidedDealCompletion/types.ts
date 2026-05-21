@@ -57,6 +57,8 @@ export type GuidedCompletionSession = {
   /** Ordered queue for one-at-a-time UX (highest priority first). */
   queue: string[];
   answered: Record<string, string>;
+  /** Milliseconds since epoch when each variable was answered (merge tie-breaker). */
+  answeredAt?: Record<string, number>;
   skipped: Set<string>;
   currentIndex: number;
   completenessPercent: number;

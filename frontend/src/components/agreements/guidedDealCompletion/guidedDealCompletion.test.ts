@@ -6,6 +6,7 @@ import {
   growthAdvisorDefectiveBodyFixture,
   QA_MANUAL_TEN_PROMPTS,
 } from "../qaManualTenPrompts";
+import { CONTRACTOR_DEVELOPER_QA_INTAKE, contractorDeveloperBodyFixture } from "../qaManualTenPrompts";
 import {
   buildMaterialMissingItems,
   formatMaterialItemsForRevisePanel,
@@ -18,6 +19,7 @@ import { validateAgreementIntegrity } from "./agreementIntegrityValidator";
 import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
 import {
   applyGuidedAnswer,
+  applyGuidedAnswerTransaction,
   buildGuidedSessionFromAgreement,
   formatRefineInstructionForAnswer,
   frozenQuestionTotal,
@@ -25,7 +27,9 @@ import {
   isGuidedCompletionComplete,
   skipGuidedVariable,
   whatChangedLineForGuidedVariable,
+  normalizeWhatChangedDisplayLine,
 } from "./guidedCompletionEngine";
+import { resolveGuidedAnswerForPill } from "./guidedAnswerResolution";
 import { extractDealVariables } from "./missingVariableExtractor";
 import { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
 import { prioritizeDealVariables } from "./variablePrioritizationLayer";
@@ -288,7 +292,7 @@ describe("guidedDealCompletion", () => {
       },
     ];
     expect(whatChangedLineForGuidedVariable("referral_economics", vars)).toBe(
-      "What changed: Added referral compensation terms.",
+      "Added referral compensation terms.",
     );
   });
 
@@ -485,7 +489,8 @@ describe("guidedDealCompletion", () => {
     expect(ids).toContain("scope_change_approval");
     expect(session!.queue.length).toBeGreaterThanOrEqual(3);
     expect(session!.queue.length).toBeLessThanOrEqual(5);
-    expect(getCurrentVariable(session!)?.question).toMatch(/How should the developer be paid/i);
+    const firstQ = getCurrentVariable(session!)?.question ?? "";
+    expect(firstQ).toMatch(/How should the developer be paid|Who should own the work product/i);
     expect(getCurrentVariable(session!)?.suggestedDefaults.some((p) => p.id === "custom")).toBe(true);
   });
 
@@ -570,6 +575,40 @@ describe("guidedDealCompletion", () => {
     expect(whatChangedLineForGuidedVariable("payment_structure", [])).toMatch(/payment structure/i);
     expect(whatChangedLineForGuidedVariable("support_obligations", [])).toMatch(/support obligations/i);
     expect(whatChangedLineForGuidedVariable("scope_change_approval", [])).toMatch(/evolving scope/i);
+    expect(whatChangedLineForGuidedVariable("ip_ownership_contradiction", [])).toMatch(/IP ownership/i);
+  });
+
+  it("normalizeWhatChangedDisplayLine strips duplicate prefix", () => {
+    expect(normalizeWhatChangedDisplayLine("What changed: What changed: Added payment.")).toBe("Added payment.");
+    expect(normalizeWhatChangedDisplayLine("What changed: Added payment.")).toBe("Added payment.");
+  });
+
+  it("applyGuidedAnswerTransaction advances from Q1 to Q2 in frozen queue", () => {
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: CONTRACTOR_DEVELOPER_QA_INTAKE,
+      body: contractorDeveloperBodyFixture(),
+      materialItems: [],
+    })!;
+    const q1 = getCurrentVariable(session)!.id;
+    const afterQ1 = applyGuidedAnswerTransaction(session, q1, "Company owns deliverables");
+    expect(Object.keys(afterQ1.answered)).toContain(q1);
+    const q2 = getCurrentVariable(afterQ1);
+    expect(q2).not.toBeNull();
+    expect(q2!.id).not.toBe(q1);
+    expect(frozenQuestionTotal(afterQ1)).toBe(session.queue.length);
+  });
+
+  it("shared pill resolves to non-empty structured IP instruction", () => {
+    const vars = extractDealVariables({ intakeRaw: CONTRACTOR_DEVELOPER_QA_INTAKE, body: "" });
+    const ip =
+      vars.find((v) => v.id === "ip_ownership_contradiction") ??
+      vars.find((v) => v.id === "ip_ownership")!;
+    const sharedPill = ip.suggestedDefaults.find((p) => p.id === "shared");
+    const res = resolveGuidedAnswerForPill(ip, "shared", "Shared / custom", sharedPill?.value ?? "");
+    expect(res.action).toBe("apply");
+    if (res.action === "apply") {
+      expect(res.instructionAnswer.length).toBeGreaterThan(80);
+    }
   });
 
   it("consulting authoritative body integrity removes orphan LOL and duplicate direct damages", () => {

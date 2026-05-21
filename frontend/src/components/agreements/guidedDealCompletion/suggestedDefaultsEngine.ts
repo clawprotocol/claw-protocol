@@ -105,16 +105,47 @@ const CONSULTING_IP: DealVariableDefault[] = [
 ];
 
 const IP_CONTRADICTION: DealVariableDefault[] = [
-  { id: "company_all", label: "Company owns all custom work product", value: "Company owns all custom work product created under this Agreement." },
-  { id: "exclusive_license", label: "Developer owns; company gets exclusive license", value: "Contractor owns work product and grants Company an exclusive, perpetual license to use deliverables for its business." },
-  { id: "split_tools", label: "Developer keeps background tools; company owns custom work", value: "Company owns project deliverables; Contractor retains pre-existing tools, libraries, and general methods." },
+  {
+    id: "split_tools",
+    label: "Company owns project deliverables; developer keeps reusable tools",
+    value:
+      "Company owns all project deliverables created under this Agreement; Contractor retains pre-existing tools, libraries, know-how, and reusable developer materials.",
+  },
+  {
+    id: "exclusive_license",
+    label: "Developer owns all work; company gets exclusive license",
+    value:
+      "Contractor owns all work product and grants Company an exclusive, perpetual, worldwide license to use, modify, and exploit deliverables for its business.",
+  },
+  {
+    id: "shared",
+    label: "Shared / custom",
+    value:
+      "Use a split IP structure: Company owns project-specific deliverables created for the engagement; Contractor retains pre-existing tools, libraries, know-how, and reusable developer materials; Company receives a perpetual license to embedded Contractor background materials as needed to use the deliverables.",
+  },
   { id: "custom", label: "Custom", value: "" },
 ];
 
 const TERM_CONTRADICTION: DealVariableDefault[] = [
-  { id: "monthly_notice", label: "Month-to-month, either side may terminate on notice", value: "Month-to-month term; either Party may terminate on thirty (30) days written notice." },
-  { id: "three_year_early", label: "3-year commitment with early termination rights", value: "Initial term of three (3) years with early termination for material breach or by mutual written agreement." },
-  { id: "monthly_cap", label: "Month-to-month billing during a 3-year maximum term", value: "Services continue month-to-month for up to three (3) years unless terminated on thirty (30) days written notice." },
+  { id: "monthly_notice", label: "Month-to-month, terminable on notice", value: "Month-to-month term; either Party may terminate on thirty (30) days written notice." },
+  { id: "three_year_early", label: "3-year initial term with monthly work orders", value: "Initial term of three (3) years with services ordered month-to-month under written work orders." },
+  { id: "monthly_cap", label: "Month-to-month after 3-year lock", value: "Services continue month-to-month for up to three (3) years unless terminated on thirty (30) days written notice." },
+  { id: "custom", label: "Custom", value: "" },
+];
+
+const LICENSE_BACKGROUND: DealVariableDefault[] = [
+  {
+    id: "perpetual_embedded",
+    label: "Company gets perpetual license to embedded tools",
+    value:
+      "Company receives a perpetual, royalty-free license to use Contractor background materials embedded in deliverables as needed to operate the deliverables.",
+  },
+  {
+    id: "approval_required",
+    label: "Developer must avoid embedding reusable tools without approval",
+    value:
+      "Contractor will not embed reusable tools or background materials in deliverables without Company's prior written approval.",
+  },
   { id: "custom", label: "Custom", value: "" },
 ];
 
@@ -135,6 +166,7 @@ const ID_DEFAULTS: Partial<Record<string, (family: CommercialFamilyHint) => Deal
   ip_ownership: () => CONSULTING_IP,
   ip_ownership_contradiction: () => IP_CONTRADICTION,
   term_structure_contradiction: () => TERM_CONTRADICTION,
+  license_background_tools: () => LICENSE_BACKGROUND,
   deliverables_scope: () => DELIVERABLES_SCOPE,
   milestone_schedule: DEFAULTS_BY_CATEGORY.milestones!,
   governing_venue: DEFAULTS_BY_CATEGORY.governing_law!,

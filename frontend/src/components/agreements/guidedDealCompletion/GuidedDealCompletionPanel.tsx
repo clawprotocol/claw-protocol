@@ -6,8 +6,10 @@ import {
   getCurrentVariable,
   guidedSessionIntro,
   isGuidedCompletionComplete,
+  resolveGuidedCurrentIndex,
   skipGuidedVariable,
 } from "./guidedCompletionEngine";
+import { resolveGuidedAnswerForPill } from "./guidedAnswerResolution";
 import { GUIDED_COMPLETION_HEADING, GUIDED_COMPLETION_SUBHEADING } from "./friendlyProCompletionCopy";
 import { RECOMMEND_PILL_ID, resolveRecommendForMe, type RecommendForMeResult } from "./intakeRecommendationEngine";
 
@@ -21,17 +23,10 @@ export type GuidedDealCompletionPanelProps = {
   onApplyAnswer: (instruction: string, variableId: string, displayAnswer: string) => Promise<boolean> | boolean;
   /** Focus the freeform custom instruction area when user picks Custom. */
   onCustomPillSelected?: () => void;
-  /** Optional global freeze (e.g. draft pre-commit) — not tied to premium refine loading. */
+  /** Document commit freeze only — not global premium loading. */
   externallyFrozen?: boolean;
   compact?: boolean;
 };
-
-function logGuidedDisabledState(args: Record<string, unknown>) {
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.info("[guided-panel-disabled-state]", args);
-  }
-}
 
 export function GuidedDealCompletionPanel({
   session,
@@ -50,10 +45,11 @@ export function GuidedDealCompletionPanel({
   const stepNum = Math.min(total, answered + session.skipped.size + (current ? 1 : 0));
   const [customOpen, setCustomOpen] = useState(false);
   const [customDraft, setCustomDraft] = useState("");
-  const [isLocalApplying, setIsLocalApplying] = useState(false);
+  const [applyingVariableId, setApplyingVariableId] = useState<string | null>(null);
   const [helpExpanded, setHelpExpanded] = useState(false);
   const [recommendView, setRecommendView] = useState<RecommendForMeResult | null>(null);
 
+  const isLocalApplying = applyingVariableId !== null;
   const controlsDisabled = externallyFrozen || isLocalApplying;
 
   useEffect(() => {
@@ -61,41 +57,56 @@ export function GuidedDealCompletionPanel({
     setHelpExpanded(false);
     setCustomOpen(false);
     setCustomDraft("");
+    setApplyingVariableId(null);
   }, [current?.id]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    logGuidedDisabledState({
-      questionIndex: stepNum,
+    if (!import.meta.env.DEV || !current) return;
+    // eslint-disable-next-line no-console
+    console.info("[guided-session-current]", {
+      variableId: current.id,
+      index: resolveGuidedCurrentIndex(session),
       frozenTotalQuestions: total,
-      activeVariableId: current?.id ?? null,
-      isLocalApplying,
-      externallyFrozen,
+      answeredIds: Object.keys(session.answered),
+      skippedIds: [...session.skipped],
     });
-  }, [stepNum, total, current?.id, isLocalApplying, externallyFrozen]);
+  }, [current?.id, session, total]);
 
-  const runApply = async (displayAnswer: string) => {
-    if (!current || controlsDisabled) return;
-    const instruction = formatRefineInstructionForAnswer(current, displayAnswer);
+  const runApply = async (displayAnswer: string, instructionAnswer: string, variableId: string) => {
+    if (!current || controlsDisabled || variableId !== current.id) return;
+    const instruction = formatRefineInstructionForAnswer(current, instructionAnswer);
     if (!instruction.trim()) return;
-    setIsLocalApplying(true);
-    try {
+    setApplyingVariableId(variableId);
+    if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      if (import.meta.env.DEV) console.info("[guided-panel-click]", { variableId: current.id, displayAnswer });
-      const ok = await Promise.resolve(onApplyAnswer(instruction, current.id, displayAnswer));
+      console.info("[guided-answer-click]", { variableId, displayAnswer });
+      // eslint-disable-next-line no-console
+      console.info("[guided-answer-refine-start]", { variableId });
+    }
+    try {
+      const ok = await Promise.resolve(onApplyAnswer(instruction, variableId, displayAnswer));
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info(ok ? "[guided-answer-refine-success]" : "[guided-answer-refine-failed]", { variableId });
+      }
       if (ok) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[guided-answer-advance]", { variableId });
+        }
         setCustomOpen(false);
         setCustomDraft("");
         setRecommendView(null);
       }
     } finally {
-      setIsLocalApplying(false);
+      setApplyingVariableId(null);
     }
   };
 
   const handlePill = (pillId: string, value: string, label: string) => {
     if (!current || controlsDisabled) return;
-    if (pillId === RECOMMEND_PILL_ID) {
+    const resolution = resolveGuidedAnswerForPill(current, pillId, label, value);
+    if (resolution.action === "recommend") {
       const rec = resolveRecommendForMe(current, intakeRaw);
       if (rec) {
         setRecommendView(rec);
@@ -103,21 +114,25 @@ export function GuidedDealCompletionPanel({
       }
       return;
     }
-    if (pillId === "custom") {
-      // eslint-disable-next-line no-console
-      if (import.meta.env.DEV) console.info("[guided-panel-custom-open]", { variableId: current.id });
+    if (resolution.action === "custom") {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[guided-panel-custom-open]", { variableId: current.id });
+      }
       setRecommendView(null);
       setCustomOpen(true);
       onCustomPillSelected?.();
       return;
     }
-    void runApply(value || label);
+    void runApply(resolution.displayAnswer, resolution.instructionAnswer, current.id);
   };
 
   const handleSkip = () => {
     if (!current || controlsDisabled) return;
-    // eslint-disable-next-line no-console
-    if (import.meta.env.DEV) console.info("[guided-panel-skip]", { variableId: current.id });
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[guided-panel-skip]", { variableId: current.id });
+    }
     onSessionChange(skipGuidedVariable(session, current.id));
     setCustomOpen(false);
     setCustomDraft("");
@@ -191,7 +206,13 @@ export function GuidedDealCompletionPanel({
                     type="button"
                     disabled={controlsDisabled}
                     className="rounded-full border border-sky-400/80 bg-white px-3 py-1.5 text-left text-xs font-semibold text-sky-950 shadow-sm transition hover:border-sky-600 disabled:opacity-40 sm:text-sm"
-                    onClick={() => void runApply(choice.value || choice.label)}
+                    onClick={() =>
+                      void runApply(
+                        choice.label,
+                        choice.value || choice.label,
+                        current.id,
+                      )
+                    }
                   >
                     {choice.label}
                   </button>
@@ -200,6 +221,7 @@ export function GuidedDealCompletionPanel({
               <button
                 type="button"
                 className="mt-2 text-xs font-medium text-sky-800 underline-offset-2 hover:underline"
+                disabled={controlsDisabled}
                 onClick={() => setRecommendView(null)}
               >
                 See all options
@@ -209,6 +231,7 @@ export function GuidedDealCompletionPanel({
             <div className="mt-3 flex flex-wrap gap-2">
               {current.suggestedDefaults.map((pill) => {
                 const isRecommended = pill.id === current.recommendedPillId;
+                const isApplyingThis = applyingVariableId === current.id;
                 return (
                   <button
                     key={pill.id}
@@ -221,7 +244,7 @@ export function GuidedDealCompletionPanel({
                     }`}
                     onClick={() => handlePill(pill.id, pill.value, pill.label)}
                   >
-                    {pill.label}
+                    {isApplyingThis && pill.id !== "custom" ? "Applying…" : pill.label}
                     {isRecommended && current.recommendedLabel ? (
                       <span className="mt-0.5 block text-[10px] font-normal text-emerald-800/90">
                         {current.recommendedLabel}
@@ -272,7 +295,9 @@ export function GuidedDealCompletionPanel({
                 disabled={controlsDisabled}
                 onChange={(e) => setCustomDraft(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void runApply(customDraft.trim());
+                  if (e.key === "Enter" && customDraft.trim()) {
+                    void runApply(customDraft.trim(), customDraft.trim(), current.id);
+                  }
                 }}
                 aria-label={`Custom answer for ${current.label}`}
               />
@@ -280,9 +305,9 @@ export function GuidedDealCompletionPanel({
                 type="button"
                 className="rounded-lg bg-stone-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-45"
                 disabled={controlsDisabled || !customDraft.trim()}
-                onClick={() => void runApply(customDraft.trim())}
+                onClick={() => void runApply(customDraft.trim(), customDraft.trim(), current.id)}
               >
-                {isLocalApplying ? "Applying…" : "Apply custom answer"}
+                {applyingVariableId === current.id ? "Applying…" : "Apply custom answer"}
               </button>
             </div>
           ) : null}

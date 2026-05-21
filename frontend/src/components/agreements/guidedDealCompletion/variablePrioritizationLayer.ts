@@ -9,8 +9,27 @@ const SEVERITY_RANK: Record<DealVariableSeverity, number> = {
 const MAX_GUIDED_QUEUE = 5;
 const MAX_INTRO_LABELS = 3;
 
+/** Business-order priority for contractor/contradiction flows (lower = earlier). */
+const GUIDED_ID_PRIORITY: Record<string, number> = {
+  ip_ownership_contradiction: 0,
+  ip_ownership: 1,
+  term_structure_contradiction: 2,
+  payment_structure: 3,
+  license_background_tools: 4,
+  deliverables_scope: 5,
+  support_obligations: 6,
+  scope_change_approval: 7,
+};
+
+function guidedIdPriority(id: string): number {
+  return GUIDED_ID_PRIORITY[id] ?? 50;
+}
+
 export function prioritizeDealVariables(variables: readonly DealVariable[]): DealVariable[] {
   return [...variables].sort((a, b) => {
+    const pa = guidedIdPriority(a.id);
+    const pb = guidedIdPriority(b.id);
+    if (pa !== pb) return pa - pb;
     const sa = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
     if (sa !== 0) return sa;
     return a.confidence - b.confidence;

@@ -5,47 +5,17 @@ import { isFounderEquityVestingIntent } from "../founderIntentRouter";
 import { getSafeFallbackPartyLabels } from "../partyNameConfidence";
 import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
 import {
+  applyGuidedAnswerTransaction,
   buildGuidedSessionFromAgreement,
   extractDealVariables,
   getCurrentVariable,
   shouldRenderGuidedCompletionPanel,
 } from "./index";
+import { mergeGuidedSessionOnBaseRefresh } from "./guidedSessionPersistence";
 import { detectContradictoryTerms } from "./detectContradictoryTerms";
 import { validateAgreementIntegrity } from "./agreementIntegrityValidator";
 
-export const CONTRACTOR_DEVELOPER_QA_INTAKE =
-  "Need a contractor agreement for a developer. They should own all their work product but we also need full exclusive ownership of everything they create. The arrangement is month-to-month but should automatically lock in for 3 years unless terminated. Need it simple and founder-friendly.";
-
-export function contractorDeveloperBodyFixture(): string {
-  return [
-    "FOUNDER VESTING AGREEMENT",
-    "This Agreement is between Party A and Party B.",
-    "",
-    "1. SERVICES",
-    "Contractor will provide development services.",
-    "",
-    "1.2 Deliverables.",
-    "",
-    "2. COMPENSATION",
-    "Compensation, invoicing, and payment timing will be documented in a schedule or written statement agreed before work begins.",
-    "",
-    "3. INTELLECTUAL PROPERTY",
-    "3.1 Work Made for Hire; Assignment.",
-    "Compensation, invoicing, and payment timing will be documented in a schedule or written statement agreed before work begins.",
-    "3.5 No Conflicting Rights.",
-    "",
-    "6. WARRANTIES",
-    "6.2 Contractor Warranties.",
-    "",
-    "7. TERM AND TERMINATION",
-    "7.6 Effect of Termination.",
-    "7.7 Survival.",
-    "Survival and wind-down obligations apply as stated herein.",
-    "",
-    "IN WITNESS WHEREOF, the parties may execute this Agreement on the date of last signature below.",
-    "By: ____________________",
-  ].join("\n");
-}
+import { CONTRACTOR_DEVELOPER_QA_INTAKE, contractorDeveloperBodyFixture } from "../qaManualTenPrompts";
 
 describe("contractorDeveloperContradictionGuidedCompletion", () => {
   it("routes contractor developer intake to independent_contractor_agreement family", () => {
@@ -88,9 +58,31 @@ describe("contractorDeveloperContradictionGuidedCompletion", () => {
         body,
       }),
     ).toBe(true);
+    expect(session!.queue[0]).toBe("ip_ownership_contradiction");
     const current = getCurrentVariable(session!)!;
-    expect(current.question).toMatch(/own the developer's work product|month-to-month/i);
+    expect(current.question).toMatch(/own the developer's work product/i);
     expect(current.suggestedDefaults.some((p) => p.id === "custom")).toBe(true);
+    expect(current.suggestedDefaults.some((p) => p.id === "shared")).toBe(true);
+  });
+
+  it("session does not rewind after base refresh when Q1 answered", () => {
+    const body = contractorDeveloperBodyFixture();
+    const full = buildGuidedSessionFromAgreement({ intakeRaw: CONTRACTOR_DEVELOPER_QA_INTAKE, body })!;
+    const q1 = getCurrentVariable(full)!.id;
+    const afterQ1 = applyGuidedAnswerTransaction(
+      { ...full, sessionKey: "gen-c:fp-c" },
+      q1,
+      "Split IP structure",
+    );
+    const shrunk = buildGuidedSessionFromAgreement({
+      intakeRaw: CONTRACTOR_DEVELOPER_QA_INTAKE,
+      body,
+      materialItems: [],
+    });
+    const merged = mergeGuidedSessionOnBaseRefresh(afterQ1, shrunk, null, "gen-c:fp-c");
+    expect(merged).not.toBeNull();
+    expect(Object.values(merged!.answered).some((a) => /split ip/i.test(a))).toBe(true);
+    expect(getCurrentVariable(merged!)?.id).not.toBe(q1);
   });
 
   it("empty guided invariant: material gaps without renderable session must not qualify for panel", () => {
@@ -133,6 +125,20 @@ describe("contractorDeveloperContradictionGuidedCompletion", () => {
       out.text.match(/Compensation, invoicing, and payment timing will be documented/gi) || []
     ).length;
     expect(hits).toBeLessThanOrEqual(1);
+  });
+
+  it("hard gate fills empty contractor numbered headings", () => {
+    const out = validateAgreementIntegrity(contractorDeveloperBodyFixture(), {
+      intakeRaw: CONTRACTOR_DEVELOPER_QA_INTAKE,
+      surface: "test_contractor_headings",
+      tier: "premium",
+    });
+    const emptyHeadingOnly = out.text.match(/^\s*\d+(?:\.\d+)?\s+[^.\n]+\.\s*$/gm) ?? [];
+    for (const h of emptyHeadingOnly) {
+      const idx = out.text.indexOf(h);
+      const after = out.text.slice(idx + h.length, idx + h.length + 120).trim();
+      expect(after.length).toBeGreaterThan(20);
+    }
   });
 
   it("validateAgreementIntegrity strips manual signature scaffolding", () => {

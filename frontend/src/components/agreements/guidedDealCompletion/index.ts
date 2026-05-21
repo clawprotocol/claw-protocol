@@ -17,6 +17,7 @@ export {
   buildGuidedSessionFromAgreement,
   getCurrentVariable,
   applyGuidedAnswer,
+  applyGuidedAnswerTransaction,
   skipGuidedVariable,
   formatRefineInstructionForAnswer,
   isGuidedCompletionComplete,
@@ -24,8 +25,10 @@ export {
   guidedSessionIntro,
   importantVariableCount,
   whatChangedLineForGuidedVariable,
+  normalizeWhatChangedDisplayLine,
   frozenQuestionTotal,
 } from "./guidedCompletionEngine";
+export { resolveGuidedAnswerForPill, GUIDED_SHARED_IP_STRUCTURED_ANSWER } from "./guidedAnswerResolution";
 export {
   buildGuidedSessionKey,
   readPersistedGuidedSession,

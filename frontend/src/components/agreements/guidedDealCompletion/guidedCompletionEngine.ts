@@ -28,15 +28,13 @@ export function buildGuidedSessionFromAgreement(args: {
   });
 }
 
-/** Pure resolver — never mutates session (avoids stale React state / inert controls). */
+/** First unanswered id in the frozen queue (always scan from 0 — never trust stale currentIndex). */
 export function resolveGuidedCurrentIndex(session: GuidedCompletionSession): number {
-  let idx = session.currentIndex;
-  while (idx < session.queue.length) {
+  for (let idx = 0; idx < session.queue.length; idx += 1) {
     const id = session.queue[idx];
-    if (!session.answered[id] && !session.skipped.has(id)) break;
-    idx += 1;
+    if (!session.answered[id] && !session.skipped.has(id)) return idx;
   }
-  return idx;
+  return session.queue.length;
 }
 
 export function getCurrentVariable(session: GuidedCompletionSession): DealVariable | null {
@@ -58,19 +56,41 @@ export function applyGuidedAnswer(
   answer: string,
   bodyLen?: number,
 ): GuidedCompletionSession {
-  const answered = { ...session.answered, [variableId]: answer.trim() };
-  const idx = resolveGuidedCurrentIndex({
+  return applyGuidedAnswerTransaction(session, variableId, answer, bodyLen);
+}
+
+/**
+ * Pure transactional advance — mark answered by id, recompute index from frozen queue only.
+ */
+export function applyGuidedAnswerTransaction(
+  session: GuidedCompletionSession,
+  variableId: string,
+  answer: string,
+  bodyLen?: number,
+): GuidedCompletionSession {
+  const trimmed = (answer || "").trim();
+  const answered = { ...session.answered, [variableId]: trimmed };
+  const answeredAt = {
+    ...(session.answeredAt ?? {}),
+    [variableId]: Date.now(),
+  };
+  const next: GuidedCompletionSession = {
     ...session,
     answered,
-  });
+    answeredAt,
+    queue: [...session.queue],
+    variables: [...session.variables],
+    frozenTotalQuestions: session.frozenTotalQuestions ?? session.queue.length,
+    skipped: new Set(session.skipped),
+  };
+  const idx = resolveGuidedCurrentIndex(next);
   return {
-    ...session,
-    answered,
+    ...next,
     currentIndex: idx,
     completenessPercent: computeCompletenessPercent({
-      totalVariables: session.frozenTotalQuestions ?? session.queue.length,
+      totalVariables: next.frozenTotalQuestions ?? next.queue.length,
       answeredCount: Object.keys(answered).length,
-      skippedCount: session.skipped.size,
+      skippedCount: next.skipped.size,
       bodyLen,
     }),
   };
@@ -112,55 +132,63 @@ export function importantVariableCount(session: GuidedCompletionSession): number
 }
 
 const WHAT_CHANGED_BY_ID: Record<string, string> = {
-  payment_structure: "What changed: Added payment structure and invoicing terms.",
-  support_obligations: "What changed: Defined post-launch support obligations.",
-  scope_change_approval: "What changed: Clarified approval process for evolving scope.",
-  ip_ownership: "What changed: Added intellectual property ownership terms.",
-  ip_ownership_contradiction: "What changed: Clarified intellectual property ownership.",
-  term_structure_contradiction: "What changed: Clarified term and termination structure.",
-  deliverables_scope: "What changed: Defined deliverables and scope.",
-  governing_law_notice: "What changed: Added governing law and notice terms.",
-  referral_economics: "What changed: Added referral compensation terms.",
-  payment_timing: "What changed: Added payment timing terms.",
-  saas_sla: "What changed: Added service level and uptime terms.",
-  milestone_schedule: "What changed: Added milestone and deliverable terms.",
-  governing_venue: "What changed: Added governing law and venue terms.",
-  ip_allocation: "What changed: Added intellectual property allocation terms.",
-  nda_survival: "What changed: Added confidentiality survival terms.",
-  exclusivity_scope: "What changed: Added exclusivity scope terms.",
-  audit_scope: "What changed: Added audit rights terms.",
-  license_scope: "What changed: Added license scope terms.",
-  jv_contributions: "What changed: Added joint venture contribution terms.",
-  jv_ip_governance: "What changed: Added joint venture IP governance terms.",
-  ai_deployment: "What changed: Added deployment milestone terms.",
-  ai_ops_economics: "What changed: Added operational economics terms.",
+  payment_structure: "Added payment structure and invoicing terms.",
+  support_obligations: "Defined post-launch support obligations.",
+  scope_change_approval: "Clarified approval process for evolving scope.",
+  ip_ownership: "Added IP ownership allocation.",
+  ip_ownership_contradiction: "Added IP ownership allocation.",
+  term_structure_contradiction: "Clarified term and termination structure.",
+  license_background_tools: "Added license and background materials language.",
+  deliverables_scope: "Defined deliverables and scope.",
+  governing_law_notice: "Added governing law and notice terms.",
+  referral_economics: "Added referral compensation terms.",
+  payment_timing: "Added payment timing terms.",
+  saas_sla: "Added service level and uptime terms.",
+  milestone_schedule: "Added milestone and deliverable terms.",
+  governing_venue: "Added governing law and venue terms.",
+  ip_allocation: "Added intellectual property allocation terms.",
+  nda_survival: "Added confidentiality survival terms.",
+  exclusivity_scope: "Added exclusivity scope terms.",
+  audit_scope: "Added audit rights terms.",
+  license_scope: "Added license and background materials language.",
+  jv_contributions: "Added joint venture contribution terms.",
+  jv_ip_governance: "Added joint venture IP governance terms.",
+  ai_deployment: "Added deployment milestone terms.",
+  ai_ops_economics: "Added operational economics terms.",
 };
 
 const WHAT_CHANGED_BY_CATEGORY: Partial<Record<DealVariableCategory, string>> = {
-  referral_economics: "What changed: Added referral compensation terms.",
-  compensation: "What changed: Added compensation terms.",
-  payment_timing: "What changed: Added payment timing terms.",
-  sla: "What changed: Added service level terms.",
-  governing_law: "What changed: Added governing law and venue terms.",
-  termination: "What changed: Added termination and notice terms.",
-  confidentiality: "What changed: Added confidentiality terms.",
-  milestones: "What changed: Added milestone terms.",
-  ip_ownership: "What changed: Added intellectual property terms.",
+  referral_economics: "Added referral compensation terms.",
+  compensation: "Added payment structure.",
+  payment_timing: "Added payment timing terms.",
+  sla: "Added service level terms.",
+  governing_law: "Added governing law and venue terms.",
+  termination: "Clarified term and termination structure.",
+  confidentiality: "Added confidentiality terms.",
+  milestones: "Added milestone terms.",
+  ip_ownership: "Added IP ownership allocation.",
 };
 
-/** User-facing success line tied to the guided variable that was answered. */
+/** Strip duplicate "What changed:" prefix before UI adds its own label. */
+export function normalizeWhatChangedDisplayLine(line: string | null | undefined): string | null {
+  const t = (line || "").trim();
+  if (!t) return null;
+  return t.replace(/^(?:what changed:\s*)+/i, "").trim() || null;
+}
+
+/** User-facing success caption (no leading "What changed:" — host adds prefix once). */
 export function whatChangedLineForGuidedVariable(
   variableId: string | null | undefined,
   variables: readonly DealVariable[],
 ): string | null {
   if (!variableId) return null;
   const byId = WHAT_CHANGED_BY_ID[variableId];
-  if (byId) return byId;
+  if (byId) return normalizeWhatChangedDisplayLine(byId);
   const v = variables.find((x) => x.id === variableId);
   if (!v) return null;
   const byCat = WHAT_CHANGED_BY_CATEGORY[v.category];
-  if (byCat) return byCat;
-  return `What changed: Added ${v.label.toLowerCase()} terms.`;
+  if (byCat) return normalizeWhatChangedDisplayLine(byCat);
+  return normalizeWhatChangedDisplayLine(`Added ${v.label.toLowerCase()} terms.`);
 }
 
 export function frozenQuestionTotal(session: GuidedCompletionSession): number {

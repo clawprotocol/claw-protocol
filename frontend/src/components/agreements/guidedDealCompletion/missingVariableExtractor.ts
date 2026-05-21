@@ -6,7 +6,7 @@ import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQ
 import type { MaterialMissingItem, MaterialSeverity } from "../proAgreementCompleteness/types";
 import { isConsultingDevIntake } from "./consultingGuidedIntake";
 import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
-import { detectContradictoryTerms } from "./detectContradictoryTerms";
+import { detectContradictoryTerms, detectIpOwnershipContradiction } from "./detectContradictoryTerms";
 import { enrichDealVariables } from "./intakeRecommendationEngine";
 import { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
 import type { DealVariable, DealVariableCategory, DealVariableSeverity } from "./types";
@@ -27,6 +27,7 @@ const ID_TO_CATEGORY: Record<string, DealVariableCategory> = {
   ip_ownership: "ip_ownership",
   ip_ownership_contradiction: "ip_ownership",
   term_structure_contradiction: "termination",
+  license_background_tools: "ip_ownership",
   deliverables_scope: "milestones",
   saas_sla: "sla",
   referral_economics: "referral_economics",
@@ -62,7 +63,14 @@ function normalizeLabel(item: MaterialMissingItem): string {
   return item.label.trim() || item.question.slice(0, 80);
 }
 
+const PRESERVE_MATERIAL_IDS = new Set([
+  "ip_ownership_contradiction",
+  "term_structure_contradiction",
+  "license_background_tools",
+]);
+
 function remapMaterialId(item: MaterialMissingItem, intakeRaw?: string | null): string {
+  if (PRESERVE_MATERIAL_IDS.has(item.id)) return item.id;
   const text = `${item.id} ${item.label} ${item.question}`.toLowerCase();
   for (const rule of MATERIAL_GAP_FALLBACK_RULES) {
     if (rule.re.test(text)) return rule.id;
@@ -101,10 +109,12 @@ function materialItemToDealVariable(item: MaterialMissingItem, intakeRaw?: strin
 }
 
 function dedupeVariables(vars: DealVariable[]): DealVariable[] {
+  const hasIpContradiction = vars.some((v) => v.id === "ip_ownership_contradiction");
   const out: DealVariable[] = [];
   const seenQ = new Set<string>();
   const seenLabel = new Set<string>();
   for (const v of vars) {
+    if (hasIpContradiction && (v.id === "ip_ownership" || v.id === "ip_allocation")) continue;
     const qKey = v.question.toLowerCase().replace(/\W+/g, " ").trim();
     const lKey = v.label.toLowerCase();
     if (seenQ.has(qKey) || seenLabel.has(lKey)) continue;
@@ -177,7 +187,11 @@ function inferConsultingVariablesFromIntake(
     });
   }
 
-  if (/\b(?:ip|work product|ownership)\b/i.test(intakeLow) && !/\b(?:owns|ownership|assign)\b[\s\S]{0,80}\bdeliverable/i.test(low)) {
+  if (
+    !detectIpOwnershipContradiction(intakeRaw) &&
+    /\b(?:ip|work product|ownership)\b/i.test(intakeLow) &&
+    !/\b(?:owns|ownership|assign)\b[\s\S]{0,80}\bdeliverable/i.test(low)
+  ) {
     push({
       id: "ip_ownership",
       severity: "material",
@@ -218,6 +232,23 @@ function inferContractorVariablesFromIntake(
       whyItMatters: "Clear payment structure keeps month-to-month or project billing predictable.",
       suggestedAnswerFormat: "e.g. monthly retainer, hourly, fixed fee",
       affectsSections: ["Compensation", "Fees", "Payment"],
+      canProceedWithoutAnswer: true,
+    });
+  }
+
+  if (
+    /\b(?:work\s+product|developer|contractor)\b/i.test(intakeLow) &&
+    !/\b(?:background|pre[- ]?existing|embedded|license)\b[\s\S]{0,120}\b(?:perpetual|license)\b/i.test(low)
+  ) {
+    push({
+      id: "license_background_tools",
+      severity: "material",
+      label: "License / background tools",
+      question: "How should background tools and embedded materials be licensed?",
+      whyItMatters:
+        "If the developer keeps reusable tools, the company usually needs a clear license to use deliverables that include those materials.",
+      suggestedAnswerFormat: "e.g. perpetual license to embedded tools",
+      affectsSections: ["Intellectual Property", "License"],
       canProceedWithoutAnswer: true,
     });
   }

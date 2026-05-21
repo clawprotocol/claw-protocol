@@ -1,5 +1,5 @@
 import type { CommercialFamilyHint } from "../proAgreementCompleteness/types";
-import { resolveGuidedCurrentIndex } from "./guidedCompletionEngine";
+import { applyGuidedAnswerTransaction, resolveGuidedCurrentIndex } from "./guidedCompletionEngine";
 import { computeCompletenessPercent } from "./variablePrioritizationLayer";
 import type { DealVariable, GuidedCompletionSession } from "./types";
 
@@ -12,6 +12,7 @@ export type PersistedGuidedSession = {
   /** Snapshot of deal variables at lock time — prevents queue shrink on rerender. */
   variables: DealVariable[];
   answered: Record<string, string>;
+  answeredAt?: Record<string, number>;
   skippedIds: string[];
   currentIndex: number;
   agreementFamily: CommercialFamilyHint;
@@ -42,6 +43,7 @@ export function persistGuidedSession(session: GuidedCompletionSession, sessionKe
       queue: [...session.queue],
       variables: [...session.variables],
       answered: { ...session.answered },
+      answeredAt: session.answeredAt ? { ...session.answeredAt } : undefined,
       skippedIds: [...session.skipped],
       currentIndex: idx,
       agreementFamily: session.agreementFamily,
@@ -73,7 +75,11 @@ export function lockGuidedSession(session: GuidedCompletionSession, sessionKey: 
 }
 
 function sessionProgressScore(session: GuidedCompletionSession): number {
-  return Object.keys(session.answered).length * 100 + session.skipped.size * 10 + session.currentIndex;
+  const answeredN = Object.keys(session.answered).length;
+  const skippedN = session.skipped.size;
+  const idx = resolveGuidedCurrentIndex(session);
+  const latestAt = Math.max(0, ...Object.values(session.answeredAt ?? {}));
+  return answeredN * 1000 + skippedN * 100 + idx * 10 + latestAt / 1_000_000_000;
 }
 
 function recomputeSessionProgress(session: GuidedCompletionSession): GuidedCompletionSession {
@@ -88,6 +94,23 @@ function recomputeSessionProgress(session: GuidedCompletionSession): GuidedCompl
       skippedCount: session.skipped.size,
     }),
   };
+}
+
+function mergeAnsweredMaps(
+  prev: GuidedCompletionSession,
+  incoming: GuidedCompletionSession,
+): { answered: Record<string, string>; answeredAt: Record<string, number> } {
+  const answered = { ...incoming.answered, ...prev.answered };
+  const answeredAt: Record<string, number> = { ...(incoming.answeredAt ?? {}), ...(prev.answeredAt ?? {}) };
+  for (const id of Object.keys(prev.answered)) {
+    const prevAt = prev.answeredAt?.[id] ?? 0;
+    const inAt = incoming.answeredAt?.[id] ?? 0;
+    if (prevAt >= inAt) {
+      answered[id] = prev.answered[id];
+      answeredAt[id] = prevAt;
+    }
+  }
+  return { answered, answeredAt };
 }
 
 /** Add new variables from base to the frozen queue — never remove ids mid-session. */
@@ -119,7 +142,7 @@ export function preserveGuidedSessionProgress(
   prev: GuidedCompletionSession,
   incoming: GuidedCompletionSession,
 ): GuidedCompletionSession {
-  const answered = { ...incoming.answered, ...prev.answered };
+  const { answered, answeredAt } = mergeAnsweredMaps(prev, incoming);
   const skipped = new Set([...incoming.skipped, ...prev.skipped]);
   const queue =
     prev.queue.length >= incoming.queue.length
@@ -139,9 +162,9 @@ export function preserveGuidedSessionProgress(
     queue,
     variables: variables.length ? variables : prev.variables,
     answered,
+    answeredAt,
     skipped,
     frozenTotalQuestions: frozen,
-    currentIndex: Math.max(prev.currentIndex, incoming.currentIndex),
   };
   return recomputeSessionProgress(merged);
 }
@@ -161,14 +184,13 @@ export function mergeGuidedSessionWithPersistence(
     const queue = [...persisted.queue];
     const variables = queue.map((id) => varById.get(id)).filter((v): v is DealVariable => Boolean(v));
     const mergedVars = variables.length ? variables : (persisted.variables ?? base?.variables ?? []);
-    const answered = { ...persisted.answered };
-    const skipped = new Set(persisted.skippedIds);
     const session: GuidedCompletionSession = {
       variables: mergedVars,
       queue,
-      answered,
-      skipped,
-      currentIndex: persisted.currentIndex,
+      answered: { ...persisted.answered },
+      answeredAt: persisted.answeredAt ? { ...persisted.answeredAt } : undefined,
+      skipped: new Set(persisted.skippedIds),
+      currentIndex: 0,
       completenessPercent: 0,
       agreementFamily: persisted.agreementFamily ?? base?.agreementFamily ?? "generic_business_agreement",
       sessionKey,
@@ -190,8 +212,41 @@ export function mergeGuidedSessionOnBaseRefresh(
   const incoming = mergeGuidedSessionWithPersistence(base, persisted, sessionKey);
   if (!incoming) return null;
   if (!prev || prev.sessionKey !== sessionKey) return incoming;
+
+  const prevProgress = Object.keys(prev.answered).length + prev.skipped.size;
+  const incomingProgress = Object.keys(incoming.answered).length + incoming.skipped.size;
+  const prevIdx = resolveGuidedCurrentIndex(prev);
+  const incomingIdx = resolveGuidedCurrentIndex(incoming);
+
+  if (prevProgress > 0 && (prevProgress > incomingProgress || prevIdx > incomingIdx)) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[guided-session-merge-skipped-active-progress]", {
+        prevAnswered: Object.keys(prev.answered),
+        incomingAnswered: Object.keys(incoming.answered),
+        prevIndex: prevIdx,
+        incomingIndex: incomingIdx,
+      });
+    }
+    return supplementGuidedSessionFromBase(prev, base, sessionKey);
+  }
+
   if (sessionProgressScore(prev) > sessionProgressScore(incoming)) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[guided-session-merge-skipped-active-progress]", { reason: "progress_score" });
+    }
     return supplementGuidedSessionFromBase(prev, base, sessionKey);
   }
   return preserveGuidedSessionProgress(prev, incoming);
+}
+
+/** Re-apply a persisted answered id after external refresh (idempotent). */
+export function rehydrateGuidedSessionAnswer(
+  session: GuidedCompletionSession,
+  variableId: string,
+  answer: string,
+): GuidedCompletionSession {
+  if (!session.answered[variableId] && !answer.trim()) return session;
+  return applyGuidedAnswerTransaction(session, variableId, answer || session.answered[variableId]);
 }

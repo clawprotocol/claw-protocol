@@ -6,6 +6,7 @@ import { applyClauseCoherenceEngine } from "./clauseCoherenceEngine";
 import { parseAgreementSections } from "../proOperationalSynthesis/sectionPurityValidator";
 import type { ProCompletenessContext } from "../proAgreementCompleteness/types";
 import { isConsultingDevIntake } from "./consultingGuidedIntake";
+import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
 import { neutralFallbackForTopic } from "../proAgreementCompleteness/familyFallbackLanguage";
 
 const BANNED_LINE_PATTERNS: readonly RegExp[] = [
@@ -118,8 +119,21 @@ function safeFallbackForHeading(heading: string, ctx: ProCompletenessContext): s
   const advisor = isGrowthAdvisorIntake(ctx.intakeRaw);
   const referral = isReferralChannelIntake(ctx.intakeRaw) && !isConsultingDevIntake(ctx.intakeRaw);
   const consulting = isConsultingDevIntake(ctx.intakeRaw);
+  const contractor = isContractorDeveloperIntake(ctx.intakeRaw);
   if (/confidential/i.test(h)) {
     return MUTUAL_CONFIDENTIALITY_FALLBACK;
+  }
+  if (contractor && /pre[- ]?existing|background\s+material/i.test(h)) {
+    return "Contractor retains ownership of pre-existing tools, libraries, and know-how. Company receives a perpetual license to use any Contractor background materials embedded in deliverables as needed to use the deliverables.";
+  }
+  if (contractor && /work\s+product|assignment|made\s+for\s+hire|intellectual\s+property/i.test(h)) {
+    return "Contractor assigns to Company all right, title, and interest in project deliverables created under this Agreement, except pre-existing Contractor materials retained by Contractor and licensed as stated herein.";
+  }
+  if (contractor && /represent|warrant/i.test(h)) {
+    return "Contractor represents that it has authority to enter into this Agreement, will perform services in a professional manner, and will not infringe third-party rights in the work performed.";
+  }
+  if (contractor && /electronic\s+sign|signature|execution/i.test(h)) {
+    return "This Agreement may be executed electronically in accordance with applicable law. Electronic signatures are intended to have the same effect as original signatures.";
   }
   if (/protection\s+period|protected\s+opportunit/i.test(h)) {
     return REFERRAL_PROTECTION_FALLBACK;
@@ -137,8 +151,8 @@ function safeFallbackForHeading(heading: string, ctx: ProCompletenessContext): s
     if (referral || advisor) {
       return REFERRAL_REVENUE_STUB;
     }
-    if (consulting) {
-      return "Compensation, invoicing, and payment timing will be documented in a schedule or written statement agreed before work begins.";
+    if (contractor || consulting) {
+      return "Contractor will invoice Company monthly in arrears for services performed. Fees, rates, and payment timing will be documented in a schedule or written statement agreed before work begins.";
     }
     return "Fees and payment timing will be confirmed in writing before execution.";
   }

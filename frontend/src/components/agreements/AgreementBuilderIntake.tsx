@@ -541,7 +541,7 @@ import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPan
 import {
   GuidedDealCompletionPanel,
   GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER,
-  applyGuidedAnswer,
+  applyGuidedAnswerTransaction,
   buildGuidedSessionFromAgreement,
   buildGuidedSessionKey,
   friendlyLowConfidenceCopy,
@@ -12989,6 +12989,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleGuidedApplyAnswer = React.useCallback(
     async (instruction: string, variableId: string, displayAnswer: string): Promise<boolean> => {
       lastGuidedAnswerVariableIdRef.current = variableId;
+      const bodyLen = (paidProCardEditDraft ?? paidBodyForGuidedCompletion ?? "").trim().length;
       const ok = await runPersistedRefineFromStepBuffer(instruction, {
         premiumRefineDocumentOverride:
           (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim() || null,
@@ -12996,7 +12997,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (ok) {
         setGuidedCompletionSession((prev) => {
           if (!prev) return prev;
-          const next = applyGuidedAnswer(prev, variableId, displayAnswer);
+          const next = applyGuidedAnswerTransaction(prev, variableId, displayAnswer, bodyLen);
           const keyed = { ...next, sessionKey: guidedSessionKey };
           persistGuidedSession(keyed, guidedSessionKey);
           guidedCompletionSessionRef.current = keyed;
@@ -13005,7 +13006,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       return ok;
     },
-    [guidedSessionKey, paidProCardEditDraft, runPersistedRefineFromStepBuffer],
+    [guidedSessionKey, paidProCardEditDraft, paidBodyForGuidedCompletion, runPersistedRefineFromStepBuffer],
   );
   const preferGuidedCompletionOverRetry = useMemo(() => {
     const snap = readPremiumCompletionSnapshot();
