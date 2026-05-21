@@ -103,6 +103,7 @@ describe("guidedDealCompletion", () => {
     expect(instruction).toContain("99.9%");
     const next = applyGuidedAnswer(session!, cur!.id, "99.9% monthly uptime");
     expect(Object.keys(next.answered)).toHaveLength(1);
+    expect(isGuidedCompletionComplete(next)).toBe(true);
   });
 
   it("prefers guided completion over retry when body is usable", () => {
