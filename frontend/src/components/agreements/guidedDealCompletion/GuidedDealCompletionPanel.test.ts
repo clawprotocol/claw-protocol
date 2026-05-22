@@ -35,7 +35,7 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     expect(panel).not.toContain("Applying update");
     expect(panel).not.toContain("onApplyAnswer");
     expect(optionCard).toContain("Why:");
-    expect(optionCard).toContain("LawDog will:");
+    expect(optionCard).toContain("Will update:");
     expect(optionCard).toContain("More details");
     expect(panel).toContain("guided-skip-tertiary");
     expect(panel).toContain("guided-saved-flash");

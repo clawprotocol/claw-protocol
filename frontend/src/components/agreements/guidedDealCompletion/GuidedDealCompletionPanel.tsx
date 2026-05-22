@@ -316,7 +316,7 @@ export function GuidedDealCompletionPanel({
     return (
       <div data-guided-completion-panel="true" className={compact ? "pb-6" : "pb-8"}>
         <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-2.5" />
-        <p className="mb-2 text-sm font-semibold text-stone-900">Review your updated Pro agreement</p>
+        <p className="mb-2 text-sm font-semibold text-stone-900">Updated in agreement</p>
         <GuidedAppliedAreasSummary areas={appliedAreas} />
         {appliedChanges.length > 0 ? (
           <div className="mt-3">
@@ -412,7 +412,7 @@ export function GuidedDealCompletionPanel({
               className="rounded-md border border-stone-200/90 bg-stone-50/90 px-2.5 py-2"
               data-testid="guided-clause-updates-preview"
             >
-              <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">Updates</p>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">Will update</p>
               <ul className="mt-1 space-y-0.5">
                 {clauseUpdates.map((label) => (
                   <li key={label} className="text-[11px] text-stone-800">

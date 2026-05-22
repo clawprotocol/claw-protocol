@@ -10,6 +10,8 @@ describe("ProReviewSigningFlowPanel", () => {
     expect(src).toContain("Continue to signing");
     expect(src).toContain("Upload edited version");
     expect(src).toContain("data-testid=\"pro-review-continue-to-signing\"");
+    expect(src).toContain("Your agreement is ready to review");
+    expect(src).toContain("pro-review-suggest-edits-card");
   });
 
   it("resolveProReviewSigningFlowState returns final_review by default", () => {

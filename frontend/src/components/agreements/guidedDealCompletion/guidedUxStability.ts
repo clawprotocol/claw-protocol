@@ -18,22 +18,26 @@ export function deriveGuidedUxPhaseFlags(args: {
   phase: GuidedCompletionPhase;
   /** Keeps “updated” surfaces stable briefly after apply metadata lands */
   hasAuthoritativeSummary?: boolean;
+  /** Paid Pro final review moment (post bulk apply, before signers). */
+  guidedFinalReview?: boolean;
 }): GuidedUxPhaseFlags {
   const surfaceActive = Boolean(args.showPrimaryGuided && args.hasSession);
+  const postApply =
+    args.phase === "applied" || Boolean(args.hasAuthoritativeSummary) || Boolean(args.guidedFinalReview);
   const queued =
-    surfaceActive &&
+    (surfaceActive || postApply) &&
     (args.phase === "collecting_answers" ||
       args.phase === "ready_to_apply" ||
       args.phase === "failed");
-  const applying = surfaceActive && args.phase === "applying_all";
-  const updated =
-    surfaceActive && (args.phase === "applied" || Boolean(args.hasAuthoritativeSummary));
+  const applying = (surfaceActive || postApply) && args.phase === "applying_all";
+  const updated = postApply;
+  const guidedReviewReady = Boolean(args.guidedFinalReview || (postApply && args.phase === "applied"));
   return {
-    isGuidedCompletion: surfaceActive,
-    guidedQueued: queued,
+    isGuidedCompletion: surfaceActive || postApply,
+    guidedQueued: queued && !updated,
     guidedApplying: applying,
     guidedUpdated: updated,
-    guidedReviewReady: updated,
+    guidedReviewReady,
   };
 }
 

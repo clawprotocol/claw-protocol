@@ -533,6 +533,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("processReviewEditedVersionUpload");
     expect(intake).toContain("verifySigningSendReady");
     expect(intake).toContain("assertSigningSendReadyOrBlock");
+    expect(intake).toContain("guided_final_review");
+    expect(intake).toContain("logGuidedAuthoritativeReviewSync");
+    expect(intake).toContain("postGuidedAuthoritativeReview");
     expect(intake).toMatch(/onContinueToSigning=\{\(\) => void handleProSendForSignature\(\)\}/);
   });
 });

@@ -54,11 +54,14 @@ export function ProReviewStepIndicator({ activeStep, className = "" }: ProReview
 export function resolveProReviewActiveStep(args: {
   guidedCompletionActive: boolean;
   guidedPhase: string;
+  guidedFinalReview?: boolean;
   signersReady: boolean;
   packetPrepared: boolean;
 }): ProReviewStepId {
+  if (args.guidedFinalReview || args.guidedPhase === "applied") {
+    return "review_draft";
+  }
   if (args.guidedCompletionActive) {
-    if (args.guidedPhase === "applied") return "add_signers";
     return "complete_agreement";
   }
   if (!args.signersReady) return "add_signers";

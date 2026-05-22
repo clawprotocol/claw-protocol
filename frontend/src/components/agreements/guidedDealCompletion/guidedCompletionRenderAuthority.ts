@@ -27,6 +27,8 @@ export type GuidedRenderDocumentResolution = {
 export type ResolveGuidedRenderDocumentArgs = {
   /** Guided panel visible or session in progress on paid Pro surface. */
   guidedCompletionActive: boolean;
+  /** After bulk apply — never fall back to structured preview over authoritative body. */
+  postGuidedAuthoritativeReview?: boolean;
   authoritativeHydratedPlain?: string | null;
   pickerPlain?: string | null;
   pickerSource?: string | null;
@@ -127,6 +129,7 @@ export function resolveGuidedCompletionRenderDocument(
   const preview = norm(args.renderedPreviewPlain);
   const starter = norm(args.starterFallbackPlain);
 
+  const postGuided = Boolean(args.postGuidedAuthoritativeReview);
   const authoritativeExists =
     authHydrated.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN ||
     lastKnown.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN;
@@ -144,20 +147,30 @@ export function resolveGuidedCompletionRenderDocument(
     picker.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
     (isAuthoritativePremiumPipelineRenderSource(pickerSource) ||
       args.guidedCompletionActive ||
+      postGuided ||
       hasPremiumMarkers(picker));
   if (pickerAuthoritative) {
     cands.push({ plain: picker, source: "picker_authoritative", rank: 3 });
   }
-  if (adt.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN && (hasPremiumMarkers(adt) || args.guidedCompletionActive)) {
+  if (
+    adt.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
+    (hasPremiumMarkers(adt) || args.guidedCompletionActive || postGuided)
+  ) {
     cands.push({ plain: adt, source: "agreement_document_text", rank: 4 });
   }
-  if (preview.length >= 400 && !args.guidedCompletionActive) {
-    cands.push({ plain: preview, source: "rendered_preview", rank: 5 });
-  } else if (preview.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN && args.guidedCompletionActive && !authoritativeExists) {
-    cands.push({ plain: preview, source: "rendered_preview", rank: 5 });
-  }
-  if (starter.length >= 200 && !args.guidedCompletionActive) {
-    cands.push({ plain: starter, source: "starter_fallback", rank: 6 });
+  if (!postGuided) {
+    if (preview.length >= 400 && !args.guidedCompletionActive) {
+      cands.push({ plain: preview, source: "rendered_preview", rank: 5 });
+    } else if (
+      preview.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
+      args.guidedCompletionActive &&
+      !authoritativeExists
+    ) {
+      cands.push({ plain: preview, source: "rendered_preview", rank: 5 });
+    }
+    if (starter.length >= 200 && !args.guidedCompletionActive) {
+      cands.push({ plain: starter, source: "starter_fallback", rank: 6 });
+    }
   }
 
   cands.sort((a, b) => a.rank - b.rank);

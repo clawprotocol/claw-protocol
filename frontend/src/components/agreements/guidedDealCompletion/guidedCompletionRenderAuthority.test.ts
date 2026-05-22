@@ -69,6 +69,19 @@ describe("resolveGuidedCompletionRenderDocument", () => {
     ).toBe(true);
   });
 
+  it("postGuidedAuthoritativeReview never prefers stale rendered preview over authoritative body", () => {
+    const stalePreview = "Short structured preview\n" + "y".repeat(400);
+    const r = resolveGuidedCompletionRenderDocument({
+      guidedCompletionActive: false,
+      postGuidedAuthoritativeReview: true,
+      authoritativeHydratedPlain: LONG_AUTH,
+      renderedPreviewPlain: stalePreview,
+      pickerPlain: SHORT,
+    });
+    expect(r.source).toBe("authoritative_hydrated_premium");
+    expect(r.plainText).toBe(LONG_AUTH);
+  });
+
   it("updateLastKnownGoodAuthoritativeDraftRef persists corpus across transitions", () => {
     const ref = { current: "" };
     expect(updateLastKnownGoodAuthoritativeDraftRef(ref, LONG_AUTH, "test")).toBe(true);

@@ -6,8 +6,13 @@ export type CreateFlowProductionPhase =
   | "generating_draft"
   | "complexity_choice_required"
   | "draft_ready_for_review"
+  | "guided_final_review"
   | "recipient_setup_required"
   | "ready_to_send";
+
+export function isGuidedFinalReviewPhase(phase: CreateFlowProductionPhase): boolean {
+  return phase === "guided_final_review";
+}
 
 export function isCreateFlowPastCapture(phase: CreateFlowProductionPhase): boolean {
   return (
@@ -27,6 +32,8 @@ export function createFlowPrimaryCtaLabel(phase: CreateFlowProductionPhase): str
       return "";
     case "draft_ready_for_review":
       return "Continue";
+    case "guided_final_review":
+      return "Continue to signing";
     case "recipient_setup_required":
       return "Continue to send";
     case "ready_to_send":
