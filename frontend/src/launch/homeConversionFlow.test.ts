@@ -164,6 +164,8 @@ describe("AgreementBuilderIntake home auto-generate (static)", () => {
     expect(intake).toContain("homeHeroAutoGenerate");
     expect(intake).toContain('handoffSource: "home_create_submit"');
     expect(intake).toContain("logHomeCreateSubmit");
+    expect(intake).toContain("beginStarterDraftGeneration");
+    expect(intake).not.toContain("deferDraftStageForFreshInput");
   });
 
   it("commits free review surface after local parse (homepage + timeout paths)", () => {

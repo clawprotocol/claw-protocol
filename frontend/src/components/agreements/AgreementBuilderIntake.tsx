@@ -648,6 +648,10 @@ import {
   type FinalReviewSendIntent,
 } from "./simpleProFinalReviewPhase";
 import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
+import {
+  canActivateGuidedCompletionPhase,
+  GUIDED_COMPLETION_PHASE_INACTIVE,
+} from "./starterCreateHandoff";
 import { buildGuidedAppliedSummaryChecklist } from "./guidedDealCompletion/guidedAppliedSummaryChecklist";
 import {
   isGuidedQueueRebuildBlocked,
@@ -2525,7 +2529,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [proFinalReviewExportBusy, setProFinalReviewExportBusy] = useState(false);
   const [proFinalReviewExportError, setProFinalReviewExportError] = useState<string | null>(null);
   const [guidedCompletionPhase, setGuidedCompletionPhase] =
-    useState<GuidedCompletionPhase>("collecting_answers");
+    useState<GuidedCompletionPhase>(GUIDED_COMPLETION_PHASE_INACTIVE);
   const [guidedBulkApplyError, setGuidedBulkApplyError] = useState<string | null>(null);
   const [appliedGuidedChanges, setAppliedGuidedChanges] = useState<GuidedAppliedChange[]>([]);
   const guidedCompletionSessionRef = useRef<GuidedCompletionSession | null>(null);
@@ -6803,6 +6807,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     runEntitledPremiumImprovementRewrite,
   ]);
 
+  const beginStarterDraftGeneration = React.useCallback(() => {
+    setHardError(null);
+    setGuidedCompletionPhase(GUIDED_COMPLETION_PHASE_INACTIVE);
+    setGuidedCompletionSession(null);
+    setCreateFlowPhase("generating_draft");
+    setDisplayPhase("generating_draft");
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setLoading(true);
+    setPreviewPaneRevealed(true);
+  }, []);
+
   const commitFreeDraftForReview = React.useCallback(
     (opts: { source: FreeReviewSurfaceSource; fromHomeAutoGenerate?: boolean }) => {
       resetStalePaidReviewShellForFreeStarter(opts.source);
@@ -6811,6 +6826,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       lastPremiumWinningCorpusRef.current = "";
       premiumPipelineOutputBodyRef.current = "";
       setGuidedCompletionSession(null);
+      setGuidedCompletionPhase(GUIDED_COMPLETION_PHASE_INACTIVE);
       setCreateFlowPhase("draft_ready_for_review");
       setCreateUiStage(CreateUiStage.DRAFT);
       setDisplayPhase("review");
@@ -6876,17 +6892,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       displayPhase_before: displayPhase,
     });
     assignLocalDraftParseStickyMode();
-    const deferDraftStageForFreshInput =
-      freshSimpleCreateUx &&
-      createUiStageRef.current === CreateUiStage.INPUT &&
-      !homeHeroAutoGenerateRef.current;
-    setHardError(null);
-    setCreateFlowPhase("generating_draft");
-    setDisplayPhase("generating_draft");
-    if (!deferDraftStageForFreshInput) {
-      setCreateUiStage(CreateUiStage.DRAFT);
-    }
-    setLoading(true);
+    beginStarterDraftGeneration();
     await finalizeIntakeCapture();
     try {
       let parsed = await parseDraft(rawIntake);
@@ -7002,6 +7008,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     freshSimpleCreateUx,
     homeHeroAutoGenerate,
     commitFreeDraftForReview,
+    beginStarterDraftGeneration,
   ]);
 
   useLayoutEffect(() => {
@@ -7068,8 +7075,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (text.length < 6) return;
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(text);
-    setPreviewPaneRevealed(true);
-    setCreateUiStage(CreateUiStage.DRAFT);
+    beginStarterDraftGeneration();
     void (async () => {
       await runProductionLocalDraftParse({
         rawOverride: text,
@@ -7084,6 +7090,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     runProductionLocalDraftParse,
     draft,
     createFlowPhase,
+    beginStarterDraftGeneration,
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(
@@ -13885,6 +13892,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleProFinalReviewActive,
     guidedQueueRebuildBlocked,
   ]);
+  useEffect(() => {
+    if (
+      !canActivateGuidedCompletionPhase({
+        premiumPaidDocumentSurface,
+        paidBodyLen: paidBodyForGuidedCompletion.length,
+      })
+    ) {
+      return;
+    }
+    if (guidedCompletionPhase !== GUIDED_COMPLETION_PHASE_INACTIVE) return;
+    if (!guidedCompletionSession && !guidedCompletionSessionBase) return;
+    setGuidedCompletionPhase("collecting_answers");
+  }, [
+    premiumPaidDocumentSurface,
+    paidBodyForGuidedCompletion,
+    guidedCompletionPhase,
+    guidedCompletionSession,
+    guidedCompletionSessionBase,
+  ]);
   const handleGuidedCompletionSessionChange = React.useCallback(
     (next: GuidedCompletionSession) => {
       const keyed = { ...next, sessionKey: next.sessionKey ?? guidedSessionKey };
@@ -13937,7 +13963,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setCreateFlowSendRecipientEditorOpen(true);
           logGuidedAllAnswersReady(keyed);
           logSignerSetupActive();
-        } else if (guidedCompletionPhase !== "applying_all" && guidedCompletionPhase !== "applied") {
+        } else if (
+          canActivateGuidedCompletionPhase({
+            premiumPaidDocumentSurface,
+            paidBodyLen: paidBodyForGuidedCompletion.length,
+          }) &&
+          guidedCompletionPhase !== "applying_all" &&
+          guidedCompletionPhase !== "applied"
+        ) {
           setGuidedCompletionPhase("collecting_answers");
         }
         return keyed;
@@ -13977,14 +14010,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setCreateFlowSendRecipientEditorOpen(true);
           logGuidedAllAnswersReady(keyed);
           logSignerSetupActive();
-        } else if (guidedCompletionPhase !== "applying_all" && guidedCompletionPhase !== "applied") {
+        } else if (
+          canActivateGuidedCompletionPhase({
+            premiumPaidDocumentSurface,
+            paidBodyLen: paidBodyForGuidedCompletion.length,
+          }) &&
+          guidedCompletionPhase !== "applying_all" &&
+          guidedCompletionPhase !== "applied"
+        ) {
           setGuidedCompletionPhase("collecting_answers");
         }
         return keyed;
       });
       setGuidedBulkApplyError(null);
     },
-    [guidedSessionKey, guidedCompletionSessionBase, guidedCompletionPhase],
+    [guidedSessionKey, guidedCompletionSessionBase, guidedCompletionPhase, premiumPaidDocumentSurface, paidBodyForGuidedCompletion],
   );
 
   const handleGuidedEditAnswer = React.useCallback(
@@ -14361,7 +14401,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       pickerPlain: premiumPaidReadonlyPick.plainText,
       agreementDocumentPlain: agreementDocumentText,
       appliedAnswerCount: answeredCount,
-      finalReviewAuthorityOnly: true,
+      finalReviewAuthorityOnly: simpleProFinalReviewActive,
     });
   }, [
     guidedAuthoritativeBodyPlain,
@@ -14372,6 +14412,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionSession,
     reviewDocRefreshTick,
     guidedAuthVersionNonce,
+    simpleProFinalReviewActive,
   ]);
 
   const guidedAppliedSummaryChecklist = useMemo(() => {
@@ -16518,19 +16559,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 ) {
                   return;
                 }
-                if (!freshSimpleCreateUx) {
-                  console.debug("[handoff-start]", {
-                    source: "executePrimaryCta_stageA",
-                    createUiStage,
-                    createFlowPhase_before: createFlowPhase,
-                    displayPhase_before: displayPhase,
-                  });
-                  setHardError(null);
-                  setCreateFlowPhase("generating_draft");
-                  setDisplayPhase("generating_draft");
-                  setCreateUiStage(CreateUiStage.DRAFT);
-                  setLoading(true);
-                }
+                console.debug("[handoff-start]", {
+                  source: freshSimpleCreateUx
+                    ? "executePrimaryCta_starter_create_submit"
+                    : "executePrimaryCta_stageA",
+                  createUiStage,
+                  createFlowPhase_before: createFlowPhase,
+                  displayPhase_before: displayPhase,
+                });
+                beginStarterDraftGeneration();
                 trackFunnelEvent("generate_clicked", {
                   ready_state: guidedStructureComplete && !isGenerating,
                   intake_chars: rawSubmitted.length,
@@ -16667,19 +16704,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ) {
             return;
           }
-          if (!freshSimpleCreateUx) {
-            console.debug("[handoff-start]", {
-              source: "runPrimary_stageA",
-              createUiStage,
-              createFlowPhase_before: createFlowPhase,
-              displayPhase_before: displayPhase,
-            });
-            setHardError(null);
-            setCreateFlowPhase("generating_draft");
-            setDisplayPhase("generating_draft");
-            setCreateUiStage(CreateUiStage.DRAFT);
-            setLoading(true);
-          }
+          console.debug("[handoff-start]", {
+            source: freshSimpleCreateUx ? "runPrimary_starter_create_submit" : "runPrimary_stageA",
+            createUiStage,
+            createFlowPhase_before: createFlowPhase,
+            displayPhase_before: displayPhase,
+          });
+          beginStarterDraftGeneration();
           trackFunnelEvent("generate_clicked", {
             ready_state: guidedStructureComplete && !isGenerating,
             intake_chars: rawSubmitted.length,

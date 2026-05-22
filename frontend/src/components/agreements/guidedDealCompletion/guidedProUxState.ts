@@ -86,6 +86,7 @@ export function guidedProUxBlocksRecipientSetup(args: {
 
 export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): GuidedProUxState {
   if (!args.premiumPaidDocumentSurface) return "inactive";
+  if (args.guidedCompletionPhase === "inactive") return "inactive";
 
   if (args.signingPacketSetupActive) return "signing_packet_setup";
 

@@ -85,7 +85,7 @@ describe("guided final review flow", () => {
     expect(intake).toContain("simpleProFinalReviewHtml");
     expect(intake).toContain("agreementHtml={simpleProFinalReviewHtml}");
     expect(intake).not.toMatch(/simpleProFinalReviewHtml\s*\|\|\s*premiumReadonlyAgreementHtml/);
-    expect(intake).toContain("finalReviewAuthorityOnly: true");
+    expect(intake).toContain("finalReviewAuthorityOnly: simpleProFinalReviewActive");
     expect(intake).toContain("finalReviewSendPathChosenRef");
     expect(intake).toContain("guidedFrozenAfterApplyRef");
     expect(intake).toContain("freezeGuidedSessionAfterApply");

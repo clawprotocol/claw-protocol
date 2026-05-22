@@ -648,6 +648,34 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(orch).toContain("resolveGuidedFrozenAnswerCount");
   });
 
+  it("homepage submit: synchronous starter handoff and inactive guided phase", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("beginStarterDraftGeneration");
+    expect(intake).toContain("GUIDED_COMPLETION_PHASE_INACTIVE");
+    expect(intake).toContain("canActivateGuidedCompletionPhase");
+    expect(intake).not.toContain("deferDraftStageForFreshInput");
+    const handoff = readFileSync(join(__dirname, "starterCreateHandoff.ts"), "utf8");
+    expect(handoff).toContain('GUIDED_COMPLETION_PHASE_INACTIVE');
+    expect(intake).toMatch(
+      /beginStarterDraftGeneration[\s\S]{0,420}setCreateFlowPhase\("generating_draft"\)/,
+    );
+    expect(intake).toMatch(
+      /beginStarterDraftGeneration[\s\S]{0,420}setDisplayPhase\("generating_draft"\)/,
+    );
+    expect(intake).toMatch(
+      /beginStarterDraftGeneration[\s\S]{0,420}setCreateUiStage\(CreateUiStage\.DRAFT\)/,
+    );
+    expect(intake).toContain('handoffSource: "home_create_submit"');
+    expect(intake).toContain("commitFreeDraftForReview");
+    expect(intake).toContain("StarterDraftDocumentSurface");
+    expect(intake).toMatch(
+      /finalReviewAuthorityOnly:\s*simpleProFinalReviewActive/,
+    );
+    expect(intake).toMatch(
+      /useState<GuidedCompletionPhase>\(GUIDED_COMPLETION_PHASE_INACTIVE\)/,
+    );
+  });
+
   it("test25: soft-pass apply outcome and retry CTA copy", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("resolveGuidedBackgroundApplyOutcome");

@@ -1,10 +1,15 @@
 /** Guided Pro completion lifecycle — collect answers locally, then one bulk regeneration. */
 export type GuidedCompletionPhase =
+  | "inactive"
   | "collecting_answers"
   | "ready_to_apply"
   | "applying_all"
   | "applied"
   | "failed";
+
+export function guidedPhaseIsActive(phase: GuidedCompletionPhase): boolean {
+  return phase !== "inactive";
+}
 
 export function guidedPhaseSuppressesSendCta(phase: GuidedCompletionPhase): boolean {
   return (
