@@ -558,6 +558,7 @@ import {
   lockGuidedSession,
   mergeGuidedSessionOnBaseRefresh,
   preserveGuidedSessionDuringCollection,
+  freezeGuidedSessionAfterApply,
   persistGuidedSession,
   readPersistedGuidedSession,
   sanitizeProUserMessage,
@@ -635,6 +636,7 @@ import {
   type FinalReviewSendIntent,
 } from "./simpleProFinalReviewPhase";
 import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
+import { buildGuidedAppliedSummaryChecklist } from "./guidedDealCompletion/guidedAppliedSummaryChecklist";
 import { downloadExportDraftDocx, downloadExportDraftTxt } from "../../agreement/proRedlineReviewApi";
 import {
   logReviewEditedVersionKeptAsReference,
@@ -653,6 +655,7 @@ import {
   readAuthoritativeAgreementVersion,
   fingerprintPremiumRecipientHandoffSlots,
   logRecipientMetadataOnlyMutation,
+  logRecipientSetupStableWhileTyping,
   shouldSkipRedundantPremiumHandoffWrite,
 } from "./authoritativeAgreementContinuity";
 import { isAgreementPacketPrepared } from "../../vs01/vs01WorkspaceSigningStatus";
@@ -2452,6 +2455,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedFinalReviewContinueArmedRef = useRef(false);
   const finalReviewSendPathChosenRef = useRef(false);
   const finalReviewSendIntentRef = useRef<FinalReviewSendIntent | null>(null);
+  const guidedFrozenAfterApplyRef = useRef(false);
   const recipientMetadataMutationRef = useRef(false);
   const premiumRecipientHandoffDebounceRef = useRef(0);
   const createFlowPhaseRefForRecipientOpen = useRef<string | null>(null);
@@ -12850,6 +12854,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     window.clearTimeout(premiumRecipientHandoffDebounceRef.current);
     premiumRecipientHandoffDebounceRef.current = window.setTimeout(() => {
       recipientMetadataMutationRef.current = true;
+      if (finalReviewSendPathChosenRef.current && paidProRecipientSetupOnDraft) {
+        logRecipientSetupStableWhileTyping({
+          phase: createFlowPhase,
+          fields: ["recipient_emails", "signer_names", "party_display"],
+        });
+      }
       persistPremiumRecipientHandoffFromDraftAndUi(draft);
       recipientMetadataMutationRef.current = false;
       logRecipientMetadataOnlyMutation({
@@ -12869,6 +12879,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     partySignerNames,
     partySignerTitles,
     persistPremiumRecipientHandoffFromDraftAndUi,
+    createFlowPhase,
+    paidProRecipientSetupOnDraft,
   ]);
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
@@ -13449,6 +13461,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     setGuidedCompletionSession((prev) => {
       if (!guidedCompletionSessionBase) return prev;
+      if (
+        guidedFrozenAfterApplyRef.current &&
+        prev &&
+        (guidedCompletionPhase === "applied" || simpleProFinalReviewActive)
+      ) {
+        const frozen = freezeGuidedSessionAfterApply(prev, guidedSessionKey);
+        guidedCompletionSessionRef.current = frozen;
+        return frozen;
+      }
       const collectingLocally =
         guidedCompletionPhase === "collecting_answers" ||
         guidedCompletionPhase === "ready_to_apply" ||
@@ -13479,7 +13500,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedCompletionSessionRef.current = merged;
       return merged;
     });
-  }, [guidedCompletionSessionBase, guidedSessionKey, guidedCompletionPhase]);
+  }, [guidedCompletionSessionBase, guidedSessionKey, guidedCompletionPhase, simpleProFinalReviewActive]);
   const handleGuidedCompletionSessionChange = React.useCallback(
     (next: GuidedCompletionSession) => {
       const keyed = { ...next, sessionKey: next.sessionKey ?? guidedSessionKey };
@@ -13650,6 +13671,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       resetPremiumRecipientsSurfaceForFinalReview();
       finalReviewSendPathChosenRef.current = false;
       finalReviewSendIntentRef.current = null;
+      guidedFrozenAfterApplyRef.current = true;
+      const frozenSession = freezeGuidedSessionAfterApply(session, guidedSessionKey);
+      guidedCompletionSessionRef.current = frozenSession;
+      setGuidedCompletionSession(frozenSession);
+      persistGuidedSession(frozenSession, guidedSessionKey);
       const answeredIds = session.queue.filter((id) => (session.answered[id] || "").trim());
       const postBody =
         (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
@@ -13724,21 +13750,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     void handleGuidedBulkApply();
   }, [guidedCompletionPhase, handleGuidedBulkApply, activeGuidedCompletionSession]);
 
-  const guidedAuthoritativeBodyPlain = useMemo(
-    () =>
-      (
-        lastKnownGoodAuthoritativeDraftRef.current ||
-        hydratedPremiumBodyRef.current ||
-        paidBodyForGuidedCompletion ||
-        ""
-      ).trim(),
-    [
-      paidBodyForGuidedCompletion,
-      guidedAuthVersionNonce,
-      guidedCompletionPhase,
-      reviewDocRefreshTick,
-    ],
-  );
+  const guidedAuthoritativeBodyPlain = useMemo(() => {
+    const lastKnown = (lastKnownGoodAuthoritativeDraftRef.current || "").trim();
+    const hydrated = (hydratedPremiumBodyRef.current || "").trim();
+    const doc = (agreementDocumentText || "").trim();
+    const picker = (premiumPaidReadonlyPick.plainText || "").trim();
+    const candidates = [lastKnown, hydrated, doc, picker].filter((t) => t.length > 0);
+    if (!candidates.length) return "";
+    return candidates.reduce((longest, next) => (next.length > longest.length ? next : longest));
+  }, [
+    agreementDocumentText,
+    premiumPaidReadonlyPick.plainText,
+    guidedAuthVersionNonce,
+    guidedCompletionPhase,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+  ]);
 
   const guidedAuthoritativeVersionId = useMemo(() => {
     void guidedAuthVersionNonce;
@@ -13761,6 +13788,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       pickerPlain: premiumPaidReadonlyPick.plainText,
       agreementDocumentPlain: agreementDocumentText,
       appliedAnswerCount: answeredCount,
+      finalReviewAuthorityOnly: true,
     });
   }, [
     guidedAuthoritativeBodyPlain,
@@ -13771,6 +13799,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionSession,
     reviewDocRefreshTick,
     guidedAuthVersionNonce,
+  ]);
+
+  const guidedAppliedSummaryChecklist = useMemo(() => {
+    const ids =
+      guidedAuthoritativeSummaryVariableIds.length > 0
+        ? guidedAuthoritativeSummaryVariableIds
+        : Object.keys((guidedCompletionSession ?? guidedCompletionSessionRef.current)?.answered ?? {}).filter(
+            (id) =>
+              ((guidedCompletionSession ?? guidedCompletionSessionRef.current)?.answered[id] || "").trim().length > 0,
+          );
+    return buildGuidedAppliedSummaryChecklist(ids);
+  }, [
+    guidedAuthoritativeSummaryVariableIds,
+    guidedCompletionSession,
+    guidedCompletionPhase,
   ]);
 
   const simpleProFinalReviewHtml = useMemo(() => {
@@ -17880,10 +17923,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     {simpleProFinalReviewActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <SimpleProFinalReviewScreen
-                                          agreementHtml={
-                                            simpleProFinalReviewHtml || premiumReadonlyAgreementHtml
-                                          }
+                                          agreementHtml={simpleProFinalReviewHtml}
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                          appliedChecklist={guidedAppliedSummaryChecklist}
                                           appliedAnswerCount={
                                             Object.keys(
                                               (guidedCompletionSession ?? guidedCompletionSessionRef.current)

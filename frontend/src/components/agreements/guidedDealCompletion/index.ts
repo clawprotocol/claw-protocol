@@ -49,6 +49,7 @@ export {
   supplementGuidedSessionFromBase,
   preserveGuidedSessionProgress,
   preserveGuidedSessionDuringCollection,
+  freezeGuidedSessionAfterApply,
   lockGuidedSession,
 } from "./guidedSessionPersistence";
 export { applyProBodyHardIntegrityGate, normalizeScheduleAContent } from "./proBodyHardIntegrityGate";

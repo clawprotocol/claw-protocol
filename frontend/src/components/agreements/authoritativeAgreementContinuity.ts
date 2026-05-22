@@ -98,9 +98,27 @@ export function fingerprintPremiumRecipientHandoffSlots(
 
 /** Skip redundant session writes when recipient metadata unchanged. */
 export function shouldSkipRedundantPremiumHandoffWrite(fingerprint: string): boolean {
-  if (!fingerprint || fingerprint === lastPremiumHandoffFingerprint) return true;
-  lastPremiumHandoffFingerprint = fingerprint;
-  return false;
+  const skip = !fingerprint || fingerprint === lastPremiumHandoffFingerprint;
+  if (skip && fingerprint) {
+    logRecipientHandoffWriteDeduped({ fingerprintLen: fingerprint.length });
+  }
+  if (!skip) lastPremiumHandoffFingerprint = fingerprint;
+  return skip;
+}
+
+export function logRecipientHandoffWriteDeduped(payload: { fingerprintLen: number }): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[recipient-handoff-write-deduped]", payload);
+}
+
+export function logRecipientSetupStableWhileTyping(payload: {
+  phase: string;
+  fields: string[];
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[recipient-setup-stable-while-typing]", payload);
 }
 
 export function resetPremiumHandoffWriteDedupe(): void {

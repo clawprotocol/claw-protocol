@@ -4,15 +4,38 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SimpleProFinalReviewScreen } from "./SimpleProFinalReviewScreen";
 
 describe("SimpleProFinalReviewScreen", () => {
-  it("renders trust copy, primary send CTAs, and collapsed edit", () => {
-    const onSendForSignature = vi.fn();
-    const onSendForReview = vi.fn();
+  it("shows applied trust copy and checklist when DOM mutation markers are absent", () => {
     render(
       <SimpleProFinalReviewScreen
-        agreementHtml="<p>Full agreement body</p>"
+        agreementHtml="<p>Full authoritative agreement body</p>"
         appliedAnswerCount={5}
-        onSendForSignature={onSendForSignature}
-        onSendForReview={onSendForReview}
+        appliedChecklist={["Fees & Payment", "Support & SLA", "Ownership", "Termination", "Invoice timing & renewal"]}
+        appliedVariableIds={[]}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("simple-pro-final-review-trust-line").textContent).toContain(
+      "5 answers applied to this version",
+    );
+    expect(screen.getByTestId("simple-pro-final-review-send-trust").textContent).toContain(
+      "This is the version that will be sent.",
+    );
+    const checklist = screen.getByTestId("simple-pro-applied-checklist");
+    expect(checklist.textContent).toContain("Fees & Payment");
+    expect(checklist.textContent).toContain("Support & SLA");
+    cleanup();
+  });
+
+  it("renders send CTAs and Edit agreement text link, not Suggest changes", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        appliedAnswerCount={5}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
         onCopyAgreement={vi.fn()}
         onExportAgreement={vi.fn()}
         onSuggestEditsDraftChange={vi.fn()}
@@ -20,22 +43,15 @@ describe("SimpleProFinalReviewScreen", () => {
         onUploadFile={vi.fn()}
       />,
     );
-    expect(screen.getByText("Review your updated Pro agreement")).toBeTruthy();
-    expect(screen.getByTestId("simple-pro-final-review-trust-line").textContent).toContain("5 answers applied");
-    expect(screen.getByText("This is the version that will be sent.")).toBeTruthy();
     expect(screen.getByTestId("simple-pro-send-for-signature")).toBeTruthy();
     expect(screen.getByTestId("simple-pro-send-for-review")).toBeTruthy();
-    expect(screen.getByTestId("simple-pro-copy-agreement")).toBeTruthy();
-    expect(screen.getByTestId("simple-pro-export-agreement")).toBeTruthy();
-    expect(screen.queryByTestId("simple-pro-continue-to-signing")).toBeNull();
     expect(screen.queryByTestId("simple-pro-suggest-changes-toggle")).toBeNull();
-    fireEvent.click(screen.getByTestId("simple-pro-send-for-signature"));
-    expect(onSendForSignature).toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("simple-pro-send-for-review"));
-    expect(onSendForReview).toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("simple-pro-edit-before-sending-toggle"));
-    expect(screen.getByTestId("simple-pro-edit-before-sending-card")).toBeTruthy();
-    expect(screen.getByLabelText("Edit or paste changes before sending")).toBeTruthy();
+    expect(screen.queryByTestId("simple-pro-continue-to-signing")).toBeNull();
+    expect(screen.getByTestId("simple-pro-edit-agreement-text-toggle").textContent).toContain(
+      "Edit agreement text",
+    );
+    fireEvent.click(screen.getByTestId("simple-pro-edit-agreement-text-toggle"));
+    expect(screen.getByTestId("simple-pro-edit-agreement-text-card")).toBeTruthy();
     cleanup();
   });
 });

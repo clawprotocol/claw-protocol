@@ -168,6 +168,25 @@ export function preserveGuidedSessionProgress(
   return recomputeSessionProgress(merged);
 }
 
+/** After bulk apply — freeze queue/answers; do not grow from post-apply body gap rescans. */
+export function freezeGuidedSessionAfterApply(
+  session: GuidedCompletionSession,
+  sessionKey: string,
+): GuidedCompletionSession {
+  const frozen = session.frozenTotalQuestions ?? session.queue.length;
+  return recomputeSessionProgress({
+    ...session,
+    sessionKey,
+    queue: [...session.queue],
+    variables: [...session.variables],
+    answered: { ...session.answered },
+    answeredAt: session.answeredAt ? { ...session.answeredAt } : undefined,
+    answeredMeta: session.answeredMeta ? { ...session.answeredMeta } : undefined,
+    skipped: new Set(session.skipped),
+    frozenTotalQuestions: frozen,
+  });
+}
+
 /**
  * During local answer collection, only merge new variables from base — never rewind answers.
  */

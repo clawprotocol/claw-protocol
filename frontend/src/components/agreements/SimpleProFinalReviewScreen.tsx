@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
 import { highlightAllGuidedChangedSections } from "./guidedDealCompletion/guidedSectionScroll";
+import type { GuidedAppliedChecklistLabel } from "./guidedDealCompletion/guidedAppliedSummaryChecklist";
 import type { UploadedSourceDocumentRecord } from "./uploadedSourceDocumentStorage";
 
 export type SimpleProFinalReviewScreenProps = {
   agreementHtml: string;
   suppressEmptyFallback?: boolean;
   appliedAnswerCount?: number;
+  appliedChecklist?: readonly GuidedAppliedChecklistLabel[];
   appliedAreas?: readonly string[];
   appliedVariableIds?: readonly string[];
   bulkApplyBusy?: boolean;
@@ -39,6 +41,7 @@ export function SimpleProFinalReviewScreen({
   agreementHtml,
   suppressEmptyFallback = false,
   appliedAnswerCount = 0,
+  appliedChecklist = [],
   appliedAreas = [],
   appliedVariableIds = [],
   bulkApplyBusy = false,
@@ -66,15 +69,10 @@ export function SimpleProFinalReviewScreen({
   className = "",
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [editBeforeSendingOpen, setEditBeforeSendingOpen] = useState(false);
+  const [editAgreementTextOpen, setEditAgreementTextOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
-  const canEditBeforeSending = Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
-  const answerLabel =
-    appliedAnswerCount > 0
-      ? `${appliedAnswerCount} answer${appliedAnswerCount === 1 ? "" : "s"} applied`
-      : appliedAreas.length > 0
-        ? "Updates applied"
-        : "Updates applied";
+  const canEditAgreementText = Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
+  const answerCount = appliedAnswerCount > 0 ? appliedAnswerCount : appliedVariableIds.length;
 
   useEffect(() => {
     if (!appliedVariableIds.length || !agreementHtml.trim()) return;
@@ -100,13 +98,36 @@ export function SimpleProFinalReviewScreen({
         <h2 className="mt-1 font-serif text-lg font-semibold tracking-tight text-stone-900 sm:text-xl">
           Review your updated Pro agreement
         </h2>
-        <p className="mt-1 text-xs font-medium text-emerald-900/95" data-testid="simple-pro-final-review-trust-line">
-          Updated Pro agreement · {answerLabel}
-        </p>
-        <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600">
+        {answerCount > 0 ? (
+          <p className="mt-1 text-xs font-medium text-emerald-900/95" data-testid="simple-pro-final-review-trust-line">
+            {answerCount} answer{answerCount === 1 ? "" : "s"} applied to this version
+          </p>
+        ) : null}
+        <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600" data-testid="simple-pro-final-review-send-trust">
           This is the version that will be sent.
         </p>
-        <p className="mt-1 text-xs leading-relaxed text-stone-600 sm:text-sm">
+        {appliedChecklist.length > 0 && !bulkApplyBusy ? (
+          <ul
+            className="mt-2.5 space-y-1 rounded-md border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2"
+            data-testid="simple-pro-applied-checklist"
+            aria-label="Applied guided updates"
+          >
+            {appliedChecklist.map((item) => (
+              <li key={item} className="flex items-start gap-1.5 text-[11px] leading-snug text-emerald-950/90">
+                <span className="mt-0.5 text-emerald-700" aria-hidden>
+                  ✓
+                </span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        ) : appliedAreas.length > 0 && !bulkApplyBusy ? (
+          <p className="mt-2 text-[11px] leading-relaxed text-emerald-900/90">
+            Updated: {appliedAreas.slice(0, 4).join(" · ")}
+            {appliedAreas.length > 4 ? ` (+${appliedAreas.length - 4} more)` : ""}
+          </p>
+        ) : null}
+        <p className="mt-2 text-xs leading-relaxed text-stone-600 sm:text-sm">
           Review the full agreement, then choose review-only sharing or signature sending.
         </p>
         {bulkApplyBusy ? (
@@ -117,12 +138,6 @@ export function SimpleProFinalReviewScreen({
         {bulkApplyError ? (
           <p className="mt-2 text-xs font-medium text-amber-800" role="alert">
             {bulkApplyError}
-          </p>
-        ) : null}
-        {appliedAreas.length > 0 && !bulkApplyBusy ? (
-          <p className="mt-2 text-[11px] leading-relaxed text-emerald-900/90">
-            Updated: {appliedAreas.slice(0, 4).join(" · ")}
-            {appliedAreas.length > 4 ? ` (+${appliedAreas.length - 4} more)` : ""}
           </p>
         ) : null}
       </div>
@@ -136,7 +151,10 @@ export function SimpleProFinalReviewScreen({
         </p>
       ) : null}
 
-      <div className="rounded-sm border border-stone-200/90 bg-white shadow-sm ring-1 ring-black/[0.05]">
+      <div
+        className="rounded-sm border border-stone-200/90 bg-white shadow-sm ring-1 ring-black/[0.05]"
+        data-testid="simple-pro-final-review-document"
+      >
         <PremiumAgreementReadonlyView html={agreementHtml} suppressEmptyFallback={suppressEmptyFallback} />
       </div>
 
@@ -183,32 +201,32 @@ export function SimpleProFinalReviewScreen({
             {exportError}
           </p>
         ) : null}
-        {canEditBeforeSending ? (
+        {canEditAgreementText ? (
           <button
             type="button"
             className="self-start text-[11px] font-medium text-stone-600 underline decoration-stone-400/70 underline-offset-2 hover:text-stone-800"
-            aria-expanded={editBeforeSendingOpen}
-            onClick={() => setEditBeforeSendingOpen((v) => !v)}
-            data-testid="simple-pro-edit-before-sending-toggle"
+            aria-expanded={editAgreementTextOpen}
+            onClick={() => setEditAgreementTextOpen((v) => !v)}
+            data-testid="simple-pro-edit-agreement-text-toggle"
           >
-            {editBeforeSendingOpen ? "Hide edit options" : "Edit before sending"}
+            {editAgreementTextOpen ? "Hide edit options" : "Edit agreement text"}
           </button>
         ) : null}
       </div>
 
-      {canEditBeforeSending && editBeforeSendingOpen ? (
+      {canEditAgreementText && editAgreementTextOpen ? (
         <div
           className="rounded-md border border-stone-200/95 bg-stone-50/95 px-2.5 py-2.5"
-          data-testid="simple-pro-edit-before-sending-card"
+          data-testid="simple-pro-edit-agreement-text-card"
         >
           <label
             className="text-xs font-semibold text-stone-900"
-            htmlFor="simple-pro-edit-before-sending-input"
+            htmlFor="simple-pro-edit-agreement-text-input"
           >
             Edit or paste changes before sending
           </label>
           <textarea
-            id="simple-pro-edit-before-sending-input"
+            id="simple-pro-edit-agreement-text-input"
             className="mt-2 min-h-[4.5rem] w-full resize-y rounded-md border border-stone-300/90 bg-white px-2.5 py-2 text-xs leading-relaxed text-stone-900 placeholder:text-stone-400"
             placeholder="Type requested changes…"
             value={suggestEditsDraft}
@@ -277,8 +295,7 @@ export function SimpleProFinalReviewScreen({
             <p className="text-[11px] text-stone-600">{uploadedSource.fileName}</p>
           ) : null}
           <p className="text-[11px] leading-relaxed text-stone-600">
-            Use this file for signing or keep the LawDog version. Side-by-side redline comparison is not
-            available yet.
+            Use this file for signing or keep the LawDog version.
           </p>
           <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
             {onUseUploadedForSigning ? (

@@ -1,5 +1,5 @@
 /**
- * Simple Pro Final Review — always prefer authoritative post-guided body over shortened preview.
+ * Simple Pro Final Review — authoritative post-guided body only; never shortened preview when final review is active.
  */
 
 import { GUIDED_MIN_AUTHORITATIVE_BODY_LEN } from "./guidedDealCompletion/guidedCompletionRenderAuthority";
@@ -22,39 +22,63 @@ export type SimpleProFinalReviewCorpusResolution = {
 
 const MATERIAL_SHORTER_RATIO = 0.85;
 
+function norm(s?: string | null): string {
+  return (s || "").trim();
+}
+
+function pickLongestAuthoritative(candidates: { plain: string; source: SimpleProFinalReviewCorpusSource }[]): {
+  plain: string;
+  source: SimpleProFinalReviewCorpusSource;
+} {
+  let best = candidates[0] ?? { plain: "", source: "authoritative_hydrated" as const };
+  for (const c of candidates) {
+    if (c.plain.length > best.plain.length) best = c;
+  }
+  return best;
+}
+
 export function resolveSimpleProFinalReviewCorpus(args: {
   authoritativePlain: string;
   renderedPreviewPlain?: string | null;
   pickerPlain?: string | null;
   agreementDocumentPlain?: string | null;
   appliedAnswerCount?: number;
+  /** When true, never use renderedAgreementPreview even if other sources are empty. */
+  finalReviewAuthorityOnly?: boolean;
 }): SimpleProFinalReviewCorpusResolution {
-  const authoritative = (args.authoritativePlain || "").trim();
-  const rendered = (args.renderedPreviewPlain || "").trim();
-  const picker = (args.pickerPlain || "").trim();
-  const adt = (args.agreementDocumentPlain || "").trim();
+  const authoritative = norm(args.authoritativePlain);
+  const rendered = norm(args.renderedPreviewPlain);
+  const picker = norm(args.pickerPlain);
+  const adt = norm(args.agreementDocumentPlain);
+  const authorityOnly = Boolean(args.finalReviewAuthorityOnly);
+
+  const authCandidates: { plain: string; source: SimpleProFinalReviewCorpusSource }[] = [];
+  if (authoritative.length > 0) {
+    authCandidates.push({ plain: authoritative, source: "authoritative_hydrated" });
+  }
+  if (picker.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
+    authCandidates.push({ plain: picker, source: "picker_authoritative" });
+  }
+  if (adt.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
+    authCandidates.push({ plain: adt, source: "agreement_document" });
+  }
+
+  const picked = pickLongestAuthoritative(
+    authCandidates.length ? authCandidates : [{ plain: authoritative, source: "authoritative_hydrated" }],
+  );
+
+  let plainText = picked.plain;
+  let source = picked.source;
+  const renderedLen = rendered.length;
 
   const authoritativeLen = Math.max(
     authoritative.length,
-    picker.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN ? picker.length : 0,
-    adt.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN ? adt.length : 0,
+    picker.length,
+    adt.length,
+    plainText.length,
   );
 
-  let plainText = authoritative;
-  let source: SimpleProFinalReviewCorpusSource = "authoritative_hydrated";
-
-  if (!plainText || plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
-    if (picker.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
-      plainText = picker;
-      source = "picker_authoritative";
-    } else if (adt.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
-      plainText = adt;
-      source = "agreement_document";
-    }
-  }
-
   let overriddenPreview = false;
-  const renderedLen = rendered.length;
 
   if (
     plainText.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
@@ -66,16 +90,26 @@ export function resolveSimpleProFinalReviewCorpus(args: {
       authoritativeLen: plainText.length,
       renderedLen,
     });
-  } else if (
-    plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
-    rendered.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
-    rendered.length > plainText.length
-  ) {
-    plainText = rendered;
-    source = "rendered_preview";
   }
 
-  return {
+  if (!authorityOnly) {
+    if (
+      plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
+      rendered.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
+      rendered.length > plainText.length
+    ) {
+      plainText = rendered;
+      source = "rendered_preview";
+    }
+  } else if (
+    renderedLen > 0 &&
+    plainText.length > 0 &&
+    renderedLen < plainText.length
+  ) {
+    overriddenPreview = true;
+  }
+
+  const resolution: SimpleProFinalReviewCorpusResolution = {
     plainText,
     source,
     authoritativeLen,
@@ -83,6 +117,16 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     overriddenPreview,
     appliedAnswerCount: args.appliedAnswerCount ?? 0,
   };
+
+  logFinalReviewAuthoritativeRender({
+    authoritativeLen: resolution.authoritativeLen,
+    renderedLen: resolution.renderedLen,
+    source: resolution.source,
+    displayLen: resolution.plainText.length,
+    authorityOnly,
+  });
+
+  return resolution;
 }
 
 export function logSimpleFinalReviewAuthoritativeOverride(payload: {
@@ -92,4 +136,16 @@ export function logSimpleFinalReviewAuthoritativeOverride(payload: {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[simple-final-review-authoritative-override]", payload);
+}
+
+export function logFinalReviewAuthoritativeRender(payload: {
+  authoritativeLen: number;
+  renderedLen: number;
+  source: SimpleProFinalReviewCorpusSource;
+  displayLen: number;
+  authorityOnly: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[final-review-authoritative-render]", payload);
 }
