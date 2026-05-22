@@ -10,10 +10,12 @@ import {
   formatGuidedProgressLabel,
   formatGuidedQuestionHeader,
 } from "./guidedVisibleQuestionAccounting";
-import { highlightGuidedSectionInDocument } from "./guidedSectionScroll";
-import { resolveGuidedQuestionTarget } from "./guidedRevisionAnchors";
 import { resolveGuidedAnswerForPill } from "./guidedAnswerResolution";
-import { GUIDED_COMPLETION_HEADING, GUIDED_COMPLETION_SUBHEADING } from "./friendlyProCompletionCopy";
+import {
+  GUIDED_COMPLETION_HEADING,
+  GUIDED_COMPLETION_SUBHEADING,
+  GUIDED_QUESTION_FOOTER_COPY,
+} from "./friendlyProCompletionCopy";
 import {
   RECOMMEND_PILL_ID,
   resolveRecommendForMe,
@@ -21,12 +23,10 @@ import {
 } from "./intakeRecommendationEngine";
 import { isRecommendPillId } from "./guidedRecommendPillIds";
 import type { GuidedAppliedChange } from "./guidedChangeTypes";
-import { GuidedAppliedChangesReview } from "./GuidedAppliedChangesReview";
 import type { GuidedCompletionPhase } from "./guidedCompletionPhase";
 import {
   buildBulkApplyChecklist,
   buildClauseUpdatesForVariable,
-  buildFinalAppliedAreaLabels,
   normalizeWhyText,
   resolveGuidedQuestionConfig,
   resolveOptionDisplayCopy,
@@ -34,7 +34,6 @@ import {
 import { GuidedReviewFlowBanner } from "./GuidedReviewFlowBanner";
 import { GuidedQuestionOptionCard } from "./GuidedQuestionOptionCard";
 import { GuidedBulkApplyChecklist } from "./GuidedBulkApplyChecklist";
-import { GuidedAppliedAreasSummary } from "./GuidedAppliedAreasSummary";
 
 const ADVANCE_HOLD_MS = 340;
 
@@ -61,6 +60,8 @@ export type GuidedDealCompletionPanelProps = {
   onCustomPillSelected?: () => void;
   externallyFrozen?: boolean;
   compact?: boolean;
+  /** GTM: hide custom/freeform answer branch during guided questions. */
+  suppressFreeformBranching?: boolean;
 };
 
 export function GuidedDealCompletionPanel({
@@ -74,17 +75,17 @@ export function GuidedDealCompletionPanel({
   onSkipQuestion,
   bulkApplyBusy = false,
   bulkApplyError = null,
-  appliedChanges = [],
+  appliedChanges: _appliedChanges = [],
   onCustomPillSelected,
   externallyFrozen = false,
   compact = false,
+  suppressFreeformBranching = false,
 }: GuidedDealCompletionPanelProps) {
   const intro = useMemo(() => guidedSessionIntro(session), [session]);
   const current = getCurrentVariable(session);
   const collecting = phase === "collecting_answers";
   const readyToApply = phase === "ready_to_apply" || phase === "failed";
   const applying = phase === "applying_all";
-  const applied = phase === "applied";
   const accounting = useMemo(() => computeGuidedVisibleQuestionAccounting(session), [session]);
   const { resolvedVisibleQuestionCount, answeredVisibleQuestionCount, progressPercent: progressPct } =
     accounting;
@@ -148,7 +149,6 @@ export function GuidedDealCompletionPanel({
 
   const controlsDisabled = externallyFrozen || applying || bulkApplyBusy || Boolean(holdQuestionId);
   const bulkChecklist = useMemo(() => buildBulkApplyChecklist(session), [session]);
-  const appliedAreas = useMemo(() => buildFinalAppliedAreaLabels(session), [session]);
 
   const displayQuestionHeader = displayQuestion
     ? formatGuidedQuestionHeader(accounting, displayQuestion.id)
@@ -311,24 +311,6 @@ export function GuidedDealCompletionPanel({
 
   const showSavedOnQuestion = savedPulse && holdQuestionId === displayQuestion?.id;
   const showSkippedOnQuestion = skipFlash && holdQuestionId === displayQuestion?.id;
-
-  if (applied) {
-    return (
-      <div data-guided-completion-panel="true" className={compact ? "pb-6" : "pb-8"}>
-        <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-2.5" />
-        <p className="mb-2 text-sm font-semibold text-stone-900">Updated in agreement</p>
-        <GuidedAppliedAreasSummary areas={appliedAreas} />
-        {appliedChanges.length > 0 ? (
-          <div className="mt-3">
-            <GuidedAppliedChangesReview
-              changes={appliedChanges}
-              onJumpToSection={(c) => highlightGuidedSectionInDocument(resolveGuidedQuestionTarget(c.questionKey))}
-            />
-          </div>
-        ) : null}
-      </div>
-    );
-  }
 
   if (readyToApply || applying) {
     const failed = phase === "failed";
@@ -576,7 +558,7 @@ export function GuidedDealCompletionPanel({
                     );
                   })
                 : null}
-              {!customOpen ? (
+              {!suppressFreeformBranching && !customOpen ? (
                 <button
                   type="button"
                   disabled={controlsDisabled}
@@ -600,7 +582,7 @@ export function GuidedDealCompletionPanel({
                   Recommend for me
                 </button>
               ) : null}
-              {customOpen ? (
+              {!suppressFreeformBranching && customOpen ? (
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -661,7 +643,8 @@ export function GuidedDealCompletionPanel({
           ) : null}
 
           {!applying && !bulkApplyBusy ? (
-            <footer className="pt-0.5 opacity-70">
+            <footer className="pt-0.5 space-y-1 opacity-80">
+              <p className="text-[10px] leading-snug text-stone-500">{GUIDED_QUESTION_FOOTER_COPY}</p>
               <button
                 type="button"
                 className="text-[10px] text-stone-400 hover:text-stone-600"

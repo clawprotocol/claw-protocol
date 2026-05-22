@@ -29,6 +29,22 @@ describe("guidedAuthoritativeReviewSync", () => {
     expect(body.length).toBe(14031);
   });
 
+  it("resolveGuidedBulkCommitBody applies light polish when polishBefore provided", () => {
+    const dup =
+      "Provider shall invoice Client within fifteen (15) days of milestone acceptance.";
+    const before = `1. Services\n\n${dup}`;
+    const candidate = `${before}\n\n\n${dup}\n\n\n\n2. Fees\nNet 30 $6,000.`;
+    const body = resolveGuidedBulkCommitBody({
+      applyDecision: "accepted",
+      currentProLen: before.length,
+      candidatePlain: candidate,
+      finalTextPlain: candidate,
+      polishBefore: before,
+    });
+    expect(body).not.toMatch(/\n{3,}/);
+    expect((body.match(new RegExp(dup.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length).toBe(1);
+  });
+
   it("warns when review render drifts from authoritative body", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const auth = "x".repeat(1000);

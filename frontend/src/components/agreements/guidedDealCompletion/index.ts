@@ -89,6 +89,16 @@ export {
   logGuidedBulkRegenerationSuccess,
   logGuidedBulkRegenerationFailed,
 } from "./guidedBulkRegeneration";
+export {
+  applyGuidedPostApplyLightPolish,
+  validateGuidedPostApplyQuality,
+  validateGuidedBulkRegenerationLength,
+  detectDuplicateTopicSectionHeadings,
+  guidedAnswersPresentInBody,
+  validateDisclaimerPreserved,
+  materialRewriteHintForGuidedAnswer,
+  logGuidedPostApplyQuality,
+} from "./guidedPostApplyQuality";
 export type { GuidedAnswerMeta } from "./types";
 export type { GuidedAppliedChange } from "./guidedChangeTypes";
 export { GuidedChangeCard } from "./GuidedChangeCard";
@@ -145,7 +155,6 @@ export {
 export { deriveGuidedUxPhaseFlags, logGuidedStateTransition } from "./guidedUxStability";
 export { assessGuidedMutationStrength } from "./guidedMutationQuality";
 export { reviewGuidedUpdatesAtIndex } from "./guidedSectionScroll";
-export { materialRewriteHintForGuidedAnswer } from "./guidedBulkRegeneration";
 export { buildClauseUpdatesForVariable } from "./guidedQuestionConfig";
 export {
   resolveProReviewFooterState,

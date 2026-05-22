@@ -31,7 +31,7 @@ export function deriveGuidedUxPhaseFlags(args: {
       args.phase === "failed");
   const applying = (surfaceActive || postApply) && args.phase === "applying_all";
   const updated = postApply;
-  const guidedReviewReady = Boolean(args.guidedFinalReview || (postApply && args.phase === "applied"));
+  const guidedReviewReady = Boolean(args.guidedFinalReview);
   return {
     isGuidedCompletion: surfaceActive || postApply,
     guidedQueued: queued && !updated,

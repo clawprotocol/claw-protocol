@@ -355,7 +355,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const adv = intake.indexOf("const advancePaidProToRecipientSetup = useCallback");
     expect(adv).toBeGreaterThanOrEqual(0);
-    const advBlock = intake.slice(adv, adv + 420);
+    const advBlock = intake.slice(adv, adv + 720);
+    expect(advBlock).toContain("logRecipientSetupPhaseBlocked");
     expect(advBlock).toContain("setCreateUiStage(CreateUiStage.DRAFT)");
     expect(advBlock).not.toContain("CreateUiStage.RECIPIENTS");
     expect(intake).toContain("paidProRecipientSetupOnDraft");
@@ -565,6 +566,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("onRecipientMetadataPersist");
     expect(intake).toContain("readPremiumRecipientHandoffMemo");
     expect(intake).toContain("guidedCompletionFrozen");
+    expect(intake).toContain("guidedProUxState");
+    expect(intake).toContain("suppressGuidedFreeformUx");
+    expect(intake).toContain("GuidedUpdatedAgreementReadyCard");
+    expect(intake).toContain("updated_agreement_ready");
     expect(intake).toContain("guidedQueueRebuildBlocked");
     expect(intake).toContain("Prepare signing packet first.");
     expect(intake).toContain("finalReviewSendPathChosenRef.current ||");

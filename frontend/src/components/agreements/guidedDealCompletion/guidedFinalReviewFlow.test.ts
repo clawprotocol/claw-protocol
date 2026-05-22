@@ -41,7 +41,14 @@ describe("guided final review flow", () => {
     expect(intake).toContain("simpleProFinalReviewActive");
     expect(intake).toContain("SimpleProFinalReviewScreen");
     expect(intake).toContain("!guidedFinalReviewActive");
-    expect(intake).toContain('setCreateFlowPhase("guided_final_review")');
+    expect(intake).toContain('setCreateFlowPhase("updated_agreement_ready")');
+    expect(intake).toContain("handleGuidedOpenFinalReview");
+    const readyCard = readFileSync(
+      join(__dirname, "GuidedUpdatedAgreementReadyCard.tsx"),
+      "utf8",
+    );
+    expect(readyCard).toContain("guided-review-updated-agreement-cta");
+    expect(intake).toContain("guidedFinalReviewExplicitlyOpened");
     expect(intake).toContain("resetPremiumRecipientsSurfaceForFinalReview");
     expect(intake).toContain("guidedFinalReviewContinueArmedRef");
     expect(intake).toContain("resolveGuidedBulkCommitBody");

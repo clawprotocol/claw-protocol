@@ -295,6 +295,7 @@ import {
   type CreateFlowProductionPhase,
   isCreateFlowPastCapture,
   isGuidedFinalReviewPhase,
+  isUpdatedAgreementReadyPhase,
 } from "./createFlowTypes";
 import { CreateUiStage, createUiStagePrimaryCta } from "./createUiStage";
 import { getCanonicalAgreementTypeForCreate } from "./agreementTypeCanonical";
@@ -642,6 +643,17 @@ import {
   isGuidedQueueRebuildBlocked,
   mergeGuidedSessionWhenRebuildBlocked,
 } from "./guidedDealCompletion/guidedCompletionFreeze";
+import { GuidedUpdatedAgreementReadyCard } from "./guidedDealCompletion/GuidedUpdatedAgreementReadyCard";
+import {
+  guidedProUxShowsQuestionPanel,
+  guidedProUxShowsUpdatedReadyCard,
+  guidedProUxSuppressesFreeform,
+  logGuidedFinalReviewActive,
+  logGuidedProUxStateResolved,
+  logRecipientSetupPhaseBlocked,
+  logRecipientUiSuppressed,
+  resolveGuidedProUxState,
+} from "./guidedDealCompletion/guidedProUxState";
 import { readPremiumRecipientHandoffMemo } from "./premiumRecipientHandoffReadCache";
 import { downloadExportDraftDocx, downloadExportDraftTxt } from "../../agreement/proRedlineReviewApi";
 import {
@@ -2467,6 +2479,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [createFlowSendRecipientEditorOpen, setCreateFlowSendRecipientEditorOpen] = useState(false);
   const createFlowSendEditorPrimedRef = useRef(false);
   const guidedFinalReviewContinueArmedRef = useRef(false);
+  const [guidedFinalReviewExplicitlyOpened, setGuidedFinalReviewExplicitlyOpened] = useState(false);
   const finalReviewSendPathChosenRef = useRef(false);
   const finalReviewSendIntentRef = useRef<FinalReviewSendIntent | null>(null);
   const guidedFrozenAfterApplyRef = useRef(false);
@@ -7146,6 +7159,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 currentProLen,
                 candidatePlain: apiCandidateRaw || out,
                 finalTextPlain: out,
+                polishBefore: currentDoc,
               })
             : out;
 
@@ -8403,15 +8417,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   /** Paid authoritative Pro: recipient setup stays on the Pro review surface (DRAFT) — never legacy RECIPIENTS shell. */
   const advancePaidProToRecipientSetup = useCallback(() => {
-    if (isGuidedFinalReviewPhase(createFlowPhase) && !guidedFinalReviewContinueArmedRef.current) {
+    if (
+      (isGuidedFinalReviewPhase(createFlowPhase) ||
+        isUpdatedAgreementReadyPhase(createFlowPhase) ||
+        (guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened)) &&
+      !guidedFinalReviewContinueArmedRef.current
+    ) {
       logGuidedFinalReviewPhaseGuardBlocked("advancePaidProToRecipientSetup", createFlowPhase);
+      logRecipientSetupPhaseBlocked("advancePaidProToRecipientSetup", "updated_agreement_ready");
       return;
     }
     setDisplayPhase("review");
     setCreateFlowPhase("recipient_setup_required");
     setCreateUiStage(CreateUiStage.DRAFT);
     setMobileWorkspacePane("preview");
-  }, [createFlowPhase]);
+  }, [createFlowPhase, guidedCompletionPhase, guidedFinalReviewExplicitlyOpened]);
 
   const returnToIntakeEditing = () => {
     if (paidProAuthoritative) {
@@ -10556,6 +10576,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumRecipientUxActive,
         createFlowPhase,
         guidedCompletionPhase,
+        finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
       }),
     [
       paidProAuthoritative,
@@ -10563,9 +10584,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumRecipientUxActive,
       createFlowPhase,
       guidedCompletionPhase,
+      guidedFinalReviewExplicitlyOpened,
     ],
   );
   const guidedFinalReviewActive = simpleProFinalReviewActive;
+
+  const guidedProUxState = useMemo(() => {
+    const state = resolveGuidedProUxState({
+      premiumPaidDocumentSurface,
+      hasGuidedSession: Boolean(guidedCompletionSession ?? guidedCompletionSessionRef.current),
+      guidedCompletionPhase,
+      createFlowPhase,
+      premiumRecipientUxActive,
+      finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
+    });
+    logGuidedProUxStateResolved(state, guidedCompletionPhase);
+    return state;
+  }, [
+    premiumPaidDocumentSurface,
+    guidedCompletionSession,
+    guidedCompletionPhase,
+    createFlowPhase,
+    premiumRecipientUxActive,
+    guidedFinalReviewExplicitlyOpened,
+  ]);
+
+  const suppressGuidedFreeformUx = guidedProUxSuppressesFreeform(guidedProUxState);
 
   const paidProRecipientSetupOnDraft = useMemo(
     () =>
@@ -10575,6 +10619,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           createUiStage === CreateUiStage.DRAFT &&
           premiumSignersSurfaceReady &&
           !guidedFinalReviewActive &&
+          !isUpdatedAgreementReadyPhase(createFlowPhase) &&
+          !(guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened) &&
           (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send"),
       ),
     [
@@ -10584,6 +10630,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSignersSurfaceReady,
       createFlowPhase,
       guidedFinalReviewActive,
+      guidedCompletionPhase,
+      guidedFinalReviewExplicitlyOpened,
     ],
   );
   const productionReadyForPersist = Boolean(
@@ -13466,6 +13514,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     bulkApplying: guidedBulkApplyingRef.current,
     phase: guidedCompletionPhase,
     finalReviewActive: simpleProFinalReviewActive,
+    createFlowPhase,
   });
   const guidedCompletionSessionBase = useMemo(() => {
     if (guidedQueueRebuildBlocked) return null;
@@ -13652,6 +13701,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return keyed;
       });
       setGuidedCompletionPhase("collecting_answers");
+      setGuidedFinalReviewExplicitlyOpened(false);
+      setCreateFlowPhase("draft_ready_for_review");
       setGuidedBulkApplyError(null);
       invalidateSigningPacketPrep("guided_answer_edit");
     },
@@ -13695,7 +13746,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       skipGuidedWhatChangedSummary: true,
       suppressGlobalGeneratingUi: true,
       validateRefinedOutput: (out) => {
-        const validation = validateGuidedBulkRegeneration(stableBefore, out);
+        const validation = validateGuidedBulkRegeneration(stableBefore, out, session);
         if (validation.ok) return true;
         logGuidedBulkRegenerationFailed(validation.reasons);
         return false;
@@ -13721,13 +13772,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setGuidedCompletionPhase("applied");
       setGuidedBulkApplyError(null);
       setReviewRefineUserMessage(null);
-      setCreateFlowPhase("guided_final_review");
+      setGuidedFinalReviewExplicitlyOpened(false);
+      setCreateFlowPhase("updated_agreement_ready");
       setCreateUiStage(CreateUiStage.DRAFT);
       setDisplayPhase("review");
       setPremiumRecipientUxActive(false);
       resetPremiumRecipientsSurfaceForFinalReview();
       finalReviewSendPathChosenRef.current = false;
       finalReviewSendIntentRef.current = null;
+      logRecipientUiSuppressed({ uxState: "updated_agreement_ready", reason: "post_apply_ready" });
       const frozenSession = freezeGuidedSessionAfterApply(session, guidedSessionKey);
       guidedCompletionSessionRef.current = frozenSession;
       setGuidedCompletionSession(frozenSession);
@@ -13872,6 +13925,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionPhase,
   ]);
 
+  const handleGuidedOpenFinalReview = React.useCallback(() => {
+    setGuidedFinalReviewExplicitlyOpened(true);
+    setCreateFlowPhase("guided_final_review");
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setDisplayPhase("review");
+    setPremiumRecipientUxActive(false);
+    resetPremiumRecipientsSurfaceForFinalReview();
+    finalReviewSendPathChosenRef.current = false;
+    logGuidedFinalReviewActive({
+      bodyLen: simpleProFinalReviewCorpus.plainText.length,
+      uxState: "guided_final_review",
+    });
+  }, [simpleProFinalReviewCorpus.plainText.length, resetPremiumRecipientsSurfaceForFinalReview]);
+
   const simpleProFinalReviewHtml = useMemo(() => {
     const corpus = simpleProFinalReviewCorpus.plainText;
     if (!corpus.trim()) return "";
@@ -13899,6 +13966,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   React.useEffect(() => {
+    if (!guidedProUxShowsUpdatedReadyCard(guidedProUxState) && guidedCompletionPhase !== "applied") return;
+    if (
+      finalReviewSendPathChosenRef.current ||
+      paidProRecipientSetupOnDraft ||
+      guidedFinalReviewContinueArmedRef.current
+    ) {
+      return;
+    }
+    if (
+      createFlowPhase === "recipient_setup_required" ||
+      createFlowPhase === "ready_to_send"
+    ) {
+      logRecipientSetupPhaseBlocked("guided_ready_phase_revert", guidedProUxState);
+      if (!guidedFinalReviewExplicitlyOpened) {
+        setCreateFlowPhase("updated_agreement_ready");
+        setPremiumRecipientUxActive(false);
+      }
+    }
+  }, [
+    guidedProUxState,
+    guidedCompletionPhase,
+    createFlowPhase,
+    paidProRecipientSetupOnDraft,
+    guidedFinalReviewExplicitlyOpened,
+  ]);
+
+  React.useEffect(() => {
     if (!simpleProFinalReviewActive) return;
     logSimpleProFinalReviewMounted({
       bodyLen: simpleProFinalReviewCorpus.plainText.length,
@@ -13922,7 +14016,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createFlowPhase === "ready_to_send"
     ) {
       logGuidedFinalReviewPhaseGuardBlocked("effect_phase_revert", createFlowPhase);
-      setCreateFlowPhase("guided_final_review");
+      logRecipientSetupPhaseBlocked("effect_phase_revert", guidedProUxState);
+      if (guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened) {
+        setCreateFlowPhase("updated_agreement_ready");
+      } else if (guidedFinalReviewExplicitlyOpened) {
+        setCreateFlowPhase("guided_final_review");
+      }
     }
   }, [
     simpleProFinalReviewActive,
@@ -13931,6 +14030,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionPhase,
     premiumRecipientUxActive,
     paidProRecipientSetupOnDraft,
+    guidedProUxState,
+    guidedFinalReviewExplicitlyOpened,
   ]);
 
   const guidedPacketStaleState = useMemo(
@@ -14230,11 +14331,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const showPrimaryGuidedCompletion = Boolean(
     !simpleProFinalReviewActive &&
+      guidedProUxShowsQuestionPanel(guidedProUxState) &&
       proReviewFooter.mode === "guided_completion" &&
       proReviewFooter.mountGuidedPanel &&
       guidedPanelMountedOnDocumentEditor &&
       activeGuidedCompletionSession &&
       !freeStarterReviewShellActive,
+  );
+
+  const showGuidedUpdatedAgreementReady = Boolean(
+    guidedProUxShowsUpdatedReadyCard(guidedProUxState) && !simpleProFinalReviewActive,
   );
 
   const guidedUxFlags = useMemo(
@@ -14965,8 +15071,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (premiumSignersSurfaceReady ||
         premiumRecipientUxActive ||
         (premiumPersistedFlowActive && peekPremiumRecipientsSurfaceReleased()));
-    if (simpleProFinalReviewActive && !guidedFinalReviewContinueArmedRef.current) {
+    if (
+      (simpleProFinalReviewActive ||
+        guidedProUxShowsUpdatedReadyCard(guidedProUxState) ||
+        (guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened)) &&
+      !guidedFinalReviewContinueArmedRef.current
+    ) {
       logGuidedFinalReviewPhaseGuardBlocked("handOffProductionDraftToRecipients", createFlowPhase);
+      logRecipientSetupPhaseBlocked("handOffProductionDraftToRecipients", guidedProUxState);
       return;
     }
     if (paidProInlineRecipientReady) {
@@ -15013,8 +15125,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handlePremiumReviewFirstContinueToSigners = React.useCallback((opts?: { telemetryMode?: PremiumSendIntent }) => {
-    if (simpleProFinalReviewActive && !guidedFinalReviewContinueArmedRef.current) {
+    if (
+      (simpleProFinalReviewActive ||
+        guidedProUxShowsUpdatedReadyCard(guidedProUxState) ||
+        (guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened)) &&
+      !guidedFinalReviewContinueArmedRef.current
+    ) {
       logGuidedFinalReviewPhaseGuardBlocked("handlePremiumReviewFirstContinueToSigners", createFlowPhase);
+      logRecipientSetupPhaseBlocked("handlePremiumReviewFirstContinueToSigners", guidedProUxState);
       return;
     }
     if (hasFullDraftAccess) {
@@ -17983,7 +18101,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     </div>
                                   ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
-                                    {simpleProFinalReviewActive ? (
+                                    {showGuidedUpdatedAgreementReady ? (
+                                      <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
+                                        <GuidedUpdatedAgreementReadyCard
+                                          appliedAnswerCount={
+                                            Object.keys(
+                                              (guidedCompletionSession ?? guidedCompletionSessionRef.current)
+                                                ?.answered ?? {},
+                                            ).filter((id) =>
+                                              (
+                                                (guidedCompletionSession ?? guidedCompletionSessionRef.current)
+                                                  ?.answered[id] || ""
+                                              ).trim(),
+                                            ).length || guidedAuthoritativeSummaryVariableIds.length
+                                          }
+                                          appliedChecklist={guidedAppliedSummaryChecklist}
+                                          applying={guidedCompletionPhase === "applying_all"}
+                                          applyError={guidedBulkApplyError}
+                                          onReviewUpdatedAgreement={handleGuidedOpenFinalReview}
+                                          onRetryApply={
+                                            guidedCompletionPhase === "failed"
+                                              ? () => void handleGuidedBulkApply()
+                                              : undefined
+                                          }
+                                        />
+                                        <div className="mt-4">
+                                          <PremiumAgreementReadonlyView
+                                            html={premiumReadonlyAgreementHtml}
+                                            suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                          />
+                                        </div>
+                                      </div>
+                                    ) : simpleProFinalReviewActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <SimpleProFinalReviewScreen
                                           agreementHtml={simpleProFinalReviewHtml}
@@ -18229,15 +18378,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           bulkApplyError={guidedBulkApplyError}
                                           appliedChanges={appliedGuidedChanges}
                                           onEditAnswer={handleGuidedEditAnswer}
-                                          onCustomPillSelected={() => {
-                                            void openPaidProDraftCardEditor();
-                                            customInstructionSectionRef.current?.setAttribute("open", "");
-                                          }}
+                                          onCustomPillSelected={
+                                            suppressGuidedFreeformUx
+                                              ? undefined
+                                              : () => {
+                                                  void openPaidProDraftCardEditor();
+                                                  customInstructionSectionRef.current?.setAttribute("open", "");
+                                                }
+                                          }
+                                          suppressFreeformBranching={suppressGuidedFreeformUx}
                                           externallyFrozen={draftPreCommitFreeze}
                                           compact
                                         />
                                       </div>
-                                    ) : proReviewFooter.showFreeformEdit ? (
+                                    ) : proReviewFooter.showFreeformEdit && !suppressGuidedFreeformUx ? (
                                       <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
                                         <p className="text-xs leading-relaxed text-stone-600">{GUIDED_NEUTRAL_REVIEW_COPY}</p>
                                         <details ref={customInstructionSectionRef} className="mt-3 group">

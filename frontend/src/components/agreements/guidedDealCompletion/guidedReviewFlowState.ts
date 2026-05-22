@@ -32,8 +32,8 @@ export function resolveGuidedReviewFlowState(args: {
   if (args.phase === "applying_all") {
     return {
       id: "applying_updates",
-      label: "Applying updates…",
-      detail: "Updating your agreement…",
+      label: "Updating your Pro agreement…",
+      detail: "Applying your answers to the full agreement.",
     };
   }
   if (args.phase === "applied") {
@@ -46,8 +46,8 @@ export function resolveGuidedReviewFlowState(args: {
     }
     return {
       id: "agreement_updated",
-      label: "Agreement updated",
-      detail: "Review updates below, then add recipient emails",
+      label: "Your updated Pro agreement is ready.",
+      detail: "Review the improved agreement before sharing it for review or signature.",
     };
   }
   if (args.phase === "failed") {

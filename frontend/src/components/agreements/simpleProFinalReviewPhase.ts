@@ -14,14 +14,15 @@ export function resolveSimpleProFinalReviewActive(args: {
   premiumRecipientUxActive: boolean;
   createFlowPhase: CreateFlowProductionPhase;
   guidedCompletionPhase: GuidedCompletionPhase;
+  /** User explicitly opened final review — never auto-open from apply alone. */
+  finalReviewExplicitlyOpened?: boolean;
 }): boolean {
   if (!args.paidProAuthoritative || !args.premiumPaidDocumentSurface) return false;
   if (args.premiumRecipientUxActive) return false;
-  if (isGuidedFinalReviewPhase(args.createFlowPhase)) return true;
+  if (!args.finalReviewExplicitlyOpened) return false;
   return (
-    args.guidedCompletionPhase === "applied" &&
-    args.createFlowPhase !== "recipient_setup_required" &&
-    args.createFlowPhase !== "ready_to_send"
+    isGuidedFinalReviewPhase(args.createFlowPhase) &&
+    args.guidedCompletionPhase === "applied"
   );
 }
 

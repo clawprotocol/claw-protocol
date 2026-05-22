@@ -20,7 +20,8 @@ export type SimpleProFinalReviewCorpusResolution = {
   appliedAnswerCount: number;
 };
 
-const MATERIAL_SHORTER_RATIO = 0.85;
+/** Refuse preview fallback when rendered body is >5% shorter than authoritative. */
+const MATERIAL_SHORTER_RATIO = 0.95;
 
 function norm(s?: string | null): string {
   return (s || "").trim();
@@ -89,6 +90,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     logSimpleFinalReviewAuthoritativeOverride({
       authoritativeLen: plainText.length,
       renderedLen,
+      refusedPreviewFallback: authorityOnly,
     });
   }
 
@@ -132,6 +134,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
 export function logSimpleFinalReviewAuthoritativeOverride(payload: {
   authoritativeLen: number;
   renderedLen: number;
+  refusedPreviewFallback?: boolean;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

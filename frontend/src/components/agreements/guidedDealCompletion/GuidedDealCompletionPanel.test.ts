@@ -130,7 +130,8 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
       intakeText: INTAKE,
       session: minimalSession()!,
     });
-    expect(prompt).toMatch(/ONE clean regeneration/i);
+    expect(prompt).toMatch(/ONE authoritative regeneration/i);
+    expect(prompt).toMatch(/do NOT pad length/i);
   });
 });
 

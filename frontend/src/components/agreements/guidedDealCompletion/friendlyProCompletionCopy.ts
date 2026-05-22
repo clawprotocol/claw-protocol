@@ -12,7 +12,16 @@ const INTERNAL_QA_RE =
 
 export const GUIDED_COMPLETION_HEADING = "Complete your agreement";
 export const GUIDED_COMPLETION_SUBHEADING =
-  "Finish a few business decisions — we'll update your draft as you go.";
+  "Finish these quick questions — LawDog will apply them in one clean update.";
+export const GUIDED_QUESTION_FOOTER_COPY =
+  "Finish these quick questions — LawDog will apply them in one clean update.";
+
+export const GUIDED_READY_STATE_HEADLINE = "Your updated Pro agreement is ready.";
+export const GUIDED_READY_STATE_SUBCOPY =
+  "Review the improved agreement before sharing it for review or signature.";
+export const GUIDED_READY_STATE_BODY =
+  "Your answers were applied in one authoritative update to the full Pro agreement.";
+export const GUIDED_READY_STATE_CTA = "Review updated agreement";
 
 export const GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER =
   "Add anything important LawDog should know — e.g., payment details, excluded prospects, notice addresses, governing law, or special deal terms.";

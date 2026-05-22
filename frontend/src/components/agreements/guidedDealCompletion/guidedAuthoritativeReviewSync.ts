@@ -4,6 +4,7 @@
 
 import type { ParsedDraftShape } from "../intakeSmartDefaults";
 import { PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE } from "../premiumRefineAcceptance";
+import { applyGuidedPostApplyLightPolish } from "./guidedPostApplyQuality";
 
 export type GuidedAuthoritativeReviewSyncInput = {
   authoritativePlain: string;
@@ -92,6 +93,8 @@ export type GuidedBulkCommitResolveArgs = {
   currentProLen: number;
   candidatePlain: string;
   finalTextPlain: string;
+  /** Baseline Pro body before bulk apply — enables deterministic post-apply polish. */
+  polishBefore?: string;
 };
 
 /** Prefer API candidate when accepted refine finalText is suspiciously stale vs candidate. */
@@ -102,6 +105,7 @@ export function resolveGuidedBulkCommitBody(args: GuidedBulkCommitResolveArgs): 
   const materialGrowth = candidate.length > args.currentProLen * 1.05;
   const staleFinal =
     accepted && materialGrowth && final.length > 0 && final.length < candidate.length * 0.9;
+  let body: string;
   if (staleFinal && candidate.length >= 500) {
     // eslint-disable-next-line no-console
     console.warn("[guided-authoritative-commit-mismatch]", {
@@ -111,10 +115,17 @@ export function resolveGuidedBulkCommitBody(args: GuidedBulkCommitResolveArgs): 
       applyDecision: args.applyDecision,
       using: "candidate",
     });
-    return candidate;
+    body = candidate;
+  } else if (final.length >= 500) {
+    body = final;
+  } else {
+    body = candidate.length >= 500 ? candidate : final;
   }
-  if (final.length >= 500) return final;
-  return candidate.length >= 500 ? candidate : final;
+  const polishBefore = (args.polishBefore || "").trim();
+  if (polishBefore) {
+    body = applyGuidedPostApplyLightPolish(polishBefore, body);
+  }
+  return body;
 }
 
 export function logGuidedBulkCommitSuccess(args: {
