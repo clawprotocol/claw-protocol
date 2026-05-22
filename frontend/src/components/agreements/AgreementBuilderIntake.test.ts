@@ -676,12 +676,64 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
+  it("test28: signer identity patch preserves corpus and final review recovery", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("guidedPreIdentityAuthoritativeRef");
+    expect(intake).toContain("identityApply.rejected");
+    expect(intake).toContain("recoveryAuthoritativePlain");
+    expect(intake).toContain("suppressPostReviewEditUx");
+    expect(intake).toContain("corpusRecoveryMessage");
+    const identity = readFileSync(
+      join(__dirname, "guidedDealCompletion/signerPartyIdentity.ts"),
+      "utf8",
+    );
+    expect(identity).toContain("[signer-party-identity-apply-rejected]");
+    expect(identity).toContain("shouldRejectSignerIdentityCorpusShrink");
+    expect(identity).toContain("findSignatureRegionStart");
+    const corpus = readFileSync(join(__dirname, "simpleProFinalReviewCorpus.ts"), "utf8");
+    expect(corpus).toContain("[guided-final-review-corpus-recovered]");
+    expect(corpus).toContain("[guided-final-review-corpus-blocked]");
+    const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
+    expect(screen).toContain("suppressPostReviewEditUx");
+    expect(screen).toContain("simple-pro-final-review-corpus-recovery");
+  });
+
+  it("test29: guided review/signing continuity freezes corpus and signer manifest", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("authoritativeAgreementSnapshotRef");
+    expect(intake).toContain("acceptedReviewCorpusRef");
+    expect(intake).toContain("finalizedSigningCorpusRef");
+    expect(intake).toContain("canonicalSignerManifestRef");
+    expect(intake).toContain("reviewSessionState");
+    expect(intake).toContain("reviewAcceptedByParties");
+    expect(intake).toContain("uploadedRevisionCorpus");
+    expect(intake).toContain("latestAcceptedCorpus");
+    expect(intake).toContain("freezeGuidedAuthoritativeCorpusSnapshot");
+    expect(intake).toContain("acceptGuidedReviewCorpus");
+    expect(intake).toContain("assertGuidedTransitionReady");
+    expect(intake).toContain("logSigningCorpusInitialized");
+    const continuity = readFileSync(
+      join(__dirname, "guidedDealCompletion/guidedReviewSigningContinuity.ts"),
+      "utf8",
+    );
+    expect(continuity).toContain("[authoritative-corpus-frozen]");
+    expect(continuity).toContain("[review-corpus-accepted]");
+    expect(continuity).toContain("[signing-corpus-initialized]");
+    expect(continuity).toContain("[guided-transition-assertion-blocked]");
+    expect(continuity).toContain("buildCanonicalSignerManifest");
+    expect(continuity).toContain("acceptUploadedRevision");
+  });
+
   it("test27: final review send routes to signing confirmation, not recipient_setup", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("enterGuidedSigningConfirmationFromFinalReview");
+    expect(intake).toContain("continueGuidedFinalReviewToSigning");
+    expect(intake).toContain("canProceedGuidedFinalReviewToSigning");
+    expect(intake).toContain("canProceedFromGuidedFinalReviewToSigning");
+    expect(intake).toContain("resolveGuidedSigningAuthoritativePlain");
     expect(intake).toContain("guidedSigningConfirmationActive");
     expect(intake).toContain("GuidedProSigningConfirmationScreen");
-    expect(intake).toContain("guidedProFinalReviewSigningPacketReady");
+    expect(intake).toContain("ensureGuidedSigningCorpusReady");
     const signing = readFileSync(
       join(__dirname, "guidedDealCompletion/guidedSigningConfirmation.ts"),
       "utf8",
@@ -694,10 +746,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("setPremiumSendConfirmOpen(true)");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
     const sendBlock = intake.slice(sendIdx, sendIdx + 2500);
-    expect(sendBlock).toContain('enterGuidedSigningConfirmationFromFinalReview("signature")');
-    expect(sendBlock).toContain("guidedProFinalReviewSigningPacketReady");
+    expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
+    expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
     const guidedBranch = sendBlock.slice(
-      sendBlock.indexOf("guidedProFinalReviewSigningPacketReady"),
+      sendBlock.indexOf("canProceedGuidedFinalReviewToSigning"),
       sendBlock.indexOf('enterFinalReviewRecipientSetup("signature")'),
     );
     expect(guidedBranch).toContain("return;");
@@ -713,7 +765,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(screen).toContain("Back to final review");
     const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
     const enterBlock = intake.slice(enterIdx, enterIdx + 600);
-    expect(enterBlock).toContain("enterGuidedSigningConfirmationFromFinalReview(intent)");
+    expect(enterBlock).toContain("continueGuidedFinalReviewToSigning({ intent })");
+    expect(intake).toContain("GuidedFinalizeModal");
+    expect(intake).toContain("logGuidedFinalizeModalEnter");
   });
 
   it("test26: signer party identity applied before final review", () => {

@@ -25,6 +25,12 @@ export type SimpleProFinalReviewScreenProps = {
   sendDisabled?: boolean;
   /** Signer/reviewer emails captured before final review. */
   signersReady?: boolean;
+  /** Hide edit/suggest/upload chrome after signer setup is complete. */
+  suppressPostReviewEditUx?: boolean;
+  /** Shown when authoritative corpus is blocked or empty. */
+  corpusRecoveryMessage?: string | null;
+  /** When false, checklist shows without broken jump links (DOM anchors missing). */
+  enableSectionJump?: boolean;
   onSendForSignature: () => void;
   onSendForReview: () => void;
   onCopyAgreement: () => void;
@@ -59,6 +65,9 @@ export function SimpleProFinalReviewScreen({
   exportError = null,
   sendDisabled = false,
   signersReady = false,
+  suppressPostReviewEditUx = false,
+  corpusRecoveryMessage = null,
+  enableSectionJump = true,
   onSendForSignature,
   onSendForReview,
   onCopyAgreement,
@@ -80,7 +89,10 @@ export function SimpleProFinalReviewScreen({
   const fileRef = useRef<HTMLInputElement>(null);
   const [editAgreementTextOpen, setEditAgreementTextOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
-  const canEditAgreementText = Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
+  const canEditAgreementText =
+    !suppressPostReviewEditUx &&
+    Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
+  const showDocument = agreementHtml.trim().length > 0 && !corpusRecoveryMessage;
   const answerCount = appliedAnswerCount > 0 ? appliedAnswerCount : appliedVariableIds.length;
 
   useEffect(() => {
@@ -141,14 +153,16 @@ export function SimpleProFinalReviewScreen({
                     </span>
                     <span>{item}</span>
                   </span>
-                  <button
-                    type="button"
-                    className="shrink-0 text-[10px] font-semibold text-emerald-800 underline decoration-emerald-600/50 underline-offset-2 hover:text-emerald-950"
-                    data-testid={`simple-pro-jump-section-${item.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`}
-                    onClick={() => scrollToGuidedAppliedChecklistSection(item, appliedVariableIds)}
-                  >
-                    Jump to section
-                  </button>
+                  {enableSectionJump && appliedVariableIds.length > 0 ? (
+                    <button
+                      type="button"
+                      className="shrink-0 text-[10px] font-semibold text-emerald-800 underline decoration-emerald-600/50 underline-offset-2 hover:text-emerald-950"
+                      data-testid={`simple-pro-jump-section-${item.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`}
+                      onClick={() => scrollToGuidedAppliedChecklistSection(item, appliedVariableIds)}
+                    >
+                      Jump to section
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -196,11 +210,29 @@ export function SimpleProFinalReviewScreen({
         </p>
       ) : null}
 
+      {corpusRecoveryMessage ? (
+        <div
+          className="rounded-md border border-amber-300/90 bg-amber-50 px-3 py-3 text-sm leading-relaxed text-amber-950"
+          role="alert"
+          data-testid="simple-pro-final-review-corpus-recovery"
+        >
+          {corpusRecoveryMessage}
+        </div>
+      ) : null}
       <div
         className="rounded-sm border border-stone-200/90 bg-white shadow-sm ring-1 ring-black/[0.05]"
         data-testid="simple-pro-final-review-document"
       >
-        <PremiumAgreementReadonlyView html={agreementHtml} suppressEmptyFallback={suppressEmptyFallback} />
+        {showDocument ? (
+          <PremiumAgreementReadonlyView html={agreementHtml} suppressEmptyFallback={suppressEmptyFallback} />
+        ) : (
+          <p
+            className="px-4 py-8 text-center text-sm leading-relaxed text-stone-600"
+            data-testid="simple-pro-final-review-document-empty"
+          >
+            Agreement preview is not available. Use Back to signer details, then continue to final review again.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-2">

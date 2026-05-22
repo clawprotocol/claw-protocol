@@ -14,6 +14,10 @@ import {
   resolveGuidedSignerSetupStickyCta,
   resolveGuidedSignerSetupStatus,
 } from "./guidedAnswerApplyOrchestration";
+import {
+  canProceedFromGuidedFinalReviewToSigning,
+  GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN,
+} from "./guidedReviewSigningContinuity";
 
 export type GuidedProUxState =
   | "inactive"
@@ -239,13 +243,16 @@ export function guidedProFinalReviewSigningPacketReady(args: {
   finalReviewExplicitlyOpened: boolean;
   createFlowPhase: CreateFlowProductionPhase;
   signersComplete: boolean;
+  authoritativeCorpusLen?: number;
 }): boolean {
-  return (
-    args.guidedCompletionPhase === "applied" &&
-    args.finalReviewExplicitlyOpened &&
-    isGuidedFinalReviewPhase(args.createFlowPhase) &&
-    args.signersComplete
-  );
+  return canProceedFromGuidedFinalReviewToSigning({
+    paidProAuthoritative: true,
+    guidedCompletionPhase: args.guidedCompletionPhase,
+    finalReviewExplicitlyOpened: args.finalReviewExplicitlyOpened,
+    createFlowPhase: args.createFlowPhase,
+    authoritativeCorpusLen: args.authoritativeCorpusLen ?? GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN,
+    signersComplete: args.signersComplete,
+  });
 }
 
 /**

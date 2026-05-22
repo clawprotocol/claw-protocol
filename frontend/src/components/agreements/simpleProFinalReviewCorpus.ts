@@ -4,6 +4,9 @@
 
 import { GUIDED_MIN_AUTHORITATIVE_BODY_LEN } from "./guidedDealCompletion/guidedCompletionRenderAuthority";
 
+/** Final review requires a full Pro agreement — not a signature-only fragment. */
+export const GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN = 1500;
+
 export type SimpleProFinalReviewCorpusSource =
   | "authoritative_hydrated"
   | "last_known_good"
@@ -18,6 +21,10 @@ export type SimpleProFinalReviewCorpusResolution = {
   renderedLen: number;
   overriddenPreview: boolean;
   appliedAnswerCount: number;
+  /** True when a full authoritative body existed but display corpus is too short. */
+  corpusBlocked?: boolean;
+  /** True when display recovered from the frozen authoritative snapshot. */
+  corpusRecovered?: boolean;
 };
 
 /** Refuse preview fallback when rendered body is >5% shorter than authoritative. */
@@ -46,12 +53,15 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   appliedAnswerCount?: number;
   /** When true, never use renderedAgreementPreview even if other sources are empty. */
   finalReviewAuthorityOnly?: boolean;
+  /** Pre–signer-identity snapshot for recovery when patched body shrank. */
+  recoveryAuthoritativePlain?: string | null;
 }): SimpleProFinalReviewCorpusResolution {
   const authoritative = norm(args.authoritativePlain);
   const rendered = norm(args.renderedPreviewPlain);
   const picker = norm(args.pickerPlain);
   const adt = norm(args.agreementDocumentPlain);
   const authorityOnly = Boolean(args.finalReviewAuthorityOnly);
+  const recovery = norm(args.recoveryAuthoritativePlain);
 
   const authCandidates: { plain: string; source: SimpleProFinalReviewCorpusSource }[] = [];
   if (authoritative.length > 0) {
@@ -80,6 +90,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   );
 
   let overriddenPreview = false;
+  let corpusRecovered = false;
 
   if (
     plainText.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
@@ -111,6 +122,59 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     overriddenPreview = true;
   }
 
+  const recoveryFull = recovery.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
+  const recoveryAuthoritativeFull = recovery.length >= 3000;
+
+  if (
+    authorityOnly &&
+    plainText.length < 1000 &&
+    recoveryAuthoritativeFull
+  ) {
+    logGuidedFinalReviewCorpusRecovered({
+      displayLenBefore: plainText.length,
+      recoveredLen: recovery.length,
+    });
+    plainText = recovery;
+    source = "last_known_good";
+    overriddenPreview = true;
+    corpusRecovered = true;
+  }
+
+  if (
+    authorityOnly &&
+    plainText.length > 0 &&
+    plainText.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
+    recoveryFull
+  ) {
+    logGuidedFinalReviewCorpusBlocked({
+      displayLen: plainText.length,
+      recoveryLen: recovery.length,
+      authoritativeLen,
+    });
+    logFinalReviewAuthoritativeRenderBlocked({ reason: "shrunken_authoritative_body" });
+    return {
+      plainText: "",
+      source: picked.source,
+      authoritativeLen: Math.max(authoritativeLen, recovery.length),
+      renderedLen,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+      corpusBlocked: true,
+    };
+  }
+
+  if (authorityOnly && plainText.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+    logFinalReviewAuthoritativeRenderBlocked({ reason: "empty_authoritative_body" });
+    return {
+      plainText: "",
+      source: picked.source,
+      authoritativeLen: 0,
+      renderedLen,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
+
   if (authorityOnly && plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
     logFinalReviewAuthoritativeRenderBlocked({ reason: "empty_authoritative_body" });
     return {
@@ -130,6 +194,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     renderedLen,
     overriddenPreview,
     appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    corpusRecovered,
   };
 
   logFinalReviewAuthoritativeRender({
@@ -158,6 +223,25 @@ export function logSimpleFinalReviewAuthoritativeOverride(payload: {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[simple-final-review-authoritative-override]", payload);
+}
+
+export function logGuidedFinalReviewCorpusRecovered(payload: {
+  displayLenBefore: number;
+  recoveredLen: number;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-final-review-corpus-recovered]", payload);
+}
+
+export function logGuidedFinalReviewCorpusBlocked(payload: {
+  displayLen: number;
+  recoveryLen: number;
+  authoritativeLen: number;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-final-review-corpus-blocked]", payload);
 }
 
 export function logFinalReviewAuthoritativeRender(payload: {

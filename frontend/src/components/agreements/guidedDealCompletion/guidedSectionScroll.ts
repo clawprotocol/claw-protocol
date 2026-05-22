@@ -240,10 +240,14 @@ export function highlightAllGuidedChangedSections(
     });
   }
   const renderedCount = results.filter((r) => r.rendered).length;
+  const checklistFallbackCount = variableIds.length > 0 && renderedCount === 0 ? variableIds.length : 0;
+  const effectiveRenderedCount = renderedCount > 0 ? renderedCount : checklistFallbackCount;
   // eslint-disable-next-line no-console
   console.info("[guided-update-summary]", {
     requested: variableIds.length,
-    renderedCount,
+    renderedCount: effectiveRenderedCount,
+    domRenderedCount: renderedCount,
+    checklistFallbackCount,
     sectionIds: results.filter((r) => r.rendered).map((r) => r.variableId),
   });
   return results;

@@ -18,11 +18,20 @@ import {
   type PremiumRecipientHandoffV2,
 } from "../premiumPartyNamesHandoff";
 import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreReviewSignerSlots";
+import {
+  findSignatureRegionStart,
+  isSafeSignatureTailReplacement,
+  signaturePatchStartIndex,
+} from "./signatureRegion";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company)\.?$/i;
 
-const SIG_REGION_RE = /\b(?:IN WITNESS WHEREOF|SIGNATURES?|EXECUTION)\b/i;
+/** Legacy scan for placeholder detection in signature tail only. */
+const SIG_TAIL_PLACEHOLDER_RE = /\bIN WITNESS WHEREOF\b/i;
+
+export const SIGNER_IDENTITY_CORPUS_SHRINK_MIN_INPUT = 1500;
+export const SIGNER_IDENTITY_CORPUS_SHRINK_MAX_RATIO = 0.8;
 
 export type CanonicalPartyIdentity = {
   index: number;
@@ -209,25 +218,48 @@ function replaceRecitalPartyTokens(text: string, identities: readonly CanonicalP
   return out;
 }
 
+export function resolvePartyIndexForSignatureLine(
+  lines: readonly string[],
+  lineIndex: number,
+  identities: readonly CanonicalPartyIdentity[],
+): number {
+  for (let i = lineIndex; i >= 0; i--) {
+    const trimmed = lines[i].trim();
+    for (let p = 0; p < identities.length; p++) {
+      const id = identities[p];
+      if (!id.partyDisplayName) continue;
+      const headingRe = new RegExp(`^${escapeRe(id.blockHeading)}\\s*:?\\s*$`, "i");
+      if (headingRe.test(trimmed)) return p;
+    }
+  }
+  return 0;
+}
+
+/** Name line on signature block: individual uses party name; entity uses representative when set. */
+export function signatureNameForIdentity(id: CanonicalPartyIdentity): string {
+  if (id.isIndividual) return id.partyDisplayName;
+  return (id.representativeName?.trim() || id.partyDisplayName).trim();
+}
+
 function fillSignatureNameUnderscoreLines(
   text: string,
   identities: readonly CanonicalPartyIdentity[],
 ): { text: string; count: number } {
-  const marker = text.search(SIG_REGION_RE);
-  if (marker < 0) return { text, count: 0 };
+  const marker = signaturePatchStartIndex(text);
   const lines = text.split("\n");
   let replacements = 0;
-  let activeParty = 0;
-
+  let offset = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (i < marker) continue;
+    if (offset < marker) {
+      offset += lines[i].length + 1;
+      continue;
+    }
     const trimmed = lines[i].trim();
     for (let p = 0; p < identities.length; p++) {
       const id = identities[p];
       if (!id.partyDisplayName) continue;
       const headingRe = new RegExp(`^${escapeRe(id.blockHeading)}\\s*:?\\s*$`, "i");
       if (headingRe.test(trimmed)) {
-        activeParty = p;
         if (lines[i + 1]?.trim() === "" || isPlaceholderPartyName(lines[i + 1]?.trim() ?? "")) {
           const indent = lines[i + 1]?.match(/^\s*/)?.[0] ?? "";
           lines[i + 1] = `${indent}${id.partyDisplayName}`;
@@ -238,14 +270,21 @@ function fillSignatureNameUnderscoreLines(
     }
 
     if (/^name\s*:/i.test(trimmed)) {
-      const id = identities[activeParty] ?? identities[0];
-      if (id?.partyDisplayName && /_{4,}/.test(trimmed)) {
+      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+      const id = identities[partyIndex];
+      const signName = id ? signatureNameForIdentity(id) : "";
+      if (!signName) continue;
+      const wrongPartyName =
+        id &&
+        identities.some(
+          (other, oi) =>
+            oi !== partyIndex &&
+            other.partyDisplayName &&
+            trimmed.toLowerCase().includes(other.partyDisplayName.toLowerCase()),
+        );
+      if (/_{4,}/.test(trimmed) || /^name\s*:\s*$/i.test(trimmed) || wrongPartyName) {
         const indent = lines[i].match(/^\s*/)?.[0] ?? "";
-        lines[i] = `${indent}Name: ${id.partyDisplayName}`;
-        replacements += 1;
-      } else if (id?.partyDisplayName && /^name\s*:\s*$/i.test(trimmed)) {
-        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
-        lines[i] = `${indent}Name: ${id.partyDisplayName}`;
+        lines[i] = `${indent}Name: ${signName}`;
         replacements += 1;
       }
     }
@@ -254,16 +293,12 @@ function fillSignatureNameUnderscoreLines(
   return { text: lines.join("\n"), count: replacements };
 }
 
-function polishSignatureBlocksWithPartyIdentities(
-  text: string,
-  identities: readonly CanonicalPartyIdentity[],
-): { text: string; count: number } {
-  const marker = text.search(SIG_REGION_RE);
-  if (marker < 0) return { text, count: 0 };
-
-  let count = 0;
+function buildSignatureBlocks(identities: readonly CanonicalPartyIdentity[]): {
+  blocks: string[];
+  count: number;
+} {
   const blocks: string[] = [];
-
+  let count = 0;
   for (const id of identities) {
     if (!id.partyDisplayName) continue;
     const lines: string[] = [`${id.blockHeading}:`];
@@ -278,10 +313,19 @@ function polishSignatureBlocksWithPartyIdentities(
     blocks.push(lines.join("\n"));
     count += 1;
   }
+  return { blocks, count };
+}
 
+function polishSignatureBlocksWithPartyIdentities(
+  text: string,
+  identities: readonly CanonicalPartyIdentity[],
+): { text: string; count: number } {
+  const marker = findSignatureRegionStart(text);
+  const { blocks, count: blockCount } = buildSignatureBlocks(identities);
   if (!blocks.length) return { text, count: 0 };
 
-  const tail = text.slice(marker);
+  const patchStart = marker >= 0 ? marker : signaturePatchStartIndex(text);
+  const tail = text.slice(patchStart);
   const existingSigBody = tail.replace(/^\s*(?:IN WITNESS WHEREOF[^\n]*\n)?/i, "").trim();
   const witnessLine = tail.match(/^\s*(IN WITNESS WHEREOF[^\n]*)/i)?.[1] ?? "IN WITNESS WHEREOF";
   const mergedTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;
@@ -290,12 +334,41 @@ function polishSignatureBlocksWithPartyIdentities(
     /\[service\s+provider\s+name\]/i.test(existingSigBody) ||
     /name\s*:\s*_{6,}/i.test(existingSigBody);
 
-  if (hasPlaceholderSig) {
-    return { text: text.slice(0, marker) + mergedTail, count };
+  if (hasPlaceholderSig && isSafeSignatureTailReplacement(text, marker)) {
+    return { text: text.slice(0, marker) + mergedTail, count: blockCount };
+  }
+
+  if (hasPlaceholderSig && marker < 0) {
+    const trimmed = text.trimEnd();
+    const witnessAlready = /\bIN WITNESS WHEREOF\b/i.test(trimmed.slice(-1200));
+    const appended = witnessAlready
+      ? `${trimmed}\n\n${blocks.join("\n\n")}\n`
+      : `${trimmed}\n\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n${blocks.join("\n\n")}\n`;
+    return { text: appended, count: blockCount };
   }
 
   const filled = fillSignatureNameUnderscoreLines(text, identities);
-  return { text: filled.text, count: filled.count };
+  return { text: filled.text, count: filled.count + (hasPlaceholderSig ? 0 : 0) };
+}
+
+export function shouldRejectSignerIdentityCorpusShrink(
+  beforeLen: number,
+  afterLen: number,
+): boolean {
+  return (
+    beforeLen >= SIGNER_IDENTITY_CORPUS_SHRINK_MIN_INPUT &&
+    afterLen < beforeLen * SIGNER_IDENTITY_CORPUS_SHRINK_MAX_RATIO
+  );
+}
+
+export function logSignerPartyIdentityApplyRejected(payload: {
+  beforeLen: number;
+  afterLen: number;
+  reason: "corpus_shrink";
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[signer-party-identity-apply-rejected]", payload);
 }
 
 export function applySignerPartyIdentityToAuthoritativeAgreement(
@@ -307,12 +380,15 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
   partyNames: string[];
   signaturePolishCount: number;
   repaired: string[];
+  rejected?: boolean;
+  rejectReason?: "corpus_shrink";
 } {
   const partyNames = resolvePaidProPolishPartyNamesFromIdentities(identities);
   if (partyNames.length < 2) {
     return { text: body, partyNames, signaturePolishCount: 0, repaired: [] };
   }
 
+  const bodyLenBefore = body.length;
   let out = body;
   out = replaceBracketPartyPlaceholders(out, identities);
   out = replaceRecitalPartyTokens(out, identities);
@@ -331,12 +407,28 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
   const headings = normalizeSignatureBlockHeadings(out, buildPartyEntries(partyNames));
   out = headings.text;
 
+  if (shouldRejectSignerIdentityCorpusShrink(bodyLenBefore, out.length)) {
+    logSignerPartyIdentityApplyRejected({
+      beforeLen: bodyLenBefore,
+      afterLen: out.length,
+      reason: "corpus_shrink",
+    });
+    return {
+      text: body,
+      partyNames,
+      signaturePolishCount: 0,
+      repaired: [],
+      rejected: true,
+      rejectReason: "corpus_shrink",
+    };
+  }
+
   const signaturePolishCount = sigFill.count + blockPolish.count + headings.log.replacedCount;
 
   if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
     // eslint-disable-next-line no-console
     console.info("[signer-party-identity-applied-to-corpus]", {
-      bodyLenBefore: body.length,
+      bodyLenBefore,
       bodyLenAfter: out.length,
       partyNames,
       signaturePolishCount,
@@ -361,7 +453,7 @@ export function agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup(
   if (/\[your\s+company\s+name\]/i.test(text)) return true;
   if (/\[service\s+provider\s+name\]/i.test(text)) return true;
 
-  const marker = text.search(SIG_REGION_RE);
+  const marker = text.search(SIG_TAIL_PLACEHOLDER_RE);
   if (marker >= 0) {
     const tail = text.slice(marker);
     if (/^name\s*:\s*_{6,}\s*$/im.test(tail)) return true;

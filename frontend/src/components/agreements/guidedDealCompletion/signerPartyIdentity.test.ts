@@ -6,6 +6,7 @@ import {
   isIndividualPartyName,
   resolveCanonicalPartyIdentitiesFromSignerSetup,
   resolvePaidProPolishPartyNamesFromIdentities,
+  shouldRejectSignerIdentityCorpusShrink,
 } from "./signerPartyIdentity";
 
 const PLACEHOLDER_BODY = `LawDog is not a law firm.
@@ -60,6 +61,32 @@ describe("signerPartyIdentity (test26)", () => {
     ]);
   });
 
+  it("entity party 1 and individual party 2 get distinct signature Name lines (test30)", () => {
+    const entityBody = `${PLACEHOLDER_BODY.replace("[Your Company Name]", "Acme LLC").replace("[Service Provider Name]", "Joe Smith")}`;
+    const ids = resolveCanonicalPartyIdentitiesFromSignerSetup({
+      ...signerArgs,
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      partySignerNames: ["Anthem Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      draftPartyNames: ["Acme LLC", "Joe Smith"],
+    });
+    expect(ids[0].partyDisplayName).toBe("Acme LLC");
+    expect(ids[0].representativeName).toBe("Anthem Blanchard");
+    expect(ids[1].partyDisplayName).toBe("Joe Smith");
+    expect(ids[1].isIndividual).toBe(true);
+    const { text } = applySignerPartyIdentityToAuthoritativeAgreement(
+      entityBody,
+      ids,
+      "Between Acme LLC and Joe Smith.",
+    );
+    const clientNameIdx = text.search(/CLIENT:[\s\S]*?Name:\s*Anthem Blanchard/i);
+    const providerNameIdx = text.search(/SERVICE PROVIDER:[\s\S]*?Name:\s*Joe Smith/i);
+    expect(clientNameIdx).toBeGreaterThan(-1);
+    expect(providerNameIdx).toBeGreaterThan(-1);
+    expect(text).not.toMatch(/SERVICE PROVIDER:[\s\S]*?Name:\s*Acme LLC/i);
+  });
+
   it("applies identities to corpus: removes bracket placeholders and fills signature names", () => {
     const ids = resolveCanonicalPartyIdentitiesFromSignerSetup(signerArgs);
     const { text } = applySignerPartyIdentityToAuthoritativeAgreement(
@@ -100,6 +127,47 @@ describe("signerPartyIdentity (test26)", () => {
     expect(isIndividualPartyName("Anthem H Blanchard")).toBe(true);
     expect(isIndividualPartyName("Acme LLC")).toBe(false);
     expect(isIndividualPartyName("Party A")).toBe(false);
+  });
+
+  it("test28: preserves full corpus when EXECUTION appears early in operative text", () => {
+    const ids = resolveCanonicalPartyIdentitiesFromSignerSetup(signerArgs);
+    const operative = "The execution of this Agreement and electronic signature laws apply.\n\n";
+    const mid =
+      "1. Services\nProvider delivers services.\n2. Payment\nFees as stated.\n3. Term\nOne year.\n".repeat(120);
+    const sig = `
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+[Your Company Name]
+By: __________________________
+Name: ________________________
+Title: _________________________
+
+SERVICE PROVIDER:
+[Service Provider Name]
+By: __________________________
+Name: ________________________
+Title: _________________________
+`;
+    const fullBody = operative + mid + sig;
+    expect(fullBody.length).toBeGreaterThan(8000);
+    const result = applySignerPartyIdentityToAuthoritativeAgreement(
+      fullBody,
+      ids,
+      "Between Client and Service Provider.",
+    );
+    expect(result.rejected).not.toBe(true);
+    expect(result.text.length).toBeGreaterThan(fullBody.length * 0.8);
+    expect(result.text).toContain("1. Services");
+    expect(result.text).toContain("Anthem H Blanchard");
+  });
+
+  it("test28: rejects shrunken identity output and returns original body", () => {
+    expect(shouldRejectSignerIdentityCorpusShrink(8856, 449)).toBe(true);
+    const ids = resolveCanonicalPartyIdentitiesFromSignerSetup(signerArgs);
+    const tiny = "x".repeat(2000);
+    const result = applySignerPartyIdentityToAuthoritativeAgreement(tiny, ids, "");
+    expect(result.text.length).toBeGreaterThanOrEqual(2000 * 0.8);
   });
 
   it("logs signer-party-identity-applied-to-corpus in non-test env path", () => {

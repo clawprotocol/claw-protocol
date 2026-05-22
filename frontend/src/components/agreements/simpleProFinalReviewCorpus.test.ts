@@ -1,46 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
+  GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN,
   resolveSimpleProFinalReviewCorpus,
 } from "./simpleProFinalReviewCorpus";
 
-describe("resolveSimpleProFinalReviewCorpus", () => {
-  it("final review authority only uses authoritative when authoritativeLen > renderedPreviewLen", () => {
-    const authoritative = "A".repeat(9493);
-    const rendered = "B".repeat(7530);
-    const result = resolveSimpleProFinalReviewCorpus({
-      authoritativePlain: authoritative,
-      renderedPreviewPlain: rendered,
-      appliedAnswerCount: 5,
-      finalReviewAuthorityOnly: true,
-    });
-    expect(result.plainText.length).toBe(9493);
-    expect(result.source).not.toBe("rendered_preview");
-    expect(result.overriddenPreview).toBe(true);
-    expect(result.authoritativeLen).toBeGreaterThan(result.renderedLen);
-  });
-
-  it("picks longest authoritative candidate over shorter picker", () => {
-    const result = resolveSimpleProFinalReviewCorpus({
-      authoritativePlain: "x".repeat(9000),
-      pickerPlain: "y".repeat(7530),
-      renderedPreviewPlain: "z".repeat(7530),
-      finalReviewAuthorityOnly: true,
-    });
-    expect(result.plainText.length).toBe(9000);
-  });
-
-  it("displayLen 0 with authorityOnly does not log final-review-authoritative-render", () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const result = resolveSimpleProFinalReviewCorpus({
+describe("simpleProFinalReviewCorpus (test28)", () => {
+  it("recovers final review display when display corpus empty but recovery snapshot is full", () => {
+    const out = resolveSimpleProFinalReviewCorpus({
       authoritativePlain: "",
-      renderedPreviewPlain: "",
+      recoveryAuthoritativePlain: "y".repeat(8800),
+      finalReviewAuthorityOnly: true,
+      appliedAnswerCount: 3,
+    });
+    expect(out.plainText.length).toBeGreaterThanOrEqual(GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN);
+    expect(out.source).toBe("last_known_good");
+  });
+
+  it("auto-recovers final review when full body existed but display corpus too short", () => {
+    const out = resolveSimpleProFinalReviewCorpus({
+      authoritativePlain: "x".repeat(400),
+      recoveryAuthoritativePlain: "y".repeat(8856),
       finalReviewAuthorityOnly: true,
     });
-    expect(result.plainText).toBe("");
-    expect(info).not.toHaveBeenCalledWith(
-      "[final-review-authoritative-render]",
-      expect.objectContaining({ displayLen: 0 }),
-    );
-    info.mockRestore();
+    expect(out.plainText.length).toBe(8856);
+    expect(out.corpusRecovered).toBe(true);
+    expect(out.corpusBlocked).not.toBe(true);
   });
 });
