@@ -101,7 +101,8 @@ describe("guided final review flow", () => {
     expect(phase).toContain("final-review-recipient-phase-blocked");
     expect(intake).toContain("!guidedPreReviewSignerSetupActive");
     expect(intake).toContain("showGuidedPreReviewApplying");
-    expect(intake).toContain("shouldAutoOpenGuidedFinalReviewAfterApply");
+    expect(intake).toContain("logGuidedFinalReviewBlockedSignersIncomplete");
+    expect(intake).toContain("resolveGuidedFinalReviewUnlockGate");
   });
 
   it("test22: final review unlocks when apply + signers both complete", () => {

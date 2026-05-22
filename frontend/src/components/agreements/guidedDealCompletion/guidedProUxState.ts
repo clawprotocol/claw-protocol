@@ -89,6 +89,16 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
 
   if (args.signingPacketSetupActive) return "signing_packet_setup";
 
+  /** Stay on signer setup until user explicitly continues — never promote on background apply alone. */
+  if (
+    args.hasGuidedSession &&
+    args.createFlowPhase === "signer_setup_required" &&
+    !args.finalReviewExplicitlyOpened &&
+    args.guidedCompletionPhase !== "applying_all"
+  ) {
+    return "signer_setup_required";
+  }
+
   const applyStatus = resolveGuidedAnswerApplyStatus({
     guidedAnswerApplyStatus: args.guidedAnswerApplyStatus ?? "idle",
     guidedCompletionPhase: args.guidedCompletionPhase,
@@ -207,18 +217,15 @@ export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState):
   );
 }
 
-/** After bulk apply, open final review when authoritative body + full answer set exist. */
-export function shouldAutoOpenGuidedFinalReviewAfterApply(args: {
+/**
+ * Legacy threshold check — do NOT use for navigation. Final review opens only via explicit CTA.
+ */
+export function shouldAutoOpenGuidedFinalReviewAfterApply(_args: {
   answeredCount: number;
   frozenTotalQuestions?: number;
   postBodyLen: number;
 }): boolean {
-  const expectedAnswers = Math.max(args.frozenTotalQuestions ?? 0, args.answeredCount);
-  return (
-    args.answeredCount > 0 &&
-    args.answeredCount >= expectedAnswers &&
-    args.postBodyLen >= 500
-  );
+  return false;
 }
 
 export function resolveGuidedProStickyCta(

@@ -46,7 +46,6 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     expect(panel).toContain("guided-clause-updates-preview");
     expect(panel).toContain("Queued update");
     expect(panel).toContain("Updating your agreement");
-    expect(panel).toContain("GuidedAppliedAreasSummary");
     expect(panel).toContain("formatGuidedProgressLabel");
     expect(panel).toContain("guided-show-other-options");
     expect(panel).toContain("guided-skip-flash");

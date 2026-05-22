@@ -52,17 +52,28 @@ export function resolveGuidedSignerSetupStatus(slotsComplete: boolean): GuidedSi
   return slotsComplete ? "complete" : "missing";
 }
 
-export function canUnlockGuidedFinalReview(args: {
+export type CanUnlockGuidedFinalReviewArgs = {
   applyStatus: GuidedAnswerApplyStatus;
   signerStatus: GuidedSignerSetupStatus;
-}): boolean {
+  /** Authoritative Pro body length — must be usable before final review. */
+  authoritativeBodyLen?: number;
+  signersEditing?: boolean;
+  signerMetadataDebouncing?: boolean;
+};
+
+export function canUnlockGuidedFinalReview(args: CanUnlockGuidedFinalReviewArgs): boolean {
+  if (args.signersEditing || args.signerMetadataDebouncing) return false;
+  if ((args.authoritativeBodyLen ?? 500) < 500) return false;
   return args.applyStatus === "applied" && args.signerStatus === "complete";
 }
 
-export const GUIDED_SIGNER_SETUP_BACKGROUND_HEADLINE =
-  "Add signer details while LawDog updates your agreement";
+export const GUIDED_SIGNER_SETUP_HEADLINE = "Add signer/reviewer details";
 export const GUIDED_SIGNER_SETUP_BACKGROUND_SUBCOPY =
-  "Your guided answers are being applied in the background. Add signer or reviewer emails now — final review opens when both are ready.";
+  "LawDog is applying your answers in the background. Add the people who need to review or sign before final review.";
+export const GUIDED_SIGNER_SETUP_APPLY_COMPLETE_SUBCOPY =
+  "Your updated Pro agreement is ready. Finish signer details to continue to final review.";
+/** @deprecated Use GUIDED_SIGNER_SETUP_HEADLINE */
+export const GUIDED_SIGNER_SETUP_BACKGROUND_HEADLINE = GUIDED_SIGNER_SETUP_HEADLINE;
 export const GUIDED_BACKGROUND_APPLY_PROGRESS = "Updating Pro agreement in background…";
 export const GUIDED_FINISHING_UPDATED_AGREEMENT = "Finishing your updated agreement…";
 export const GUIDED_APPLYING_ANSWERS_SUBCOPY = "Applying your answers to the Pro agreement…";

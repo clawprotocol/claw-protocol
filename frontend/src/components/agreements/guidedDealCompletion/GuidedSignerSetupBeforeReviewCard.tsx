@@ -1,7 +1,8 @@
 import {
   GUIDED_BACKGROUND_APPLY_PROGRESS,
-  GUIDED_SIGNER_SETUP_BACKGROUND_HEADLINE,
+  GUIDED_SIGNER_SETUP_APPLY_COMPLETE_SUBCOPY,
   GUIDED_SIGNER_SETUP_BACKGROUND_SUBCOPY,
+  GUIDED_SIGNER_SETUP_HEADLINE,
 } from "./guidedAnswerApplyOrchestration";
 import { GUIDED_SIGNER_SETUP_CTA } from "./guidedSignerSetupUx";
 
@@ -29,11 +30,13 @@ export function GuidedSignerSetupBeforeReviewCard({
       className={`rounded-lg border border-sky-200/90 bg-sky-50/95 px-4 py-4 ${className}`}
       data-testid="guided-signer-setup-before-review-card"
       role="region"
-      aria-label={GUIDED_SIGNER_SETUP_BACKGROUND_HEADLINE}
+      aria-label={GUIDED_SIGNER_SETUP_HEADLINE}
     >
-      <p className="text-sm font-semibold text-stone-900">{GUIDED_SIGNER_SETUP_BACKGROUND_HEADLINE}</p>
+      <p className="text-sm font-semibold text-stone-900">{GUIDED_SIGNER_SETUP_HEADLINE}</p>
       <p className="mt-1 text-[11px] leading-relaxed text-stone-600">
-        {GUIDED_SIGNER_SETUP_BACKGROUND_SUBCOPY}
+        {backgroundApplyComplete
+          ? GUIDED_SIGNER_SETUP_APPLY_COMPLETE_SUBCOPY
+          : GUIDED_SIGNER_SETUP_BACKGROUND_SUBCOPY}
       </p>
       {backgroundApplyActive && !backgroundApplyComplete ? (
         <p

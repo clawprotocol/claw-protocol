@@ -72,23 +72,41 @@ describe("guidedAnswerApplyOrchestration", () => {
     ).toBe("applied");
   });
 
-  it("final review unlocks only when apply and signers are complete", () => {
+  it("final review unlocks only when apply, signers, body, and no editing/debounce", () => {
     expect(
       canUnlockGuidedFinalReview({
         applyStatus: "applied",
         signerStatus: "complete",
+        authoritativeBodyLen: 6000,
       }),
     ).toBe(true);
     expect(
       canUnlockGuidedFinalReview({
         applyStatus: "applying",
         signerStatus: "complete",
+        authoritativeBodyLen: 6000,
       }),
     ).toBe(false);
     expect(
       canUnlockGuidedFinalReview({
         applyStatus: "applied",
         signerStatus: "missing",
+        authoritativeBodyLen: 6000,
+      }),
+    ).toBe(false);
+    expect(
+      canUnlockGuidedFinalReview({
+        applyStatus: "applied",
+        signerStatus: "complete",
+        authoritativeBodyLen: 200,
+      }),
+    ).toBe(false);
+    expect(
+      canUnlockGuidedFinalReview({
+        applyStatus: "applied",
+        signerStatus: "complete",
+        authoritativeBodyLen: 6000,
+        signersEditing: true,
       }),
     ).toBe(false);
   });

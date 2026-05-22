@@ -648,6 +648,22 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(orch).toContain("resolveGuidedFrozenAnswerCount");
   });
 
+  it("test23: no auto final review on apply; explicit unlock gate and blocked-signer log", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("logGuidedFinalReviewBlockedSignersIncomplete");
+    expect(intake).toContain("resolveGuidedFinalReviewUnlockGate");
+    expect(intake).toContain("guidedSignerMetadataDebouncingRef");
+    expect(intake).toContain("stayOnSignerSetup");
+    expect(intake).not.toContain("} else if (autoFinal) {");
+    expect(intake).toContain("logBlockedAutoNavigationWhileSignersEditing(\"continue_to_final_review\")");
+    const card = readFileSync(
+      join(__dirname, "guidedDealCompletion/GuidedSignerSetupBeforeReviewCard.tsx"),
+      "utf8",
+    );
+    expect(card).toContain("GUIDED_SIGNER_SETUP_APPLY_COMPLETE_SUBCOPY");
+    expect(card).toContain("GUIDED_SIGNER_SETUP_HEADLINE");
+  });
+
   it("test21: background apply orchestration, suppress signing links, applying + final review routing", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("guidedApplyInFlightRef");
@@ -656,7 +672,6 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("guided-pre-review-applying");
     expect(intake).toContain("GUIDED_APPLYING_HEADLINE");
     expect(intake).toContain("formatGuidedApplyingSubcopy");
-    expect(intake).toContain("shouldAutoOpenGuidedFinalReviewAfterApply");
     expect(intake).toContain('setCreateFlowPhase("guided_final_review")');
     expect(intake).toContain("backgroundDuringSignerSetup");
     expect(intake).toContain("guidedEarlySticky");

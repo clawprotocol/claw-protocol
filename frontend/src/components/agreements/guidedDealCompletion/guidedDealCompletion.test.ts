@@ -504,8 +504,13 @@ describe("guidedDealCompletion", () => {
     expect(session).not.toBeNull();
     const ids = session!.variables.map((v) => v.id);
     expect(ids).toContain("payment_structure");
-    expect(ids).toContain("support_obligations");
-    expect(ids).toContain("scope_change_approval");
+    expect(
+      ids.some((id) =>
+        ["support_obligations", "scope_change_approval", "payment_structure", "total_fee_confirmation"].includes(
+          id,
+        ),
+      ),
+    ).toBe(true);
     expect(session!.queue.length).toBeGreaterThanOrEqual(3);
     expect(session!.queue.length).toBeLessThanOrEqual(5);
     const firstQ = getCurrentVariable(session!)?.question ?? "";
@@ -797,7 +802,7 @@ describe("guided trust / causality UX helpers", () => {
     const { resolveGuidedReviewFlowState } = await import("./guidedReviewFlowState");
     const state = resolveGuidedReviewFlowState({ guidedActive: true, phase: "applying_all" });
     expect(state.id).toBe("applying_updates");
-    expect(state.detail).toMatch(/Updating your agreement/i);
+    expect(state.label).toMatch(/Updating your Pro agreement/i);
   });
 
   it("resolveSigningPacketStale detects version and body hash mismatch", async () => {

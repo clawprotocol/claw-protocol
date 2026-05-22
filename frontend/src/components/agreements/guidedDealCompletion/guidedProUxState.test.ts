@@ -166,27 +166,24 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
     expect(guidedProUxSuppressesFreeform("signer_setup_required")).toBe(true);
   });
 
-  it("test21: auto-opens final review after apply when body + full answers exist", () => {
+  it("test23: never auto-opens final review from apply threshold (explicit CTA only)", () => {
     expect(
       shouldAutoOpenGuidedFinalReviewAfterApply({
         answeredCount: 5,
         frozenTotalQuestions: 5,
         postBodyLen: 12000,
       }),
-    ).toBe(true);
-    expect(
-      shouldAutoOpenGuidedFinalReviewAfterApply({
-        answeredCount: 4,
-        frozenTotalQuestions: 5,
-        postBodyLen: 12000,
-      }),
     ).toBe(false);
+  });
+
+  it("test23: signer_setup_required createFlowPhase pins UX during background apply", () => {
     expect(
-      shouldAutoOpenGuidedFinalReviewAfterApply({
-        answeredCount: 5,
-        frozenTotalQuestions: 5,
-        postBodyLen: 200,
+      resolveGuidedProUxState({
+        ...BASE,
+        guidedCompletionPhase: "applied",
+        createFlowPhase: "signer_setup_required",
+        guidedAnswerApplyStatus: "applied",
       }),
-    ).toBe(false);
+    ).toBe("signer_setup_required");
   });
 });
