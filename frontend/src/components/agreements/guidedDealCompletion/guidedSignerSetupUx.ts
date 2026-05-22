@@ -7,6 +7,12 @@ export const GUIDED_SIGNER_SETUP_SUBCOPY =
   "Add signer or reviewer emails now. LawDog will apply your guided answers in the background, then show the updated agreement for final review.";
 export const GUIDED_SIGNER_SETUP_CTA = "Add signer / reviewer details";
 export const GUIDED_SIGNER_SETUP_APPLY_CTA = "Apply answers and prepare review";
+export const GUIDED_APPLYING_HEADLINE = "Updating your Pro agreement…";
+
+export function formatGuidedApplyingSubcopy(answerCount: number): string {
+  const n = Math.max(0, answerCount);
+  return `Applying your ${n} answer${n === 1 ? "" : "s"} and signer details.`;
+}
 
 export function logSignerSetupActive(): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
@@ -46,6 +52,12 @@ export function logGuidedApplyExplicitlyStarted(): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[guided-apply-explicitly-started]");
+}
+
+export function logGuidedApplyDeduped(): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-apply-deduped]");
 }
 
 export function logBlockedAutoNavigationWhileSignersEditing(context: string): void {

@@ -10,6 +10,7 @@ import {
   guidedProUxSuppressesProductionSendCta,
   resolveGuidedProStickyCta,
   resolveGuidedProUxState,
+  shouldAutoOpenGuidedFinalReviewAfterApply,
 } from "./guidedProUxState";
 
 const BASE = {
@@ -146,5 +147,29 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
     expect(guidedProUxShowsUpdatedReadyCard("updated_agreement_ready")).toBe(true);
     expect(guidedProUxShowsFinalReview("guided_final_review")).toBe(true);
     expect(guidedProUxSuppressesFreeform("signer_setup_required")).toBe(true);
+  });
+
+  it("test21: auto-opens final review after apply when body + full answers exist", () => {
+    expect(
+      shouldAutoOpenGuidedFinalReviewAfterApply({
+        queueLength: 5,
+        answeredCount: 5,
+        postBodyLen: 12000,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoOpenGuidedFinalReviewAfterApply({
+        queueLength: 5,
+        answeredCount: 4,
+        postBodyLen: 12000,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoOpenGuidedFinalReviewAfterApply({
+        queueLength: 5,
+        answeredCount: 5,
+        postBodyLen: 200,
+      }),
+    ).toBe(false);
   });
 });

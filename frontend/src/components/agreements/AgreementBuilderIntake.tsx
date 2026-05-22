@@ -651,6 +651,10 @@ import {
   logGuidedApplyingStuckCleared,
   logPostApplyQualityWarningNonblocking,
   logGuidedApplyExplicitlyStarted,
+  logGuidedApplyDeduped,
+  GUIDED_SIGNER_SETUP_APPLY_CTA,
+  GUIDED_APPLYING_HEADLINE,
+  formatGuidedApplyingSubcopy,
   logSignerSetupActive,
   logSignerSetupComplete,
   logSignerSetupFieldPersisted,
@@ -671,6 +675,7 @@ import {
   logRecipientUiSuppressed,
   resolveGuidedProStickyCta,
   resolveGuidedProUxState,
+  shouldAutoOpenGuidedFinalReviewAfterApply,
   guidedProUxAllowsRecipientSetup,
   guidedProUxBlocksRecipientSetup,
 } from "./guidedDealCompletion/guidedProUxState";
@@ -1326,6 +1331,8 @@ type CreateFlowSendRecipientsPanelProps = {
   looksLikeEmail: (s: string) => boolean;
   /** Persist signer metadata on blur (not every keystroke). */
   onRecipientMetadataPersist?: () => void;
+  /** Hide green send/signing-link CTAs (guided pre-review signer capture). */
+  hidePrimarySendCta?: boolean;
 };
 
 function CreateFlowSendRecipientsPanel({
@@ -1373,6 +1380,7 @@ function CreateFlowSendRecipientsPanel({
   stripRecipientEmailNoise,
   looksLikeEmail,
   onRecipientMetadataPersist,
+  hidePrimarySendCta = false,
 }: CreateFlowSendRecipientsPanelProps) {
   const resolvedSendMode: PremiumSendIntent =
     finalReviewSendIntent === "review_only"
@@ -1740,16 +1748,20 @@ function CreateFlowSendRecipientsPanel({
         ) : null}
       </div>
       <div className="mt-6 hidden sm:block">
-        <button
-          type="button"
-          className="w-full rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-600 px-4 py-3.5 text-center text-base font-semibold text-slate-950 shadow-[0_8px_28px_rgba(16,185,129,0.22)] transition hover:from-emerald-300 hover:to-emerald-500 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
-          disabled={sendDisabled}
-          onClick={onSendClick}
-        >
-          {primarySendLabel}
-        </button>
-        {primaryCtaHelperText ? (
-          <p className="mt-2 text-center text-sm leading-snug text-amber-200/90">{primaryCtaHelperText}</p>
+        {!hidePrimarySendCta ? (
+          <>
+            <button
+              type="button"
+              className="w-full rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-600 px-4 py-3.5 text-center text-base font-semibold text-slate-950 shadow-[0_8px_28px_rgba(16,185,129,0.22)] transition hover:from-emerald-300 hover:to-emerald-500 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+              disabled={sendDisabled}
+              onClick={onSendClick}
+            >
+              {primarySendLabel}
+            </button>
+            {primaryCtaHelperText ? (
+              <p className="mt-2 text-center text-sm leading-snug text-amber-200/90">{primaryCtaHelperText}</p>
+            ) : null}
+          </>
         ) : null}
       </div>
       <p className="mt-3 text-center text-xs leading-relaxed text-slate-500 sm:text-sm">
@@ -1853,16 +1865,20 @@ function CreateFlowSendRecipientsPanel({
         </button>
       ) : null}
       <div className="fixed inset-x-0 bottom-0 z-[85] border-t border-slate-800/90 bg-slate-950/95 p-4 shadow-[0_-12px_40px_rgba(0,0,0,0.35)] backdrop-blur sm:hidden">
-        <button
-          type="button"
-          className="w-full rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-600 px-4 py-3.5 text-center text-base font-semibold text-slate-950 shadow-[0_8px_28px_rgba(16,185,129,0.22)] transition hover:from-emerald-300 hover:to-emerald-500 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
-          disabled={sendDisabled}
-          onClick={onSendClick}
-        >
-          {primarySendLabel}
-        </button>
-        {primaryCtaHelperText ? (
-          <p className="mb-1 text-center text-sm leading-snug text-amber-200/90">{primaryCtaHelperText}</p>
+        {!hidePrimarySendCta ? (
+          <>
+            <button
+              type="button"
+              className="w-full rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-600 px-4 py-3.5 text-center text-base font-semibold text-slate-950 shadow-[0_8px_28px_rgba(16,185,129,0.22)] transition hover:from-emerald-300 hover:to-emerald-500 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+              disabled={sendDisabled}
+              onClick={onSendClick}
+            >
+              {primarySendLabel}
+            </button>
+            {primaryCtaHelperText ? (
+              <p className="mb-1 text-center text-sm leading-snug text-amber-200/90">{primaryCtaHelperText}</p>
+            ) : null}
+          </>
         ) : null}
       </div>
     </div>
@@ -2460,6 +2476,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [guidedCompletionSession, setGuidedCompletionSession] = useState<GuidedCompletionSession | null>(null);
   const lastGuidedAnswerVariableIdRef = useRef<string | null>(null);
   const guidedBulkApplyingRef = useRef(false);
+  const guidedApplyInFlightRef = useRef(false);
   const guidedPendingAutoApplyRef = useRef(false);
   const guidedUxFlagsRef = useRef<ReturnType<typeof deriveGuidedUxPhaseFlags> | null>(null);
   const [guidedAuthoritativeSummaryAreas, setGuidedAuthoritativeSummaryAreas] = useState<string[]>([]);
@@ -13076,6 +13093,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : undefined,
         };
       }
+      {
+        const guidedSessionForEarlyCta =
+          guidedCompletionSession ?? guidedCompletionSessionRef.current;
+        const pendingEarly = guidedSessionForEarlyCta
+          ? countUnresolvedRenderableVariables(guidedSessionForEarlyCta)
+          : 0;
+        const guidedEarlySticky = resolveGuidedProStickyCta(
+          guidedProUxState,
+          pendingEarly,
+          guidedPreReviewSignerSlots.complete,
+        );
+        if (
+          guidedEarlySticky &&
+          premiumPaidDocumentSurface &&
+          (guidedProUxShowsQuestionPanel(guidedProUxState) ||
+            guidedProUxShowsSignerSetup(guidedProUxState) ||
+            guidedProUxState === "guided_applying_updates" ||
+            guidedProUxShowsUpdatedReadyCard(guidedProUxState))
+        ) {
+          return {
+            ...guidedEarlySticky,
+            disabled:
+              guidedEarlySticky.disabled ||
+              guidedBulkApplyingActive ||
+              guidedApplyInFlightRef.current,
+          };
+        }
+      }
       /** Paid Pro delivery on DRAFT must resolve here — the DRAFT branch below would otherwise return `continue_to_recipients` (dead). */
       if (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) {
         if (productionReadyForPersist) {
@@ -13419,6 +13464,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedProUxState,
     guidedCompletionSession,
     guidedPreReviewSignerSlots.complete,
+    guidedBulkApplyingActive,
   ]);
 
   useEffect(() => {
@@ -13811,9 +13857,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [guidedSessionKey, paidBodyForGuidedCompletion],
   );
 
-  const handleGuidedBulkApply = React.useCallback(async () => {
+  const handleGuidedBulkApply = React.useCallback(async (options?: { skipPhaseInit?: boolean }) => {
     const session = guidedCompletionSessionRef.current;
-    if (!session || !isGuidedCompletionComplete(session)) return;
+    if (!session || !isGuidedCompletionComplete(session)) {
+      guidedApplyInFlightRef.current = false;
+      return;
+    }
     setGuidedCompletionFrozen(true);
     guidedFrozenAfterApplyRef.current = true;
     const freezeStart = freezeGuidedSessionAfterApply(session, guidedSessionKey);
@@ -13835,11 +13884,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       session,
     });
     const docOverride = null;
-    setGuidedCompletionPhase("applying_all");
-    setGuidedBulkApplyError(null);
-    flashGuidedAgreementUpdateToast("Updating your agreement…", null);
-    logGuidedBulkRegenerationStart();
-    guidedBulkApplyingRef.current = true;
+    if (!options?.skipPhaseInit) {
+      setGuidedCompletionPhase("applying_all");
+      setGuidedBulkApplyError(null);
+      flashGuidedAgreementUpdateToast("Updating your agreement…", null);
+      logGuidedBulkRegenerationStart();
+      guidedBulkApplyingRef.current = true;
+    }
     let ok = false;
     try {
       ok = await runPersistedRefineFromStepBuffer(instruction, {
@@ -13859,7 +13910,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     } finally {
       guidedBulkApplyingRef.current = false;
+      guidedApplyInFlightRef.current = false;
     }
+    const landPostGuidedApplySuccess = (nextLen: number) => {
+      const answeredIds = session.queue.filter((id) => (session.answered[id] || "").trim());
+      const autoFinal = shouldAutoOpenGuidedFinalReviewAfterApply({
+        queueLength: session.queue.length,
+        answeredCount: answeredIds.length,
+        postBodyLen: nextLen,
+      });
+      setAppliedGuidedChanges(buildAppliedChangesFromSession(session));
+      setGuidedCompletionPhase("applied");
+      setGuidedBulkApplyError(null);
+      setReviewRefineUserMessage(null);
+      setCreateUiStage(CreateUiStage.DRAFT);
+      setDisplayPhase("review");
+      setPremiumRecipientUxActive(false);
+      resetPremiumRecipientsSurfaceForFinalReview();
+      finalReviewSendPathChosenRef.current = false;
+      finalReviewSendIntentRef.current = null;
+      setGuidedSendIntentSelected(false);
+      if (autoFinal) {
+        setGuidedFinalReviewExplicitlyOpened(true);
+        setCreateFlowPhase("guided_final_review");
+        logGuidedFinalReviewActive({ bodyLen: nextLen, uxState: "guided_final_review" });
+      } else {
+        setGuidedFinalReviewExplicitlyOpened(false);
+        setCreateFlowPhase("updated_agreement_ready");
+        logRecipientUiSuppressed({ uxState: "updated_agreement_ready", reason: "post_apply_ready" });
+      }
+      const frozenSession = freezeGuidedSessionAfterApply(session, guidedSessionKey);
+      guidedCompletionSessionRef.current = frozenSession;
+      setGuidedCompletionSession(frozenSession);
+      persistGuidedSession(frozenSession, guidedSessionKey);
+      return answeredIds;
+    };
     if (ok) {
       const nextLen = (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim().length;
       assertAuthoritativeBodyContinuity({
@@ -13873,25 +13958,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       );
       setGuidedAuthVersionNonce((n) => n + 1);
       logGuidedBulkRegenerationSuccess(nextLen);
-      setAppliedGuidedChanges(buildAppliedChangesFromSession(session));
-      setGuidedCompletionPhase("applied");
-      setGuidedBulkApplyError(null);
-      setReviewRefineUserMessage(null);
-      setGuidedFinalReviewExplicitlyOpened(false);
-      setCreateFlowPhase("updated_agreement_ready");
-      setCreateUiStage(CreateUiStage.DRAFT);
-      setDisplayPhase("review");
-      setPremiumRecipientUxActive(false);
-      resetPremiumRecipientsSurfaceForFinalReview();
-      finalReviewSendPathChosenRef.current = false;
-      finalReviewSendIntentRef.current = null;
-      setGuidedSendIntentSelected(false);
-      logRecipientUiSuppressed({ uxState: "updated_agreement_ready", reason: "post_apply_ready" });
-      const frozenSession = freezeGuidedSessionAfterApply(session, guidedSessionKey);
-      guidedCompletionSessionRef.current = frozenSession;
-      setGuidedCompletionSession(frozenSession);
-      persistGuidedSession(frozenSession, guidedSessionKey);
-      const answeredIds = session.queue.filter((id) => (session.answered[id] || "").trim());
+      const answeredIds = landPostGuidedApplySuccess(nextLen);
       const postBody =
         (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
       const applyResult = reinforceGuidedAuthoritativeApply({
@@ -13921,29 +13988,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const softKeepReady =
         postBody.length >= Math.max(stableBefore.trim().length * 1.02, 500);
       if (softKeepReady) {
-        guidedBulkApplyingRef.current = false;
         logGuidedBulkRegenerationFailed(["post_apply_quality_soft_fail_kept_ready"]);
         logPostApplyQualityWarningNonblocking(["post_apply_quality_soft_fail_kept_ready"]);
         const nextLen = postBody.length;
         bumpAuthoritativeAgreementVersion(nextLen, persistedPremiumReviewTitle || draft?.title || "");
         setGuidedAuthVersionNonce((n) => n + 1);
-        setAppliedGuidedChanges(buildAppliedChangesFromSession(session));
-        setGuidedCompletionPhase("applied");
-        setGuidedBulkApplyError(null);
-        setReviewRefineUserMessage(null);
-        setGuidedFinalReviewExplicitlyOpened(false);
-        setCreateFlowPhase("updated_agreement_ready");
-        setCreateUiStage(CreateUiStage.DRAFT);
-        setDisplayPhase("review");
-        setPremiumRecipientUxActive(false);
-        resetPremiumRecipientsSurfaceForFinalReview();
-        finalReviewSendPathChosenRef.current = false;
-        finalReviewSendIntentRef.current = null;
-        setGuidedSendIntentSelected(false);
-        const frozenSession = freezeGuidedSessionAfterApply(session, guidedSessionKey);
-        guidedCompletionSessionRef.current = frozenSession;
-        setGuidedCompletionSession(frozenSession);
-        persistGuidedSession(frozenSession, guidedSessionKey);
+        landPostGuidedApplySuccess(nextLen);
         bumpPremiumSurfaceGateTick();
         setReviewDocRefreshTick((n) => n + 1);
         flashGuidedAgreementUpdateToast("Updated agreement ready for review", null);
@@ -13962,6 +14012,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     persistedPremiumReviewTitle,
     draft?.title,
     flashGuidedAgreementUpdateToast,
+    resetPremiumRecipientsSurfaceForFinalReview,
+    guidedSessionKey,
   ]);
 
   const preferGuidedCompletionOverRetry = useMemo(() => {
@@ -14520,6 +14572,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedProUxShowsSignerSetup(guidedProUxState),
   );
 
+  const showGuidedPreReviewApplying = Boolean(
+    premiumPaidDocumentSurface &&
+      paidProAuthoritative &&
+      guidedProUxState === "guided_applying_updates" &&
+      guidedCompletionPhase === "applying_all" &&
+      !simpleProFinalReviewActive,
+  );
+
+  const guidedPreReviewAnswerCount = useMemo(() => {
+    const session = guidedCompletionSession ?? guidedCompletionSessionRef.current;
+    if (!session) return 0;
+    return session.queue.filter((id) => (session.answered[id] || "").trim()).length;
+  }, [guidedCompletionSession]);
+
   const scrollGuidedSignerSetupIntoView = React.useCallback(() => {
     setCreateFlowSendRecipientEditorOpen(true);
     window.requestAnimationFrame(() => {
@@ -14530,7 +14596,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, []);
 
-  const handleGuidedPreReviewApplyAfterSigners = React.useCallback(() => {
+  const handleGuidedPreReviewApplyAfterSigners = React.useCallback(async () => {
+    if (
+      guidedApplyInFlightRef.current ||
+      guidedBulkApplyingRef.current ||
+      guidedCompletionPhase === "applying_all"
+    ) {
+      logGuidedApplyDeduped();
+      return;
+    }
     if (!guidedPreReviewSignerSlots.complete) {
       logSignerSetupIncomplete({
         filledCount: guidedPreReviewSignerSlots.filledCount,
@@ -14540,13 +14614,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       scrollGuidedSignerSetupIntoView();
       return;
     }
+    guidedApplyInFlightRef.current = true;
     logGuidedApplyExplicitlyStarted();
     logSignerSetupComplete();
-    void handleGuidedBulkApply();
+    flushSync(() => {
+      setGuidedCompletionPhase("applying_all");
+      guidedBulkApplyingRef.current = true;
+      setGuidedBulkApplyError(null);
+    });
+    flashGuidedAgreementUpdateToast(GUIDED_APPLYING_HEADLINE, null);
+    logGuidedBulkRegenerationStart();
+    await handleGuidedBulkApply({ skipPhaseInit: true });
   }, [
     guidedPreReviewSignerSlots,
     handleGuidedBulkApply,
     scrollGuidedSignerSetupIntoView,
+    guidedCompletionPhase,
+    flashGuidedAgreementUpdateToast,
   ]);
 
   React.useEffect(() => {
@@ -14730,10 +14814,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
   const hideStickyForGuidedInProgress = Boolean(
-    premiumPaidDocumentSurface &&
-      (guidedProUxShowsQuestionPanel(guidedProUxState) ||
-        guidedProUxShowsSignerSetup(guidedProUxState) ||
-        guidedProUxSuppressesProductionSendCta(guidedProUxState)),
+    premiumPaidDocumentSurface && guidedProUxShowsQuestionPanel(guidedProUxState),
   );
   const hideStickyForPaidProFinalizeDeliveryChoice =
     hideStickyForPaidProFinalizeDeliveryChoiceBase || hideStickyForGuidedInProgress;
@@ -15865,7 +15946,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           if (cta.reason === "signer_setup_ready_apply") {
-            handleGuidedPreReviewApplyAfterSigners();
+            await handleGuidedPreReviewApplyAfterSigners();
             return;
           }
         }
@@ -18420,9 +18501,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           filledCount={guidedPreReviewSignerSlots.filledCount}
                                           requiredCount={guidedPreReviewSignerSlots.requiredCount}
                                           onScrollToSignerFields={scrollGuidedSignerSetupIntoView}
-                                          onApplyAnswersAndPrepareReview={() =>
-                                            handleGuidedPreReviewApplyAfterSigners()
-                                          }
                                         />
                                         <div
                                           id="claw-guided-pre-review-signers"
@@ -18444,6 +18522,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
                                             productionReadyForPersist={false}
                                             minimalProSendRecipientChrome
+                                            hidePrimarySendCta
                                             draft={draft}
                                             effectivePremiumSendMode={effectivePremiumSendMode}
                                             onPremiumSendModePick={handlePremiumSendModePick}
@@ -18486,12 +18565,50 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             }}
                                           />
                                         </div>
+                                        {guidedPreReviewSignerSlots.complete ? (
+                                          <button
+                                            type="button"
+                                            className="mt-4 w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                                            data-testid="guided-pre-review-apply-inline"
+                                            disabled={guidedBulkApplyingActive}
+                                            onClick={runPrimaryIntakeAction}
+                                          >
+                                            {GUIDED_SIGNER_SETUP_APPLY_CTA}
+                                          </button>
+                                        ) : null}
                                         <div className="mt-4">
                                           <PremiumAgreementReadonlyView
                                             html={premiumReadonlyAgreementHtml}
                                             suppressEmptyFallback={blockProEmptyDocumentFallback}
                                           />
                                         </div>
+                                      </div>
+                                    ) : showGuidedPreReviewApplying ? (
+                                      <div
+                                        className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4"
+                                        data-testid="guided-pre-review-applying"
+                                        role="status"
+                                        aria-live="polite"
+                                      >
+                                        <p className="text-sm font-semibold text-stone-900">{GUIDED_APPLYING_HEADLINE}</p>
+                                        <p className="mt-1 text-[11px] leading-relaxed text-stone-600">
+                                          {formatGuidedApplyingSubcopy(guidedPreReviewAnswerCount)}
+                                        </p>
+                                        {guidedAppliedSummaryChecklist.length > 0 ? (
+                                          <ul className="mt-3 space-y-1.5">
+                                            {guidedAppliedSummaryChecklist.map((label) => (
+                                              <li
+                                                key={label}
+                                                className="flex items-start gap-2 text-xs text-stone-700"
+                                              >
+                                                <span className="mt-0.5 shrink-0 text-emerald-700" aria-hidden>
+                                                  ✓
+                                                </span>
+                                                <span>{label}</span>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        ) : null}
                                       </div>
                                     ) : showGuidedUpdatedAgreementReady ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">

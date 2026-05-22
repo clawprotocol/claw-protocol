@@ -100,5 +100,7 @@ describe("guided final review flow", () => {
     const phase = readFileSync(join(__dirname, "../simpleProFinalReviewPhase.ts"), "utf8");
     expect(phase).toContain("final-review-recipient-phase-blocked");
     expect(intake).toContain("!guidedPreReviewSignerSetupActive");
+    expect(intake).toContain("showGuidedPreReviewApplying");
+    expect(intake).toContain("shouldAutoOpenGuidedFinalReviewAfterApply");
   });
 });

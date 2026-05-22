@@ -1,5 +1,4 @@
 import {
-  GUIDED_SIGNER_SETUP_APPLY_CTA,
   GUIDED_SIGNER_SETUP_CTA,
   GUIDED_SIGNER_SETUP_HEADLINE,
   GUIDED_SIGNER_SETUP_SUBCOPY,
@@ -10,7 +9,6 @@ export type GuidedSignerSetupBeforeReviewCardProps = {
   filledCount?: number;
   requiredCount?: number;
   onScrollToSignerFields?: () => void;
-  onApplyAnswersAndPrepareReview?: () => void;
   className?: string;
 };
 
@@ -19,7 +17,6 @@ export function GuidedSignerSetupBeforeReviewCard({
   filledCount = 0,
   requiredCount = 2,
   onScrollToSignerFields,
-  onApplyAnswersAndPrepareReview,
   className = "",
 }: GuidedSignerSetupBeforeReviewCardProps) {
   return (
@@ -34,16 +31,7 @@ export function GuidedSignerSetupBeforeReviewCard({
       <p className="mt-2 text-[11px] text-stone-600" data-testid="guided-signer-setup-progress">
         {filledCount} of {requiredCount} signer slots complete
       </p>
-      {slotsComplete ? (
-        <button
-          type="button"
-          className="mt-3 w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 sm:w-auto"
-          data-testid="guided-signer-setup-apply-cta"
-          onClick={() => onApplyAnswersAndPrepareReview?.()}
-        >
-          {GUIDED_SIGNER_SETUP_APPLY_CTA}
-        </button>
-      ) : (
+      {!slotsComplete ? (
         <button
           type="button"
           className="mt-3 w-full rounded-lg bg-sky-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 sm:w-auto"
@@ -52,7 +40,7 @@ export function GuidedSignerSetupBeforeReviewCard({
         >
           {GUIDED_SIGNER_SETUP_CTA}
         </button>
-      )}
+      ) : null}
     </div>
   );
 }

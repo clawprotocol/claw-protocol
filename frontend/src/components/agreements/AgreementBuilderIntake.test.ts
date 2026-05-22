@@ -618,12 +618,33 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("resolveGuidedPreReviewSignerSlots");
     expect(intake).toContain("logSignerSetupIncomplete");
     expect(intake).not.toContain("if (!paidProInlineSignersReady) return;");
-    expect(intake).toContain("onApplyAnswersAndPrepareReview");
+    expect(intake).toContain("guided-pre-review-apply-inline");
     const card = readFileSync(
       join(__dirname, "guidedDealCompletion/GuidedSignerSetupBeforeReviewCard.tsx"),
       "utf8",
     );
-    expect(card).toContain("guided-signer-setup-apply-cta");
+    expect(card).not.toContain("guided-signer-setup-apply-cta");
+  });
+
+  it("test21: single-flight guided apply, suppress signing links, applying + final review routing", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("guidedApplyInFlightRef");
+    expect(intake).toContain("logGuidedApplyDeduped");
+    expect(intake).toContain("hidePrimarySendCta");
+    expect(intake).toContain("guided-pre-review-applying");
+    expect(intake).toContain("GUIDED_APPLYING_HEADLINE");
+    expect(intake).toContain("formatGuidedApplyingSubcopy");
+    expect(intake).toContain("shouldAutoOpenGuidedFinalReviewAfterApply");
+    expect(intake).toContain('setCreateFlowPhase("guided_final_review")');
+    expect(intake).toContain("skipPhaseInit: true");
+    expect(intake).toContain("guidedEarlySticky");
+    expect(intake).toContain("runPrimaryIntakeAction");
+    expect(intake).toContain("guided-pre-review-apply-inline");
+    expect(intake).not.toMatch(
+      /hideStickyForGuidedInProgress[\s\S]{0,220}guidedProUxShowsSignerSetup/,
+    );
+    const ux = readFileSync(join(__dirname, "guidedDealCompletion/guidedSignerSetupUx.ts"), "utf8");
+    expect(ux).toContain("[guided-apply-deduped]");
   });
 
   it("test19: guided flow uses signer_setup_required before apply and final review", () => {

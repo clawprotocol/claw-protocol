@@ -192,6 +192,19 @@ export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState):
   );
 }
 
+/** After bulk apply, open final review when authoritative body + full answer set exist. */
+export function shouldAutoOpenGuidedFinalReviewAfterApply(args: {
+  queueLength: number;
+  answeredCount: number;
+  postBodyLen: number;
+}): boolean {
+  return (
+    args.queueLength > 0 &&
+    args.answeredCount >= args.queueLength &&
+    args.postBodyLen >= 500
+  );
+}
+
 export function resolveGuidedProStickyCta(
   state: GuidedProUxState,
   pendingQuestions: number,
