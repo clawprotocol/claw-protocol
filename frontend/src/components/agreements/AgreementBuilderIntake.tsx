@@ -14830,7 +14830,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       persistPremiumRecipientHandoffFromDraftAndUi(draft);
     }
     setDisplayPhase("review");
-    setCreateFlowPhase("draft_ready_for_review");
     setCreateUiStage(CreateUiStage.DRAFT);
     advancePaidProToRecipientSetup();
     markPremiumRecipientsSurfaceReleased();
@@ -17687,7 +17686,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             onUploadFile={(f) => void handleReviewEditedVersionFile(f)}
                                             onUseUploadedForSigning={handleUseUploadedVersionForSigning}
                                             onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
-                                            onCompareChanges={handleCompareUploadedChanges}
+                                            onCompareChanges={
+                                              guidedFinalReviewActive
+                                                ? undefined
+                                                : handleCompareUploadedChanges
+                                            }
                                             onReadAgreement={scrollToAgreementBody}
                                             continueDisabled={
                                               (isGenerating && !draft) ||

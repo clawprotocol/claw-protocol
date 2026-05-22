@@ -47,9 +47,19 @@ describe("guided final review flow", () => {
     expect(intake).toContain("guided_final_review_hidden");
   });
 
-  it("ProReviewSigningFlowPanel exposes final review copy", () => {
+  it("ProReviewSigningFlowPanel exposes final review copy and three-action layout", () => {
     const panel = readFileSync(join(__dirname, "../ProReviewSigningFlowPanel.tsx"), "utf8");
     expect(panel).toContain("Your agreement is ready to review");
-    expect(panel).toContain("Suggest changes before sending");
+    expect(panel).toContain("pro-review-suggest-changes-toggle");
+    expect(panel.replace(/\s+/g, " ")).toContain(
+      "Side-by-side redline comparison is not available yet",
+    );
+    const finalReviewBlock = panel.split("if (finalReviewMoment)")[1]?.split("  return (")[0] ?? "";
+    expect(finalReviewBlock).not.toContain('data-testid="pro-review-compare-versions"');
+  });
+
+  it("intake omits compare handler during guided final review", () => {
+    const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("guidedFinalReviewActive\n                                                ? undefined");
   });
 });

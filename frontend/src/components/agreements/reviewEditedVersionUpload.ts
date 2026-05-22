@@ -2,7 +2,13 @@
  * Upload counterparty / reviewer edited version from Pro review stage.
  */
 
-import { extractRevisedDraftPlainText } from "../../agreement/recipientRevisedDraftImportText";
+import {
+  extractRevisedDraftPlainText,
+  REVISED_DRAFT_FILE_INPUT_ACCEPT,
+} from "../../agreement/recipientRevisedDraftImportText";
+
+/** Pro final-review upload: PDF/TXT/MD plus Word when extractable (no redline yet). */
+export const PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT = `${REVISED_DRAFT_FILE_INPUT_ACCEPT},.doc,application/msword,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document`;
 import { invalidateSigningPacketPrep } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { writeUploadedSourceDocument, type UploadedSourceDocumentRecord } from "./uploadedSourceDocumentStorage";
 import { writeEditedVersionIntent } from "./proReviewSigningFlowState";

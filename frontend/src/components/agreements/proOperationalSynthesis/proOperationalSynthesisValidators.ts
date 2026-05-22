@@ -2,6 +2,12 @@
  * Shared validators for Pro operational synthesis batch QA.
  */
 
+import {
+  extractKeyContactsRegion,
+  findAgreementExecutionRegionStart,
+  isLawDogWorkflowExecutionFooter,
+  textContainsLegalEntityName,
+} from "../agreementExecutionRegion";
 import { collectForbiddenTemplateFragments } from "../agreementTemplatePlaceholderSafety";
 import { definedShortNameFromLegalEntity } from "../paidProAgreementPolish";
 import { STALE_PRO_TRANSFORMATION_PREVIEW_STRINGS } from "../../../launch/simpleProduct/proTransformationCopy";
@@ -128,8 +134,16 @@ export function assertNoDuplicatedSections(text: string): ProQaValidationIssue[]
 }
 
 export function assertDisputeNotInContacts(text: string): ProQaValidationIssue[] {
+  const execIdx = findAgreementExecutionRegionStart(text);
+  const contactsEnd =
+    execIdx >= 0
+      ? execIdx
+      : text.search(/\n\n(?:This Agreement may be executed|SCHEDULE\s+[A-Z])/i);
   const notices = text.match(/\n\s*NOTICES\s*\n([\s\S]*?)(?=\n\s*KEY\s+CONTACTS\s*\n)/i)?.[1] ?? "";
-  const contacts = text.match(/\n\s*KEY\s+CONTACTS\s*\n([\s\S]*?)(?=\n\s*IN WITNESS WHEREOF\b)/i)?.[1] ?? "";
+  const contacts =
+    contactsEnd >= 0
+      ? extractKeyContactsRegion(text, contactsEnd)
+      : text.match(/\n\s*KEY\s+CONTACTS\s*\n([\s\S]*)$/i)?.[1] ?? "";
   const region = `${notices}\n${contacts}`;
   if (!region.trim()) return [];
   if (DISPUTE_ESCALATION_IN_NOTICES_RE.test(region)) {
@@ -140,11 +154,15 @@ export function assertDisputeNotInContacts(text: string): ProQaValidationIssue[]
 
 export function assertSectionPurity(text: string): ProQaValidationIssue[] {
   const issues = [...assertDisputeNotInContacts(text)];
-  const sig = text.match(/\b(?:IN WITNESS WHEREOF|SIGNATURES?)\b\s*([\s\S]*)$/i)?.[1] ?? "";
+  const execIdx = findAgreementExecutionRegionStart(text);
+  const sig = execIdx >= 0 ? text.slice(execIdx) : "";
   if (sig && SLA_IN_SIGNATURES_RE.test(sig)) {
     issues.push({ code: "sla_in_signatures", message: "SLA/uptime language in signature block" });
   }
-  const noticesBody = text.match(/\bNOTICES?\b\s*([\s\S]*?)(?=\bSIGNATURES?\b|$)/i)?.[1] ?? "";
+  const noticesBody =
+    execIdx >= 0
+      ? text.slice(0, execIdx).match(/\bNOTICES?\b\s*([\s\S]*)$/i)?.[1] ?? ""
+      : text.match(/\bNOTICES?\b\s*([\s\S]*)$/i)?.[1] ?? "";
   if (noticesBody && /\bintellectual\s+property\s+license\s+grant\b/i.test(noticesBody)) {
     issues.push({ code: "ip_in_notices", message: "IP license language in Notices" });
   }
@@ -152,14 +170,28 @@ export function assertSectionPurity(text: string): ProQaValidationIssue[] {
 }
 
 export function assertSignatureFullNames(text: string, parties: readonly string[]): ProQaValidationIssue[] {
-  const sigIdx = text.search(/\b(?:IN WITNESS WHEREOF|SIGNATURES?)\b/i);
-  if (sigIdx < 0) return [{ code: "no_signature_block", message: "Missing signature block" }];
-  const sig = text.slice(sigIdx);
-  const above = text.slice(0, sigIdx);
+  const execIdx = findAgreementExecutionRegionStart(text);
+  if (execIdx < 0) return [{ code: "no_signature_block", message: "Missing signature block" }];
+  const sig = text.slice(execIdx);
+  const above = text.slice(0, execIdx);
+
+  if (isLawDogWorkflowExecutionFooter(text, execIdx)) {
+    const contactsRegion = extractKeyContactsRegion(text, execIdx);
+    const identityRegion = contactsRegion ? `${contactsRegion}\n${above}` : above;
+    const missing = parties.filter((p) => !textContainsLegalEntityName(identityRegion, p));
+    if (!missing.length) return [];
+    return [
+      {
+        code: "signature_short_names",
+        message: `Full legal names missing before LawDog execution: ${missing.slice(0, 3).join("; ")}`,
+      },
+    ];
+  }
+
   const missing = parties.filter((p) => {
-    if (sig.includes(p)) return false;
+    if (textContainsLegalEntityName(sig, p)) return false;
     const short = definedShortNameFromLegalEntity(p);
-    if (sig.includes(short) && above.includes(p)) return false;
+    if (sig.includes(short) && textContainsLegalEntityName(above, p)) return false;
     return true;
   });
   if (!missing.length) return [];
