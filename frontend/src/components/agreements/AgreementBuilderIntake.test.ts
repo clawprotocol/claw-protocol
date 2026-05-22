@@ -676,6 +676,46 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
+  it("test27: final review send routes to signing confirmation, not recipient_setup", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("enterGuidedSigningConfirmationFromFinalReview");
+    expect(intake).toContain("guidedSigningConfirmationActive");
+    expect(intake).toContain("GuidedProSigningConfirmationScreen");
+    expect(intake).toContain("guidedProFinalReviewSigningPacketReady");
+    const signing = readFileSync(
+      join(__dirname, "guidedDealCompletion/guidedSigningConfirmation.ts"),
+      "utf8",
+    );
+    expect(signing).toContain("[guided-final-review-send-signature-start]");
+    expect(signing).toContain("[guided-final-review-signing-packet-ready]");
+    expect(signing).toContain("[guided-signing-confirmation-mounted]");
+    expect(intake).toContain("logGuidedFinalReviewSendSignatureStart");
+    expect(intake).toContain("handleGuidedSigningConfirmationContinue");
+    expect(intake).toContain("setPremiumSendConfirmOpen(true)");
+    const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
+    const sendBlock = intake.slice(sendIdx, sendIdx + 2500);
+    expect(sendBlock).toContain('enterGuidedSigningConfirmationFromFinalReview("signature")');
+    expect(sendBlock).toContain("guidedProFinalReviewSigningPacketReady");
+    const guidedBranch = sendBlock.slice(
+      sendBlock.indexOf("guidedProFinalReviewSigningPacketReady"),
+      sendBlock.indexOf('enterFinalReviewRecipientSetup("signature")'),
+    );
+    expect(guidedBranch).toContain("return;");
+    const screen = readFileSync(
+      join(__dirname, "guidedDealCompletion/GuidedProSigningConfirmationScreen.tsx"),
+      "utf8",
+    );
+    expect(screen).toContain("guided-pro-signing-confirmation-screen");
+    expect(screen).not.toContain("Describe a change");
+    expect(screen).not.toContain("Add recipient emails");
+    expect(screen).not.toContain("textarea");
+    expect(screen).toContain("guided-signing-order-self-first");
+    expect(screen).toContain("Back to final review");
+    const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
+    const enterBlock = intake.slice(enterIdx, enterIdx + 600);
+    expect(enterBlock).toContain("enterGuidedSigningConfirmationFromFinalReview(intent)");
+  });
+
   it("test26: signer party identity applied before final review", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("resolveCanonicalPartyIdentitiesFromSignerSetup");

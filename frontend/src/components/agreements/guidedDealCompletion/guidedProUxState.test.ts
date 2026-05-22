@@ -9,6 +9,7 @@ import {
   guidedProUxSuppressesFreeform,
   guidedProUxSuppressesProductionSendCta,
   resolveGuidedProStickyCta,
+  guidedProFinalReviewSigningPacketReady,
   resolveGuidedProUxState,
   shouldAutoOpenGuidedFinalReviewAfterApply,
 } from "./guidedProUxState";
@@ -93,6 +94,37 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
         finalReviewExplicitlyOpened: true,
       }),
     ).toBe("guided_final_review");
+  });
+
+  it("signingPacketSetupActive maps to signing_packet_setup (test27)", () => {
+    expect(
+      resolveGuidedProUxState({
+        ...BASE,
+        guidedCompletionPhase: "applied",
+        createFlowPhase: "guided_final_review",
+        finalReviewExplicitlyOpened: true,
+        signingPacketSetupActive: true,
+      }),
+    ).toBe("signing_packet_setup");
+  });
+
+  it("guidedProFinalReviewSigningPacketReady when applied + final review + signers complete", () => {
+    expect(
+      guidedProFinalReviewSigningPacketReady({
+        guidedCompletionPhase: "applied",
+        finalReviewExplicitlyOpened: true,
+        createFlowPhase: "guided_final_review",
+        signersComplete: true,
+      }),
+    ).toBe(true);
+    expect(
+      guidedProFinalReviewSigningPacketReady({
+        guidedCompletionPhase: "applied",
+        finalReviewExplicitlyOpened: true,
+        createFlowPhase: "guided_final_review",
+        signersComplete: false,
+      }),
+    ).toBe(false);
   });
 
   it("send intent after final review maps to send_intent_selected", () => {

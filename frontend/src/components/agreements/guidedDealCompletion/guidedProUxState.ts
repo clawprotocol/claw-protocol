@@ -216,6 +216,10 @@ export function guidedProUxShowsFinalReview(state: GuidedProUxState): boolean {
   return state === "guided_final_review";
 }
 
+export function guidedProUxShowsSigningConfirmation(state: GuidedProUxState): boolean {
+  return state === "signing_packet_setup";
+}
+
 /** Hide production send / continue-to-recipient CTAs until explicit final-review send intent. */
 export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState): boolean {
   return (
@@ -224,6 +228,23 @@ export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState):
     state === "guided_applying_updates" ||
     state === "updated_agreement_ready" ||
     state === "send_intent_selected"
+  );
+}
+
+/**
+ * Final review → signing confirmation: recipient re-entry is not required when signers were captured pre-review.
+ */
+export function guidedProFinalReviewSigningPacketReady(args: {
+  guidedCompletionPhase: GuidedCompletionPhase;
+  finalReviewExplicitlyOpened: boolean;
+  createFlowPhase: CreateFlowProductionPhase;
+  signersComplete: boolean;
+}): boolean {
+  return (
+    args.guidedCompletionPhase === "applied" &&
+    args.finalReviewExplicitlyOpened &&
+    isGuidedFinalReviewPhase(args.createFlowPhase) &&
+    args.signersComplete
   );
 }
 

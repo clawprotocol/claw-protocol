@@ -107,6 +107,13 @@ describe("guided final review flow", () => {
     expect(intake).toContain("guidedFinalReviewExplicitlyUnlockedRef");
   });
 
+  it("test27: signing confirmation screen and logs wired in intake", () => {
+    const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("evaluateGuidedSigningPacketGate");
+    expect(intake).toContain("signingConfirmationActive: guidedSigningConfirmationActive");
+    expect(intake).toContain("!guidedSigningConfirmationActive");
+  });
+
   it("test22: final review unlocks when apply + signers both complete", () => {
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("evaluateGuidedFinalReviewUnlockGate");

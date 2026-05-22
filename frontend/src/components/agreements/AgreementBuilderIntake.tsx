@@ -720,7 +720,17 @@ import {
   resolveGuidedProUxState,
   guidedProUxAllowsRecipientSetup,
   guidedProUxBlocksRecipientSetup,
+  guidedProFinalReviewSigningPacketReady,
+  guidedProUxShowsSigningConfirmation,
 } from "./guidedDealCompletion/guidedProUxState";
+import {
+  evaluateGuidedSigningPacketGate,
+  logGuidedFinalReviewSendSignatureStart,
+  logGuidedFinalReviewSigningBlocked,
+  logGuidedFinalReviewSigningPacketReady,
+  logGuidedSigningConfirmationMounted,
+} from "./guidedDealCompletion/guidedSigningConfirmation";
+import { GuidedProSigningConfirmationScreen } from "./guidedDealCompletion/GuidedProSigningConfirmationScreen";
 import { readPremiumRecipientHandoffMemo } from "./premiumRecipientHandoffReadCache";
 import { downloadExportDraftDocx, downloadExportDraftTxt } from "../../agreement/proRedlineReviewApi";
 import {
@@ -2566,6 +2576,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedFinalReviewNavigationInFlightRef = useRef(false);
   const finalReviewSendPathChosenRef = useRef(false);
   const [guidedSendIntentSelected, setGuidedSendIntentSelected] = useState(false);
+  const [guidedSigningConfirmationActive, setGuidedSigningConfirmationActive] = useState(false);
+  const [guidedSigningConfirmationBlockMessage, setGuidedSigningConfirmationBlockMessage] = useState<
+    string | null
+  >(null);
   const guidedSignerFieldFocusedRef = useRef(false);
   const guidedSignerMetadataDebounceRef = useRef(0);
   const guidedSignerMetadataDebouncingRef = useRef(false);
@@ -10709,6 +10723,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createFlowPhase,
         guidedCompletionPhase,
         finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
+        signingConfirmationActive: guidedSigningConfirmationActive,
       }),
     [
       paidProAuthoritative,
@@ -10717,6 +10732,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createFlowPhase,
       guidedCompletionPhase,
       guidedFinalReviewExplicitlyOpened,
+      guidedSigningConfirmationActive,
     ],
   );
   const guidedFinalReviewActive = simpleProFinalReviewActive;
@@ -10745,6 +10761,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumRecipientUxActive,
       finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
       sendIntentSelected: guidedSendIntentSelected || finalReviewSendPathChosenRef.current,
+      signingPacketSetupActive: guidedSigningConfirmationActive,
       guidedBulkApplying: guidedBulkApplyingActive,
       guidedAnswerApplyStatus: resolvedGuidedAnswerApplyStatus,
     });
@@ -10757,6 +10774,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
     premiumRecipientUxActive,
     guidedFinalReviewExplicitlyOpened,
+    guidedSigningConfirmationActive,
     guidedBulkApplyingActive,
     guidedSendIntentSelected,
     resolvedGuidedAnswerApplyStatus,
@@ -10771,6 +10789,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           createProductionTwoPane &&
           createUiStage === CreateUiStage.DRAFT &&
           premiumSignersSurfaceReady &&
+          !guidedSigningConfirmationActive &&
+          !guidedProUxShowsSigningConfirmation(guidedProUxState) &&
+          !simpleProFinalReviewActive &&
           guidedProUxAllowsRecipientSetup(guidedProUxState) &&
           (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send"),
       ),
@@ -10779,6 +10800,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createProductionTwoPane,
       createUiStage,
       premiumSignersSurfaceReady,
+      guidedSigningConfirmationActive,
+      simpleProFinalReviewActive,
       createFlowPhase,
       guidedProUxState,
     ],
@@ -14551,6 +14574,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalReviewSendPathChosenRef.current = false;
       finalReviewSendIntentRef.current = null;
       setGuidedSendIntentSelected(false);
+      setGuidedSigningConfirmationActive(false);
+      setGuidedSigningConfirmationBlockMessage(null);
       logGuidedFinalReviewExplicitUnlocked({ unlockedAt: Date.now() });
       logGuidedFinalReviewActive({
         bodyLen: simpleProFinalReviewCorpus.plainText.length,
@@ -15121,6 +15146,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(() => {
+    setGuidedSigningConfirmationActive(false);
+    setGuidedSigningConfirmationBlockMessage(null);
     guidedFinalReviewExplicitlyUnlockedRef.current = false;
     setGuidedFinalReviewUnlockedAt(null);
     setGuidedFinalReviewExplicitlyOpened(false);
@@ -15929,10 +15956,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (premiumSignersSurfaceReady ||
         premiumRecipientUxActive ||
         (premiumPersistedFlowActive && peekPremiumRecipientsSurfaceReleased()));
+    if (guidedSigningConfirmationActive) return;
     if (
       guidedProUxSuppressesProductionSendCta(guidedProUxState) ||
       guidedProUxShowsQuestionPanel(guidedProUxState) ||
       guidedProUxShowsSignerSetup(guidedProUxState) ||
+      guidedProUxShowsSigningConfirmation(guidedProUxState) ||
       ((simpleProFinalReviewActive ||
         guidedProUxShowsUpdatedReadyCard(guidedProUxState) ||
         (guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened)) &&
@@ -15986,11 +16015,97 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     debouncedStepBuffer,
   ]);
 
+  const enterGuidedSigningConfirmationFromFinalReview = React.useCallback(
+    (intent: FinalReviewSendIntent) => {
+      const bodyPlain = (simpleProFinalReviewCorpus.plainText || guidedAuthoritativeBodyPlain || "").trim();
+      logGuidedFinalReviewSendSignatureStart({ bodyLen: bodyPlain.length });
+      const gate = evaluateGuidedSigningPacketGate({
+        signersComplete: paidProInlineSignersReady,
+        authoritativeBodyLen: bodyPlain.length,
+        partyPlaceholdersUnresolved: agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup(bodyPlain),
+      });
+      if (!gate.ok && gate.reason) {
+        logGuidedFinalReviewSigningBlocked(gate.reason, { bodyLen: gate.bodyLen });
+        const msg =
+          gate.reason === "signers_incomplete"
+            ? "Add signer names and emails before sending."
+            : gate.reason === "authoritative_body_missing"
+              ? "The agreement body is not ready yet. Return to final review or try applying answers again."
+              : "Signer names are saved, but party placeholders remain. Edit signer details and open final review again.";
+        setGuidedSigningConfirmationBlockMessage(msg);
+        setHardError(msg);
+        return;
+      }
+      setGuidedSigningConfirmationBlockMessage(null);
+      setHardError(null);
+      finalReviewSendIntentRef.current = intent;
+      const sendMode: PremiumSendIntent = intent === "review_only" ? "review" : "signature";
+      handlePremiumSendModePick(sendMode);
+      if (intent === "signature") {
+        const signFirst = peekPremiumSenderSignFirst() ?? true;
+        setPremiumSignatureSenderFirst(signFirst);
+        writePremiumSenderSignFirst(signFirst);
+        setPremiumSendConfirmSignFirst(signFirst);
+      }
+      setGuidedSigningConfirmationActive(true);
+      logGuidedFinalReviewSigningPacketReady({
+        bodyLen: gate.bodyLen,
+        signerCount: guidedSignerCanonicalIdentities.length,
+      });
+      logGuidedSigningConfirmationMounted({
+        bodyLen: gate.bodyLen,
+        signerCount: guidedSignerCanonicalIdentities.length,
+      });
+    },
+    [
+      simpleProFinalReviewCorpus.plainText,
+      guidedAuthoritativeBodyPlain,
+      paidProInlineSignersReady,
+      handlePremiumSendModePick,
+      guidedSignerCanonicalIdentities.length,
+    ],
+  );
+
+  const handleGuidedBackToFinalReviewFromSigningConfirmation = React.useCallback(() => {
+    setGuidedSigningConfirmationActive(false);
+    setGuidedSigningConfirmationBlockMessage(null);
+    finalReviewSendIntentRef.current = null;
+    setGuidedSendIntentSelected(false);
+    finalReviewSendPathChosenRef.current = false;
+  }, []);
+
+  const handleGuidedSigningConfirmationContinue = React.useCallback(() => {
+    const intent = finalReviewSendIntentRef.current ?? "signature";
+    const sendMode: PremiumSendIntent = intent === "review_only" ? "review" : "signature";
+    finalReviewSendPathChosenRef.current = true;
+    setGuidedSendIntentSelected(true);
+    handlePremiumSendModePick(sendMode);
+    devPremiumSendRoute(sendMode, peekPremiumSenderSignFirst(), "send_confirm");
+    if (draft) {
+      agreementDocumentDirtyRef.current = false;
+      applyHandoffAgreementPreviewOrAuthoritative(draft);
+      persistPremiumRecipientHandoffFromDraftAndUi(draft);
+    }
+    markPremiumRecipientsSurfaceReleased();
+    setPremiumRecipientUxActive(true);
+    bumpPremiumSurfaceGateTick();
+    setGuidedSigningConfirmationActive(false);
+    setPremiumSendConfirmOpen(true);
+  }, [
+    handlePremiumSendModePick,
+    draft,
+    applyHandoffAgreementPreviewOrAuthoritative,
+    persistPremiumRecipientHandoffFromDraftAndUi,
+    bumpPremiumSurfaceGateTick,
+  ]);
+
   const handlePremiumReviewFirstContinueToSigners = React.useCallback((opts?: { telemetryMode?: PremiumSendIntent }) => {
+    if (guidedSigningConfirmationActive) return;
     if (
       guidedProUxSuppressesProductionSendCta(guidedProUxState) ||
       guidedProUxShowsQuestionPanel(guidedProUxState) ||
       guidedProUxShowsSignerSetup(guidedProUxState) ||
+      guidedProUxShowsSigningConfirmation(guidedProUxState) ||
       ((simpleProFinalReviewActive ||
         guidedProUxShowsUpdatedReadyCard(guidedProUxState) ||
         (guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened)) &&
@@ -16044,6 +16159,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     bumpPremiumSurfaceGateTick();
     void handOffProductionDraftToRecipients();
   }, [
+    guidedSigningConfirmationActive,
     simpleProFinalReviewActive,
     createFlowPhase,
     hasFullDraftAccess,
@@ -16094,6 +16210,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const enterFinalReviewRecipientSetup = React.useCallback(
     (intent: FinalReviewSendIntent) => {
       if (
+        guidedCompletionActive &&
+        guidedProFinalReviewSigningPacketReady({
+          guidedCompletionPhase,
+          finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
+          createFlowPhase,
+          signersComplete: paidProInlineSignersReady,
+        })
+      ) {
+        enterGuidedSigningConfirmationFromFinalReview(intent);
+        return;
+      }
+      if (
         guidedProUxSuppressesProductionSendCta(guidedProUxState) ||
         guidedProUxShowsQuestionPanel(guidedProUxState)
       ) {
@@ -16128,6 +16256,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       void handlePremiumReviewFirstContinueToSigners({ telemetryMode: sendMode });
     },
     [
+      guidedCompletionActive,
+      guidedCompletionPhase,
+      guidedFinalReviewExplicitlyOpened,
+      createFlowPhase,
+      paidProInlineSignersReady,
+      enterGuidedSigningConfirmationFromFinalReview,
       handlePremiumSendModePick,
       draft,
       applyHandoffAgreementPreviewOrAuthoritative,
@@ -16135,6 +16269,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       advancePaidProToRecipientSetup,
       bumpPremiumSurfaceGateTick,
       handlePremiumReviewFirstContinueToSigners,
+      guidedProUxState,
     ],
   );
 
@@ -16156,9 +16291,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProAuthoritative,
     });
     logSimpleProFinalReviewContinueToSigning({ bodyLen: bodyPlain.length });
+    if (
+      guidedCompletionActive &&
+      guidedProFinalReviewSigningPacketReady({
+        guidedCompletionPhase,
+        finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
+        createFlowPhase,
+        signersComplete: paidProInlineSignersReady,
+      })
+    ) {
+      enterGuidedSigningConfirmationFromFinalReview("signature");
+      return;
+    }
     enterFinalReviewRecipientSetup("signature");
   }, [
     guidedCompletionActive,
+    guidedCompletionPhase,
+    guidedFinalReviewExplicitlyOpened,
+    createFlowPhase,
+    paidProInlineSignersReady,
+    enterGuidedSigningConfirmationFromFinalReview,
     guidedCompletionRenderDocument.source,
     simpleProFinalReviewCorpus.plainText,
     reviewAgreementId,
@@ -19204,6 +19356,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             suppressEmptyFallback={blockProEmptyDocumentFallback}
                                           />
                                         </div>
+                                      </div>
+                                    ) : guidedSigningConfirmationActive ? (
+                                      <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
+                                        <GuidedProSigningConfirmationScreen
+                                          agreementTitle={
+                                            (persistedPremiumReviewTitle || draft?.title || "").trim() ||
+                                            "Your agreement"
+                                          }
+                                          bodyLen={
+                                            (
+                                              simpleProFinalReviewCorpus.plainText ||
+                                              guidedAuthoritativeBodyPlain ||
+                                              ""
+                                            ).trim().length
+                                          }
+                                          signerLines={guidedSignerFinalVersionLines}
+                                          sendIntent={finalReviewSendIntentRef.current ?? "signature"}
+                                          signFirst={premiumSignatureSenderFirst}
+                                          onSignFirstChange={(v) => {
+                                            setPremiumSignatureSenderFirst(v);
+                                            writePremiumSenderSignFirst(v);
+                                            setPremiumSendConfirmSignFirst(v);
+                                            devPremiumSendChoice("signature", v);
+                                          }}
+                                          continueDisabled={
+                                            (isGenerating && !draft) ||
+                                            upgradeLockActive ||
+                                            loading ||
+                                            guidedPacketSendBlocked
+                                          }
+                                          blockMessage={guidedSigningConfirmationBlockMessage}
+                                          onContinue={() => void handleGuidedSigningConfirmationContinue()}
+                                          onBackToFinalReview={
+                                            handleGuidedBackToFinalReviewFromSigningConfirmation
+                                          }
+                                        />
                                       </div>
                                     ) : simpleProFinalReviewActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">

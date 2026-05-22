@@ -16,10 +16,13 @@ export function resolveSimpleProFinalReviewActive(args: {
   guidedCompletionPhase: GuidedCompletionPhase;
   /** User explicitly opened final review — never auto-open from apply alone. */
   finalReviewExplicitlyOpened?: boolean;
+  /** Guided signing confirmation replaces final review document surface. */
+  signingConfirmationActive?: boolean;
 }): boolean {
   if (!args.paidProAuthoritative || !args.premiumPaidDocumentSurface) return false;
   if (args.premiumRecipientUxActive) return false;
   if (!args.finalReviewExplicitlyOpened) return false;
+  if (args.signingConfirmationActive) return false;
   return (
     isGuidedFinalReviewPhase(args.createFlowPhase) &&
     args.guidedCompletionPhase === "applied"
