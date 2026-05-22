@@ -375,7 +375,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("paid Pro recipient fields mount below finalize with inline shell (not legacy Share headline constant)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toMatch(
-      /\{paidProRecipientSetupOnDraft && !guidedFinalReviewActive \? \([\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
+      /\{paidProRecipientSetupOnDraft &&[\s\S]*?!guidedPreReviewSignerSetupActive \? \([\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
     );
     expect(intake).toMatch(
       /paidProInlineRecipientShell && effectivePremiumSendMode === "review"\s*\n\s*\? "Send for review"/,
@@ -594,8 +594,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("guidedSessionQueueRenderable");
     const unifiedStart = intake.indexOf("const unifiedPrimaryCta = useMemo(");
     const unifiedDraft = intake.slice(unifiedStart, unifiedStart + 14000);
-    expect(unifiedDraft).toContain("guidedProUxSuppressesProductionSendCta(guidedProUxState)");
-    expect(unifiedDraft).toContain("guided_questions_active");
+    expect(unifiedDraft).toContain("resolveGuidedProStickyCta(guidedProUxState");
+    expect(intake).toContain('setCreateFlowPhase("signer_setup_required")');
     const panelIdx = intake.indexOf('id="guided-deal-completion-primary"');
     const readonlyIdx = intake.indexOf("<PremiumAgreementReadonlyView", panelIdx);
     expect(panelIdx).toBeGreaterThanOrEqual(0);
@@ -612,6 +612,21 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(advBlock).toContain("armedFinalReviewSend");
     expect(advBlock).toContain("isGuidedFinalReviewPhase(createFlowPhase)");
     expect(advBlock).toContain("guidedFinalReviewExplicitlyOpened");
+  });
+
+  it("test19: guided flow uses signer_setup_required before apply and final review", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain('setCreateFlowPhase("signer_setup_required")');
+    expect(intake).toContain("GuidedSignerSetupBeforeReviewCard");
+    expect(intake).toContain("claw-guided-pre-review-signers");
+    expect(intake).toContain("logSignerSetupActive");
+    expect(intake).toContain("logSignerSetupComplete");
+    expect(intake).toContain("logPostApplyQualityWarningNonblocking");
+    expect(intake).toContain("logGuidedApplyingStuckCleared");
+    expect(intake).toContain("resolveGuidedProStickyCta");
+    expect(intake).toContain("guidedPreReviewSignerSetupActive");
+    expect(intake).toContain("signersReady={paidProInlineSignersReady}");
+    expect(intake).toContain("logBlockedAutoNavigationWhileSignersEditing");
   });
 
   it("test18: enterFinalReviewRecipientSetup blocked until post-ready send path", () => {

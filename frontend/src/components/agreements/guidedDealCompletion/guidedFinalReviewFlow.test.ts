@@ -72,7 +72,8 @@ describe("guided final review flow", () => {
   it("intake blocks production send during guided_questions_active (test18)", () => {
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("guidedProUxSuppressesProductionSendCta");
-    expect(intake).toContain('"guided_questions_active"');
+    expect(intake).toContain("signer_setup_required");
+    expect(intake).toContain("resolveGuidedProStickyCta");
     expect(intake).toContain("guided-deal-completion-primary");
     expect(intake).toContain('logGuidedSendCtaBlocked("handOffProductionDraftToRecipients"');
   });
@@ -98,6 +99,6 @@ describe("guided final review flow", () => {
     expect(intake).toContain("guidedCompletionFrozen");
     const phase = readFileSync(join(__dirname, "../simpleProFinalReviewPhase.ts"), "utf8");
     expect(phase).toContain("final-review-recipient-phase-blocked");
-    expect(intake).toContain("paidProRecipientSetupOnDraft && !guidedFinalReviewActive");
+    expect(intake).toContain("!guidedPreReviewSignerSetupActive");
   });
 });

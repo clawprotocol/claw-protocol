@@ -37,6 +37,24 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
+  it("shows signer/reviewer ready trust line when signersReady", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        appliedAnswerCount={5}
+        signersReady
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("simple-pro-final-review-signers-ready").textContent).toContain(
+      "Signer/reviewer details ready",
+    );
+    cleanup();
+  });
+
   it("renders send CTAs and Edit agreement text link, not Suggest changes", () => {
     render(
       <SimpleProFinalReviewScreen

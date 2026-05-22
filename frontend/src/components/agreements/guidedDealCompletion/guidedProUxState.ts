@@ -1,6 +1,8 @@
 /**
  * Universal guided Pro UX state machine — agreement-family agnostic.
- * Single source of truth for phase guards, freeform suppression, and review gating.
+ * Canonical sequence:
+ * paid_pro_draft → guided_questions_active → signer_setup_required → guided_applying_updates
+ * → updated_agreement_ready → guided_final_review → send_intent_selected → recipient_setup
  */
 
 import type { CreateFlowProductionPhase } from "../createFlowTypes";
@@ -9,12 +11,22 @@ import type { GuidedCompletionPhase } from "./guidedCompletionPhase";
 
 export type GuidedProUxState =
   | "inactive"
+  | "paid_pro_draft"
   | "guided_questions_active"
+  | "signer_setup_required"
   | "guided_applying_updates"
   | "updated_agreement_ready"
   | "guided_final_review"
+  | "send_intent_selected"
   | "recipient_setup"
   | "signing_packet_setup";
+
+export type GuidedProStickyCta = {
+  label: string;
+  action: "guided_continue";
+  disabled: boolean;
+  reason: string;
+};
 
 export type ResolveGuidedProUxStateArgs = {
   premiumPaidDocumentSurface: boolean;
@@ -24,12 +36,16 @@ export type ResolveGuidedProUxStateArgs = {
   premiumRecipientUxActive: boolean;
   /** User explicitly opened final review via CTA. */
   finalReviewExplicitlyOpened: boolean;
+  /** Signer/reviewer emails captured before bulk apply. */
+  signerSetupComplete: boolean;
+  /** User chose Send for signature/review on final review. */
+  sendIntentSelected: boolean;
   signingPacketSetupActive?: boolean;
   /** True while bulk guided regeneration is in flight (ref may be set before phase state flushes). */
   guidedBulkApplying?: boolean;
 };
 
-/** Guided phases where recipient/signing UI must stay hidden until explicit final-review send intent. */
+/** Guided phases where post–final-review recipient/signing UI must stay hidden. */
 export function guidedProUxBlocksRecipientSetup(args: {
   guidedCompletionPhase: GuidedCompletionPhase;
   createFlowPhase: CreateFlowProductionPhase;
@@ -37,6 +53,7 @@ export function guidedProUxBlocksRecipientSetup(args: {
   guidedBulkApplying?: boolean;
 }): boolean {
   if (args.guidedBulkApplying || args.guidedCompletionPhase === "applying_all") return true;
+  if (args.createFlowPhase === "signer_setup_required") return true;
   if (
     args.guidedCompletionPhase === "collecting_answers" ||
     args.guidedCompletionPhase === "ready_to_apply"
@@ -81,6 +98,24 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
   }
 
   if (
+    args.sendIntentSelected &&
+    !guidedProUxBlocksRecipientSetup({
+      guidedCompletionPhase: args.guidedCompletionPhase,
+      createFlowPhase: args.createFlowPhase,
+      finalReviewExplicitlyOpened: args.finalReviewExplicitlyOpened,
+      guidedBulkApplying: args.guidedBulkApplying,
+    })
+  ) {
+    if (
+      args.premiumRecipientUxActive ||
+      args.createFlowPhase === "recipient_setup_required" ||
+      args.createFlowPhase === "ready_to_send"
+    ) {
+      return "send_intent_selected";
+    }
+  }
+
+  if (
     !guidedProUxBlocksRecipientSetup({
       guidedCompletionPhase: args.guidedCompletionPhase,
       createFlowPhase: args.createFlowPhase,
@@ -94,17 +129,24 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
     return "recipient_setup";
   }
 
-  if (args.guidedCompletionPhase === "applied" && args.finalReviewExplicitlyOpened) {
-    return "guided_final_review";
+  if (
+    args.hasGuidedSession &&
+    args.guidedCompletionPhase === "ready_to_apply" &&
+    !args.signerSetupComplete
+  ) {
+    return "signer_setup_required";
   }
 
   if (
     args.hasGuidedSession &&
     (args.guidedCompletionPhase === "collecting_answers" ||
-      args.guidedCompletionPhase === "ready_to_apply" ||
       args.guidedCompletionPhase === "failed")
   ) {
     return "guided_questions_active";
+  }
+
+  if (args.hasGuidedSession && args.premiumPaidDocumentSurface) {
+    return "paid_pro_draft";
   }
 
   return "inactive";
@@ -113,17 +155,22 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
 export function guidedProUxSuppressesFreeform(state: GuidedProUxState): boolean {
   return (
     state === "guided_questions_active" ||
+    state === "signer_setup_required" ||
     state === "guided_applying_updates" ||
     state === "updated_agreement_ready"
   );
 }
 
 export function guidedProUxAllowsRecipientSetup(state: GuidedProUxState): boolean {
-  return state === "recipient_setup" || state === "signing_packet_setup";
+  return state === "recipient_setup" || state === "signing_packet_setup" || state === "send_intent_selected";
 }
 
 export function guidedProUxShowsQuestionPanel(state: GuidedProUxState): boolean {
-  return state === "guided_questions_active" || state === "guided_applying_updates";
+  return state === "guided_questions_active";
+}
+
+export function guidedProUxShowsSignerSetup(state: GuidedProUxState): boolean {
+  return state === "signer_setup_required";
 }
 
 export function guidedProUxShowsUpdatedReadyCard(state: GuidedProUxState): boolean {
@@ -138,9 +185,59 @@ export function guidedProUxShowsFinalReview(state: GuidedProUxState): boolean {
 export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState): boolean {
   return (
     state === "guided_questions_active" ||
+    state === "signer_setup_required" ||
     state === "guided_applying_updates" ||
-    state === "updated_agreement_ready"
+    state === "updated_agreement_ready" ||
+    state === "send_intent_selected"
   );
+}
+
+export function resolveGuidedProStickyCta(
+  state: GuidedProUxState,
+  pendingQuestions: number,
+): GuidedProStickyCta | null {
+  switch (state) {
+    case "guided_questions_active":
+      return {
+        label:
+          pendingQuestions > 0
+            ? `Answer ${pendingQuestions} guided question${pendingQuestions === 1 ? "" : "s"} above`
+            : "Answer guided questions above",
+        action: "guided_continue",
+        disabled: true,
+        reason: "guided_questions_active",
+      };
+    case "signer_setup_required":
+      return {
+        label: "Add signer details",
+        action: "guided_continue",
+        disabled: true,
+        reason: "signer_setup_required",
+      };
+    case "guided_applying_updates":
+      return {
+        label: "Updating agreement…",
+        action: "guided_continue",
+        disabled: true,
+        reason: "guided_applying_updates",
+      };
+    case "updated_agreement_ready":
+      return {
+        label: "Review updated agreement",
+        action: "guided_continue",
+        disabled: false,
+        reason: "updated_agreement_ready",
+      };
+    default:
+      return guidedProUxSuppressesProductionSendCta(state)
+        ? {
+            label: "Complete guided steps above",
+            action: "guided_continue",
+            disabled: true,
+            reason: state,
+          }
+        : null;
+  }
 }
 
 export function logGuidedSendCtaBlocked(

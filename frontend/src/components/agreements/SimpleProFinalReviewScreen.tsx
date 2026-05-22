@@ -19,6 +19,8 @@ export type SimpleProFinalReviewScreenProps = {
   exportBusy?: boolean;
   exportError?: string | null;
   sendDisabled?: boolean;
+  /** Signer/reviewer emails captured before final review. */
+  signersReady?: boolean;
   onSendForSignature: () => void;
   onSendForReview: () => void;
   onCopyAgreement: () => void;
@@ -51,6 +53,7 @@ export function SimpleProFinalReviewScreen({
   exportBusy = false,
   exportError = null,
   sendDisabled = false,
+  signersReady = false,
   onSendForSignature,
   onSendForReview,
   onCopyAgreement,
@@ -101,6 +104,14 @@ export function SimpleProFinalReviewScreen({
         {answerCount > 0 ? (
           <p className="mt-1 text-xs font-medium text-emerald-900/95" data-testid="simple-pro-final-review-trust-line">
             {answerCount} answer{answerCount === 1 ? "" : "s"} applied to this version
+          </p>
+        ) : null}
+        {signersReady ? (
+          <p
+            className="mt-1 text-xs font-medium text-emerald-900/95"
+            data-testid="simple-pro-final-review-signers-ready"
+          >
+            Signer/reviewer details ready
           </p>
         ) : null}
         <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600" data-testid="simple-pro-final-review-send-trust">

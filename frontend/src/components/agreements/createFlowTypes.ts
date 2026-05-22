@@ -6,6 +6,7 @@ export type CreateFlowProductionPhase =
   | "generating_draft"
   | "complexity_choice_required"
   | "draft_ready_for_review"
+  | "signer_setup_required"
   | "updated_agreement_ready"
   | "guided_final_review"
   | "recipient_setup_required"
@@ -37,6 +38,8 @@ export function createFlowPrimaryCtaLabel(phase: CreateFlowProductionPhase): str
       return "";
     case "draft_ready_for_review":
       return "Continue";
+    case "signer_setup_required":
+      return "Add signer details";
     case "updated_agreement_ready":
       return "Review updated agreement";
     case "guided_final_review":
