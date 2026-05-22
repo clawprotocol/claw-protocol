@@ -10,6 +10,7 @@ import {
   resolveGuidedSignerSetupStickyCta,
   shouldResolveGuidedApplyFromExistingBody,
 } from "./guidedAnswerApplyOrchestration";
+import { evaluateGuidedFinalReviewUnlockGate } from "./guidedFinalReviewTransition";
 
 function frozenSession(): GuidedCompletionSession {
   const ids = ["a", "b", "c", "d", "e"];
@@ -70,6 +71,16 @@ describe("guidedAnswerApplyOrchestration", () => {
         bulkApplying: false,
       }),
     ).toBe("applied");
+  });
+
+  it("evaluateGuidedFinalReviewUnlockGate returns null reason when ok", () => {
+    expect(
+      evaluateGuidedFinalReviewUnlockGate({
+        applyStatus: "applied",
+        signerStatus: "complete",
+        authoritativeBodyLen: 6000,
+      }),
+    ).toEqual({ ok: true, reason: null });
   });
 
   it("final review unlocks only when apply, signers, body, and no editing/debounce", () => {

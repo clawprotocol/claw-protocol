@@ -89,6 +89,14 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
 
   if (args.signingPacketSetupActive) return "signing_packet_setup";
 
+  /** Explicit unlock milestone — only path to final review render state. */
+  if (
+    args.finalReviewExplicitlyOpened &&
+    isGuidedFinalReviewPhase(args.createFlowPhase)
+  ) {
+    return "guided_final_review";
+  }
+
   /** Stay on signer setup until user explicitly continues — never promote on background apply alone. */
   if (
     args.hasGuidedSession &&
@@ -106,7 +114,11 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
   });
 
   /** Signer setup during background apply — do not replace with full-screen applying state. */
-  if (args.hasGuidedSession && args.guidedCompletionPhase === "ready_to_apply") {
+  if (
+    args.hasGuidedSession &&
+    args.guidedCompletionPhase === "ready_to_apply" &&
+    !args.finalReviewExplicitlyOpened
+  ) {
     return "signer_setup_required";
   }
 
@@ -115,9 +127,6 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
   }
 
   if (args.guidedCompletionPhase === "applied") {
-    if (args.finalReviewExplicitlyOpened && isGuidedFinalReviewPhase(args.createFlowPhase)) {
-      return "guided_final_review";
-    }
     if (
       isUpdatedAgreementReadyPhase(args.createFlowPhase) ||
       (args.createFlowPhase === "draft_ready_for_review" && !args.finalReviewExplicitlyOpened)

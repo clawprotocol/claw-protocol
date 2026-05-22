@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
 import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
+import {
+  SIMPLE_PRO_FINAL_REVIEW_HEADLINE,
+  SIMPLE_PRO_FINAL_REVIEW_SUBCOPY,
+} from "./guidedDealCompletion/guidedFinalReviewTransition";
 import type { GuidedAppliedChecklistLabel } from "./guidedDealCompletion/guidedAppliedSummaryChecklist";
 import type { UploadedSourceDocumentRecord } from "./uploadedSourceDocumentStorage";
 
@@ -36,6 +40,7 @@ export type SimpleProFinalReviewScreenProps = {
   onUploadFile?: (file: File) => void;
   onUseUploadedForSigning?: () => void;
   onKeepLawDogVersion?: () => void;
+  onBackToSignerDetails?: () => void;
   className?: string;
 };
 
@@ -69,6 +74,7 @@ export function SimpleProFinalReviewScreen({
   onUploadFile,
   onUseUploadedForSigning,
   onKeepLawDogVersion,
+  onBackToSignerDetails,
   className = "",
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -94,12 +100,15 @@ export function SimpleProFinalReviewScreen({
       className={`flex flex-col gap-3 ${className}`}
       data-testid="simple-pro-final-review-screen"
       role="region"
-      aria-label="Review your updated Pro agreement"
+      aria-label={SIMPLE_PRO_FINAL_REVIEW_HEADLINE}
     >
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">LawDog Pro</p>
-        <h2 className="mt-1 font-serif text-lg font-semibold tracking-tight text-stone-900 sm:text-xl">
-          Review your updated Pro agreement
+        <h2
+          className="mt-1 font-serif text-lg font-semibold tracking-tight text-stone-900 sm:text-xl"
+          data-testid="simple-pro-final-review-headline"
+        >
+          {SIMPLE_PRO_FINAL_REVIEW_HEADLINE}
         </h2>
         {answerCount > 0 ? (
           <p className="mt-1 text-xs font-medium text-emerald-900/95" data-testid="simple-pro-final-review-trust-line">
@@ -150,9 +159,22 @@ export function SimpleProFinalReviewScreen({
             {appliedAreas.length > 4 ? ` (+${appliedAreas.length - 4} more)` : ""}
           </p>
         ) : null}
-        <p className="mt-2 text-xs leading-relaxed text-stone-600 sm:text-sm">
-          Review the full agreement, then choose review-only sharing or signature sending.
+        <p
+          className="mt-2 text-xs leading-relaxed text-stone-600 sm:text-sm"
+          data-testid="simple-pro-final-review-subcopy"
+        >
+          {SIMPLE_PRO_FINAL_REVIEW_SUBCOPY}
         </p>
+        {onBackToSignerDetails ? (
+          <button
+            type="button"
+            className="mt-2 text-[11px] font-medium text-stone-600 underline decoration-stone-400/70 underline-offset-2 hover:text-stone-800"
+            onClick={onBackToSignerDetails}
+            data-testid="simple-pro-back-to-signer-details"
+          >
+            Back to signer details
+          </button>
+        ) : null}
         {bulkApplyBusy ? (
           <p className="mt-2 text-xs font-medium text-stone-700" role="status" aria-live="polite">
             Updating your agreement…

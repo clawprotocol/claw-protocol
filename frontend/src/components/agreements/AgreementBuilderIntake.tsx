@@ -671,7 +671,6 @@ import {
 } from "./guidedDealCompletion/guidedSignerSetupUx";
 import { resolveGuidedPreReviewSignerSlots } from "./guidedDealCompletion/resolveGuidedPreReviewSignerSlots";
 import {
-  canUnlockGuidedFinalReview,
   GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA,
   GUIDED_FINISHING_UPDATED_AGREEMENT,
   listGuidedAnsweredVariableIds,
@@ -682,6 +681,14 @@ import {
   shouldResolveGuidedApplyFromExistingBody,
   type GuidedAnswerApplyStatus,
 } from "./guidedDealCompletion/guidedAnswerApplyOrchestration";
+import {
+  evaluateGuidedFinalReviewUnlockGate,
+  logGuidedFinalReviewExplicitUnlockBlocked,
+  logGuidedFinalReviewExplicitUnlocked,
+  logGuidedFinalReviewExplicitUnlockStarted,
+  logGuidedFinalReviewNavigationDeduped,
+  resolveGuidedFinalReviewCtaVisibility,
+} from "./guidedDealCompletion/guidedFinalReviewTransition";
 import {
   guidedProUxShowsQuestionPanel,
   guidedProUxShowsSignerSetup,
@@ -2538,6 +2545,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const createFlowSendEditorPrimedRef = useRef(false);
   const guidedFinalReviewContinueArmedRef = useRef(false);
   const [guidedFinalReviewExplicitlyOpened, setGuidedFinalReviewExplicitlyOpened] = useState(false);
+  const [guidedFinalReviewUnlockedAt, setGuidedFinalReviewUnlockedAt] = useState<number | null>(null);
+  const guidedFinalReviewExplicitlyUnlockedRef = useRef(false);
+  const guidedFinalReviewNavigationInFlightRef = useRef(false);
   const finalReviewSendPathChosenRef = useRef(false);
   const [guidedSendIntentSelected, setGuidedSendIntentSelected] = useState(false);
   const guidedSignerFieldFocusedRef = useRef(false);
@@ -13222,6 +13232,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             guidedProUxState === "guided_applying_updates" ||
             guidedProUxShowsUpdatedReadyCard(guidedProUxState))
         ) {
+          if (guidedEarlySticky.reason === "signer_setup_ready_final_review") {
+            const stickyForSigner = Boolean(
+              simpleCreateStickyBottomBarVisibleBaseGated &&
+                !(premiumPaidDocumentSurface && guidedProUxShowsQuestionPanel(guidedProUxState)),
+            );
+            const placement = resolveGuidedFinalReviewCtaVisibility({
+              signerSetupActive: guidedProUxShowsSignerSetup(guidedProUxState),
+              signerSlotsComplete: guidedPreReviewSignerSlots.complete,
+              applyStatus: resolvedGuidedAnswerApplyStatus,
+              bulkApplying: guidedBulkApplyingActive,
+              stickyBottomBarVisible: stickyForSigner,
+              finalReviewUnlocked: guidedFinalReviewExplicitlyOpened,
+            });
+            if (placement.showInline && !placement.showSticky) {
+              return {
+                label: "",
+                action: "guided_continue",
+                disabled: true,
+                reason: "guided_final_review_inline_cta",
+              };
+            }
+            if (!placement.showSticky && !placement.showInline) {
+              return {
+                ...guidedEarlySticky,
+                disabled: true,
+              };
+            }
+          }
           return {
             ...guidedEarlySticky,
             disabled:
@@ -13962,6 +14000,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       setGuidedCompletionPhase("collecting_answers");
       setGuidedFinalReviewExplicitlyOpened(false);
+      guidedFinalReviewExplicitlyUnlockedRef.current = false;
+      setGuidedFinalReviewUnlockedAt(null);
       setCreateFlowPhase("draft_ready_for_review");
       setGuidedBulkApplyError(null);
       setGuidedAnswerApplyStatus("idle");
@@ -14059,6 +14099,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setGuidedCompletionPhase("ready_to_apply");
         setCreateFlowPhase("signer_setup_required");
         setGuidedFinalReviewExplicitlyOpened(false);
+        guidedFinalReviewExplicitlyUnlockedRef.current = false;
+        setGuidedFinalReviewUnlockedAt(null);
       } else {
         setGuidedCompletionPhase("applied");
         setGuidedFinalReviewExplicitlyOpened(false);
@@ -14202,21 +14244,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
-  const resolveGuidedFinalReviewUnlockGate = React.useCallback(
-    () =>
-      canUnlockGuidedFinalReview({
-        applyStatus: resolvedGuidedAnswerApplyStatus,
-        signerStatus: resolveGuidedSignerSetupStatus(guidedPreReviewSignerSlots.complete),
-        authoritativeBodyLen: guidedAuthoritativeBodyLenForGate,
-        signersEditing: guidedSignerFieldFocusedRef.current,
-        signerMetadataDebouncing: guidedSignerMetadataDebouncingRef.current,
-      }),
+  const buildGuidedFinalReviewUnlockGateArgs = React.useCallback(
+    () => ({
+      applyStatus: resolvedGuidedAnswerApplyStatus,
+      signerStatus: resolveGuidedSignerSetupStatus(guidedPreReviewSignerSlots.complete),
+      authoritativeBodyLen: guidedAuthoritativeBodyLenForGate,
+      signersEditing: guidedSignerFieldFocusedRef.current,
+      signerMetadataDebouncing: guidedSignerMetadataDebouncingRef.current,
+    }),
     [
       resolvedGuidedAnswerApplyStatus,
       guidedPreReviewSignerSlots.complete,
       guidedAuthoritativeBodyLenForGate,
     ],
   );
+
+  const flushGuidedSignerMetadataBeforeFinalReview = React.useCallback(() => {
+    window.clearTimeout(guidedSignerMetadataDebounceRef.current);
+    guidedSignerMetadataDebouncingRef.current = false;
+    if (draft) {
+      persistPremiumRecipientHandoffFromDraftAndUi(draft);
+      logSignerSetupFieldPersisted("recipient_metadata");
+    }
+  }, [draft, persistPremiumRecipientHandoffFromDraftAndUi]);
 
   React.useEffect(() => {
     const applying =
@@ -14339,40 +14389,66 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleGuidedOpenFinalReview = React.useCallback(() => {
-    if (guidedSignerFieldFocusedRef.current) {
-      logBlockedAutoNavigationWhileSignersEditing("open_final_review");
+    if (guidedFinalReviewNavigationInFlightRef.current) {
+      logGuidedFinalReviewNavigationDeduped();
       return;
     }
-    if (!resolveGuidedFinalReviewUnlockGate()) {
-      if (!guidedPreReviewSignerSlots.complete) {
+    if (guidedFinalReviewExplicitlyUnlockedRef.current && guidedFinalReviewExplicitlyOpened) {
+      logGuidedFinalReviewNavigationDeduped();
+      return;
+    }
+    flushGuidedSignerMetadataBeforeFinalReview();
+    const gate = evaluateGuidedFinalReviewUnlockGate(buildGuidedFinalReviewUnlockGateArgs());
+    if (!gate.ok) {
+      if (gate.reason === "signers_incomplete") {
         logGuidedFinalReviewBlockedSignersIncomplete({
           filledCount: guidedPreReviewSignerSlots.filledCount,
           requiredCount: guidedPreReviewSignerSlots.requiredCount,
           incompleteIndices: guidedPreReviewSignerSlots.incompleteIndices,
           applyStatus: resolvedGuidedAnswerApplyStatus,
-          isEditing: false,
+          isEditing: guidedSignerFieldFocusedRef.current,
         });
+      } else if (gate.reason) {
+        logGuidedFinalReviewExplicitUnlockBlocked(gate.reason);
+      }
+      if (gate.reason === "signer_field_focused") {
+        logBlockedAutoNavigationWhileSignersEditing("open_final_review");
       }
       return;
     }
-    setGuidedCompletionPhase("applied");
-    setGuidedFinalReviewExplicitlyOpened(true);
-    setCreateFlowPhase("guided_final_review");
-    setCreateUiStage(CreateUiStage.DRAFT);
-    setDisplayPhase("review");
-    setPremiumRecipientUxActive(false);
-    resetPremiumRecipientsSurfaceForFinalReview();
-    finalReviewSendPathChosenRef.current = false;
-    logGuidedFinalReviewActive({
-      bodyLen: simpleProFinalReviewCorpus.plainText.length,
-      uxState: "guided_final_review",
-    });
+    guidedFinalReviewNavigationInFlightRef.current = true;
+    logGuidedFinalReviewExplicitUnlockStarted();
+    try {
+      flushSync(() => {
+        guidedFinalReviewExplicitlyUnlockedRef.current = true;
+        setGuidedFinalReviewUnlockedAt(Date.now());
+        setGuidedCompletionPhase("applied");
+        setGuidedFinalReviewExplicitlyOpened(true);
+        setCreateFlowPhase("guided_final_review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setDisplayPhase("review");
+        setPremiumRecipientUxActive(false);
+      });
+      resetPremiumRecipientsSurfaceForFinalReview();
+      finalReviewSendPathChosenRef.current = false;
+      finalReviewSendIntentRef.current = null;
+      setGuidedSendIntentSelected(false);
+      logGuidedFinalReviewExplicitUnlocked({ unlockedAt: Date.now() });
+      logGuidedFinalReviewActive({
+        bodyLen: simpleProFinalReviewCorpus.plainText.length,
+        uxState: "guided_final_review",
+      });
+    } finally {
+      guidedFinalReviewNavigationInFlightRef.current = false;
+    }
   }, [
     simpleProFinalReviewCorpus.plainText.length,
     resetPremiumRecipientsSurfaceForFinalReview,
-    resolveGuidedFinalReviewUnlockGate,
+    buildGuidedFinalReviewUnlockGateArgs,
+    flushGuidedSignerMetadataBeforeFinalReview,
     guidedPreReviewSignerSlots,
     resolvedGuidedAnswerApplyStatus,
+    guidedFinalReviewExplicitlyOpened,
   ]);
 
   const simpleProFinalReviewHtml = useMemo(() => {
@@ -14806,6 +14882,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedProUxShowsSignerSetup(guidedProUxState),
   );
 
+  const guidedStickyBottomBarVisibleForSignerCta = Boolean(
+    simpleCreateStickyBottomBarVisibleBaseGated &&
+      !(premiumPaidDocumentSurface && guidedProUxShowsQuestionPanel(guidedProUxState)),
+  );
+  const guidedFinalReviewCtaPlacement = useMemo(
+    () =>
+      resolveGuidedFinalReviewCtaVisibility({
+        signerSetupActive: guidedPreReviewSignerSetupActive,
+        signerSlotsComplete: guidedPreReviewSignerSlots.complete,
+        applyStatus: resolvedGuidedAnswerApplyStatus,
+        bulkApplying: guidedBulkApplyingActive,
+        stickyBottomBarVisible: guidedStickyBottomBarVisibleForSignerCta,
+        finalReviewUnlocked:
+          guidedFinalReviewExplicitlyOpened || guidedFinalReviewExplicitlyUnlockedRef.current,
+      }),
+    [
+      guidedPreReviewSignerSetupActive,
+      guidedPreReviewSignerSlots.complete,
+      resolvedGuidedAnswerApplyStatus,
+      guidedBulkApplyingActive,
+      guidedStickyBottomBarVisibleForSignerCta,
+      guidedFinalReviewExplicitlyOpened,
+    ],
+  );
+  const showGuidedFinalReviewInlineCta = guidedFinalReviewCtaPlacement.showInline;
+
   React.useEffect(() => {
     if (createFlowPhase !== "signer_setup_required" && !guidedPreReviewSignerSetupActive) return;
     if (resolvedGuidedAnswerApplyStatus !== "applied") return;
@@ -14852,10 +14954,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, []);
 
   const handleGuidedPreReviewContinueToFinalReview = React.useCallback(async () => {
-    if (guidedSignerFieldFocusedRef.current) {
-      logBlockedAutoNavigationWhileSignersEditing("continue_to_final_review");
-      return;
-    }
     if (!guidedPreReviewSignerSlots.complete) {
       logSignerSetupIncomplete({
         filledCount: guidedPreReviewSignerSlots.filledCount,
@@ -14867,12 +14965,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         requiredCount: guidedPreReviewSignerSlots.requiredCount,
         incompleteIndices: guidedPreReviewSignerSlots.incompleteIndices,
         applyStatus: resolvedGuidedAnswerApplyStatus,
-        isEditing: false,
+        isEditing: guidedSignerFieldFocusedRef.current,
       });
       scrollGuidedSignerSetupIntoView();
       return;
     }
-    logSignerSetupComplete();
     if (resolvedGuidedAnswerApplyStatus === "applying") {
       return;
     }
@@ -14881,26 +14978,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       void handleGuidedBulkApply({ skipPhaseInit: true, backgroundDuringSignerSetup: true });
       return;
     }
-    if (resolveGuidedFinalReviewUnlockGate()) {
-      handleGuidedOpenFinalReview();
-    }
+    logSignerSetupComplete();
+    handleGuidedOpenFinalReview();
   }, [
     guidedPreReviewSignerSlots,
     resolvedGuidedAnswerApplyStatus,
     scrollGuidedSignerSetupIntoView,
     handleGuidedOpenFinalReview,
     handleGuidedBulkApply,
-    resolveGuidedFinalReviewUnlockGate,
   ]);
 
+  const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(() => {
+    guidedFinalReviewExplicitlyUnlockedRef.current = false;
+    setGuidedFinalReviewUnlockedAt(null);
+    setGuidedFinalReviewExplicitlyOpened(false);
+    setGuidedCompletionPhase("ready_to_apply");
+    setCreateFlowPhase("signer_setup_required");
+    setPremiumRecipientUxActive(false);
+    setCreateFlowSendRecipientEditorOpen(true);
+    window.requestAnimationFrame(() => scrollGuidedSignerSetupIntoView());
+  }, [scrollGuidedSignerSetupIntoView]);
+
   React.useEffect(() => {
+    if (guidedFinalReviewExplicitlyOpened || guidedFinalReviewExplicitlyUnlockedRef.current) return;
     if (guidedCompletionPhase !== "ready_to_apply") return;
     if (createFlowPhase === "signer_setup_required") return;
     setCreateFlowPhase("signer_setup_required");
     setPremiumRecipientUxActive(false);
-  }, [guidedCompletionPhase, createFlowPhase]);
+  }, [guidedCompletionPhase, createFlowPhase, guidedFinalReviewExplicitlyOpened]);
 
   React.useEffect(() => {
+    if (guidedFinalReviewExplicitlyOpened || guidedFinalReviewExplicitlyUnlockedRef.current) return;
     if (!guidedSignerFieldFocusedRef.current) return;
     if (
       createFlowPhase === "recipient_setup_required" ||
@@ -18809,7 +18917,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
                                     {guidedPreReviewSignerSetupActive ? (
-                                      <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
+                                      <div
+                                        className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4"
+                                        data-guided-final-review-sticky-cta={
+                                          guidedFinalReviewCtaPlacement.showSticky ? "visible" : "hidden"
+                                        }
+                                        data-guided-final-review-inline-cta={
+                                          showGuidedFinalReviewInlineCta ? "visible" : "hidden"
+                                        }
+                                        data-guided-final-review-unlocked-at={guidedFinalReviewUnlockedAt ?? ""}
+                                      >
                                         <GuidedSignerSetupBeforeReviewCard
                                           slotsComplete={guidedPreReviewSignerSlots.complete}
                                           filledCount={guidedPreReviewSignerSlots.filledCount}
@@ -18881,7 +18998,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             }}
                                           />
                                         </div>
-                                        {guidedPreReviewSignerSlots.complete ? (
+                                        {showGuidedFinalReviewInlineCta ? (
                                           <button
                                             type="button"
                                             className="mt-4 w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
@@ -19010,6 +19127,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           onUploadFile={(f) => void handleReviewEditedVersionFile(f)}
                                           onUseUploadedForSigning={handleUseUploadedVersionForSigning}
                                           onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
+                                          onBackToSignerDetails={handleGuidedBackToSignerDetailsFromFinalReview}
                                           signersReady={paidProInlineSignersReady}
                                         />
                                       </div>

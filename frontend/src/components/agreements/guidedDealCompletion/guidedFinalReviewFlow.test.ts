@@ -59,7 +59,8 @@ describe("guided final review flow", () => {
 
   it("SimpleProFinalReviewScreen exposes final review copy and send CTAs", () => {
     const screen = readFileSync(join(__dirname, "../SimpleProFinalReviewScreen.tsx"), "utf8");
-    expect(screen).toContain("Review your updated Pro agreement");
+    expect(screen).toContain("SIMPLE_PRO_FINAL_REVIEW_HEADLINE");
+    expect(screen).toContain("simple-pro-final-review-headline");
     expect(screen).toContain("simple-pro-send-for-signature");
     expect(screen).toContain("simple-pro-send-for-review");
     expect(screen).toContain("simple-pro-copy-agreement");
@@ -102,12 +103,13 @@ describe("guided final review flow", () => {
     expect(intake).toContain("!guidedPreReviewSignerSetupActive");
     expect(intake).toContain("showGuidedPreReviewApplying");
     expect(intake).toContain("logGuidedFinalReviewBlockedSignersIncomplete");
-    expect(intake).toContain("resolveGuidedFinalReviewUnlockGate");
+    expect(intake).toContain("evaluateGuidedFinalReviewUnlockGate");
+    expect(intake).toContain("guidedFinalReviewExplicitlyUnlockedRef");
   });
 
   it("test22: final review unlocks when apply + signers both complete", () => {
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain("canUnlockGuidedFinalReview");
+    expect(intake).toContain("evaluateGuidedFinalReviewUnlockGate");
     expect(intake).toContain("handleGuidedPreReviewContinueToFinalReview");
     expect(intake).toContain("guidedAnswerApplyStatus");
     expect(intake).toContain("resolveGuidedFrozenAnswerCount");

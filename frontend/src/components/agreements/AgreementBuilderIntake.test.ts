@@ -633,7 +633,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("resolveGuidedFrozenAnswerCount");
     expect(intake).toContain("listGuidedAnsweredVariableIds");
     expect(intake).toContain("guidedAnswerApplyStatus");
-    expect(intake).toContain("canUnlockGuidedFinalReview");
+    expect(intake).toContain("evaluateGuidedFinalReviewUnlockGate");
     expect(intake).toContain("shouldResolveGuidedApplyFromExistingBody");
     expect(intake).toContain("GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA");
     expect(intake).toContain("GUIDED_FINISHING_UPDATED_AGREEMENT");
@@ -648,14 +648,33 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(orch).toContain("resolveGuidedFrozenAnswerCount");
   });
 
+  it("test24: explicit final review unlock, dedupe, and mutually exclusive CTAs", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("guidedFinalReviewExplicitlyUnlockedRef");
+    expect(intake).toContain("guidedFinalReviewNavigationInFlightRef");
+    expect(intake).toContain("showGuidedFinalReviewInlineCta");
+    expect(intake).toContain("resolveGuidedFinalReviewCtaVisibility");
+    expect(intake).toContain("flushSync");
+    expect(intake).toContain("logGuidedFinalReviewExplicitUnlockStarted");
+    expect(intake).toContain("logGuidedFinalReviewNavigationDeduped");
+    expect(intake).toContain("evaluateGuidedFinalReviewUnlockGate");
+    expect(intake).toContain("handleGuidedBackToSignerDetailsFromFinalReview");
+    expect(intake).toContain("resolveGuidedFinalReviewCtaVisibility");
+    const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
+    expect(screen).toContain("SIMPLE_PRO_FINAL_REVIEW_HEADLINE");
+    expect(screen).toContain("simple-pro-send-for-signature");
+    expect(screen).toContain("simple-pro-send-for-review");
+  });
+
   it("test23: no auto final review on apply; explicit unlock gate and blocked-signer log", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("logGuidedFinalReviewBlockedSignersIncomplete");
-    expect(intake).toContain("resolveGuidedFinalReviewUnlockGate");
+    expect(intake).toContain("evaluateGuidedFinalReviewUnlockGate");
     expect(intake).toContain("guidedSignerMetadataDebouncingRef");
     expect(intake).toContain("stayOnSignerSetup");
     expect(intake).not.toContain("} else if (autoFinal) {");
-    expect(intake).toContain("logBlockedAutoNavigationWhileSignersEditing(\"continue_to_final_review\")");
+    expect(intake).toContain("logGuidedFinalReviewExplicitUnlockBlocked");
+    expect(intake).toContain("flushGuidedSignerMetadataBeforeFinalReview");
     const card = readFileSync(
       join(__dirname, "guidedDealCompletion/GuidedSignerSetupBeforeReviewCard.tsx"),
       "utf8",

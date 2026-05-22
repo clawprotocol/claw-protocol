@@ -69,9 +69,8 @@ export function canUnlockGuidedFinalReview(args: CanUnlockGuidedFinalReviewArgs)
 
 export const GUIDED_SIGNER_SETUP_HEADLINE = "Add signer/reviewer details";
 export const GUIDED_SIGNER_SETUP_BACKGROUND_SUBCOPY =
-  "LawDog is applying your answers in the background. Add the people who need to review or sign before final review.";
-export const GUIDED_SIGNER_SETUP_APPLY_COMPLETE_SUBCOPY =
-  "Your updated Pro agreement is ready. Finish signer details to continue to final review.";
+  "Nothing is sent yet. You'll review the final version before choosing signature or review-only sharing.";
+export const GUIDED_SIGNER_SETUP_APPLY_COMPLETE_SUBCOPY = GUIDED_SIGNER_SETUP_BACKGROUND_SUBCOPY;
 /** @deprecated Use GUIDED_SIGNER_SETUP_HEADLINE */
 export const GUIDED_SIGNER_SETUP_BACKGROUND_HEADLINE = GUIDED_SIGNER_SETUP_HEADLINE;
 export const GUIDED_BACKGROUND_APPLY_PROGRESS = "Updating Pro agreement in background…";

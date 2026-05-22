@@ -176,14 +176,15 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
     ).toBe(false);
   });
 
-  it("test23: signer_setup_required createFlowPhase pins UX during background apply", () => {
+  it("test24: signer_setup_required does not reclaim after explicit unlock", () => {
     expect(
       resolveGuidedProUxState({
         ...BASE,
-        guidedCompletionPhase: "applied",
-        createFlowPhase: "signer_setup_required",
+        guidedCompletionPhase: "ready_to_apply",
+        createFlowPhase: "guided_final_review",
+        finalReviewExplicitlyOpened: true,
         guidedAnswerApplyStatus: "applied",
       }),
-    ).toBe("signer_setup_required");
+    ).toBe("guided_final_review");
   });
 });
