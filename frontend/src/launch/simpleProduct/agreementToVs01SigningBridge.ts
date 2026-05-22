@@ -1,5 +1,12 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import {
+  agreementParticipantToVs01Counterparty,
+  assertSignerMetadataPreserved,
+  logAgreementParticipantNormalization,
+  participantsFromAgreementDraft,
+  type AgreementParticipant,
+} from "../../agreement/agreementParticipantModel";
+import {
   explicitSignerNameForEntity,
   normalizeSignerMetadataForSave,
 } from "../../agreement/signerMetadataNormalize";
@@ -457,6 +464,13 @@ function inferBridgeCreatorEmail(
   return "";
 }
 
+function bridgeParticipantsFromDraft(draft: AgreementDraft | null): AgreementParticipant[] {
+  const parties = (draft?.parties ?? []) as AgreementParty[];
+  const canonical = participantsFromAgreementDraft(parties);
+  logAgreementParticipantNormalization("vs01-bridge-build", canonical);
+  return canonical;
+}
+
 /** Map agreement parties → VS01 creator + counterparties (non-owner signers/recipients). */
 export function buildAgreementVs01BridgeSession(params: {
   agreementId: string;
@@ -468,29 +482,27 @@ export function buildAgreementVs01BridgeSession(params: {
   reviewerApprovedCleanHandoff?: boolean;
 }): AgreementVs01BridgeSession {
   const parties = (params.draft?.parties ?? []) as AgreementParty[];
+  const participants = bridgeParticipantsFromDraft(params.draft);
+  const ownerParticipant = participants.find((p) => p.role === "owner");
+  const counterParticipants = participants.filter((p) => p.role === "counterparty");
   const owner =
     parties.find((p) => (p.role || "").toLowerCase() === "owner") ?? parties[0] ?? null;
-  const others = owner ? parties.filter((p) => p !== owner) : parties.slice(1);
-  const creatorName = (owner?.name || "").trim() || "Sender";
-  const creatorSignerName = explicitSignerNameForEntity(owner?.signerName, creatorName);
-  const creatorSignerTitle = normalizeSignerMetadataForSave(owner?.signerTitle);
-  const creatorEmail = inferBridgeCreatorEmail(params.draft, owner, creatorName);
+  const creatorName = ownerParticipant?.partyName || (owner?.name || "").trim() || "Sender";
+  const creatorSignerName = ownerParticipant?.signerName || explicitSignerNameForEntity(owner?.signerName, creatorName);
+  const creatorSignerTitle =
+    ownerParticipant?.signerTitle || normalizeSignerMetadataForSave(owner?.signerTitle);
+  const creatorEmail =
+    ownerParticipant?.signerEmail || inferBridgeCreatorEmail(params.draft, owner, creatorName);
   const counterparties: Vs01Counterparty[] =
-    others.length > 0
-      ? others.map((p) => {
-          const email = (p.email || "").trim();
-          return {
-            id: (p.id && String(p.id).trim()) || newCpId(),
-            name: (p.name || "").trim(),
-            email,
-            phone: (p.phone || "").trim(),
-            signerName: explicitSignerNameForEntity(p.signerName, (p.name || "").trim()),
-            signerTitle: normalizeSignerMetadataForSave(p.signerTitle),
-            signerEmail: (p.signerEmail || "").trim() || undefined,
-            reviewEmail: (p.reviewEmail || "").trim() || undefined,
-          };
+    counterParticipants.length > 0
+      ? counterParticipants.map((p) => {
+          const partyRow = parties.find((x) => (x.name || "").trim() === p.partyName);
+          const stableId =
+            partyRow?.id && String(partyRow.id).trim() ? String(partyRow.id).trim() : newCpId();
+          return { ...agreementParticipantToVs01Counterparty(p), id: stableId };
         })
       : [{ id: newCpId(), name: "", email: "", phone: "" }];
+  assertSignerMetadataPreserved(participants, participants, "vs01-bridge-build");
   const senderFirst = Boolean(params.senderFirstLawdogHandoff);
   const reviewerApproved = Boolean(params.reviewerApprovedCleanHandoff);
   return {

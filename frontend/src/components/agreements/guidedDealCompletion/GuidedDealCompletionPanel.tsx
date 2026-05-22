@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GuidedCompletionSession } from "./types";
 import type { DealVariable } from "./types";
 import {
-  computeGuidedCollectionProgress,
-  frozenQuestionTotal,
   getCurrentVariable,
   guidedSessionIntro,
-  skipGuidedVariable,
 } from "./guidedCompletionEngine";
+import {
+  computeGuidedVisibleQuestionAccounting,
+  formatGuidedProgressLabel,
+  formatGuidedQuestionHeader,
+} from "./guidedVisibleQuestionAccounting";
 import { resolveGuidedAnswerForPill } from "./guidedAnswerResolution";
 import { GUIDED_COMPLETION_HEADING, GUIDED_COMPLETION_SUBHEADING } from "./friendlyProCompletionCopy";
 import {
@@ -24,8 +26,8 @@ import {
   buildBulkApplyChecklist,
   buildFinalAppliedAreaLabels,
   normalizeWhyText,
+  resolveGuidedQuestionConfig,
   resolveOptionDisplayCopy,
-  resolveQuestionNumber,
 } from "./guidedQuestionConfig";
 import { GuidedQuestionOptionCard } from "./GuidedQuestionOptionCard";
 import { GuidedBulkApplyChecklist } from "./GuidedBulkApplyChecklist";
@@ -49,6 +51,7 @@ export type GuidedDealCompletionPanelProps = {
   ) => void;
   onEditAnswer?: (variableId: string) => void;
   onBulkApply?: () => void;
+  onSkipQuestion?: (variableId: string) => void;
   bulkApplyBusy?: boolean;
   bulkApplyError?: string | null;
   appliedChanges?: readonly GuidedAppliedChange[];
@@ -61,10 +64,11 @@ export function GuidedDealCompletionPanel({
   session,
   intakeRaw,
   phase,
-  onSessionChange,
+  onSessionChange: _onSessionChange,
   onSaveAnswer,
   onEditAnswer,
   onBulkApply,
+  onSkipQuestion,
   bulkApplyBusy = false,
   bulkApplyError = null,
   appliedChanges = [],
@@ -78,21 +82,19 @@ export function GuidedDealCompletionPanel({
   const readyToApply = phase === "ready_to_apply" || phase === "failed";
   const applying = phase === "applying_all";
   const applied = phase === "applied";
-  const total = frozenQuestionTotal(session);
-  const answeredCount = Object.keys(session.answered).length;
-  const progressPct = computeGuidedCollectionProgress(answeredCount, total);
+  const accounting = useMemo(() => computeGuidedVisibleQuestionAccounting(session), [session]);
+  const { resolvedVisibleQuestionCount, answeredVisibleQuestionCount, progressPercent: progressPct } =
+    accounting;
 
   const [customOpen, setCustomOpen] = useState(false);
+  const [showOtherOptions, setShowOtherOptions] = useState(false);
   const [customDraft, setCustomDraft] = useState("");
   const [recommendView, setRecommendView] = useState<RecommendForMeResult | null>(null);
   const [holdQuestionId, setHoldQuestionId] = useState<string | null>(null);
   const [savedPulse, setSavedPulse] = useState(false);
   const [lastSelectedPillId, setLastSelectedPillId] = useState<string | null>(null);
+  const [skipFlash, setSkipFlash] = useState(false);
   const advanceTimerRef = useRef<number | null>(null);
-
-  const controlsDisabled = externallyFrozen || applying || bulkApplyBusy || Boolean(holdQuestionId);
-  const bulkChecklist = useMemo(() => buildBulkApplyChecklist(session), [session]);
-  const appliedAreas = useMemo(() => buildFinalAppliedAreaLabels(session), [session]);
 
   const displayQuestion: DealVariable | null = useMemo(() => {
     const id = holdQuestionId ?? current?.id;
@@ -100,9 +102,54 @@ export function GuidedDealCompletionPanel({
     return session.variables.find((v) => v.id === id) ?? current;
   }, [holdQuestionId, current, session.variables]);
 
-  const displayQuestionNum = displayQuestion
-    ? resolveQuestionNumber(session, displayQuestion.id)
-    : total;
+  const selectablePills = useMemo(() => {
+    if (!displayQuestion) return [];
+    return displayQuestion.suggestedDefaults.filter((p) => !isRecommendPillId(p.id));
+  }, [displayQuestion]);
+
+  const primaryPillEntry = useMemo(() => {
+    if (!displayQuestion || selectablePills.length === 0) return null;
+    let best = selectablePills[0]!;
+    let bestRank = 99;
+    for (const pill of selectablePills) {
+      const resolution = resolveGuidedAnswerForPill(
+        displayQuestion,
+        pill.id,
+        pill.label,
+        pill.value,
+      );
+      const instructionAnswer =
+        resolution.action === "apply" ? resolution.instructionAnswer : pill.value;
+      const copy = resolveOptionDisplayCopy({
+        variableId: displayQuestion.id,
+        pillId: pill.id,
+        pillLabel: pill.label,
+        pillValue: pill.value,
+        intakeRaw,
+        variable: displayQuestion,
+        instructionAnswer,
+      });
+      const rank = copy.recommended ? 0 : 1;
+      if (rank < bestRank) {
+        bestRank = rank;
+        best = pill;
+      }
+    }
+    return best;
+  }, [displayQuestion, selectablePills, intakeRaw]);
+
+  const otherPillEntries = useMemo(() => {
+    if (!primaryPillEntry) return selectablePills;
+    return selectablePills.filter((p) => p.id !== primaryPillEntry.id);
+  }, [selectablePills, primaryPillEntry]);
+
+  const controlsDisabled = externallyFrozen || applying || bulkApplyBusy || Boolean(holdQuestionId);
+  const bulkChecklist = useMemo(() => buildBulkApplyChecklist(session), [session]);
+  const appliedAreas = useMemo(() => buildFinalAppliedAreaLabels(session), [session]);
+
+  const displayQuestionHeader = displayQuestion
+    ? formatGuidedQuestionHeader(accounting, displayQuestion.id)
+    : "Question";
 
   useEffect(() => {
     return () => {
@@ -116,6 +163,7 @@ export function GuidedDealCompletionPanel({
     setCustomOpen(false);
     setCustomDraft("");
     setLastSelectedPillId(null);
+    setShowOtherOptions(false);
   }, [current?.id, holdQuestionId]);
 
   const beginAdvanceHold = (variableId: string, nextCompletedCount: number) => {
@@ -143,7 +191,9 @@ export function GuidedDealCompletionPanel({
     implementationPreview?: string,
   ) => {
     if (!displayQuestion || controlsDisabled || variableId !== displayQuestion.id) return;
-    const nextCount = answeredCount + (session.answered[variableId] ? 0 : 1);
+    const nextCount =
+      resolvedVisibleQuestionCount +
+      (session.answered[variableId] || session.skipped.has(variableId) ? 0 : 1);
     onSaveAnswer(variableId, displayAnswer, {
       recommendationReason,
       instructionAnswer,
@@ -238,15 +288,26 @@ export function GuidedDealCompletionPanel({
   const handleSkip = () => {
     if (!displayQuestion || controlsDisabled) return;
     if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
-    setHoldQuestionId(null);
+    setHoldQuestionId(displayQuestion.id);
     setSavedPulse(false);
-    onSessionChange(skipGuidedVariable(session, displayQuestion.id));
+    setSkipFlash(true);
+    onSkipQuestion?.(displayQuestion.id);
+    advanceTimerRef.current = window.setTimeout(() => {
+      setHoldQuestionId(null);
+      setSkipFlash(false);
+      advanceTimerRef.current = null;
+    }, ADVANCE_HOLD_MS);
     setCustomOpen(false);
     setCustomDraft("");
     setRecommendView(null);
   };
 
+  const pendingAreaLabel = displayQuestion
+    ? resolveGuidedQuestionConfig(displayQuestion.id).finalAppliedAreaLabel
+    : null;
+
   const showSavedOnQuestion = savedPulse && holdQuestionId === displayQuestion?.id;
+  const showSkippedOnQuestion = skipFlash && holdQuestionId === displayQuestion?.id;
 
   if (applied) {
     return (
@@ -310,7 +371,7 @@ export function GuidedDealCompletionPanel({
             Update Pro agreement
           </button>
           <p className="mt-1.5 text-[11px] text-stone-500">
-            LawDog will apply your {answeredCount} answers in one clean pass.
+            LawDog will apply your {answeredVisibleQuestionCount} answers in one clean pass.
           </p>
         </div>
       </div>
@@ -330,13 +391,13 @@ export function GuidedDealCompletionPanel({
 
       <div className="mt-2.5 flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold tabular-nums text-stone-800" data-testid="guided-progress-count">
-          {answeredCount} of {total} completed
+          {formatGuidedProgressLabel(accounting)}
         </span>
       </div>
       <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-stone-200/90">
         <div
           className="h-full rounded-full bg-emerald-600 transition-[width] duration-500 ease-out"
-          style={{ width: `${Math.max(progressPct, answeredCount > 0 ? 8 : 0)}%` }}
+          style={{ width: `${Math.max(progressPct, resolvedVisibleQuestionCount > 0 ? 8 : 0)}%` }}
           data-testid="guided-progress-bar"
         />
       </div>
@@ -344,7 +405,7 @@ export function GuidedDealCompletionPanel({
       {collecting && displayQuestion ? (
         <div className="mt-3 space-y-2">
           <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400">
-            Question {displayQuestionNum} of {total}
+            {displayQuestionHeader}
           </p>
           <p className="text-[15px] font-semibold leading-snug text-stone-900">{displayQuestion.question}</p>
 
@@ -364,7 +425,15 @@ export function GuidedDealCompletionPanel({
                 ✓
               </span>
               <p className="text-[11px] leading-snug text-emerald-900">
-                <span className="font-semibold">Saved.</span> We&apos;ll apply this when all questions are complete.
+                <span className="font-semibold">Saved.</span>{" "}
+                {pendingAreaLabel ? (
+                  <>
+                    Will update: <span className="font-semibold">{pendingAreaLabel}</span> when you update the
+                    agreement.
+                  </>
+                ) : (
+                  <>We&apos;ll apply this when all questions are complete.</>
+                )}
               </p>
             </div>
           ) : null}
@@ -403,40 +472,96 @@ export function GuidedDealCompletionPanel({
                 Show other options
               </button>
             </div>
+          ) : showSkippedOnQuestion ? (
+            <div
+              className="rounded-md border border-amber-200/90 bg-amber-50/90 px-2.5 py-2 text-[11px] text-amber-950"
+              role="status"
+              data-testid="guided-skip-flash"
+            >
+              <span className="font-semibold">Question skipped</span> — not needed for this agreement.
+            </div>
           ) : !showSavedOnQuestion ? (
             <div className="space-y-1.5">
-              {displayQuestion.suggestedDefaults.map((pill) => {
-                if (isRecommendPillId(pill.id)) return null;
-                const resolution = resolveGuidedAnswerForPill(
-                  displayQuestion,
-                  pill.id,
-                  pill.label,
-                  pill.value,
-                );
-                const instructionAnswer =
-                  resolution.action === "apply" ? resolution.instructionAnswer : pill.value;
-                const copy = resolveOptionDisplayCopy({
-                  variableId: displayQuestion.id,
-                  pillId: pill.id,
-                  pillLabel: pill.label,
-                  pillValue: pill.value,
-                  intakeRaw,
-                  variable: displayQuestion,
-                  instructionAnswer,
-                });
-                return (
-                  <GuidedQuestionOptionCard
-                    key={pill.id}
-                    label={pill.label}
-                    recommended={copy.recommended}
-                    selected={lastSelectedPillId === pill.id}
-                    why={copy.why}
-                    lawDogWill={copy.lawDogWill}
-                    disabled={controlsDisabled}
-                    onSelect={() => handlePill(pill.id, pill.value, pill.label)}
-                  />
-                );
-              })}
+              {primaryPillEntry ? (
+                (() => {
+                  const pill = primaryPillEntry;
+                  const resolution = resolveGuidedAnswerForPill(
+                    displayQuestion,
+                    pill.id,
+                    pill.label,
+                    pill.value,
+                  );
+                  const instructionAnswer =
+                    resolution.action === "apply" ? resolution.instructionAnswer : pill.value;
+                  const copy = resolveOptionDisplayCopy({
+                    variableId: displayQuestion.id,
+                    pillId: pill.id,
+                    pillLabel: pill.label,
+                    pillValue: pill.value,
+                    intakeRaw,
+                    variable: displayQuestion,
+                    instructionAnswer,
+                  });
+                  return (
+                    <GuidedQuestionOptionCard
+                      key={pill.id}
+                      label={pill.label}
+                      recommended
+                      selected={lastSelectedPillId === pill.id}
+                      why={copy.why}
+                      lawDogWill={copy.lawDogWill}
+                      compact
+                      disabled={controlsDisabled}
+                      onSelect={() => handlePill(pill.id, pill.value, pill.label)}
+                    />
+                  );
+                })()
+              ) : null}
+              {otherPillEntries.length > 0 ? (
+                <button
+                  type="button"
+                  className="text-[11px] font-medium text-stone-600 underline-offset-2 hover:underline"
+                  disabled={controlsDisabled}
+                  onClick={() => setShowOtherOptions((v) => !v)}
+                  data-testid="guided-show-other-options"
+                >
+                  {showOtherOptions ? "Hide other options" : "Show other options"}
+                </button>
+              ) : null}
+              {showOtherOptions
+                ? otherPillEntries.map((pill) => {
+                    const resolution = resolveGuidedAnswerForPill(
+                      displayQuestion,
+                      pill.id,
+                      pill.label,
+                      pill.value,
+                    );
+                    const instructionAnswer =
+                      resolution.action === "apply" ? resolution.instructionAnswer : pill.value;
+                    const copy = resolveOptionDisplayCopy({
+                      variableId: displayQuestion.id,
+                      pillId: pill.id,
+                      pillLabel: pill.label,
+                      pillValue: pill.value,
+                      intakeRaw,
+                      variable: displayQuestion,
+                      instructionAnswer,
+                    });
+                    return (
+                      <GuidedQuestionOptionCard
+                        key={pill.id}
+                        label={pill.label}
+                        recommended={copy.recommended}
+                        selected={lastSelectedPillId === pill.id}
+                        why={copy.why}
+                        lawDogWill={copy.lawDogWill}
+                        compact
+                        disabled={controlsDisabled}
+                        onSelect={() => handlePill(pill.id, pill.value, pill.label)}
+                      />
+                    );
+                  })
+                : null}
               {displayQuestion.suggestedDefaults.some((p) => isRecommendPillId(p.id)) ? (
                 <button
                   type="button"

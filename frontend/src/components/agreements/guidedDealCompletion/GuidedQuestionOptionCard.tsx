@@ -9,6 +9,8 @@ type Props = {
   whyFull?: string | null;
   lawDogWillFull?: string;
   disabled?: boolean;
+  /** Mobile-first: hide Why / LawDog will for tap-once flow. */
+  compact?: boolean;
   onSelect: () => void;
 };
 
@@ -21,6 +23,7 @@ export function GuidedQuestionOptionCard({
   whyFull,
   lawDogWillFull,
   disabled = false,
+  compact = false,
   onSelect,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -56,16 +59,18 @@ export function GuidedQuestionOptionCard({
           </span>
         ) : null}
       </div>
-      {why ? (
+      {!compact && why ? (
         <p className="mt-1 text-[11px] leading-snug text-stone-600">
           <span className="font-semibold text-stone-700">Why: </span>
           {expanded && whyFull ? whyFull : why}
         </p>
       ) : null}
-      <p className="mt-0.5 text-[11px] leading-snug text-stone-700">
-        <span className="font-semibold text-stone-800">LawDog will: </span>
-        {expanded && lawDogWillFull ? lawDogWillFull : lawDogWill}
-      </p>
+      {!compact ? (
+        <p className="mt-0.5 text-[11px] leading-snug text-stone-700">
+          <span className="font-semibold text-stone-800">LawDog will: </span>
+          {expanded && lawDogWillFull ? lawDogWillFull : lawDogWill}
+        </p>
+      ) : null}
       {showMore ? (
         <span
           role="presentation"

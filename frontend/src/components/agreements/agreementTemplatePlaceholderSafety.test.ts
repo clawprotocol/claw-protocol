@@ -115,6 +115,17 @@ describe("agreementTemplatePlaceholderSafety", () => {
     expect(fatal.some((x) => /\[NAME\]/i.test(x))).toBe(false);
   });
 
+  it("rejects semantic party_a / bracket company placeholders in premium gate", () => {
+    const raw =
+      "This Agreement is between party_a and party_b. [Your Company Name] provides services to [Service Provider Name].\n" +
+      "terms. ".repeat(120);
+    const fatal = collectForbiddenTemplateFragments(raw, "Anthem Blanchard and Sarah Collins", {
+      partyNames: ["Anthem Blanchard", "Sarah Collins"],
+    });
+    expect(fatal.some((x) => /party_a/i.test(x))).toBe(true);
+    expect(fatal.some((x) => /Your Company Name/i.test(x))).toBe(true);
+  });
+
   it("still flags operative insert/mustache placeholders in body", () => {
     const raw =
       "Between Beta Inc. and Gamma LLC, fees are {{party_name}} and notice at [INSERT PAYMENT TERMS HERE].\n" +

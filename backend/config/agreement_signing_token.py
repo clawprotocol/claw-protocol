@@ -22,12 +22,16 @@ _DEV_FALLBACK_SIGNING_TOKEN_RAW = hashlib.sha256(
 
 
 def resolve_signing_token_secret_raw() -> str:
-    s = os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()
+    s = (
+        os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()
+        or os.getenv("CLAW_SIGNING_TOKEN_SECRET", "").strip()
+    )
     if s:
         return s
     env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
     if env in ("production", "prod"):
         raise SigningTokenSecretMissingInProductionError(
-            "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET must be set when CLAW_ENVIRONMENT is production or prod."
+            "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET (or CLAW_SIGNING_TOKEN_SECRET) must be set when "
+            "CLAW_ENVIRONMENT is production or prod. Recipient/signing links cannot be minted until configured."
         )
     return _DEV_FALLBACK_SIGNING_TOKEN_RAW

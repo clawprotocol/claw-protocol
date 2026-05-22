@@ -43,7 +43,9 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     expect(panel).toContain("guided-progress-count");
     expect(panel).toContain("GuidedBulkApplyChecklist");
     expect(panel).toContain("GuidedAppliedAreasSummary");
-    expect(panel).toContain("of {total} completed");
+    expect(panel).toContain("formatGuidedProgressLabel");
+    expect(panel).toContain("guided-show-other-options");
+    expect(panel).toContain("guided-skip-flash");
   });
 
   it("skip is tertiary footer not primary option styling", () => {
@@ -52,10 +54,11 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     expect(panel).toMatch(/text-stone-400.*Skip for now/s);
   });
 
-  it("collection progress is linear from answered count", () => {
+  it("collection progress is linear from resolved visible count", () => {
     expect(computeGuidedCollectionProgress(0, 5)).toBe(0);
     expect(computeGuidedCollectionProgress(1, 5)).toBe(20);
     expect(computeGuidedCollectionProgress(5, 5)).toBe(100);
+    expect(computeGuidedCollectionProgress(3, 5)).toBe(60);
   });
 
   it("preserveGuidedSessionDuringCollection keeps answers when base refreshes", () => {

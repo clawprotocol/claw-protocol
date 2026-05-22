@@ -7,6 +7,11 @@ import {
 } from "./variablePrioritizationLayer";
 import type { CommercialFamilyHint } from "../proAgreementCompleteness/types";
 import type { DealVariable, DealVariableCategory, GuidedAnswerMeta, GuidedCompletionSession } from "./types";
+import {
+  computeGuidedVisibleQuestionAccounting,
+  type GuidedVisibleQuestionAccounting,
+} from "./guidedVisibleQuestionAccounting";
+import { variableHasSelectableAnswerPath } from "./shouldRenderGuidedCompletionPanel";
 
 export function buildGuidedSessionFromAgreement(args: {
   intakeRaw?: string | null;
@@ -32,10 +37,17 @@ export function buildGuidedSessionFromAgreement(args: {
   });
 }
 
-/** First unanswered id in the frozen queue (always scan from 0 — never trust stale currentIndex). */
+function isVisibleGuidedQueueItem(session: GuidedCompletionSession, id: string): boolean {
+  const v = session.variables.find((x) => x.id === id);
+  if (!v) return false;
+  return variableHasSelectableAnswerPath(v) && v.question.trim().length > 8;
+}
+
+/** First unanswered visible id in the frozen queue (always scan from 0 — never trust stale currentIndex). */
 export function resolveGuidedCurrentIndex(session: GuidedCompletionSession): number {
   for (let idx = 0; idx < session.queue.length; idx += 1) {
     const id = session.queue[idx];
+    if (!isVisibleGuidedQueueItem(session, id)) continue;
     if (!session.answered[id] && !session.skipped.has(id)) return idx;
   }
   return session.queue.length;
@@ -161,25 +173,30 @@ export function skipGuidedVariable(session: GuidedCompletionSession, variableId:
 }
 
 export function isGuidedCompletionComplete(session: GuidedCompletionSession): boolean {
-  return getCurrentVariable(session) === null;
+  return computeGuidedVisibleQuestionAccounting(session).isCollectionComplete;
 }
 
-/** Linear progress for collect-all UX (0–100 from answered count only). */
+/** Linear progress for collect-all UX (0–100 from resolved visible questions). */
 export function computeGuidedCollectionProgress(
-  answeredCount: number,
-  totalQuestions: number,
+  resolvedCount: number,
+  visibleQuestionCount: number,
 ): number {
-  if (totalQuestions <= 0) return 0;
-  return Math.min(100, Math.round((answeredCount / totalQuestions) * 100));
+  if (visibleQuestionCount <= 0) return 0;
+  return Math.min(100, Math.round((resolvedCount / visibleQuestionCount) * 100));
 }
 
-/** Session view for UI: uses draft answers only, never bodyLen-derived completeness. */
+export function guidedVisibleAccounting(
+  session: GuidedCompletionSession,
+): GuidedVisibleQuestionAccounting {
+  return computeGuidedVisibleQuestionAccounting(session);
+}
+
+/** Session view for UI: uses visible question accounting, never bodyLen-derived completeness. */
 export function withGuidedDraftProgress(session: GuidedCompletionSession): GuidedCompletionSession {
-  const total = session.frozenTotalQuestions ?? session.queue.length;
-  const answeredCount = Object.keys(session.answered).length;
+  const accounting = computeGuidedVisibleQuestionAccounting(session);
   return {
     ...session,
-    completenessPercent: computeGuidedCollectionProgress(answeredCount, total),
+    completenessPercent: accounting.progressPercent,
   };
 }
 

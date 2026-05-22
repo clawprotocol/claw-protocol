@@ -539,6 +539,7 @@ import {
   GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER,
   applyGuidedAnswerTransaction,
   clearGuidedAnswer,
+  skipGuidedVariable,
   withGuidedDraftProgress,
   buildGuidedSessionFromAgreement,
   buildGuidedSessionKey,
@@ -569,6 +570,10 @@ import {
 import type { GuidedAppliedChange } from "./guidedDealCompletion/guidedChangeTypes";
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
 import { guidedPhaseSuppressesSendCta } from "./guidedDealCompletion/guidedCompletionPhase";
+import {
+  ProReviewStepIndicator,
+  resolveProReviewActiveStep,
+} from "./ProReviewStepIndicator";
 import { resolveGuidedQuestionTarget } from "./guidedDealCompletion/guidedRevisionAnchors";
 import { compressLawDogWill } from "./guidedDealCompletion/guidedCopyCompress";
 import { resolveImplementationPreview } from "./guidedDealCompletion/guidedImplementationPreview";
@@ -13250,7 +13255,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       setGuidedBulkApplyError(null);
     },
-    [guidedSessionKey, paidBodyForGuidedCompletion],
+    [guidedSessionKey, paidBodyForGuidedCompletion, guidedCompletionPhase],
+  );
+
+  const handleGuidedSkipQuestion = React.useCallback(
+    (variableId: string) => {
+      setGuidedCompletionSession((prev) => {
+        const base = prev ?? guidedCompletionSessionRef.current ?? guidedCompletionSessionBase;
+        if (!base) return prev;
+        const next = withGuidedDraftProgress(skipGuidedVariable(base, variableId));
+        const keyed = { ...next, sessionKey: guidedSessionKey };
+        persistGuidedSession(keyed, guidedSessionKey);
+        guidedCompletionSessionRef.current = keyed;
+        if (isGuidedCompletionComplete(keyed)) {
+          setGuidedCompletionPhase("ready_to_apply");
+          logGuidedAllAnswersReady(keyed);
+        } else if (guidedCompletionPhase !== "applying_all" && guidedCompletionPhase !== "applied") {
+          setGuidedCompletionPhase("collecting_answers");
+        }
+        return keyed;
+      });
+      setGuidedBulkApplyError(null);
+    },
+    [guidedSessionKey, guidedCompletionSessionBase, guidedCompletionPhase],
   );
 
   const handleGuidedEditAnswer = React.useCallback(
@@ -13563,6 +13590,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       activeGuidedCompletionSession &&
       showPrimaryGuidedCompletion &&
       guidedCompletionPhase !== "applied",
+  );
+  const proReviewActiveStep = React.useMemo(
+    () =>
+      resolveProReviewActiveStep({
+        guidedCompletionActive,
+        guidedPhase: guidedCompletionPhase,
+        signersReady: paidProInlineSignersReady,
+        packetPrepared: false,
+      }),
+    [guidedCompletionActive, guidedCompletionPhase, paidProInlineSignersReady],
   );
   const hideStickyForGuidedInProgress = Boolean(
     premiumPaidDocumentSurface &&
@@ -16782,6 +16819,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       <p className="mt-2 text-xs leading-relaxed text-stone-700 sm:text-sm">
                                         {guidedCompletionFriendlyCopy.body}
                                       </p>
+                                      {premiumPaidDocumentSurface ? (
+                                        <ProReviewStepIndicator
+                                          activeStep={proReviewActiveStep}
+                                          className="mt-3 border-b border-stone-200/80 pb-3"
+                                        />
+                                      ) : null}
                                       <div className="mt-4">
                                         <GuidedDealCompletionPanel
                                           session={activeGuidedCompletionSession}
@@ -16789,6 +16832,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           phase={guidedCompletionPhase}
                                           onSessionChange={handleGuidedCompletionSessionChange}
                                           onSaveAnswer={handleGuidedSaveAnswer}
+                                          onSkipQuestion={handleGuidedSkipQuestion}
                                           onBulkApply={() => void handleGuidedBulkApply()}
                                           bulkApplyBusy={guidedCompletionPhase === "applying_all"}
                                           bulkApplyError={guidedBulkApplyError}
@@ -17051,12 +17095,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     )}
                                     {showPrimaryGuidedCompletion && activeGuidedCompletionSession ? (
                                       <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
+                                        <ProReviewStepIndicator
+                                          activeStep={proReviewActiveStep}
+                                          className="mb-3 border-b border-stone-200/80 pb-3"
+                                        />
                                         <GuidedDealCompletionPanel
                                           session={activeGuidedCompletionSession}
                                           intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
                                           phase={guidedCompletionPhase}
                                           onSessionChange={handleGuidedCompletionSessionChange}
                                           onSaveAnswer={handleGuidedSaveAnswer}
+                                          onSkipQuestion={handleGuidedSkipQuestion}
                                           onBulkApply={() => void handleGuidedBulkApply()}
                                           bulkApplyBusy={guidedCompletionPhase === "applying_all"}
                                           bulkApplyError={guidedBulkApplyError}

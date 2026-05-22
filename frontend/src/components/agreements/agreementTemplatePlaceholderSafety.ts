@@ -210,6 +210,34 @@ const SIGNATURE_TOKEN_ALLOWLIST = new Set([
 
 const GENERIC_UPPER_BRACKET_RE = /\[[A-Z][A-Z0-9\s/&.'_\-]{1,55}\]/g;
 
+/** Semantic party placeholders that must not survive into authoritative premium apply. */
+const SEMANTIC_PARTY_PLACEHOLDER_PATTERNS: readonly { re: RegExp; label: string }[] = [
+  { re: /\bparty[_\s-]?a\b/gi, label: "party_a" },
+  { re: /\bparty[_\s-]?b\b/gi, label: "party_b" },
+  { re: /\[your\s+company\s+name\]/gi, label: "[Your Company Name]" },
+  { re: /\[service\s+provider\s+name\]/gi, label: "[Service Provider Name]" },
+  { re: /\[client\s+legal\s+name\]/gi, label: "[Client Legal Name]" },
+  { re: /\[counterparty\s+name\]/gi, label: "[Counterparty Name]" },
+  { re: /\{\{\s*party[_\s-]?a\s*\}\}/gi, label: "{{party_a}}" },
+  { re: /\{\{\s*party[_\s-]?b\s*\}\}/gi, label: "{{party_b}}" },
+];
+
+export function collectSemanticPartyPlaceholderFragments(text: string): string[] {
+  const prepared = prepareAgreementTextForPlaceholderScan(text);
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const { re, label } of SEMANTIC_PARTY_PLACEHOLDER_PATTERNS) {
+    re.lastIndex = 0;
+    if (!re.test(prepared)) continue;
+    re.lastIndex = 0;
+    if (!seen.has(label)) {
+      seen.add(label);
+      found.push(label);
+    }
+  }
+  return found;
+}
+
 const INSERT_BRACKET_RE = /\[[^\]\n]{0,200}\b(?:insert|describe|tbd|to\s+be\s+(?:determined|completed|filled))[^\]\n]{0,200}\]/gi;
 const MUSTACHE_RE = /\{\{[\s\S]*?\}\}/g;
 const SINGLE_BRACE_TOKEN_RE = /\{[a-z][a-z0-9_]*\}/gi;
@@ -998,6 +1026,9 @@ export function collectForbiddenTemplateFragments(
   const found: string[] = [];
   for (const d of decisions.filter((x) => x.fatal)) {
     if (!found.includes(d.token)) found.push(d.token);
+  }
+  for (const semantic of collectSemanticPartyPlaceholderFragments(prepared)) {
+    if (!found.includes(semantic)) found.push(semantic);
   }
   return found.slice(0, 40);
 }

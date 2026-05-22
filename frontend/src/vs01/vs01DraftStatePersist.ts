@@ -133,13 +133,34 @@ export function mergeBridgeEmailsIntoSavedCounterparties(
 /**
  * Merge bridge emails and signer metadata into saved counterparties (fill blanks only).
  */
+function normalizeBridgeLookupKey(name: string, email: string): string {
+  return `${name.trim().toLowerCase()}|${email.trim().toLowerCase()}`;
+}
+
+function resolveBridgeRowForSaved(
+  saved: Vs01Counterparty,
+  index: number,
+  bridgeById: Map<string, Vs01Counterparty>,
+  bridgeByKey: Map<string, Vs01Counterparty>,
+  bridge: Vs01Counterparty[],
+): Vs01Counterparty | undefined {
+  return (
+    bridgeById.get(saved.id) ??
+    bridgeByKey.get(normalizeBridgeLookupKey(saved.name, saved.email)) ??
+    bridge[index]
+  );
+}
+
 export function mergeBridgeMetadataIntoSavedCounterparties(
   saved: Vs01Counterparty[],
   bridge: Vs01Counterparty[],
 ): Vs01Counterparty[] {
   const bridgeById = new Map(bridge.map((b) => [b.id, b]));
+  const bridgeByKey = new Map(
+    bridge.map((b) => [normalizeBridgeLookupKey(b.name, b.email), b] as const),
+  );
   return saved.map((s, i) => {
-    const b = bridgeById.get(s.id) ?? bridge[i];
+    const b = resolveBridgeRowForSaved(s, i, bridgeById, bridgeByKey, bridge);
     if (!b) return s;
     let next: Vs01Counterparty = { ...s };
     const existingEmail = (s.email || "").trim();

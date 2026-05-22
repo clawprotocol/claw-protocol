@@ -7,7 +7,12 @@ export type GuidedCompletionPhase =
   | "failed";
 
 export function guidedPhaseSuppressesSendCta(phase: GuidedCompletionPhase): boolean {
-  return phase === "collecting_answers" || phase === "ready_to_apply" || phase === "applying_all";
+  return (
+    phase === "collecting_answers" ||
+    phase === "ready_to_apply" ||
+    phase === "applying_all" ||
+    phase === "failed"
+  );
 }
 
 export function guidedPhaseBlocksDocumentSwap(phase: GuidedCompletionPhase): boolean {

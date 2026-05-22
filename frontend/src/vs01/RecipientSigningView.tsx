@@ -241,7 +241,9 @@ export function RecipientSigningView({
     if (!el) return;
     const apply = () => {
       const w = el.clientWidth;
-      if (w > 48) setPageRenderWidth(Math.max(160, w - 8));
+      const mobile = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
+      const target = mobile ? Math.max(320, Math.min(w - 8, 520)) : Math.max(160, w - 8);
+      if (w > 48) setPageRenderWidth(target);
     };
     apply();
     const ro = new ResizeObserver(apply);

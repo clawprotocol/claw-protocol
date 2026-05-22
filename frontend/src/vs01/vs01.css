@@ -4384,6 +4384,17 @@ button.vs01-upload-btn:disabled {
   max-height: min(70vh, 52rem);
 }
 
+@media (max-width: 640px) {
+  .vs01-recipient-signing-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .vs01-recipient-signing-doc-wrap .react-pdf__Page__canvas {
+    min-width: min(100%, 20rem);
+  }
+}
+
 .vs01-recipient-signing-empty {
   margin: 0.5rem 0 0;
   font-size: 0.875rem;
