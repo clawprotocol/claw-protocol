@@ -86,3 +86,47 @@ export function buildAuthoritativeReviewDraftPatch(
 export function authoritativePipelineRenderSource(): string {
   return PREMIUM_REFINE_AUTHORITATIVE_PIPELINE_SOURCE;
 }
+
+export type GuidedBulkCommitResolveArgs = {
+  applyDecision: string;
+  currentProLen: number;
+  candidatePlain: string;
+  finalTextPlain: string;
+};
+
+/** Prefer API candidate when accepted refine finalText is suspiciously stale vs candidate. */
+export function resolveGuidedBulkCommitBody(args: GuidedBulkCommitResolveArgs): string {
+  const candidate = (args.candidatePlain || "").trim();
+  const final = (args.finalTextPlain || "").trim();
+  const accepted = /accepted/i.test(args.applyDecision);
+  const materialGrowth = candidate.length > args.currentProLen * 1.05;
+  const staleFinal =
+    accepted && materialGrowth && final.length > 0 && final.length < candidate.length * 0.9;
+  if (staleFinal && candidate.length >= 500) {
+    // eslint-disable-next-line no-console
+    console.warn("[guided-authoritative-commit-mismatch]", {
+      currentLen: args.currentProLen,
+      candidateLen: candidate.length,
+      committedLen: final.length,
+      applyDecision: args.applyDecision,
+      using: "candidate",
+    });
+    return candidate;
+  }
+  if (final.length >= 500) return final;
+  return candidate.length >= 500 ? candidate : final;
+}
+
+export function logGuidedBulkCommitSuccess(args: {
+  currentProLen: number;
+  candidateLen: number;
+  committedLen: number;
+}): void {
+  // eslint-disable-next-line no-console
+  console.info("[guided-bulk-commit-success]", {
+    currentLen: args.currentProLen,
+    candidateLen: args.candidateLen,
+    committedLen: args.committedLen,
+    synced: args.committedLen >= args.candidateLen * 0.9 || args.committedLen > args.currentProLen * 1.02,
+  });
+}

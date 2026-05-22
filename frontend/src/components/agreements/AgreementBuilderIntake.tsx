@@ -618,6 +618,8 @@ import {
 import {
   buildAuthoritativeReviewDraftPatch,
   logGuidedAuthoritativeReviewSync,
+  logGuidedBulkCommitSuccess,
+  resolveGuidedBulkCommitBody,
 } from "./guidedDealCompletion/guidedAuthoritativeReviewSync";
 import { ProReviewSigningFlowPanel } from "./ProReviewSigningFlowPanel";
 import {
@@ -7066,10 +7068,45 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             ? PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY
             : PRO_REFINE_CHANGE_APPLIED_USER_MESSAGE,
         );
-        if (opts?.validateRefinedOutput && !opts.validateRefinedOutput(out)) {
+        const guidedBulkActive = guidedBulkApplyingRef.current;
+        const apiCandidateRaw = (r?.updated_document_text || "").trim();
+        const applyDecision = refineApplyDecision ?? acceptance.decision;
+        const bodyToCommit =
+          guidedBulkActive && /accepted/i.test(applyDecision)
+            ? resolveGuidedBulkCommitBody({
+                applyDecision,
+                currentProLen,
+                candidatePlain: apiCandidateRaw || out,
+                finalTextPlain: out,
+              })
+            : out;
+
+        if (guidedBulkActive && /accepted/i.test(applyDecision)) {
+          const scrollToReview =
+            opts?.scrollToReview !== undefined ? opts.scrollToReview : false;
+          applyProRefineOutputToProSurfaceRef.current?.(bodyToCommit, {
+            clearStepBuffer: true,
+            scrollToReview,
+            scrollReviewerNoteToVisible: usedAppendReviewerNotePreserve,
+          });
+          logGuidedBulkCommitSuccess({
+            currentProLen,
+            candidateLen: apiCandidateRaw.length || acceptance.refinedLen,
+            committedLen: bodyToCommit.length,
+          });
+          if (opts?.validateRefinedOutput && !opts.validateRefinedOutput(bodyToCommit)) {
+            logGuidedBulkRegenerationFailed(["bulk_placement_soft_fail"]);
+            if (bodyToCommit.length >= Math.max(currentProLen * 1.02, 500)) {
+              return true;
+            }
+            return false;
+          }
+          return true;
+        }
+
+        if (opts?.validateRefinedOutput && !opts.validateRefinedOutput(bodyToCommit)) {
           return false;
         }
-        const guidedBulkActive = guidedBulkApplyingRef.current;
         if (!opts?.skipGuidedWhatChangedSummary && !guidedBulkActive) {
           const guidedWhatChanged = whatChangedLineForGuidedVariable(
             lastGuidedAnswerVariableIdRef.current,
@@ -7089,7 +7126,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         const scrollToReview =
           opts?.scrollToReview !== undefined ? opts.scrollToReview : !guidedBulkApplyingRef.current;
-        applyProRefineOutputToProSurfaceRef.current?.(out, {
+        applyProRefineOutputToProSurfaceRef.current?.(bodyToCommit, {
           clearStepBuffer: true,
           scrollToReview,
           scrollReviewerNoteToVisible: usedAppendReviewerNotePreserve,
@@ -11308,7 +11345,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const simpleCreateStickyBottomBarVisibleBaseGated =
     simpleCreateStickyBottomBarVisibleBase &&
     !hideStickyForPaidProFinalizeDeliveryChoiceBase &&
-    !hideStickyForStarterProContinuation;
+    !hideStickyForStarterProContinuation &&
+    !guidedFinalReviewActive;
 
 
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
@@ -12728,7 +12766,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPaidDocumentSurface &&
           !isFreeStarterReviewSurface
         ? PRO_REFINE_APPLY_REVISION_BUTTON_LABEL
-        : guidedMainCtaLabel;
+        :     guidedMainCtaLabel;
+
+  useEffect(() => {
+    if (!paidProRecipientSetupOnDraft || guidedFinalReviewActive || !draft) return;
+    persistPremiumRecipientHandoffFromDraftAndUi(draft);
+  }, [
+    paidProRecipientSetupOnDraft,
+    guidedFinalReviewActive,
+    draft,
+    recipient1Email,
+    recipient2Email,
+    recipient1Name,
+    recipient2Name,
+    partySignerNames,
+    partySignerTitles,
+    persistPremiumRecipientHandoffFromDraftAndUi,
+  ]);
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
     if (!simpleCreateUnifiedBottomCta) {
@@ -12737,6 +12791,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         action: "guided_continue",
         disabled: true,
         reason: "unified_cta_inactive",
+      };
+    }
+    if (guidedFinalReviewActive) {
+      return {
+        label: "",
+        action: "guided_continue",
+        disabled: true,
+        reason: "guided_final_review_hidden",
       };
     }
     if (isGenerating || intakeDictationPhase === "processing") {
@@ -13454,7 +13516,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText,
       session,
     });
-    const docOverride = (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim() || null;
+    const docOverride = null;
     setGuidedCompletionPhase("applying_all");
     setGuidedBulkApplyError(null);
     flashGuidedAgreementUpdateToast("Updating your agreement…", null);
@@ -13527,10 +13589,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setGuidedCompletionPhase("failed");
       setGuidedBulkApplyError(GUIDED_BULK_FAIL_USER_MESSAGE);
       setReviewRefineUserMessage(GUIDED_BULK_FAIL_USER_MESSAGE);
-      applyProRefineOutputToProSurfaceRef.current?.(stableBefore, {
-        clearStepBuffer: false,
-        scrollToReview: false,
-      });
     }
   }, [
     paidBodyForGuidedCompletion,
@@ -13747,7 +13805,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
-    if (!paidProRecipientSetupOnDraft || !hasAnyValidRecipientEmail) return;
+    if (!paidProRecipientSetupOnDraft || guidedFinalReviewActive || !hasAnyValidRecipientEmail) return;
     if (detectPlaceholderRegressionInPartyLabels(resolvedPartyDisplaySlots, true)) {
       logUxTrustEvent("placeholder_regression", {
         slots: resolvedPartyDisplaySlots.map((s) => ({ i: s.index, name: s.displayName, source: s.source })),

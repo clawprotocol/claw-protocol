@@ -67,7 +67,7 @@ export function ProReviewSigningFlowPanel({
             Your agreement is ready to review
           </h3>
           <p className="mt-1 text-xs leading-relaxed text-stone-600 sm:text-sm">
-            We updated your agreement using your answers below. Review the final version before sending.
+            Your answers have been applied. Review the agreement, suggest changes, or continue to signing.
           </p>
         </>
       ) : (
@@ -143,7 +143,7 @@ export function ProReviewSigningFlowPanel({
           <p className="text-xs font-semibold text-stone-900">Suggest changes before sending</p>
           <textarea
             className="mt-2 min-h-[4.5rem] w-full resize-y rounded-md border border-stone-300/90 bg-white px-2.5 py-2 text-xs leading-relaxed text-stone-900 placeholder:text-stone-400"
-            placeholder="Example: Add a 15-day payment grace period and clarify dashboard ownership."
+            placeholder="Type requested changes…"
             value={suggestEditsDraft}
             disabled={suggestEditsBusy}
             onChange={(e) => onSuggestEditsDraftChange(e.target.value)}

@@ -42,6 +42,9 @@ describe("guided final review flow", () => {
     expect(intake).toContain("!guidedFinalReviewActive");
     expect(intake).toContain('setCreateFlowPhase("guided_final_review")');
     expect(intake).toContain("finalReviewMoment={guidedFinalReviewActive}");
+    expect(intake).toContain("resolveGuidedBulkCommitBody");
+    expect(intake).not.toContain("applyProRefineOutputToProSurfaceRef.current?.(stableBefore");
+    expect(intake).toContain("guided_final_review_hidden");
   });
 
   it("ProReviewSigningFlowPanel exposes final review copy", () => {

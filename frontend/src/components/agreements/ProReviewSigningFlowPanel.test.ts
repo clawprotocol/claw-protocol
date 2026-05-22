@@ -11,6 +11,7 @@ describe("ProReviewSigningFlowPanel", () => {
     expect(src).toContain("Upload edited version");
     expect(src).toContain("data-testid=\"pro-review-continue-to-signing\"");
     expect(src).toContain("Your agreement is ready to review");
+    expect(src).toContain("Your answers have been applied");
     expect(src).toContain("pro-review-suggest-edits-card");
   });
 

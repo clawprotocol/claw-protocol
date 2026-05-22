@@ -109,8 +109,22 @@ export function buildConsolidatedGuidedRegenerationPrompt(args: {
   return lines.join("\n");
 }
 
-/** Validate full-document output after bulk guided regeneration. */
+/** Validate full-document output after bulk guided regeneration (lenient — not surgical placement). */
 export function validateGuidedBulkRegeneration(beforeText: string, afterText: string) {
+  const before = (beforeText || "").trim();
+  const after = (afterText || "").trim();
+  const reasons: string[] = [];
+  if (after.length < Math.max(500, before.length * 0.45)) {
+    reasons.push("output_too_short");
+  }
+  if (before.length >= 800 && after.length < before.length * 0.72) {
+    reasons.push("output_shrunk_unexpectedly");
+  }
+  return { ok: reasons.length === 0, reasons };
+}
+
+/** @deprecated Surgical placement rules — use only for per-answer patch refine, not bulk regen. */
+export function validateGuidedBulkRegenerationStrictPlacement(beforeText: string, afterText: string) {
   return validateGuidedPatchPlacement(beforeText, afterText, COMBINED_FORBIDDEN_TARGET);
 }
 

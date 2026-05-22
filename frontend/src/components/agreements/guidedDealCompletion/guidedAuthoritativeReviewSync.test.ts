@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assessGuidedAuthoritativeReviewSync,
   logGuidedAuthoritativeReviewSync,
+  resolveGuidedBulkCommitBody,
 } from "./guidedAuthoritativeReviewSync";
 
 describe("guidedAuthoritativeReviewSync", () => {
@@ -14,6 +15,18 @@ describe("guidedAuthoritativeReviewSync", () => {
     });
     expect(r.synced).toBe(true);
     expect(r.authoritativeLen).toBe(body.length);
+  });
+
+  it("resolveGuidedBulkCommitBody uses candidate when finalText is stale", () => {
+    const candidate = "x".repeat(14031);
+    const stale = "y".repeat(10342);
+    const body = resolveGuidedBulkCommitBody({
+      applyDecision: "accepted_replacement",
+      currentProLen: 10342,
+      candidatePlain: candidate,
+      finalTextPlain: stale,
+    });
+    expect(body.length).toBe(14031);
   });
 
   it("warns when review render drifts from authoritative body", () => {
