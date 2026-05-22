@@ -28,4 +28,14 @@ describe("canApplyLatePremiumCompletionFromModal", () => {
       }),
     ).toEqual({ apply: false, reason: "user_dismissed" });
   });
+
+  it("always applies retryable network/generation results even when run unmounted", () => {
+    expect(
+      canApplyLatePremiumCompletionFromModal({
+        runIsStillCurrent: false,
+        userDismissedPostCheckoutWait: true,
+        retryableResult: true,
+      }),
+    ).toEqual({ apply: true, reason: "ok" });
+  });
 });

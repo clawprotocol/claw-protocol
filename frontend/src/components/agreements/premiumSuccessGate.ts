@@ -196,6 +196,16 @@ export function canShowPremiumSuccess(args: CanShowPremiumSuccessArgs): PremiumS
   }
 
   if (args.allowPaidSubstantiveStitch) {
+    const p = String(args.premiumPipelineSource || "");
+    if (pipelineIsIneligible(p)) {
+      return {
+        state: "premium_retry_available",
+        successBannerAllowed: false,
+        signerCtaAllowed: false,
+        ...outBase,
+        successBannerReasons: [`paid_stitch_blocked_pipeline:${p || "null"}`],
+      };
+    }
     const t = String(args.documentText || "").trim();
     if (t.length >= 500) {
       return {

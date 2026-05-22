@@ -6,7 +6,12 @@
 export function canApplyLatePremiumCompletionFromModal(args: {
   runIsStillCurrent: boolean;
   userDismissedPostCheckoutWait: boolean;
+  /** Network/generation retryable results must always land recovery UI even if the run unmounted. */
+  retryableResult?: boolean;
 }): { apply: boolean; reason: "ok" | "stale_unmounted" | "user_dismissed" } {
+  if (args.retryableResult) {
+    return { apply: true, reason: "ok" };
+  }
   if (!args.runIsStillCurrent) {
     return { apply: false, reason: "stale_unmounted" };
   }

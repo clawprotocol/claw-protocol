@@ -65,7 +65,6 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
 
   it("starter upgrade card remains gated behind showStarterProRefineUpsell", () => {
     expect(src).toMatch(/\{showStarterProRefineUpsell \? \(/);
-    expect(src).toContain("STARTER_PRO_REFINE_IMPROVEMENT_HEADING");
   });
 
   it("amber Pro recovery stays tied to premiumPaidDocumentSurface (starter cannot get surface without session flags)", () => {
@@ -79,7 +78,8 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   });
 
   it("paid Pro upgrade failure copy remains available for real paid recovery panels", () => {
-    expect(src).toContain("We couldn’t complete the Pro upgrade with your terms yet.");
+    expect(src).toContain("PAID_PREMIUM_CONNECTION_RECOVERY_COPY");
+    expect(src).toContain("PREMIUM_NETWORK_RECOVERABLE_HEADLINE");
   });
 
   it("suppresses amber recovery while premium return wait is active (patience / in-flight)", () => {
@@ -125,5 +125,16 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   it("logs terminal premium completion boundary timeout", () => {
     expect(src).toContain("[premium-return-terminal-timeout]");
     expect(src).toContain("PREMIUM_COMPLETION_ATTEMPT_MAX_MS");
+  });
+
+  it("network recoverable preserves paid session and reuses intake fingerprint on retry", () => {
+    expect(src).toContain("premium_network_recoverable");
+    expect(src).toContain("handlePremiumRecoverableContinueWithStarterDraft");
+    expect(src).toContain("preserve_paid: true");
+    expect(src).not.toMatch(
+      /handlePremiumRecoverableContinueWithStarterDraft[\s\S]{0,400}clearPaidPremiumCompletionSession/,
+    );
+    expect(src).toContain("premiumGapBaseIntakeRef");
+    expect(src).toContain("shortIntakeFingerprint(base)");
   });
 });

@@ -280,6 +280,9 @@ export async function postPremiumFullDraftOnce(args: {
   signal?: AbortSignal;
   /** Second pass: server uses stronger / distinct pass when output was too close to a free outline. */
   similarityRegeneration?: boolean;
+  agreementGenerationId?: string | null;
+  intakeFingerprint?: string | null;
+  agreementId?: string | null;
 }): Promise<PremiumFullDraftResult> {
   const uga = (args.userGapAnswers || "").trim();
   if (import.meta.env.DEV) {
@@ -306,6 +309,13 @@ export async function postPremiumFullDraftOnce(args: {
       context: args.context,
       ...(uga ? { user_gap_answers: uga } : {}),
       ...(args.similarityRegeneration ? { similarity_regeneration: true } : {}),
+      ...((args.agreementGenerationId || "").trim()
+        ? { agreement_generation_id: (args.agreementGenerationId || "").trim() }
+        : {}),
+      ...((args.intakeFingerprint || "").trim()
+        ? { intake_fingerprint: (args.intakeFingerprint || "").trim() }
+        : {}),
+      ...((args.agreementId || "").trim() ? { agreement_id: (args.agreementId || "").trim() } : {}),
     }),
     signal: args.signal,
   });
@@ -523,6 +533,9 @@ export async function postPremiumFullDraftWithRetry(
         context: args.context,
         userGapAnswers: args.userGapAnswers,
         signal: args.signal,
+        agreementGenerationId,
+        intakeFingerprint: shortIntakeFingerprint(args.intakeText),
+        agreementId,
       });
       const genRetry = classifyPremiumFullDraftGenerationRetryable(result);
       if (genRetry.retryable) {

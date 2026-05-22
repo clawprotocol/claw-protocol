@@ -49,6 +49,43 @@ export const PREMIUM_PRO_WAIT_ROTATE_INTERVAL_MS = 5000;
 
 export const PREMIUM_RETURN_RETRY_GENERATION_LABEL = "Retry Pro generation";
 export const PREMIUM_RETURN_USE_STARTER_LABEL = "Use current draft for now";
+export const PREMIUM_NETWORK_RECOVERABLE_HEADLINE =
+  "Your payment is confirmed. We had a connection issue while building the Pro draft.";
+export const PREMIUM_NETWORK_RECOVERABLE_BODY =
+  "Your starter draft is still here. Retry Pro draft when your connection is stable — no additional checkout.";
+export const PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL = "Retry Pro draft";
+export const PREMIUM_NETWORK_RECOVERABLE_STARTER_LABEL = "Continue with starter draft";
+export const PREMIUM_NETWORK_RECOVERABLE_COPY_DEBUG_LABEL = "Copy debug info";
+
+export type PremiumNetworkRecoverableDebugPayload = {
+  sessionGenerationId?: string | null;
+  intakeFingerprint?: string | null;
+  agreementId?: string | null;
+  renderSource?: string | null;
+  phase?: string | null;
+  ts?: string;
+};
+
+export function buildPremiumNetworkRecoverableDebugInfo(
+  payload: PremiumNetworkRecoverableDebugPayload,
+): string {
+  const lines = [
+    "LawDog Pro checkout return (network recoverable)",
+    `ts: ${payload.ts ?? new Date().toISOString()}`,
+    `phase: ${payload.phase ?? "premium_network_recoverable"}`,
+    `sessionGenerationId: ${payload.sessionGenerationId ?? "—"}`,
+    `intakeFingerprint: ${payload.intakeFingerprint ?? "—"}`,
+    `agreementId: ${payload.agreementId ?? "—"}`,
+    `renderSource: ${payload.renderSource ?? "premium_network_retryable"}`,
+  ];
+  return lines.join("\n");
+}
+
+export function logPremiumNetworkRecoverable(payload: PremiumNetworkRecoverableDebugPayload): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-network-recoverable]", payload);
+}
 
 /** Shown when HTTP succeeded but client corpus gates rejected the paid body. */
 export const PREMIUM_PAID_CORPUS_REJECTED_HEADLINE = "We couldn't safely finalize the Pro version.";

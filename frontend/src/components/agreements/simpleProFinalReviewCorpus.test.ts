@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  logFinalReviewAuthoritativeRender,
   resolveSimpleProFinalReviewCorpus,
 } from "./simpleProFinalReviewCorpus";
 
@@ -30,19 +29,18 @@ describe("resolveSimpleProFinalReviewCorpus", () => {
     expect(result.plainText.length).toBe(9000);
   });
 
-  it("logs final-review-authoritative-render", () => {
+  it("displayLen 0 with authorityOnly does not log final-review-authoritative-render", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    resolveSimpleProFinalReviewCorpus({
-      authoritativePlain: "body",
+    const result = resolveSimpleProFinalReviewCorpus({
+      authoritativePlain: "",
+      renderedPreviewPlain: "",
       finalReviewAuthorityOnly: true,
     });
-    logFinalReviewAuthoritativeRender({
-      authoritativeLen: 4,
-      renderedLen: 0,
-      source: "authoritative_hydrated",
-      displayLen: 4,
-      authorityOnly: true,
-    });
+    expect(result.plainText).toBe("");
+    expect(info).not.toHaveBeenCalledWith(
+      "[final-review-authoritative-render]",
+      expect.objectContaining({ displayLen: 0 }),
+    );
     info.mockRestore();
   });
 });

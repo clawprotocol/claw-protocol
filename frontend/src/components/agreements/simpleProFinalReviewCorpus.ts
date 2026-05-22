@@ -111,6 +111,18 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     overriddenPreview = true;
   }
 
+  if (authorityOnly && plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
+    logFinalReviewAuthoritativeRenderBlocked({ reason: "empty_authoritative_body" });
+    return {
+      plainText: "",
+      source: picked.source,
+      authoritativeLen: 0,
+      renderedLen,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
+
   const resolution: SimpleProFinalReviewCorpusResolution = {
     plainText,
     source,
@@ -126,9 +138,16 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     source: resolution.source,
     displayLen: resolution.plainText.length,
     authorityOnly,
+    blockedEmpty: authorityOnly && resolution.plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN,
   });
 
   return resolution;
+}
+
+export function logFinalReviewAuthoritativeRenderBlocked(payload: { reason: string }): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[final-review-authoritative-render-blocked]", payload);
 }
 
 export function logSimpleFinalReviewAuthoritativeOverride(payload: {
@@ -147,8 +166,10 @@ export function logFinalReviewAuthoritativeRender(payload: {
   source: SimpleProFinalReviewCorpusSource;
   displayLen: number;
   authorityOnly: boolean;
+  blockedEmpty?: boolean;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (payload.blockedEmpty) return;
   // eslint-disable-next-line no-console
   console.info("[final-review-authoritative-render]", payload);
 }

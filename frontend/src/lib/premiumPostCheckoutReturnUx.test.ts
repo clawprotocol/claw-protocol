@@ -5,8 +5,10 @@ import {
   PREMIUM_PRO_WAIT_STALE_COPY_BANS,
   PREMIUM_PAID_CORPUS_REJECTED_BODY,
   PREMIUM_PAID_CORPUS_REJECTED_HEADLINE,
-  PREMIUM_RETURN_RETRY_GENERATION_LABEL,
-  PREMIUM_RETURN_USE_STARTER_LABEL,
+  PREMIUM_NETWORK_RECOVERABLE_HEADLINE,
+  PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL,
+  PREMIUM_NETWORK_RECOVERABLE_STARTER_LABEL,
+  buildPremiumNetworkRecoverableDebugInfo,
   logPremiumProWaitCopyRotated,
   logPremiumProWaitSuccessTransition,
   logPremiumProWaitView,
@@ -92,8 +94,22 @@ describe("premium post-checkout return UX policy", () => {
         authoritativeRequestInFlight: false,
       }),
     ).toBe(true);
-    expect(PREMIUM_RETURN_RETRY_GENERATION_LABEL).toMatch(/Retry Pro generation/);
-    expect(PREMIUM_RETURN_USE_STARTER_LABEL).toMatch(/Use current draft/i);
+    expect(PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL).toMatch(/Retry Pro draft/);
+    expect(PREMIUM_NETWORK_RECOVERABLE_STARTER_LABEL).toMatch(/Continue with starter draft/i);
+  });
+
+  it("network recoverable debug info includes session generation and fingerprint", () => {
+    const text = buildPremiumNetworkRecoverableDebugInfo({
+      sessionGenerationId: "gen-123",
+      intakeFingerprint: "fp-abc",
+      agreementId: "agr-1",
+      renderSource: "premium_network_retryable",
+      phase: "premium_network_recoverable",
+    });
+    expect(text).toContain("gen-123");
+    expect(text).toContain("fp-abc");
+    expect(text).toContain("premium_network_recoverable");
+    expect(PREMIUM_NETWORK_RECOVERABLE_HEADLINE).toMatch(/payment is confirmed/i);
   });
 
   it("soft wait uses warmer building headline without finishing copy", () => {

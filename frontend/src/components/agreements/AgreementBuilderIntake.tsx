@@ -459,6 +459,9 @@ import {
 import {
   authoritativePremiumCompletionMatchesSession,
   authoritativePremiumPipelineResultForUiApply,
+  isPremiumNetworkRecoverableResult,
+  isPremiumPipelineRewriteSucceeded,
+  isPremiumRecoverablePipelineResult,
 } from "./premiumPostCheckoutApplyEligible";
 import {
   hasMaterialPremiumPipelineCorpus,
@@ -475,8 +478,15 @@ import {
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
 } from "../../lib/postCheckoutModalTimeout";
 import {
+  PREMIUM_NETWORK_RECOVERABLE_BODY,
+  PREMIUM_NETWORK_RECOVERABLE_COPY_DEBUG_LABEL,
+  PREMIUM_NETWORK_RECOVERABLE_HEADLINE,
+  PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL,
+  PREMIUM_NETWORK_RECOVERABLE_STARTER_LABEL,
   PREMIUM_RETURN_RETRY_GENERATION_LABEL,
   PREMIUM_RETURN_USE_STARTER_LABEL,
+  buildPremiumNetworkRecoverableDebugInfo,
+  logPremiumNetworkRecoverable,
   logPremiumProWaitSuccessTransition,
   resetPremiumReviewScrollToTop,
   resolvePremiumProWaitModalView,
@@ -1909,10 +1919,11 @@ type PremiumPostCheckoutPhase =
   | "processing"
   | "terminal_failure"
   | "network_retry"
+  | "premium_network_recoverable"
   | "generation_retry";
 
 function isPremiumNetworkRetryablePipelineResult(result: PremiumCompletionResult): boolean {
-  return Boolean(result.premiumNetworkRetryable) || result.premiumRenderSource === "premium_network_retryable";
+  return isPremiumNetworkRecoverableResult(result);
 }
 
 function isPremiumGenerationRetryablePipelineResult(result: PremiumCompletionResult): boolean {
@@ -1923,10 +1934,7 @@ function isPremiumGenerationRetryablePipelineResult(result: PremiumCompletionRes
 }
 
 function isPremiumRetryablePipelineResult(result: PremiumCompletionResult): boolean {
-  return (
-    isPremiumNetworkRetryablePipelineResult(result) ||
-    isPremiumGenerationRetryablePipelineResult(result)
-  );
+  return isPremiumRecoverablePipelineResult(result);
 }
 
 function devTracePremiumSendIntent(source: string, mode: PremiumSendIntent | null, senderFirst?: boolean) {
@@ -4998,55 +5006,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         };
         try {
-        paidCheckoutCompletedRef.current = true;
-        {
-          const wDup = (result.winningPremiumBodyText || "").trim();
-          if (
-            isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) &&
-            wDup.length >= 500 &&
-            result.agreementGenerationId != null
-          ) {
-            const s0 = readPremiumCompletionSnapshot();
-            if (
-              s0?.premiumAccepted &&
-              s0.agreementGenerationId != null &&
-              String(s0.agreementGenerationId) === String(result.agreementGenerationId) &&
-              (s0.premiumWinningBodyText || "").trim().length >= 500
-            ) {
-              logPremiumDuplicateRunBlocked({
-                reason: "applySuccess_authoritative_already_persisted_same_gen",
-                agreementGenerationId: result.agreementGenerationId,
-                note: "telemetry_only_full_apply_success_still_runs_visible_commit",
-              });
-            }
-          }
-        }
         if (resumeSnap?.resume_kind === "optional_full_upgrade") {
           setProReplacedStarterAfterUpgrade(true);
-        }
-        emitPaidFunnelEvent("premium_checkout_completed", {
-          once: true,
-          extra: {
-            premium_generation_outcome: result.serverGenerationDegraded
-              ? "degraded"
-              : result.proIntentGateMessage || result.founderDetailsGateMessage
-                ? "needs_details"
-                : "ok",
-            render_source: result.premiumRenderSource,
-            ...(result.serverGenerationDegraded?.code
-              ? { server_generation_failure_code: result.serverGenerationDegraded.code }
-              : {}),
-          },
-        });
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.info("[dev-premium-bind] apply", {
-            raw_intake_hash: shortIntakeFingerprint(mergedIntake),
-            active_generation_id: getOrInitSessionAgreementGenerationId(),
-            premium_response_generation_id: result.agreementGenerationId,
-            premium_request_fp: result.premiumRequestIntakeFingerprint,
-            render_source: result.premiumRenderSource,
-          });
         }
         if (result.staleIntakeOrGeneration) {
           setPremiumServerGenerationDegraded(null);
@@ -5100,10 +5061,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
             intakeFingerprint: shortIntakeFingerprint(mergedIntake),
           });
+          logPremiumNetworkRecoverable({
+            sessionGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+            intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+            renderSource: result.premiumRenderSource,
+            phase: "premium_network_recoverable",
+          });
           setPremiumServerGenerationDegraded(null);
           setHardError(null);
-          setProFullDraftCustomGateMessage(null);
-          setProFullDraftQualityRetry(false);
+          setProFullDraftCustomGateMessage(PREMIUM_NETWORK_RECOVERABLE_HEADLINE);
+          setProFullDraftQualityRetry(true);
           clearPremiumForkUserSendMode();
           paidProPremiumSendIntentRef.current = null;
           clearPremiumSendIntent();
@@ -5116,13 +5084,69 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumRefineReview(null);
           setPremiumFinalizeAudit(null);
           setPremiumReviewRoute(null);
-          setPremiumPostCheckoutPhase("network_retry");
+          premiumModalExtendedWaitActiveRef.current = false;
+          setPremiumCheckoutModalExtendedWait(false);
+          setPremiumReturnPatienceExtended(false);
+          premiumPostCheckoutModalHardFailopenRef.current = false;
+          setPremiumAuthoritativeRequestInFlight(false);
+          applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+          setPremiumPostCheckoutPhase("premium_network_recoverable");
           setPremiumPipelineUserMessage(null);
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.info("[premium-modal-stage]", { to: "network_retry", ts: new Date().toISOString() });
+            console.info("[premium-modal-stage]", { to: "premium_network_recoverable", ts: new Date().toISOString() });
           }
           return;
+        }
+        paidCheckoutCompletedRef.current = true;
+        {
+          const wDup = (result.winningPremiumBodyText || "").trim();
+          if (
+            isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) &&
+            wDup.length >= 500 &&
+            result.agreementGenerationId != null
+          ) {
+            const s0 = readPremiumCompletionSnapshot();
+            if (
+              s0?.premiumAccepted &&
+              s0.agreementGenerationId != null &&
+              String(s0.agreementGenerationId) === String(result.agreementGenerationId) &&
+              (s0.premiumWinningBodyText || "").trim().length >= 500
+            ) {
+              logPremiumDuplicateRunBlocked({
+                reason: "applySuccess_authoritative_already_persisted_same_gen",
+                agreementGenerationId: result.agreementGenerationId,
+                note: "telemetry_only_full_apply_success_still_runs_visible_commit",
+              });
+            }
+          }
+        }
+        if (isPremiumPipelineRewriteSucceeded(result)) {
+          emitPaidFunnelEvent("premium_checkout_completed", {
+            once: true,
+            extra: {
+              premium_generation_outcome: result.serverGenerationDegraded
+                ? "degraded"
+                : result.proIntentGateMessage || result.founderDetailsGateMessage
+                  ? "needs_details"
+                  : "ok",
+              render_source: result.premiumRenderSource,
+              ...(result.serverGenerationDegraded?.code
+                ? { server_generation_failure_code: result.serverGenerationDegraded.code }
+                : {}),
+            },
+          });
+        }
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[dev-premium-bind] apply", {
+            raw_intake_hash: shortIntakeFingerprint(mergedIntake),
+            active_generation_id: getOrInitSessionAgreementGenerationId(),
+            premium_response_generation_id: result.agreementGenerationId,
+            premium_request_fp: result.premiumRequestIntakeFingerprint,
+            render_source: result.premiumRenderSource,
+            rewrite_succeeded: isPremiumPipelineRewriteSucceeded(result),
+          });
         }
         if (
           (result.proIntentGateMessage || result.founderDetailsGateMessage) &&
@@ -6245,7 +6269,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   completed_before_timeout: true,
                   timeout_ms: premiumCompletionAttemptTimeoutMs,
                 });
-                console.info("[premium-flow] premium_rewrite_request_success", { attempt });
+                if (result && isPremiumRecoverablePipelineResult(result)) {
+                  console.info("[premium-flow] premium_rewrite_retryable", {
+                    attempt,
+                    render_source: result.premiumRenderSource,
+                  });
+                } else if (result && isPremiumPipelineRewriteSucceeded(result)) {
+                  console.info("[premium-flow] premium_rewrite_request_success", { attempt });
+                } else if (result) {
+                  console.info("[premium-flow] premium_rewrite_request_no_authoritative_body", {
+                    attempt,
+                    render_source: result.premiumRenderSource,
+                  });
+                }
                 break;
               } catch (e) {
                 const em = e instanceof Error ? e.message : String(e);
@@ -6293,13 +6329,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           clearPostCheckoutModalTimers();
           premiumModalEscapeHandlerRef.current = null;
 
+          const retryableReadyForApply = Boolean(result && isPremiumRetryablePipelineResult(result));
           const authoritativeReadyForApply =
             Boolean(result) &&
             authoritativePremiumPipelineResultForUiApply(result!) &&
             authoritativePremiumCompletionMatchesSession(result!, sessionGenForPass) &&
             !premiumPostCheckoutUserDismissedRef.current;
 
-          if (!runIsCurrent() && !authoritativeReadyForApply) {
+          if (!runIsCurrent() && !authoritativeReadyForApply && !retryableReadyForApply) {
             if (import.meta.env.DEV) {
               // eslint-disable-next-line no-console
               console.info("[premium-timeout-race]", {
@@ -6318,10 +6355,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
 
           const lateApply = canApplyLatePremiumCompletionFromModal({
-            runIsStillCurrent: runIsCurrent() || authoritativeReadyForApply,
+            runIsStillCurrent: runIsCurrent() || authoritativeReadyForApply || retryableReadyForApply,
             userDismissedPostCheckoutWait: premiumPostCheckoutUserDismissedRef.current,
+            retryableResult: retryableReadyForApply,
           });
-          if (!lateApply.apply) {
+          if (!lateApply.apply && !retryableReadyForApply) {
             if (import.meta.env.DEV) {
               // eslint-disable-next-line no-console
               console.info("[premium-timeout-race]", {
@@ -6352,7 +6390,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
           const elapsed = Date.now() - started;
           if (elapsed < minMs) await sleep(minMs - elapsed);
-          if (!runIsCurrent() && !authoritativeReadyForApply) {
+          if (!runIsCurrent() && !authoritativeReadyForApply && !retryableReadyForApply) {
             if (import.meta.env.DEV) {
               // eslint-disable-next-line no-console
               console.info("[premium-timeout-race]", {
@@ -11039,6 +11077,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [draft, debouncedStepBuffer, scheduleAgreementDocSync, bumpPremiumSurfaceGateTick]);
 
+  const handlePremiumRecoverableContinueWithStarterDraft = React.useCallback(() => {
+    console.info("[premium-return-user-fallback]", {
+      source: "network_recoverable_starter_draft",
+      preserve_paid: true,
+    });
+    setPremiumPostCheckoutPhase(null);
+    setPremiumPipelineUserMessage(null);
+    setProFullDraftQualityRetry(true);
+    setProUpgradeUseStarterView(true);
+    setProFullDraftCustomGateMessage(PREMIUM_NETWORK_RECOVERABLE_BODY);
+    const d = draftSnapshotRef.current ?? draft;
+    if (d) {
+      const txt = buildAgreementPreviewText(d, {
+        starterPreview: true,
+        premiumDeliverablePreview: false,
+        intakeText: debouncedStepBuffer,
+      });
+      agreementDocumentDirtyRef.current = true;
+      setAgreementDocumentText(txt);
+      scheduleAgreementDocSync(txt);
+    }
+    if (createProductionTwoPane && simpleProductFlow) {
+      setDisplayPhase("review");
+    }
+  }, [draft, debouncedStepBuffer, scheduleAgreementDocSync, createProductionTwoPane, simpleProductFlow]);
+
+  const handleCopyPremiumNetworkRecoverableDebugInfo = React.useCallback(async () => {
+    const debugText = buildPremiumNetworkRecoverableDebugInfo({
+      sessionGenerationId: getOrInitSessionAgreementGenerationId(),
+      intakeFingerprint: shortIntakeFingerprint(
+        premiumGapBaseIntakeRef.current || currentPremiumMergedIntakeKey || intakeCombined,
+      ),
+      agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+      renderSource: lastPremiumPipelineRenderSourceRef.current || "premium_network_retryable",
+      phase: premiumPostCheckoutPhase ?? "premium_network_recoverable",
+    });
+    try {
+      await navigator.clipboard.writeText(debugText);
+    } catch {
+      window.prompt("Copy debug info:", debugText);
+    }
+  }, [currentPremiumMergedIntakeKey, intakeCombined, premiumPostCheckoutPhase]);
+
   useEffect(() => {
     if (!premiumPaidDocumentSurface) setPremiumReviewDocEditorOpen(false);
   }, [premiumPaidDocumentSurface]);
@@ -14442,7 +14523,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }).sessionHasRenderableQueue,
   );
   const premiumReturnWaitActive = Boolean(
-    premiumPostCheckoutPhase || premiumAuthoritativeRequestInFlightUi || premiumReturnPatienceExtended,
+    (premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable") ||
+      premiumAuthoritativeRequestInFlightUi ||
+      premiumReturnPatienceExtended,
+  );
+  const showPremiumNetworkRecoverablePanel = Boolean(
+    premiumPaidDocumentSurface &&
+      hasPaidPremiumCompletionSession() &&
+      premiumPostCheckoutPhase === "premium_network_recoverable" &&
+      !authoritativePremiumUiCommitted &&
+      !canProceedWithPaidProDocument,
   );
   const primaryGuidedFooter = useMemo(
     () =>
@@ -14556,6 +14646,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     !simpleProFinalReviewActive &&
       premiumPaidDocumentSurface &&
       !proUpgradeUseStarterView &&
+      guidedBodyUsable &&
+      canProceedWithPaidProDocument &&
       guidedProUxShowsQuestionPanel(guidedProUxState) &&
       activeGuidedCompletionSession &&
       guidedSessionQueueRenderable &&
@@ -14787,6 +14879,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedCompletionActive = Boolean(
     premiumPaidDocumentSurface &&
       !proUpgradeUseStarterView &&
+      guidedBodyUsable &&
+      canProceedWithPaidProDocument &&
       !shouldGateGuidedRenderAuthorityForFreeReview({
         isFreeStreamlineDraftReview,
         isFreeStarterReviewSurface,
@@ -15062,7 +15156,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !proUpgradeUseStarterView &&
       !canProceedWithPaidProDocument &&
       !premiumReturnWaitActive &&
-      !showGuidedCompletionRecovery,
+      !showGuidedCompletionRecovery &&
+      !showPremiumNetworkRecoverablePanel,
   );
   const showRetryAsPrimaryCta = Boolean(
     simpleCreateUnifiedBottomCta &&
@@ -16807,7 +16902,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       {showMainIntakeForm ? (
         liveWorkspaceTwoPane ? (
           <>
-            {simpleProductFlow && createProductionTwoPane && premiumPostCheckoutPhase ? (
+            {simpleProductFlow && createProductionTwoPane && premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable" ? (
               <div
                 className="fixed inset-0 z-[220] flex items-center justify-center bg-[#0a0e18]/92 px-4 backdrop-blur-sm"
                 role="dialog"
@@ -18341,7 +18436,50 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     </div>
                                   </div>
                                 ) : null}
-                                {showProAmberRecoveryPanel ? (
+                                {showPremiumNetworkRecoverablePanel ? (
+                                  <div className="mx-auto mb-4 w-full max-w-[850px] px-0 sm:px-1">
+                                    <div
+                                      className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-4 py-5 sm:px-6 sm:py-6"
+                                      role="status"
+                                      aria-live="polite"
+                                      data-testid="premium-network-recoverable-panel"
+                                    >
+                                      <p className="text-sm font-semibold leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
+                                        {PREMIUM_NETWORK_RECOVERABLE_HEADLINE}
+                                      </p>
+                                      <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
+                                        {PREMIUM_NETWORK_RECOVERABLE_BODY}
+                                      </p>
+                                      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-2">
+                                        <button
+                                          type="button"
+                                          className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25 sm:w-auto"
+                                          data-testid="premium-network-recoverable-retry"
+                                          onClick={handleRetryProFullDraft}
+                                        >
+                                          {PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-500/50 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800/60 sm:w-auto"
+                                          data-testid="premium-network-recoverable-starter"
+                                          onClick={handlePremiumRecoverableContinueWithStarterDraft}
+                                        >
+                                          {PREMIUM_NETWORK_RECOVERABLE_STARTER_LABEL}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-600/50 bg-transparent px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-900/40 sm:w-auto"
+                                          data-testid="premium-network-recoverable-copy-debug"
+                                          onClick={() => void handleCopyPremiumNetworkRecoverableDebugInfo()}
+                                        >
+                                          {PREMIUM_NETWORK_RECOVERABLE_COPY_DEBUG_LABEL}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : null}
+                                {showProAmberRecoveryPanel && !showPremiumNetworkRecoverablePanel ? (
                                   showStrictRetryNeedsDetailsPanel ? (
                                     <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
                                       <div
@@ -18383,7 +18521,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             <button
                                               type="button"
                                               className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-500/50 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800/60 sm:w-auto"
-                                              onClick={handleProUpgradeUseStarterInstead}
+                                              onClick={handlePremiumRecoverableContinueWithStarterDraft}
                                             >
                                               {PREMIUM_RETURN_USE_STARTER_LABEL}
                                             </button>

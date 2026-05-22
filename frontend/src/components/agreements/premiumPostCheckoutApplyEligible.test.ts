@@ -3,6 +3,10 @@ import type { PremiumCompletionResult } from "./premiumCompletionPipeline";
 import {
   authoritativePremiumCompletionMatchesSession,
   authoritativePremiumPipelineResultForUiApply,
+  hasUsablePremiumBodyText,
+  isPremiumNetworkRecoverableResult,
+  isPremiumPipelineRewriteSucceeded,
+  isPremiumRecoverablePipelineResult,
 } from "./premiumPostCheckoutApplyEligible";
 
 function mockAuthoritativeResult(overrides: Partial<PremiumCompletionResult> = {}): PremiumCompletionResult {
@@ -71,5 +75,23 @@ describe("premiumPostCheckoutApplyEligible", () => {
       authoritativePremiumPipelineResultForUiApply(r) &&
       authoritativePremiumCompletionMatchesSession(r, "same-gen");
     expect(authoritativeReadyForApply).toBe(true);
+  });
+
+  it("network retryable is not rewrite success and not eligible for UI apply", () => {
+    const r = mockAuthoritativeResult({
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_network_retryable",
+      premiumNetworkRetryable: true,
+    });
+    expect(isPremiumNetworkRecoverableResult(r)).toBe(true);
+    expect(isPremiumRecoverablePipelineResult(r)).toBe(true);
+    expect(isPremiumPipelineRewriteSucceeded(r)).toBe(false);
+    expect(authoritativePremiumPipelineResultForUiApply(r)).toBe(false);
+  });
+
+  it("hasUsablePremiumBodyText rejects short and placeholder bodies", () => {
+    expect(hasUsablePremiumBodyText("x".repeat(600))).toBe(true);
+    expect(hasUsablePremiumBodyText("x".repeat(100))).toBe(false);
+    expect(hasUsablePremiumBodyText("placeholder")).toBe(false);
   });
 });
