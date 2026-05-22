@@ -35,6 +35,38 @@ function sessionStub(queue: string[], answered: Record<string, string>): GuidedC
 }
 
 describe("guidedCompletionFreeze", () => {
+  it("blocks queue rebuild during applying_all and updated_agreement_ready", () => {
+    expect(
+      isGuidedQueueRebuildBlocked({
+        completionFrozen: false,
+        frozenAfterApplyRef: false,
+        bulkApplying: false,
+        phase: "applying_all",
+        finalReviewActive: false,
+        createFlowPhase: "draft_ready_for_review",
+      }),
+    ).toBe(true);
+    expect(
+      isGuidedQueueRebuildBlocked({
+        completionFrozen: false,
+        frozenAfterApplyRef: true,
+        bulkApplying: false,
+        phase: "ready_to_apply",
+        finalReviewActive: false,
+      }),
+    ).toBe(true);
+    expect(
+      isGuidedQueueRebuildBlocked({
+        completionFrozen: false,
+        frozenAfterApplyRef: false,
+        bulkApplying: false,
+        phase: "applied",
+        finalReviewActive: false,
+        createFlowPhase: "updated_agreement_ready",
+      }),
+    ).toBe(true);
+  });
+
   it("blocks queue rebuild after apply and final review", () => {
     expect(
       isGuidedQueueRebuildBlocked({

@@ -567,6 +567,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("readPremiumRecipientHandoffMemo");
     expect(intake).toContain("guidedCompletionFrozen");
     expect(intake).toContain("guidedProUxState");
+    expect(intake).toContain("guidedProUxAllowsRecipientSetup");
+    expect(intake).toContain("guidedProUxBlocksRecipientSetup");
+    expect(intake).toContain("guidedBulkApplyingActive");
+    expect(intake).toContain("post_apply_quality_soft_fail_kept_ready");
     expect(intake).toContain("suppressGuidedFreeformUx");
     expect(intake).toContain("GuidedUpdatedAgreementReadyCard");
     expect(intake).toContain("updated_agreement_ready");

@@ -653,6 +653,8 @@ import {
   logRecipientSetupPhaseBlocked,
   logRecipientUiSuppressed,
   resolveGuidedProUxState,
+  guidedProUxAllowsRecipientSetup,
+  guidedProUxBlocksRecipientSetup,
 } from "./guidedDealCompletion/guidedProUxState";
 import { readPremiumRecipientHandoffMemo } from "./premiumRecipientHandoffReadCache";
 import { downloadExportDraftDocx, downloadExportDraftTxt } from "../../agreement/proRedlineReviewApi";
@@ -4143,7 +4145,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const recipientsSurfaceReleased = peekPremiumRecipientsSurfaceReleased();
     const revealSeen = peekPremiumPostCheckoutRevealDismissed();
     const blockRecipientReleaseForFinalReview =
-      guidedCompletionPhase === "applied" || isGuidedFinalReviewPhase(createFlowPhase);
+      guidedCompletionPhase === "applying_all" ||
+      guidedCompletionPhase === "ready_to_apply" ||
+      guidedCompletionPhase === "applied" ||
+      isGuidedFinalReviewPhase(createFlowPhase) ||
+      isUpdatedAgreementReadyPhase(createFlowPhase);
     if (recipientsSurfaceReleased && !blockRecipientReleaseForFinalReview) {
       setPremiumRecipientUxActive(true);
       setPremiumPostCheckoutPhase(null);
@@ -8418,13 +8424,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Paid authoritative Pro: recipient setup stays on the Pro review surface (DRAFT) — never legacy RECIPIENTS shell. */
   const advancePaidProToRecipientSetup = useCallback(() => {
     if (
-      (isGuidedFinalReviewPhase(createFlowPhase) ||
-        isUpdatedAgreementReadyPhase(createFlowPhase) ||
-        (guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened)) &&
+      guidedProUxBlocksRecipientSetup({
+        guidedCompletionPhase,
+        createFlowPhase,
+        finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
+        guidedBulkApplying: guidedBulkApplyingRef.current,
+      }) &&
       !guidedFinalReviewContinueArmedRef.current
     ) {
       logGuidedFinalReviewPhaseGuardBlocked("advancePaidProToRecipientSetup", createFlowPhase);
-      logRecipientSetupPhaseBlocked("advancePaidProToRecipientSetup", "updated_agreement_ready");
+      logRecipientSetupPhaseBlocked("advancePaidProToRecipientSetup", "guided_applying_updates");
       return;
     }
     setDisplayPhase("review");
@@ -10589,6 +10598,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const guidedFinalReviewActive = simpleProFinalReviewActive;
 
+  const guidedBulkApplyingActive =
+    guidedBulkApplyingRef.current || guidedCompletionPhase === "applying_all";
+
   const guidedProUxState = useMemo(() => {
     const state = resolveGuidedProUxState({
       premiumPaidDocumentSurface,
@@ -10597,6 +10609,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createFlowPhase,
       premiumRecipientUxActive,
       finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
+      guidedBulkApplying: guidedBulkApplyingActive,
     });
     logGuidedProUxStateResolved(state, guidedCompletionPhase);
     return state;
@@ -10607,6 +10620,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
     premiumRecipientUxActive,
     guidedFinalReviewExplicitlyOpened,
+    guidedBulkApplyingActive,
   ]);
 
   const suppressGuidedFreeformUx = guidedProUxSuppressesFreeform(guidedProUxState);
@@ -10618,9 +10632,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           createProductionTwoPane &&
           createUiStage === CreateUiStage.DRAFT &&
           premiumSignersSurfaceReady &&
-          !guidedFinalReviewActive &&
-          !isUpdatedAgreementReadyPhase(createFlowPhase) &&
-          !(guidedCompletionPhase === "applied" && !guidedFinalReviewExplicitlyOpened) &&
+          guidedProUxAllowsRecipientSetup(guidedProUxState) &&
           (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send"),
       ),
     [
@@ -10629,9 +10641,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createUiStage,
       premiumSignersSurfaceReady,
       createFlowPhase,
-      guidedFinalReviewActive,
-      guidedCompletionPhase,
-      guidedFinalReviewExplicitlyOpened,
+      guidedProUxState,
     ],
   );
   const productionReadyForPersist = Boolean(
@@ -11457,8 +11467,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const showProLawdogRefineAndFinalize = useMemo(
-    () => showFinalizeYourAgreement && canProceedWithPaidProDocument && !proUpgradeUseStarterView,
-    [showFinalizeYourAgreement, canProceedWithPaidProDocument, proUpgradeUseStarterView],
+    () =>
+      showFinalizeYourAgreement &&
+      canProceedWithPaidProDocument &&
+      !proUpgradeUseStarterView &&
+      !suppressGuidedFreeformUx &&
+      guidedProUxState !== "guided_final_review" &&
+      !guidedBulkApplyingActive,
+    [
+      showFinalizeYourAgreement,
+      canProceedWithPaidProDocument,
+      proUpgradeUseStarterView,
+      suppressGuidedFreeformUx,
+      guidedProUxState,
+      guidedBulkApplyingActive,
+    ],
   );
 
   /** Paid Pro: bottom sticky duplicates “Send for review / signature” on the finalize panel — hide until recipients. */
@@ -13558,7 +13581,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (
         guidedFrozenAfterApplyRef.current &&
         prev &&
-        (guidedCompletionPhase === "applied" || simpleProFinalReviewActive)
+        (guidedCompletionPhase === "applied" ||
+          guidedCompletionPhase === "applying_all" ||
+          isUpdatedAgreementReadyPhase(createFlowPhase) ||
+          simpleProFinalReviewActive)
       ) {
         const frozen = freezeGuidedSessionAfterApply(prev, guidedSessionKey);
         guidedCompletionSessionRef.current = frozen;
@@ -13749,6 +13775,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const validation = validateGuidedBulkRegeneration(stableBefore, out, session);
         if (validation.ok) return true;
         logGuidedBulkRegenerationFailed(validation.reasons);
+        if (out.trim().length >= Math.max(stableBefore.trim().length * 1.02, 500)) {
+          return true;
+        }
         return false;
       },
     });
@@ -13811,9 +13840,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         changedClauseCount: applyResult.areas.length,
       });
     } else {
-      setGuidedCompletionPhase("failed");
-      setGuidedBulkApplyError(GUIDED_BULK_FAIL_USER_MESSAGE);
-      setReviewRefineUserMessage(GUIDED_BULK_FAIL_USER_MESSAGE);
+      const postBody = (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
+      const softKeepReady =
+        postBody.length >= Math.max(stableBefore.trim().length * 1.02, 500);
+      if (softKeepReady) {
+        logGuidedBulkRegenerationFailed(["post_apply_quality_soft_fail_kept_ready"]);
+        const nextLen = postBody.length;
+        bumpAuthoritativeAgreementVersion(nextLen, persistedPremiumReviewTitle || draft?.title || "");
+        setGuidedAuthVersionNonce((n) => n + 1);
+        setAppliedGuidedChanges(buildAppliedChangesFromSession(session));
+        setGuidedCompletionPhase("applied");
+        setGuidedBulkApplyError(null);
+        setReviewRefineUserMessage(null);
+        setGuidedFinalReviewExplicitlyOpened(false);
+        setCreateFlowPhase("updated_agreement_ready");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setDisplayPhase("review");
+        setPremiumRecipientUxActive(false);
+        resetPremiumRecipientsSurfaceForFinalReview();
+        finalReviewSendPathChosenRef.current = false;
+        finalReviewSendIntentRef.current = null;
+        const frozenSession = freezeGuidedSessionAfterApply(session, guidedSessionKey);
+        guidedCompletionSessionRef.current = frozenSession;
+        setGuidedCompletionSession(frozenSession);
+        persistGuidedSession(frozenSession, guidedSessionKey);
+        bumpPremiumSurfaceGateTick();
+        setReviewDocRefreshTick((n) => n + 1);
+        flashGuidedAgreementUpdateToast("Updated agreement ready for review", null);
+      } else {
+        setGuidedCompletionPhase("failed");
+        setGuidedBulkApplyError(GUIDED_BULK_FAIL_USER_MESSAGE);
+        setReviewRefineUserMessage(GUIDED_BULK_FAIL_USER_MESSAGE);
+      }
     }
   }, [
     paidBodyForGuidedCompletion,

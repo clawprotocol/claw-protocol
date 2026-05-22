@@ -4,7 +4,7 @@
  */
 
 import type { CreateFlowProductionPhase } from "../createFlowTypes";
-import { isGuidedFinalReviewPhase } from "../createFlowTypes";
+import { isGuidedFinalReviewPhase, isUpdatedAgreementReadyPhase } from "../createFlowTypes";
 import type { GuidedCompletionPhase } from "./guidedCompletionPhase";
 
 export type GuidedProUxState =
@@ -25,30 +25,46 @@ export type ResolveGuidedProUxStateArgs = {
   /** User explicitly opened final review via CTA. */
   finalReviewExplicitlyOpened: boolean;
   signingPacketSetupActive?: boolean;
+  /** True while bulk guided regeneration is in flight (ref may be set before phase state flushes). */
+  guidedBulkApplying?: boolean;
 };
+
+/** Guided phases where recipient/signing UI must stay hidden until explicit final-review send intent. */
+export function guidedProUxBlocksRecipientSetup(args: {
+  guidedCompletionPhase: GuidedCompletionPhase;
+  createFlowPhase: CreateFlowProductionPhase;
+  finalReviewExplicitlyOpened: boolean;
+  guidedBulkApplying?: boolean;
+}): boolean {
+  if (args.guidedBulkApplying || args.guidedCompletionPhase === "applying_all") return true;
+  if (
+    args.guidedCompletionPhase === "collecting_answers" ||
+    args.guidedCompletionPhase === "ready_to_apply"
+  ) {
+    return true;
+  }
+  if (args.guidedCompletionPhase === "applied" && !args.finalReviewExplicitlyOpened) {
+    return (
+      isUpdatedAgreementReadyPhase(args.createFlowPhase) ||
+      args.createFlowPhase === "draft_ready_for_review"
+    );
+  }
+  if (
+    args.guidedCompletionPhase === "applied" &&
+    args.finalReviewExplicitlyOpened &&
+    isGuidedFinalReviewPhase(args.createFlowPhase)
+  ) {
+    return true;
+  }
+  return false;
+}
 
 export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): GuidedProUxState {
   if (!args.premiumPaidDocumentSurface) return "inactive";
 
   if (args.signingPacketSetupActive) return "signing_packet_setup";
 
-  if (
-    args.premiumRecipientUxActive ||
-    args.createFlowPhase === "recipient_setup_required" ||
-    args.createFlowPhase === "ready_to_send"
-  ) {
-    return "recipient_setup";
-  }
-
-  if (
-    isGuidedFinalReviewPhase(args.createFlowPhase) &&
-    args.guidedCompletionPhase === "applied" &&
-    args.finalReviewExplicitlyOpened
-  ) {
-    return "guided_final_review";
-  }
-
-  if (args.guidedCompletionPhase === "applying_all") {
+  if (args.guidedBulkApplying || args.guidedCompletionPhase === "applying_all") {
     return "guided_applying_updates";
   }
 
@@ -56,7 +72,30 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
     if (args.finalReviewExplicitlyOpened && isGuidedFinalReviewPhase(args.createFlowPhase)) {
       return "guided_final_review";
     }
-    return "updated_agreement_ready";
+    if (
+      isUpdatedAgreementReadyPhase(args.createFlowPhase) ||
+      (args.createFlowPhase === "draft_ready_for_review" && !args.finalReviewExplicitlyOpened)
+    ) {
+      return "updated_agreement_ready";
+    }
+  }
+
+  if (
+    !guidedProUxBlocksRecipientSetup({
+      guidedCompletionPhase: args.guidedCompletionPhase,
+      createFlowPhase: args.createFlowPhase,
+      finalReviewExplicitlyOpened: args.finalReviewExplicitlyOpened,
+      guidedBulkApplying: args.guidedBulkApplying,
+    }) &&
+    (args.premiumRecipientUxActive ||
+      args.createFlowPhase === "recipient_setup_required" ||
+      args.createFlowPhase === "ready_to_send")
+  ) {
+    return "recipient_setup";
+  }
+
+  if (args.guidedCompletionPhase === "applied" && args.finalReviewExplicitlyOpened) {
+    return "guided_final_review";
   }
 
   if (

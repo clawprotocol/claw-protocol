@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  guidedProUxAllowsRecipientSetup,
+  guidedProUxBlocksRecipientSetup,
   guidedProUxShowsFinalReview,
   guidedProUxShowsQuestionPanel,
   guidedProUxShowsUpdatedReadyCard,
@@ -13,6 +15,7 @@ const BASE = {
   premiumRecipientUxActive: false,
   finalReviewExplicitlyOpened: false,
   signingPacketSetupActive: false,
+  guidedBulkApplying: false,
 };
 
 describe("resolveGuidedProUxState — universal agreement families", () => {
@@ -46,6 +49,30 @@ describe("resolveGuidedProUxState — universal agreement families", () => {
     ).toBe("guided_applying_updates");
   });
 
+  it("stale recipient flags during applying_all still resolve to guided_applying_updates", () => {
+    expect(
+      resolveGuidedProUxState({
+        ...BASE,
+        guidedCompletionPhase: "applying_all",
+        createFlowPhase: "recipient_setup_required",
+        premiumRecipientUxActive: true,
+      }),
+    ).toBe("guided_applying_updates");
+    expect(guidedProUxAllowsRecipientSetup("guided_applying_updates")).toBe(false);
+  });
+
+  it("guidedBulkApplying flag wins over stale recipient_setup_required phase", () => {
+    expect(
+      resolveGuidedProUxState({
+        ...BASE,
+        guidedCompletionPhase: "ready_to_apply",
+        createFlowPhase: "recipient_setup_required",
+        premiumRecipientUxActive: true,
+        guidedBulkApplying: true,
+      }),
+    ).toBe("guided_applying_updates");
+  });
+
   it("applied without explicit review maps to updated_agreement_ready", () => {
     expect(
       resolveGuidedProUxState({
@@ -68,7 +95,7 @@ describe("resolveGuidedProUxState — universal agreement families", () => {
     ).toBe("guided_final_review");
   });
 
-  it("recipient_setup_required maps to recipient_setup", () => {
+  it("recipient_setup_required only after explicit final-review send path", () => {
     expect(
       resolveGuidedProUxState({
         ...BASE,
@@ -93,5 +120,23 @@ describe("resolveGuidedProUxState — universal agreement families", () => {
     expect(guidedProUxShowsQuestionPanel("updated_agreement_ready")).toBe(false);
     expect(guidedProUxShowsUpdatedReadyCard("updated_agreement_ready")).toBe(true);
     expect(guidedProUxShowsFinalReview("guided_final_review")).toBe(true);
+  });
+
+  it("guidedProUxBlocksRecipientSetup during applying and updated ready", () => {
+    expect(
+      guidedProUxBlocksRecipientSetup({
+        guidedCompletionPhase: "applying_all",
+        createFlowPhase: "recipient_setup_required",
+        finalReviewExplicitlyOpened: false,
+        guidedBulkApplying: false,
+      }),
+    ).toBe(true);
+    expect(
+      guidedProUxBlocksRecipientSetup({
+        guidedCompletionPhase: "applied",
+        createFlowPhase: "updated_agreement_ready",
+        finalReviewExplicitlyOpened: false,
+      }),
+    ).toBe(true);
   });
 });

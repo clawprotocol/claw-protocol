@@ -22,7 +22,9 @@ export function isGuidedQueueRebuildBlocked(args: {
   if (args.completionFrozen || args.frozenAfterApplyRef || args.bulkApplying) return true;
   if (args.finalReviewActive) return true;
   if (args.createFlowPhase && isUpdatedAgreementReadyPhase(args.createFlowPhase)) return true;
-  return args.phase === "applied" || args.phase === "applying_all";
+  if (args.phase === "applying_all" || args.phase === "applied") return true;
+  if (args.frozenAfterApplyRef && args.phase === "ready_to_apply") return true;
+  return false;
 }
 
 /** Return frozen session only — never merge base queue while rebuild blocked. */
