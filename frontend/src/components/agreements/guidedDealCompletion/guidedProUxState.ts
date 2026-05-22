@@ -36,8 +36,8 @@ export type ResolveGuidedProUxStateArgs = {
   premiumRecipientUxActive: boolean;
   /** User explicitly opened final review via CTA. */
   finalReviewExplicitlyOpened: boolean;
-  /** Signer/reviewer emails captured before bulk apply. */
-  signerSetupComplete: boolean;
+  /** All required pre-review signer slots filled (enables explicit apply CTA only). */
+  signerSlotsComplete?: boolean;
   /** User chose Send for signature/review on final review. */
   sendIntentSelected: boolean;
   signingPacketSetupActive?: boolean;
@@ -129,11 +129,7 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
     return "recipient_setup";
   }
 
-  if (
-    args.hasGuidedSession &&
-    args.guidedCompletionPhase === "ready_to_apply" &&
-    !args.signerSetupComplete
-  ) {
+  if (args.hasGuidedSession && args.guidedCompletionPhase === "ready_to_apply") {
     return "signer_setup_required";
   }
 
@@ -145,7 +141,11 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
     return "guided_questions_active";
   }
 
-  if (args.hasGuidedSession && args.premiumPaidDocumentSurface) {
+  if (
+    args.hasGuidedSession &&
+    args.premiumPaidDocumentSurface &&
+    args.guidedCompletionPhase !== "applied"
+  ) {
     return "paid_pro_draft";
   }
 
@@ -195,6 +195,7 @@ export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState):
 export function resolveGuidedProStickyCta(
   state: GuidedProUxState,
   pendingQuestions: number,
+  signerSlotsComplete = false,
 ): GuidedProStickyCta | null {
   switch (state) {
     case "guided_questions_active":
@@ -208,6 +209,14 @@ export function resolveGuidedProStickyCta(
         reason: "guided_questions_active",
       };
     case "signer_setup_required":
+      if (signerSlotsComplete) {
+        return {
+          label: "Apply answers and prepare review",
+          action: "guided_continue",
+          disabled: false,
+          reason: "signer_setup_ready_apply",
+        };
+      }
       return {
         label: "Add signer details",
         action: "guided_continue",

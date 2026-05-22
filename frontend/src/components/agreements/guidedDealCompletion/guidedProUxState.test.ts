@@ -17,13 +17,12 @@ const BASE = {
   hasGuidedSession: true,
   premiumRecipientUxActive: false,
   finalReviewExplicitlyOpened: false,
-  signerSetupComplete: false,
   sendIntentSelected: false,
   signingPacketSetupActive: false,
   guidedBulkApplying: false,
 };
 
-describe("resolveGuidedProUxState — GTM sequence (test19)", () => {
+describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
   const families = [
     { label: "services", phase: "collecting_answers" as const },
     { label: "saas", phase: "collecting_answers" as const },
@@ -45,24 +44,31 @@ describe("resolveGuidedProUxState — GTM sequence (test19)", () => {
     });
   }
 
-  it("ready_to_apply without signers maps to signer_setup_required", () => {
+  it("ready_to_apply always maps to signer_setup_required (test20 — no paid_pro_draft regression)", () => {
     expect(
       resolveGuidedProUxState({
         ...BASE,
         guidedCompletionPhase: "ready_to_apply",
         createFlowPhase: "signer_setup_required",
-        signerSetupComplete: false,
+        signerSlotsComplete: true,
+      }),
+    ).toBe("signer_setup_required");
+    expect(
+      resolveGuidedProUxState({
+        ...BASE,
+        guidedCompletionPhase: "ready_to_apply",
+        createFlowPhase: "draft_ready_for_review",
+        signerSlotsComplete: false,
       }),
     ).toBe("signer_setup_required");
   });
 
-  it("applying maps to guided_applying_updates (after signers)", () => {
+  it("applying maps to guided_applying_updates only after explicit apply", () => {
     expect(
       resolveGuidedProUxState({
         ...BASE,
         guidedCompletionPhase: "applying_all",
         createFlowPhase: "signer_setup_required",
-        signerSetupComplete: true,
       }),
     ).toBe("guided_applying_updates");
   });
@@ -73,7 +79,6 @@ describe("resolveGuidedProUxState — GTM sequence (test19)", () => {
         ...BASE,
         guidedCompletionPhase: "applied",
         createFlowPhase: "updated_agreement_ready",
-        signerSetupComplete: true,
       }),
     ).toBe("updated_agreement_ready");
   });
@@ -85,7 +90,6 @@ describe("resolveGuidedProUxState — GTM sequence (test19)", () => {
         guidedCompletionPhase: "applied",
         createFlowPhase: "guided_final_review",
         finalReviewExplicitlyOpened: true,
-        signerSetupComplete: true,
       }),
     ).toBe("guided_final_review");
   });
@@ -97,45 +101,27 @@ describe("resolveGuidedProUxState — GTM sequence (test19)", () => {
         guidedCompletionPhase: "applied",
         createFlowPhase: "recipient_setup_required",
         finalReviewExplicitlyOpened: true,
-        signerSetupComplete: true,
         sendIntentSelected: true,
         premiumRecipientUxActive: true,
       }),
     ).toBe("send_intent_selected");
   });
 
-  it("recipient_setup_required only after send path (no send intent)", () => {
-    expect(
-      resolveGuidedProUxState({
-        ...BASE,
-        guidedCompletionPhase: "applied",
-        createFlowPhase: "recipient_setup_required",
-        finalReviewExplicitlyOpened: true,
-        signerSetupComplete: true,
-        premiumRecipientUxActive: true,
-      }),
-    ).toBe("recipient_setup");
-  });
-
-  it("suppresses production send during questions, signer setup, apply, and ready", () => {
-    expect(guidedProUxSuppressesProductionSendCta("guided_questions_active")).toBe(true);
+  it("suppresses production send during signer setup", () => {
     expect(guidedProUxSuppressesProductionSendCta("signer_setup_required")).toBe(true);
-    expect(guidedProUxSuppressesProductionSendCta("guided_applying_updates")).toBe(true);
-    expect(guidedProUxSuppressesProductionSendCta("updated_agreement_ready")).toBe(true);
     expect(guidedProUxSuppressesProductionSendCta("guided_final_review")).toBe(false);
   });
 
-  it("sticky CTA labels match GTM copy", () => {
-    expect(resolveGuidedProStickyCta("guided_questions_active", 3)?.label).toContain("3");
-    expect(resolveGuidedProStickyCta("signer_setup_required", 0)?.label).toBe("Add signer details");
-    expect(resolveGuidedProStickyCta("guided_applying_updates", 0)?.label).toBe("Updating agreement…");
-    expect(resolveGuidedProStickyCta("updated_agreement_ready", 0)?.label).toBe("Review updated agreement");
-  });
-
-  it("shows signer setup panel state helper", () => {
-    expect(guidedProUxShowsSignerSetup("signer_setup_required")).toBe(true);
-    expect(guidedProUxShowsQuestionPanel("signer_setup_required")).toBe(false);
-    expect(guidedProUxShowsUpdatedReadyCard("signer_setup_required")).toBe(false);
+  it("sticky CTA: incomplete signer setup stays disabled; complete enables apply", () => {
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, false)?.disabled).toBe(true);
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, false)?.label).toBe("Add signer details");
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true)?.disabled).toBe(false);
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true)?.label).toBe(
+      "Apply answers and prepare review",
+    );
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true)?.reason).toBe(
+      "signer_setup_ready_apply",
+    );
   });
 
   it("guidedProUxBlocksRecipientSetup during signer_setup_required phase", () => {
@@ -148,20 +134,17 @@ describe("resolveGuidedProUxState — GTM sequence (test19)", () => {
     ).toBe(true);
   });
 
-  it("guidedProUxAllowsRecipientSetup for send_intent_selected", () => {
+  it("guidedProUxAllowsRecipientSetup for send_intent_selected only", () => {
     expect(guidedProUxAllowsRecipientSetup("send_intent_selected")).toBe(true);
     expect(guidedProUxAllowsRecipientSetup("signer_setup_required")).toBe(false);
   });
 
-  it("suppresses freeform during questions, signer setup, apply, and ready", () => {
-    expect(guidedProUxSuppressesFreeform("signer_setup_required")).toBe(true);
-    expect(guidedProUxSuppressesFreeform("guided_final_review")).toBe(false);
-  });
-
   it("shows question panel only during questions", () => {
     expect(guidedProUxShowsQuestionPanel("guided_questions_active")).toBe(true);
-    expect(guidedProUxShowsQuestionPanel("guided_applying_updates")).toBe(false);
+    expect(guidedProUxShowsSignerSetup("signer_setup_required")).toBe(true);
+    expect(guidedProUxShowsQuestionPanel("signer_setup_required")).toBe(false);
     expect(guidedProUxShowsUpdatedReadyCard("updated_agreement_ready")).toBe(true);
     expect(guidedProUxShowsFinalReview("guided_final_review")).toBe(true);
+    expect(guidedProUxSuppressesFreeform("signer_setup_required")).toBe(true);
   });
 });

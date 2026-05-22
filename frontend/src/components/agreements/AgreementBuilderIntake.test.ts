@@ -592,14 +592,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("guidedProUxShowsQuestionPanel(guidedProUxState)");
     expect(intake).toContain("guidedSessionQueueRenderable");
-    const unifiedStart = intake.indexOf("const unifiedPrimaryCta = useMemo(");
-    const unifiedDraft = intake.slice(unifiedStart, unifiedStart + 14000);
-    expect(unifiedDraft).toContain("resolveGuidedProStickyCta(guidedProUxState");
+    expect(intake).toContain("resolveGuidedProStickyCta(");
     expect(intake).toContain('setCreateFlowPhase("signer_setup_required")');
-    const panelIdx = intake.indexOf('id="guided-deal-completion-primary"');
-    const readonlyIdx = intake.indexOf("<PremiumAgreementReadonlyView", panelIdx);
-    expect(panelIdx).toBeGreaterThanOrEqual(0);
-    expect(readonlyIdx).toBeGreaterThan(panelIdx);
+    expect(intake).toContain('id="claw-guided-pre-review-signers"');
+    expect(intake).toContain('id="guided-deal-completion-primary"');
     const executeIdx = intake.indexOf('logGuidedSendCtaBlocked("executePrimaryCta"');
     expect(executeIdx).toBeGreaterThanOrEqual(0);
     expect(intake.slice(executeIdx - 400, executeIdx)).toMatch(/continue_to_recipients|premium_continue_to_signers/);
@@ -612,6 +608,22 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(advBlock).toContain("armedFinalReviewSend");
     expect(advBlock).toContain("isGuidedFinalReviewPhase(createFlowPhase)");
     expect(advBlock).toContain("guidedFinalReviewExplicitlyOpened");
+  });
+
+  it("test20: no auto-apply on signer email; explicit apply CTA only", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("handleGuidedPreReviewApplyAfterSigners");
+    expect(intake).toContain("logGuidedApplyExplicitlyStarted");
+    expect(intake).toContain("signer_setup_ready_apply");
+    expect(intake).toContain("resolveGuidedPreReviewSignerSlots");
+    expect(intake).toContain("logSignerSetupIncomplete");
+    expect(intake).not.toContain("if (!paidProInlineSignersReady) return;");
+    expect(intake).toContain("onApplyAnswersAndPrepareReview");
+    const card = readFileSync(
+      join(__dirname, "guidedDealCompletion/GuidedSignerSetupBeforeReviewCard.tsx"),
+      "utf8",
+    );
+    expect(card).toContain("guided-signer-setup-apply-cta");
   });
 
   it("test19: guided flow uses signer_setup_required before apply and final review", () => {

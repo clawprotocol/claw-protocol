@@ -650,10 +650,14 @@ import {
   logBlockedAutoNavigationWhileSignersEditing,
   logGuidedApplyingStuckCleared,
   logPostApplyQualityWarningNonblocking,
+  logGuidedApplyExplicitlyStarted,
   logSignerSetupActive,
   logSignerSetupComplete,
+  logSignerSetupFieldPersisted,
+  logSignerSetupIncomplete,
   logSignerSetupWriteDeduped,
 } from "./guidedDealCompletion/guidedSignerSetupUx";
+import { resolveGuidedPreReviewSignerSlots } from "./guidedDealCompletion/resolveGuidedPreReviewSignerSlots";
 import {
   guidedProUxShowsQuestionPanel,
   guidedProUxShowsSignerSetup,
@@ -10622,16 +10626,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedBulkApplyingActive =
     guidedBulkApplyingRef.current || guidedCompletionPhase === "applying_all";
 
-  const guidedSignerEmailsReady = useMemo(
-    () =>
-      Boolean(
-        !recipientsDeferred &&
-          hasAnyValidRecipientEmail &&
-          !recipientEmailsHaveValidationErrors,
-      ),
-    [recipientsDeferred, hasAnyValidRecipientEmail, recipientEmailsHaveValidationErrors],
-  );
-
   const guidedProUxState = useMemo(() => {
     const state = resolveGuidedProUxState({
       premiumPaidDocumentSurface,
@@ -10640,7 +10634,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createFlowPhase,
       premiumRecipientUxActive,
       finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
-      signerSetupComplete: guidedSignerEmailsReady,
       sendIntentSelected: guidedSendIntentSelected || finalReviewSendPathChosenRef.current,
       guidedBulkApplying: guidedBulkApplyingActive,
     });
@@ -10654,7 +10647,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumRecipientUxActive,
     guidedFinalReviewExplicitlyOpened,
     guidedBulkApplyingActive,
-    guidedSignerEmailsReady,
     guidedSendIntentSelected,
   ]);
 
@@ -10841,9 +10833,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     effectivePremiumSendMode,
   ]);
 
+  const guidedPreReviewSignerSlots = useMemo(
+    () =>
+      resolveGuidedPreReviewSignerSlots({
+        partyCount: draft?.parties?.length ?? 2,
+        partySignerNames,
+        recipient1Name,
+        recipient2Name,
+        recipient1Email,
+        recipient2Email,
+        extraPartyReviewEmails,
+        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+        sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
+        recipientsDeferred,
+      }),
+    [
+      draft?.parties,
+      partySignerNames,
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails,
+      effectivePremiumSendMode,
+      recipientsDeferred,
+    ],
+  );
+
   /** Paid Pro inline recipient card: emails valid and no helper blockers (matches send_agreement gate). */
   const paidProInlineSignersReady = Boolean(
-    guidedSignerEmailsReady && !createFlowRecipientPrimaryHelper,
+    guidedPreReviewSignerSlots.complete && !createFlowRecipientPrimaryHelper,
   );
   /** While missing/invalid emails, keep recipient inputs surfaced (no dead-end collapsed card). */
   const paidProRecipientBlockForceExpanded = Boolean(
@@ -13147,7 +13166,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const pending = guidedSessionForCta
             ? countUnresolvedRenderableVariables(guidedSessionForCta)
             : 0;
-          const guidedSticky = resolveGuidedProStickyCta(guidedProUxState, pending);
+          const guidedSticky = resolveGuidedProStickyCta(
+            guidedProUxState,
+            pending,
+            guidedPreReviewSignerSlots.complete,
+          );
           if (guidedSticky) return guidedSticky;
         }
         if (
@@ -13395,6 +13418,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedPacketSendBlocked,
     guidedProUxState,
     guidedCompletionSession,
+    guidedPreReviewSignerSlots.complete,
   ]);
 
   useEffect(() => {
@@ -13701,7 +13725,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         persistGuidedSession(keyed, guidedSessionKey);
         guidedCompletionSessionRef.current = keyed;
         if (isGuidedCompletionComplete(keyed)) {
-          guidedPendingAutoApplyRef.current = true;
+          guidedPendingAutoApplyRef.current = false;
+          setGuidedCompletionFrozen(true);
+          guidedFrozenAfterApplyRef.current = true;
+          const frozenReady = freezeGuidedSessionAfterApply(keyed, guidedSessionKey);
+          guidedCompletionSessionRef.current = frozenReady;
+          setGuidedCompletionSession(frozenReady);
+          persistGuidedSession(frozenReady, guidedSessionKey);
           setGuidedCompletionPhase("ready_to_apply");
           setCreateFlowPhase("signer_setup_required");
           setCreateFlowSendRecipientEditorOpen(true);
@@ -13735,7 +13765,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         persistGuidedSession(keyed, guidedSessionKey);
         guidedCompletionSessionRef.current = keyed;
         if (isGuidedCompletionComplete(keyed)) {
-          guidedPendingAutoApplyRef.current = true;
+          guidedPendingAutoApplyRef.current = false;
+          setGuidedCompletionFrozen(true);
+          guidedFrozenAfterApplyRef.current = true;
+          const frozenReady = freezeGuidedSessionAfterApply(keyed, guidedSessionKey);
+          guidedCompletionSessionRef.current = frozenReady;
+          setGuidedCompletionSession(frozenReady);
+          persistGuidedSession(frozenReady, guidedSessionKey);
           setGuidedCompletionPhase("ready_to_apply");
           setCreateFlowPhase("signer_setup_required");
           setCreateFlowSendRecipientEditorOpen(true);
@@ -13950,22 +13986,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const agreementIdForReview =
     (reviewDraft as { id?: string } | null)?.id ?? (draft as { id?: string } | null)?.id ?? null;
-
-  React.useEffect(() => {
-    if (guidedCompletionPhase !== "ready_to_apply") return;
-    if (!paidProInlineSignersReady) return;
-    const session = guidedCompletionSessionRef.current;
-    if (!session || !isGuidedCompletionComplete(session)) return;
-    if (guidedBulkApplyingRef.current) return;
-    guidedPendingAutoApplyRef.current = false;
-    logSignerSetupComplete();
-    void handleGuidedBulkApply();
-  }, [
-    guidedCompletionPhase,
-    paidProInlineSignersReady,
-    handleGuidedBulkApply,
-    activeGuidedCompletionSession,
-  ]);
 
   React.useEffect(() => {
     if (guidedProUxState !== "guided_applying_updates") return;
@@ -14510,6 +14530,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, []);
 
+  const handleGuidedPreReviewApplyAfterSigners = React.useCallback(() => {
+    if (!guidedPreReviewSignerSlots.complete) {
+      logSignerSetupIncomplete({
+        filledCount: guidedPreReviewSignerSlots.filledCount,
+        requiredCount: guidedPreReviewSignerSlots.requiredCount,
+        incompleteIndices: guidedPreReviewSignerSlots.incompleteIndices,
+      });
+      scrollGuidedSignerSetupIntoView();
+      return;
+    }
+    logGuidedApplyExplicitlyStarted();
+    logSignerSetupComplete();
+    void handleGuidedBulkApply();
+  }, [
+    guidedPreReviewSignerSlots,
+    handleGuidedBulkApply,
+    scrollGuidedSignerSetupIntoView,
+  ]);
+
+  React.useEffect(() => {
+    if (guidedCompletionPhase !== "ready_to_apply") return;
+    if (createFlowPhase === "signer_setup_required") return;
+    setCreateFlowPhase("signer_setup_required");
+    setPremiumRecipientUxActive(false);
+  }, [guidedCompletionPhase, createFlowPhase]);
+
   React.useEffect(() => {
     if (!guidedSignerFieldFocusedRef.current) return;
     if (
@@ -14542,6 +14588,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       persistPremiumRecipientHandoffFromDraftAndUi(draft);
+      logSignerSetupFieldPersisted("recipient_metadata");
+      if (!guidedPreReviewSignerSlots.complete) {
+        logSignerSetupIncomplete({
+          filledCount: guidedPreReviewSignerSlots.filledCount,
+          requiredCount: guidedPreReviewSignerSlots.requiredCount,
+          incompleteIndices: guidedPreReviewSignerSlots.incompleteIndices,
+        });
+      }
     }, 400);
     return () => window.clearTimeout(guidedSignerMetadataDebounceRef.current);
   }, [
@@ -14552,6 +14606,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient1Name,
     recipient2Name,
     partySignerNames,
+    guidedPreReviewSignerSlots,
     persistPremiumRecipientHandoffFromDraftAndUi,
   ]);
 
@@ -14748,7 +14803,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hasUsablePaidBody &&
       (postCheckoutAdvisoryGaps.length > 0 || postCheckoutProReadyForCompactRefineUx) &&
       !paidProAuthoritative &&
-      !showPrimaryGuidedCompletion,
+      !showPrimaryGuidedCompletion &&
+      !guidedPreReviewSignerSetupActive,
   );
   const showStrictRetryNeedsDetailsPanel =
     !authoritativePremiumUiCommitted &&
@@ -14773,12 +14829,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showSimplifiedProReviewSigningFlow = Boolean(
     !simpleProFinalReviewActive &&
+      !guidedPreReviewSignerSetupActive &&
       premiumPaidDocumentSurface &&
       paidProAuthoritative &&
       canProceedWithPaidProDocument &&
       !showStrictRetryNeedsDetailsPanel &&
       !isSourceComparisonReviewMode(agreementReviewMode) &&
       !guidedPhaseSuppressesSendCta(guidedCompletionPhase) &&
+      !guidedProUxShowsSignerSetup(guidedProUxState) &&
       (guidedCompletionPhase === "applied" ||
         (proReviewFooter.mode === "freeform_edit" && !guidedUxFlags.guidedQueued)),
   );
@@ -15801,13 +15859,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           return;
         }
-        if (
-          cta.action === "guided_continue" &&
-          cta.reason === "updated_agreement_ready" &&
-          !cta.disabled
-        ) {
-          handleGuidedOpenFinalReview();
-          return;
+        if (cta.action === "guided_continue" && !cta.disabled) {
+          if (cta.reason === "updated_agreement_ready") {
+            handleGuidedOpenFinalReview();
+            return;
+          }
+          if (cta.reason === "signer_setup_ready_apply") {
+            handleGuidedPreReviewApplyAfterSigners();
+            return;
+          }
         }
         if (
           (cta.action === "continue_to_recipients" || cta.action === "premium_continue_to_signers") &&
@@ -18356,8 +18416,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     {guidedPreReviewSignerSetupActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <GuidedSignerSetupBeforeReviewCard
-                                          signersReady={paidProInlineSignersReady}
+                                          slotsComplete={guidedPreReviewSignerSlots.complete}
+                                          filledCount={guidedPreReviewSignerSlots.filledCount}
+                                          requiredCount={guidedPreReviewSignerSlots.requiredCount}
                                           onScrollToSignerFields={scrollGuidedSignerSetupIntoView}
+                                          onApplyAnswersAndPrepareReview={() =>
+                                            handleGuidedPreReviewApplyAfterSigners()
+                                          }
                                         />
                                         <div
                                           id="claw-guided-pre-review-signers"
@@ -18981,6 +19046,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             ) : null}
                             {showProLawdogRefineAndFinalize &&
                             !guidedFinalReviewActive &&
+                            !guidedPreReviewSignerSetupActive &&
                             !isSourceComparisonReviewMode(agreementReviewMode) ? (
                               <div className="mt-5 w-full sm:pr-0 md:max-w-3xl">
                                 <FinalizeYourAgreementPanel
