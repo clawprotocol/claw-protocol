@@ -13,6 +13,12 @@ import {
   formatAuthoritativeAgreementPartiesHeadline,
   orderedAuthoritativePartyDisplayNames,
 } from "../../agreement/handoffPartyDisplay";
+import {
+  buildResolvedPartyDisplayModel,
+  detectPlaceholderRegressionInPartyLabels,
+  formatResolvedPartyDisplayHeadline,
+  resolvePersistedAgreementTitle,
+} from "../../agreement/resolvedPartyDisplayModel";
 import { extractAgreementParties } from "../../agreement/extractAgreementParties";
 import {
   isAgreementDetailsStepReady,
@@ -587,6 +593,16 @@ import {
   logGuidedBulkRegenerationSuccess,
   logGuidedBulkRegenerationFailed,
 } from "./guidedDealCompletion/guidedBulkRegeneration";
+import {
+  reinforceGuidedAnswerCausality,
+  reinforceGuidedBulkApplyCausality,
+} from "./guidedDealCompletion/guidedAnswerCausality";
+import {
+  assertAuthoritativeBodyContinuity,
+  bumpAuthoritativeAgreementVersion,
+  logRecipientMetadataOnlyMutation,
+} from "./authoritativeAgreementContinuity";
+import { logUxTrustEvent } from "../../lib/uxTrustAssertions";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import {
   isSourceComparisonReviewMode,
@@ -2353,6 +2369,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [usedContextSuggestionIds, setUsedContextSuggestionIds] = useState(() => new Set<string>());
   const [intakeClauseAddedToast, setIntakeClauseAddedToast] = useState<string | null>(null);
   const intakeClauseToastTimerRef = useRef<number | null>(null);
+  const [guidedAgreementUpdateToast, setGuidedAgreementUpdateToast] = useState<string | null>(null);
+  const [guidedNumericTransition, setGuidedNumericTransition] = useState<{
+    label: string;
+    before: string;
+    after: string;
+  } | null>(null);
+  const guidedAgreementToastTimerRef = useRef<number | null>(null);
   const [intakePartyRoleLabels, setIntakePartyRoleLabels] = useState<IntakePartyRoleLabels>(() => defaultIntakePartyRoleLabels());
   useLayoutEffect(() => {
     draftSnapshotRef.current = draft;
@@ -12380,6 +12403,59 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }, 2400);
   }, []);
 
+  const flashGuidedAgreementUpdateToast = useCallback((message: string, numeric?: { label: string; before: string; after: string } | null) => {
+    setGuidedAgreementUpdateToast(message);
+    setGuidedNumericTransition(numeric ?? null);
+    const prev = guidedAgreementToastTimerRef.current;
+    if (prev != null) window.clearTimeout(prev);
+    guidedAgreementToastTimerRef.current = window.setTimeout(() => {
+      setGuidedAgreementUpdateToast(null);
+      setGuidedNumericTransition(null);
+      guidedAgreementToastTimerRef.current = null;
+    }, 4200);
+  }, []);
+
+  const resolvedPartyDisplaySlots = useMemo(() => {
+    if (!draft?.parties?.length) return [];
+    const emails = [
+      recipient1Email,
+      recipient2Email,
+      ...extraPartyReviewEmails,
+    ];
+    const handoff = readPremiumRecipientHandoff();
+    const ho = handoff ? linearPremiumRecipientSlots(handoff, draft.parties.length) : [];
+    const signerNames = draft.parties.map((p, i) => ho[i]?.signerName ?? (p as { signerName?: string }).signerName);
+    return buildResolvedPartyDisplayModel({
+      parties: draft.parties,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      recipientEmails: emails,
+      recipientSignerNames: signerNames,
+    });
+  }, [
+    draft?.parties,
+    recipient1Email,
+    recipient2Email,
+    extraPartyReviewEmails,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+  ]);
+
+  const resolvedPartyDisplayHeadline = useMemo(
+    () => formatResolvedPartyDisplayHeadline(resolvedPartyDisplaySlots),
+    [resolvedPartyDisplaySlots],
+  );
+
+  const persistedPremiumReviewTitle = useMemo(() => {
+    if (!draft) return "";
+    const intakeText = currentPremiumMergedIntakeKey || intakeCombined;
+    return resolvePersistedAgreementTitle({
+      draftTitle: draft.title,
+      intakeText,
+      family: detectAgreementFamily(intakeText),
+      liveDocTitle: paidProCardEditDraft ?? agreementDocumentTextRef.current,
+    });
+  }, [draft, currentPremiumMergedIntakeKey, intakeCombined, paidProCardEditDraft]);
+
   const handleStarterQuickAddApply = useCallback(
     (item: StarterQuickAdd) => {
       if (isGenerating || draftPreCommitFreeze) return;
@@ -13234,6 +13310,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         meta?.implementationPreview?.trim() ||
         resolveImplementationPreview(variableId, displayAnswer, meta?.instructionAnswer);
       const implementationPreview = compressLawDogWill(variableId, rawPreview);
+      const prevAnswer =
+        (guidedCompletionSessionRef.current ?? guidedCompletionSession)?.answered[variableId] ?? null;
       setGuidedCompletionSession((prev) => {
         const base = prev ?? guidedCompletionSessionRef.current ?? guidedCompletionSessionBase;
         if (!base) return prev;
@@ -13253,9 +13331,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         return keyed;
       });
+      const causality = reinforceGuidedAnswerCausality({
+        variableId,
+        displayAnswer,
+        phase: "queued",
+        previousAnswer: prevAnswer,
+      });
+      flashGuidedAgreementUpdateToast(causality.toast, causality.numericTransition);
+      logUxTrustEvent("guided_causality", { variableId, phase: "queued" });
       setGuidedBulkApplyError(null);
     },
-    [guidedSessionKey, paidBodyForGuidedCompletion, guidedCompletionPhase],
+    [guidedSessionKey, paidBodyForGuidedCompletion, guidedCompletionPhase, flashGuidedAgreementUpdateToast],
   );
 
   const handleGuidedSkipQuestion = React.useCallback(
@@ -13341,13 +13427,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedBulkApplyingRef.current = false;
     }
     if (ok) {
-      logGuidedBulkRegenerationSuccess(
-        (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim().length,
-      );
+      const nextLen = (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim().length;
+      assertAuthoritativeBodyContinuity({
+        label: "guided_bulk_apply",
+        previousLen: stableBefore.trim().length,
+        nextLen,
+      });
+      bumpAuthoritativeAgreementVersion(nextLen, persistedPremiumReviewTitle || draft?.title || "");
+      logGuidedBulkRegenerationSuccess(nextLen);
       setAppliedGuidedChanges(buildAppliedChangesFromSession(session));
       setGuidedCompletionPhase("applied");
       setGuidedBulkApplyError(null);
       setReviewRefineUserMessage(null);
+      const bulkToast = reinforceGuidedBulkApplyCausality(session.queue.filter((id) => session.answered[id]));
+      flashGuidedAgreementUpdateToast(bulkToast, null);
+      logUxTrustEvent("guided_causality", { phase: "applied", questionCount: session.queue.length });
     } else {
       setGuidedCompletionPhase("failed");
       setGuidedBulkApplyError(GUIDED_BULK_FAIL_USER_MESSAGE);
@@ -13363,6 +13457,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     currentPremiumMergedIntakeKey,
     intakeCombined,
     runPersistedRefineFromStepBuffer,
+    persistedPremiumReviewTitle,
+    draft?.title,
+    flashGuidedAgreementUpdateToast,
   ]);
   const preferGuidedCompletionOverRetry = useMemo(() => {
     const snap = readPremiumCompletionSnapshot();
@@ -13386,6 +13483,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const agreementIdForReview =
     (reviewDraft as { id?: string } | null)?.id ?? (draft as { id?: string } | null)?.id ?? null;
+
+  useEffect(() => {
+    if (!paidProRecipientSetupOnDraft || !hasAnyValidRecipientEmail) return;
+    if (detectPlaceholderRegressionInPartyLabels(resolvedPartyDisplaySlots, true)) {
+      logUxTrustEvent("placeholder_regression", {
+        slots: resolvedPartyDisplaySlots.map((s) => ({ i: s.index, name: s.displayName, source: s.source })),
+      });
+    }
+  }, [paidProRecipientSetupOnDraft, hasAnyValidRecipientEmail, resolvedPartyDisplaySlots]);
+
+  useEffect(() => {
+    if (!paidProRecipientSetupOnDraft) return;
+    logRecipientMetadataOnlyMutation({
+      agreementId: agreementIdForReview ?? undefined,
+      fields: ["recipient_emails", "signer_names", "party_display"],
+    });
+  }, [paidProRecipientSetupOnDraft, recipient1Email, recipient2Email, agreementIdForReview]);
+
   const uploadedSourceRecord = useMemo(
     () => (agreementIdForReview ? readUploadedSourceDocument(agreementIdForReview) : null),
     [agreementIdForReview, premiumSurfaceGateTick, reviewDocRefreshTick],
@@ -17088,10 +17203,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         aria-label="Agreement document"
                                       />
                                     ) : (
-                                      <PremiumAgreementReadonlyView
-                                        html={premiumReadonlyAgreementHtml}
-                                        suppressEmptyFallback={blockProEmptyDocumentFallback}
-                                      />
+                                      <>
+                                        {guidedAgreementUpdateToast ? (
+                                          <div
+                                            className="pointer-events-none sticky top-2 z-20 mx-[clamp(1.35rem,4.5vw,2.65rem)] mb-2"
+                                            role="status"
+                                            aria-live="polite"
+                                            data-testid="guided-agreement-updated-toast"
+                                          >
+                                            <div className="rounded-lg border border-emerald-300/90 bg-emerald-50 px-3 py-2 shadow-md">
+                                              <p className="text-xs font-semibold text-emerald-950">
+                                                {guidedAgreementUpdateToast}
+                                              </p>
+                                              {guidedNumericTransition ? (
+                                                <p className="mt-1 text-[10px] leading-snug text-emerald-900/90">
+                                                  <span className="font-medium">{guidedNumericTransition.label}:</span>{" "}
+                                                  <span className="line-through opacity-70">{guidedNumericTransition.before}</span>
+                                                  {" → "}
+                                                  <span className="font-semibold">{guidedNumericTransition.after}</span>
+                                                </p>
+                                              ) : null}
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                        <PremiumAgreementReadonlyView
+                                          html={premiumReadonlyAgreementHtml}
+                                          suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                        />
+                                      </>
                                     )}
                                     {showPrimaryGuidedCompletion && activeGuidedCompletionSession ? (
                                       <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
@@ -18910,13 +19049,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             ) : null}
             {draft
               ? (() => {
-                  const partyNames = orderedAuthoritativePartyDisplayNames(draft.parties);
+                  const partyNames =
+                    hasAnyValidRecipientEmail && resolvedPartyDisplaySlots.length > 0
+                      ? resolvedPartyDisplaySlots.map((s) => s.displayName)
+                      : orderedAuthoritativePartyDisplayNames(draft.parties);
+                  const confirmTitle = persistedPremiumReviewTitle || (draft.title || "").trim() || "Your agreement";
                   return (
                     <div className="mt-4 rounded-lg border border-slate-700/60 bg-slate-950/70 px-3.5 py-3 text-left">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</p>
-                      <p className="mt-1 text-sm font-medium text-slate-100">
-                        {(draft.title || "").trim() || "Your agreement"}
-                      </p>
+                      <p className="mt-1 text-sm font-medium text-slate-100">{confirmTitle}</p>
                       <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Agreement parties
                       </p>
@@ -18928,7 +19069,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         </ol>
                       ) : (
                         <p className="mt-1 text-sm text-slate-200">
-                          {formatAuthoritativeAgreementPartiesHeadline(draft.parties)}
+                          {hasAnyValidRecipientEmail
+                            ? resolvedPartyDisplayHeadline
+                            : formatAuthoritativeAgreementPartiesHeadline(draft.parties)}
                         </p>
                       )}
                     </div>

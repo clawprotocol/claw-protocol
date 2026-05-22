@@ -2,6 +2,7 @@ import type { Vs01FieldValueMode } from "./vs01FieldValueResolution";
 import type { Vs01SignerRuntimeContext } from "./vs01FieldValueResolution";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { vs01DiagnosticsEnabled } from "./vs01SignerFieldAssignment";
+import { inferSignerDisplayNameFromRole } from "./vs01SignerIdentityUx";
 
 export const VS01_PREPARE_SIGNER_NAME_PLACEHOLDER = "Signer name";
 export const VS01_PREPARE_TITLE_PLACEHOLDER = "Title";
@@ -110,6 +111,18 @@ export function resolvePrepareSignerDisplayName(
       knownSignerName: true,
     });
     return { value: known, source: "role_signer_name", isPlaceholder: false };
+  }
+
+  const inferred = inferSignerDisplayNameFromRole(role);
+  if (inferred) {
+    logVs01SignerNameSource({
+      mode,
+      roleKind: role.kind,
+      partyId: role.partyId,
+      source: "email_local_part",
+      knownSignerName: true,
+    });
+    return { value: inferred, source: "email_local_part", isPlaceholder: false };
   }
 
   logVs01SignerNameSource({

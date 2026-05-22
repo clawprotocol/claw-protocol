@@ -92,6 +92,12 @@ import {
   logVs01PrepareContinueBlocked,
   vs01DevKeepPlacingEnabled,
 } from "./vs01PreparePacketChecklist";
+import {
+  autoSignaturePacketStatusMessage,
+  buildAutoSignaturePacketForAllRoles,
+} from "./vs01AutoSignaturePacket";
+import { Vs01PrepPreparedBanner } from "./Vs01PrepPreparedBanner";
+import { logUxTrustEvent } from "../lib/uxTrustAssertions";
 
 const INTENT_OPTIONS = ["agree_and_sign"] as const;
 
@@ -308,6 +314,8 @@ export function StepPrepareSignature({
   const [currentPage, setCurrentPage] = useState(1);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [autoPrepBannerMessage, setAutoPrepBannerMessage] = useState<string | null>(null);
+  const autoSignatureSeededRef = useRef(false);
 
   const fieldsRef = useRef(fields);
   fieldsRef.current = fields;
@@ -749,6 +757,47 @@ export function StepPrepareSignature({
     signerEmailForPlacement,
     agreementBridgePlacementCopy,
     prepareSignerRoles,
+  ]);
+
+  /** Default: auto-place signature block on last page when bridge opens with no manual fields yet. */
+  useEffect(() => {
+    if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length || numPages <= 0) return;
+    if (autoSignatureSeededRef.current) return;
+    const hasSignature = fields.some((f) => f.type === "signature" && !f.autoInitials);
+    if (hasSignature) {
+      autoSignatureSeededRef.current = true;
+      return;
+    }
+    const ownerValueCtx = {
+      typedName: typedNameRef.current,
+      initials: initialsRef.current,
+      signerEmail: signerEmailForPlacement,
+    };
+    const result = buildAutoSignaturePacketForAllRoles({
+      roles: prepareSignerRoles,
+      pageCount: numPages,
+      existingFields: fields,
+      ownerValueCtx,
+    });
+    if (result.placedCount > 0) {
+      autoSignatureSeededRef.current = true;
+      setFields((prev) => [...prev, ...result.fields]);
+      setAutoPrepBannerMessage(autoSignaturePacketStatusMessage(result));
+      logUxTrustEvent("guided_causality", {
+        surface: "vs01_auto_signature_packet",
+        placedCount: result.placedCount,
+        confidence: result.confidence,
+      });
+    } else {
+      logUxTrustEvent("auto_placement_failure", { pageCount: numPages, roleCount: prepareSignerRoles.length });
+    }
+  }, [
+    agreementBridgePlacementCopy,
+    prepareSignerRoles,
+    numPages,
+    fields,
+    signerEmailForPlacement,
+    setFields,
   ]);
 
   const onPagePlacementClick = useCallback(
@@ -1344,13 +1393,22 @@ export function StepPrepareSignature({
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title" className="vs01-sign-step">
       <header className="vs01-sign-step-header">
         <h2 id="vs01-step-prepare-title" className="vs01-card-title">
-          {agreementBridgePlacementCopy ? "Prepare for e-signing" : "Sign your document"}
+          {agreementBridgePlacementCopy ? "LawDog prepared your signing packet" : "Sign your document"}
         </h2>
         <p className="vs01-card-help vs01-sign-step-lead">
           {agreementBridgePlacementCopy
-            ? "Place required signature fields for each party. Reviewers already approved this draft — you are preparing the signing packet, not signing yet."
+            ? "Review signature field placement for each signer. Adjust anything that looks off — then continue when ready."
             : "Choose a field type, then click once where it should go."}
         </p>
+        {agreementBridgePlacementCopy && prepareSignerRoles?.length ? (
+          <Vs01PrepPreparedBanner
+            agreementTitle={prepareSignerRoles[0]?.entityName ?? "Your agreement"}
+            signerCount={prepareSignerRoles.length}
+            fieldCount={fields.filter((f) => !f.autoInitials).length}
+            autoPrepared={Boolean(autoPrepBannerMessage)}
+            message={autoPrepBannerMessage}
+          />
+        ) : null}
       </header>
 
       <div

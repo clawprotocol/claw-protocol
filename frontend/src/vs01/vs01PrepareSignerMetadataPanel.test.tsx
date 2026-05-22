@@ -40,7 +40,7 @@ describe("Vs01PrepareSignerMetadataPanel", () => {
         onPatch={vi.fn()}
       />,
     );
-    expect(screen.getByText("Signer name not set")).toBeTruthy();
+    expect(screen.getByText(/Signer details optional|Signature label can be customized/i)).toBeTruthy();
     cleanup();
   });
 });

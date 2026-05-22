@@ -15,9 +15,14 @@ function ensureHighlightStyles(): void {
   style.textContent = `
 .premium-readonly-doc .${HIGHLIGHT_CLASS},
 .premium-readonly-doc h2.${HIGHLIGHT_CLASS} {
-  background: rgba(254, 243, 199, 0.55) !important;
-  box-shadow: inset 0 0 0 2px rgba(180, 83, 9, 0.45);
+  background: rgba(254, 243, 199, 0.65) !important;
+  box-shadow: inset 0 0 0 2px rgba(180, 83, 9, 0.5);
+  animation: guided-section-pulse 1.2s ease-in-out 2;
   transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+@keyframes guided-section-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(180, 83, 9, 0.45); }
+  50% { box-shadow: inset 0 0 0 3px rgba(217, 119, 6, 0.75); }
 }
 `;
   document.head.appendChild(style);
@@ -70,7 +75,7 @@ export function highlightGuidedSectionInDocument(target: GuidedRevisionTarget): 
     if (!match) continue;
     h2.classList.add(HIGHLIGHT_CLASS);
     h2.scrollIntoView({ behavior: "smooth", block: "center" });
-    window.setTimeout(() => h2.classList.remove(HIGHLIGHT_CLASS), 2200);
+    window.setTimeout(() => h2.classList.remove(HIGHLIGHT_CLASS), 3200);
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.info("[guided-change-scroll-highlight]", { heading: text.slice(0, 80) });

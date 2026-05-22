@@ -7,6 +7,7 @@ import {
 } from "../agreement/signerMetadataNormalize";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { isKnownPrepareSignerName, resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
+import { resolvePrepareSignerMetadataPanelTitle } from "./vs01SignerIdentityUx";
 
 export type Vs01PrepareSignerMetadataPanelProps = {
   role: Vs01PrepareSigningRole;
@@ -21,6 +22,7 @@ export function Vs01PrepareSignerMetadataPanel({
 }: Vs01PrepareSignerMetadataPanelProps) {
   const party = resolvePreparePartyEntityLabel(role);
   const known = isKnownPrepareSignerName(role);
+  const panelCopy = resolvePrepareSignerMetadataPanelTitle(role);
   const signerName = signerMetadataInputRaw(role.signerName);
   const signerTitle = signerMetadataInputRaw(role.signerTitle);
   const [editOpen, setEditOpen] = useState(false);
@@ -55,7 +57,7 @@ export function Vs01PrepareSignerMetadataPanel({
       signerName={signerName}
       signerTitle={signerTitle}
       busy={busy}
-      known={known}
+      panelCopy={panelCopy}
       onPatch={onPatch}
       onDone={known ? () => setEditOpen(false) : undefined}
     />
@@ -67,7 +69,7 @@ function SignerMetadataEditor({
   signerName,
   signerTitle,
   busy,
-  known,
+  panelCopy,
   onPatch,
   onDone,
 }: {
@@ -75,14 +77,18 @@ function SignerMetadataEditor({
   signerName: string;
   signerTitle: string;
   busy: boolean;
-  known: boolean;
+  panelCopy: ReturnType<typeof resolvePrepareSignerMetadataPanelTitle>;
   onPatch: (patch: { signerName?: string; signerTitle?: string }) => void;
   onDone?: () => void;
 }) {
   return (
     <div className="vs01-prepare-signer-metadata-panel" role="group" aria-label="Signer details">
-      <p className="vs01-prepare-signer-metadata-title">
-        {known ? "Signer details" : "Signer name not set"}
+      <p
+        className={`vs01-prepare-signer-metadata-title${
+          panelCopy.severity === "required" ? " vs01-prepare-signer-metadata-title--required" : ""
+        }`}
+      >
+        {panelCopy.title}
       </p>
       {party ? (
         <p className="vs01-prepare-signer-metadata-party">
@@ -157,11 +163,8 @@ function SignerMetadataEditor({
           onClick={(ev) => ev.stopPropagation()}
         />
       </label>
-      {!known ? (
-        <p className="vs01-prepare-signer-metadata-hint">
-          Printed name fields show &ldquo;Signer name&rdquo; with party context until you enter a representative
-          name or the signer provides it from their link.
-        </p>
+      {panelCopy.hint ? (
+        <p className="vs01-prepare-signer-metadata-hint">{panelCopy.hint}</p>
       ) : null}
       {onDone ? (
         <button

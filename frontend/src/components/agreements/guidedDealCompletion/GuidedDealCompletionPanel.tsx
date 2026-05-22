@@ -10,6 +10,8 @@ import {
   formatGuidedProgressLabel,
   formatGuidedQuestionHeader,
 } from "./guidedVisibleQuestionAccounting";
+import { highlightGuidedSectionInDocument } from "./guidedSectionScroll";
+import { resolveGuidedQuestionTarget } from "./guidedRevisionAnchors";
 import { resolveGuidedAnswerForPill } from "./guidedAnswerResolution";
 import { GUIDED_COMPLETION_HEADING, GUIDED_COMPLETION_SUBHEADING } from "./friendlyProCompletionCopy";
 import {
@@ -316,7 +318,10 @@ export function GuidedDealCompletionPanel({
         <GuidedAppliedAreasSummary areas={appliedAreas} />
         {appliedChanges.length > 0 ? (
           <div className="mt-3">
-            <GuidedAppliedChangesReview changes={appliedChanges} onJumpToSection={() => {}} />
+            <GuidedAppliedChangesReview
+              changes={appliedChanges}
+              onJumpToSection={(c) => highlightGuidedSectionInDocument(resolveGuidedQuestionTarget(c.questionKey))}
+            />
           </div>
         ) : null}
       </div>
@@ -562,16 +567,6 @@ export function GuidedDealCompletionPanel({
                     );
                   })
                 : null}
-              {displayQuestion.suggestedDefaults.some((p) => isRecommendPillId(p.id)) ? (
-                <button
-                  type="button"
-                  disabled={controlsDisabled}
-                  className="w-full rounded-lg border border-dashed border-sky-300/80 bg-sky-50/40 px-2.5 py-1.5 text-left text-[11px] font-semibold text-sky-900"
-                  onClick={() => handleRecommendForMe()}
-                >
-                  Recommend for me
-                </button>
-              ) : null}
               {!customOpen ? (
                 <button
                   type="button"
@@ -585,7 +580,18 @@ export function GuidedDealCompletionPanel({
                 >
                   Custom answer
                 </button>
-              ) : (
+              ) : null}
+              {displayQuestion.suggestedDefaults.some((p) => isRecommendPillId(p.id)) ? (
+                <button
+                  type="button"
+                  disabled={controlsDisabled}
+                  className="text-[10px] font-medium text-sky-800/90 underline-offset-2 hover:underline"
+                  onClick={() => handleRecommendForMe()}
+                >
+                  Recommend for me
+                </button>
+              ) : null}
+              {customOpen ? (
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -641,11 +647,11 @@ export function GuidedDealCompletionPanel({
                     Save
                   </button>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : null}
 
-          <footer className="pt-2">
+          <footer className="pt-1 opacity-80">
             <button
               type="button"
               className="text-[10px] text-stone-400 hover:text-stone-600"

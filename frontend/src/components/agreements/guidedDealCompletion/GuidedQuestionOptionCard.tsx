@@ -35,7 +35,7 @@ export function GuidedQuestionOptionCard({
       type="button"
       disabled={disabled}
       onClick={onSelect}
-      className={`w-full rounded-lg border px-2.5 py-2 text-left transition active:scale-[0.99] disabled:opacity-40 ${
+      className={`w-full rounded-lg border px-2 py-1.5 text-left transition active:scale-[0.99] disabled:opacity-40 ${
         selected
           ? "border-emerald-600 bg-emerald-50/95 ring-2 ring-emerald-500/35"
           : recommended
