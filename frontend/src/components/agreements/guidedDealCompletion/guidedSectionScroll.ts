@@ -2,6 +2,10 @@
  * Scroll preservation and section highlight for guided Pro completion.
  */
 
+import {
+  GUIDED_CHECKLIST_SECTION_HEADING_FALLBACKS,
+  type GuidedAppliedChecklistLabel,
+} from "./guidedAppliedSummaryChecklist";
 import { resolveGuidedQuestionTarget, type GuidedRevisionTarget } from "./guidedRevisionAnchors";
 
 const HIGHLIGHT_CLASS = "guided-section-highlight";
@@ -246,6 +250,55 @@ export function highlightAllGuidedChangedSections(
 }
 
 /** Cycle review scroll — one section per tap with precise anchor. */
+function findHeadingByTextPatterns(root: Element, patterns: readonly string[]): HTMLElement | null {
+  const normalized = patterns.map((p) => p.toLowerCase());
+  let best: { el: HTMLElement; score: number } | null = null;
+  for (const h2 of root.querySelectorAll("h2")) {
+    const text = (h2.textContent || "").trim().toLowerCase();
+    if (!text) continue;
+    for (const p of normalized) {
+      if (!text.includes(p)) continue;
+      const score = p.length / Math.max(text.length, 1);
+      if (!best || score > best.score) best = { el: h2 as HTMLElement, score };
+    }
+  }
+  return best?.el ?? null;
+}
+
+/** Scroll to a checklist section using variable anchors, then heading-text fallback. */
+export function scrollToGuidedAppliedChecklistSection(
+  label: GuidedAppliedChecklistLabel,
+  variableIds: readonly string[],
+): boolean {
+  if (typeof document === "undefined") return false;
+  ensureHighlightStyles();
+  const root = document.querySelector(".premium-readonly-doc");
+  if (!root) return false;
+
+  for (const id of variableIds) {
+    const target = resolveGuidedQuestionTarget(id);
+    const h2 = findMatchingHeading(root, target);
+    if (h2) {
+      highlightGuidedSectionInDocument(target, { mode: "applied", scroll: true });
+      return true;
+    }
+  }
+
+  const patterns = GUIDED_CHECKLIST_SECTION_HEADING_FALLBACKS[label];
+  const fallback = findHeadingByTextPatterns(root, patterns);
+  if (!fallback) return false;
+
+  fallback.classList.add(APPLIED_CLASS, "guided-section-scroll-target");
+  scrollHeadingIntoViewPrecise(fallback);
+  injectAppliedMarkersOnHeading(fallback);
+  // eslint-disable-next-line no-console
+  console.info("[guided-update-section-fallback-match]", {
+    label,
+    heading: (fallback.textContent || "").slice(0, 80),
+  });
+  return true;
+}
+
 export function reviewGuidedUpdatesAtIndex(
   variableIds: readonly string[],
   index: number,

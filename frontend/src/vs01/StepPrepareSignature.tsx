@@ -98,6 +98,7 @@ import {
 } from "./vs01AutoSignaturePacket";
 import { Vs01PrepPreparedBanner } from "./Vs01PrepPreparedBanner";
 import { logUxTrustEvent } from "../lib/uxTrustAssertions";
+import { markAgreementFieldsPlacedCount } from "./vs01WorkspaceSigningStatus";
 
 const INTENT_OPTIONS = ["agree_and_sign"] as const;
 
@@ -785,6 +786,8 @@ export function StepPrepareSignature({
     });
     if (result.placedCount > 0) {
       autoSignatureSeededRef.current = true;
+      const aid = (prepareAgreementId ?? "").trim();
+      if (aid) markAgreementFieldsPlacedCount(aid, result.placedCount);
       setFields((prev) => [...prev, ...result.fields]);
       setAutoPrepBannerMessage(autoSignaturePacketStatusMessage(result));
       logUxTrustEvent("guided_causality", {
@@ -797,6 +800,7 @@ export function StepPrepareSignature({
     }
   }, [
     agreementBridgePlacementCopy,
+    prepareAgreementId,
     prepareSignerRoles,
     numPages,
     fields,

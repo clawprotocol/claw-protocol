@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
-import { highlightAllGuidedChangedSections } from "./guidedDealCompletion/guidedSectionScroll";
+import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
 import type { GuidedAppliedChecklistLabel } from "./guidedDealCompletion/guidedAppliedSummaryChecklist";
 import type { UploadedSourceDocumentRecord } from "./uploadedSourceDocumentStorage";
 
@@ -107,20 +107,32 @@ export function SimpleProFinalReviewScreen({
           This is the version that will be sent.
         </p>
         {appliedChecklist.length > 0 && !bulkApplyBusy ? (
-          <ul
-            className="mt-2.5 space-y-1 rounded-md border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2"
-            data-testid="simple-pro-applied-checklist"
-            aria-label="Applied guided updates"
+          <div
+            className="mt-2.5 rounded-md border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2"
+            data-testid="simple-pro-applied-updates-card"
           >
-            {appliedChecklist.map((item) => (
-              <li key={item} className="flex items-start gap-1.5 text-[11px] leading-snug text-emerald-950/90">
-                <span className="mt-0.5 text-emerald-700" aria-hidden>
-                  ✓
-                </span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-900/80">Updates applied</p>
+            <ul className="mt-1.5 space-y-1" data-testid="simple-pro-applied-checklist" aria-label="Applied guided updates">
+              {appliedChecklist.map((item) => (
+                <li key={item} className="flex items-center justify-between gap-2 text-[11px] leading-snug text-emerald-950/90">
+                  <span className="flex min-w-0 items-start gap-1.5">
+                    <span className="mt-0.5 text-emerald-700" aria-hidden>
+                      ✓
+                    </span>
+                    <span>{item}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-[10px] font-semibold text-emerald-800 underline decoration-emerald-600/50 underline-offset-2 hover:text-emerald-950"
+                    data-testid={`simple-pro-jump-section-${item.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`}
+                    onClick={() => scrollToGuidedAppliedChecklistSection(item, appliedVariableIds)}
+                  >
+                    Jump to section
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : appliedAreas.length > 0 && !bulkApplyBusy ? (
           <p className="mt-2 text-[11px] leading-relaxed text-emerald-900/90">
             Updated: {appliedAreas.slice(0, 4).join(" · ")}

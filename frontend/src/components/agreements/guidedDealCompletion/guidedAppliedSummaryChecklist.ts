@@ -8,9 +8,21 @@ export const GUIDED_APPLIED_CHECKLIST_ORDER = [
   "Fees & Payment",
   "Support & SLA",
   "Ownership",
-  "Termination",
+  "Termination / Renewal",
   "Invoice timing & renewal",
 ] as const;
+
+/** Heading text fallbacks when mutation markers are absent (scroll-by-text). */
+export const GUIDED_CHECKLIST_SECTION_HEADING_FALLBACKS: Record<
+  GuidedAppliedChecklistLabel,
+  readonly string[]
+> = {
+  "Fees & Payment": ["Fees", "Payment", "Compensation", "Fee Schedule", "Pricing"],
+  "Support & SLA": ["Support", "Service Level", "SLA", "Uptime"],
+  Ownership: ["Intellectual Property", "Ownership", "Work Product", "IP"],
+  "Termination / Renewal": ["Termination", "Renewal", "Term and Termination"],
+  "Invoice timing & renewal": ["Payment Terms", "Invoicing", "Invoice", "Net 30"],
+};
 
 export type GuidedAppliedChecklistLabel = (typeof GUIDED_APPLIED_CHECKLIST_ORDER)[number];
 
@@ -31,11 +43,11 @@ const VARIABLE_TO_BUCKET: Record<string, GuidedAppliedChecklistLabel> = {
   ip_ownership_contradiction: "Ownership",
   license_background_tools: "Ownership",
   license_scope: "Ownership",
-  term_structure_contradiction: "Termination",
+  term_structure_contradiction: "Termination / Renewal",
   renewal_notice: "Invoice timing & renewal",
-  governing_law_notice: "Termination",
-  governing_venue: "Termination",
-  security_obligations: "Termination",
+  governing_law_notice: "Termination / Renewal",
+  governing_venue: "Termination / Renewal",
+  security_obligations: "Termination / Renewal",
   deliverables_scope: "Fees & Payment",
   deal_terms_confirmation: "Fees & Payment",
 };
@@ -48,7 +60,7 @@ function bucketForVariableId(variableId: string): GuidedAppliedChecklistLabel | 
   if (/fee|payment|compensation|schedule/i.test(area)) return "Fees & Payment";
   if (/support|sla|uptime/i.test(area)) return "Support & SLA";
   if (/ownership|ip|work product/i.test(area)) return "Ownership";
-  if (/terminat|renew|notice|governing/i.test(area)) return "Termination";
+  if (/terminat|renew|notice|governing/i.test(area)) return "Termination / Renewal";
   if (/invoice|timing|net\s+\d/i.test(area)) return "Invoice timing & renewal";
   return null;
 }

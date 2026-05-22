@@ -10,6 +10,7 @@ export type GuidedPacketPrepSnapshot = {
   versionId: string;
   bodyHash: string;
   preparedAt: number;
+  fieldsPlacedCount?: number;
 };
 
 let memoryPacketSnap: GuidedPacketPrepSnapshot | null = null;
@@ -62,6 +63,7 @@ export function readSigningPacketGuidedVersion(): string | null {
 export function markSigningPacketPreparedAtGuidedVersion(
   versionId: string,
   bodyHash?: string | null,
+  fieldsPlacedCount?: number,
 ): void {
   const id = versionId.trim();
   if (!id) return;
@@ -69,6 +71,9 @@ export function markSigningPacketPreparedAtGuidedVersion(
     versionId: id,
     bodyHash: (bodyHash || "").trim(),
     preparedAt: Date.now(),
+    ...(typeof fieldsPlacedCount === "number" && fieldsPlacedCount > 0
+      ? { fieldsPlacedCount }
+      : {}),
   };
   memoryPacketSnap = snap;
   try {

@@ -3,9 +3,36 @@ import { readPaidProVs01PostSignHandoff } from "./vs01PaidProPostSignHandoff";
 import { readSigningPacketStatus } from "./vs01SigningPacketStatusStore";
 
 const PACKET_PREPARED_KEY = "vs01_packet_prepared_v1:";
+const FIELDS_PLACED_COUNT_KEY = "vs01_fields_placed_count_v1:";
 
 function packetPreparedKey(agreementId: string): string {
   return `${PACKET_PREPARED_KEY}${agreementId.trim()}`;
+}
+
+function fieldsPlacedCountKey(agreementId: string): string {
+  return `${FIELDS_PLACED_COUNT_KEY}${agreementId.trim()}`;
+}
+
+export function markAgreementFieldsPlacedCount(agreementId: string, count: number): void {
+  const id = agreementId.trim();
+  if (!id || count <= 0 || typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(fieldsPlacedCountKey(id), String(Math.floor(count)));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readAgreementFieldsPlacedCount(agreementId: string): number {
+  const id = agreementId.trim();
+  if (!id || typeof localStorage === "undefined") return 0;
+  try {
+    const raw = localStorage.getItem(fieldsPlacedCountKey(id));
+    const n = raw ? Number.parseInt(raw, 10) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function markAgreementPacketPrepared(agreementId: string): void {

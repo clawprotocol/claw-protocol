@@ -9,7 +9,13 @@ describe("SimpleProFinalReviewScreen", () => {
       <SimpleProFinalReviewScreen
         agreementHtml="<p>Full authoritative agreement body</p>"
         appliedAnswerCount={5}
-        appliedChecklist={["Fees & Payment", "Support & SLA", "Ownership", "Termination", "Invoice timing & renewal"]}
+        appliedChecklist={[
+          "Fees & Payment",
+          "Support & SLA",
+          "Ownership",
+          "Termination / Renewal",
+          "Invoice timing & renewal",
+        ]}
         appliedVariableIds={[]}
         onSendForSignature={vi.fn()}
         onSendForReview={vi.fn()}
@@ -23,9 +29,11 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(screen.getByTestId("simple-pro-final-review-send-trust").textContent).toContain(
       "This is the version that will be sent.",
     );
+    expect(screen.getByTestId("simple-pro-applied-updates-card").textContent).toContain("Updates applied");
     const checklist = screen.getByTestId("simple-pro-applied-checklist");
     expect(checklist.textContent).toContain("Fees & Payment");
     expect(checklist.textContent).toContain("Support & SLA");
+    expect(screen.getByTestId("simple-pro-jump-section-fees-payment")).toBeTruthy();
     cleanup();
   });
 

@@ -366,7 +366,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("paid Pro recipient fields mount below finalize with inline shell (not legacy Share headline constant)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toMatch(
-      /\{paidProRecipientSetupOnDraft \? \([\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
+      /\{paidProRecipientSetupOnDraft && !guidedFinalReviewActive \? \([\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
     );
     expect(intake).toMatch(
       /paidProInlineRecipientShell && effectivePremiumSendMode === "review"\s*\n\s*\? "Send for review"/,
@@ -561,7 +561,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const debounceBlock = intake.slice(debounceIdx, debounceIdx + 1200);
     expect(debounceBlock).toContain("logRecipientMetadataOnlyMutation");
     expect(debounceBlock).toContain("logRecipientSetupStableWhileTyping");
-    expect(intake.slice(debounceIdx, debounceIdx + 1600)).toContain("partySignerNames");
+    expect(debounceBlock).not.toContain("partySignerNames");
+    expect(intake).toContain("onRecipientMetadataPersist");
+    expect(intake).toContain("readPremiumRecipientHandoffMemo");
+    expect(intake).toContain("guidedCompletionFrozen");
+    expect(intake).toContain("guidedQueueRebuildBlocked");
+    expect(intake).toContain("Prepare signing packet first.");
     expect(intake).toContain("finalReviewSendPathChosenRef.current ||");
     expect(intake).toContain("paidProRecipientSetupOnDraft");
   });

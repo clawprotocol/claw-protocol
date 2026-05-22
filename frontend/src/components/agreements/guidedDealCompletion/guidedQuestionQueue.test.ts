@@ -3,8 +3,11 @@ import {
   buildStableGuidedQuestionQueue,
   logGuidedQuestionDedupe,
   logGuidedQuestionQueueBuilt,
+  logGuidedQuestionQueueFreezeHit,
   logGuidedQuestionRepeatBlocked,
 } from "./guidedQuestionQueue";
+import { mergeGuidedSessionWhenRebuildBlocked } from "./guidedCompletionFreeze";
+import { freezeGuidedSessionAfterApply } from "./guidedSessionPersistence";
 import type { DealVariable } from "./types";
 
 function varStub(id: string, label: string, question: string): DealVariable {
@@ -56,6 +59,23 @@ describe("buildStableGuidedQuestionQueue", () => {
     });
     expect(result.queue).not.toContain("total_fee_confirmation");
     expect(result.blockedRepeatIds).toContain("total_fee_confirmation");
+  });
+
+  it("logs freeze hit when merge is blocked after apply", () => {
+    const session = {
+      variables: [varStub("saas_sla", "SLA", "What support hours apply?")],
+      queue: ["saas_sla"],
+      answered: { saas_sla: "99.5%" },
+      skipped: new Set<string>(),
+      currentIndex: 1,
+      completenessPercent: 100,
+      agreementFamily: "services_agreement" as const,
+      frozenTotalQuestions: 1,
+    };
+    const frozen = mergeGuidedSessionWhenRebuildBlocked(session, "gen:fp");
+    expect(frozen?.answered.saas_sla).toBe("99.5%");
+    logGuidedQuestionQueueFreezeHit({ queueLen: 1, answeredCount: 1 });
+    expect(freezeGuidedSessionAfterApply(session, "gen:fp").queue).not.toContain("saas_sla");
   });
 
   it("never shrinks visible progress by reinserting skipped ids", () => {

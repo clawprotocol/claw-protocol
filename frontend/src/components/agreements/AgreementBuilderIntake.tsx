@@ -611,6 +611,7 @@ import {
   invalidateSigningPacketPrep,
   logGuidedPacketStaleHardStop,
   markSigningPacketPreparedAtGuidedVersion,
+  readSigningPacketPrepSnapshot,
   resolveSigningPacketStale,
 } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import {
@@ -637,6 +638,11 @@ import {
 } from "./simpleProFinalReviewPhase";
 import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
 import { buildGuidedAppliedSummaryChecklist } from "./guidedDealCompletion/guidedAppliedSummaryChecklist";
+import {
+  isGuidedQueueRebuildBlocked,
+  mergeGuidedSessionWhenRebuildBlocked,
+} from "./guidedDealCompletion/guidedCompletionFreeze";
+import { readPremiumRecipientHandoffMemo } from "./premiumRecipientHandoffReadCache";
 import { downloadExportDraftDocx, downloadExportDraftTxt } from "../../agreement/proRedlineReviewApi";
 import {
   logReviewEditedVersionKeptAsReference,
@@ -658,7 +664,10 @@ import {
   logRecipientSetupStableWhileTyping,
   shouldSkipRedundantPremiumHandoffWrite,
 } from "./authoritativeAgreementContinuity";
-import { isAgreementPacketPrepared } from "../../vs01/vs01WorkspaceSigningStatus";
+import {
+  isAgreementPacketPrepared,
+  readAgreementFieldsPlacedCount,
+} from "../../vs01/vs01WorkspaceSigningStatus";
 import { logUxTrustEvent } from "../../lib/uxTrustAssertions";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import {
@@ -1283,6 +1292,8 @@ type CreateFlowSendRecipientsPanelProps = {
   finalReviewSendIntent?: FinalReviewSendIntent | null;
   stripRecipientEmailNoise: (s: string) => string;
   looksLikeEmail: (s: string) => boolean;
+  /** Persist signer metadata on blur (not every keystroke). */
+  onRecipientMetadataPersist?: () => void;
 };
 
 function CreateFlowSendRecipientsPanel({
@@ -1329,6 +1340,7 @@ function CreateFlowSendRecipientsPanel({
   finalReviewSendIntent = null,
   stripRecipientEmailNoise,
   looksLikeEmail,
+  onRecipientMetadataPersist,
 }: CreateFlowSendRecipientsPanelProps) {
   const resolvedSendMode: PremiumSendIntent =
     finalReviewSendIntent === "review_only"
@@ -1467,6 +1479,7 @@ function CreateFlowSendRecipientsPanel({
             next[idx] = after;
             return next;
           });
+          onRecipientMetadataPersist?.();
         };
         const onSignerTitleChange = (v: string) => {
           const prev = signerMetadataInputRaw(partySignerTitles[idx]);
@@ -1505,6 +1518,7 @@ function CreateFlowSendRecipientsPanel({
             next[idx] = after;
             return next;
           });
+          onRecipientMetadataPersist?.();
         };
         return (
           <div
@@ -2456,6 +2470,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const finalReviewSendPathChosenRef = useRef(false);
   const finalReviewSendIntentRef = useRef<FinalReviewSendIntent | null>(null);
   const guidedFrozenAfterApplyRef = useRef(false);
+  const [guidedCompletionFrozen, setGuidedCompletionFrozen] = useState(false);
   const recipientMetadataMutationRef = useRef(false);
   const premiumRecipientHandoffDebounceRef = useRef(0);
   const createFlowPhaseRefForRecipientOpen = useRef<string | null>(null);
@@ -12629,7 +12644,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipient2Email,
       ...extraPartyReviewEmails,
     ];
-    const handoff = readPremiumRecipientHandoff();
+    const handoff = readPremiumRecipientHandoffMemo();
     const ho = handoff ? linearPremiumRecipientSlots(handoff, draft.parties.length) : [];
     const signerNames = draft.parties.map((p, i) => ho[i]?.signerName ?? (p as { signerName?: string }).signerName);
     return buildResolvedPartyDisplayModel({
@@ -12866,7 +12881,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementId: reviewAgreementIdRef.current ?? undefined,
         fields: ["recipient_emails", "signer_names", "party_display"],
       });
-    }, 280);
+    }, 400);
     return () => window.clearTimeout(premiumRecipientHandoffDebounceRef.current);
   }, [
     paidProRecipientSetupOnDraft,
@@ -12876,11 +12891,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient2Email,
     recipient1Name,
     recipient2Name,
-    partySignerNames,
-    partySignerTitles,
     persistPremiumRecipientHandoffFromDraftAndUi,
     createFlowPhase,
-    paidProRecipientSetupOnDraft,
   ]);
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
@@ -12954,17 +12966,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       /** Paid Pro delivery on DRAFT must resolve here — the DRAFT branch below would otherwise return `continue_to_recipients` (dead). */
       if (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) {
         if (productionReadyForPersist) {
+          const sendAgreementId = (
+            productionSendBarAgreementId ||
+            agreementIdForReview ||
+            reviewAgreementId ||
+            ""
+          ).trim();
+          const signingPacketCtaBlocked =
+            paidProAuthoritative &&
+            effectivePremiumSendMode === "signature" &&
+            (!sendAgreementId ||
+              !isAgreementPacketPrepared(sendAgreementId) ||
+              (readAgreementFieldsPlacedCount(sendAgreementId) ||
+                readSigningPacketPrepSnapshot()?.fieldsPlacedCount ||
+                0) <= 0);
           const sendDisabled =
             (!recipientsDeferred && (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)) ||
             Boolean(loading) ||
             premiumSendConfirmOpen ||
-            guidedPacketSendBlocked;
+            guidedPacketSendBlocked ||
+            signingPacketCtaBlocked;
           const premiumOutbox = premiumSignersSurfaceReady;
           const persistSendLabel =
             loading &&
             (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
             createFlowPhase === "ready_to_send"
               ? "Saving…"
+              : signingPacketCtaBlocked
+                ? "Prepare signing packet first."
               : paidProRecipientSetupOnDraft &&
                   !recipientsDeferred &&
                   (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)
@@ -13431,13 +13460,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDocRefreshTick,
     authoritativePremiumUiCommitted,
   ]);
+  const guidedQueueRebuildBlocked = isGuidedQueueRebuildBlocked({
+    completionFrozen: guidedCompletionFrozen,
+    frozenAfterApplyRef: guidedFrozenAfterApplyRef.current,
+    bulkApplying: guidedBulkApplyingRef.current,
+    phase: guidedCompletionPhase,
+    finalReviewActive: simpleProFinalReviewActive,
+  });
   const guidedCompletionSessionBase = useMemo(() => {
+    if (guidedQueueRebuildBlocked) return null;
     if (!premiumPaidDocumentSurface || paidBodyForGuidedCompletion.length < 200) return null;
     return buildGuidedSessionFromAgreement({
       intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
       body: paidBodyForGuidedCompletion,
     });
   }, [
+    guidedQueueRebuildBlocked,
     premiumPaidDocumentSurface,
     paidBodyForGuidedCompletion,
     currentPremiumMergedIntakeKey,
@@ -13460,7 +13498,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   useEffect(() => {
     setGuidedCompletionSession((prev) => {
-      if (!guidedCompletionSessionBase) return prev;
+      if (guidedQueueRebuildBlocked && prev) {
+        const frozen = mergeGuidedSessionWhenRebuildBlocked(prev, guidedSessionKey);
+        if (frozen) {
+          guidedCompletionSessionRef.current = frozen;
+          return frozen;
+        }
+      }
+      if (!guidedCompletionSessionBase) return guidedQueueRebuildBlocked ? prev : prev;
       if (
         guidedFrozenAfterApplyRef.current &&
         prev &&
@@ -13472,9 +13517,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       const collectingLocally =
         guidedCompletionPhase === "collecting_answers" ||
-        guidedCompletionPhase === "ready_to_apply" ||
-        guidedCompletionPhase === "applying_all";
-      if (prev && collectingLocally) {
+        guidedCompletionPhase === "ready_to_apply";
+      if (prev && collectingLocally && !guidedQueueRebuildBlocked) {
         const preserved = preserveGuidedSessionDuringCollection(
           prev,
           guidedCompletionSessionBase,
@@ -13483,6 +13527,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         guidedCompletionSessionRef.current = preserved;
         return preserved;
       }
+      if (guidedQueueRebuildBlocked) return prev;
       const merged = mergeGuidedSessionOnBaseRefresh(
         prev,
         guidedCompletionSessionBase,
@@ -13500,7 +13545,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedCompletionSessionRef.current = merged;
       return merged;
     });
-  }, [guidedCompletionSessionBase, guidedSessionKey, guidedCompletionPhase, simpleProFinalReviewActive]);
+  }, [
+    guidedCompletionSessionBase,
+    guidedSessionKey,
+    guidedCompletionPhase,
+    simpleProFinalReviewActive,
+    guidedQueueRebuildBlocked,
+  ]);
   const handleGuidedCompletionSessionChange = React.useCallback(
     (next: GuidedCompletionSession) => {
       const keyed = { ...next, sessionKey: next.sessionKey ?? guidedSessionKey };
@@ -13610,6 +13661,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleGuidedBulkApply = React.useCallback(async () => {
     const session = guidedCompletionSessionRef.current;
     if (!session || !isGuidedCompletionComplete(session)) return;
+    setGuidedCompletionFrozen(true);
+    guidedFrozenAfterApplyRef.current = true;
+    const freezeStart = freezeGuidedSessionAfterApply(session, guidedSessionKey);
+    guidedCompletionSessionRef.current = freezeStart;
+    setGuidedCompletionSession(freezeStart);
+    persistGuidedSession(freezeStart, guidedSessionKey);
     const stableBefore =
       lastKnownGoodAuthoritativeDraftRef.current ||
       hydratedPremiumBodyRef.current ||
@@ -13671,7 +13728,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       resetPremiumRecipientsSurfaceForFinalReview();
       finalReviewSendPathChosenRef.current = false;
       finalReviewSendIntentRef.current = null;
-      guidedFrozenAfterApplyRef.current = true;
       const frozenSession = freezeGuidedSessionAfterApply(session, guidedSessionKey);
       guidedCompletionSessionRef.current = frozenSession;
       setGuidedCompletionSession(frozenSession);
@@ -13936,12 +13992,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ).trim();
     const body = (guidedAuthoritativeBodyPlain || paidBodyForGuidedCompletion).trim();
     const packetPrepared = id ? isAgreementPacketPrepared(id) : false;
+    const packetSnap = readSigningPacketPrepSnapshot();
+    const fieldsPlacedCount =
+      (id ? readAgreementFieldsPlacedCount(id) : 0) ||
+      packetSnap?.fieldsPlacedCount ||
+      0;
     const result = verifySigningSendReady({
       agreementBodyPlain: body,
       authoritativeVersionId: guidedAuthoritativeVersionId,
       packetPrepared,
       signerCount: premiumSigningRecipientCount,
-      fieldsPlacedCount: packetPrepared ? 1 : 0,
+      fieldsPlacedCount,
     });
     if (!result.ok) {
       if (result.blockReason === "stale_packet") setGuidedPacketSendBlocked(true);
@@ -13949,7 +14010,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const msg =
           result.blockReason === "stale_packet"
             ? "Agreement changed — refresh signing packet before sending."
-            : `${result.fixLabel} before sending.`;
+            : result.blockReason === "packet_not_prepared" || result.blockReason === "missing_fields"
+              ? "Prepare signing packet first."
+              : `${result.fixLabel} before sending.`;
         setHardError(msg);
       }
       return false;
@@ -18500,7 +18563,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       : undefined
                                   }
                                 />
-                                {paidProRecipientSetupOnDraft ? (
+                                {paidProRecipientSetupOnDraft && !guidedFinalReviewActive ? (
                                   <div className="mt-5 w-full sm:pr-0 md:max-w-3xl" id="claw-recipient-setup">
                                     <CreateFlowSendRecipientsPanel
                                       variant="workspace"
@@ -18549,6 +18612,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       finalReviewSendIntent={finalReviewSendIntentRef.current}
                                       stripRecipientEmailNoise={stripRecipientEmailNoise}
                                       looksLikeEmail={looksLikeEmail}
+                                      onRecipientMetadataPersist={() => {
+                                        if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
+                                      }}
                                     />
                                   </div>
                                 ) : null}

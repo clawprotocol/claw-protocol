@@ -15,6 +15,7 @@ import { StepPrepareSignature } from "./StepPrepareSignature";
 import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
+import { markAgreementFieldsPlacedCount } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
@@ -468,11 +469,16 @@ export function Vs01Wizard({
     writePaidProVs01PostSignHandoff(result.handoff);
     setPacketHandoff(result.handoff);
     clearVs01DraftState(did, "packet_ready_in_wizard");
+    const placedCount = senderPlacedFields.length + recipientPlacedFields.length;
+    if (placedCount > 0) {
+      markAgreementFieldsPlacedCount(linkedAgreementId, placedCount);
+    }
     // eslint-disable-next-line no-console
     console.info("[vs01-packet-prepared]", {
       agreementId: linkedAgreementId,
       documentIdShort: did.slice(0, 8),
       signerCount: result.handoff.signers.length,
+      fieldsPlacedCount: placedCount,
     });
     goToStep(3);
   }, [

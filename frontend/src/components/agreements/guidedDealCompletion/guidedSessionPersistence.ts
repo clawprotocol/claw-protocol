@@ -1,6 +1,10 @@
 import type { CommercialFamilyHint } from "../proAgreementCompleteness/types";
 import { applyGuidedAnswerTransaction, resolveGuidedCurrentIndex } from "./guidedCompletionEngine";
-import { mergeStableGuidedQueue } from "./guidedQuestionQueue";
+import {
+  filterAppliedIdsFromVisibleQueue,
+  logGuidedQuestionQueueFreezeHit,
+  mergeStableGuidedQueue,
+} from "./guidedQuestionQueue";
 import { computeCompletenessPercent } from "./variablePrioritizationLayer";
 import type { DealVariable, GuidedCompletionSession } from "./types";
 
@@ -119,7 +123,21 @@ export function supplementGuidedSessionFromBase(
   locked: GuidedCompletionSession,
   base: GuidedCompletionSession | null,
   sessionKey: string,
+  opts?: { rebuildBlocked?: boolean },
 ): GuidedCompletionSession {
+  if (opts?.rebuildBlocked) {
+    logGuidedQuestionQueueFreezeHit({
+      queueLen: locked.queue.length,
+      answeredCount: Object.keys(locked.answered).length,
+    });
+    const visibleQueue = filterAppliedIdsFromVisibleQueue(locked.queue, locked.answered, locked.skipped);
+    return recomputeSessionProgress({
+      ...locked,
+      sessionKey,
+      queue: visibleQueue,
+      frozenTotalQuestions: locked.frozenTotalQuestions ?? locked.queue.length,
+    });
+  }
   if (!base) return recomputeSessionProgress({ ...locked, sessionKey });
   const merged = mergeStableGuidedQueue(locked.queue, locked.variables, {
     variables: base.variables,
@@ -174,10 +192,11 @@ export function freezeGuidedSessionAfterApply(
   sessionKey: string,
 ): GuidedCompletionSession {
   const frozen = session.frozenTotalQuestions ?? session.queue.length;
+  const visibleQueue = filterAppliedIdsFromVisibleQueue(session.queue, session.answered, session.skipped);
   return recomputeSessionProgress({
     ...session,
     sessionKey,
-    queue: [...session.queue],
+    queue: visibleQueue,
     variables: [...session.variables],
     answered: { ...session.answered },
     answeredAt: session.answeredAt ? { ...session.answeredAt } : undefined,

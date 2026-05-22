@@ -42,7 +42,7 @@ describe("freezeGuidedSessionAfterApply", () => {
       },
     );
     const frozen = freezeGuidedSessionAfterApply(session, "gen:fp");
-    expect(frozen.queue.length).toBe(5);
+    expect(frozen.queue.length).toBe(0);
     expect(Object.keys(frozen.answered).length).toBe(5);
     expect(frozen.frozenTotalQuestions).toBe(5);
   });

@@ -80,5 +80,9 @@ describe("guided final review flow", () => {
     expect(corpus).toContain("logFinalReviewAuthoritativeRender");
     expect(corpus).toContain("finalReviewAuthorityOnly");
     expect(intake).toContain("guidedAppliedSummaryChecklist");
+    expect(intake).toContain("guidedCompletionFrozen");
+    const phase = readFileSync(join(__dirname, "../simpleProFinalReviewPhase.ts"), "utf8");
+    expect(phase).toContain("final-review-recipient-phase-blocked");
+    expect(intake).toContain("paidProRecipientSetupOnDraft && !guidedFinalReviewActive");
   });
 });

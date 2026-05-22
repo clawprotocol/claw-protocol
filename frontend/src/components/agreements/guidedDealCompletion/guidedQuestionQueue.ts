@@ -149,3 +149,27 @@ export function logGuidedQuestionRepeatBlocked(payload: { variableId: string }):
   // eslint-disable-next-line no-console
   console.info("[guided-question-repeat-blocked]", payload);
 }
+
+/** Applied variable IDs must never re-enter the visible queue. */
+export function filterAppliedIdsFromVisibleQueue(
+  queue: readonly string[],
+  answered: Readonly<Record<string, string>>,
+  skipped: ReadonlySet<string>,
+): string[] {
+  const out: string[] = [];
+  for (const id of queue) {
+    if (skipped.has(id)) continue;
+    if ((answered[id] || "").trim()) continue;
+    out.push(id);
+  }
+  return out;
+}
+
+export function logGuidedQuestionQueueFreezeHit(payload: {
+  queueLen: number;
+  answeredCount?: number;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-question-queue-freeze-hit]", payload);
+}

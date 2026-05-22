@@ -52,6 +52,8 @@ export function logGuidedFinalReviewPhaseGuardBlocked(context: string, phase: Cr
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.warn("[guided-final-review-phase-guard-blocked-recipient-setup]", { context, phase });
+  // eslint-disable-next-line no-console
+  console.info("[final-review-recipient-phase-blocked]", { context, phase });
 }
 
 export function logRecipientInputPhaseChangeBlocked(args: {

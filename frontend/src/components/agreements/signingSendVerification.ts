@@ -33,7 +33,20 @@ export function verifySigningSendReady(args: {
     };
   }
 
-  if (args.packetPrepared && args.fieldsPlacedCount <= 0) {
+  if (!args.packetPrepared) {
+    // eslint-disable-next-line no-console
+    console.warn("[signing-send-blocked-unprepared-packet]", {
+      signerCount: args.signerCount,
+      fieldsPlacedCount: args.fieldsPlacedCount,
+    });
+    return {
+      ok: false,
+      blockReason: "packet_not_prepared",
+      fixLabel: "Prepare signing packet first.",
+    };
+  }
+
+  if (args.fieldsPlacedCount <= 0) {
     // eslint-disable-next-line no-console
     console.warn("[signing-send-blocked-missing-fields]", {
       signerCount: args.signerCount,
@@ -42,7 +55,7 @@ export function verifySigningSendReady(args: {
     return {
       ok: false,
       blockReason: "missing_fields",
-      fixLabel: "Review field placement",
+      fixLabel: "Prepare signing packet first.",
     };
   }
 

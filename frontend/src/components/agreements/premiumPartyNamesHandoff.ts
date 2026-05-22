@@ -8,8 +8,12 @@ import {
   signerMetadataInputRaw,
 } from "../../agreement/signerMetadataNormalize";
 
+import { invalidatePremiumRecipientHandoffReadCache } from "./premiumRecipientHandoffReadCache";
+
 const LEGACY_KEY = "claw_premium_party_names_handoff_v1";
 const KEY_V2 = "claw_premium_recipient_handoff_v2";
+
+let lastHandoffReadLogFingerprint = "";
 
 export type PremiumRecipientHandoffSlot = {
   name: string;
@@ -137,6 +141,15 @@ function mergeSlot(
 
 function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoffV2): void {
   const slots = linearPremiumRecipientSlots(handoff, 2 + (handoff.partyIndexSlots?.length ?? 0));
+  const fingerprint = JSON.stringify(
+    slots.map((s) => ({
+      email: (s.email || "").trim(),
+      signerName: signerMetadataInputRaw(s.signerName),
+      signerTitle: signerMetadataInputRaw(s.signerTitle),
+    })),
+  );
+  if (fingerprint === lastHandoffReadLogFingerprint) return;
+  lastHandoffReadLogFingerprint = fingerprint;
   const withSignerName = slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length;
   const withSignerTitle = slots.filter((s) => signerMetadataInputRaw(s.signerTitle).length > 0).length;
   // eslint-disable-next-line no-console
@@ -197,6 +210,7 @@ export function persistPremiumRecipientHandoff(patch: {
     };
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
+    invalidatePremiumRecipientHandoffReadCache();
     logReviewLinkSignerMetadataHandoffWrite(payload);
     const slots = linearPremiumRecipientSlots(payload, 2 + (partyIndexSlots?.length ?? 0));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
@@ -275,6 +289,7 @@ export function writePremiumRecipientHandoffExact(
       return;
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
+    invalidatePremiumRecipientHandoffReadCache();
     logReviewLinkSignerMetadataHandoffWrite(payload);
     const slots = linearPremiumRecipientSlots(payload, 2 + (extra.length ?? 0));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;

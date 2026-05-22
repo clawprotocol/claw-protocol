@@ -52,6 +52,19 @@ describe("verifySigningSendReady", () => {
       fieldsPlacedCount: 0,
     });
     expect(result.ok).toBe(false);
-    expect(result.fixLabel).toBe("Review field placement");
+    expect(result.fixLabel).toBe("Prepare signing packet first.");
+  });
+
+  it("blocks when packet is not prepared", () => {
+    const result = verifySigningSendReady({
+      agreementBodyPlain: "x",
+      authoritativeVersionId: "v1",
+      packetPrepared: false,
+      signerCount: 1,
+      fieldsPlacedCount: 0,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.blockReason).toBe("packet_not_prepared");
+    expect(result.fixLabel).toBe("Prepare signing packet first.");
   });
 });
