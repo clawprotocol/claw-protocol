@@ -50,14 +50,26 @@ describe("guided final review flow", () => {
     expect(intake).toContain("logSimpleProFinalReviewMounted");
   });
 
-  it("SimpleProFinalReviewScreen exposes final review copy and CTAs", () => {
+  it("SimpleProFinalReviewScreen exposes final review copy and send CTAs", () => {
     const screen = readFileSync(join(__dirname, "../SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain("Review your updated Pro agreement");
-    expect(screen).toContain("simple-pro-continue-to-signing");
+    expect(screen).toContain("simple-pro-send-for-signature");
+    expect(screen).toContain("simple-pro-send-for-review");
     expect(screen).toContain("simple-pro-copy-agreement");
-    expect(screen.replace(/\s+/g, " ")).toContain(
-      "Side-by-side redline comparison is not available yet",
-    );
-    expect(screen).not.toContain('data-testid="pro-review-compare-versions"');
+    expect(screen).toContain("This is the version that will be sent.");
+    expect(screen).toContain("Edit before sending");
+    expect(screen).not.toContain("simple-pro-continue-to-signing");
+    expect(screen).not.toContain("simple-pro-suggest-changes-toggle");
+  });
+
+  it("intake wires authoritative final review corpus and send path guards", () => {
+    const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("resolveSimpleProFinalReviewCorpus");
+    expect(intake).toContain("simpleProFinalReviewHtml");
+    expect(intake).toContain("finalReviewSendPathChosenRef");
+    expect(intake).toContain("handleProSendForReview");
+    expect(intake).toContain("premiumRecipientHandoffDebounceRef");
+    expect(intake).toContain("resolveSimpleProFinalReviewCorpus");
+    expect(intake).toContain("finalReviewSendIntentRef");
   });
 });

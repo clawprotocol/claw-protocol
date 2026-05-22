@@ -524,13 +524,14 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("logPaidProEditReturnSkipBasicGenerate");
   });
 
-  it("simplified Pro review flow uses ProReviewSigningFlowPanel and signing send verification", () => {
+  it("simplified Pro review flow uses SimpleProFinalReviewScreen and signing send verification", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showSimplifiedProReviewSigningFlow");
     expect(intake).toContain("SimpleProFinalReviewScreen");
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
-    expect(screen).toContain("data-testid=\"simple-pro-continue-to-signing\"");
-    expect(screen).toContain("simple-pro-suggest-changes-toggle");
+    expect(screen).toContain("data-testid=\"simple-pro-send-for-signature\"");
+    expect(screen).toContain("data-testid=\"simple-pro-send-for-review\"");
+    expect(screen).toContain("simple-pro-edit-before-sending-toggle");
     expect(intake).toContain("processReviewEditedVersionUpload");
     expect(intake).toContain("verifySigningSendReady");
     expect(intake).toContain("assertSigningSendReadyOrBlock");
@@ -539,6 +540,22 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("postGuidedAuthoritativeReview");
     expect(intake).toContain("resolveGuidedBulkCommitBody");
     expect(intake).toContain("logGuidedBulkCommitSuccess");
-    expect(intake).toMatch(/onContinueToSigning=\{\(\) => void handleProSendForSignature\(\)\}/);
+    expect(intake).toContain("finalReviewSendPathChosenRef");
+    expect(intake).toContain("premiumRecipientHandoffDebounceRef");
+    expect(intake).toMatch(/onSendForSignature=\{\(\) => void handleProSendForSignature\(\)\}/);
+    expect(intake).toMatch(/onSendForReview=\{\(\) => void handleProSendForReview\(\)\}/);
+  });
+
+  it("recipient metadata debounce does not revert phase while signer fields change", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("recipientMetadataMutationRef");
+    expect(intake).toContain("finalReviewSendPathChosenRef");
+    const debounceIdx = intake.indexOf("premiumRecipientHandoffDebounceRef.current = window.setTimeout");
+    expect(debounceIdx).toBeGreaterThan(-1);
+    const debounceBlock = intake.slice(debounceIdx, debounceIdx + 900);
+    expect(debounceBlock).toContain("partySignerNames");
+    expect(debounceBlock).toContain("logRecipientMetadataOnlyMutation");
+    expect(intake).toContain("finalReviewSendPathChosenRef.current ||");
+    expect(intake).toContain("paidProRecipientSetupOnDraft");
   });
 });

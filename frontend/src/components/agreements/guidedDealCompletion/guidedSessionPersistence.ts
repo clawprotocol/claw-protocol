@@ -1,5 +1,6 @@
 import type { CommercialFamilyHint } from "../proAgreementCompleteness/types";
 import { applyGuidedAnswerTransaction, resolveGuidedCurrentIndex } from "./guidedCompletionEngine";
+import { mergeStableGuidedQueue } from "./guidedQuestionQueue";
 import { computeCompletenessPercent } from "./variablePrioritizationLayer";
 import type { DealVariable, GuidedCompletionSession } from "./types";
 
@@ -120,20 +121,18 @@ export function supplementGuidedSessionFromBase(
   sessionKey: string,
 ): GuidedCompletionSession {
   if (!base) return recomputeSessionProgress({ ...locked, sessionKey });
-  const varById = new Map<string, DealVariable>();
-  for (const v of locked.variables) varById.set(v.id, v);
-  for (const v of base.variables) varById.set(v.id, v);
-  const queue = [...locked.queue];
-  for (const id of base.queue) {
-    if (!queue.includes(id)) queue.push(id);
-  }
-  const variables = queue.map((id) => varById.get(id)).filter((v): v is DealVariable => Boolean(v));
+  const merged = mergeStableGuidedQueue(locked.queue, locked.variables, {
+    variables: base.variables,
+    answered: locked.answered,
+    skipped: locked.skipped,
+    maxQuestions: Math.max(locked.frozenTotalQuestions ?? locked.queue.length, base.queue.length),
+  });
   return recomputeSessionProgress({
     ...locked,
     sessionKey,
-    queue,
-    variables: variables.length ? variables : locked.variables,
-    frozenTotalQuestions: locked.frozenTotalQuestions ?? locked.queue.length,
+    queue: merged.queue,
+    variables: merged.variables.length ? merged.variables : locked.variables,
+    frozenTotalQuestions: Math.max(locked.frozenTotalQuestions ?? locked.queue.length, merged.queue.length),
   });
 }
 

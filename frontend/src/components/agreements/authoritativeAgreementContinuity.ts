@@ -80,3 +80,29 @@ export function logRecipientMetadataOnlyMutation(args: {
     fields: args.fields,
   });
 }
+
+let lastPremiumHandoffFingerprint = "";
+
+export function fingerprintPremiumRecipientHandoffSlots(
+  slots: readonly { name?: string; email?: string; signerName?: string; signerTitle?: string }[],
+): string {
+  return JSON.stringify(
+    slots.map((s) => ({
+      name: (s.name || "").trim(),
+      email: (s.email || "").trim(),
+      signerName: (s.signerName || "").trim(),
+      signerTitle: (s.signerTitle || "").trim(),
+    })),
+  );
+}
+
+/** Skip redundant session writes when recipient metadata unchanged. */
+export function shouldSkipRedundantPremiumHandoffWrite(fingerprint: string): boolean {
+  if (!fingerprint || fingerprint === lastPremiumHandoffFingerprint) return true;
+  lastPremiumHandoffFingerprint = fingerprint;
+  return false;
+}
+
+export function resetPremiumHandoffWriteDedupe(): void {
+  lastPremiumHandoffFingerprint = "";
+}

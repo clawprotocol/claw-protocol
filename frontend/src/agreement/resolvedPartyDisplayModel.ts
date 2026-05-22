@@ -48,27 +48,31 @@ function formatEmailLocalPart(email: string): string {
 
 function pickDisplayName(args: {
   signerName?: string;
+  recipientName?: string;
   entityName?: string;
   email?: string;
   intakeText?: string | null;
+  partyIndex?: number;
 }): { displayName: string; source: ResolvedPartyDisplaySlot["source"] } {
   const signer = (args.signerName || "").trim();
+  const recipient = (args.recipientName || "").trim();
   const entity = (args.entityName || "").trim();
   const email = stripRecipientEmailNoise(args.email || "");
 
-  if (signer && !isSemanticPartyPlaceholder(signer) && signer.toLowerCase() !== entity.toLowerCase()) {
+  if (signer && !isSemanticPartyPlaceholder(signer)) {
     return { displayName: finalizePartyDisplayNameForUserFacing(signer, args.intakeText), source: "signer" };
   }
-  if (entity && !isSemanticPartyPlaceholder(entity)) {
-    return { displayName: finalizePartyDisplayNameForUserFacing(entity, args.intakeText), source: "draft" };
+  if (recipient && !isSemanticPartyPlaceholder(recipient)) {
+    return { displayName: finalizePartyDisplayNameForUserFacing(recipient, args.intakeText), source: "intake" };
   }
   if (isPlausibleEmail(email)) {
     return { displayName: formatEmailLocalPart(email), source: "email" };
   }
-  if (signer && !isSemanticPartyPlaceholder(signer)) {
-    return { displayName: finalizePartyDisplayNameForUserFacing(signer, args.intakeText), source: "signer" };
+  if (entity && !isSemanticPartyPlaceholder(entity)) {
+    return { displayName: finalizePartyDisplayNameForUserFacing(entity, args.intakeText), source: "draft" };
   }
-  return { displayName: entity || "Signer", source: "fallback" };
+  const idx = args.partyIndex ?? 0;
+  return { displayName: `Signer ${idx + 1}`, source: "fallback" };
 }
 
 export function buildResolvedPartyDisplayModel(args: {
@@ -76,6 +80,7 @@ export function buildResolvedPartyDisplayModel(args: {
   intakeText?: string | null;
   recipientEmails?: readonly (string | null | undefined)[];
   recipientSignerNames?: readonly (string | null | undefined)[];
+  recipientDisplayNames?: readonly (string | null | undefined)[];
 }): ResolvedPartyDisplaySlot[] {
   const parties = (args.parties ?? []) as AgreementParty[];
   const handoff = readPremiumRecipientHandoff();
@@ -89,12 +94,15 @@ export function buildResolvedPartyDisplayModel(args: {
       stripRecipientEmailNoise(String(args.recipientEmails?.[i] ?? "")) ||
       stripRecipientEmailNoise(String(ho?.email ?? p.email ?? ""));
     const signerName = (args.recipientSignerNames?.[i] ?? ho?.signerName ?? p.signerName ?? "").trim();
+    const recipientName = (args.recipientDisplayNames?.[i] ?? ho?.name ?? "").trim();
     const entity = (p.name || "").trim() || participantDisplayName(p, i).trim();
     const picked = pickDisplayName({
       signerName,
+      recipientName,
       entityName: entity,
       email,
       intakeText: args.intakeText,
+      partyIndex: i,
     });
     out.push({ index: i, displayName: picked.displayName, source: picked.source, email: email || undefined });
   }
@@ -132,5 +140,9 @@ export function detectPlaceholderRegressionInPartyLabels(
   recipientsCaptured: boolean,
 ): boolean {
   if (!recipientsCaptured) return false;
-  return slots.some((s) => isSemanticPartyPlaceholder(s.displayName));
+  return slots.some((s) => s.source === "draft" && isSemanticPartyPlaceholder(s.displayName));
+}
+
+export function partyLabelsNeedFinalizeBeforeSend(slots: readonly ResolvedPartyDisplaySlot[]): boolean {
+  return slots.some((s) => isSemanticPartyPlaceholder(s.displayName) && s.source === "draft");
 }

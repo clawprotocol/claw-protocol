@@ -1,4 +1,5 @@
 import type { DealVariable, DealVariableSeverity, GuidedCompletionIntro, GuidedCompletionSession } from "./types";
+import { buildStableGuidedQuestionQueue } from "./guidedQuestionQueue";
 
 const SEVERITY_RANK: Record<DealVariableSeverity, number> = {
   critical: 0,
@@ -49,10 +50,19 @@ export function prioritizeDealVariables(variables: readonly DealVariable[]): Dea
   });
 }
 
-export function buildGuidedQueue(variables: readonly DealVariable[]): string[] {
-  return prioritizeDealVariables(variables)
-    .slice(0, MAX_GUIDED_QUEUE)
-    .map((v) => v.id);
+export function buildGuidedQueue(
+  variables: readonly DealVariable[],
+  opts?: {
+    answered?: Readonly<Record<string, string>>;
+    skipped?: ReadonlySet<string>;
+  },
+): string[] {
+  return buildStableGuidedQuestionQueue({
+    variables,
+    answered: opts?.answered,
+    skipped: opts?.skipped,
+    maxQuestions: MAX_GUIDED_QUEUE,
+  }).queue;
 }
 
 export function computeCompletenessPercent(args: {
@@ -104,9 +114,13 @@ export function createGuidedCompletionSession(args: {
   agreementFamily: DealVariable["applicableAgreementFamilies"][0];
   bodyLen?: number;
 }): GuidedCompletionSession {
-  const queue = buildGuidedQueue(args.variables);
-  return {
+  const built = buildStableGuidedQuestionQueue({
     variables: args.variables,
+    maxQuestions: MAX_GUIDED_QUEUE,
+  });
+  const queue = built.queue;
+  return {
+    variables: built.variables.length ? built.variables : args.variables,
     queue,
     answered: {},
     skipped: new Set(),

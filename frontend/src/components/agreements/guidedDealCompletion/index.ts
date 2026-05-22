@@ -12,6 +12,13 @@ export {
   computeCompletenessPercent,
   createGuidedCompletionSession,
 } from "./variablePrioritizationLayer";
+export {
+  buildStableGuidedQuestionQueue,
+  mergeStableGuidedQueue,
+  logGuidedQuestionQueueBuilt,
+  logGuidedQuestionDedupe,
+  logGuidedQuestionRepeatBlocked,
+} from "./guidedQuestionQueue";
 export { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
 export {
   buildGuidedSessionFromAgreement,

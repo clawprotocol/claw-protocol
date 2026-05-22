@@ -7,6 +7,7 @@ import type { UploadedSourceDocumentRecord } from "./uploadedSourceDocumentStora
 export type SimpleProFinalReviewScreenProps = {
   agreementHtml: string;
   suppressEmptyFallback?: boolean;
+  appliedAnswerCount?: number;
   appliedAreas?: readonly string[];
   appliedVariableIds?: readonly string[];
   bulkApplyBusy?: boolean;
@@ -15,8 +16,9 @@ export type SimpleProFinalReviewScreenProps = {
   copyAck?: boolean;
   exportBusy?: boolean;
   exportError?: string | null;
-  continueDisabled?: boolean;
-  onContinueToSigning: () => void;
+  sendDisabled?: boolean;
+  onSendForSignature: () => void;
+  onSendForReview: () => void;
   onCopyAgreement: () => void;
   onExportAgreement: () => void;
   suggestEditsDraft?: string;
@@ -36,6 +38,7 @@ export type SimpleProFinalReviewScreenProps = {
 export function SimpleProFinalReviewScreen({
   agreementHtml,
   suppressEmptyFallback = false,
+  appliedAnswerCount = 0,
   appliedAreas = [],
   appliedVariableIds = [],
   bulkApplyBusy = false,
@@ -44,8 +47,9 @@ export function SimpleProFinalReviewScreen({
   copyAck = false,
   exportBusy = false,
   exportError = null,
-  continueDisabled = false,
-  onContinueToSigning,
+  sendDisabled = false,
+  onSendForSignature,
+  onSendForReview,
   onCopyAgreement,
   onExportAgreement,
   suggestEditsDraft = "",
@@ -62,9 +66,15 @@ export function SimpleProFinalReviewScreen({
   className = "",
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [suggestEditsOpen, setSuggestEditsOpen] = useState(false);
+  const [editBeforeSendingOpen, setEditBeforeSendingOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
-  const canSuggestEdits = Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
+  const canEditBeforeSending = Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
+  const answerLabel =
+    appliedAnswerCount > 0
+      ? `${appliedAnswerCount} answer${appliedAnswerCount === 1 ? "" : "s"} applied`
+      : appliedAreas.length > 0
+        ? "Updates applied"
+        : "Updates applied";
 
   useEffect(() => {
     if (!appliedVariableIds.length || !agreementHtml.trim()) return;
@@ -90,8 +100,14 @@ export function SimpleProFinalReviewScreen({
         <h2 className="mt-1 font-serif text-lg font-semibold tracking-tight text-stone-900 sm:text-xl">
           Review your updated Pro agreement
         </h2>
+        <p className="mt-1 text-xs font-medium text-emerald-900/95" data-testid="simple-pro-final-review-trust-line">
+          Updated Pro agreement · {answerLabel}
+        </p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600">
+          This is the version that will be sent.
+        </p>
         <p className="mt-1 text-xs leading-relaxed text-stone-600 sm:text-sm">
-          Your answers have been applied. Review the full agreement before adding signers.
+          Review the full agreement, then choose review-only sharing or signature sending.
         </p>
         {bulkApplyBusy ? (
           <p className="mt-2 text-xs font-medium text-stone-700" role="status" aria-live="polite">
@@ -128,13 +144,22 @@ export function SimpleProFinalReviewScreen({
         <button
           type="button"
           className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-          disabled={continueDisabled || packetStale || bulkApplyBusy}
-          onClick={onContinueToSigning}
-          data-testid="simple-pro-continue-to-signing"
+          disabled={sendDisabled || packetStale || bulkApplyBusy}
+          onClick={onSendForSignature}
+          data-testid="simple-pro-send-for-signature"
         >
-          Continue to signing
+          Send for signature
         </button>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <button
+            type="button"
+            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+            disabled={sendDisabled || packetStale || bulkApplyBusy}
+            onClick={onSendForReview}
+            data-testid="simple-pro-send-for-review"
+          >
+            Send for review
+          </button>
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
@@ -152,36 +177,38 @@ export function SimpleProFinalReviewScreen({
           >
             {exportBusy ? "Preparing export…" : "Download / export"}
           </button>
-          {canSuggestEdits ? (
-            <button
-              type="button"
-              className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-              aria-expanded={suggestEditsOpen}
-              onClick={() => setSuggestEditsOpen((v) => !v)}
-              data-testid="simple-pro-suggest-changes-toggle"
-            >
-              {suggestEditsOpen ? "Hide suggest changes" : "Suggest changes"}
-            </button>
-          ) : null}
         </div>
         {exportError ? (
           <p className="text-[11px] font-medium text-amber-800" role="alert">
             {exportError}
           </p>
         ) : null}
+        {canEditBeforeSending ? (
+          <button
+            type="button"
+            className="self-start text-[11px] font-medium text-stone-600 underline decoration-stone-400/70 underline-offset-2 hover:text-stone-800"
+            aria-expanded={editBeforeSendingOpen}
+            onClick={() => setEditBeforeSendingOpen((v) => !v)}
+            data-testid="simple-pro-edit-before-sending-toggle"
+          >
+            {editBeforeSendingOpen ? "Hide edit options" : "Edit before sending"}
+          </button>
+        ) : null}
       </div>
 
-      {canSuggestEdits && suggestEditsOpen ? (
+      {canEditBeforeSending && editBeforeSendingOpen ? (
         <div
           className="rounded-md border border-stone-200/95 bg-stone-50/95 px-2.5 py-2.5"
-          data-testid="simple-pro-suggest-edits-card"
+          data-testid="simple-pro-edit-before-sending-card"
         >
-          <p className="text-xs font-semibold text-stone-900">Suggest changes</p>
-          <p className="mt-1 text-[11px] leading-relaxed text-stone-600">
-            Type notes for LawDog to apply, or upload a revised file. Side-by-side redline comparison is not
-            available yet.
-          </p>
+          <label
+            className="text-xs font-semibold text-stone-900"
+            htmlFor="simple-pro-edit-before-sending-input"
+          >
+            Edit or paste changes before sending
+          </label>
           <textarea
+            id="simple-pro-edit-before-sending-input"
             className="mt-2 min-h-[4.5rem] w-full resize-y rounded-md border border-stone-300/90 bg-white px-2.5 py-2 text-xs leading-relaxed text-stone-900 placeholder:text-stone-400"
             placeholder="Type requested changes…"
             value={suggestEditsDraft}
@@ -202,7 +229,7 @@ export function SimpleProFinalReviewScreen({
               onClick={onApplySuggestEdits}
               data-testid="simple-pro-apply-suggest-edits"
             >
-              {suggestEditsBusy ? "Applying…" : "Apply suggestions"}
+              {suggestEditsBusy ? "Applying…" : "Apply changes"}
             </button>
             <button
               type="button"
@@ -211,7 +238,7 @@ export function SimpleProFinalReviewScreen({
               onClick={() => fileRef.current?.click()}
               data-testid="simple-pro-upload-revised-document"
             >
-              {uploadBusy ? "Uploading…" : "Upload revised document"}
+              {uploadBusy ? "Uploading…" : "Upload revised agreement"}
             </button>
           </div>
           <p className="mt-1.5 text-[10px] leading-relaxed text-stone-500">
@@ -250,8 +277,8 @@ export function SimpleProFinalReviewScreen({
             <p className="text-[11px] text-stone-600">{uploadedSource.fileName}</p>
           ) : null}
           <p className="text-[11px] leading-relaxed text-stone-600">
-            LawDog cannot show a redline against your draft yet. Use this file for signing or keep the LawDog
-            version.
+            Use this file for signing or keep the LawDog version. Side-by-side redline comparison is not
+            available yet.
           </p>
           <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
             {onUseUploadedForSigning ? (

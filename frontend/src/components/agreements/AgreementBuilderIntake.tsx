@@ -15,7 +15,7 @@ import {
 } from "../../agreement/handoffPartyDisplay";
 import {
   buildResolvedPartyDisplayModel,
-  detectPlaceholderRegressionInPartyLabels,
+  partyLabelsNeedFinalizeBeforeSend,
   formatResolvedPartyDisplayHeadline,
   resolvePersistedAgreementTitle,
 } from "../../agreement/resolvedPartyDisplayModel";
@@ -629,8 +629,12 @@ import {
   logSimpleProFinalReviewContinueToSigning,
   logSimpleProFinalReviewHiddenRecipientUi,
   logSimpleProFinalReviewMounted,
+  recipientSetupSubcopyForIntent,
+  recipientSetupTitleForIntent,
   resolveSimpleProFinalReviewActive,
+  type FinalReviewSendIntent,
 } from "./simpleProFinalReviewPhase";
+import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
 import { downloadExportDraftDocx, downloadExportDraftTxt } from "../../agreement/proRedlineReviewApi";
 import {
   logReviewEditedVersionKeptAsReference,
@@ -647,7 +651,9 @@ import {
   assertAuthoritativeBodyContinuity,
   bumpAuthoritativeAgreementVersion,
   readAuthoritativeAgreementVersion,
+  fingerprintPremiumRecipientHandoffSlots,
   logRecipientMetadataOnlyMutation,
+  shouldSkipRedundantPremiumHandoffWrite,
 } from "./authoritativeAgreementContinuity";
 import { isAgreementPacketPrepared } from "../../vs01/vs01WorkspaceSigningStatus";
 import { logUxTrustEvent } from "../../lib/uxTrustAssertions";
@@ -1269,6 +1275,9 @@ type CreateFlowSendRecipientsPanelProps = {
   primaryCtaHelperText?: string | null;
   /** Guided Pro: e-sign trust / stale packet messaging near recipient setup. */
   guidedSigningTrustSlot?: React.ReactNode;
+  partyDisplaySlots?: readonly import("../../agreement/resolvedPartyDisplayModel").ResolvedPartyDisplaySlot[];
+  partyLabelsFinalizeHint?: boolean;
+  finalReviewSendIntent?: FinalReviewSendIntent | null;
   stripRecipientEmailNoise: (s: string) => string;
   looksLikeEmail: (s: string) => boolean;
 };
@@ -1312,9 +1321,18 @@ function CreateFlowSendRecipientsPanel({
   premiumPrimarySendLabelOverride = null,
   primaryCtaHelperText,
   guidedSigningTrustSlot = null,
+  partyDisplaySlots = [],
+  partyLabelsFinalizeHint = false,
+  finalReviewSendIntent = null,
   stripRecipientEmailNoise,
   looksLikeEmail,
 }: CreateFlowSendRecipientsPanelProps) {
+  const resolvedSendMode: PremiumSendIntent =
+    finalReviewSendIntent === "review_only"
+      ? "review"
+      : finalReviewSendIntent === "signature"
+        ? "signature"
+        : effectivePremiumSendMode;
   const r1e = stripRecipientEmailNoise(recipient1Email);
   const r2e = stripRecipientEmailNoise(recipient2Email);
   const cappedParties = (draft?.parties ?? []).slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
@@ -1333,14 +1351,14 @@ function CreateFlowSendRecipientsPanel({
       : minimalProSendRecipientChrome
         ? "Add email for your records (optional for labeling)"
         : "Add recipient 1 email (labels your invite; you’ll copy a secure link next)";
-  const modeLinkLabel = effectivePremiumSendMode === "review" ? "Review link" : "Signing link";
+  const modeLinkLabel = resolvedSendMode === "review" ? "Review link" : "Signing link";
   const minimalAgreementFirstBody =
-    effectivePremiumSendMode === "review"
+    resolvedSendMode === "review"
       ? "LawDog creates a secure review link for this agreement. It does not email recipients automatically — you copy and share the link when you are ready. Nothing is emailed from LawDog."
       : "LawDog creates secure signing links for this agreement. It does not email recipients automatically — you copy and share when you are ready. Nothing is emailed from LawDog.";
   const modeExplain = minimalProSendRecipientChrome
     ? minimalAgreementFirstBody
-    : effectivePremiumSendMode === "review"
+    : resolvedSendMode === "review"
       ? "Recipients open a secure link to read the draft, suggest plain-English edits, paste a revised version, preview material changes, and submit suggestions. You confirm before anything updates."
       : "Recipients open a secure link to read the final terms and sign when they are ready.";
   const nextStepExplain = minimalProSendRecipientChrome
@@ -1354,12 +1372,12 @@ function CreateFlowSendRecipientsPanel({
     (minimalProSendRecipientChrome
       ? sendRequiresConfirmStep
         ? "Continue to confirmation"
-        : effectivePremiumSendMode === "review"
+        : resolvedSendMode === "review"
           ? "Create review link"
           : "Create signing links"
       : sendRequiresConfirmStep
         ? "Continue to confirmation"
-        : effectivePremiumSendMode === "review"
+        : resolvedSendMode === "review"
           ? linkReadyOutbox
             ? "Continue to review links"
             : "Create review link"
@@ -1382,8 +1400,17 @@ function CreateFlowSendRecipientsPanel({
 
   const recipientFields = (
     <div className="mt-4 space-y-4">
+      {partyLabelsFinalizeHint ? (
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-400" role="note">
+          Party name can be finalized before sending.
+        </p>
+      ) : null}
       {cappedParties.map((party, idx) => {
-        const partyLine = String((party as { name?: string }).name ?? "").trim() || `Party ${idx + 1}`;
+        const resolvedLine = partyDisplaySlots[idx]?.displayName?.trim();
+        const partyLine =
+          resolvedLine ||
+          String((party as { name?: string }).name ?? "").trim() ||
+          `Party ${idx + 1}`;
         const emailVal =
           idx === 0 ? recipient1Email : idx === 1 ? recipient2Email : extraPartyReviewEmails[idx - 2] ?? "";
         const onEmailChange =
@@ -2423,6 +2450,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [createFlowSendRecipientEditorOpen, setCreateFlowSendRecipientEditorOpen] = useState(false);
   const createFlowSendEditorPrimedRef = useRef(false);
   const guidedFinalReviewContinueArmedRef = useRef(false);
+  const finalReviewSendPathChosenRef = useRef(false);
+  const finalReviewSendIntentRef = useRef<FinalReviewSendIntent | null>(null);
+  const recipientMetadataMutationRef = useRef(false);
+  const premiumRecipientHandoffDebounceRef = useRef(0);
   const createFlowPhaseRefForRecipientOpen = useRef<string | null>(null);
   const premiumRecipientUxActiveRef = useRef(false);
   const premiumSendAnotherSkipOnCreatedRef = useRef(false);
@@ -3925,6 +3956,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
       }
       if (slots.length === 0) return;
+      const fingerprint = fingerprintPremiumRecipientHandoffSlots(slots);
+      if (shouldSkipRedundantPremiumHandoffWrite(fingerprint)) return;
       writePremiumRecipientHandoffLinear(slots);
     },
     [],
@@ -11040,22 +11073,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const premiumRecipientSetupTitle = useMemo(() => {
+    const intentTitle = recipientSetupTitleForIntent(finalReviewSendIntentRef.current);
+    if (finalReviewSendPathChosenRef.current && premiumSignersSurfaceReady) return intentTitle;
     if (minimalProSendRecipientChrome && premiumSignersSurfaceReady) {
-      return effectivePremiumSendMode === "review" ? "Share for review" : "Send for signature";
+      return effectivePremiumSendMode === "review" ? "Add reviewer emails" : "Add signer emails";
     }
     if (!premiumSignersSurfaceReady) return "Add recipients";
     if (productionReadyForPersist && !premiumSendModeTouched) return "Choose how to send next";
-    return effectivePremiumSendMode === "review" ? "Share for review" : "Send for signature";
+    return effectivePremiumSendMode === "review" ? "Add reviewer emails" : "Add signer emails";
   }, [
     minimalProSendRecipientChrome,
     premiumSignersSurfaceReady,
     productionReadyForPersist,
     premiumSendModeTouched,
     effectivePremiumSendMode,
+    premiumSurfaceGateTick,
   ]);
 
   const premiumRecipientSetupSubcopy = useMemo(() => {
     if (!premiumSignersSurfaceReady) return "";
+    const intentSubcopy = recipientSetupSubcopyForIntent(finalReviewSendIntentRef.current);
+    if (finalReviewSendPathChosenRef.current && intentSubcopy) return intentSubcopy;
     if (minimalProSendRecipientChrome) {
       return effectivePremiumSendMode === "review"
         ? "Recipients can read the draft, suggest plain-English edits, and approve. Nothing changes unless you accept it."
@@ -12595,15 +12633,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       recipientEmails: emails,
       recipientSignerNames: signerNames,
+      recipientDisplayNames: [recipient1Name, recipient2Name, ...extraPartyReviewEmails.map(() => "")],
     });
   }, [
     draft?.parties,
     recipient1Email,
     recipient2Email,
+    recipient1Name,
+    recipient2Name,
     extraPartyReviewEmails,
+    partySignerNames,
     currentPremiumMergedIntakeKey,
     intakeCombined,
   ]);
+
+  const partyLabelsFinalizeHint = useMemo(
+    () => paidProRecipientSetupOnDraft && partyLabelsNeedFinalizeBeforeSend(resolvedPartyDisplaySlots),
+    [paidProRecipientSetupOnDraft, resolvedPartyDisplaySlots],
+  );
 
   const resolvedPartyDisplayHeadline = useMemo(
     () => formatResolvedPartyDisplayHeadline(resolvedPartyDisplaySlots),
@@ -12800,7 +12847,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!paidProRecipientSetupOnDraft || guidedFinalReviewActive || !draft) return;
-    persistPremiumRecipientHandoffFromDraftAndUi(draft);
+    window.clearTimeout(premiumRecipientHandoffDebounceRef.current);
+    premiumRecipientHandoffDebounceRef.current = window.setTimeout(() => {
+      recipientMetadataMutationRef.current = true;
+      persistPremiumRecipientHandoffFromDraftAndUi(draft);
+      recipientMetadataMutationRef.current = false;
+      logRecipientMetadataOnlyMutation({
+        agreementId: reviewAgreementIdRef.current ?? undefined,
+        fields: ["recipient_emails", "signer_names", "party_display"],
+      });
+    }, 280);
+    return () => window.clearTimeout(premiumRecipientHandoffDebounceRef.current);
   }, [
     paidProRecipientSetupOnDraft,
     guidedFinalReviewActive,
@@ -13591,6 +13648,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setDisplayPhase("review");
       setPremiumRecipientUxActive(false);
       resetPremiumRecipientsSurfaceForFinalReview();
+      finalReviewSendPathChosenRef.current = false;
+      finalReviewSendIntentRef.current = null;
       const answeredIds = session.queue.filter((id) => (session.answered[id] || "").trim());
       const postBody =
         (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
@@ -13691,31 +13750,88 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [guidedAuthoritativeBodyPlain],
   );
 
+  const simpleProFinalReviewCorpus = useMemo(() => {
+    const session = guidedCompletionSessionRef.current ?? guidedCompletionSession;
+    const answeredCount = session
+      ? Object.keys(session.answered).filter((id) => (session.answered[id] || "").trim()).length
+      : guidedAuthoritativeSummaryVariableIds.length;
+    return resolveSimpleProFinalReviewCorpus({
+      authoritativePlain: guidedAuthoritativeBodyPlain,
+      renderedPreviewPlain: renderedAgreementPreview,
+      pickerPlain: premiumPaidReadonlyPick.plainText,
+      agreementDocumentPlain: agreementDocumentText,
+      appliedAnswerCount: answeredCount,
+    });
+  }, [
+    guidedAuthoritativeBodyPlain,
+    renderedAgreementPreview,
+    premiumPaidReadonlyPick.plainText,
+    agreementDocumentText,
+    guidedAuthoritativeSummaryVariableIds.length,
+    guidedCompletionSession,
+    reviewDocRefreshTick,
+    guidedAuthVersionNonce,
+  ]);
+
+  const simpleProFinalReviewHtml = useMemo(() => {
+    const corpus = simpleProFinalReviewCorpus.plainText;
+    if (!corpus.trim()) return "";
+    const rd = reviewDraft ?? draft;
+    const signaturePartyNames = extractAgreementParties({
+      parties: rd?.parties,
+      intakeText: intakeCombined,
+      renderedText: corpus,
+      partiesLine: displayLivePreviewModel.partiesLine,
+    });
+    const intakeForHints = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const renderHints = computePremiumDocumentRenderHints(rd, corpus, intakeForHints);
+    return buildPremiumAgreementReadonlyHtml(corpus, {
+      signatureSectionMode: "collaboration",
+      partyNames: signaturePartyNames,
+      renderHints,
+    });
+  }, [
+    simpleProFinalReviewCorpus.plainText,
+    reviewDraft,
+    draft,
+    intakeCombined,
+    currentPremiumMergedIntakeKey,
+    displayLivePreviewModel.partiesLine,
+  ]);
+
   React.useEffect(() => {
     if (!simpleProFinalReviewActive) return;
     logSimpleProFinalReviewMounted({
-      bodyLen: guidedAuthoritativeBodyPlain.length,
+      bodyLen: simpleProFinalReviewCorpus.plainText.length,
       phase: createFlowPhase,
       guidedApplied: guidedCompletionPhase === "applied",
       recipientUxActive: premiumRecipientUxActive,
     });
-    if (premiumRecipientUxActive) {
+    if (premiumRecipientUxActive && !finalReviewSendPathChosenRef.current) {
       logSimpleProFinalReviewHiddenRecipientUi();
       setPremiumRecipientUxActive(false);
     }
     if (
-      !guidedFinalReviewContinueArmedRef.current &&
-      (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send")
+      finalReviewSendPathChosenRef.current ||
+      paidProRecipientSetupOnDraft ||
+      guidedFinalReviewContinueArmedRef.current
+    ) {
+      return;
+    }
+    if (
+      createFlowPhase === "recipient_setup_required" ||
+      createFlowPhase === "ready_to_send"
     ) {
       logGuidedFinalReviewPhaseGuardBlocked("effect_phase_revert", createFlowPhase);
       setCreateFlowPhase("guided_final_review");
     }
   }, [
     simpleProFinalReviewActive,
-    guidedAuthoritativeBodyPlain.length,
+    simpleProFinalReviewCorpus.plainText.length,
     createFlowPhase,
     guidedCompletionPhase,
     premiumRecipientUxActive,
+    paidProRecipientSetupOnDraft,
   ]);
 
   const guidedPacketStaleState = useMemo(
@@ -13862,22 +13978,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     assertSigningSendReadyOrBlock,
   ]);
 
-  useEffect(() => {
-    if (!paidProRecipientSetupOnDraft || guidedFinalReviewActive || !hasAnyValidRecipientEmail) return;
-    if (detectPlaceholderRegressionInPartyLabels(resolvedPartyDisplaySlots, true)) {
-      logUxTrustEvent("placeholder_regression", {
-        slots: resolvedPartyDisplaySlots.map((s) => ({ i: s.index, name: s.displayName, source: s.source })),
-      });
-    }
-  }, [paidProRecipientSetupOnDraft, hasAnyValidRecipientEmail, resolvedPartyDisplaySlots]);
-
-  useEffect(() => {
-    if (!paidProRecipientSetupOnDraft) return;
-    logRecipientMetadataOnlyMutation({
-      agreementId: agreementIdForReview ?? undefined,
-      fields: ["recipient_emails", "signer_names", "party_display"],
-    });
-  }, [paidProRecipientSetupOnDraft, recipient1Email, recipient2Email, agreementIdForReview]);
 
   const uploadedSourceRecord = useMemo(
     () => (agreementIdForReview ? readUploadedSourceDocument(agreementIdForReview) : null),
@@ -14875,13 +14975,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleSimpleProFinalReviewCopy = React.useCallback(() => {
-    const text = (guidedAuthoritativeBodyPlain || proRefineCurrentDocumentTextForProPanels).trim();
+    const text = (simpleProFinalReviewCorpus.plainText || guidedAuthoritativeBodyPlain || proRefineCurrentDocumentTextForProPanels).trim();
     if (!text || !navigator.clipboard?.writeText) return;
     void navigator.clipboard.writeText(text).then(() => {
       setProFinalReviewCopyAck(true);
       window.setTimeout(() => setProFinalReviewCopyAck(false), 2000);
     });
-  }, [guidedAuthoritativeBodyPlain, proRefineCurrentDocumentTextForProPanels]);
+  }, [simpleProFinalReviewCorpus.plainText, guidedAuthoritativeBodyPlain, proRefineCurrentDocumentTextForProPanels]);
 
   const handleSimpleProFinalReviewExport = React.useCallback(async () => {
     const id = agreementIdForReview?.trim();
@@ -14901,60 +15001,86 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setProFinalReviewExportBusy(false);
   }, [agreementIdForReview]);
 
+  const enterFinalReviewRecipientSetup = React.useCallback(
+    (intent: FinalReviewSendIntent) => {
+      finalReviewSendPathChosenRef.current = true;
+      finalReviewSendIntentRef.current = intent;
+      const sendMode: PremiumSendIntent = intent === "review_only" ? "review" : "signature";
+      guidedFinalReviewContinueArmedRef.current = true;
+      handlePremiumSendModePick(sendMode);
+      if (intent === "signature") {
+        setPremiumSignatureSenderFirst(true);
+        writePremiumSenderSignFirst(true);
+      }
+      devPremiumSendRoute(sendMode, intent === "signature", "recipients_setup");
+      if (draft) {
+        agreementDocumentDirtyRef.current = false;
+        applyHandoffAgreementPreviewOrAuthoritative(draft);
+        persistPremiumRecipientHandoffFromDraftAndUi(draft);
+      }
+      setDisplayPhase("review");
+      setCreateUiStage(CreateUiStage.DRAFT);
+      advancePaidProToRecipientSetup();
+      markPremiumRecipientsSurfaceReleased();
+      setPremiumRecipientUxActive(true);
+      guidedFinalReviewContinueArmedRef.current = false;
+      bumpPremiumSurfaceGateTick();
+      void handlePremiumReviewFirstContinueToSigners({ telemetryMode: sendMode });
+    },
+    [
+      handlePremiumSendModePick,
+      draft,
+      applyHandoffAgreementPreviewOrAuthoritative,
+      persistPremiumRecipientHandoffFromDraftAndUi,
+      advancePaidProToRecipientSetup,
+      bumpPremiumSurfaceGateTick,
+      handlePremiumReviewFirstContinueToSigners,
+    ],
+  );
+
   const handleProSendForSignature = React.useCallback(() => {
     if (guidedCompletionActive) {
       logGuidedSignTransition({
-        bodyLen: guidedCompletionRenderDocument.plainText.length,
+        bodyLen: simpleProFinalReviewCorpus.plainText.length,
         source: guidedCompletionRenderDocument.source,
       });
     }
     const rawId = (reviewAgreementIdRef.current || reviewAgreementId || "").trim();
     const agreementIdShort =
       rawId.length > 12 ? `${rawId.slice(0, 8)}…` : rawId.length > 0 ? rawId : "(local)";
-    const bodyPlain = (premiumPaidReadonlyPick.plainText || agreementDocumentTextRef.current || "").trim();
+    const bodyPlain = (simpleProFinalReviewCorpus.plainText || guidedAuthoritativeBodyPlain || "").trim();
     logProReviewSendSignatureClick({
       agreementIdShort,
       bodyLen: bodyPlain.length,
       renderSource: premiumPaidReadonlyPick.sourceUsed ?? null,
       paidProAuthoritative,
     });
-    logSimpleProFinalReviewContinueToSigning({
-      bodyLen: (guidedAuthoritativeBodyPlain || proRefineCurrentDocumentTextForProPanels).trim().length,
-    });
-    guidedFinalReviewContinueArmedRef.current = true;
-    handlePremiumSendModePick("signature");
-    setPremiumSignatureSenderFirst(true);
-    writePremiumSenderSignFirst(true);
-    devPremiumSendRoute("signature", true, "recipients_setup");
-    if (draft) {
-      agreementDocumentDirtyRef.current = false;
-      applyHandoffAgreementPreviewOrAuthoritative(draft);
-      persistPremiumRecipientHandoffFromDraftAndUi(draft);
-    }
-    setDisplayPhase("review");
-    setCreateUiStage(CreateUiStage.DRAFT);
-    advancePaidProToRecipientSetup();
-    markPremiumRecipientsSurfaceReleased();
-    setPremiumRecipientUxActive(true);
-    guidedFinalReviewContinueArmedRef.current = false;
-    bumpPremiumSurfaceGateTick();
-    void handlePremiumReviewFirstContinueToSigners({ telemetryMode: "signature" });
+    logSimpleProFinalReviewContinueToSigning({ bodyLen: bodyPlain.length });
+    enterFinalReviewRecipientSetup("signature");
   }, [
-    reviewAgreementId,
-    premiumPaidReadonlyPick,
-    paidProAuthoritative,
-    handlePremiumSendModePick,
-    draft,
-    applyHandoffAgreementPreviewOrAuthoritative,
-    persistPremiumRecipientHandoffFromDraftAndUi,
-    bumpPremiumSurfaceGateTick,
-    handlePremiumReviewFirstContinueToSigners,
-    advancePaidProToRecipientSetup,
     guidedCompletionActive,
-    guidedCompletionRenderDocument.plainText,
     guidedCompletionRenderDocument.source,
+    simpleProFinalReviewCorpus.plainText,
+    reviewAgreementId,
+    premiumPaidReadonlyPick.sourceUsed,
+    paidProAuthoritative,
     guidedAuthoritativeBodyPlain,
-    proRefineCurrentDocumentTextForProPanels,
+    enterFinalReviewRecipientSetup,
+  ]);
+
+  const handleProSendForReview = React.useCallback(() => {
+    if (guidedCompletionActive) {
+      logGuidedReviewTransition({
+        bodyLen: simpleProFinalReviewCorpus.plainText.length,
+        source: guidedCompletionRenderDocument.source,
+      });
+    }
+    enterFinalReviewRecipientSetup("review_only");
+  }, [
+    guidedCompletionActive,
+    guidedCompletionRenderDocument.source,
+    simpleProFinalReviewCorpus.plainText,
+    enterFinalReviewRecipientSetup,
   ]);
 
   const handleFinalizeRoutePrimaryAction = React.useCallback(
@@ -15977,6 +16103,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
           premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
           guidedSigningTrustSlot={guidedSigningTrustSlot}
+          partyDisplaySlots={resolvedPartyDisplaySlots}
+          partyLabelsFinalizeHint={partyLabelsFinalizeHint}
+          finalReviewSendIntent={finalReviewSendIntentRef.current}
           primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
           stripRecipientEmailNoise={stripRecipientEmailNoise}
           looksLikeEmail={looksLikeEmail}
@@ -17751,8 +17880,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     {simpleProFinalReviewActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <SimpleProFinalReviewScreen
-                                          agreementHtml={premiumReadonlyAgreementHtml}
+                                          agreementHtml={
+                                            simpleProFinalReviewHtml || premiumReadonlyAgreementHtml
+                                          }
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                          appliedAnswerCount={
+                                            Object.keys(
+                                              (guidedCompletionSession ?? guidedCompletionSessionRef.current)
+                                                ?.answered ?? {},
+                                            ).filter((id) =>
+                                              (
+                                                (guidedCompletionSession ?? guidedCompletionSessionRef.current)
+                                                  ?.answered[id] || ""
+                                              ).trim(),
+                                            ).length || guidedAuthoritativeSummaryVariableIds.length
+                                          }
                                           appliedAreas={guidedAuthoritativeSummaryAreas}
                                           appliedVariableIds={guidedAuthoritativeSummaryVariableIds}
                                           bulkApplyBusy={guidedCompletionPhase === "applying_all"}
@@ -17761,13 +17903,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           copyAck={proFinalReviewCopyAck}
                                           exportBusy={proFinalReviewExportBusy}
                                           exportError={proFinalReviewExportError}
-                                          continueDisabled={
+                                          sendDisabled={
                                             (isGenerating && !draft) ||
                                             upgradeLockActive ||
                                             loading ||
                                             guidedPacketSendBlocked
                                           }
-                                          onContinueToSigning={() => void handleProSendForSignature()}
+                                          onSendForSignature={() => void handleProSendForSignature()}
+                                          onSendForReview={() => void handleProSendForReview()}
                                           onCopyAgreement={handleSimpleProFinalReviewCopy}
                                           onExportAgreement={() => void handleSimpleProFinalReviewExport()}
                                           suggestEditsDraft={proReviewSuggestEditsDraft}
@@ -18359,6 +18502,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
                                       primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
                                       guidedSigningTrustSlot={guidedSigningTrustSlot}
+                                      partyDisplaySlots={resolvedPartyDisplaySlots}
+                                      partyLabelsFinalizeHint={partyLabelsFinalizeHint}
+                                      finalReviewSendIntent={finalReviewSendIntentRef.current}
                                       stripRecipientEmailNoise={stripRecipientEmailNoise}
                                       looksLikeEmail={looksLikeEmail}
                                     />
@@ -18650,6 +18796,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
                         primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
                         guidedSigningTrustSlot={guidedSigningTrustSlot}
+                        partyDisplaySlots={resolvedPartyDisplaySlots}
+                        partyLabelsFinalizeHint={partyLabelsFinalizeHint}
+                        finalReviewSendIntent={finalReviewSendIntentRef.current}
                         stripRecipientEmailNoise={stripRecipientEmailNoise}
                         looksLikeEmail={looksLikeEmail}
                       />
