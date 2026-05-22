@@ -23,14 +23,15 @@ import { isRecommendPillId } from "./guidedRecommendPillIds";
 import type { GuidedAppliedChange } from "./guidedChangeTypes";
 import { GuidedAppliedChangesReview } from "./GuidedAppliedChangesReview";
 import type { GuidedCompletionPhase } from "./guidedCompletionPhase";
-import { sessionReadyForBulkApply } from "./guidedBulkRegeneration";
 import {
   buildBulkApplyChecklist,
+  buildClauseUpdatesForVariable,
   buildFinalAppliedAreaLabels,
   normalizeWhyText,
   resolveGuidedQuestionConfig,
   resolveOptionDisplayCopy,
 } from "./guidedQuestionConfig";
+import { GuidedReviewFlowBanner } from "./GuidedReviewFlowBanner";
 import { GuidedQuestionOptionCard } from "./GuidedQuestionOptionCard";
 import { GuidedBulkApplyChecklist } from "./GuidedBulkApplyChecklist";
 import { GuidedAppliedAreasSummary } from "./GuidedAppliedAreasSummary";
@@ -68,7 +69,7 @@ export function GuidedDealCompletionPanel({
   phase,
   onSessionChange: _onSessionChange,
   onSaveAnswer,
-  onEditAnswer,
+  onEditAnswer: _onEditAnswer,
   onBulkApply,
   onSkipQuestion,
   bulkApplyBusy = false,
@@ -314,6 +315,7 @@ export function GuidedDealCompletionPanel({
   if (applied) {
     return (
       <div data-guided-completion-panel="true" className={compact ? "pb-6" : "pb-8"}>
+        <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-2.5" />
         <p className="mb-2 text-sm font-semibold text-stone-900">Review your updated Pro agreement</p>
         <GuidedAppliedAreasSummary areas={appliedAreas} />
         {appliedChanges.length > 0 ? (
@@ -329,67 +331,58 @@ export function GuidedDealCompletionPanel({
   }
 
   if (readyToApply || applying) {
-    const ready = sessionReadyForBulkApply(session);
+    const failed = phase === "failed";
     return (
       <div
         data-guided-completion-panel="true"
-        className={`rounded-xl border border-stone-300/90 bg-white shadow-sm ${compact ? "p-3 pb-28 sm:pb-4" : "p-4 pb-28 sm:p-5 sm:pb-8"}`}
+        className={`rounded-xl border border-amber-200/80 bg-amber-50/40 shadow-sm ring-1 ring-stone-200/60 ${compact ? "p-2.5 pb-28 sm:pb-4" : "p-3 pb-28 sm:p-4 sm:pb-8"}`}
       >
-        <p className="text-sm font-semibold text-stone-900">All questions answered</p>
-        <p className="mt-1 text-xs text-stone-600">Review choices, then update your Pro agreement in one pass.</p>
-        <ul className="mt-2 space-y-1.5">
-          {session.queue.map((id) => {
-            const ans = session.answered[id];
-            if (!ans) return null;
-            const v = session.variables.find((x) => x.id === id);
-            return (
-              <li key={id} className="rounded-md border border-stone-200/80 bg-stone-50/80 px-2.5 py-1.5 text-xs">
-                <span className="font-medium text-stone-900">{v?.label ?? id}: </span>
-                <span className="text-stone-700">{ans}</span>
-                {onEditAnswer ? (
-                  <button
-                    type="button"
-                    className="ml-2 text-[10px] text-stone-500 underline hover:text-stone-800"
-                    disabled={applying || bulkApplyBusy}
-                    onClick={() => onEditAnswer(id)}
-                  >
-                    Edit
-                  </button>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-        {applying || bulkApplyBusy ? <GuidedBulkApplyChecklist items={bulkChecklist} /> : null}
-        {bulkApplyError ? (
-          <p className="mt-2 text-xs font-medium text-amber-800" role="alert">
-            {bulkApplyError}
-          </p>
-        ) : null}
-        <div className="mt-3">
-          <button
-            type="button"
-            className="w-full rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-45 sm:w-auto"
-            disabled={!ready || applying || bulkApplyBusy || externallyFrozen}
-            onClick={() => onBulkApply?.()}
-          >
-            Update Pro agreement
-          </button>
-          <p className="mt-1.5 text-[11px] text-stone-500">
-            LawDog will apply your {answeredVisibleQuestionCount} answers in one clean pass.
-          </p>
-        </div>
+        <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-2.5" />
+        {applying || bulkApplyBusy ? (
+          <>
+            <p className="text-sm font-semibold text-stone-900">Updating your agreement…</p>
+            <p className="mt-0.5 text-[11px] text-stone-600">
+              Applying {answeredVisibleQuestionCount} answers in one authoritative update.
+            </p>
+            <div className="mt-2">
+              <GuidedBulkApplyChecklist items={bulkChecklist} />
+            </div>
+          </>
+        ) : failed ? (
+          <>
+            <p className="text-sm font-semibold text-stone-900">Couldn&apos;t apply updates</p>
+            <p className="mt-0.5 text-[11px] text-stone-600">Your answers are still queued. Try again.</p>
+            {bulkApplyError ? (
+              <p className="mt-2 text-xs font-medium text-amber-800" role="alert">
+                {bulkApplyError}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="mt-3 w-full rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-45 sm:w-auto"
+              disabled={externallyFrozen}
+              onClick={() => onBulkApply?.()}
+            >
+              Retry update
+            </button>
+          </>
+        ) : (
+          <p className="text-sm font-semibold text-stone-900">Applying your agreement now…</p>
+        )}
       </div>
     );
   }
 
+  const clauseUpdates = displayQuestion ? buildClauseUpdatesForVariable(displayQuestion.id) : [];
+
   return (
     <div
       data-guided-completion-panel="true"
-      className={`rounded-xl border border-stone-300/90 bg-white shadow-sm ${compact ? "p-2.5 pb-28 sm:pb-4" : "p-3 pb-28 sm:p-4 sm:pb-8"}`}
+      className={`rounded-xl border-2 border-stone-400/50 bg-white shadow-md ring-2 ring-stone-300/40 ${compact ? "p-2 pb-24 sm:pb-3" : "p-2.5 pb-24 sm:p-3 sm:pb-6"}`}
       role="region"
       aria-label={GUIDED_COMPLETION_HEADING}
     >
+      <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-2" />
       <p className="text-sm font-semibold text-stone-900">{GUIDED_COMPLETION_HEADING}</p>
       <p className="mt-0.5 text-[11px] leading-snug text-stone-500">{GUIDED_COMPLETION_SUBHEADING}</p>
       <p className="mt-2 text-[11px] text-stone-500">{intro.subline}</p>
@@ -414,6 +407,22 @@ export function GuidedDealCompletionPanel({
           </p>
           <p className="text-[15px] font-semibold leading-snug text-stone-900">{displayQuestion.question}</p>
 
+          {clauseUpdates.length > 0 ? (
+            <div
+              className="rounded-md border border-stone-200/90 bg-stone-50/90 px-2.5 py-2"
+              data-testid="guided-clause-updates-preview"
+            >
+              <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">Updates</p>
+              <ul className="mt-1 space-y-0.5">
+                {clauseUpdates.map((label) => (
+                  <li key={label} className="text-[11px] text-stone-800">
+                    • {label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {showSavedOnQuestion ? (
             <div
               className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2"
@@ -433,11 +442,11 @@ export function GuidedDealCompletionPanel({
                 <span className="font-semibold">Saved.</span>{" "}
                 {pendingAreaLabel ? (
                   <>
-                    Will update: <span className="font-semibold">{pendingAreaLabel}</span> when you update the
-                    agreement.
+                    Queued update · <span className="font-semibold">{pendingAreaLabel}</span> — applies when you
+                    finish the questions.
                   </>
                 ) : (
-                  <>We&apos;ll apply this when all questions are complete.</>
+                  <>Queued — applies when you finish the questions.</>
                 )}
               </p>
             </div>
@@ -651,17 +660,19 @@ export function GuidedDealCompletionPanel({
             </div>
           ) : null}
 
-          <footer className="pt-1 opacity-80">
-            <button
-              type="button"
-              className="text-[10px] text-stone-400 hover:text-stone-600"
-              disabled={controlsDisabled}
-              onClick={handleSkip}
-              data-testid="guided-skip-tertiary"
-            >
-              Skip for now
-            </button>
-          </footer>
+          {!applying && !bulkApplyBusy ? (
+            <footer className="pt-0.5 opacity-70">
+              <button
+                type="button"
+                className="text-[10px] text-stone-400 hover:text-stone-600"
+                disabled={controlsDisabled}
+                onClick={handleSkip}
+                data-testid="guided-skip-tertiary"
+              >
+                Skip for now
+              </button>
+            </footer>
+          ) : null}
         </div>
       ) : null}
     </div>

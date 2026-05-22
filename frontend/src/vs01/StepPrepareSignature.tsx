@@ -315,7 +315,11 @@ export function StepPrepareSignature({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [autoPrepBannerMessage, setAutoPrepBannerMessage] = useState<string | null>(null);
+  const [manualPlacementOverride, setManualPlacementOverride] = useState(false);
   const autoSignatureSeededRef = useRef(false);
+  const autoPlacementComplete = Boolean(autoPrepBannerMessage);
+  const showManualPlacementUi =
+    !agreementBridgePlacementCopy || manualPlacementOverride || !autoPlacementComplete;
 
   const fieldsRef = useRef(fields);
   fieldsRef.current = fields;
@@ -1397,7 +1401,9 @@ export function StepPrepareSignature({
         </h2>
         <p className="vs01-card-help vs01-sign-step-lead">
           {agreementBridgePlacementCopy
-            ? "Review signature field placement for each signer. Adjust anything that looks off — then continue when ready."
+            ? autoPlacementComplete && !manualPlacementOverride
+              ? "Signature fields were placed automatically. Review once, then send."
+              : "Adjust field placement if needed, then continue when ready."
             : "Choose a field type, then click once where it should go."}
         </p>
         {agreementBridgePlacementCopy && prepareSignerRoles?.length ? (
@@ -1475,7 +1481,7 @@ export function StepPrepareSignature({
               </div>
             ) : pdfUrl || (documentId?.trim() && previewError) ? (
               <div
-                className={`vs01-sign-doc-pages-wrap vs01-sign-doc-surface${placementArmed ? " vs01-sign-doc-surface--armed" : ""}`}
+                className={`vs01-sign-doc-pages-wrap vs01-sign-doc-surface vs01-sign-doc-surface--bridge${placementArmed ? " vs01-sign-doc-surface--armed" : ""}`}
               >
                 {pdfUrl ? (
                   previewError ? (
@@ -1868,7 +1874,9 @@ export function StepPrepareSignature({
                       <span className="vs01-sign-rail-recipient-name">{c.name.trim()}</span>
                       {agreementBridgePlacementCopy ? (
                         <span className="vs01-sign-rail-recipient-email">
-                          Signer: {c.signerName?.trim() || "Signer name needed"}
+                          Signer:{" "}
+                          {c.signerName?.trim() ||
+                            (c.email.trim() ? "Signer will confirm name" : "Signer")}
                           {c.signerTitle?.trim() ? ` · ${c.signerTitle.trim()}` : ""}
                         </span>
                       ) : null}
@@ -1885,6 +1893,18 @@ export function StepPrepareSignature({
             ) : null}
           </div>
 
+          {agreementBridgePlacementCopy && autoPlacementComplete && !manualPlacementOverride ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--auto mb-2 text-sm"
+              disabled={busy}
+              onClick={() => setManualPlacementOverride(true)}
+              data-testid="vs01-edit-field-placement"
+            >
+              Edit field placement
+            </button>
+          ) : null}
+          {showManualPlacementUi ? (
           <div className="vs01-sign-toolbar" role="toolbar" aria-label="Choose what to place">
             {agreementBridgePlacementCopy && activePrepareRole ? (
               <p className="vs01-sign-placing-for-role" role="status">
@@ -1938,8 +1958,9 @@ export function StepPrepareSignature({
               })}
             </div>
           </div>
+          ) : null}
 
-          {selectedField ? (
+          {selectedField && showManualPlacementUi ? (
             <div className="vs01-sign-selected-panel">
               <div className="vs01-sign-selected-head">
                 <span className="vs01-sign-selected-title">{signingPlacementCornerLabel(selectedField.type)}</span>
@@ -2190,7 +2211,9 @@ export function StepPrepareSignature({
                 ? "Signature added ✓"
                 : agreementBridgePlacementCopy
                   ? packetChecklist.allReady
-                    ? "Continue to signing packet"
+                    ? autoPlacementComplete && !manualPlacementOverride
+                      ? "Review and send"
+                      : "Send signing links"
                     : "Continue"
                   : busySession
                     ? "Working…"

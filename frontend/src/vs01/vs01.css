@@ -3477,6 +3477,19 @@ button.vs01-upload-btn:disabled {
   overflow: visible;
 }
 
+@media (max-width: 640px) {
+  .vs01-sign-workspace--prepare .vs01-sign-doc-surface--bridge {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .vs01-sign-workspace--prepare .vs01-sign-doc-surface--bridge .vs01-sign-page-surface {
+    min-width: min(100%, 340px);
+  }
+  .vs01-sign-workspace--prepare .vs01-sign-scroll {
+    min-height: min(50vh, 420px);
+  }
+}
+
 .vs01-sign-pages-inner {
   display: flex;
   flex-direction: column;

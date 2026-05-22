@@ -116,6 +116,13 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   const confidence: AutoSignaturePacketResult["confidence"] =
     placedCount >= args.roles.length * 2 ? "high" : "draft";
 
+  // eslint-disable-next-line no-console
+  console.info("[signing-auto-placement-start]", {
+    pageCount,
+    lastPage,
+    roleCount: args.roles.length,
+  });
+
   if (vs01DiagnosticsEnabled()) {
     // eslint-disable-next-line no-console
     console.info("[vs01-auto-signature-packet]", {
@@ -127,13 +134,25 @@ export function buildAutoSignaturePacketForAllRoles(args: {
     });
   }
 
+  if (placedCount > 0) {
+    // eslint-disable-next-line no-console
+    console.info("[signing-auto-placement-success]", { placedCount, confidence });
+  } else {
+    // eslint-disable-next-line no-console
+    console.warn("[signing-auto-placement-fallback]", { pageCount, roleCount: args.roles.length });
+  }
+
   return { fields: out, confidence, placedCount };
 }
 
 export function autoSignaturePacketStatusMessage(result: AutoSignaturePacketResult): string | null {
-  if (result.placedCount <= 0) return null;
-  if (result.confidence === "high") {
-    return "Signature fields prepared automatically — review placement below.";
+  if (result.placedCount <= 0) {
+    // eslint-disable-next-line no-console
+    console.info("[signing-auto-placement-needs-review]", { placedCount: 0 });
+    return null;
   }
-  return "We prepared draft signature locations for review.";
+  if (result.confidence === "high") {
+    return "Signature fields were placed automatically. Review once, then send.";
+  }
+  return "Draft signature locations prepared — review placement before sending.";
 }

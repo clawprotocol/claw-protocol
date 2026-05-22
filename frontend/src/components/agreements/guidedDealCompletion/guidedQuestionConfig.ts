@@ -242,6 +242,22 @@ export function buildBulkApplyChecklist(session: GuidedCompletionSession): BulkC
   return items;
 }
 
+/** Clause labels shown under a guided answer card before authoritative apply. */
+export function buildClauseUpdatesForVariable(variableId: string): string[] {
+  const cfg = configForVariable(variableId);
+  const labels = [cfg.targetSectionLabel, cfg.bulkApplyChecklistLabel]
+    .map((s) => (s || "").trim())
+    .filter(Boolean);
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const label of labels) {
+    if (seen.has(label)) continue;
+    seen.add(label);
+    unique.push(label);
+  }
+  return unique.length > 0 ? unique : [cfg.finalAppliedAreaLabel];
+}
+
 export function buildFinalAppliedAreaLabels(session: GuidedCompletionSession): string[] {
   const labels: string[] = [];
   const seen = new Set<string>();

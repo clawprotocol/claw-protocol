@@ -523,4 +523,16 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("skip_local_parse:");
     expect(intake).toContain("logPaidProEditReturnSkipBasicGenerate");
   });
+
+  it("simplified Pro review flow uses ProReviewSigningFlowPanel and signing send verification", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("showSimplifiedProReviewSigningFlow");
+    expect(intake).toContain("ProReviewSigningFlowPanel");
+    const panel = readFileSync(join(__dirname, "ProReviewSigningFlowPanel.tsx"), "utf8");
+    expect(panel).toContain("data-testid=\"pro-review-continue-to-signing\"");
+    expect(intake).toContain("processReviewEditedVersionUpload");
+    expect(intake).toContain("verifySigningSendReady");
+    expect(intake).toContain("assertSigningSendReadyOrBlock");
+    expect(intake).toMatch(/onContinueToSigning=\{\(\) => void handleProSendForSignature\(\)\}/);
+  });
 });

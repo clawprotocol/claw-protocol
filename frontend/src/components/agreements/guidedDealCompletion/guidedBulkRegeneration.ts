@@ -9,6 +9,47 @@ import { resolveGuidedQuestionConfig } from "./guidedQuestionConfig";
 export const GUIDED_BULK_FAIL_USER_MESSAGE =
   "We couldn't cleanly apply all answers. Please try again or edit manually.";
 
+/** Per-answer synthesis hints so bulk regen materially rewrites operative language. */
+export function materialRewriteHintForGuidedAnswer(variableId: string, answer: string): string | null {
+  const a = (answer || "").trim().toLowerCase();
+  const id = variableId.toLowerCase();
+  if (!a) return null;
+  if (/99\.9|uptime|sla/i.test(a) || /sla|uptime|support_obligations/i.test(id)) {
+    if (/99\.9/.test(a)) {
+      return "Rewrite Section 5 with explicit 99.9% monthly uptime target, measurement method, exclusions, and remedy/credit language.";
+    }
+    if (/business.?hour|9\s*[-–]\s*5|weekday/i.test(a)) {
+      return "Rewrite Section 5 with business-hours support window, response-time targets, and escalation path.";
+    }
+    return "Rewrite Section 5 support/SLA with measurable response targets and scope boundaries.";
+  }
+  if (/phase|milestone|deposit|installment|net\s*\d/i.test(a) || /payment|fee|phase/i.test(id)) {
+    if (/phase|milestone|installment/i.test(a)) {
+      return "Rewrite Section 2 and Schedule A with milestone-based payment schedule, due dates, and late-payment terms tied to deliverables.";
+    }
+    if (/monthly|retainer/i.test(a)) {
+      return "Rewrite Section 2 with recurring monthly fee, invoice timing, and payment due dates.";
+    }
+    return "Rewrite Section 2 Fees and Payment with concrete amounts, timing, and invoicing language matching the answer.";
+  }
+  if (/client.*own|company.*own|provider.*own|assign|work.?product|ip/i.test(a) || /ip|ownership/i.test(id)) {
+    if (/client|company|customer/i.test(a)) {
+      return "Rewrite Section 4 so deliverables and work product are assigned to the client, with provider background-IP license carve-out.";
+    }
+    if (/provider|vendor|consultant/i.test(a)) {
+      return "Rewrite Section 4 so provider retains IP with a broad license to the client for deliverables.";
+    }
+    return "Rewrite Section 4 Ownership and Work Product to match the selected allocation explicitly.";
+  }
+  if (/confidential|nda|security/i.test(id)) {
+    return "Rewrite Section 3 Confidentiality with practical duties, permitted disclosures, and survival period from the answer.";
+  }
+  if (/terminat|renewal/i.test(id)) {
+    return "Rewrite Section 6 Term and Termination with notice period and exit mechanics from the answer.";
+  }
+  return null;
+}
+
 const COMBINED_FORBIDDEN_TARGET: GuidedRevisionTarget = {
   questionKey: "bulk",
   sectionNumber: null,
@@ -52,8 +93,11 @@ export function buildConsolidatedGuidedRegenerationPrompt(args: {
     if (!answer) continue;
     const variable = args.session.variables.find((v) => v.id === id);
     const target = resolveGuidedQuestionTarget(id);
+    const materialHint = materialRewriteHintForGuidedAnswer(id, answer);
     lines.push(
-      `- ${variable?.label ?? id} → ${target.instructionSectionLine}: ${answer}`,
+      `- ${variable?.label ?? id} → ${target.instructionSectionLine}: ${answer}${
+        materialHint ? ` [REWRITE: ${materialHint}]` : ""
+      }`,
     );
   }
 

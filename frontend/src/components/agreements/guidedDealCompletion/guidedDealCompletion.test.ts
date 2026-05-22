@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CONSULTING_DEV_QA_INTAKE,
   consultingAuthoritativeBodyFixture,
@@ -775,5 +775,64 @@ describe("canRenderGuidedQuestions UI invariant", () => {
     const indemnityHits = (out.text.match(/Provider will indemnify Client for third-party claims/gi) || []).length;
     expect(indemnityHits).toBeLessThanOrEqual(1);
     expect(out.text).not.toMatch(/\n\s*Survival and wind-down[^\n]+\n\s*IN WITNESS/i);
+  });
+});
+
+describe("guided trust / causality UX helpers", () => {
+  it("materialRewriteHintForGuidedAnswer returns SLA rewrite for uptime answers", async () => {
+    const { materialRewriteHintForGuidedAnswer } = await import("./guidedBulkRegeneration");
+    const hint = materialRewriteHintForGuidedAnswer("saas_sla", "99.9% monthly uptime");
+    expect(hint).toMatch(/99\.9%/i);
+    expect(hint).toMatch(/Section 5/i);
+  });
+
+  it("buildClauseUpdatesForVariable lists target sections", async () => {
+    const { buildClauseUpdatesForVariable } = await import("./guidedQuestionConfig");
+    const labels = buildClauseUpdatesForVariable("payment_timing");
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels.some((l) => /fee|payment/i.test(l))).toBe(true);
+  });
+
+  it("resolveGuidedReviewFlowState maps applying phase", async () => {
+    const { resolveGuidedReviewFlowState } = await import("./guidedReviewFlowState");
+    const state = resolveGuidedReviewFlowState({ guidedActive: true, phase: "applying_all" });
+    expect(state.id).toBe("applying_updates");
+    expect(state.detail).toMatch(/Updating your agreement/i);
+  });
+
+  it("resolveSigningPacketStale detects version and body hash mismatch", async () => {
+    const {
+      markSigningPacketPreparedAtGuidedVersion,
+      resolveSigningPacketStale,
+      invalidateSigningPacketPrep,
+    } = await import("./guidedSigningPacketVersion");
+    invalidateSigningPacketPrep("test_reset");
+    markSigningPacketPreparedAtGuidedVersion("version-a", "hash-a");
+    expect(
+      resolveSigningPacketStale({ currentVersionId: "version-b", currentBodyHash: "hash-a" }).stale,
+    ).toBe(true);
+    expect(
+      resolveSigningPacketStale({ currentVersionId: "version-a", currentBodyHash: "hash-b" }).stale,
+    ).toBe(true);
+    expect(
+      resolveSigningPacketStale({ currentVersionId: "version-a", currentBodyHash: "hash-a" }).stale,
+    ).toBe(false);
+  });
+
+  it("assessGuidedMutationStrength warns on low semantic delta", async () => {
+    const { assessGuidedMutationStrength } = await import("./guidedMutationQuality");
+    const body = "1. SERVICES\n\n2. FEES\n\n3. IP\n\n4. SLA\n\n5. TERM\n".repeat(3);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const r = assessGuidedMutationStrength({
+      preBody: body,
+      postBody: body,
+      changedSectionCount: 2,
+      renderedMarkerCount: 2,
+    });
+    expect(r.lowMutation).toBe(true);
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("guided-low-mutation-warning"))).toBe(
+      true,
+    );
+    warn.mockRestore();
   });
 });

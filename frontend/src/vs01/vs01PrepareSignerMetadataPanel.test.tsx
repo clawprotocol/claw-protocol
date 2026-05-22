@@ -43,6 +43,28 @@ describe("Vs01PrepareSignerMetadataPanel", () => {
     expect(screen.getByText(/Signer details optional|Signature label can be customized/i)).toBeTruthy();
     cleanup();
   });
+
+  it("does not show Signer name not set when counterparty has email only", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_email_only",
+      creatorName: "Owner Co",
+      creatorEmail: "owner@co.com",
+      ownerSignerName: "Owner Person",
+      counterparties: [
+        {
+          id: "cp2",
+          name: "Beta LLC",
+          email: "counterparty@beta.com",
+          signerName: "",
+          signerTitle: "",
+        },
+      ],
+    });
+    render(<Vs01PrepareSignerMetadataPanel role={roles[1]!} onPatch={vi.fn()} />);
+    expect(screen.queryByText("Signer name not set")).toBeNull();
+    expect(screen.getByText(/Signer details optional/i)).toBeTruthy();
+    cleanup();
+  });
 });
 
 describe("labelForPreparePlacedField", () => {

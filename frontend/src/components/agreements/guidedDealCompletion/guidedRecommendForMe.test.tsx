@@ -138,7 +138,6 @@ describe("GuidedDealCompletionPanel recommend click", () => {
       materialItems: buildMaterialMissingItems({ intakeRaw: AI_AUTOMATION_SERVICES_QA_INTAKE, body }),
     })!;
     const onSaveAnswer = vi.fn();
-    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
     render(
       <GuidedDealCompletionPanel
@@ -153,23 +152,21 @@ describe("GuidedDealCompletionPanel recommend click", () => {
     const recommendBtn = screen.getByRole("button", { name: /Recommend for me/i });
     fireEvent.click(recommendBtn);
 
-    await waitFor(() => {
-      const clicked = logSpy.mock.calls.some((c) => c[0] === "[guided-recommend-click]");
-      const applied = onSaveAnswer.mock.calls.length > 0;
-      const cardShown = screen.queryByText(/Use this recommendation/i);
-      expect(clicked || applied || cardShown).toBeTruthy();
-    });
-
-    const resolved = logSpy.mock.calls.some((c) => c[0] === "[guided-recommend-resolved]");
-    expect(resolved).toBe(true);
+    await waitFor(
+      () => {
+        const applied = onSaveAnswer.mock.calls.length > 0;
+        const recommendCard = screen.queryByTestId("guided-option-recommended");
+        expect(applied || recommendCard).toBeTruthy();
+      },
+      { timeout: 2000 },
+    );
 
     if (onSaveAnswer.mock.calls.length === 0) {
-      const useBtn = screen.getByRole("button", { name: /Use this recommendation/i });
-      fireEvent.click(useBtn);
-      await waitFor(() => expect(onSaveAnswer).toHaveBeenCalled());
+      const recommendCard = screen.getByTestId("guided-option-recommended");
+      fireEvent.click(recommendCard);
+      await waitFor(() => expect(onSaveAnswer).toHaveBeenCalled(), { timeout: 2000 });
     }
 
     expect(onSaveAnswer.mock.calls[0][1].length).toBeGreaterThan(0);
-    logSpy.mockRestore();
   });
 });

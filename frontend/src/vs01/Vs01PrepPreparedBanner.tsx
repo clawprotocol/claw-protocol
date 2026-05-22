@@ -20,17 +20,19 @@ export function Vs01PrepPreparedBanner({
       role="status"
       data-testid="vs01-prep-prepared-banner"
     >
-      <p className="text-sm font-semibold text-emerald-950">Signing packet prepared</p>
+      <p className="text-sm font-semibold text-emerald-950">LawDog prepared your signing packet</p>
       <p className="mt-0.5 text-xs text-emerald-900/90">
+        Signature fields were placed automatically. Review once, then send.
+      </p>
+      <p className="mt-1.5 text-[11px] text-emerald-800/90">
         <span className="font-medium">{agreementTitle.trim() || "Your agreement"}</span>
         {" · "}
         {signerCount} signer{signerCount === 1 ? "" : "s"}
         {" · "}
         {fieldCount} field{fieldCount === 1 ? "" : "s"} placed
-        {autoPrepared ? " · auto-prepared" : ""}
+        {autoPrepared ? " · latest version" : ""}
       </p>
       {message ? <p className="mt-1 text-[11px] text-emerald-800/95">{message}</p> : null}
-      <p className="mt-1 text-[11px] text-emerald-800/80">Ready for signature — review placement, then send.</p>
     </div>
   );
 }

@@ -594,14 +594,42 @@ import {
   logGuidedBulkRegenerationFailed,
 } from "./guidedDealCompletion/guidedBulkRegeneration";
 import {
-  reinforceGuidedAnswerCausality,
-  reinforceGuidedBulkApplyCausality,
+  reinforceGuidedQueuedUpdate,
+  reinforceGuidedAuthoritativeApply,
 } from "./guidedDealCompletion/guidedAnswerCausality";
+import { GuidedAgreementUpdateSummary } from "./guidedDealCompletion/GuidedAgreementUpdateSummary";
+import { GuidedReviewFlowBanner } from "./guidedDealCompletion/GuidedReviewFlowBanner";
+import { GuidedSigningTrustStrip } from "./guidedDealCompletion/GuidedSigningTrustStrip";
+import {
+  fingerprintAgreementBody,
+  invalidateSigningPacketPrep,
+  logGuidedPacketStaleHardStop,
+  markSigningPacketPreparedAtGuidedVersion,
+  resolveSigningPacketStale,
+} from "./guidedDealCompletion/guidedSigningPacketVersion";
+import {
+  deriveGuidedUxPhaseFlags,
+  logGuidedStateTransition,
+} from "./guidedDealCompletion/guidedUxStability";
+import { ProReviewSigningFlowPanel } from "./ProReviewSigningFlowPanel";
+import {
+  logReviewEditedVersionKeptAsReference,
+  logReviewEditedVersionSelectedForSigning,
+  processReviewEditedVersionUpload,
+} from "./reviewEditedVersionUpload";
+import {
+  logProReviewSigningFlowState,
+  readEditedVersionIntent,
+  resolveProReviewSigningFlowState,
+} from "./proReviewSigningFlowState";
+import { verifySigningSendReady } from "./signingSendVerification";
 import {
   assertAuthoritativeBodyContinuity,
   bumpAuthoritativeAgreementVersion,
+  readAuthoritativeAgreementVersion,
   logRecipientMetadataOnlyMutation,
 } from "./authoritativeAgreementContinuity";
+import { isAgreementPacketPrepared } from "../../vs01/vs01WorkspaceSigningStatus";
 import { logUxTrustEvent } from "../../lib/uxTrustAssertions";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import {
@@ -1219,6 +1247,8 @@ type CreateFlowSendRecipientsPanelProps = {
   premiumPrimarySendLabelOverride?: string | null;
   /** Inline help when the primary CTA is blocked (e.g. missing recipient email). */
   primaryCtaHelperText?: string | null;
+  /** Guided Pro: e-sign trust / stale packet messaging near recipient setup. */
+  guidedSigningTrustSlot?: React.ReactNode;
   stripRecipientEmailNoise: (s: string) => string;
   looksLikeEmail: (s: string) => boolean;
 };
@@ -1261,6 +1291,7 @@ function CreateFlowSendRecipientsPanel({
   recipientBlockForceExpanded = false,
   premiumPrimarySendLabelOverride = null,
   primaryCtaHelperText,
+  guidedSigningTrustSlot = null,
   stripRecipientEmailNoise,
   looksLikeEmail,
 }: CreateFlowSendRecipientsPanelProps) {
@@ -1572,6 +1603,7 @@ function CreateFlowSendRecipientsPanel({
           </>
         )}
       </p>
+      {guidedSigningTrustSlot ? <div className="mt-3">{guidedSigningTrustSlot}</div> : null}
       {!minimalProSendRecipientChrome ? senderInviteTrustStrip : null}
       <div className="mt-5 rounded-xl border border-slate-700/45 bg-slate-900/35 px-4 py-4 sm:px-5">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Agreement parties</p>
@@ -2332,6 +2364,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [guidedCompletionSession, setGuidedCompletionSession] = useState<GuidedCompletionSession | null>(null);
   const lastGuidedAnswerVariableIdRef = useRef<string | null>(null);
   const guidedBulkApplyingRef = useRef(false);
+  const guidedPendingAutoApplyRef = useRef(false);
+  const guidedUxFlagsRef = useRef<ReturnType<typeof deriveGuidedUxPhaseFlags> | null>(null);
+  const [guidedAuthoritativeSummaryAreas, setGuidedAuthoritativeSummaryAreas] = useState<string[]>([]);
+  const [guidedAuthoritativeSummaryVariableIds, setGuidedAuthoritativeSummaryVariableIds] = useState<string[]>([]);
+  const [guidedAuthVersionNonce, setGuidedAuthVersionNonce] = useState(0);
+  const [guidedPacketSendBlocked, setGuidedPacketSendBlocked] = useState(false);
+  const [reviewUploadBusy, setReviewUploadBusy] = useState(false);
+  const [reviewUploadError, setReviewUploadError] = useState<string | null>(null);
+  const [reviewUploadTick, setReviewUploadTick] = useState(0);
   const [guidedCompletionPhase, setGuidedCompletionPhase] =
     useState<GuidedCompletionPhase>("collecting_answers");
   const [guidedBulkApplyError, setGuidedBulkApplyError] = useState<string | null>(null);
@@ -12699,7 +12740,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const sendDisabled =
             (!recipientsDeferred && (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)) ||
             Boolean(loading) ||
-            premiumSendConfirmOpen;
+            premiumSendConfirmOpen ||
+            guidedPacketSendBlocked;
           const premiumOutbox = premiumSignersSurfaceReady;
           const persistSendLabel =
             loading &&
@@ -13001,6 +13043,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     showStarterProRefineUpsell,
     renderedAgreementPreview,
     debouncedStepBuffer,
+    guidedPacketSendBlocked,
   ]);
 
   useEffect(() => {
@@ -13134,61 +13177,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
   ]);
 
-  const openPaidProPostInlineSendDestination = React.useCallback(async () => {
-    const id = productionSendBarAgreementId?.trim();
-    if (!id || !draft) return;
-    const primedForHandoff =
-      mergeLiveDraftWithRecipientSetupForVs01Bridge(
-        draft as unknown as AgreementDraft,
-        buildRecipientSetupForVs01Bridge(draft),
-      ) ?? (draft as unknown as AgreementDraft);
-    if (
-      shouldSkipPaidProPrepareReviewLinkInterstitial({
-        draft: primedForHandoff,
-        agreementId: id,
-        premiumSendIntent: effectivePremiumSendMode,
-      })
-    ) {
-      const result = await executePaidProPostRecipientSetupHandoff({
-        navigate: (to) => void navigate(to),
-        agreementId: id,
-        draft: primedForHandoff,
-        premiumSendIntent: effectivePremiumSendMode,
-        recipientSetup: buildRecipientSetupForVs01Bridge(draft as unknown as ParsedDraftShape),
-        logSource: "intake_inline_send_success_cta",
-      });
-      if (result.ok) {
-        clearPaidProStarterSignatureSendFromCreateFlow();
-        return;
-      }
-      setHardError(result.failure.userMessage);
-      return;
-    }
-    navigate(`/app/send/${encodeURIComponent(id)}`, {
-      simpleSendHandoff: buildSimpleSendHandoff({
-        agreementId: id,
-        primedDraft: primedForHandoff,
-        streamlinedSimpleFlow: freshSimpleCreateUx,
-        premiumSendIntent: effectivePremiumSendMode,
-        openFlowPhase: "send",
-      }),
-    });
-  }, [
-    productionSendBarAgreementId,
-    draft,
-    recipient1Email,
-    recipient2Email,
-    effectivePremiumSendMode,
-    navigate,
-    freshSimpleCreateUx,
-    tier,
-    premiumSendPathUnlocked,
-    premiumPersistedFlowActive,
-  ]);
-
-  const effectivePrimaryCtaDisabled = simpleCreateUnifiedBottomCta
-    ? unifiedPrimaryCta.disabled
-    : primaryIntakeCtaDisabled;
+  const effectivePrimaryCtaDisabled =
+    (simpleCreateUnifiedBottomCta ? unifiedPrimaryCta.disabled : primaryIntakeCtaDisabled) ||
+    guidedPacketSendBlocked;
 
   /** Sticky CTA stays pressable so we can scroll/focus missing recipient fields instead of a dead disabled button. */
   const stickyRecipientBlockedNudge = Boolean(
@@ -13324,6 +13315,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         persistGuidedSession(keyed, guidedSessionKey);
         guidedCompletionSessionRef.current = keyed;
         if (isGuidedCompletionComplete(keyed)) {
+          guidedPendingAutoApplyRef.current = true;
           setGuidedCompletionPhase("ready_to_apply");
           logGuidedAllAnswersReady(keyed);
         } else if (guidedCompletionPhase !== "applying_all" && guidedCompletionPhase !== "applied") {
@@ -13331,7 +13323,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         return keyed;
       });
-      const causality = reinforceGuidedAnswerCausality({
+      const causality = reinforceGuidedQueuedUpdate({
         variableId,
         displayAnswer,
         phase: "queued",
@@ -13354,6 +13346,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         persistGuidedSession(keyed, guidedSessionKey);
         guidedCompletionSessionRef.current = keyed;
         if (isGuidedCompletionComplete(keyed)) {
+          guidedPendingAutoApplyRef.current = true;
           setGuidedCompletionPhase("ready_to_apply");
           logGuidedAllAnswersReady(keyed);
         } else if (guidedCompletionPhase !== "applying_all" && guidedCompletionPhase !== "applied") {
@@ -13383,6 +13376,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       setGuidedCompletionPhase("collecting_answers");
       setGuidedBulkApplyError(null);
+      invalidateSigningPacketPrep("guided_answer_edit");
     },
     [guidedSessionKey, paidBodyForGuidedCompletion],
   );
@@ -13407,6 +13401,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const docOverride = (paidProCardEditDraft ?? agreementDocumentTextRef.current ?? "").trim() || null;
     setGuidedCompletionPhase("applying_all");
     setGuidedBulkApplyError(null);
+    flashGuidedAgreementUpdateToast("Updating your agreement…", null);
     logGuidedBulkRegenerationStart();
     guidedBulkApplyingRef.current = true;
     let ok = false;
@@ -13433,15 +13428,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         previousLen: stableBefore.trim().length,
         nextLen,
       });
-      bumpAuthoritativeAgreementVersion(nextLen, persistedPremiumReviewTitle || draft?.title || "");
+      const versionSnap = bumpAuthoritativeAgreementVersion(
+        nextLen,
+        persistedPremiumReviewTitle || draft?.title || "",
+      );
+      setGuidedAuthVersionNonce((n) => n + 1);
       logGuidedBulkRegenerationSuccess(nextLen);
       setAppliedGuidedChanges(buildAppliedChangesFromSession(session));
       setGuidedCompletionPhase("applied");
       setGuidedBulkApplyError(null);
       setReviewRefineUserMessage(null);
-      const bulkToast = reinforceGuidedBulkApplyCausality(session.queue.filter((id) => session.answered[id]));
-      flashGuidedAgreementUpdateToast(bulkToast, null);
-      logUxTrustEvent("guided_causality", { phase: "applied", questionCount: session.queue.length });
+      const answeredIds = session.queue.filter((id) => (session.answered[id] || "").trim());
+      const postBody =
+        (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
+      const applyResult = reinforceGuidedAuthoritativeApply({
+        variableIds: answeredIds,
+        preBodyLen: stableBefore.trim().length,
+        postBodyLen: nextLen,
+        preBody: stableBefore.trim(),
+        postBody,
+      });
+      setGuidedAuthoritativeSummaryAreas(applyResult.areas);
+      setGuidedAuthoritativeSummaryVariableIds(answeredIds);
+      flashGuidedAgreementUpdateToast(applyResult.toast, null);
+      logUxTrustEvent("guided_causality", {
+        phase: "applied",
+        questionCount: session.queue.length,
+        versionId: versionSnap.versionId,
+      });
+      // eslint-disable-next-line no-console
+      console.info("[guided-finalized-ready-for-signature]", {
+        versionIdShort: versionSnap.versionId.slice(0, 8),
+        changedClauseCount: applyResult.areas.length,
+      });
     } else {
       setGuidedCompletionPhase("failed");
       setGuidedBulkApplyError(GUIDED_BULK_FAIL_USER_MESSAGE);
@@ -13461,6 +13480,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft?.title,
     flashGuidedAgreementUpdateToast,
   ]);
+
   const preferGuidedCompletionOverRetry = useMemo(() => {
     const snap = readPremiumCompletionSnapshot();
     return shouldPreferGuidedCompletionOverRetry({
@@ -13483,6 +13503,186 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const agreementIdForReview =
     (reviewDraft as { id?: string } | null)?.id ?? (draft as { id?: string } | null)?.id ?? null;
+
+  React.useEffect(() => {
+    if (!guidedPendingAutoApplyRef.current) return;
+    if (guidedCompletionPhase !== "ready_to_apply") return;
+    const session = guidedCompletionSessionRef.current;
+    if (!session || !isGuidedCompletionComplete(session)) return;
+    if (guidedBulkApplyingRef.current) return;
+    guidedPendingAutoApplyRef.current = false;
+    void handleGuidedBulkApply();
+  }, [guidedCompletionPhase, handleGuidedBulkApply, activeGuidedCompletionSession]);
+
+  const guidedAuthoritativeBodyPlain = useMemo(
+    () =>
+      (
+        lastKnownGoodAuthoritativeDraftRef.current ||
+        hydratedPremiumBodyRef.current ||
+        paidBodyForGuidedCompletion ||
+        ""
+      ).trim(),
+    [
+      paidBodyForGuidedCompletion,
+      guidedAuthVersionNonce,
+      guidedCompletionPhase,
+      reviewDocRefreshTick,
+    ],
+  );
+
+  const guidedAuthoritativeVersionId = useMemo(() => {
+    void guidedAuthVersionNonce;
+    return readAuthoritativeAgreementVersion()?.versionId ?? null;
+  }, [guidedAuthVersionNonce, guidedCompletionPhase]);
+
+  const guidedAuthoritativeBodyHash = useMemo(
+    () => fingerprintAgreementBody(guidedAuthoritativeBodyPlain),
+    [guidedAuthoritativeBodyPlain],
+  );
+
+  const guidedPacketStaleState = useMemo(
+    () =>
+      resolveSigningPacketStale({
+        currentVersionId: guidedAuthoritativeVersionId,
+        currentBodyHash: guidedAuthoritativeBodyHash,
+      }),
+    [guidedAuthoritativeVersionId, guidedAuthoritativeBodyHash],
+  );
+
+  const guidedSigningPacketStale = guidedPacketStaleState.stale;
+  const guidedSigningPacketPreparedCurrent = Boolean(
+    guidedPacketStaleState.preparedVersion &&
+      !guidedSigningPacketStale &&
+      guidedAuthoritativeVersionId,
+  );
+
+  const guidedPacketBlocksSend = Boolean(
+    guidedSigningPacketStale && guidedPacketStaleState.preparedVersion,
+  );
+
+  React.useEffect(() => {
+    setGuidedPacketSendBlocked(Boolean(guidedPacketBlocksSend));
+    if (!guidedPacketBlocksSend || !guidedPacketStaleState.reason) return;
+    logGuidedPacketStaleHardStop(guidedPacketStaleState.reason);
+  }, [guidedPacketBlocksSend, guidedPacketStaleState.reason]);
+
+  React.useEffect(() => {
+    const id = agreementIdForReview?.trim();
+    if (!id || !isAgreementPacketPrepared(id)) return;
+    const versionId = readAuthoritativeAgreementVersion()?.versionId;
+    if (versionId) {
+      markSigningPacketPreparedAtGuidedVersion(versionId, guidedAuthoritativeBodyHash);
+    }
+  }, [
+    agreementIdForReview,
+    guidedAuthVersionNonce,
+    guidedCompletionPhase,
+    paidProInlineSignersReady,
+    guidedAuthoritativeBodyHash,
+  ]);
+
+  const premiumSigningRecipientCount = useMemo(() => {
+    let n = 0;
+    if (looksLikeEmail(stripRecipientEmailNoise(recipient1Email))) n += 1;
+    const r2 = stripRecipientEmailNoise(recipient2Email);
+    if (looksLikeEmail(r2) && (recipient2Name.trim() || n === 0)) n += 1;
+    return n;
+  }, [recipient1Email, recipient2Email, recipient2Name]);
+
+  const assertSigningSendReadyOrBlock = React.useCallback((): boolean => {
+    if (!paidProAuthoritative || effectivePremiumSendMode !== "signature") return true;
+    const id = (
+      productionSendBarAgreementId ||
+      agreementIdForReview ||
+      reviewAgreementId ||
+      ""
+    ).trim();
+    const body = (guidedAuthoritativeBodyPlain || paidBodyForGuidedCompletion).trim();
+    const packetPrepared = id ? isAgreementPacketPrepared(id) : false;
+    const result = verifySigningSendReady({
+      agreementBodyPlain: body,
+      authoritativeVersionId: guidedAuthoritativeVersionId,
+      packetPrepared,
+      signerCount: premiumSigningRecipientCount,
+      fieldsPlacedCount: packetPrepared ? 1 : 0,
+    });
+    if (!result.ok) {
+      if (result.blockReason === "stale_packet") setGuidedPacketSendBlocked(true);
+      if (result.fixLabel) {
+        const msg =
+          result.blockReason === "stale_packet"
+            ? "Agreement changed — refresh signing packet before sending."
+            : `${result.fixLabel} before sending.`;
+        setHardError(msg);
+      }
+      return false;
+    }
+    return true;
+  }, [
+    paidProAuthoritative,
+    effectivePremiumSendMode,
+    productionSendBarAgreementId,
+    agreementIdForReview,
+    reviewAgreementId,
+    guidedAuthoritativeBodyPlain,
+    paidBodyForGuidedCompletion,
+    guidedAuthoritativeVersionId,
+    premiumSigningRecipientCount,
+  ]);
+
+  const openPaidProPostInlineSendDestination = React.useCallback(async () => {
+    const id = productionSendBarAgreementId?.trim();
+    if (!id || !draft) return;
+    const primedForHandoff =
+      mergeLiveDraftWithRecipientSetupForVs01Bridge(
+        draft as unknown as AgreementDraft,
+        buildRecipientSetupForVs01Bridge(draft),
+      ) ?? (draft as unknown as AgreementDraft);
+    if (
+      shouldSkipPaidProPrepareReviewLinkInterstitial({
+        draft: primedForHandoff,
+        agreementId: id,
+        premiumSendIntent: effectivePremiumSendMode,
+      })
+    ) {
+      if (!assertSigningSendReadyOrBlock()) return;
+      const result = await executePaidProPostRecipientSetupHandoff({
+        navigate: (to) => void navigate(to),
+        agreementId: id,
+        draft: primedForHandoff,
+        premiumSendIntent: effectivePremiumSendMode,
+        recipientSetup: buildRecipientSetupForVs01Bridge(draft as unknown as ParsedDraftShape),
+        logSource: "intake_inline_send_success_cta",
+      });
+      if (result.ok) {
+        clearPaidProStarterSignatureSendFromCreateFlow();
+        return;
+      }
+      setHardError(result.failure.userMessage);
+      return;
+    }
+    navigate(`/app/send/${encodeURIComponent(id)}`, {
+      simpleSendHandoff: buildSimpleSendHandoff({
+        agreementId: id,
+        primedDraft: primedForHandoff,
+        streamlinedSimpleFlow: freshSimpleCreateUx,
+        premiumSendIntent: effectivePremiumSendMode,
+        openFlowPhase: "send",
+      }),
+    });
+  }, [
+    productionSendBarAgreementId,
+    draft,
+    recipient1Email,
+    recipient2Email,
+    effectivePremiumSendMode,
+    navigate,
+    freshSimpleCreateUx,
+    tier,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
+    assertSigningSendReadyOrBlock,
+  ]);
 
   useEffect(() => {
     if (!paidProRecipientSetupOnDraft || !hasAnyValidRecipientEmail) return;
@@ -13652,6 +13852,52 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !freeStarterReviewShellActive,
   );
 
+  const guidedUxFlags = useMemo(
+    () =>
+      deriveGuidedUxPhaseFlags({
+        showPrimaryGuided: showPrimaryGuidedCompletion,
+        hasSession: Boolean(activeGuidedCompletionSession),
+        phase: guidedCompletionPhase,
+        hasAuthoritativeSummary: guidedAuthoritativeSummaryAreas.length > 0,
+      }),
+    [
+      showPrimaryGuidedCompletion,
+      activeGuidedCompletionSession,
+      guidedCompletionPhase,
+      guidedAuthoritativeSummaryAreas.length,
+    ],
+  );
+
+  React.useEffect(() => {
+    logGuidedStateTransition(guidedUxFlagsRef.current, guidedUxFlags, guidedCompletionPhase);
+    guidedUxFlagsRef.current = guidedUxFlags;
+  }, [guidedUxFlags, guidedCompletionPhase]);
+
+  const guidedSigningTrustSlot = useMemo(() => {
+    if (!guidedUxFlags.guidedUpdated) return null;
+    return (
+      <GuidedSigningTrustStrip
+        agreementAuthoritativelyUpdated
+        packetStale={guidedSigningPacketStale}
+        packetPreparedOnCurrentVersion={guidedSigningPacketPreparedCurrent}
+      />
+    );
+  }, [guidedUxFlags.guidedUpdated, guidedSigningPacketStale, guidedSigningPacketPreparedCurrent]);
+
+  const guidedSuppressSecondaryDocActions = Boolean(
+    guidedUxFlags.guidedApplying ||
+      (guidedUxFlags.guidedUpdated &&
+        !paidProInlineSignersReady &&
+        guidedAuthoritativeSummaryAreas.length > 0),
+  );
+
+  const premiumRecipientSendHelper = useMemo(() => {
+    if (guidedPacketSendBlocked) {
+      return "Refresh signing packet before you send.";
+    }
+    return createFlowRecipientPrimaryHelper;
+  }, [guidedPacketSendBlocked, createFlowRecipientPrimaryHelper]);
+
   useEffect(() => {
     if (!simpleProductFlow || !liveWorkspaceTwoPane) return;
     if (freeStarterReviewShellActive) {
@@ -13712,9 +13958,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         guidedCompletionActive,
         guidedPhase: guidedCompletionPhase,
         signersReady: paidProInlineSignersReady,
-        packetPrepared: false,
+        packetPrepared: guidedSigningPacketPreparedCurrent,
       }),
-    [guidedCompletionActive, guidedCompletionPhase, paidProInlineSignersReady],
+    [
+      guidedCompletionActive,
+      guidedCompletionPhase,
+      paidProInlineSignersReady,
+      guidedSigningPacketPreparedCurrent,
+    ],
   );
   const hideStickyForGuidedInProgress = Boolean(
     premiumPaidDocumentSurface &&
@@ -13804,6 +14055,132 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumProTruthGate,
       renderSource: blockedPreviewRenderSource,
     });
+
+  const uploadedSourceForReview = useMemo(() => {
+    void reviewUploadTick;
+    return agreementIdForReview ? readUploadedSourceDocument(agreementIdForReview) : null;
+  }, [agreementIdForReview, reviewUploadTick]);
+
+  const showSimplifiedProReviewSigningFlow = Boolean(
+    premiumPaidDocumentSurface &&
+      paidProAuthoritative &&
+      canProceedWithPaidProDocument &&
+      !showStrictRetryNeedsDetailsPanel &&
+      !isSourceComparisonReviewMode(agreementReviewMode) &&
+      !guidedPhaseSuppressesSendCta(guidedCompletionPhase) &&
+      (guidedCompletionPhase === "applied" ||
+        (proReviewFooter.mode === "freeform_edit" && !guidedUxFlags.guidedQueued)),
+  );
+
+  const proReviewSigningFlowState = useMemo(() => {
+    const packetPrepared = Boolean(
+      agreementIdForReview && isAgreementPacketPrepared(agreementIdForReview),
+    );
+    return resolveProReviewSigningFlowState({
+      uploadedSource: uploadedSourceForReview,
+      editedIntent: readEditedVersionIntent(agreementIdForReview),
+      packetPrepared,
+      packetStale: guidedSigningPacketStale,
+      signersReady: paidProInlineSignersReady,
+      guidedApplied: guidedCompletionPhase === "applied",
+    });
+  }, [
+    uploadedSourceForReview,
+    agreementIdForReview,
+    guidedSigningPacketStale,
+    paidProInlineSignersReady,
+    guidedCompletionPhase,
+  ]);
+
+  React.useEffect(() => {
+    if (!showSimplifiedProReviewSigningFlow) return;
+    logProReviewSigningFlowState(proReviewSigningFlowState);
+  }, [showSimplifiedProReviewSigningFlow, proReviewSigningFlowState]);
+
+  const handleReviewEditedVersionFile = React.useCallback(
+    async (file: File) => {
+      const id = agreementIdForReview?.trim();
+      if (!id) return;
+      setReviewUploadBusy(true);
+      setReviewUploadError(null);
+      const result = await processReviewEditedVersionUpload({ agreementId: id, file });
+      setReviewUploadBusy(false);
+      if (!result.ok) {
+        setReviewUploadError(result.userMessage);
+        return;
+      }
+      const snap = readPremiumCompletionSnapshot();
+      if (snap) {
+        persistPremiumCompletionSnapshot({
+          ...snap,
+          uploadedSourceDocumentText: result.text,
+          premiumDraft: {
+            ...snap.premiumDraft,
+            uploaded_source_document_text: result.text,
+          },
+        });
+      }
+      setReviewUploadTick((n) => n + 1);
+      bumpPremiumSurfaceGateTick();
+    },
+    [agreementIdForReview],
+  );
+
+  const handleUseUploadedVersionForSigning = React.useCallback(() => {
+    const id = agreementIdForReview?.trim();
+    const text = uploadedSourceForReview?.text?.trim();
+    if (!id || !text) return;
+    logReviewEditedVersionSelectedForSigning(id);
+    applyProRefineOutputToProSurfaceRef.current?.(text, {
+      clearStepBuffer: false,
+      scrollToReview: true,
+    });
+    bumpAuthoritativeAgreementVersion(
+      text.length,
+      persistedPremiumReviewTitle || draft?.title || "",
+    );
+    setGuidedAuthVersionNonce((n) => n + 1);
+    setReviewUploadTick((n) => n + 1);
+  }, [
+    agreementIdForReview,
+    uploadedSourceForReview,
+    persistedPremiumReviewTitle,
+    draft?.title,
+  ]);
+
+  const handleKeepLawDogVersionAfterUpload = React.useCallback(() => {
+    const id = agreementIdForReview?.trim();
+    if (id) logReviewEditedVersionKeptAsReference(id);
+  }, [agreementIdForReview]);
+
+  const handleCompareUploadedChanges = React.useCallback(() => {
+    const id = agreementIdForReview?.trim();
+    const text = uploadedSourceForReview?.text?.trim();
+    if (!id || !text) return;
+    writeUploadedSourceDocument(id, {
+      text,
+      fileName: uploadedSourceForReview?.fileName,
+      savedAt: uploadedSourceForReview?.savedAt ?? Date.now(),
+    });
+    const snap = readPremiumCompletionSnapshot();
+    if (snap) {
+      persistPremiumCompletionSnapshot({
+        ...snap,
+        uploadedSourceDocumentText: text,
+        premiumDraft: {
+          ...snap.premiumDraft,
+          review_mode: "source_comparison",
+          uploaded_source_document_text: text,
+        },
+      });
+    }
+    bumpPremiumSurfaceGateTick();
+  }, [agreementIdForReview, uploadedSourceForReview]);
+
+  const scrollToAgreementBody = React.useCallback(() => {
+    document.querySelector(".premium-readonly-doc")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   useEffect(() => {
     if (showPrimaryGuidedCompletion && postCheckoutAdvisoryGaps.length > 0) {
       setPostCheckoutAdvisoryGaps([]);
@@ -14713,6 +15090,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
             await finalizeIntakeCapture();
             if (!assertRecipientsValidForPremiumSend()) return;
+            if (!assertSigningSendReadyOrBlock()) return;
             if (premiumSendConfirmGateActive) {
               if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
               if (import.meta.env.DEV && paidProAuthoritative) {
@@ -15344,7 +15722,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           sendRequiresConfirmStep={premiumSendConfirmGateActive}
           recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
           premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
-          primaryCtaHelperText={createFlowRecipientPrimaryHelper}
+          guidedSigningTrustSlot={guidedSigningTrustSlot}
+          primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
           stripRecipientEmailNoise={stripRecipientEmailNoise}
           looksLikeEmail={looksLikeEmail}
         />
@@ -17140,55 +17519,81 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       <p className="text-xs leading-relaxed text-stone-600 sm:text-sm">
                                         {PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY}
                                       </p>
-                                      <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2.5">
-                                        {!premiumReviewDocEditorOpen ? (
-                                          <button
-                                            type="button"
-                                            className="rounded-lg border border-stone-300/90 bg-white/80 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
-                                            disabled={(isGenerating && !draft) || upgradeLockActive || loading}
-                                            onClick={() => void openPaidProDraftCardEditor()}
-                                          >
-                                            Edit wording
-                                          </button>
-                                        ) : (
-                                          <>
+                                      {showSimplifiedProReviewSigningFlow ? (
+                                        <div className="w-full min-w-0">
+                                          <ProReviewSigningFlowPanel
+                                            flowState={proReviewSigningFlowState}
+                                            uploadedSource={uploadedSourceForReview}
+                                            packetStale={guidedSigningPacketStale}
+                                            uploadBusy={reviewUploadBusy}
+                                            uploadError={reviewUploadError}
+                                            onContinueToSigning={() => void handleProSendForSignature()}
+                                            onUploadFile={(f) => void handleReviewEditedVersionFile(f)}
+                                            onUseUploadedForSigning={handleUseUploadedVersionForSigning}
+                                            onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
+                                            onCompareChanges={handleCompareUploadedChanges}
+                                            onReadAgreement={scrollToAgreementBody}
+                                            continueDisabled={
+                                              (isGenerating && !draft) ||
+                                              upgradeLockActive ||
+                                              loading ||
+                                              guidedPacketSendBlocked
+                                            }
+                                          />
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2.5">
+                                          {!premiumReviewDocEditorOpen ? (
                                             <button
                                               type="button"
-                                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-50 sm:text-[13px]"
+                                              className="rounded-lg border border-stone-300/90 bg-white/80 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
                                               disabled={(isGenerating && !draft) || upgradeLockActive || loading}
-                                              onClick={() => void savePaidProDraftCardEditor()}
+                                              onClick={() => void openPaidProDraftCardEditor()}
                                             >
-                                              Save changes
+                                              Edit wording
                                             </button>
-                                            <button
-                                              type="button"
-                                              className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white disabled:opacity-50 sm:text-[13px]"
-                                              disabled={loading}
-                                              onClick={() => void cancelPaidProDraftCardEditor()}
-                                            >
-                                              Cancel
-                                            </button>
-                                          </>
-                                        )}
-                                        {!guidedPhaseSuppressesSendCta(guidedCompletionPhase) ? (
-                                          <>
-                                            <button
-                                              type="button"
-                                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
-                                              onClick={() => handleFinalizeRoutePrimaryAction("review")}
-                                            >
-                                              Send for review
-                                            </button>
-                                            <button
-                                              type="button"
-                                              className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
-                                              onClick={() => void handleProSendForSignature()}
-                                            >
-                                              Send for signature
-                                            </button>
-                                          </>
-                                        ) : null}
-                                      </div>
+                                          ) : (
+                                            <>
+                                              <button
+                                                type="button"
+                                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-50 sm:text-[13px]"
+                                                disabled={(isGenerating && !draft) || upgradeLockActive || loading}
+                                                onClick={() => void savePaidProDraftCardEditor()}
+                                              >
+                                                Save changes
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white disabled:opacity-50 sm:text-[13px]"
+                                                disabled={loading}
+                                                onClick={() => void cancelPaidProDraftCardEditor()}
+                                              >
+                                                Cancel
+                                              </button>
+                                            </>
+                                          )}
+                                          {!guidedPhaseSuppressesSendCta(guidedCompletionPhase) &&
+                                          !guidedSuppressSecondaryDocActions &&
+                                          !guidedPacketSendBlocked ? (
+                                            <>
+                                              <button
+                                                type="button"
+                                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
+                                                onClick={() => handleFinalizeRoutePrimaryAction("review")}
+                                              >
+                                                Send for review
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
+                                                onClick={() => void handleProSendForSignature()}
+                                              >
+                                                Send for signature
+                                              </button>
+                                            </>
+                                          ) : null}
+                                        </div>
+                                      )}
                                     </div>
                                     {premiumReviewDocEditorOpen ? (
                                       <textarea
@@ -17204,6 +17609,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       />
                                     ) : (
                                       <>
+                                        {guidedUxFlags.isGuidedCompletion &&
+                                        (guidedUxFlags.guidedApplying || guidedUxFlags.guidedUpdated) ? (
+                                          <div className="mx-[clamp(1.35rem,4.5vw,2.65rem)] mb-2 space-y-2">
+                                            <GuidedReviewFlowBanner
+                                              guidedActive
+                                              phase={guidedCompletionPhase}
+                                              signersReady={paidProInlineSignersReady}
+                                            />
+                                            {guidedUxFlags.guidedUpdated &&
+                                            guidedAuthoritativeSummaryAreas.length > 0 ? (
+                                              <GuidedAgreementUpdateSummary
+                                                areas={guidedAuthoritativeSummaryAreas}
+                                                variableIds={guidedAuthoritativeSummaryVariableIds}
+                                                className="sticky top-2 z-10"
+                                                primaryFocus={!paidProInlineSignersReady}
+                                              />
+                                            ) : null}
+                                          </div>
+                                        ) : null}
                                         {guidedAgreementUpdateToast ? (
                                           <div
                                             className="pointer-events-none sticky top-2 z-20 mx-[clamp(1.35rem,4.5vw,2.65rem)] mb-2"
@@ -17226,14 +17650,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             </div>
                                           </div>
                                         ) : null}
-                                        <PremiumAgreementReadonlyView
-                                          html={premiumReadonlyAgreementHtml}
-                                          suppressEmptyFallback={blockProEmptyDocumentFallback}
-                                        />
+                                        <div
+                                          className={
+                                            showPrimaryGuidedCompletion
+                                              ? "rounded-lg border-2 border-stone-400/45 bg-white shadow-sm ring-1 ring-stone-300/60"
+                                              : ""
+                                          }
+                                        >
+                                          <PremiumAgreementReadonlyView
+                                            html={premiumReadonlyAgreementHtml}
+                                            suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                          />
+                                        </div>
                                       </>
                                     )}
                                     {showPrimaryGuidedCompletion && activeGuidedCompletionSession ? (
-                                      <div className="border-t border-stone-200/90 bg-[#efe9df] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4">
+                                      <div className="mt-3 border-t-2 border-stone-400/35 bg-[#e8e2d6] px-[clamp(1.35rem,4.5vw,2.65rem)] py-3 sm:py-4">
                                         <ProReviewStepIndicator
                                           activeStep={proReviewActiveStep}
                                           className="mb-3 border-b border-stone-200/80 pb-3"
@@ -17622,7 +18054,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       sendRequiresConfirmStep={premiumSendConfirmGateActive}
                                       recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
                                       premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
-                                      primaryCtaHelperText={createFlowRecipientPrimaryHelper}
+                                      primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
+                                      guidedSigningTrustSlot={guidedSigningTrustSlot}
                                       stripRecipientEmailNoise={stripRecipientEmailNoise}
                                       looksLikeEmail={looksLikeEmail}
                                     />
@@ -17912,7 +18345,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         sendRequiresConfirmStep={premiumSendConfirmGateActive}
                         recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
                         premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
-                        primaryCtaHelperText={createFlowRecipientPrimaryHelper}
+                        primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
+                        guidedSigningTrustSlot={guidedSigningTrustSlot}
                         stripRecipientEmailNoise={stripRecipientEmailNoise}
                         looksLikeEmail={looksLikeEmail}
                       />

@@ -105,7 +105,40 @@ export {
   restoreGuidedScrollSnapshot,
   runWithGuidedScrollPreserved,
   highlightGuidedSectionInDocument,
+  highlightAllGuidedChangedSections,
 } from "./guidedSectionScroll";
+export {
+  reinforceGuidedQueuedUpdate,
+  reinforceGuidedAuthoritativeApply,
+  formatGuidedQueuedToast,
+  formatGuidedAuthoritativeUpdatedToast,
+} from "./guidedAnswerCausality";
+export { GuidedAgreementUpdateSummary } from "./GuidedAgreementUpdateSummary";
+export { GuidedReviewFlowBanner } from "./GuidedReviewFlowBanner";
+export { GuidedSigningTrustStrip } from "./GuidedSigningTrustStrip";
+export {
+  resolveGuidedReviewFlowState,
+  logGuidedReviewFlowState,
+  type GuidedReviewFlowState,
+  type GuidedReviewFlowStateId,
+} from "./guidedReviewFlowState";
+export {
+  fingerprintAgreementBody,
+  readSigningPacketGuidedVersion,
+  readSigningPacketPrepSnapshot,
+  markSigningPacketPreparedAtGuidedVersion,
+  invalidateSigningPacketPrep,
+  resolveSigningPacketStale,
+  isSigningPacketStaleForGuidedVersion,
+  logGuidedPacketInvalidated,
+  logGuidedPacketStaleHardStop,
+  logGuidedPacketVersionMismatch,
+} from "./guidedSigningPacketVersion";
+export { deriveGuidedUxPhaseFlags, logGuidedStateTransition } from "./guidedUxStability";
+export { assessGuidedMutationStrength } from "./guidedMutationQuality";
+export { reviewGuidedUpdatesAtIndex } from "./guidedSectionScroll";
+export { materialRewriteHintForGuidedAnswer } from "./guidedBulkRegeneration";
+export { buildClauseUpdatesForVariable } from "./guidedQuestionConfig";
 export {
   resolveProReviewFooterState,
   logProReviewFooterState,
