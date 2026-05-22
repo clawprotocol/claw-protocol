@@ -13,6 +13,7 @@ export type GuidedFinalReviewUnlockBlockReason =
   | "signers_incomplete"
   | "apply_not_complete"
   | "authoritative_body_missing"
+  | "party_placeholders_unresolved"
   | "signer_field_focused"
   | "metadata_write_pending";
 
@@ -22,7 +23,7 @@ export type GuidedFinalReviewUnlockEvaluation = {
 };
 
 export function evaluateGuidedFinalReviewUnlockGate(
-  args: CanUnlockGuidedFinalReviewArgs,
+  args: CanUnlockGuidedFinalReviewArgs & { partyPlaceholdersUnresolved?: boolean },
 ): GuidedFinalReviewUnlockEvaluation {
   if (args.signersEditing) {
     return { ok: false, reason: "signer_field_focused" };
@@ -32,6 +33,9 @@ export function evaluateGuidedFinalReviewUnlockGate(
   }
   if ((args.authoritativeBodyLen ?? 0) < 500) {
     return { ok: false, reason: "authoritative_body_missing" };
+  }
+  if (args.partyPlaceholdersUnresolved) {
+    return { ok: false, reason: "party_placeholders_unresolved" };
   }
   if (args.applyStatus !== "applied") {
     return { ok: false, reason: "apply_not_complete" };

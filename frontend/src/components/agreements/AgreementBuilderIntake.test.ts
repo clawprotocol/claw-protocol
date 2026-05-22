@@ -676,6 +676,29 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
+  it("test26: signer party identity applied before final review", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("resolveCanonicalPartyIdentitiesFromSignerSetup");
+    expect(intake).toContain("applySignerPartyIdentityToAuthoritativeAgreement");
+    expect(intake).toContain("agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup");
+    expect(intake).toContain("guidedSignerFinalVersionLines");
+    expect(intake).toContain("finalVersionPartyLines");
+    expect(intake).toContain("Edit signer details");
+    const card = readFileSync(
+      join(__dirname, "guidedDealCompletion/GuidedSignerSetupBeforeReviewCard.tsx"),
+      "utf8",
+    );
+    expect(card).toContain("guided-signer-final-version-preview");
+    const identity = readFileSync(
+      join(__dirname, "guidedDealCompletion/signerPartyIdentity.ts"),
+      "utf8",
+    );
+    expect(identity).toContain("[signer-party-identity-resolved]");
+    expect(identity).toContain("[signer-party-identity-applied-to-corpus]");
+    expect(identity).toContain("[signer-party-placeholder-blocked-final-review]");
+    expect(identity).toContain("[signature-block-party-polish-applied]");
+  });
+
   it("test25: soft-pass apply outcome and retry CTA copy", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("resolveGuidedBackgroundApplyOutcome");

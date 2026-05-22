@@ -674,6 +674,14 @@ import {
 } from "./guidedDealCompletion/guidedSignerSetupUx";
 import { resolveGuidedPreReviewSignerSlots } from "./guidedDealCompletion/resolveGuidedPreReviewSignerSlots";
 import {
+  applySignerPartyIdentityToAuthoritativeAgreement,
+  agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup,
+  formatSignerPartyIdentityConfirmationLines,
+  logSignerPartyPlaceholderBlockedFinalReview,
+  mergeDraftPartiesFromCanonicalIdentities,
+  resolveCanonicalPartyIdentitiesFromSignerSetup,
+} from "./guidedDealCompletion/signerPartyIdentity";
+import {
   GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA,
   GUIDED_FINISHING_UPDATED_AGREEMENT,
   GUIDED_RETRY_APPLY_ANSWERS_CTA,
@@ -10964,6 +10972,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const guidedSignerCanonicalIdentities = useMemo(
+    () =>
+      resolveCanonicalPartyIdentitiesFromSignerSetup({
+        partyCount: guidedPreReviewSignerSlots.requiredCount,
+        partySignerNames,
+        partySignerTitles,
+        recipient1Name,
+        recipient2Name,
+        recipient1Email,
+        recipient2Email,
+        extraPartyReviewEmails,
+        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+        draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
+        sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
+        recipientsDeferred,
+      }),
+    [
+      guidedPreReviewSignerSlots.requiredCount,
+      partySignerNames,
+      partySignerTitles,
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails,
+      draft?.parties,
+      effectivePremiumSendMode,
+      recipientsDeferred,
+    ],
+  );
+
+  const guidedSignerFinalVersionLines = useMemo(() => {
+    if (!guidedPreReviewSignerSlots.complete) return [];
+    return formatSignerPartyIdentityConfirmationLines(guidedSignerCanonicalIdentities);
+  }, [guidedPreReviewSignerSlots.complete, guidedSignerCanonicalIdentities]);
+
   /** Paid Pro inline recipient card: emails valid and no helper blockers (matches send_agreement gate). */
   const paidProInlineSignersReady = Boolean(
     guidedPreReviewSignerSlots.complete && !createFlowRecipientPrimaryHelper,
@@ -14438,6 +14482,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     flushGuidedSignerMetadataBeforeFinalReview();
+
+    const rawAuthoritative = (
+      lastKnownGoodAuthoritativeDraftRef.current ||
+      hydratedPremiumBodyRef.current ||
+      guidedAuthoritativeBodyPlain ||
+      paidBodyForGuidedCompletion ||
+      ""
+    ).trim();
+    const identityApply = applySignerPartyIdentityToAuthoritativeAgreement(
+      rawAuthoritative,
+      guidedSignerCanonicalIdentities,
+      currentPremiumMergedIntakeKey || intakeCombined,
+    );
+    if (agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup(identityApply.text)) {
+      logSignerPartyPlaceholderBlockedFinalReview({
+        fragments: ["party_placeholder"],
+        bodyLen: identityApply.text.length,
+      });
+      setHardError(
+        "Signer names are saved, but the agreement still has unresolved party placeholders. Edit signer details and try again.",
+      );
+      return;
+    }
+    lastKnownGoodAuthoritativeDraftRef.current = identityApply.text;
+    hydratedPremiumBodyRef.current = identityApply.text;
+    premiumPipelineOutputBodyRef.current = identityApply.text;
+    setAgreementDocumentText(identityApply.text);
+    setGuidedAuthVersionNonce((n) => n + 1);
+    if (draft) {
+      const mergedDraft = mergeDraftPartiesFromCanonicalIdentities(draft, guidedSignerCanonicalIdentities);
+      setDraft(mergedDraft);
+      persistPremiumRecipientHandoffFromDraftAndUi(mergedDraft);
+    }
+
     const gate = evaluateGuidedFinalReviewUnlockGate(buildGuidedFinalReviewUnlockGateArgs());
     if (!gate.ok) {
       if (gate.reason === "signers_incomplete") {
@@ -14489,18 +14567,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedPreReviewSignerSlots,
     resolvedGuidedAnswerApplyStatus,
     guidedFinalReviewExplicitlyOpened,
+    guidedSignerCanonicalIdentities,
+    guidedAuthoritativeBodyPlain,
+    paidBodyForGuidedCompletion,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft,
+    persistPremiumRecipientHandoffFromDraftAndUi,
   ]);
 
   const simpleProFinalReviewHtml = useMemo(() => {
     const corpus = simpleProFinalReviewCorpus.plainText;
     if (!corpus.trim()) return "";
     const rd = reviewDraft ?? draft;
-    const signaturePartyNames = extractAgreementParties({
-      parties: rd?.parties,
-      intakeText: intakeCombined,
-      renderedText: corpus,
-      partiesLine: displayLivePreviewModel.partiesLine,
-    });
+    const canonicalNames = guidedSignerCanonicalIdentities
+      .map((p) => p.partyDisplayName)
+      .filter((n) => n.length >= 2);
+    const signaturePartyNames =
+      canonicalNames.length >= 2
+        ? canonicalNames
+        : extractAgreementParties({
+            parties: rd?.parties,
+            intakeText: intakeCombined,
+            renderedText: corpus,
+            partiesLine: displayLivePreviewModel.partiesLine,
+          });
     const intakeForHints = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const renderHints = computePremiumDocumentRenderHints(rd, corpus, intakeForHints);
     return buildPremiumAgreementReadonlyHtml(corpus, {
@@ -14515,6 +14606,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeCombined,
     currentPremiumMergedIntakeKey,
     displayLivePreviewModel.partiesLine,
+    guidedSignerCanonicalIdentities,
   ]);
 
   React.useEffect(() => {
@@ -18963,6 +19055,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           requiredCount={guidedPreReviewSignerSlots.requiredCount}
                                           backgroundApplyActive={resolvedGuidedAnswerApplyStatus === "applying"}
                                           backgroundApplyComplete={resolvedGuidedAnswerApplyStatus === "applied"}
+                                          finalVersionPartyLines={guidedSignerFinalVersionLines}
+                                          onEditSignerDetails={scrollGuidedSignerSetupIntoView}
                                           onScrollToSignerFields={scrollGuidedSignerSetupIntoView}
                                         />
                                         <div

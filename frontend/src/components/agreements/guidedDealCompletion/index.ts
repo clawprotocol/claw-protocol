@@ -153,6 +153,17 @@ export {
   logGuidedPacketVersionMismatch,
 } from "./guidedSigningPacketVersion";
 export { deriveGuidedUxPhaseFlags, logGuidedStateTransition } from "./guidedUxStability";
+export {
+  applySignerPartyIdentityToAuthoritativeAgreement,
+  agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup,
+  formatSignerPartyIdentityConfirmationLines,
+  isIndividualPartyName,
+  logSignerPartyPlaceholderBlockedFinalReview,
+  mergeDraftPartiesFromCanonicalIdentities,
+  resolveCanonicalPartyIdentitiesFromSignerSetup,
+  resolvePaidProPolishPartyNamesFromIdentities,
+  type CanonicalPartyIdentity,
+} from "./signerPartyIdentity";
 export { assessGuidedMutationStrength } from "./guidedMutationQuality";
 export { reviewGuidedUpdatesAtIndex } from "./guidedSectionScroll";
 export { buildClauseUpdatesForVariable } from "./guidedQuestionConfig";

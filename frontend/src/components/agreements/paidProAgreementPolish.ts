@@ -9,6 +9,8 @@ import {
   isDisallowedPartyPhrase,
   resolveAuthoritativePartiesForRecitalPolish,
 } from "./paidProPartyNamePreserve";
+import { resolvePaidProPolishPartyNamesFromIdentities } from "./guidedDealCompletion/signerPartyIdentity";
+import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import {
   applyProOperationalSynthesisPasses,
   applyMilestoneTableGeneration,
@@ -643,7 +645,13 @@ export function polishPaidProAgreementText(
   text: string,
   intakeRaw: string | null | undefined,
   partyNames: readonly string[] | null | undefined,
-  opts?: { surface?: string; explicitPartyList?: boolean; skipInternalMask?: boolean },
+  opts?: {
+    surface?: string;
+    explicitPartyList?: boolean;
+    skipInternalMask?: boolean;
+    /** Guided signer setup identities override intake-only entity extraction. */
+    signerPartyIdentities?: readonly CanonicalPartyIdentity[];
+  },
 ): PaidProAgreementPolishResult {
   if (shouldSkipPaidProPolish({ surface: opts?.surface })) {
     return {
@@ -662,7 +670,11 @@ export function polishPaidProAgreementText(
     };
   }
   const explicitPartyList = opts?.explicitPartyList ?? (partyNames?.length ?? 0) >= 2;
-  const authoritativeFullNames = resolveAuthoritativePartiesForRecitalPolish(partyNames, intakeRaw);
+  const fromSigner = resolvePaidProPolishPartyNamesFromIdentities(opts?.signerPartyIdentities ?? []);
+  const authoritativeFullNames =
+    fromSigner.length >= 2
+      ? fromSigner
+      : resolveAuthoritativePartiesForRecitalPolish(partyNames, intakeRaw);
   const parties = buildPartyEntries(authoritativeFullNames);
   const { confidence: assessed } = assessPartyExtractionConfidence(
     authoritativeFullNames,
