@@ -5,6 +5,7 @@
 import type { DealVariable } from "./types";
 import type { GuidedCompletionSession } from "./types";
 import { resolveRecommendReasonForPill } from "./guidedRevisionAnchors";
+import { compressGuidedWhy, compressLawDogWill } from "./guidedCopyCompress";
 import { resolveImplementationPreview } from "./guidedImplementationPreview";
 import { resolveGuidedQuestionTarget } from "./guidedRevisionAnchors";
 
@@ -31,17 +32,13 @@ const FEES: GuidedQuestionConfig = {
   finalAppliedAreaLabel: "Fees & Payment",
   optionOverrides: {
     monthly: {
-      recommendationReason:
-        "Your intake mentioned a recurring monthly payment but the draft does not spell out timing and invoicing.",
-      implementationPreview:
-        "Add monthly fee language, invoice timing, and late-payment protections to Section 2 — Fees and Payment.",
+      recommendationReason: "Your prompt mentions monthly support but not payment timing.",
+      implementationPreview: "Add payment timing and invoice protections.",
       recommendationRank: 1,
     },
     intake_estimate: {
-      recommendationReason:
-        "Your intake includes a fee figure that should be reflected consistently in the agreement.",
-      implementationPreview:
-        "Confirm total fee, payment schedule, and invoicing terms in Section 2 and Schedule A if needed.",
+      recommendationReason: "Your prompt includes a fee that should appear in the draft.",
+      implementationPreview: "Confirm total fee and payment schedule.",
       recommendationRank: 1,
     },
   },
@@ -62,15 +59,12 @@ const GUIDED_BY_VARIABLE_ID: Record<string, GuidedQuestionConfig> = {
     finalAppliedAreaLabel: "Ownership",
     optionOverrides: {
       client: {
-        recommendationReason:
-          "Your intake describes work product the client should own after delivery.",
-        implementationPreview:
-          "State client ownership of deliverables and license-back for provider tools in Section 4.",
+        recommendationReason: "Your prompt says the client should own what gets built.",
+        implementationPreview: "Clarify ownership of deliverables.",
         recommendationRank: 1,
       },
       provider: {
-        implementationPreview:
-          "State provider retention of core IP with a license grant to the client in Section 4.",
+        implementationPreview: "Clarify provider IP with a client license.",
         recommendationRank: 2,
       },
     },
@@ -211,15 +205,17 @@ export function resolveOptionDisplayCopy(args: {
   const cfg = configForVariable(args.variableId);
   const override = cfg.optionOverrides?.[args.pillId];
   const intakeReason = resolveRecommendReasonForPill(args.variableId, args.pillId, args.intakeRaw);
-  const why =
-    normalizeWhyText(override?.recommendationReason) ||
-    normalizeWhyText(intakeReason) ||
-    (args.pillId === args.variable?.recommendedPillId
-      ? normalizeWhyText(args.variable?.recommendedLabel)
-      : null);
-  const lawDogWill =
+  const rawWill =
     override?.implementationPreview?.trim() ||
     resolveImplementationPreview(args.variableId, args.pillLabel, args.instructionAnswer ?? args.pillValue);
+  const why = compressGuidedWhy(
+    normalizeWhyText(override?.recommendationReason) ||
+      normalizeWhyText(intakeReason) ||
+      (args.pillId === args.variable?.recommendedPillId
+        ? normalizeWhyText(args.variable?.recommendedLabel)
+        : null),
+  );
+  const lawDogWill = compressLawDogWill(args.variableId, rawWill);
   const recommended =
     args.pillId === args.variable?.recommendedPillId ||
     override?.recommendationRank === 1 ||

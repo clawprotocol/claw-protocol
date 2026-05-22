@@ -164,6 +164,25 @@ export function isGuidedCompletionComplete(session: GuidedCompletionSession): bo
   return getCurrentVariable(session) === null;
 }
 
+/** Linear progress for collect-all UX (0–100 from answered count only). */
+export function computeGuidedCollectionProgress(
+  answeredCount: number,
+  totalQuestions: number,
+): number {
+  if (totalQuestions <= 0) return 0;
+  return Math.min(100, Math.round((answeredCount / totalQuestions) * 100));
+}
+
+/** Session view for UI: uses draft answers only, never bodyLen-derived completeness. */
+export function withGuidedDraftProgress(session: GuidedCompletionSession): GuidedCompletionSession {
+  const total = session.frozenTotalQuestions ?? session.queue.length;
+  const answeredCount = Object.keys(session.answered).length;
+  return {
+    ...session,
+    completenessPercent: computeGuidedCollectionProgress(answeredCount, total),
+  };
+}
+
 export function guidedSessionIntro(session: GuidedCompletionSession) {
   return buildGuidedCompletionIntro(session);
 }

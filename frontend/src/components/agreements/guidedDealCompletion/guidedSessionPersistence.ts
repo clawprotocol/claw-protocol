@@ -169,6 +169,25 @@ export function preserveGuidedSessionProgress(
   return recomputeSessionProgress(merged);
 }
 
+/**
+ * During local answer collection, only merge new variables from base — never rewind answers.
+ */
+export function preserveGuidedSessionDuringCollection(
+  prev: GuidedCompletionSession,
+  base: GuidedCompletionSession | null,
+  sessionKey: string,
+): GuidedCompletionSession {
+  const supplemented = supplementGuidedSessionFromBase(prev, base, sessionKey);
+  return {
+    ...supplemented,
+    answered: { ...prev.answered },
+    answeredAt: prev.answeredAt ? { ...prev.answeredAt } : supplemented.answeredAt,
+    answeredMeta: prev.answeredMeta ? { ...prev.answeredMeta } : supplemented.answeredMeta,
+    skipped: new Set([...prev.skipped, ...supplemented.skipped]),
+    sessionKey,
+  };
+}
+
 /** Reuse locked queue for the same premium generation; never shrink mid-review. */
 export function mergeGuidedSessionWithPersistence(
   base: GuidedCompletionSession | null,

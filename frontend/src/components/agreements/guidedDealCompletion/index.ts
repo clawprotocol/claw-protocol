@@ -19,6 +19,8 @@ export {
   applyGuidedAnswer,
   applyGuidedAnswerTransaction,
   clearGuidedAnswer,
+  computeGuidedCollectionProgress,
+  withGuidedDraftProgress,
   skipGuidedVariable,
   formatRefineInstructionForAnswer,
   isGuidedCompletionComplete,
@@ -39,6 +41,7 @@ export {
   mergeGuidedSessionOnBaseRefresh,
   supplementGuidedSessionFromBase,
   preserveGuidedSessionProgress,
+  preserveGuidedSessionDuringCollection,
   lockGuidedSession,
 } from "./guidedSessionPersistence";
 export { applyProBodyHardIntegrityGate, normalizeScheduleAContent } from "./proBodyHardIntegrityGate";

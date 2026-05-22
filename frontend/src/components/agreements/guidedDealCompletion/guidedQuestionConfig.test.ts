@@ -27,7 +27,7 @@ describe("guidedQuestionConfig", () => {
       intakeRaw: INTAKE,
     });
     expect(copy.why).toBeTruthy();
-    expect(copy.lawDogWill).toMatch(/LawDog will|Section 2|Fees/i);
+    expect(copy.lawDogWill).toMatch(/payment|invoice|fee/i);
     expect(copy.lawDogWill).not.toBe(copy.why);
   });
 

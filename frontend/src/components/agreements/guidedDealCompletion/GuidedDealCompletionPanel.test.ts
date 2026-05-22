@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { applyGuidedAnswerTransaction } from "./guidedCompletionEngine";
+import {
+  applyGuidedAnswerTransaction,
+  computeGuidedCollectionProgress,
+  getCurrentVariable,
+} from "./guidedCompletionEngine";
+import { preserveGuidedSessionDuringCollection } from "./guidedSessionPersistence";
 import { createGuidedCompletionSession } from "./variablePrioritizationLayer";
 import { extractDealVariables } from "./missingVariableExtractor";
 import { buildBulkApplyChecklist, resolveOptionDisplayCopy } from "./guidedQuestionConfig";
@@ -29,10 +34,13 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     expect(panel).toContain("onSaveAnswer");
     expect(panel).not.toContain("Applying update");
     expect(panel).not.toContain("onApplyAnswer");
-    expect(optionCard).toContain('>Why<');
-    expect(optionCard).toContain("LawDog will");
+    expect(optionCard).toContain("Why:");
+    expect(optionCard).toContain("LawDog will:");
+    expect(optionCard).toContain("More details");
     expect(panel).toContain("guided-skip-tertiary");
     expect(panel).toContain("guided-saved-flash");
+    expect(panel).toContain("holdQuestionId");
+    expect(panel).toContain("guided-progress-count");
     expect(panel).toContain("GuidedBulkApplyChecklist");
     expect(panel).toContain("GuidedAppliedAreasSummary");
     expect(panel).toContain("of {total} completed");
@@ -42,6 +50,23 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     const panel = readFileSync(join(__dirname, "GuidedDealCompletionPanel.tsx"), "utf8");
     expect(panel).toMatch(/data-testid="guided-skip-tertiary"/);
     expect(panel).toMatch(/text-stone-400.*Skip for now/s);
+  });
+
+  it("collection progress is linear from answered count", () => {
+    expect(computeGuidedCollectionProgress(0, 5)).toBe(0);
+    expect(computeGuidedCollectionProgress(1, 5)).toBe(20);
+    expect(computeGuidedCollectionProgress(5, 5)).toBe(100);
+  });
+
+  it("preserveGuidedSessionDuringCollection keeps answers when base refreshes", () => {
+    const session = minimalSession();
+    if (!session) return;
+    const first = session.queue[0];
+    const answered = applyGuidedAnswerTransaction(session, first, "Monthly $6,000", undefined);
+    const base = applyGuidedAnswerTransaction(session, session.queue[1], "", undefined);
+    const preserved = preserveGuidedSessionDuringCollection(answered, base, "k1");
+    expect(preserved.answered[first]).toBe("Monthly $6,000");
+    expect(getCurrentVariable(preserved)?.id).not.toBe(first);
   });
 
   it("applyGuidedAnswerTransaction advances Q1 to Q2 without network", () => {
@@ -54,7 +79,7 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     expect(secondId).not.toBe(first);
   });
 
-  it("recommended option exposes reason and implementation preview", () => {
+  it("recommended option exposes short reason and implementation preview", () => {
     const copy = resolveOptionDisplayCopy({
       variableId: "payment_timing",
       pillId: "monthly",
@@ -63,7 +88,8 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
       intakeRaw: INTAKE,
     });
     expect(copy.why || copy.lawDogWill).toBeTruthy();
-    expect(copy.lawDogWill.length).toBeGreaterThan(12);
+    expect(copy.lawDogWill.length).toBeLessThan(55);
+    expect(copy.lawDogWill).not.toMatch(/Section \d/i);
   });
 
   it("bulk checklist module exists for applying_all", () => {
@@ -107,6 +133,8 @@ describe("AgreementBuilderIntake guided Genesis wiring", () => {
     expect(intake).toContain("handleGuidedSaveAnswer");
     expect(intake).toContain("handleGuidedBulkApply");
     expect(intake).toContain("suppressGlobalGeneratingUi: true");
+    expect(intake).toContain("preserveGuidedSessionDuringCollection");
+    expect(intake).toContain("withGuidedDraftProgress");
     expect(intake).toContain('guidedCompletionPhase !== "collecting_answers"');
     expect(intake).not.toContain("handleGuidedApplyAnswer");
     expect(intake).toContain("guidedQuestionsRemain");

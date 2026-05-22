@@ -539,11 +539,13 @@ import {
   GUIDED_CUSTOM_INSTRUCTION_PLACEHOLDER,
   applyGuidedAnswerTransaction,
   clearGuidedAnswer,
+  withGuidedDraftProgress,
   buildGuidedSessionFromAgreement,
   buildGuidedSessionKey,
   friendlyLowConfidenceCopy,
   lockGuidedSession,
   mergeGuidedSessionOnBaseRefresh,
+  preserveGuidedSessionDuringCollection,
   persistGuidedSession,
   readPersistedGuidedSession,
   sanitizeProUserMessage,
@@ -568,6 +570,7 @@ import type { GuidedAppliedChange } from "./guidedDealCompletion/guidedChangeTyp
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
 import { guidedPhaseSuppressesSendCta } from "./guidedDealCompletion/guidedCompletionPhase";
 import { resolveGuidedQuestionTarget } from "./guidedDealCompletion/guidedRevisionAnchors";
+import { compressLawDogWill } from "./guidedDealCompletion/guidedCopyCompress";
 import { resolveImplementationPreview } from "./guidedDealCompletion/guidedImplementationPreview";
 import {
   buildConsolidatedGuidedRegenerationPrompt,
@@ -13168,6 +13171,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   useEffect(() => {
     setGuidedCompletionSession((prev) => {
+      if (!guidedCompletionSessionBase) return prev;
+      const collectingLocally =
+        guidedCompletionPhase === "collecting_answers" ||
+        guidedCompletionPhase === "ready_to_apply" ||
+        guidedCompletionPhase === "applying_all";
+      if (prev && collectingLocally) {
+        const preserved = preserveGuidedSessionDuringCollection(
+          prev,
+          guidedCompletionSessionBase,
+          guidedSessionKey,
+        );
+        guidedCompletionSessionRef.current = preserved;
+        return preserved;
+      }
       const merged = mergeGuidedSessionOnBaseRefresh(
         prev,
         guidedCompletionSessionBase,
@@ -13178,12 +13195,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!prev) {
         const locked = lockGuidedSession(merged, guidedSessionKey);
         persistGuidedSession(locked, guidedSessionKey);
+        guidedCompletionSessionRef.current = locked;
         return locked;
       }
       persistGuidedSession(merged, guidedSessionKey);
+      guidedCompletionSessionRef.current = merged;
       return merged;
     });
-  }, [guidedCompletionSessionBase, guidedSessionKey]);
+  }, [guidedCompletionSessionBase, guidedSessionKey, guidedCompletionPhase]);
   const handleGuidedCompletionSessionChange = React.useCallback(
     (next: GuidedCompletionSession) => {
       const keyed = { ...next, sessionKey: next.sessionKey ?? guidedSessionKey };
@@ -13202,32 +13221,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         implementationPreview?: string;
       },
     ) => {
-      const bodyLen = (
-        hydratedPremiumBodyRef.current ||
-        lastKnownGoodAuthoritativeDraftRef.current ||
-        paidBodyForGuidedCompletion
-      ).trim().length;
       const target = resolveGuidedQuestionTarget(variableId);
       const sectionLabel = target.sectionNumber
         ? `Section ${target.sectionNumber} — ${target.sectionLabel}`
         : target.sectionLabel;
-      const implementationPreview =
+      const rawPreview =
         meta?.implementationPreview?.trim() ||
         resolveImplementationPreview(variableId, displayAnswer, meta?.instructionAnswer);
+      const implementationPreview = compressLawDogWill(variableId, rawPreview);
       setGuidedCompletionSession((prev) => {
-        if (!prev) return prev;
-        const next = applyGuidedAnswerTransaction(prev, variableId, displayAnswer, bodyLen, {
+        const base = prev ?? guidedCompletionSessionRef.current ?? guidedCompletionSessionBase;
+        if (!base) return prev;
+        const next = applyGuidedAnswerTransaction(base, variableId, displayAnswer, undefined, {
           recommendationReason: meta?.recommendationReason ?? null,
           implementationPreview,
           targetSectionLabel: sectionLabel,
         });
-        const keyed = { ...next, sessionKey: guidedSessionKey };
+        const keyed = { ...withGuidedDraftProgress(next), sessionKey: guidedSessionKey };
         persistGuidedSession(keyed, guidedSessionKey);
         guidedCompletionSessionRef.current = keyed;
         if (isGuidedCompletionComplete(keyed)) {
           setGuidedCompletionPhase("ready_to_apply");
           logGuidedAllAnswersReady(keyed);
-        } else {
+        } else if (guidedCompletionPhase !== "applying_all" && guidedCompletionPhase !== "applied") {
           setGuidedCompletionPhase("collecting_answers");
         }
         return keyed;
