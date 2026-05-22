@@ -604,7 +604,6 @@ import { resolveImplementationPreview } from "./guidedDealCompletion/guidedImple
 import {
   buildConsolidatedGuidedRegenerationPrompt,
   buildAppliedChangesFromSession,
-  validateGuidedBulkRegeneration,
   GUIDED_BULK_FAIL_USER_MESSAGE,
   logGuidedAllAnswersReady,
   logGuidedBulkRegenerationStart,
@@ -673,6 +672,7 @@ import { resolveGuidedPreReviewSignerSlots } from "./guidedDealCompletion/resolv
 import {
   GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA,
   GUIDED_FINISHING_UPDATED_AGREEMENT,
+  GUIDED_RETRY_APPLY_ANSWERS_CTA,
   listGuidedAnsweredVariableIds,
   logGuidedBackgroundApplyStarted,
   resolveGuidedAnswerApplyStatus,
@@ -689,6 +689,10 @@ import {
   logGuidedFinalReviewNavigationDeduped,
   resolveGuidedFinalReviewCtaVisibility,
 } from "./guidedDealCompletion/guidedFinalReviewTransition";
+import {
+  resolveGuidedBackgroundApplyOutcome,
+  validateGuidedBulkRefinedOutputForApply,
+} from "./guidedDealCompletion/guidedApplyOutcome";
 import {
   guidedProUxShowsQuestionPanel,
   guidedProUxShowsSignerSetup,
@@ -14039,7 +14043,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeCombined;
     const instruction = buildConsolidatedGuidedRegenerationPrompt({
       intakeText,
-      session,
+      session: freezeStart,
     });
     const docOverride = null;
     const backgroundDuringSignerSetup = Boolean(options?.backgroundDuringSignerSetup);
@@ -14066,15 +14070,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       scrollToReview: false,
       skipGuidedWhatChangedSummary: true,
       suppressGlobalGeneratingUi: true,
-      validateRefinedOutput: (out) => {
-        const validation = validateGuidedBulkRegeneration(stableBefore, out, session);
-        if (validation.ok) return true;
-        logGuidedBulkRegenerationFailed(validation.reasons);
-        if (out.trim().length >= Math.max(stableBefore.trim().length * 1.02, 500)) {
-          return true;
-        }
-        return false;
-      },
+      validateRefinedOutput: (out) =>
+        validateGuidedBulkRefinedOutputForApply({
+          stableBeforePlain: stableBefore,
+          candidatePlain: out,
+          session: freezeStart,
+          refineAccepted: true,
+        }),
     });
     } finally {
       guidedBulkApplyingRef.current = false;
@@ -14113,8 +14115,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       persistGuidedSession(frozenSession, guidedSessionKey);
       return answeredIds;
     };
-    if (ok) {
-      const nextLen = (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim().length;
+    const postBody = (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
+    const applyOutcome = resolveGuidedBackgroundApplyOutcome({
+      stableBeforePlain: stableBefore,
+      postBodyPlain: postBody,
+      session: freezeStart,
+      refineAccepted: true,
+      refineOk: ok,
+    });
+    if (applyOutcome.status === "applied") {
+      if (applyOutcome.softPass) {
+        logGuidedBulkRegenerationFailed(applyOutcome.reasons);
+        logPostApplyQualityWarningNonblocking(applyOutcome.reasons);
+      }
+      const nextLen = postBody.length || stableBefore.trim().length;
       assertAuthoritativeBodyContinuity({
         label: "guided_bulk_apply",
         previousLen: stableBefore.trim().length,
@@ -14127,14 +14141,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setGuidedAuthVersionNonce((n) => n + 1);
       logGuidedBulkRegenerationSuccess(nextLen);
       const answeredIds = landPostGuidedApplySuccess(nextLen);
-      const postBody =
-        (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
       const applyResult = reinforceGuidedAuthoritativeApply({
         variableIds: answeredIds,
         preBodyLen: stableBefore.trim().length,
         postBodyLen: nextLen,
         preBody: stableBefore.trim(),
-        postBody,
+        postBody: postBody || stableBefore.trim(),
       });
       setGuidedAuthoritativeSummaryAreas(applyResult.areas);
       setGuidedAuthoritativeSummaryVariableIds(answeredIds);
@@ -14143,39 +14155,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setReviewDocRefreshTick((n) => n + 1);
       logUxTrustEvent("guided_causality", {
         phase: "applied",
-        questionCount: resolveGuidedFrozenAnswerCount(session),
+        questionCount: resolveGuidedFrozenAnswerCount(freezeStart),
         versionId: versionSnap.versionId,
       });
       // eslint-disable-next-line no-console
       console.info("[guided-finalized-ready-for-signature]", {
         versionIdShort: versionSnap.versionId.slice(0, 8),
         changedClauseCount: applyResult.areas.length,
+        softPass: applyOutcome.softPass,
       });
     } else {
-      const postBody = (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
-      const softKeepReady =
-        postBody.length >= Math.max(stableBefore.trim().length * 1.02, 500);
-      if (softKeepReady) {
-        logGuidedBulkRegenerationFailed(["post_apply_quality_soft_fail_kept_ready"]);
-        logPostApplyQualityWarningNonblocking(["post_apply_quality_soft_fail_kept_ready"]);
-        const nextLen = postBody.length;
-        bumpAuthoritativeAgreementVersion(nextLen, persistedPremiumReviewTitle || draft?.title || "");
-        setGuidedAuthVersionNonce((n) => n + 1);
-        landPostGuidedApplySuccess(nextLen);
-        bumpPremiumSurfaceGateTick();
-        setReviewDocRefreshTick((n) => n + 1);
-        flashGuidedAgreementUpdateToast("Updated agreement ready for review", null);
+      if (backgroundDuringSignerSetup) {
+        setGuidedAnswerApplyStatus("failed_retryable");
+        setGuidedCompletionPhase("ready_to_apply");
+        setCreateFlowPhase("signer_setup_required");
       } else {
-        if (backgroundDuringSignerSetup) {
-          setGuidedAnswerApplyStatus("failed_retryable");
-          setGuidedCompletionPhase("ready_to_apply");
-          setCreateFlowPhase("signer_setup_required");
-        } else {
-          setGuidedCompletionPhase("failed");
-        }
-        setGuidedBulkApplyError(GUIDED_BULK_FAIL_USER_MESSAGE);
-        setReviewRefineUserMessage(GUIDED_BULK_FAIL_USER_MESSAGE);
+        setGuidedCompletionPhase("failed");
       }
+      setGuidedBulkApplyError(GUIDED_BULK_FAIL_USER_MESSAGE);
+      setReviewRefineUserMessage(GUIDED_BULK_FAIL_USER_MESSAGE);
+      logGuidedBulkRegenerationFailed(applyOutcome.reasons);
     }
   }, [
     paidBodyForGuidedCompletion,
@@ -19012,7 +19011,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             {resolvedGuidedAnswerApplyStatus === "applying"
                                               ? GUIDED_FINISHING_UPDATED_AGREEMENT
                                               : resolvedGuidedAnswerApplyStatus === "failed_retryable"
-                                                ? "Retry Pro update"
+                                                ? GUIDED_RETRY_APPLY_ANSWERS_CTA
                                                 : GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA}
                                           </button>
                                         ) : null}

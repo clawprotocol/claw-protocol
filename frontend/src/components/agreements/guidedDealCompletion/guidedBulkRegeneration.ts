@@ -39,21 +39,31 @@ const COMBINED_FORBIDDEN_TARGET: GuidedRevisionTarget = {
   ],
 };
 
+export type GuidedBulkRegenerationValidation = {
+  ok: boolean;
+  softPass: boolean;
+  reasons: string[];
+};
+
 /** Validate full-document output after bulk guided regeneration (length + quality when session provided). */
 export function validateGuidedBulkRegeneration(
   beforeText: string,
   afterText: string,
   session?: GuidedCompletionSession | null,
-) {
+): GuidedBulkRegenerationValidation {
   const polished = applyGuidedPostApplyLightPolish(beforeText, afterText);
   const length = validateGuidedBulkRegenerationLength(beforeText, polished);
-  if (!length.ok) return length;
-  if (session) {
-    const quality = validateGuidedPostApplyQuality(beforeText, polished, session);
-    logGuidedPostApplyQuality(quality);
-    return { ok: quality.ok, reasons: quality.reasons };
+  if (!session) {
+    return { ok: length.ok, softPass: false, reasons: length.reasons };
   }
-  return length;
+  const quality = validateGuidedPostApplyQuality(beforeText, polished, session);
+  if (quality.ok && length.ok) {
+    logGuidedPostApplyQuality(quality);
+    return { ok: true, softPass: false, reasons: [] };
+  }
+  const reasons = [...new Set([...length.reasons, ...quality.reasons])];
+  logGuidedPostApplyQuality(quality);
+  return { ok: false, softPass: false, reasons };
 }
 
 /** @deprecated Surgical placement rules — use only for per-answer patch refine, not bulk regen. */

@@ -8,6 +8,7 @@ import { scanBodyMaterialPlaceholders } from "./bodyMaterialPlaceholderScanner";
 import type { GuidedCompletionSession } from "./types";
 import { resolveGuidedQuestionConfig } from "./guidedQuestionConfig";
 import { resolveGuidedQuestionTarget } from "./guidedRevisionAnchors";
+import { countGuidedAnsweredVariables } from "./guidedAnswerApplyOrchestration";
 
 export const GUIDED_DISCLAIMER_FRAGMENTS = [
   NOT_LEGAL_ADVICE,
@@ -123,6 +124,54 @@ export function validateDisclaimerPreserved(before: string, after: string): bool
   return bodyContainsDisclaimerFragments(after);
 }
 
+/** Minimum post-apply body length for Pro guided flow. */
+export const GUIDED_APPLY_USABLE_MIN_LEN = 500;
+
+/** Soft-pass when refine accepted: candidate >= 95% of pre-apply authoritative length. */
+export const GUIDED_APPLY_SOFT_PASS_MIN_RATIO = 0.95;
+
+export function isGuidedApplyOutputBodyUsable(beforeLen: number, afterLen: number): boolean {
+  if (afterLen < GUIDED_APPLY_USABLE_MIN_LEN) return false;
+  if (beforeLen < GUIDED_APPLY_USABLE_MIN_LEN) return true;
+  return afterLen >= Math.floor(beforeLen * GUIDED_APPLY_SOFT_PASS_MIN_RATIO);
+}
+
+export type GuidedPostApplySoftPassArgs = {
+  applyDecisionAccepted: boolean;
+  refineOk?: boolean;
+  bodyUsable: boolean;
+  answeredCount: number;
+  hasSummaryChanges?: boolean;
+  qualityReasons: readonly string[];
+};
+
+const GUIDED_POST_APPLY_HARD_BLOCKERS = new Set([
+  "output_too_short",
+  "output_shrunk_unexpectedly",
+  "disclaimer_stripped",
+  "placeholder_regression",
+]);
+
+/** Non-blocking soft pass when premium refine accepted and body remains usable. */
+export function shouldSoftPassGuidedPostApplyQuality(args: GuidedPostApplySoftPassArgs): boolean {
+  if (!args.bodyUsable || args.answeredCount <= 0) return false;
+  if (args.qualityReasons.some((r) => GUIDED_POST_APPLY_HARD_BLOCKERS.has(r))) return false;
+  return Boolean(args.applyDecisionAccepted || args.refineOk || args.hasSummaryChanges);
+}
+
+export function logGuidedPostApplyQualitySoftPass(payload: {
+  reasons: readonly string[];
+  beforeLen: number;
+  afterLen: number;
+  answeredCount: number;
+  refineAccepted?: boolean;
+  refineOk?: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-post-apply-quality-soft-pass]", payload);
+}
+
 /** Significant tokens from guided answers should appear in the post-guided body. */
 export function guidedAnswersPresentInBody(
   session: GuidedCompletionSession,
@@ -130,7 +179,11 @@ export function guidedAnswersPresentInBody(
 ): { ok: boolean; missing: string[] } {
   const hay = (body || "").toLowerCase();
   const missing: string[] = [];
-  for (const id of session.queue) {
+  const variableIds =
+    session.queue.length > 0
+      ? session.queue
+      : Object.keys(session.answered).filter((id) => (session.answered[id] || "").trim());
+  for (const id of variableIds) {
     const answer = (session.answered[id] || "").trim();
     if (!answer) continue;
     const numeric = answer.match(/\d+(?:\.\d+)?%?|\$[\d,]+(?:\.\d{2})?|net\s*\d+/gi) || [];
@@ -285,7 +338,9 @@ export function validateGuidedPostApplyQuality(
   if (session) {
     const presence = guidedAnswersPresentInBody(session, after);
     answersMissing = presence.missing;
-    if (!presence.ok && answersMissing.length > session.queue.filter((id) => session.answered[id]).length / 2) {
+    const answeredCount = countGuidedAnsweredVariables(session);
+    const missingThreshold = Math.max(1, Math.ceil(answeredCount / 2));
+    if (!presence.ok && answersMissing.length >= missingThreshold) {
       reasons.push("guided_answers_not_integrated");
     }
   }

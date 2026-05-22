@@ -77,6 +77,7 @@ export const GUIDED_BACKGROUND_APPLY_PROGRESS = "Updating Pro agreement in backg
 export const GUIDED_FINISHING_UPDATED_AGREEMENT = "Finishing your updated agreement…";
 export const GUIDED_APPLYING_ANSWERS_SUBCOPY = "Applying your answers to the Pro agreement…";
 export const GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA = "Continue to final review";
+export const GUIDED_RETRY_APPLY_ANSWERS_CTA = "Try applying answers again";
 
 export function resolveGuidedSignerSetupStickyCta(args: {
   signerStatus: GuidedSignerSetupStatus;
@@ -100,7 +101,7 @@ export function resolveGuidedSignerSetupStickyCta(args: {
   }
   if (args.applyStatus === "failed_retryable") {
     return {
-      label: "Retry Pro update",
+      label: GUIDED_RETRY_APPLY_ANSWERS_CTA,
       action: "guided_continue",
       disabled: false,
       reason: "guided_apply_failed_retry",
@@ -125,7 +126,7 @@ export function shouldResolveGuidedApplyFromExistingBody(args: {
   const minWait = args.minWaitMs ?? 4_000;
   if (args.elapsedMs < minWait) return false;
   if (args.stableBodyLen < 500) return args.currentBodyLen >= 500;
-  return args.currentBodyLen >= Math.max(args.stableBodyLen * 1.02, args.stableBodyLen + 200);
+  return args.currentBodyLen >= Math.max(args.stableBodyLen * 0.95, args.stableBodyLen + 200);
 }
 
 export function logGuidedBackgroundApplyStarted(payload: { answeredCount: number }): void {

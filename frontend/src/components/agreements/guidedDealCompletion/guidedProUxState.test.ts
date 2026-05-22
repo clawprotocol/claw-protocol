@@ -134,6 +134,9 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
     expect(resolveGuidedProStickyCta("signer_setup_required", 0, true, "applied")?.label).toBe(
       "Continue to final review",
     );
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true, "failed_retryable")?.label).toBe(
+      "Try applying answers again",
+    );
     expect(resolveGuidedProStickyCta("signer_setup_required", 0, true, "applied")?.reason).toBe(
       "signer_setup_ready_final_review",
     );

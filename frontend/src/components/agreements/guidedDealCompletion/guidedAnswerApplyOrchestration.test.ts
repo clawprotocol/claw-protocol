@@ -131,6 +131,15 @@ describe("guidedAnswerApplyOrchestration", () => {
     expect(cta.label).toMatch(/Finishing your updated agreement/i);
   });
 
+  it("failed_retryable CTA uses Try applying answers again (test25)", () => {
+    const cta = resolveGuidedSignerSetupStickyCta({
+      signerStatus: resolveGuidedSignerSetupStatus(true),
+      applyStatus: "failed_retryable",
+    });
+    expect(cta.label).toBe("Try applying answers again");
+    expect(cta.label).not.toBe("Retry Pro update");
+  });
+
   it("sticky CTA: both complete shows continue to final review", () => {
     const cta = resolveGuidedSignerSetupStickyCta({
       signerStatus: resolveGuidedSignerSetupStatus(true),

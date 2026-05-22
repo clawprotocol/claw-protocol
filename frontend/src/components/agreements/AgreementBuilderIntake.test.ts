@@ -311,7 +311,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("handleGuidedBulkApply");
     expect(intake).toContain("guidedCompletionPhase");
     expect(intake).toContain("appliedGuidedChanges");
-    expect(intake).toContain("validateGuidedBulkRegeneration");
+    expect(intake).toContain("validateGuidedBulkRefinedOutputForApply");
     expect(intake).toContain("buildConsolidatedGuidedRegenerationPrompt");
     expect(intake).toContain("hideStickyForGuidedInProgress");
     expect(intake).toContain("guidedQuestionsRemain");
@@ -578,7 +578,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("guidedProUxAllowsRecipientSetup");
     expect(intake).toContain("guidedProUxBlocksRecipientSetup");
     expect(intake).toContain("guidedBulkApplyingActive");
-    expect(intake).toContain("post_apply_quality_soft_fail_kept_ready");
+    expect(intake).toContain("logPostApplyQualityWarningNonblocking");
     expect(intake).toContain("suppressGuidedFreeformUx");
     expect(intake).toContain("GuidedUpdatedAgreementReadyCard");
     expect(intake).toContain("updated_agreement_ready");
@@ -646,6 +646,26 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       "utf8",
     );
     expect(orch).toContain("resolveGuidedFrozenAnswerCount");
+  });
+
+  it("test25: soft-pass apply outcome and retry CTA copy", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("resolveGuidedBackgroundApplyOutcome");
+    expect(intake).toContain("validateGuidedBulkRefinedOutputForApply");
+    expect(intake).toContain("logPostApplyQualityWarningNonblocking");
+    expect(intake).toContain("GUIDED_RETRY_APPLY_ANSWERS_CTA");
+    expect(intake).not.toMatch(/Retry Pro update/);
+    const quality = readFileSync(
+      join(__dirname, "guidedDealCompletion/guidedPostApplyQuality.ts"),
+      "utf8",
+    );
+    expect(quality).toContain("guided-post-apply-quality-soft-pass");
+    expect(quality).toContain("GUIDED_APPLY_SOFT_PASS_MIN_RATIO");
+    const outcome = readFileSync(
+      join(__dirname, "guidedDealCompletion/guidedApplyOutcome.ts"),
+      "utf8",
+    );
+    expect(outcome).toContain("shouldSoftPassGuidedPostApplyQuality");
   });
 
   it("test24: explicit final review unlock, dedupe, and mutually exclusive CTAs", () => {
