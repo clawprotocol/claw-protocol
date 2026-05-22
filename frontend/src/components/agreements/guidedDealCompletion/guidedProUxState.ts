@@ -8,6 +8,12 @@
 import type { CreateFlowProductionPhase } from "../createFlowTypes";
 import { isGuidedFinalReviewPhase, isUpdatedAgreementReadyPhase } from "../createFlowTypes";
 import type { GuidedCompletionPhase } from "./guidedCompletionPhase";
+import type { GuidedAnswerApplyStatus } from "./guidedAnswerApplyOrchestration";
+import {
+  resolveGuidedAnswerApplyStatus,
+  resolveGuidedSignerSetupStickyCta,
+  resolveGuidedSignerSetupStatus,
+} from "./guidedAnswerApplyOrchestration";
 
 export type GuidedProUxState =
   | "inactive"
@@ -43,6 +49,8 @@ export type ResolveGuidedProUxStateArgs = {
   signingPacketSetupActive?: boolean;
   /** True while bulk guided regeneration is in flight (ref may be set before phase state flushes). */
   guidedBulkApplying?: boolean;
+  /** Split apply status — signer setup can proceed while background apply runs. */
+  guidedAnswerApplyStatus?: GuidedAnswerApplyStatus;
 };
 
 /** Guided phases where post–final-review recipient/signing UI must stay hidden. */
@@ -81,7 +89,18 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
 
   if (args.signingPacketSetupActive) return "signing_packet_setup";
 
-  if (args.guidedBulkApplying || args.guidedCompletionPhase === "applying_all") {
+  const applyStatus = resolveGuidedAnswerApplyStatus({
+    guidedAnswerApplyStatus: args.guidedAnswerApplyStatus ?? "idle",
+    guidedCompletionPhase: args.guidedCompletionPhase,
+    bulkApplying: Boolean(args.guidedBulkApplying),
+  });
+
+  /** Signer setup during background apply — do not replace with full-screen applying state. */
+  if (args.hasGuidedSession && args.guidedCompletionPhase === "ready_to_apply") {
+    return "signer_setup_required";
+  }
+
+  if (applyStatus === "applying" || args.guidedCompletionPhase === "applying_all") {
     return "guided_applying_updates";
   }
 
@@ -127,10 +146,6 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
       args.createFlowPhase === "ready_to_send")
   ) {
     return "recipient_setup";
-  }
-
-  if (args.hasGuidedSession && args.guidedCompletionPhase === "ready_to_apply") {
-    return "signer_setup_required";
   }
 
   if (
@@ -194,13 +209,14 @@ export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState):
 
 /** After bulk apply, open final review when authoritative body + full answer set exist. */
 export function shouldAutoOpenGuidedFinalReviewAfterApply(args: {
-  queueLength: number;
   answeredCount: number;
+  frozenTotalQuestions?: number;
   postBodyLen: number;
 }): boolean {
+  const expectedAnswers = Math.max(args.frozenTotalQuestions ?? 0, args.answeredCount);
   return (
-    args.queueLength > 0 &&
-    args.answeredCount >= args.queueLength &&
+    args.answeredCount > 0 &&
+    args.answeredCount >= expectedAnswers &&
     args.postBodyLen >= 500
   );
 }
@@ -209,6 +225,7 @@ export function resolveGuidedProStickyCta(
   state: GuidedProUxState,
   pendingQuestions: number,
   signerSlotsComplete = false,
+  applyStatus: GuidedAnswerApplyStatus = "idle",
 ): GuidedProStickyCta | null {
   switch (state) {
     case "guided_questions_active":
@@ -222,20 +239,10 @@ export function resolveGuidedProStickyCta(
         reason: "guided_questions_active",
       };
     case "signer_setup_required":
-      if (signerSlotsComplete) {
-        return {
-          label: "Apply answers and prepare review",
-          action: "guided_continue",
-          disabled: false,
-          reason: "signer_setup_ready_apply",
-        };
-      }
-      return {
-        label: "Add signer details",
-        action: "guided_continue",
-        disabled: true,
-        reason: "signer_setup_required",
-      };
+      return resolveGuidedSignerSetupStickyCta({
+        signerStatus: resolveGuidedSignerSetupStatus(signerSlotsComplete),
+        applyStatus,
+      });
     case "guided_applying_updates":
       return {
         label: "Updating agreement…",

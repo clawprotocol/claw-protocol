@@ -113,15 +113,32 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
     expect(guidedProUxSuppressesProductionSendCta("guided_final_review")).toBe(false);
   });
 
-  it("sticky CTA: incomplete signer setup stays disabled; complete enables apply", () => {
-    expect(resolveGuidedProStickyCta("signer_setup_required", 0, false)?.disabled).toBe(true);
-    expect(resolveGuidedProStickyCta("signer_setup_required", 0, false)?.label).toBe("Add signer details");
-    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true)?.disabled).toBe(false);
-    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true)?.label).toBe(
-      "Apply answers and prepare review",
+  it("ready_to_apply with background apply stays on signer_setup_required (test22)", () => {
+    expect(
+      resolveGuidedProUxState({
+        ...BASE,
+        guidedCompletionPhase: "ready_to_apply",
+        createFlowPhase: "signer_setup_required",
+        guidedAnswerApplyStatus: "applying",
+        guidedBulkApplying: true,
+      }),
+    ).toBe("signer_setup_required");
+  });
+
+  it("sticky CTA: incomplete signer setup stays disabled; complete + apply done enables final review", () => {
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, false, "applying")?.disabled).toBe(true);
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, false, "applying")?.label).toBe(
+      "Add signer details",
     );
-    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true)?.reason).toBe(
-      "signer_setup_ready_apply",
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true, "applied")?.disabled).toBe(false);
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true, "applied")?.label).toBe(
+      "Continue to final review",
+    );
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true, "applied")?.reason).toBe(
+      "signer_setup_ready_final_review",
+    );
+    expect(resolveGuidedProStickyCta("signer_setup_required", 0, true, "applying")?.label).toMatch(
+      /Finishing your updated agreement/i,
     );
   });
 
@@ -152,22 +169,22 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
   it("test21: auto-opens final review after apply when body + full answers exist", () => {
     expect(
       shouldAutoOpenGuidedFinalReviewAfterApply({
-        queueLength: 5,
         answeredCount: 5,
+        frozenTotalQuestions: 5,
         postBodyLen: 12000,
       }),
     ).toBe(true);
     expect(
       shouldAutoOpenGuidedFinalReviewAfterApply({
-        queueLength: 5,
         answeredCount: 4,
+        frozenTotalQuestions: 5,
         postBodyLen: 12000,
       }),
     ).toBe(false);
     expect(
       shouldAutoOpenGuidedFinalReviewAfterApply({
-        queueLength: 5,
         answeredCount: 5,
+        frozenTotalQuestions: 5,
         postBodyLen: 200,
       }),
     ).toBe(false);

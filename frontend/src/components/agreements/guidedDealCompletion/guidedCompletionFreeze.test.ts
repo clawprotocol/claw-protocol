@@ -106,7 +106,7 @@ describe("guidedCompletionFreeze", () => {
     expect(filtered).toEqual(["payment_timing"]);
   });
 
-  it("mergeGuidedSessionWhenRebuildBlocked keeps frozen queue length", () => {
+  it("mergeGuidedSessionWhenRebuildBlocked keeps frozen answer count (test22)", () => {
     const session = sessionStub(
       ["project_fee_phase_confirmation", "saas_sla", "ip_ownership", "renewal_notice", "payment_timing"],
       {

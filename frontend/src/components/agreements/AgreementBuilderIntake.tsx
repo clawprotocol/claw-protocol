@@ -660,9 +660,6 @@ import {
   logBlockedAutoNavigationWhileSignersEditing,
   logGuidedApplyingStuckCleared,
   logPostApplyQualityWarningNonblocking,
-  logGuidedApplyExplicitlyStarted,
-  logGuidedApplyDeduped,
-  GUIDED_SIGNER_SETUP_APPLY_CTA,
   GUIDED_APPLYING_HEADLINE,
   formatGuidedApplyingSubcopy,
   logSignerSetupActive,
@@ -672,6 +669,18 @@ import {
   logSignerSetupWriteDeduped,
 } from "./guidedDealCompletion/guidedSignerSetupUx";
 import { resolveGuidedPreReviewSignerSlots } from "./guidedDealCompletion/resolveGuidedPreReviewSignerSlots";
+import {
+  canUnlockGuidedFinalReview,
+  GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA,
+  GUIDED_FINISHING_UPDATED_AGREEMENT,
+  listGuidedAnsweredVariableIds,
+  logGuidedBackgroundApplyStarted,
+  resolveGuidedAnswerApplyStatus,
+  resolveGuidedFrozenAnswerCount,
+  resolveGuidedSignerSetupStatus,
+  shouldResolveGuidedApplyFromExistingBody,
+  type GuidedAnswerApplyStatus,
+} from "./guidedDealCompletion/guidedAnswerApplyOrchestration";
 import {
   guidedProUxShowsQuestionPanel,
   guidedProUxShowsSignerSetup,
@@ -2486,6 +2495,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedBulkApplyingRef = useRef(false);
   const guidedApplyInFlightRef = useRef(false);
   const guidedPendingAutoApplyRef = useRef(false);
+  const guidedBackgroundApplyStartedRef = useRef(false);
+  const guidedApplyStartedAtRef = useRef<number | null>(null);
+  const [guidedAnswerApplyStatus, setGuidedAnswerApplyStatus] =
+    useState<GuidedAnswerApplyStatus>("idle");
   const guidedUxFlagsRef = useRef<ReturnType<typeof deriveGuidedUxPhaseFlags> | null>(null);
   const [guidedAuthoritativeSummaryAreas, setGuidedAuthoritativeSummaryAreas] = useState<string[]>([]);
   const [guidedAuthoritativeSummaryVariableIds, setGuidedAuthoritativeSummaryVariableIds] = useState<string[]>([]);
@@ -10679,7 +10692,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedFinalReviewActive = simpleProFinalReviewActive;
 
   const guidedBulkApplyingActive =
-    guidedBulkApplyingRef.current || guidedCompletionPhase === "applying_all";
+    guidedBulkApplyingRef.current ||
+    guidedCompletionPhase === "applying_all" ||
+    guidedAnswerApplyStatus === "applying";
+
+  const resolvedGuidedAnswerApplyStatus = useMemo(
+    () =>
+      resolveGuidedAnswerApplyStatus({
+        guidedAnswerApplyStatus,
+        guidedCompletionPhase,
+        bulkApplying: guidedBulkApplyingActive,
+      }),
+    [guidedAnswerApplyStatus, guidedCompletionPhase, guidedBulkApplyingActive],
+  );
 
   const guidedProUxState = useMemo(() => {
     const state = resolveGuidedProUxState({
@@ -10691,6 +10716,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
       sendIntentSelected: guidedSendIntentSelected || finalReviewSendPathChosenRef.current,
       guidedBulkApplying: guidedBulkApplyingActive,
+      guidedAnswerApplyStatus: resolvedGuidedAnswerApplyStatus,
     });
     logGuidedProUxStateResolved(state, guidedCompletionPhase);
     return state;
@@ -10703,6 +10729,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedFinalReviewExplicitlyOpened,
     guidedBulkApplyingActive,
     guidedSendIntentSelected,
+    resolvedGuidedAnswerApplyStatus,
   ]);
 
   const suppressGuidedFreeformUx = guidedProUxSuppressesFreeform(guidedProUxState);
@@ -13184,6 +13211,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           guidedProUxState,
           pendingEarly,
           guidedPreReviewSignerSlots.complete,
+          resolvedGuidedAnswerApplyStatus,
         );
         if (
           guidedEarlySticky &&
@@ -13296,6 +13324,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             guidedProUxState,
             pending,
             guidedPreReviewSignerSlots.complete,
+            resolvedGuidedAnswerApplyStatus,
           );
           if (guidedSticky) return guidedSticky;
         }
@@ -13546,6 +13575,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionSession,
     guidedPreReviewSignerSlots.complete,
     guidedBulkApplyingActive,
+    resolvedGuidedAnswerApplyStatus,
   ]);
 
   useEffect(() => {
@@ -13852,7 +13882,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         persistGuidedSession(keyed, guidedSessionKey);
         guidedCompletionSessionRef.current = keyed;
         if (isGuidedCompletionComplete(keyed)) {
-          guidedPendingAutoApplyRef.current = false;
+          guidedPendingAutoApplyRef.current = true;
           setGuidedCompletionFrozen(true);
           guidedFrozenAfterApplyRef.current = true;
           const frozenReady = freezeGuidedSessionAfterApply(keyed, guidedSessionKey);
@@ -13892,7 +13922,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         persistGuidedSession(keyed, guidedSessionKey);
         guidedCompletionSessionRef.current = keyed;
         if (isGuidedCompletionComplete(keyed)) {
-          guidedPendingAutoApplyRef.current = false;
+          guidedPendingAutoApplyRef.current = true;
           setGuidedCompletionFrozen(true);
           guidedFrozenAfterApplyRef.current = true;
           const frozenReady = freezeGuidedSessionAfterApply(keyed, guidedSessionKey);
@@ -13933,12 +13963,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setGuidedFinalReviewExplicitlyOpened(false);
       setCreateFlowPhase("draft_ready_for_review");
       setGuidedBulkApplyError(null);
+      setGuidedAnswerApplyStatus("idle");
+      guidedBackgroundApplyStartedRef.current = false;
+      guidedApplyStartedAtRef.current = null;
       invalidateSigningPacketPrep("guided_answer_edit");
     },
     [guidedSessionKey, paidBodyForGuidedCompletion],
   );
 
-  const handleGuidedBulkApply = React.useCallback(async (options?: { skipPhaseInit?: boolean }) => {
+  const handleGuidedBulkApply = React.useCallback(async (options?: {
+    skipPhaseInit?: boolean;
+    backgroundDuringSignerSetup?: boolean;
+  }) => {
     const session = guidedCompletionSessionRef.current;
     if (!session || !isGuidedCompletionComplete(session)) {
       guidedApplyInFlightRef.current = false;
@@ -13965,10 +14001,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       session,
     });
     const docOverride = null;
-    if (!options?.skipPhaseInit) {
+    const backgroundDuringSignerSetup = Boolean(options?.backgroundDuringSignerSetup);
+    guidedApplyInFlightRef.current = true;
+    if (backgroundDuringSignerSetup) {
+      setGuidedAnswerApplyStatus("applying");
+      guidedApplyStartedAtRef.current = Date.now();
+    }
+    if (!options?.skipPhaseInit && !backgroundDuringSignerSetup) {
       setGuidedCompletionPhase("applying_all");
       setGuidedBulkApplyError(null);
       flashGuidedAgreementUpdateToast("Updating your agreement…", null);
+      logGuidedBulkRegenerationStart();
+      guidedBulkApplyingRef.current = true;
+    } else if (!options?.skipPhaseInit) {
+      setGuidedBulkApplyError(null);
       logGuidedBulkRegenerationStart();
       guidedBulkApplyingRef.current = true;
     }
@@ -13994,14 +14040,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedApplyInFlightRef.current = false;
     }
     const landPostGuidedApplySuccess = (nextLen: number) => {
-      const answeredIds = session.queue.filter((id) => (session.answered[id] || "").trim());
-      const autoFinal = shouldAutoOpenGuidedFinalReviewAfterApply({
-        queueLength: session.queue.length,
-        answeredCount: answeredIds.length,
-        postBodyLen: nextLen,
-      });
+      const answeredIds = listGuidedAnsweredVariableIds(session);
+      const frozenAnswerCount = resolveGuidedFrozenAnswerCount(session);
+      setGuidedAnswerApplyStatus("applied");
       setAppliedGuidedChanges(buildAppliedChangesFromSession(session));
-      setGuidedCompletionPhase("applied");
       setGuidedBulkApplyError(null);
       setReviewRefineUserMessage(null);
       setCreateUiStage(CreateUiStage.DRAFT);
@@ -14011,11 +14053,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalReviewSendPathChosenRef.current = false;
       finalReviewSendIntentRef.current = null;
       setGuidedSendIntentSelected(false);
-      if (autoFinal) {
+      const autoFinal = shouldAutoOpenGuidedFinalReviewAfterApply({
+        answeredCount: frozenAnswerCount,
+        frozenTotalQuestions: session.frozenTotalQuestions,
+        postBodyLen: nextLen,
+      });
+      if (backgroundDuringSignerSetup) {
+        setGuidedCompletionPhase("ready_to_apply");
+        setCreateFlowPhase("signer_setup_required");
+      } else if (autoFinal) {
+        setGuidedCompletionPhase("applied");
         setGuidedFinalReviewExplicitlyOpened(true);
         setCreateFlowPhase("guided_final_review");
         logGuidedFinalReviewActive({ bodyLen: nextLen, uxState: "guided_final_review" });
       } else {
+        setGuidedCompletionPhase("applied");
         setGuidedFinalReviewExplicitlyOpened(false);
         setCreateFlowPhase("updated_agreement_ready");
         logRecipientUiSuppressed({ uxState: "updated_agreement_ready", reason: "post_apply_ready" });
@@ -14056,7 +14108,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setReviewDocRefreshTick((n) => n + 1);
       logUxTrustEvent("guided_causality", {
         phase: "applied",
-        questionCount: session.queue.length,
+        questionCount: resolveGuidedFrozenAnswerCount(session),
         versionId: versionSnap.versionId,
       });
       // eslint-disable-next-line no-console
@@ -14079,7 +14131,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setReviewDocRefreshTick((n) => n + 1);
         flashGuidedAgreementUpdateToast("Updated agreement ready for review", null);
       } else {
-        setGuidedCompletionPhase("failed");
+        if (backgroundDuringSignerSetup) {
+          setGuidedAnswerApplyStatus("failed_retryable");
+          setGuidedCompletionPhase("ready_to_apply");
+          setCreateFlowPhase("signer_setup_required");
+        } else {
+          setGuidedCompletionPhase("failed");
+        }
         setGuidedBulkApplyError(GUIDED_BULK_FAIL_USER_MESSAGE);
         setReviewRefineUserMessage(GUIDED_BULK_FAIL_USER_MESSAGE);
       }
@@ -14121,30 +14179,104 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     (reviewDraft as { id?: string } | null)?.id ?? (draft as { id?: string } | null)?.id ?? null;
 
   React.useEffect(() => {
-    if (guidedProUxState !== "guided_applying_updates") return;
+    if (guidedCompletionPhase !== "ready_to_apply") return;
+    if (guidedAnswerApplyStatus !== "idle") return;
+    if (!guidedPendingAutoApplyRef.current) return;
+    const session = guidedCompletionSessionRef.current;
+    if (!session || !isGuidedCompletionComplete(session)) return;
+    if (guidedBackgroundApplyStartedRef.current) return;
+    guidedBackgroundApplyStartedRef.current = true;
+    guidedPendingAutoApplyRef.current = false;
+    logGuidedBackgroundApplyStarted({
+      answeredCount: resolveGuidedFrozenAnswerCount(session),
+    });
+    void handleGuidedBulkApply({ skipPhaseInit: true, backgroundDuringSignerSetup: true });
+  }, [guidedCompletionPhase, guidedAnswerApplyStatus, handleGuidedBulkApply, guidedCompletionSession]);
+
+  React.useEffect(() => {
+    if (
+      !canUnlockGuidedFinalReview({
+        applyStatus: resolvedGuidedAnswerApplyStatus,
+        signerStatus: resolveGuidedSignerSetupStatus(guidedPreReviewSignerSlots.complete),
+      })
+    ) {
+      return;
+    }
+    if (guidedFinalReviewExplicitlyOpened || simpleProFinalReviewActive) return;
+    if (guidedCompletionPhase !== "ready_to_apply" && guidedCompletionPhase !== "applied") return;
+    setGuidedCompletionPhase("applied");
+    setGuidedFinalReviewExplicitlyOpened(true);
+    setCreateFlowPhase("guided_final_review");
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setDisplayPhase("review");
+    setPremiumRecipientUxActive(false);
+    resetPremiumRecipientsSurfaceForFinalReview();
+    logGuidedFinalReviewActive({
+      bodyLen: (
+        hydratedPremiumBodyRef.current ||
+        lastKnownGoodAuthoritativeDraftRef.current ||
+        paidBodyForGuidedCompletion
+      ).trim().length,
+      uxState: "guided_final_review",
+    });
+  }, [
+    resolvedGuidedAnswerApplyStatus,
+    guidedPreReviewSignerSlots.complete,
+    guidedFinalReviewExplicitlyOpened,
+    simpleProFinalReviewActive,
+    guidedCompletionPhase,
+    paidBodyForGuidedCompletion,
+    resetPremiumRecipientsSurfaceForFinalReview,
+  ]);
+
+  React.useEffect(() => {
+    const applying =
+      resolvedGuidedAnswerApplyStatus === "applying" ||
+      guidedProUxState === "guided_applying_updates";
+    if (!applying) return;
     const stableLen = (lastKnownGoodAuthoritativeDraftRef.current || paidBodyForGuidedCompletion || "").trim().length;
-    const timer = window.setTimeout(() => {
+    const startedAt = guidedApplyStartedAtRef.current ?? Date.now();
+    const poll = window.setInterval(() => {
       const bodyLen = (
         hydratedPremiumBodyRef.current ||
         lastKnownGoodAuthoritativeDraftRef.current ||
         ""
       ).trim().length;
+      const elapsedMs = Date.now() - startedAt;
       if (
-        bodyLen >= Math.max(stableLen * 1.02, 500) &&
-        (guidedCompletionPhase === "applying_all" || guidedBulkApplyingRef.current)
+        shouldResolveGuidedApplyFromExistingBody({
+          applying: true,
+          stableBodyLen: stableLen,
+          currentBodyLen: bodyLen,
+          elapsedMs,
+        })
       ) {
         guidedBulkApplyingRef.current = false;
+        setGuidedAnswerApplyStatus("applied");
         if (guidedCompletionPhase === "applying_all") {
           setGuidedCompletionPhase("applied");
           setCreateFlowPhase("updated_agreement_ready");
           setGuidedFinalReviewExplicitlyOpened(false);
           setPremiumRecipientUxActive(false);
-          logGuidedApplyingStuckCleared({ bodyLen, phase: createFlowPhase });
         }
+        logGuidedApplyingStuckCleared({ bodyLen, phase: createFlowPhase });
+        window.clearInterval(poll);
+      } else if (elapsedMs >= 12_000 && bodyLen >= Math.max(stableLen * 1.02, 500)) {
+        guidedBulkApplyingRef.current = false;
+        setGuidedAnswerApplyStatus("applied");
+        if (guidedCompletionPhase === "applying_all") {
+          setGuidedCompletionPhase("applied");
+          setCreateFlowPhase("updated_agreement_ready");
+          setGuidedFinalReviewExplicitlyOpened(false);
+          setPremiumRecipientUxActive(false);
+        }
+        logGuidedApplyingStuckCleared({ bodyLen, phase: createFlowPhase });
+        window.clearInterval(poll);
       }
-    }, 12_000);
-    return () => window.clearTimeout(timer);
+    }, 1500);
+    return () => window.clearInterval(poll);
   }, [
+    resolvedGuidedAnswerApplyStatus,
     guidedProUxState,
     guidedCompletionPhase,
     createFlowPhase,
@@ -14205,13 +14337,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const guidedAppliedSummaryChecklist = useMemo(() => {
+    const session = guidedCompletionSession ?? guidedCompletionSessionRef.current;
     const ids =
       guidedAuthoritativeSummaryVariableIds.length > 0
         ? guidedAuthoritativeSummaryVariableIds
-        : Object.keys((guidedCompletionSession ?? guidedCompletionSessionRef.current)?.answered ?? {}).filter(
-            (id) =>
-              ((guidedCompletionSession ?? guidedCompletionSessionRef.current)?.answered[id] || "").trim().length > 0,
-          );
+        : listGuidedAnsweredVariableIds(session);
     return buildGuidedAppliedSummaryChecklist(ids);
   }, [
     guidedAuthoritativeSummaryVariableIds,
@@ -14669,13 +14799,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProAuthoritative &&
       guidedProUxState === "guided_applying_updates" &&
       guidedCompletionPhase === "applying_all" &&
+      !guidedPreReviewSignerSetupActive &&
       !simpleProFinalReviewActive,
   );
 
   const guidedPreReviewAnswerCount = useMemo(() => {
     const session = guidedCompletionSession ?? guidedCompletionSessionRef.current;
-    if (!session) return 0;
-    return session.queue.filter((id) => (session.answered[id] || "").trim()).length;
+    return resolveGuidedFrozenAnswerCount(session);
   }, [guidedCompletionSession]);
 
   const scrollGuidedSignerSetupIntoView = React.useCallback(() => {
@@ -14688,15 +14818,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, []);
 
-  const handleGuidedPreReviewApplyAfterSigners = React.useCallback(async () => {
-    if (
-      guidedApplyInFlightRef.current ||
-      guidedBulkApplyingRef.current ||
-      guidedCompletionPhase === "applying_all"
-    ) {
-      logGuidedApplyDeduped();
-      return;
-    }
+  const handleGuidedPreReviewContinueToFinalReview = React.useCallback(async () => {
     if (!guidedPreReviewSignerSlots.complete) {
       logSignerSetupIncomplete({
         filledCount: guidedPreReviewSignerSlots.filledCount,
@@ -14706,23 +14828,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       scrollGuidedSignerSetupIntoView();
       return;
     }
-    guidedApplyInFlightRef.current = true;
-    logGuidedApplyExplicitlyStarted();
     logSignerSetupComplete();
-    flushSync(() => {
-      setGuidedCompletionPhase("applying_all");
-      guidedBulkApplyingRef.current = true;
-      setGuidedBulkApplyError(null);
-    });
-    flashGuidedAgreementUpdateToast(GUIDED_APPLYING_HEADLINE, null);
-    logGuidedBulkRegenerationStart();
-    await handleGuidedBulkApply({ skipPhaseInit: true });
+    if (resolvedGuidedAnswerApplyStatus === "applying") {
+      return;
+    }
+    if (resolvedGuidedAnswerApplyStatus === "failed_retryable") {
+      guidedBackgroundApplyStartedRef.current = true;
+      void handleGuidedBulkApply({ skipPhaseInit: true, backgroundDuringSignerSetup: true });
+      return;
+    }
+    if (
+      canUnlockGuidedFinalReview({
+        applyStatus: resolvedGuidedAnswerApplyStatus,
+        signerStatus: resolveGuidedSignerSetupStatus(true),
+      })
+    ) {
+      handleGuidedOpenFinalReview();
+    }
   }, [
     guidedPreReviewSignerSlots,
-    handleGuidedBulkApply,
+    resolvedGuidedAnswerApplyStatus,
     scrollGuidedSignerSetupIntoView,
-    guidedCompletionPhase,
-    flashGuidedAgreementUpdateToast,
+    handleGuidedOpenFinalReview,
+    handleGuidedBulkApply,
   ]);
 
   React.useEffect(() => {
@@ -16040,8 +16168,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             handleGuidedOpenFinalReview();
             return;
           }
-          if (cta.reason === "signer_setup_ready_apply") {
-            await handleGuidedPreReviewApplyAfterSigners();
+          if (
+            cta.reason === "signer_setup_ready_final_review" ||
+            cta.reason === "guided_apply_failed_retry"
+          ) {
+            await handleGuidedPreReviewContinueToFinalReview();
             return;
           }
         }
@@ -18638,6 +18769,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           slotsComplete={guidedPreReviewSignerSlots.complete}
                                           filledCount={guidedPreReviewSignerSlots.filledCount}
                                           requiredCount={guidedPreReviewSignerSlots.requiredCount}
+                                          backgroundApplyActive={resolvedGuidedAnswerApplyStatus === "applying"}
+                                          backgroundApplyComplete={resolvedGuidedAnswerApplyStatus === "applied"}
                                           onScrollToSignerFields={scrollGuidedSignerSetupIntoView}
                                         />
                                         <div
@@ -18708,10 +18841,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             type="button"
                                             className="mt-4 w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                                             data-testid="guided-pre-review-apply-inline"
-                                            disabled={guidedBulkApplyingActive}
+                                            disabled={
+                                              resolvedGuidedAnswerApplyStatus === "applying" ||
+                                              guidedBulkApplyingActive
+                                            }
                                             onClick={runPrimaryIntakeAction}
                                           >
-                                            {GUIDED_SIGNER_SETUP_APPLY_CTA}
+                                            {resolvedGuidedAnswerApplyStatus === "applying"
+                                              ? GUIDED_FINISHING_UPDATED_AGREEMENT
+                                              : resolvedGuidedAnswerApplyStatus === "failed_retryable"
+                                                ? "Retry Pro update"
+                                                : GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA}
                                           </button>
                                         ) : null}
                                         <div className="mt-4">

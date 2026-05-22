@@ -594,6 +594,12 @@ class PremiumFullDraftRequest(BaseModel):
     intake_text: str = Field(..., min_length=1)
     context: Optional[PremiumFullDraftContext] = None
     user_gap_answers: Optional[str] = Field(default=None, max_length=32_000)
+    """Client session generation id — idempotency / stale-response correlation (optional)."""
+    agreement_generation_id: Optional[str] = Field(default=None, max_length=128)
+    """Short intake fingerprint from client (optional)."""
+    intake_fingerprint: Optional[str] = Field(default=None, max_length=64)
+    """Persisted agreement id when retrying after checkout (optional)."""
+    agreement_id: Optional[str] = Field(default=None, max_length=128)
     """
     When true, the client is asking for a second pass because the first full draft was too close
     in substance to a free / stitched outline. Uses CLAW_LLM_MODEL_PREMIUM_REGEN (or premium default).
@@ -3974,10 +3980,16 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     if len(json.dumps(user_payload, ensure_ascii=False)) > 240_000:
         raise HTTPException(status_code=400, detail="Input too large for premium full draft")
     session_hint = sha256_hex(intake_s.encode("utf-8"))[:16]
+    client_gen = (getattr(body, "agreement_generation_id", None) or "").strip() or "n/a"
+    client_fp = (getattr(body, "intake_fingerprint", None) or "").strip() or "n/a"
+    client_agreement_id = (getattr(body, "agreement_id", None) or "").strip() or "n/a"
     ctx_title = (str((ctx_dict or {}).get("title") or "")[:120]) if ctx_dict else ""
     log.info(
-        "[premium-full-draft] event=start agreement_id=n/a session_hint=%s intake_len=%s context_title=%r sim_regen=%s payload_json_len=%s",
+        "[premium-full-draft] event=start agreement_id=%s session_hint=%s client_generation_id=%s intake_fingerprint=%s intake_len=%s context_title=%r sim_regen=%s payload_json_len=%s",
+        client_agreement_id,
         session_hint,
+        client_gen,
+        client_fp,
         len(intake_s),
         ctx_title,
         int(sim_regen),

@@ -610,11 +610,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(advBlock).toContain("guidedFinalReviewExplicitlyOpened");
   });
 
-  it("test20: no auto-apply on signer email; explicit apply CTA only", () => {
+  it("test20: background apply after last answer; explicit continue CTA only", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain("handleGuidedPreReviewApplyAfterSigners");
-    expect(intake).toContain("logGuidedApplyExplicitlyStarted");
-    expect(intake).toContain("signer_setup_ready_apply");
+    expect(intake).toContain("handleGuidedPreReviewContinueToFinalReview");
+    expect(intake).toContain("backgroundDuringSignerSetup");
+    expect(intake).toContain("logGuidedBackgroundApplyStarted");
+    expect(intake).toContain("signer_setup_ready_final_review");
     expect(intake).toContain("resolveGuidedPreReviewSignerSlots");
     expect(intake).toContain("logSignerSetupIncomplete");
     expect(intake).not.toContain("if (!paidProInlineSignersReady) return;");
@@ -623,28 +624,47 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       join(__dirname, "guidedDealCompletion/GuidedSignerSetupBeforeReviewCard.tsx"),
       "utf8",
     );
+    expect(card).toContain("guided-background-apply-progress");
     expect(card).not.toContain("guided-signer-setup-apply-cta");
   });
 
-  it("test21: single-flight guided apply, suppress signing links, applying + final review routing", () => {
+  it("test22: frozen answer count, no 0 answers copy, background apply + final review unlock", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("resolveGuidedFrozenAnswerCount");
+    expect(intake).toContain("listGuidedAnsweredVariableIds");
+    expect(intake).toContain("guidedAnswerApplyStatus");
+    expect(intake).toContain("canUnlockGuidedFinalReview");
+    expect(intake).toContain("shouldResolveGuidedApplyFromExistingBody");
+    expect(intake).toContain("GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA");
+    expect(intake).toContain("GUIDED_FINISHING_UPDATED_AGREEMENT");
+    expect(intake).not.toMatch(/Applying your \$\{n\} answer/);
+    expect(intake).not.toMatch(/session\.queue\.filter\(\(id\) => \(session\.answered\[id\]/);
+    const ux = readFileSync(join(__dirname, "guidedDealCompletion/guidedSignerSetupUx.ts"), "utf8");
+    expect(ux).toContain("Applying your answers to the Pro agreement");
+    const orch = readFileSync(
+      join(__dirname, "guidedDealCompletion/guidedAnswerApplyOrchestration.ts"),
+      "utf8",
+    );
+    expect(orch).toContain("resolveGuidedFrozenAnswerCount");
+  });
+
+  it("test21: background apply orchestration, suppress signing links, applying + final review routing", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("guidedApplyInFlightRef");
-    expect(intake).toContain("logGuidedApplyDeduped");
+    expect(intake).toContain("guidedAnswerApplyStatus");
     expect(intake).toContain("hidePrimarySendCta");
     expect(intake).toContain("guided-pre-review-applying");
     expect(intake).toContain("GUIDED_APPLYING_HEADLINE");
     expect(intake).toContain("formatGuidedApplyingSubcopy");
     expect(intake).toContain("shouldAutoOpenGuidedFinalReviewAfterApply");
     expect(intake).toContain('setCreateFlowPhase("guided_final_review")');
-    expect(intake).toContain("skipPhaseInit: true");
+    expect(intake).toContain("backgroundDuringSignerSetup");
     expect(intake).toContain("guidedEarlySticky");
     expect(intake).toContain("runPrimaryIntakeAction");
     expect(intake).toContain("guided-pre-review-apply-inline");
     expect(intake).not.toMatch(
       /hideStickyForGuidedInProgress[\s\S]{0,220}guidedProUxShowsSignerSetup/,
     );
-    const ux = readFileSync(join(__dirname, "guidedDealCompletion/guidedSignerSetupUx.ts"), "utf8");
-    expect(ux).toContain("[guided-apply-deduped]");
   });
 
   it("test19: guided flow uses signer_setup_required before apply and final review", () => {

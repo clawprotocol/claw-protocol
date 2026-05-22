@@ -9,9 +9,8 @@ export const GUIDED_SIGNER_SETUP_CTA = "Add signer / reviewer details";
 export const GUIDED_SIGNER_SETUP_APPLY_CTA = "Apply answers and prepare review";
 export const GUIDED_APPLYING_HEADLINE = "Updating your Pro agreement…";
 
-export function formatGuidedApplyingSubcopy(answerCount: number): string {
-  const n = Math.max(0, answerCount);
-  return `Applying your ${n} answer${n === 1 ? "" : "s"} and signer details.`;
+export function formatGuidedApplyingSubcopy(_answerCount?: number): string {
+  return "Applying your answers to the Pro agreement…";
 }
 
 export function logSignerSetupActive(): void {
