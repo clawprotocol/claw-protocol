@@ -527,10 +527,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("simplified Pro review flow uses ProReviewSigningFlowPanel and signing send verification", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showSimplifiedProReviewSigningFlow");
-    expect(intake).toContain("ProReviewSigningFlowPanel");
-    const panel = readFileSync(join(__dirname, "ProReviewSigningFlowPanel.tsx"), "utf8");
-    expect(panel).toContain("data-testid=\"pro-review-continue-to-signing\"");
-    expect(panel).toContain("pro-review-suggest-changes-toggle");
+    expect(intake).toContain("SimpleProFinalReviewScreen");
+    const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
+    expect(screen).toContain("data-testid=\"simple-pro-continue-to-signing\"");
+    expect(screen).toContain("simple-pro-suggest-changes-toggle");
     expect(intake).toContain("processReviewEditedVersionUpload");
     expect(intake).toContain("verifySigningSendReady");
     expect(intake).toContain("assertSigningSendReadyOrBlock");

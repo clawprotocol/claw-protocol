@@ -280,6 +280,7 @@ import {
   peekPremiumCompletionDoneInLocalStorage,
   peekPremiumPostCheckoutRevealDismissed,
   peekPremiumRecipientsSurfaceReleased,
+  resetPremiumRecipientsSurfaceForFinalReview,
   readPremiumCompletionSnapshot,
   stripPremiumCompletionQueryParam,
   type PremiumCompletionSnapshot,
@@ -622,6 +623,15 @@ import {
   resolveGuidedBulkCommitBody,
 } from "./guidedDealCompletion/guidedAuthoritativeReviewSync";
 import { ProReviewSigningFlowPanel } from "./ProReviewSigningFlowPanel";
+import { SimpleProFinalReviewScreen } from "./SimpleProFinalReviewScreen";
+import {
+  logGuidedFinalReviewPhaseGuardBlocked,
+  logSimpleProFinalReviewContinueToSigning,
+  logSimpleProFinalReviewHiddenRecipientUi,
+  logSimpleProFinalReviewMounted,
+  resolveSimpleProFinalReviewActive,
+} from "./simpleProFinalReviewPhase";
+import { downloadExportDraftDocx, downloadExportDraftTxt } from "../../agreement/proRedlineReviewApi";
 import {
   logReviewEditedVersionKeptAsReference,
   logReviewEditedVersionSelectedForSigning,
@@ -2386,6 +2396,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [proReviewSuggestEditsDraft, setProReviewSuggestEditsDraft] = useState("");
   const [proReviewSuggestEditsBusy, setProReviewSuggestEditsBusy] = useState(false);
   const [proReviewSuggestEditsError, setProReviewSuggestEditsError] = useState<string | null>(null);
+  const [proFinalReviewCopyAck, setProFinalReviewCopyAck] = useState(false);
+  const [proFinalReviewExportBusy, setProFinalReviewExportBusy] = useState(false);
+  const [proFinalReviewExportError, setProFinalReviewExportError] = useState<string | null>(null);
   const [guidedCompletionPhase, setGuidedCompletionPhase] =
     useState<GuidedCompletionPhase>("collecting_answers");
   const [guidedBulkApplyError, setGuidedBulkApplyError] = useState<string | null>(null);
@@ -2409,6 +2422,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Calm send step: collapsible recipient grid; auto-open once when primary contact incomplete. */
   const [createFlowSendRecipientEditorOpen, setCreateFlowSendRecipientEditorOpen] = useState(false);
   const createFlowSendEditorPrimedRef = useRef(false);
+  const guidedFinalReviewContinueArmedRef = useRef(false);
   const createFlowPhaseRefForRecipientOpen = useRef<string | null>(null);
   const premiumRecipientUxActiveRef = useRef(false);
   const premiumSendAnotherSkipOnCreatedRef = useRef(false);
@@ -4063,7 +4077,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
     const recipientsSurfaceReleased = peekPremiumRecipientsSurfaceReleased();
     const revealSeen = peekPremiumPostCheckoutRevealDismissed();
-    if (recipientsSurfaceReleased) {
+    const blockRecipientReleaseForFinalReview =
+      guidedCompletionPhase === "applied" || isGuidedFinalReviewPhase(createFlowPhase);
+    if (recipientsSurfaceReleased && !blockRecipientReleaseForFinalReview) {
       setPremiumRecipientUxActive(true);
       setPremiumPostCheckoutPhase(null);
     } else if (revealSeen) {
@@ -4093,7 +4109,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     writeAgreementCreatorIntakeStorage(raw);
 
     commitParsedDraftToReviewFlow(merged.draft, { forceReviewDisplay: true });
-    if (recipientsSurfaceReleased) {
+    if (recipientsSurfaceReleased && !blockRecipientReleaseForFinalReview) {
       setDisplayPhase("review");
       setCreateFlowPhase("recipient_setup_required");
       const hydratePaidAuthoritative = isPaidProAgreementAuthoritative({
@@ -8335,11 +8351,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   /** Paid authoritative Pro: recipient setup stays on the Pro review surface (DRAFT) — never legacy RECIPIENTS shell. */
   const advancePaidProToRecipientSetup = useCallback(() => {
+    if (isGuidedFinalReviewPhase(createFlowPhase) && !guidedFinalReviewContinueArmedRef.current) {
+      logGuidedFinalReviewPhaseGuardBlocked("advancePaidProToRecipientSetup", createFlowPhase);
+      return;
+    }
     setDisplayPhase("review");
     setCreateFlowPhase("recipient_setup_required");
     setCreateUiStage(CreateUiStage.DRAFT);
     setMobileWorkspacePane("preview");
-  }, []);
+  }, [createFlowPhase]);
 
   const returnToIntakeEditing = () => {
     if (paidProAuthoritative) {
@@ -10475,15 +10495,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [createUiStage, createProductionTwoPane, hasAnyValidRecipientEmail]);
 
-  /** Paid authoritative Pro: premium recipient/send UI on the Pro review column (DRAFT), not legacy RECIPIENTS. */
-  const guidedFinalReviewActive = useMemo(
+  /** Paid authoritative Pro: simple agreement-first review before any recipient/signing UI. */
+  const simpleProFinalReviewActive = useMemo(
     () =>
-      isGuidedFinalReviewPhase(createFlowPhase) ||
-      (guidedCompletionPhase === "applied" &&
-        createFlowPhase !== "recipient_setup_required" &&
-        createFlowPhase !== "ready_to_send"),
-    [createFlowPhase, guidedCompletionPhase],
+      resolveSimpleProFinalReviewActive({
+        paidProAuthoritative,
+        premiumPaidDocumentSurface,
+        premiumRecipientUxActive,
+        createFlowPhase,
+        guidedCompletionPhase,
+      }),
+    [
+      paidProAuthoritative,
+      premiumPaidDocumentSurface,
+      premiumRecipientUxActive,
+      createFlowPhase,
+      guidedCompletionPhase,
+    ],
   );
+  const guidedFinalReviewActive = simpleProFinalReviewActive;
 
   const paidProRecipientSetupOnDraft = useMemo(
     () =>
@@ -11544,7 +11574,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         session &&
         !isGuidedCompletionComplete(session),
     );
-    const postGuidedAuthoritativeReview = guidedFinalReviewActive || guidedCompletionPhase === "applied";
+    const postGuidedAuthoritativeReview = simpleProFinalReviewActive || guidedCompletionPhase === "applied";
     const renderDoc = resolveGuidedCompletionRenderDocument({
       guidedCompletionActive: guidedActive,
       postGuidedAuthoritativeReview,
@@ -13560,6 +13590,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(CreateUiStage.DRAFT);
       setDisplayPhase("review");
       setPremiumRecipientUxActive(false);
+      resetPremiumRecipientsSurfaceForFinalReview();
       const answeredIds = session.queue.filter((id) => (session.answered[id] || "").trim());
       const postBody =
         (hydratedPremiumBodyRef.current || lastKnownGoodAuthoritativeDraftRef.current || "").trim();
@@ -13659,6 +13690,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     () => fingerprintAgreementBody(guidedAuthoritativeBodyPlain),
     [guidedAuthoritativeBodyPlain],
   );
+
+  React.useEffect(() => {
+    if (!simpleProFinalReviewActive) return;
+    logSimpleProFinalReviewMounted({
+      bodyLen: guidedAuthoritativeBodyPlain.length,
+      phase: createFlowPhase,
+      guidedApplied: guidedCompletionPhase === "applied",
+      recipientUxActive: premiumRecipientUxActive,
+    });
+    if (premiumRecipientUxActive) {
+      logSimpleProFinalReviewHiddenRecipientUi();
+      setPremiumRecipientUxActive(false);
+    }
+    if (
+      !guidedFinalReviewContinueArmedRef.current &&
+      (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send")
+    ) {
+      logGuidedFinalReviewPhaseGuardBlocked("effect_phase_revert", createFlowPhase);
+      setCreateFlowPhase("guided_final_review");
+    }
+  }, [
+    simpleProFinalReviewActive,
+    guidedAuthoritativeBodyPlain.length,
+    createFlowPhase,
+    guidedCompletionPhase,
+    premiumRecipientUxActive,
+  ]);
 
   const guidedPacketStaleState = useMemo(
     () =>
@@ -13965,7 +14023,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [guidedCompletionSession, guidedCompletionSessionBase, guidedCompletionRenderState],
   );
   const showPrimaryGuidedCompletion = Boolean(
-    proReviewFooter.mode === "guided_completion" &&
+    !simpleProFinalReviewActive &&
+      proReviewFooter.mode === "guided_completion" &&
       proReviewFooter.mountGuidedPanel &&
       guidedPanelMountedOnDocumentEditor &&
       activeGuidedCompletionSession &&
@@ -14190,14 +14249,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [agreementIdForReview, reviewUploadTick]);
 
   const showSimplifiedProReviewSigningFlow = Boolean(
-    premiumPaidDocumentSurface &&
+    !simpleProFinalReviewActive &&
+      premiumPaidDocumentSurface &&
       paidProAuthoritative &&
       canProceedWithPaidProDocument &&
       !showStrictRetryNeedsDetailsPanel &&
       !isSourceComparisonReviewMode(agreementReviewMode) &&
       !guidedPhaseSuppressesSendCta(guidedCompletionPhase) &&
-      (guidedFinalReviewActive ||
-        guidedCompletionPhase === "applied" ||
+      (guidedCompletionPhase === "applied" ||
         (proReviewFooter.mode === "freeform_edit" && !guidedUxFlags.guidedQueued)),
   );
 
@@ -14700,6 +14759,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (premiumSignersSurfaceReady ||
         premiumRecipientUxActive ||
         (premiumPersistedFlowActive && peekPremiumRecipientsSurfaceReleased()));
+    if (simpleProFinalReviewActive && !guidedFinalReviewContinueArmedRef.current) {
+      logGuidedFinalReviewPhaseGuardBlocked("handOffProductionDraftToRecipients", createFlowPhase);
+      return;
+    }
     if (paidProInlineRecipientReady) {
       advancePaidProToRecipientSetup();
     } else {
@@ -14713,6 +14776,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     advancePaidProToRecipientSetup,
     paidProAuthoritative,
+    simpleProFinalReviewActive,
+    createFlowPhase,
     premiumSignersSurfaceReady,
     premiumRecipientUxActive,
     createProductionTwoPane,
@@ -14742,6 +14807,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handlePremiumReviewFirstContinueToSigners = React.useCallback((opts?: { telemetryMode?: PremiumSendIntent }) => {
+    if (simpleProFinalReviewActive && !guidedFinalReviewContinueArmedRef.current) {
+      logGuidedFinalReviewPhaseGuardBlocked("handlePremiumReviewFirstContinueToSigners", createFlowPhase);
+      return;
+    }
     if (hasFullDraftAccess) {
       const t = (premiumPaidReadonlyPick.plainText || "").trim();
       if (t) {
@@ -14785,6 +14854,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     bumpPremiumSurfaceGateTick();
     void handOffProductionDraftToRecipients();
   }, [
+    simpleProFinalReviewActive,
+    createFlowPhase,
     hasFullDraftAccess,
     premiumPaidReadonlyPick,
     currentPremiumMergedIntakeKey,
@@ -14803,6 +14874,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumDefaultSendMode,
   ]);
 
+  const handleSimpleProFinalReviewCopy = React.useCallback(() => {
+    const text = (guidedAuthoritativeBodyPlain || proRefineCurrentDocumentTextForProPanels).trim();
+    if (!text || !navigator.clipboard?.writeText) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setProFinalReviewCopyAck(true);
+      window.setTimeout(() => setProFinalReviewCopyAck(false), 2000);
+    });
+  }, [guidedAuthoritativeBodyPlain, proRefineCurrentDocumentTextForProPanels]);
+
+  const handleSimpleProFinalReviewExport = React.useCallback(async () => {
+    const id = agreementIdForReview?.trim();
+    if (!id) {
+      setProFinalReviewExportError("Save the agreement first, then export.");
+      return;
+    }
+    setProFinalReviewExportBusy(true);
+    setProFinalReviewExportError(null);
+    const txt = await downloadExportDraftTxt(id);
+    if (!txt.ok) {
+      const docx = await downloadExportDraftDocx(id);
+      if (!docx.ok) {
+        setProFinalReviewExportError("Export is not available yet. Use Copy agreement.");
+      }
+    }
+    setProFinalReviewExportBusy(false);
+  }, [agreementIdForReview]);
+
   const handleProSendForSignature = React.useCallback(() => {
     if (guidedCompletionActive) {
       logGuidedSignTransition({
@@ -14820,6 +14918,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       renderSource: premiumPaidReadonlyPick.sourceUsed ?? null,
       paidProAuthoritative,
     });
+    logSimpleProFinalReviewContinueToSigning({
+      bodyLen: (guidedAuthoritativeBodyPlain || proRefineCurrentDocumentTextForProPanels).trim().length,
+    });
+    guidedFinalReviewContinueArmedRef.current = true;
     handlePremiumSendModePick("signature");
     setPremiumSignatureSenderFirst(true);
     writePremiumSenderSignFirst(true);
@@ -14834,6 +14936,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     advancePaidProToRecipientSetup();
     markPremiumRecipientsSurfaceReleased();
     setPremiumRecipientUxActive(true);
+    guidedFinalReviewContinueArmedRef.current = false;
     bumpPremiumSurfaceGateTick();
     void handlePremiumReviewFirstContinueToSigners({ telemetryMode: "signature" });
   }, [
@@ -14850,6 +14953,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionActive,
     guidedCompletionRenderDocument.plainText,
     guidedCompletionRenderDocument.source,
+    guidedAuthoritativeBodyPlain,
+    proRefineCurrentDocumentTextForProPanels,
   ]);
 
   const handleFinalizeRoutePrimaryAction = React.useCallback(
@@ -17118,7 +17223,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   {PREVIEW_BLOCK_TITLE}
                                 </h2>
                                 <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
-                                  {premiumPersistedFlowActive && !peekPremiumRecipientsSurfaceReleased() ? (
+                                  {simpleProFinalReviewActive ? (
+                                    "Review your updated agreement, then continue to signing when you are ready."
+                                  ) : premiumPersistedFlowActive && !peekPremiumRecipientsSurfaceReleased() ? (
                                     <>
                                       Stronger commercial language — editable here. Nothing sends until you confirm.
                                     </>
@@ -17641,6 +17748,43 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     </div>
                                   ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
+                                    {simpleProFinalReviewActive ? (
+                                      <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
+                                        <SimpleProFinalReviewScreen
+                                          agreementHtml={premiumReadonlyAgreementHtml}
+                                          suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                          appliedAreas={guidedAuthoritativeSummaryAreas}
+                                          appliedVariableIds={guidedAuthoritativeSummaryVariableIds}
+                                          bulkApplyBusy={guidedCompletionPhase === "applying_all"}
+                                          bulkApplyError={guidedBulkApplyError}
+                                          packetStale={guidedSigningPacketStale}
+                                          copyAck={proFinalReviewCopyAck}
+                                          exportBusy={proFinalReviewExportBusy}
+                                          exportError={proFinalReviewExportError}
+                                          continueDisabled={
+                                            (isGenerating && !draft) ||
+                                            upgradeLockActive ||
+                                            loading ||
+                                            guidedPacketSendBlocked
+                                          }
+                                          onContinueToSigning={() => void handleProSendForSignature()}
+                                          onCopyAgreement={handleSimpleProFinalReviewCopy}
+                                          onExportAgreement={() => void handleSimpleProFinalReviewExport()}
+                                          suggestEditsDraft={proReviewSuggestEditsDraft}
+                                          suggestEditsBusy={proReviewSuggestEditsBusy}
+                                          suggestEditsError={proReviewSuggestEditsError}
+                                          uploadBusy={reviewUploadBusy}
+                                          uploadError={reviewUploadError}
+                                          uploadedSource={uploadedSourceForReview}
+                                          onSuggestEditsDraftChange={setProReviewSuggestEditsDraft}
+                                          onApplySuggestEdits={() => void handleProReviewApplySuggestEdits()}
+                                          onUploadFile={(f) => void handleReviewEditedVersionFile(f)}
+                                          onUseUploadedForSigning={handleUseUploadedVersionForSigning}
+                                          onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
+                                        />
+                                      </div>
+                                    ) : (
+                                    <>
                                     <div className="flex flex-col gap-3 border-b border-stone-200/95 bg-gradient-to-b from-[#f4f0e6] to-[#ebe6dc] px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5">
                                       <div className="min-w-0">
                                         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">
@@ -17676,7 +17820,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             packetStale={guidedSigningPacketStale}
                                             uploadBusy={reviewUploadBusy}
                                             uploadError={reviewUploadError}
-                                            finalReviewMoment={guidedFinalReviewActive}
+                                            finalReviewMoment={false}
                                             suggestEditsDraft={proReviewSuggestEditsDraft}
                                             suggestEditsBusy={proReviewSuggestEditsBusy}
                                             suggestEditsError={proReviewSuggestEditsError}
@@ -17686,11 +17830,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             onUploadFile={(f) => void handleReviewEditedVersionFile(f)}
                                             onUseUploadedForSigning={handleUseUploadedVersionForSigning}
                                             onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
-                                            onCompareChanges={
-                                              guidedFinalReviewActive
-                                                ? undefined
-                                                : handleCompareUploadedChanges
-                                            }
+                                            onCompareChanges={handleCompareUploadedChanges}
                                             onReadAgreement={scrollToAgreementBody}
                                             continueDisabled={
                                               (isGenerating && !draft) ||
@@ -17892,6 +18032,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         </details>
                                       </div>
                                     ) : null}
+                                    </>
+                                    )}
                                   </div>
                                 </div>
                                 ) : premiumReturnWaitActive ? (

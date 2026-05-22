@@ -161,6 +161,15 @@ export function markPremiumRecipientsSurfaceReleased(): void {
   }
 }
 
+/** Reset recipient rail until user explicitly continues from guided final review. */
+export function resetPremiumRecipientsSurfaceForFinalReview(): void {
+  try {
+    sessionStorage.setItem(RECIPIENTS_SURFACE_KEY, "0");
+  } catch {
+    /* ignore */
+  }
+}
+
 /** False only while key is explicitly "0" (fresh paid snapshot). Missing or "1" => treat as released (legacy sessions). */
 export function peekPremiumRecipientsSurfaceReleased(): boolean {
   try {
