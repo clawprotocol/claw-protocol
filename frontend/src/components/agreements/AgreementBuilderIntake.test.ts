@@ -317,6 +317,13 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("guidedQuestionsRemain");
     expect(intake).toContain("onSaveAnswer={handleGuidedSaveAnswer}");
     expect(intake).toContain("guidedPhaseSuppressesSendCta");
+    expect(intake).toContain("guidedProUxSuppressesProductionSendCta");
+    expect(intake).toContain("guidedSessionQueueRenderable");
+    expect(intake).toContain('id="guided-deal-completion-primary"');
+    expect(intake).toContain("logGuidedSendCtaBlocked");
+    expect(intake).not.toMatch(
+      /showPrimaryGuidedCompletion[\s\S]{0,400}proReviewFooter\.mode === "guided_completion"/,
+    );
     expect(intake).toContain("showProLawdogRefineAndFinalize");
     const finalize = readFileSync(join(__dirname, "FinalizeYourAgreementPanel.tsx"), "utf8");
     expect(finalize).toContain("Choose how to deliver");
@@ -355,8 +362,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const adv = intake.indexOf("const advancePaidProToRecipientSetup = useCallback");
     expect(adv).toBeGreaterThanOrEqual(0);
-    const advBlock = intake.slice(adv, adv + 720);
+    const advBlock = intake.slice(adv, adv + 1100);
     expect(advBlock).toContain("logRecipientSetupPhaseBlocked");
+    expect(advBlock).toContain("armedFinalReviewSend");
     expect(advBlock).toContain("setCreateUiStage(CreateUiStage.DRAFT)");
     expect(advBlock).not.toContain("CreateUiStage.RECIPIENTS");
     expect(intake).toContain("paidProRecipientSetupOnDraft");
@@ -578,5 +586,40 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("Prepare signing packet first.");
     expect(intake).toContain("finalReviewSendPathChosenRef.current ||");
     expect(intake).toContain("paidProRecipientSetupOnDraft");
+  });
+
+  it("test18: guided_questions_active shows panel above draft and blocks send CTAs", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("guidedProUxShowsQuestionPanel(guidedProUxState)");
+    expect(intake).toContain("guidedSessionQueueRenderable");
+    const unifiedStart = intake.indexOf("const unifiedPrimaryCta = useMemo(");
+    const unifiedDraft = intake.slice(unifiedStart, unifiedStart + 14000);
+    expect(unifiedDraft).toContain("guidedProUxSuppressesProductionSendCta(guidedProUxState)");
+    expect(unifiedDraft).toContain("guided_questions_active");
+    const panelIdx = intake.indexOf('id="guided-deal-completion-primary"');
+    const readonlyIdx = intake.indexOf("<PremiumAgreementReadonlyView", panelIdx);
+    expect(panelIdx).toBeGreaterThanOrEqual(0);
+    expect(readonlyIdx).toBeGreaterThan(panelIdx);
+    const executeIdx = intake.indexOf('logGuidedSendCtaBlocked("executePrimaryCta"');
+    expect(executeIdx).toBeGreaterThanOrEqual(0);
+    expect(intake.slice(executeIdx - 400, executeIdx)).toMatch(/continue_to_recipients|premium_continue_to_signers/);
+  });
+
+  it("test18: armed recipient advance only after explicit guided final review phase", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const adv = intake.indexOf("const advancePaidProToRecipientSetup = useCallback");
+    const advBlock = intake.slice(adv, adv + 900);
+    expect(advBlock).toContain("armedFinalReviewSend");
+    expect(advBlock).toContain("isGuidedFinalReviewPhase(createFlowPhase)");
+    expect(advBlock).toContain("guidedFinalReviewExplicitlyOpened");
+  });
+
+  it("test18: enterFinalReviewRecipientSetup blocked until post-ready send path", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
+    const enterBlock = intake.slice(enterIdx, enterIdx + 900);
+    expect(enterBlock).toContain("guidedProUxSuppressesProductionSendCta");
+    expect(enterBlock).toContain("guidedProUxShowsQuestionPanel");
+    expect(enterBlock).toContain('logGuidedSendCtaBlocked("enterFinalReviewRecipientSetup"');
   });
 });

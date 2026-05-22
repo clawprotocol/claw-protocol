@@ -6,6 +6,7 @@ import {
   guidedProUxShowsQuestionPanel,
   guidedProUxShowsUpdatedReadyCard,
   guidedProUxSuppressesFreeform,
+  guidedProUxSuppressesProductionSendCta,
   resolveGuidedProUxState,
 } from "./guidedProUxState";
 
@@ -120,6 +121,14 @@ describe("resolveGuidedProUxState — universal agreement families", () => {
     expect(guidedProUxShowsQuestionPanel("updated_agreement_ready")).toBe(false);
     expect(guidedProUxShowsUpdatedReadyCard("updated_agreement_ready")).toBe(true);
     expect(guidedProUxShowsFinalReview("guided_final_review")).toBe(true);
+  });
+
+  it("guidedProUxSuppressesProductionSendCta during questions, apply, and ready card", () => {
+    expect(guidedProUxSuppressesProductionSendCta("guided_questions_active")).toBe(true);
+    expect(guidedProUxSuppressesProductionSendCta("guided_applying_updates")).toBe(true);
+    expect(guidedProUxSuppressesProductionSendCta("updated_agreement_ready")).toBe(true);
+    expect(guidedProUxSuppressesProductionSendCta("guided_final_review")).toBe(false);
+    expect(guidedProUxSuppressesProductionSendCta("recipient_setup")).toBe(false);
   });
 
   it("guidedProUxBlocksRecipientSetup during applying and updated ready", () => {

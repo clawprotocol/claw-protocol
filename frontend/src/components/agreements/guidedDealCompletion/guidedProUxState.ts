@@ -134,6 +134,25 @@ export function guidedProUxShowsFinalReview(state: GuidedProUxState): boolean {
   return state === "guided_final_review";
 }
 
+/** Hide production send / continue-to-recipient CTAs until explicit final-review send intent. */
+export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState): boolean {
+  return (
+    state === "guided_questions_active" ||
+    state === "guided_applying_updates" ||
+    state === "updated_agreement_ready"
+  );
+}
+
+export function logGuidedSendCtaBlocked(
+  context: string,
+  uxState: GuidedProUxState,
+  action?: string,
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-send-cta-blocked]", { context, uxState, action });
+}
+
 export function logGuidedProUxStateResolved(state: GuidedProUxState, phase: GuidedCompletionPhase): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

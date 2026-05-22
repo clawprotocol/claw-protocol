@@ -69,6 +69,14 @@ describe("guided final review flow", () => {
     expect(screen).not.toContain("simple-pro-suggest-changes-toggle");
   });
 
+  it("intake blocks production send during guided_questions_active (test18)", () => {
+    const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("guidedProUxSuppressesProductionSendCta");
+    expect(intake).toContain('"guided_questions_active"');
+    expect(intake).toContain("guided-deal-completion-primary");
+    expect(intake).toContain('logGuidedSendCtaBlocked("handOffProductionDraftToRecipients"');
+  });
+
   it("intake wires authoritative final review corpus and send path guards", () => {
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("resolveSimpleProFinalReviewCorpus");
