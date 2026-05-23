@@ -3,16 +3,13 @@
  */
 
 import {
-  findNonOverlappingPrepareRect,
   newSigningFieldId,
   PREPARE_PAGE_FOOTER_BAND_Y,
-  clampPrepareFieldRectToSafeBounds,
   type PlacedSigningField,
   type SigningPlacementValueContext,
 } from "./signingFields";
 import {
   findSignatureLineAnchorsFromCorpusText,
-  signatureAnchorToPrepareRect,
   corpusHasPrefilledSignatureIdentity,
   logSignatureAnchorPlacementMiss,
   logVs01SignatureAnchorResolved,
@@ -22,6 +19,7 @@ import {
   buildVs01PlacementContext,
   resolveSignatureRectForRole,
 } from "./vs01FieldGeometry";
+import { resolveSignatureFieldRect } from "./vs01SignaturePlacement";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
 import {
   findSignatureLinePlacementsFromPageLayout,
@@ -101,8 +99,6 @@ const AUTO_SIGNATURE_ONLY_TOOLS: Array<{
 }> = [{ type: "signature", dy: 0 }];
 
 /** Keep auto signature stacks above footer/watermark bands. */
-const AUTO_SIGNATURE_MAX_Y = 0.82;
-
 function layoutHasCanonicalSignatureIdentityBlocks(
   pageLayouts: readonly Vs01PageTextLayout[],
   lastPage: number,
@@ -309,6 +305,7 @@ export function buildAutoSignaturePacketForAllRoles(args: {
           corpusText: args.corpusText,
           pageLayouts,
           lastPage: witnessPage,
+          fieldObstacles: [...placedSoFar, ...out],
         });
         if (!placement.rect) {
           logFieldRejected({
@@ -357,41 +354,31 @@ export function buildAutoSignaturePacketForAllRoles(args: {
         continue;
       }
 
-      if (witnessPresent && layoutByLines.length >= args.roles.length) continue;
+      if (witnessPresent && layoutByLines.length >= args.roles.length && mode === "signature_only") {
+        continue;
+      }
 
-      const anchored = signatureAnchorToPrepareRect({
-        anchor,
+      const witnessLayout = pageLayoutForIndex(pageLayouts, witnessPage);
+      const stackPlacement = resolveSignatureFieldRect({
+        page: witnessPage,
         partyIndex: role.partyIndex,
         roleCount,
         fieldType: tool.type,
+        pageLayout: witnessLayout,
+        corpusAnchor: anchor,
+        fieldObstacles: [...placedSoFar, ...out],
       });
-      const desired = clampPrepareFieldRectToSafeBounds(
-        {
-          x: anchored.x,
-          y: Math.min(AUTO_SIGNATURE_MAX_Y - tool.dy, anchored.y),
-          width: 0.3,
-          height: 0.04,
-        },
-        { kind: "signature" },
-      );
-      if (desired.y + desired.height > PREPARE_PAGE_FOOTER_BAND_Y) {
+      if (!stackPlacement.rect) {
         logFieldRejected({
           type: tool.type,
           page: witnessPage,
-          rect: desired,
+          role: role.kind,
           source: "autoplace",
-          reason: "footer_overlap",
+          reason: stackPlacement.mode,
         });
         continue;
       }
-      const resolved = findNonOverlappingPrepareRect({
-        desiredRect: desired,
-        page: witnessPage,
-        roleId: role.roleId,
-        existingFields: [...placedSoFar, ...out],
-        placementMode: "manual",
-      });
-      const clamped = clampPrepareFieldRectToSafeBounds(resolved, { kind: "signature" });
+      const clamped = stackPlacement.rect;
       const field = createAutoField(role, witnessPage, tool.type, clamped, valueCtx, tool.textPurpose);
       if (field) {
         out.push(field);

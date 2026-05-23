@@ -9,6 +9,8 @@ import {
   textObstaclesForInitialsPlacement,
   verifyInitialsRectClear,
 } from "./vs01InitialsSafeZone";
+import { verifySignatureRectClear } from "./vs01SignaturePlacement";
+import { buildVs01PlacementContext } from "./vs01FieldGeometry";
 import {
   buildCorpusSimulatedPageLayouts,
   mergePageLayoutForInitials,
@@ -32,6 +34,9 @@ export type Vs01SigningPacketInitialsSummary = {
   incompletePages: number[];
   unsafeInitialsCount: number;
   initialsFieldCount: number;
+  signatureFieldCount: number;
+  unsafeSignatureCount: number;
+  witnessPageIndex: number;
   complete: boolean;
 };
 
@@ -115,6 +120,15 @@ export function summarizeVs01SigningPacketInitials(args: {
   });
   const eligiblePages = policy.eligiblePages;
   const initialsFields = args.fields.filter((f) => f.type === "initials" && f.autoInitials);
+  const signatureFields = args.fields.filter((f) => f.type === "signature");
+  const placementCtx = buildVs01PlacementContext({
+    corpusText: args.corpusText,
+    pageCount,
+    pageLayouts: args.pageLayouts,
+    documentId: args.documentId,
+    roleCount,
+  });
+  const witnessPageIndex = placementCtx.witnessPageIndex ?? pageCount - 1;
   const corpusLayouts =
     (args.corpusText ?? "").trim().length >= 40
       ? buildCorpusSimulatedPageLayouts(args.corpusText!, pageCount)
@@ -123,6 +137,19 @@ export function summarizeVs01SigningPacketInitials(args: {
   const pagesWithInitialsPerRole: number[] = [];
   const incompletePages: number[] = [];
   let unsafeInitialsCount = 0;
+  let unsafeSignatureCount = 0;
+  const witnessLayout = mergePageLayoutForInitials(
+    pageLayoutForIndex(args.pageLayouts, witnessPageIndex),
+    pageLayoutForIndex(corpusLayouts, witnessPageIndex),
+  );
+  for (const sig of signatureFields) {
+    const check = verifySignatureRectClear({
+      rect: sig,
+      pageLayout: witnessLayout,
+      fieldObstacles: args.fields.filter((f) => f.id !== sig.id && f.page === sig.page),
+    });
+    if (!check.ok) unsafeSignatureCount += 1;
+  }
 
   for (const p of eligiblePages) {
     const pdfLayout = pageLayoutForIndex(args.pageLayouts, p);
@@ -170,7 +197,12 @@ export function summarizeVs01SigningPacketInitials(args: {
     incompletePages,
     unsafeInitialsCount,
     initialsFieldCount: initialsFields.length,
+    signatureFieldCount: signatureFields.length,
+    unsafeSignatureCount,
+    witnessPageIndex,
     complete:
+      signatureFields.length >= roleCount &&
+      unsafeSignatureCount === 0 &&
       eligiblePages.length > 0 &&
       incompletePages.length === 0 &&
       unsafeInitialsCount === 0 &&
@@ -179,10 +211,12 @@ export function summarizeVs01SigningPacketInitials(args: {
 
   logVs01SigningPacketValidation({
     pageCount: summary.pageCount,
-    signatureFieldCount: args.fields.filter((f) => f.type === "signature").length,
+    signatureFieldCount: summary.signatureFieldCount,
     initialsPagesExpected: eligiblePages.length * roleCount,
     initialsPagesPlaced: initialsFields.length,
     unsafeInitialsCount: summary.unsafeInitialsCount,
+    unsafeSignatureCount: summary.unsafeSignatureCount,
+    witnessPageIndex: summary.witnessPageIndex,
     incompletePages: summary.incompletePages,
     complete: summary.complete,
   });

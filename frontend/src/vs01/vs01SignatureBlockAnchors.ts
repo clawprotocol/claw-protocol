@@ -97,11 +97,11 @@ export function corpusHasPrefilledSignatureIdentity(corpusText: string | null | 
   const tail = signatureTailText(text);
   const blocks = partySignatureBlocksFromTail(tail);
   if (blocks.length < 1) {
-    return /\bName\s*:\s*\S+/i.test(tail);
+    return /\bName\s*:\s*(?:\S|_)/i.test(tail);
   }
   let withName = 0;
   for (const block of blocks) {
-    if (/\bName\s*:\s*\S+/i.test(block)) withName += 1;
+    if (/\bName\s*:\s*(?:\S|_)/i.test(block)) withName += 1;
   }
   return withName >= Math.min(2, blocks.length) && withName >= 1;
 }
@@ -136,7 +136,7 @@ export function logVs01SignaturePlacementInvalid(payload: Record<string, unknown
   console.warn("[vs01-signature-placement-invalid]", payload);
 }
 
-function fallbackSignatureY(partyIndex: number, roleCount: number, height: number): number {
+export function fallbackSignatureY(partyIndex: number, roleCount: number, height: number): number {
   const regionH = SIGNATURE_BLOCK_REGION_BOTTOM - SIGNATURE_BLOCK_REGION_TOP;
   const slot = partyIndex / Math.max(1, roleCount);
   return SIGNATURE_BLOCK_REGION_TOP + slot * regionH * 0.55 - height * 0.25;

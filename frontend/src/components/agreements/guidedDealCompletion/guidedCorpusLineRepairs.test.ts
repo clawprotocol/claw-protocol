@@ -3,6 +3,7 @@ import {
   dedupeRepeatingSentenceLines,
   repairGuidedCorpusLinesBeforeStructure,
   splitMergedSubclauseLine,
+  stripOrphanNumberedHeadingLines,
   stripStaleExecutionPlacementCorpusCopy,
 } from "./guidedCorpusLineRepairs";
 import { normalizeGuidedProCorpusStructure, validateNormalizedCorpusStructure } from "./guidedCanonicalCorpusNormalizer";
@@ -23,6 +24,13 @@ describe("guidedCorpusLineRepairs", () => {
     const text = `${line}\n\n${line}`;
     const deduped = dedupeRepeatingSentenceLines(text);
     expect((deduped.text.match(/Contractor will invoice Company monthly/gi) ?? []).length).toBe(1);
+  });
+
+  it("strips orphan numbered headings like 8. and **8.", () => {
+    const text = "7. Notices\nNotices go here.\n\n**8.\n\n9. Electronic Signatures\nDone.";
+    const stripped = stripOrphanNumberedHeadingLines(text);
+    expect(stripped.text).not.toMatch(/^\s*\*{0,2}8\./m);
+    expect(stripped.text).toMatch(/9\.\s+Electronic Signatures/);
   });
 
   it("strips execution placement footer when witness block exists", () => {

@@ -210,9 +210,20 @@ function mergeWitnessPageLayout(
   pdfPage: Vs01PageTextLayout | null,
   corpusPage: Vs01PageTextLayout,
   pageIndex: number,
+  roleCount: number,
 ): Vs01PageTextLayout {
+  const corpusSig = findSignatureLinePlacementsFromPageLayout(corpusPage);
   const pdfSig = findSignatureLinePlacementsFromPageLayout(pdfPage);
-  if (pdfSig.length >= 2 && pdfPage) {
+  if (corpusSig.length >= roleCount) {
+    return { ...corpusPage, pageIndex, source: pdfPage?.textRects.length ? "pdf" : "corpus_sim" };
+  }
+  if (pdfSig.length >= roleCount && pdfPage) {
+    return { ...pdfPage, pageIndex };
+  }
+  if (corpusSig.length > pdfSig.length) {
+    return { ...corpusPage, pageIndex, source: "corpus_sim" };
+  }
+  if (pdfPage && pdfPage.textRects.length > 0) {
     return { ...pdfPage, pageIndex };
   }
   return { ...corpusPage, pageIndex, source: "corpus_sim" };
@@ -258,11 +269,8 @@ export function reconcileVs01PageLayouts(args: {
     const pdf = pageLayoutForIndex(pdfLayouts, i);
     const corpusPage = pageLayoutForIndex(corpusLayouts, i);
     if (witnessPageIndex === i && corpusPage) {
-      const pdfSig = findSignatureLinePlacementsFromPageLayout(pdf);
-      if (pdfSig.length < roleCount) {
-        layouts.push(mergeWitnessPageLayout(pdf, corpusPage, i));
-        continue;
-      }
+      layouts.push(mergeWitnessPageLayout(pdf, corpusPage, i, roleCount));
+      continue;
     }
     if (pdf && pdf.textRects.length > 0) {
       layouts.push({ ...pdf, pageIndex: i });
@@ -326,7 +334,7 @@ function pdfPageIsFooterOnly(layout: Vs01PageTextLayout | null): boolean {
   return rects.every((r) => r.kind === "footer" || r.y >= 0.9);
 }
 
-/** Prefer PDF text geometry; fall back to corpus simulation when a page has no readable body layer. */
+/** Prefer PDF text geometry; union with corpus when both carry body (avoids missed overlap). */
 export function mergePageLayoutForInitials(
   pdfLayout: Vs01PageTextLayout | null,
   corpusLayout: Vs01PageTextLayout | null,
@@ -335,9 +343,22 @@ export function mergePageLayoutForInitials(
     return pdfLayout;
   }
   const pdfRects = pdfLayout?.textRects ?? [];
+  const corpusRects = corpusLayout?.textRects ?? [];
   const pdfHasBody = pdfRects.some((r) => r.kind === "body" || r.kind === "heading");
+  const corpusHasBody = corpusRects.some((r) => r.kind === "body" || r.kind === "heading");
+  if (pdfHasBody && corpusHasBody && pdfLayout && corpusLayout) {
+    const seen = new Set<string>();
+    const merged: Vs01NormTextRect[] = [];
+    for (const r of [...pdfRects, ...corpusRects]) {
+      const key = `${r.y.toFixed(3)}:${r.text.slice(0, 40)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(r);
+    }
+    return { ...pdfLayout, textRects: merged };
+  }
   if (pdfHasBody && pdfLayout) return pdfLayout;
-  if (corpusLayout && corpusLayout.textRects.length > 0) {
+  if (corpusLayout && corpusRects.length > 0) {
     return {
       ...corpusLayout,
       pageIndex: pdfLayout?.pageIndex ?? corpusLayout.pageIndex,

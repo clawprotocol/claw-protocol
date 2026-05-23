@@ -185,6 +185,42 @@ export function canonicalKeyForSectionNumber(sectionNumber: number): string | nu
   return SECTION_NUMBER_TO_CANONICAL[sectionNumber] ?? null;
 }
 
+const ORPHAN_NUMBERED_HEADING_RE = /^\s*(?:\*{0,2})?(\d+)\.(?:\*{0,2})?\s*$/;
+const ORPHAN_EMPTY_SUBSECTION_RE = /^\s*\d+\.\d+\.?\s*$/;
+
+export function stripOrphanNumberedHeadingLines(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const out: string[] = [];
+  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+    const t = line.trim();
+    if (ORPHAN_NUMBERED_HEADING_RE.test(t)) {
+      repairs.push(`orphan_numbered_heading:${t.slice(0, 12)}`);
+      continue;
+    }
+    if (ORPHAN_EMPTY_SUBSECTION_RE.test(t)) {
+      repairs.push(`orphan_empty_subsection:${t}`);
+      continue;
+    }
+    out.push(line);
+  }
+  return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), repairs };
+}
+
+export function isStructurallyEmptySectionBody(bodyLines: string[]): boolean {
+  const substantive = bodyLines
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .filter((l) => !ORPHAN_NUMBERED_HEADING_RE.test(l))
+    .filter((l) => !ORPHAN_EMPTY_SUBSECTION_RE.test(l));
+  return substantive.length === 0;
+}
+
+export function logGuidedEmptySectionPruned(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-empty-section-pruned]", payload);
+}
+
 export function repairGuidedCorpusLinesBeforeStructure(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let out = (text || "").trim();
@@ -193,6 +229,10 @@ export function repairGuidedCorpusLinesBeforeStructure(text: string): { text: st
   const split = splitMergedSubclausesInText(out);
   out = split.text;
   repairs.push(...split.repairs);
+
+  const orphanHeadings = stripOrphanNumberedHeadingLines(out);
+  out = orphanHeadings.text;
+  repairs.push(...orphanHeadings.repairs);
 
   const dedupeLines = dedupeRepeatingSentenceLines(out);
   out = dedupeLines.text;

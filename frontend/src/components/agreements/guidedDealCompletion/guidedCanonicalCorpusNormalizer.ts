@@ -12,7 +12,10 @@ import { dedupeGuidedAnswerClauses } from "./guidedFinalReviewToSigning";
 import {
   applyOrphanSubclausesToSections,
   canonicalKeyForSectionNumber,
+  isStructurallyEmptySectionBody,
+  logGuidedEmptySectionPruned,
   repairGuidedCorpusLinesBeforeStructure,
+  stripOrphanNumberedHeadingLines,
 } from "./guidedCorpusLineRepairs";
 
 export type CanonicalSectionKey =
@@ -116,6 +119,14 @@ export function resolveCanonicalSectionKey(heading: string): CanonicalSectionKey
     if (/support|uptime|sla/i.test(h)) return "support";
   }
   return "unknown";
+}
+
+function firstTopLevelSectionNumberInText(text: string): number | null {
+  for (const line of normLines(text)) {
+    const heading = isTopLevelHeadingLine(line);
+    if (heading) return heading.number;
+  }
+  return null;
 }
 
 function isTopLevelHeadingLine(line: string): { number: number; heading: string } | null {
@@ -284,8 +295,8 @@ export function detectCorpusStructuralDefects(text: string): CorpusStructuralDef
   );
   const witnessPos = text.search(/\bIN WITNESS WHEREOF\b/i);
   const preWitness = witnessPos >= 0 ? text.slice(0, witnessPos) : text;
-  const firstHeadingNumber = preWitness.match(/(?:^|\n)\s*(\d+)\.\s+[A-Za-z]/)?.[1];
-  if (firstHeadingNumber && Number(firstHeadingNumber) >= 2) {
+  const firstHeadingNumber = firstTopLevelSectionNumberInText(preWitness);
+  if (firstHeadingNumber != null && firstHeadingNumber >= 2) {
     defects.add("prepended_guided_mini_agreement");
   }
   if (purposeIdx > 0 && firstLater >= 0 && purposeIdx > firstLater) {
@@ -444,6 +455,20 @@ export function normalizeGuidedProCorpusStructure(text: string): { text: string;
   for (const spec of CANONICAL_SECTION_SPECS) {
     const section = mergedByKey.get(spec.key);
     if (!section) continue;
+    if (isStructurallyEmptySectionBody(section.bodyLines)) {
+      logGuidedEmptySectionPruned({
+        sectionNumber: spec.number,
+        title: spec.label,
+        bodyLength: 0,
+        source: "canonical_emit",
+        canonicalKey: spec.key,
+      });
+      repairs.push(`prune_empty_section:${spec.key}`);
+      if (spec.key === "purpose") {
+        rebuilt.push(`${spec.number}. ${spec.label}`);
+      }
+      continue;
+    }
     const body = renumberSubclausesInSection(section.bodyLines, spec.number).map((line) =>
       line.replace(/^(\s*)\d+\.\s+(\d+)\.\s+/, (_, indent, second) => {
         repairs.push("body_malformed_subclause");
@@ -467,6 +492,9 @@ export function normalizeGuidedProCorpusStructure(text: string): { text: string;
   const finalLineRepairs = repairGuidedCorpusLinesBeforeStructure(body);
   body = finalLineRepairs.text;
   repairs.push(...finalLineRepairs.repairs.map((r) => `final:${r}`));
+  const finalOrphanHeadings = stripOrphanNumberedHeadingLines(body);
+  body = finalOrphanHeadings.text;
+  repairs.push(...finalOrphanHeadings.repairs.map((r) => `final:${r}`));
 
   body = body
     .replace(/\b7\.\s+8\.\s+Notices\b/gi, () => {
@@ -509,11 +537,11 @@ export function validateNormalizedCorpusStructure(text: string): {
   }
   const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
   const preWitness = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
-  const firstHeadingNumber = preWitness.match(/(?:^|\n)\s*(\d+)\.\s+[A-Za-z]/)?.[1];
+  const firstHeadingNumber = firstTopLevelSectionNumberInText(preWitness);
   if (!/(?:^|\n)\s*1\.\s+Purpose\b/im.test(preWitness)) {
     defects.push("missing_section_1");
   }
-  if (firstHeadingNumber && Number(firstHeadingNumber) >= 2) {
+  if (firstHeadingNumber != null && firstHeadingNumber >= 2) {
     defects.push("prepended_guided_mini_agreement");
   }
   if ((text.match(/\bIN WITNESS WHEREOF\b/gi) ?? []).length > 1) {
@@ -521,6 +549,12 @@ export function validateNormalizedCorpusStructure(text: string): {
   }
   if (/^[^\n]*\b6\.1\b[^\n]*\b8\.1\b[^\n]*$/im.test(text)) {
     defects.push("merged_subclause_line");
+  }
+  if (/^\s*(?:\*{0,2})?8\.(?:\*{0,2})?\s*$/im.test(text)) {
+    defects.push("orphan_section_8_heading");
+  }
+  if (/^\s*\d+\.\d+\.?\s*$/m.test(text.replace(/\*\*/g, ""))) {
+    defects.push("orphan_empty_subsection");
   }
   if ((text.match(/Contractor will invoice Company monthly in arrears/gi) ?? []).length > 1) {
     defects.push("duplicate_invoice_clause");

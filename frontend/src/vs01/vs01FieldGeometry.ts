@@ -10,12 +10,15 @@ import {
 } from "./signingFields";
 import {
   findSignatureLineAnchorsFromCorpusText,
-  logVs01FieldGeometry,
   logVs01SignatureAnchorFallbackVisibleLines,
   logVs01SignaturePlacementInvalid,
   signatureAnchorToPrepareRect,
   SIGNATURE_BY_LINE_HEIGHT,
 } from "./vs01SignatureBlockAnchors";
+import {
+  resolveSignatureFieldRect,
+  type Vs01SignaturePlacementMode,
+} from "./vs01SignaturePlacement";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import {
@@ -152,6 +155,19 @@ export function byLinePlacementToSignatureRect(placement: Vs01ByLinePlacement): 
   );
 }
 
+function placementModeToAnchorKind(mode: Vs01SignaturePlacementMode): Vs01FieldPlacementAnchorKind {
+  switch (mode) {
+    case "explicit_execution":
+    case "explicit_signature_line":
+      return "by_line_layout";
+    case "witness_region":
+    case "synthesized_fallback":
+      return "by_line_corpus";
+    default:
+      return "manual_required";
+  }
+}
+
 export function resolveSignatureRectForRole(args: {
   role: Pick<Vs01PrepareSigningRole, "partyIndex" | "kind">;
   roleCount: number;
@@ -159,6 +175,7 @@ export function resolveSignatureRectForRole(args: {
   pageLayouts: readonly Vs01PageTextLayout[];
   /** Zero-based witness / signature block page (not assumed last PDF page). */
   lastPage: number;
+  fieldObstacles?: readonly PlacedSigningField[];
 }): {
   rect: { x: number; y: number; width: number; height: number } | null;
   anchorKind: Vs01FieldPlacementAnchorKind;
@@ -167,78 +184,44 @@ export function resolveSignatureRectForRole(args: {
   const layout = pageLayoutForIndex(args.pageLayouts, args.lastPage);
   const byLines = findSignatureLinePlacementsFromPageLayout(layout);
   const by = byLines.find((b) => b.partyIndex === args.role.partyIndex) ?? null;
+  const corpusAnchors = args.corpusText ? findSignatureLineAnchorsFromCorpusText(args.corpusText) : [];
+  const corpusAnchor = corpusAnchors.find((a) => a.partyIndex === args.role.partyIndex) ?? null;
 
-  if (by) {
-    const rect = byLinePlacementToSignatureRect(by);
-    const overlapsBody = fieldOverlapsDocumentText(rect, textObstaclesForSignaturePlacement(layout));
-    if (!overlapsBody) {
-      logVs01SignatureAnchorUsed({
-        partyIndex: args.role.partyIndex,
-        page: args.lastPage,
-        blockHeading: by.blockHeading,
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        lineText: by.lineText,
-      });
-      logVs01FieldGeometry({
-        page: args.lastPage,
-        role: args.role.kind,
-        type: "signature",
-        rect,
-        anchorKind: "by_line_layout",
-        overlap: false,
-        partyIndex: args.role.partyIndex,
-      });
-      return { rect, anchorKind: "by_line_layout", byPlacement: by };
-    }
-    logVs01FieldOverlapRejected({
-      partyIndex: args.role.partyIndex,
-      page: args.lastPage,
-      reason: "by_line_overlaps_body",
-    });
+  const resolved = resolveSignatureFieldRect({
+    page: args.lastPage,
+    partyIndex: args.role.partyIndex,
+    roleCount: args.roleCount,
+    fieldType: "signature",
+    pageLayout: layout,
+    corpusAnchor,
+    fieldObstacles: args.fieldObstacles,
+  });
+
+  if (resolved.rect) {
     logVs01SignatureAnchorUsed({
       partyIndex: args.role.partyIndex,
       page: args.lastPage,
-      blockHeading: by.blockHeading,
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      lineText: by.lineText,
-      overlapExempt: true,
+      blockHeading: by?.blockHeading ?? corpusAnchor?.blockHeading,
+      x: resolved.rect.x,
+      y: resolved.rect.y,
+      width: resolved.rect.width,
+      mode: resolved.mode,
+      lineText: by?.lineText,
     });
-    return { rect, anchorKind: "by_line_layout", byPlacement: by };
+    return {
+      rect: resolved.rect,
+      anchorKind: placementModeToAnchorKind(resolved.mode),
+      byPlacement: by,
+    };
   }
 
-  if (witnessBlockPresent(args.corpusText)) {
-    const corpusAnchors = findSignatureLineAnchorsFromCorpusText(args.corpusText ?? "");
-    const corpusAnchor = corpusAnchors.find((a) => a.partyIndex === args.role.partyIndex) ?? null;
-    if (corpusAnchor) {
-      const rect = by
-        ? byLinePlacementToSignatureRect(by)
-        : signatureAnchorToPrepareRect({
-            anchor: corpusAnchor,
-            partyIndex: args.role.partyIndex,
-            roleCount: args.roleCount,
-            fieldType: "signature",
-          });
-      logVs01SignatureAnchorFallbackVisibleLines({
-        partyIndex: args.role.partyIndex,
-        page: args.lastPage,
-        blockHeading: corpusAnchor.blockHeading,
-        layoutByLines: byLines.length,
-      });
-      logVs01SignatureAnchorUsed({
-        partyIndex: args.role.partyIndex,
-        page: args.lastPage,
-        blockHeading: corpusAnchor.blockHeading,
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        source: by ? "layout_visible_lines" : "corpus_visible_lines",
-      });
-      return { rect, anchorKind: by ? "by_line_layout" : "by_line_corpus", byPlacement: by };
-    }
+  if (witnessBlockPresent(args.corpusText) && byLines.length < args.roleCount) {
+    logVs01SignatureAnchorFallbackVisibleLines({
+      partyIndex: args.role.partyIndex,
+      page: args.lastPage,
+      blockHeading: corpusAnchor?.blockHeading,
+      layoutByLines: byLines.length,
+    });
     logVs01SignaturePlacementInvalid({
       partyIndex: args.role.partyIndex,
       pageIndex: args.lastPage,
@@ -256,34 +239,38 @@ export function resolveSignatureRectForRole(args: {
     return { rect: null, anchorKind: "manual_required", byPlacement: null };
   }
 
-  const corpusAnchors = args.corpusText ? findSignatureLineAnchorsFromCorpusText(args.corpusText) : [];
-  const corpusAnchor = corpusAnchors.find((a) => a.partyIndex === args.role.partyIndex) ?? null;
   if (corpusAnchor) {
-    const rect = signatureAnchorToPrepareRect({
+    const fallbackRect = signatureAnchorToPrepareRect({
       anchor: corpusAnchor,
       partyIndex: args.role.partyIndex,
       roleCount: args.roleCount,
       fieldType: "signature",
     });
-    logVs01SignatureAnchorUsed({
+    const retry = resolveSignatureFieldRect({
+      page: args.lastPage,
+      partyIndex: args.role.partyIndex,
+      roleCount: args.roleCount,
+      fieldType: "signature",
+      pageLayout: layout,
+      corpusAnchor,
+      fieldObstacles: args.fieldObstacles,
+    });
+    if (retry.rect) {
+      return {
+        rect: retry.rect,
+        anchorKind: placementModeToAnchorKind(retry.mode),
+        byPlacement: by,
+      };
+    }
+    logVs01FieldOverlapRejected({
       partyIndex: args.role.partyIndex,
       page: args.lastPage,
-      blockHeading: corpusAnchor.blockHeading,
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      source: "corpus_anchor",
+      reason: "corpus_fallback_rejected",
+      y: fallbackRect.y,
     });
-    return { rect, anchorKind: "by_line_corpus", byPlacement: null };
   }
 
-  const fallback = signatureAnchorToPrepareRect({
-    anchor: null,
-    partyIndex: args.role.partyIndex,
-    roleCount: args.roleCount,
-    fieldType: "signature",
-  });
-  return { rect: fallback, anchorKind: "by_line_corpus", byPlacement: null };
+  return { rect: null, anchorKind: "manual_required", byPlacement: by };
 }
 
 export function findSafeInitialsRectOnPage(args: {
