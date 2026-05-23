@@ -43,10 +43,10 @@ import {
 import { sha256Bytes } from "../utils/agreements/hash";
 import {
   buildVs01PrepareSigningRoles,
-  mergeRecipientManifestFieldsForSignerRole,
   migrateLegacyRecipientPlacedFields,
   migrateLegacySenderPlacedFields,
 } from "./vs01SignerFieldAssignment";
+import { buildFullPacketSigningManifestFields } from "./vs01SigningPacketManifest";
 import { Vs01PrepareRoleAuthorityProvider } from "./Vs01PrepareRoleAuthorityContext";
 import {
   buildOwnerPlacementValueContext,
@@ -1248,19 +1248,15 @@ export function Vs01Wizard({
               const named = counterparties
                 .map((c, recipientIndex) => ({ c, recipientIndex }))
                 .filter(({ c }) => c.name.trim().length > 0);
+              const packetManifestFields = buildFullPacketSigningManifestFields({
+                ownerRole,
+                roles,
+                senderPlacedFields,
+                recipientPlacedFields,
+              });
               const signers = named.map(({ c, recipientIndex }) => {
                 const role = roles.find((r) => r.vs01CounterpartyId === c.id);
                 const signerRoleId = role?.roleId ?? "";
-                const merged = role
-                  ? mergeRecipientManifestFieldsForSignerRole({
-                      ownerRole,
-                      roles,
-                      counterpartyId: c.id,
-                      signerRoleId: role.roleId,
-                      recipientPlacedFields,
-                      senderPlacedFields,
-                    })
-                  : recipientPlacedFields.filter((f) => f.counterpartyId === c.id);
                 return {
                   counterpartyId: c.id,
                   displayName: c.name.trim(),
@@ -1272,7 +1268,7 @@ export function Vs01Wizard({
                     counterpartyId: c.id,
                     documentId: did,
                     receiptId: rid || null,
-                    recipientFieldsForSigner: merged,
+                    recipientFieldsForSigner: packetManifestFields,
                     agreementId: linkedAgreementId,
                     signerRoleId: signerRoleId || null,
                   }),

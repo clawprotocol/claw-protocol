@@ -600,10 +600,25 @@ const PREPARE_SIGNATURE_OBSTACLE_PAD = 0.028;
 export const PREPARE_PAGE_FOOTER_BAND_Y = 0.9;
 export const PREPARE_PAGE_WATERMARK_BAND_Y = 0.875;
 
-export function buildPreparePageLayoutObstacleRects(page: number): PrepareRectObstacle[] {
-  return [
+export function buildPreparePageLayoutObstacleRects(
+  page: number,
+  extraObstacles?: ReadonlyArray<{ x: number; y: number; width: number; height: number }>,
+): PrepareRectObstacle[] {
+  const base: PrepareRectObstacle[] = [
     { id: `footer_${page}`, page, x: 0, y: PREPARE_PAGE_FOOTER_BAND_Y, width: 1, height: 0.1 },
     { id: `watermark_${page}`, page, x: 0.04, y: PREPARE_PAGE_WATERMARK_BAND_Y, width: 0.92, height: 0.05 },
+  ];
+  if (!extraObstacles?.length) return base;
+  return [
+    ...base,
+    ...extraObstacles.map((o, i) => ({
+      id: `text_${page}_${i}`,
+      page,
+      x: o.x,
+      y: o.y,
+      width: o.width,
+      height: o.height,
+    })),
   ];
 }
 
@@ -625,18 +640,24 @@ export function clampPrepareFieldRectToSafeBounds(
   let x = Math.max(minX, Math.min(maxX, rect.x));
   let y = Math.max(PREPARE_FIELD_SAFE_MARGIN_Y, Math.min(maxY, rect.y));
   if (y + rect.height > PREPARE_PAGE_WATERMARK_BAND_Y && x + rect.width > 0.7) {
-    x = Math.min(x, 0.68 - rect.width);
+    if (kind === "initials") {
+      y = Math.min(y, PREPARE_PAGE_WATERMARK_BAND_Y - rect.height - 0.012);
+    } else {
+      x = Math.min(x, 0.68 - rect.width);
+    }
   }
   return { x, y, width: rect.width, height: rect.height };
 }
 
-const PREPARE_AUTO_INITIALS_Y_SCAN_MIN = 0.14;
-const PREPARE_AUTO_INITIALS_Y_SCAN_MAX = 0.685;
-const PREPARE_AUTO_INITIALS_Y_SCAN_STEP = 0.042;
-/** Upper-right safe lane for prepare auto-initials (avoids mobile clipping at page edge). */
+/** Lower-right safe band for auto-initials (above footer/watermark). */
+export const PREPARE_AUTO_INITIALS_LOWER_Y_MIN = 0.52;
+/** Upper-right fallback lane for prepare auto-initials (only when lower safe zones fail). */
 export const PREPARE_AUTO_INITIALS_UPPER_Y_MIN = 0.085;
 export const PREPARE_AUTO_INITIALS_UPPER_Y_MAX = 0.21;
 export const PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN = 0.072;
+const PREPARE_AUTO_INITIALS_Y_SCAN_MIN = PREPARE_AUTO_INITIALS_LOWER_Y_MIN;
+const PREPARE_AUTO_INITIALS_Y_SCAN_MAX = PREPARE_PAGE_FOOTER_BAND_Y - 0.028;
+const PREPARE_AUTO_INITIALS_Y_SCAN_STEP = 0.042;
 
 function expandNormRectForPad(
   rect: { x: number; y: number; width: number; height: number },
@@ -677,7 +698,7 @@ export function buildPreparePageObstacleRects(
   return out;
 }
 
-/** True when a rect sits in the reserved initials safe zone (upper-right body lane). */
+/** True when a rect sits in a reserved initials safe zone (prefers lower-right margin band). */
 export function isRectInPrepareAutoInitialsSafeZone(rect: {
   x: number;
   y: number;
@@ -685,26 +706,26 @@ export function isRectInPrepareAutoInitialsSafeZone(rect: {
   height: number;
 }): boolean {
   const maxX = 1 - PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN;
-  const inUpperLane =
-    rect.x + rect.width <= maxX + 1e-5 &&
-    rect.x >= PREPARE_FIELD_SAFE_MARGIN_X - 1e-5 &&
-    rect.y >= PREPARE_AUTO_INITIALS_UPPER_Y_MIN - 1e-5 &&
-    rect.y + rect.height <= PREPARE_AUTO_INITIALS_UPPER_Y_MAX + 1e-5;
-  if (inUpperLane) return true;
+  const yBottom = 1 - AUTO_INITIALS_MARGIN_BOTTOM - rect.height;
+  const yLow = yBottom - AUTO_INITIALS_BOTTOM_BAND_HEIGHT;
+  const inLowerRightBand =
+    rect.y >= Math.max(PREPARE_AUTO_INITIALS_LOWER_Y_MIN, yLow) - 1e-5 &&
+    rect.y + rect.height <= PREPARE_PAGE_FOOTER_BAND_Y + 1e-5 &&
+    rect.x >= AUTO_INITIALS_BOTTOM_SWEEP_X_MIN - 1e-5 &&
+    rect.x + rect.width <= 1 - AUTO_INITIALS_MARGIN_RIGHT + 1e-5;
+  if (inLowerRightBand) return true;
   const inRightLane =
     rect.x + rect.width <= 1 - AUTO_INITIALS_MARGIN_RIGHT + 1e-5 &&
     rect.x >= AUTO_INITIALS_BOTTOM_SWEEP_X_MIN - 1e-5 &&
     rect.y >= PREPARE_AUTO_INITIALS_Y_SCAN_MIN - 1e-5 &&
     rect.y + rect.height <= PREPARE_PAGE_FOOTER_BAND_Y + 1e-5;
   if (inRightLane) return true;
-  const yBottom = 1 - AUTO_INITIALS_MARGIN_BOTTOM - rect.height;
-  const yLow = yBottom - AUTO_INITIALS_BOTTOM_BAND_HEIGHT;
-  return (
-    rect.y >= yLow - 1e-5 &&
-    rect.y <= yBottom + 1e-5 &&
-    rect.x >= AUTO_INITIALS_BOTTOM_SWEEP_X_MIN - 1e-5 &&
-    rect.x + rect.width <= 1 - AUTO_INITIALS_MARGIN_RIGHT + 1e-5
-  );
+  const inUpperLane =
+    rect.x + rect.width <= maxX + 1e-5 &&
+    rect.x >= PREPARE_FIELD_SAFE_MARGIN_X - 1e-5 &&
+    rect.y >= PREPARE_AUTO_INITIALS_UPPER_Y_MIN - 1e-5 &&
+    rect.y + rect.height <= PREPARE_AUTO_INITIALS_UPPER_Y_MAX + 1e-5;
+  return inUpperLane;
 }
 
 export type PrepareAutoInitialsLayoutResult = {
@@ -714,8 +735,8 @@ export type PrepareAutoInitialsLayoutResult = {
 };
 
 /**
- * Deterministic upper-right initials slot for one prepare signer on one page.
- * Prefers a mobile-safe lane inside the document body, clear of footer/watermark/signature blocks.
+ * Deterministic initials slot for one prepare signer on one page.
+ * Prefers lower-right safe margin (above footer/watermark), then mid-page right lane, then upper-right fallback.
  */
 export function layoutPrepareAutoInitialsRectOnPage(args: {
   partyIndex: number;
@@ -723,10 +744,12 @@ export function layoutPrepareAutoInitialsRectOnPage(args: {
   existingFields: ReadonlyArray<PlacedSigningField>;
   roleId: string;
   dims?: { width: number; height: number };
+  /** Document text obstacles (normalized) — when set, only bottom-right margin is tried. */
+  textObstacles?: ReadonlyArray<{ x: number; y: number; width: number; height: number }>;
 }): PrepareAutoInitialsLayoutResult {
   const dims = args.dims ?? prepareAutoInitialsPlacementDims();
   const lane = Math.max(0, Math.floor(args.partyIndex));
-  const layoutObstacles = buildPreparePageLayoutObstacleRects(args.page);
+  const layoutObstacles = buildPreparePageLayoutObstacleRects(args.page, args.textObstacles);
   const fieldObstacles = buildPreparePageObstacleRects(args.existingFields, args.page, {
     excludeRoleAutoInitialsId: args.roleId,
   });
@@ -738,56 +761,76 @@ export function layoutPrepareAutoInitialsRectOnPage(args: {
     lane * (dims.width + AUTO_INITIALS_COLUMN_GAP);
   const xStart = Math.max(PREPARE_FIELD_SAFE_MARGIN_X, xRight);
   let collisionCount = 0;
-  for (
-    let y = PREPARE_AUTO_INITIALS_UPPER_Y_MIN;
-    y <= PREPARE_AUTO_INITIALS_UPPER_Y_MAX + 1e-5;
-    y += PREPARE_AUTO_INITIALS_Y_SCAN_STEP
-  ) {
+
+  const tryRect = (rect: { x: number; y: number; width: number; height: number }) => {
+    const hits = obstacles.filter((o) => normRectsOverlap(rect, o, AUTO_INITIALS_OBSTACLE_PAD));
+    if (hits.length === 0) {
+      return {
+        rect: clampPrepareFieldRectToSafeBounds(rect, { kind: "initials" as const }),
+        lane,
+        collisionCount: 0,
+      };
+    }
+    collisionCount = Math.max(collisionCount, hits.length);
+    return null;
+  };
+
+  const bottomProbe = findAutoInitialsMarginSlotOrNull(dims, obstacles, {
+    columnOffset: lane,
+    rightMargin: PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN,
+    prepareFooterSafe: true,
+  });
+  if (bottomProbe && bottomProbe.y + bottomProbe.height <= PREPARE_PAGE_FOOTER_BAND_Y) {
+    const hit = tryRect(bottomProbe);
+    if (hit) return hit;
+  }
+
+  if (!args.textObstacles?.length) {
     for (
-      let x = xStart;
-      x + dims.width <= 1 - PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN + 1e-5;
-      x -= AUTO_INITIALS_X_SCAN_STEP
+      let y = PREPARE_AUTO_INITIALS_Y_SCAN_MAX;
+      y >= PREPARE_AUTO_INITIALS_Y_SCAN_MIN - 1e-5;
+      y -= PREPARE_AUTO_INITIALS_Y_SCAN_STEP
     ) {
-      const rect = { x, y, width: dims.width, height: dims.height };
-      const hits = obstacles.filter((o) => normRectsOverlap(rect, o, AUTO_INITIALS_OBSTACLE_PAD));
-      if (hits.length === 0) {
-        return {
-          rect: clampPrepareFieldRectToSafeBounds(rect, { kind: "initials" }),
-          lane,
-          collisionCount: 0,
-        };
+      for (
+        let x = xStart;
+        x + dims.width <= 1 - PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN + 1e-5;
+        x -= AUTO_INITIALS_X_SCAN_STEP
+      ) {
+        const hit = tryRect({ x, y, width: dims.width, height: dims.height });
+        if (hit) return hit;
       }
-      collisionCount = Math.max(collisionCount, hits.length);
+    }
+
+    for (
+      let y = PREPARE_AUTO_INITIALS_UPPER_Y_MIN;
+      y <= PREPARE_AUTO_INITIALS_UPPER_Y_MAX + 1e-5;
+      y += PREPARE_AUTO_INITIALS_Y_SCAN_STEP
+    ) {
+      for (
+        let x = xStart;
+        x + dims.width <= 1 - PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN + 1e-5;
+        x -= AUTO_INITIALS_X_SCAN_STEP
+      ) {
+        const hit = tryRect({ x, y, width: dims.width, height: dims.height });
+        if (hit) return hit;
+      }
     }
   }
-  for (let y = PREPARE_AUTO_INITIALS_Y_SCAN_MIN; y <= PREPARE_AUTO_INITIALS_Y_SCAN_MAX + 1e-5; y += PREPARE_AUTO_INITIALS_Y_SCAN_STEP) {
+
+  if (bottomProbe && bottomProbe.y + bottomProbe.height <= PREPARE_PAGE_FOOTER_BAND_Y) {
     for (
-      let x = xStart;
-      x + dims.width <= 1 - AUTO_INITIALS_MARGIN_RIGHT + 1e-5;
-      x -= AUTO_INITIALS_X_SCAN_STEP
+      let y = bottomProbe.y;
+      y >= PREPARE_AUTO_INITIALS_Y_SCAN_MIN - 1e-5;
+      y -= PREPARE_AUTO_INITIALS_Y_SCAN_STEP
     ) {
-      const rect = { x, y, width: dims.width, height: dims.height };
-      const hits = obstacles.filter((o) => normRectsOverlap(rect, o, AUTO_INITIALS_OBSTACLE_PAD));
-      if (hits.length === 0) {
-        return {
-          rect: clampPrepareFieldRectToSafeBounds(rect, { kind: "initials" }),
-          lane,
-          collisionCount: 0,
-        };
-      }
-      collisionCount = Math.max(collisionCount, hits.length);
+      const hit = tryRect({
+        x: bottomProbe.x,
+        y,
+        width: dims.width,
+        height: dims.height,
+      });
+      if (hit) return hit;
     }
-  }
-  const probe = findAutoInitialsMarginSlotOrNull(dims, obstacles, { columnOffset: lane });
-  if (probe && probe.y + probe.height <= PREPARE_PAGE_FOOTER_BAND_Y) {
-    for (const o of obstacles) {
-      if (fieldRectsOverlap(probe, o, AUTO_INITIALS_OBSTACLE_PAD)) collisionCount += 1;
-    }
-    return {
-      rect: clampPrepareFieldRectToSafeBounds(probe, { kind: "initials" }),
-      lane,
-      collisionCount,
-    };
   }
   return { rect: null, lane, collisionCount };
 }
@@ -858,25 +901,36 @@ export function prepareAutoInitialsLaneAnchor(partyIndex: number, dims: { width:
 export function findAutoInitialsMarginSlotOrNull(
   dims: { width: number; height: number },
   obstacles: Array<{ x: number; y: number; width: number; height: number }>,
-  options?: { columnOffset?: number }
+  options?: { columnOffset?: number; rightMargin?: number; prepareFooterSafe?: boolean }
 ): { x: number; y: number; width: number; height: number } | null {
   const { width: w, height: h } = dims;
   const col = Math.max(0, Math.floor(options?.columnOffset ?? 0));
-  const xRightAnchor =
-    1 - AUTO_INITIALS_MARGIN_RIGHT - w - col * (w + AUTO_INITIALS_COLUMN_GAP);
+  const marginRight = options?.rightMargin ?? AUTO_INITIALS_MARGIN_RIGHT;
+  const xRightAnchor = 1 - marginRight - w - col * (w + AUTO_INITIALS_COLUMN_GAP);
   if (xRightAnchor + 1e-9 < AUTO_INITIALS_BOTTOM_SWEEP_X_MIN) return null;
 
-  const yBottom = 1 - AUTO_INITIALS_MARGIN_BOTTOM - h;
+  const padClearance = AUTO_INITIALS_OBSTACLE_PAD * 2 + 0.01;
+  const yBottomLegacy = 1 - AUTO_INITIALS_MARGIN_BOTTOM - h;
+  const yBottom = options?.prepareFooterSafe
+    ? Math.min(
+        yBottomLegacy - AUTO_INITIALS_OBSTACLE_PAD,
+        PREPARE_PAGE_WATERMARK_BAND_Y - h - padClearance,
+        PREPARE_PAGE_FOOTER_BAND_Y - h - padClearance,
+      )
+    : yBottomLegacy;
   const yLow = yBottom - AUTO_INITIALS_BOTTOM_BAND_HEIGHT;
   const pad = AUTO_INITIALS_OBSTACLE_PAD;
   const overlapsObstacle = (rect: { x: number; y: number; width: number; height: number }) =>
     obstacles.some((b) => normRectsOverlap(rect, b, pad));
+  const xMin = options?.prepareFooterSafe
+    ? Math.max(0.66 - w, xRightAnchor - AUTO_INITIALS_X_SCAN_STEP * 8)
+    : AUTO_INITIALS_BOTTOM_SWEEP_X_MIN;
 
   for (let yRow = yBottom; yRow >= yLow - 1e-9; yRow -= AUTO_INITIALS_Y_SCAN_STEP) {
     const y = Math.max(0, Math.min(yRow, 1 - h));
     for (
       let x = Math.min(xRightAnchor, 1 - w);
-      x >= AUTO_INITIALS_BOTTOM_SWEEP_X_MIN - 1e-9;
+      x >= xMin - 1e-9;
       x -= AUTO_INITIALS_X_SCAN_STEP
     ) {
       const xx = Math.max(0, Math.min(x, 1 - w));

@@ -139,7 +139,8 @@ describe("VS01 placement test41 regression", () => {
     const layoutObstacles = buildPreparePageLayoutObstacleRects(0);
     for (const f of existing.filter((x) => x.type === "initials")) {
       expect(f.x + f.width).toBeLessThanOrEqual(1 - PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN + 1e-5);
-      expect(f.y + f.height).toBeLessThanOrEqual(PREPARE_AUTO_INITIALS_UPPER_Y_MAX + 0.05);
+      expect(f.y).toBeGreaterThan(PREPARE_AUTO_INITIALS_UPPER_Y_MAX);
+      expect(f.y + f.height).toBeLessThanOrEqual(PREPARE_PAGE_FOOTER_BAND_Y + 1e-5);
       expect(isRectInPrepareAutoInitialsSafeZone(f)).toBe(true);
       for (const sig of signatures) {
         expect(fieldRectsOverlap(f, sig)).toBe(false);

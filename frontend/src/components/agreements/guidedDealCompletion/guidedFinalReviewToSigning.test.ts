@@ -163,6 +163,59 @@ describe("guided signature track (test36)", () => {
     expect(cleaned.body).not.toMatch(/SERVICE PROVIDER:[\s\S]*?Title: Manager/i);
   });
 
+  it("strips duplicate identity fragment before canonical witness block", () => {
+    const manifest = resolveCanonicalFinalPartyManifest({
+      partyCount: 2,
+      partySignerNames: ["Anthem Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      recipient1Email: "anthem@example.test",
+      recipient2Email: "joe@example.test",
+      extraPartyReviewEmails: [],
+      draftPartyNames: ["Acme LLC", "Joe Smith"],
+      sendMode: "signature",
+      recipientsDeferred: false,
+    });
+    const body = `
+SERVICES AGREEMENT
+
+1. Scope
+Provider will deliver services.
+
+9.3 Electronic Signature
+The parties may sign electronically.
+
+Acme LLC
+Name: Anthem Blanchard
+Title: Manager
+SERVICE PROVIDER: Joe Smith
+Name: Joe Smith
+
+IN WITNESS WHEREOF, the parties execute below.
+
+CLIENT:
+Acme LLC
+By: __________________________
+Name: Anthem Blanchard
+Title: Manager
+Date: _________________________
+
+SERVICE PROVIDER:
+Joe Smith
+By: __________________________
+Name: Joe Smith
+Date: _________________________
+`.trim();
+    const cleaned = prepareGuidedSigningCorpusCleanup({ body, partyManifest: manifest });
+    const witness = cleaned.body.search(/IN WITNESS WHEREOF/i);
+    expect(witness).toBeGreaterThan(0);
+    expect(cleaned.repairs).toContain("signature:pre_witness_identity_fragment_removed");
+    expect(cleaned.body.slice(0, witness)).not.toMatch(/Name:\s*Anthem Blanchard/i);
+    expect(cleaned.body.match(/IN WITNESS WHEREOF/gi)).toHaveLength(1);
+    expect(cleaned.body.match(/^\s*By\s*:/gim)).toHaveLength(2);
+  });
+
   it("builds signing packet manifest with two signers", () => {
     const manifest = resolveCanonicalFinalPartyManifest({
       partyCount: 2,

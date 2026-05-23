@@ -75,6 +75,31 @@ describe("vs01SignerFieldAssignment", () => {
     expect(gate.canFinish).toBe(true);
   });
 
+  it("mergeRecipientManifestFieldsForSignerRole pulls sender-layer fields for owner role", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: AG,
+      creatorName: "Owner",
+      creatorEmail: "o@x.com",
+      counterparties: [],
+    });
+    const owner = roles[0]!;
+    const sender: PlacedSigningField[] = [
+      stampSenderFieldWithPrepareRole(
+        { id: "sx", type: "signature", page: 0, x: 0.2, y: 0.2, width: 0.2, height: 0.05 },
+        owner,
+      ),
+    ];
+    const merged = mergeRecipientManifestFieldsForSignerRole({
+      ownerRole: owner,
+      roles,
+      counterpartyId: owner.partyId,
+      signerRoleId: owner.roleId,
+      recipientPlacedFields: [],
+      senderPlacedFields: sender,
+    });
+    expect(merged.some((f) => f.id.startsWith("s2r_"))).toBe(true);
+  });
+
   it("mergeRecipientManifestFieldsForSignerRole pulls sender-layer fields for counterparty roles", () => {
     const cps: Vs01Counterparty[] = [{ id: "c1", name: "Acme LLC", email: "x@y.com" }];
     const roles = buildVs01PrepareSigningRoles({

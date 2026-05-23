@@ -13,6 +13,8 @@ import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { fetchDocumentContent } from "./vs01Api";
+import { setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
+import { extractPdfPageLayoutsFromBlob } from "./vs01PdfPageLayout";
 import type {
   Vs01Counterparty,
   Vs01RecipientPlacedField,
@@ -37,6 +39,11 @@ import {
   recipientFinishGateComplete,
   recipientFinishGateEditableFields,
 } from "./recipientSigningFieldUtils";
+import {
+  buildRecipientSigningDocumentFields,
+  buildVs01PrepareSigningRoles,
+} from "./vs01SignerFieldAssignment";
+import { logVs01PersistedGeometryHash } from "./vs01AutoSignaturePacket";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -158,7 +165,25 @@ export function RecipientSigningView({
   const signerName =
     signer?.signerName?.trim() || signer?.name.trim() || "Signer";
   const signerEmail = signer?.email.trim() || "";
-  const documentFields = recipientFields;
+  const documentFields = useMemo(() => {
+    if (!senderPlacedFields.length) return recipientFields;
+    const aid = (recipientAgreementId ?? "").trim();
+    if (!aid) return recipientFields;
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: aid,
+      creatorName: counterparties[0]?.name?.trim() || "Owner",
+      creatorEmail: counterparties[0]?.email?.trim() || "",
+      counterparties,
+    });
+    const ownerRole = roles[0];
+    if (!ownerRole) return recipientFields;
+    return buildRecipientSigningDocumentFields({
+      ownerRole,
+      roles,
+      recipientPlacedFields: recipientFields,
+      senderPlacedFields,
+    });
+  }, [recipientFields, senderPlacedFields, recipientAgreementId, counterparties]);
 
   const myFields = useMemo(
     () =>
@@ -172,8 +197,9 @@ export function RecipientSigningView({
   useEffect(() => {
     if (hydratedRef.current || documentFields.length === 0) return;
     hydratedRef.current = true;
+    logVs01PersistedGeometryHash("recipient_signing_hydration", documentFields);
     onRecipientFieldsChange((prev) => hydrateRecipientSigningFields(prev, cpById));
-  }, [documentFields.length, cpById, onRecipientFieldsChange]);
+  }, [documentFields.length, cpById, onRecipientFieldsChange, documentFields]);
 
   useEffect(() => {
     const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
@@ -219,6 +245,12 @@ export function RecipientSigningView({
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setPdfUrl(objectUrl);
+        try {
+          const layouts = await extractPdfPageLayoutsFromBlob(blob);
+          if (!cancelled) setVs01DocumentPageLayouts(documentId.trim(), layouts);
+        } catch {
+          /* layout extraction is best-effort; manifest rects are authoritative */
+        }
       } catch (e) {
         if (!cancelled) {
           setPdfUrl(null);

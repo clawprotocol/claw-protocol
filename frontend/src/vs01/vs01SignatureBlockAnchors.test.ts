@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  corpusHasPrefilledSignatureIdentity,
   findSignatureLineAnchorsFromCorpusText,
   signatureAnchorToPrepareRect,
   signatureRectsFollowBlockOrder,
@@ -54,6 +55,22 @@ describe("vs01SignatureBlockAnchors (test39)", () => {
     expect(signatureRectsFollowBlockOrder(client, provider)).toBe(true);
     expect(client.y + client.height).toBeLessThanOrEqual(PREPARE_PAGE_FOOTER_BAND_Y);
     expect(provider.y + provider.height).toBeLessThanOrEqual(PREPARE_PAGE_FOOTER_BAND_Y);
+  });
+
+  it("prefilled identity when Name lines exist without global Title requirement", () => {
+    const noBy = `
+IN WITNESS WHEREOF
+
+CLIENT:
+Acme LLC
+Name: Anthem H Blanchard
+Title: Manager
+
+SERVICE PROVIDER:
+Joe Smith
+Name: Joe Smith
+`.trim();
+    expect(corpusHasPrefilledSignatureIdentity(noBy)).toBe(true);
   });
 
   it("keeps anchored rects inside safe margins on narrow/mobile widths", () => {

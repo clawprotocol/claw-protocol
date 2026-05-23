@@ -184,12 +184,39 @@ export type GuidedFinalizeModalBlockedKind =
 export function describeGuidedFinalizeValidationBlock(args: {
   validationMissing?: readonly string[];
   validationContradictions?: readonly string[];
+  guidedSession?: import("./types").GuidedCompletionSession | null;
 }): string | null {
   const parts = [
-    ...describeGuidedValidationMissingItems(args.validationMissing ?? []),
+    ...describeGuidedValidationMissingItems(args.validationMissing ?? [], args.guidedSession),
     ...(args.validationContradictions ?? []).map((c) => `Contradiction: ${c.replace(/_/g, " ")}`),
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" ") : null;
+}
+
+export function logGuidedFinalReviewRetryStart(payload?: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-final-review-retry-start]", payload ?? {});
+}
+
+export function logGuidedFinalReviewRetryAnswers(
+  answers: Array<{ variableId: string; answer: string }>,
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-final-review-retry-answers]", { answers });
+}
+
+export function logGuidedFinalReviewRetrySuccess(payload?: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-final-review-retry-success]", payload ?? {});
+}
+
+export function logGuidedFinalReviewRetryFailed(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-final-review-retry-failed]", payload);
 }
 
 export function resolveGuidedFinalizeModalBlockedPresentation(args: {
@@ -205,7 +232,6 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
   footnote: string;
 } {
   const workingLen = args.workingDraftLen ?? 0;
-  const validationDetail = describeGuidedFinalizeValidationBlock(args);
   switch (args.reason) {
     case "signers_incomplete":
     case "party_placeholders_unresolved":
@@ -218,13 +244,13 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
         footnote: "Update signer details below, then continue.",
       };
     case "guided_validation_incomplete":
-      if (validationDetail) {
+      if ((args.validationMissing?.length ?? 0) > 0 || (args.validationContradictions?.length ?? 0) > 0) {
         return {
           kind: "internal_retry",
-          headline: "We could not prepare final review.",
-          body: validationDetail,
+          headline: "Final review needs another pass.",
+          body: "LawDog could not finish applying one of your answers. Retry final review to re-run the finalization step.",
           ctaLabel: "Retry final review",
-          footnote: "LawDog will re-run finalization with your saved answers and signer details.",
+          footnote: "Your answers and signer details are saved.",
         };
       }
       if (workingLen >= 1500) {
@@ -238,10 +264,10 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
       }
       return {
         kind: "internal_retry",
-        headline: "We could not prepare final review.",
-        body: userMessageForGuidedSignerSetupContinueBlock("guided_validation_incomplete"),
+        headline: "Final review needs another pass.",
+        body: "LawDog could not finish applying one of your answers. Retry final review to re-run the finalization step.",
         ctaLabel: "Retry final review",
-        footnote: "LawDog will re-run finalization with your saved answers and signer details.",
+        footnote: "Your answers and signer details are saved.",
       };
     case "authoritative_body_missing":
       return workingLen >= 1500
@@ -254,10 +280,10 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
           }
         : {
             kind: "internal_retry",
-            headline: "We could not prepare final review.",
-            body: userMessageForGuidedSignerSetupContinueBlock("authoritative_body_missing"),
+            headline: "Final review needs another pass.",
+            body: "LawDog could not finish applying one of your answers. Retry final review to re-run the finalization step.",
             ctaLabel: "Retry final review",
-            footnote: "Please wait a moment, then retry final review.",
+            footnote: "Your answers and signer details are saved.",
           };
     case "apply_not_complete":
     case "refine_in_flight":
@@ -272,10 +298,10 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
     default:
       return {
         kind: "internal_retry",
-        headline: "We could not prepare final review.",
-        body: userMessageForGuidedSignerSetupContinueBlock(args.reason),
+        headline: "Final review needs another pass.",
+        body: "LawDog could not finish applying one of your answers. Retry final review to re-run the finalization step.",
         ctaLabel: "Retry final review",
-        footnote: "LawDog will re-run finalization with your saved answers and signer details.",
+        footnote: "Your answers and signer details are saved.",
       };
   }
 }

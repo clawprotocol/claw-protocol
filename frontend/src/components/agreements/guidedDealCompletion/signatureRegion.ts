@@ -91,3 +91,27 @@ export function findSignatureRegionEnd(text: string, start: number): number {
   }
   return start + offset;
 }
+
+/** Count party signature block headings in the signature tail. */
+export function countSignatureBlockHeadingsInTail(text: string): number {
+  const start = signaturePatchStartIndex(text);
+  const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
+  return (tail.match(/^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:/gim) || []).length;
+}
+
+/** Count `By:` lines in the signature tail (VS01 anchor requirement). */
+export function countSignatureByLinesInTail(text: string): number {
+  const start = signaturePatchStartIndex(text);
+  const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
+  return (tail.match(/^\s*By\s*:/gim) || []).length;
+}
+
+export function corpusSignatureBlocksHaveRequiredByLines(
+  text: string,
+  partyCount: number,
+): boolean {
+  const headings = countSignatureBlockHeadingsInTail(text);
+  const byLines = countSignatureByLinesInTail(text);
+  if (headings > 0) return byLines >= headings;
+  return byLines >= Math.min(2, Math.max(1, partyCount));
+}

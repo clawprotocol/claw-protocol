@@ -10,7 +10,20 @@ import {
   type PlacedSigningField,
   type SigningPlacementValueContext,
 } from "./signingFields";
-import { findSignatureLineAnchorsFromCorpusText, signatureAnchorToPrepareRect, corpusHasPrefilledSignatureIdentity, logSignatureAnchorPlacementMiss } from "./vs01SignatureBlockAnchors";
+import {
+  findSignatureLineAnchorsFromCorpusText,
+  signatureAnchorToPrepareRect,
+  corpusHasPrefilledSignatureIdentity,
+  logSignatureAnchorPlacementMiss,
+} from "./vs01SignatureBlockAnchors";
+import {
+  buildVs01PlacementContext,
+  geometryUsesLayoutByAnchors,
+  resolveSignatureRectForRole,
+} from "./vs01FieldGeometry";
+import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
+import { findByLinePlacementsFromPageLayout, pageLayoutForIndex } from "./vs01PageTextLayout";
+import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { stampPrepareSenderFieldOrReject, type Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { PREPARE_FIELD_ASSIGNMENT_SOURCE } from "./vs01PrepareFieldPlacement";
 import { buildPrepareTemplateValueContext, defaultPrepareTemplateStoredValue } from "./vs01PrepareTemplateField";
@@ -20,7 +33,51 @@ export type AutoSignaturePacketResult = {
   fields: PlacedSigningField[];
   confidence: "high" | "draft";
   placedCount: number;
+  mode: "signature_only" | "full_stack";
+  requiredSignatureCount: number;
+  optionalFieldCount: number;
 };
+
+export function logVs01PersistedGeometryHash(
+  surface: string,
+  fields: readonly Pick<PlacedSigningField, "type" | "page" | "x" | "y" | "width" | "height" | "assignedPartyIndex">[],
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-persisted-geometry-hash]", {
+    surface,
+    hash: signingFieldGeometryHash(fields),
+    fieldCount: fields.length,
+    signatureCount: fields.filter((f) => f.type === "signature").length,
+  });
+}
+
+export function signingFieldGeometryHash(fields: readonly Pick<PlacedSigningField, "type" | "page" | "x" | "y" | "width" | "height" | "assignedPartyIndex">[]): string {
+  return fields
+    .map((f) =>
+      [
+        f.assignedPartyIndex ?? -1,
+        f.type,
+        f.page,
+        f.x.toFixed(4),
+        f.y.toFixed(4),
+        f.width.toFixed(4),
+        f.height.toFixed(4),
+      ].join(":"),
+    )
+    .sort()
+    .join("|");
+}
+
+export function removeStaleSignatureOnlyAutoplaceFields(
+  fields: readonly PlacedSigningField[],
+): PlacedSigningField[] {
+  return fields.filter((f) => {
+    if (f.autoInitials) return true;
+    if (f.assignmentSource !== "autoplace") return true;
+    return f.type === "signature";
+  });
+}
 
 const SIGNATURE_BLOCK_TOOLS: Array<{
   type: "signature" | "printed_name" | "text" | "date";
@@ -42,24 +99,67 @@ const AUTO_SIGNATURE_ONLY_TOOLS: Array<{
 /** Keep auto signature stacks above footer/watermark bands. */
 const AUTO_SIGNATURE_MAX_Y = 0.82;
 
-function resolveAutoSignatureBlockTools(corpusText?: string | null) {
-  if (corpusHasPrefilledSignatureIdentity(corpusText)) {
-    return AUTO_SIGNATURE_ONLY_TOOLS;
+function layoutHasCanonicalSignatureIdentityBlocks(
+  pageLayouts: readonly Vs01PageTextLayout[],
+  lastPage: number,
+  roleCount: number,
+): boolean {
+  const layout = pageLayoutForIndex(pageLayouts, lastPage);
+  const byLines = findByLinePlacementsFromPageLayout(layout);
+  if (byLines.length < Math.min(1, roleCount)) return false;
+  const lines = (layout?.textRects ?? [])
+    .map((r) => r.text.trim())
+    .filter(Boolean);
+  let completeBlocks = 0;
+  for (const by of byLines) {
+    const start = lines.findIndex((line) => line === by.lineText);
+    if (start < 0) continue;
+    const window = lines.slice(start, start + 5).join("\n");
+    if (/\bName\s*:\s*\S+/i.test(window) && /\bDate\s*:/i.test(window)) {
+      completeBlocks += 1;
+    }
   }
-  return SIGNATURE_BLOCK_TOOLS;
+  return completeBlocks >= Math.min(roleCount, byLines.length);
 }
 
-function anchoredSignatureRect(args: {
-  anchor: ReturnType<typeof findSignatureLineAnchorsFromCorpusText>[number] | null;
-  partyIndex: number;
+export function resolveAutoSignaturePacketMode(args: {
+  corpusText?: string | null;
+  pageLayouts?: readonly Vs01PageTextLayout[] | null;
+  lastPage: number;
   roleCount: number;
-}): { x: number; y: number; width: number; height: number } {
-  return signatureAnchorToPrepareRect({
-    anchor: args.anchor,
-    partyIndex: args.partyIndex,
-    roleCount: args.roleCount,
-    fieldType: "signature",
-  });
+}): "signature_only" | "full_stack" {
+  if (corpusHasPrefilledSignatureIdentity(args.corpusText)) return "signature_only";
+  if (args.pageLayouts?.length) {
+    return layoutHasCanonicalSignatureIdentityBlocks(
+      args.pageLayouts,
+      args.lastPage,
+      args.roleCount,
+    )
+      ? "signature_only"
+      : "full_stack";
+  }
+  return "full_stack";
+}
+
+function resolveAutoSignatureBlockTools(mode: "signature_only" | "full_stack") {
+  return mode === "signature_only" ? AUTO_SIGNATURE_ONLY_TOOLS : SIGNATURE_BLOCK_TOOLS;
+}
+
+function logAutoPacketMode(payload: Record<string, unknown>): void {
+  // eslint-disable-next-line no-console
+  console.info("[vs01-auto-packet-mode]", payload);
+}
+
+function logFieldGenerated(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-field-generated]", payload);
+}
+
+function logFieldRejected(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[vs01-field-rejected]", payload);
 }
 
 function roleHasSignatureBlock(existing: PlacedSigningField[], roleId: string, page: number): boolean {
@@ -101,15 +201,43 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   ownerValueCtx: SigningPlacementValueContext;
   /** Agreement corpus text — used to anchor fields on signature block lines. */
   corpusText?: string | null;
+  /** Rendered PDF/corpus text layout per page (canonical geometry). */
+  pageLayouts?: readonly Vs01PageTextLayout[] | null;
+  documentId?: string | null;
 }): AutoSignaturePacketResult {
   const pageCount = Math.max(1, args.pageCount);
-  const lastPage = pageCount - 1;
   const manual = args.existingFields.filter((f) => !f.autoInitials);
   const out: PlacedSigningField[] = [];
   let placedSoFar = [...manual];
   const roleCount = args.roles.length;
+  const placementCtx = buildVs01PlacementContext({
+    corpusText: args.corpusText,
+    pageCount,
+    pageLayouts: args.pageLayouts ?? getVs01DocumentPageLayouts(args.documentId),
+    documentId: args.documentId,
+    roleCount,
+  });
+  const pageLayouts = placementCtx.layouts;
+  const witnessPage = placementCtx.witnessPageIndex ?? pageCount - 1;
   const anchors = args.corpusText ? findSignatureLineAnchorsFromCorpusText(args.corpusText) : [];
-  const blockTools = resolveAutoSignatureBlockTools(args.corpusText);
+  const layoutByLines = findByLinePlacementsFromPageLayout(pageLayoutForIndex(pageLayouts, witnessPage));
+  const mode = resolveAutoSignaturePacketMode({
+    corpusText: args.corpusText,
+    pageLayouts,
+    lastPage: witnessPage,
+    roleCount: args.roles.length,
+  });
+  const blockTools = resolveAutoSignatureBlockTools(mode);
+  const witnessPresent = /\bIN WITNESS WHEREOF\b/i.test(args.corpusText ?? "");
+  logAutoPacketMode({
+    mode,
+    pageCount,
+    witnessPage,
+    layoutSource: placementCtx.layoutSource,
+    roleCount: args.roles.length,
+    corpusHasCanonicalIdentity: corpusHasPrefilledSignatureIdentity(args.corpusText),
+    layoutByLines: layoutByLines.length,
+  });
   if (args.corpusText && anchors.length < Math.min(2, args.roles.length)) {
     logSignatureAnchorPlacementMiss({
       roleCount: args.roles.length,
@@ -118,8 +246,10 @@ export function buildAutoSignaturePacketForAllRoles(args: {
     });
   }
 
+  let anchorPlacements = 0;
+
   for (const role of args.roles) {
-    if (roleHasSignatureBlock([...placedSoFar, ...out], role.roleId, lastPage)) continue;
+    if (roleHasSignatureBlock([...placedSoFar, ...out], role.roleId, witnessPage)) continue;
     const valueCtx =
       role.kind === "owner"
         ? args.ownerValueCtx
@@ -127,60 +257,130 @@ export function buildAutoSignaturePacketForAllRoles(args: {
     const anchor = anchors.find((a) => a.partyIndex === role.partyIndex) ?? null;
 
     for (const tool of blockTools) {
-      const anchored =
-        tool.type === "signature"
-          ? anchoredSignatureRect({ anchor, partyIndex: role.partyIndex, roleCount })
-          : signatureAnchorToPrepareRect({
-              anchor,
-              partyIndex: role.partyIndex,
-              roleCount,
-              fieldType: tool.type,
-            });
-      const useAnchorY = Boolean(anchor) || tool.type === "signature";
+      if (tool.type === "signature") {
+        const placement = resolveSignatureRectForRole({
+          role,
+          roleCount,
+          corpusText: args.corpusText,
+          pageLayouts,
+          lastPage: witnessPage,
+        });
+        if (!placement.rect) {
+          logFieldRejected({
+            type: "signature",
+            page: witnessPage,
+            role: role.kind,
+            source: "autoplace",
+            reason: placement.anchorKind,
+          });
+          continue;
+        }
+        if (
+          placement.anchorKind === "by_line_layout" ||
+          placement.anchorKind === "by_line_corpus"
+        ) {
+          anchorPlacements += 1;
+        }
+        const clamped = placement.rect;
+        if (clamped.y + clamped.height > PREPARE_PAGE_FOOTER_BAND_Y) {
+          logFieldRejected({
+            type: "signature",
+            page: witnessPage,
+            rect: clamped,
+            source: "autoplace",
+            reason: "footer_overlap",
+          });
+          continue;
+        }
+        const field = createAutoField(role, witnessPage, "signature", clamped, valueCtx);
+        if (field) {
+          out.push(field);
+          placedSoFar = [...manual, ...out];
+          logFieldGenerated({
+            type: field.type,
+            page: field.page,
+            rect: { x: field.x, y: field.y, width: field.width, height: field.height },
+            source: "signature_anchor",
+            mode,
+          });
+        }
+        continue;
+      }
+
+      if (witnessPresent && layoutByLines.length >= args.roles.length) continue;
+
+      const anchored = signatureAnchorToPrepareRect({
+        anchor,
+        partyIndex: role.partyIndex,
+        roleCount,
+        fieldType: tool.type,
+      });
       const desired = clampPrepareFieldRectToSafeBounds(
         {
           x: anchored.x,
-          y: useAnchorY ? anchored.y : Math.min(AUTO_SIGNATURE_MAX_Y - tool.dy, anchored.y),
-          width: tool.type === "signature" ? anchored.width : 0.3,
-          height: tool.type === "signature" ? anchored.height : 0.04,
+          y: Math.min(AUTO_SIGNATURE_MAX_Y - tool.dy, anchored.y),
+          width: 0.3,
+          height: 0.04,
         },
         { kind: "signature" },
       );
-      if (desired.y + desired.height > PREPARE_PAGE_FOOTER_BAND_Y) continue;
-      const resolved =
-        tool.type === "signature" && anchor
-          ? desired
-          : findNonOverlappingPrepareRect({
-              desiredRect: desired,
-              page: lastPage,
-              roleId: role.roleId,
-              existingFields: [...placedSoFar, ...out],
-              placementMode: "manual",
-            });
+      if (desired.y + desired.height > PREPARE_PAGE_FOOTER_BAND_Y) {
+        logFieldRejected({
+          type: tool.type,
+          page: witnessPage,
+          rect: desired,
+          source: "autoplace",
+          reason: "footer_overlap",
+        });
+        continue;
+      }
+      const resolved = findNonOverlappingPrepareRect({
+        desiredRect: desired,
+        page: witnessPage,
+        roleId: role.roleId,
+        existingFields: [...placedSoFar, ...out],
+        placementMode: "manual",
+      });
       const clamped = clampPrepareFieldRectToSafeBounds(resolved, { kind: "signature" });
-      const field = createAutoField(role, lastPage, tool.type, clamped, valueCtx, tool.textPurpose);
+      const field = createAutoField(role, witnessPage, tool.type, clamped, valueCtx, tool.textPurpose);
       if (field) {
         out.push(field);
         placedSoFar = [...manual, ...out];
+        logFieldGenerated({
+          type: field.type,
+          page: field.page,
+          rect: { x: field.x, y: field.y, width: field.width, height: field.height },
+          source: "signature_stack",
+          mode,
+        });
       }
     }
   }
 
   const placedCount = out.length;
-  const signatureOnlyMode = corpusHasPrefilledSignatureIdentity(args.corpusText);
+  const signatureFields = out.filter((f) => f.type === "signature").length;
+  const optionalFieldCount = placedCount - signatureFields;
+  const anchorBacked = witnessPresent
+    ? anchorPlacements >= args.roles.length &&
+      (layoutByLines.length >= args.roles.length ||
+        anchors.length >= args.roles.length ||
+        geometryUsesLayoutByAnchors(pageLayouts, witnessPage))
+    : anchorPlacements >= args.roles.length;
   const confidence: AutoSignaturePacketResult["confidence"] =
-    signatureOnlyMode
-      ? placedCount >= args.roles.length && anchors.length >= Math.min(2, args.roles.length)
+    mode === "signature_only"
+      ? signatureFields >= args.roles.length &&
+        anchorBacked &&
+        out.every((f) => f.type === "signature")
         ? "high"
         : "draft"
-      : placedCount >= args.roles.length * 2 && anchors.length >= Math.min(2, args.roles.length)
+      : placedCount >= args.roles.length * 2 && anchorBacked
         ? "high"
         : "draft";
 
   // eslint-disable-next-line no-console
   console.info("[signing-auto-placement-start]", {
     pageCount,
-    lastPage,
+    witnessPage,
     roleCount: args.roles.length,
   });
 
@@ -188,9 +388,10 @@ export function buildAutoSignaturePacketForAllRoles(args: {
     // eslint-disable-next-line no-console
     console.info("[vs01-auto-signature-packet]", {
       pageCount,
-      lastPage,
+      witnessPage,
       roleCount: args.roles.length,
       placedCount,
+      mode,
       confidence,
     });
   }
@@ -209,7 +410,14 @@ export function buildAutoSignaturePacketForAllRoles(args: {
     console.warn("[signing-auto-placement-fallback]", { pageCount, roleCount: args.roles.length });
   }
 
-  return { fields: out, confidence, placedCount };
+  return {
+    fields: out,
+    confidence,
+    placedCount,
+    mode,
+    requiredSignatureCount: signatureFields,
+    optionalFieldCount,
+  };
 }
 
 export function autoSignaturePacketStatusMessage(result: AutoSignaturePacketResult): string | null {
@@ -217,6 +425,9 @@ export function autoSignaturePacketStatusMessage(result: AutoSignaturePacketResu
     // eslint-disable-next-line no-console
     console.info("[signing-auto-placement-needs-review]", { placedCount: 0 });
     return null;
+  }
+  if (result.mode === "signature_only") {
+    return `${result.requiredSignatureCount} signature field${result.requiredSignatureCount === 1 ? "" : "s"} placed. Initials added where safe.`;
   }
   if (result.confidence === "high") {
     return "Signature fields were placed automatically. Review once, then send.";

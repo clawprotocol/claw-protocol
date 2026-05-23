@@ -3889,6 +3889,48 @@ button.vs01-upload-btn:disabled {
   container-name: vs01-placed-field;
 }
 
+.lawdog-signing-field {
+  --lawdog-field-border: var(--vs01-color-accent);
+  --lawdog-field-bg: rgba(212, 165, 116, 0.14);
+  --lawdog-field-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  border-color: var(--lawdog-field-border);
+  background: var(--lawdog-field-bg);
+  box-shadow: var(--lawdog-field-shadow);
+}
+
+.lawdog-signing-field--locked {
+  --lawdog-field-border: color-mix(in srgb, var(--vs01-color-text-muted) 45%, var(--vs01-color-border-subtle));
+  --lawdog-field-bg: rgba(248, 250, 252, 0.78);
+  --lawdog-field-shadow: none;
+  border-style: dashed;
+}
+
+.lawdog-signing-field--active {
+  --lawdog-field-border: var(--vs01-color-accent);
+  --lawdog-field-bg: rgba(212, 165, 116, 0.2);
+  --lawdog-field-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+.lawdog-signing-field__label,
+.lawdog-signing-field__signer {
+  color: #111111;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.lawdog-signing-field__signer {
+  font-size: clamp(0.5rem, 18cqb, 0.68rem);
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.lawdog-signing-field--locked .lawdog-signing-field__signer,
+.lawdog-signing-field--locked .lawdog-signing-field__label {
+  color: #1e293b;
+}
+
 .vs01-sign-placement-resize-handle {
   position: absolute;
   right: -3px;
@@ -4834,30 +4876,47 @@ button.vs01-upload-btn:disabled {
   margin-top: 0.5rem;
 }
 
-/* Recipient signing — field overlays */
-.vs01-recipient-signing-view .vs01-sign-placement-box {
+/* Recipient signing — field overlays (always visible on document) */
+.vs01-recipient-signing-view .lawdog-signing-field.vs01-sign-placement-box {
+  position: absolute;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
   padding: 0.25rem 0.35rem;
   border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
   min-height: 2.5rem;
+  min-width: 12cqi;
+  z-index: 4;
+  border: 2px solid var(--lawdog-field-border);
+  background: var(--lawdog-field-bg);
+  box-shadow: var(--lawdog-field-shadow);
+  pointer-events: auto;
 }
 
-.vs01-recipient-signing-field--mine.vs01-recipient-signing-field--editable {
-  border-color: rgba(16, 185, 129, 0.55);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+.vs01-recipient-signing-view .lawdog-signing-field.vs01-sign-placement-box .vs01-sign-placement-label,
+.vs01-recipient-signing-view .lawdog-signing-field.vs01-sign-placement-box .lawdog-signing-field__label {
+  color: #111111;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
-.vs01-recipient-signing-field--other.vs01-recipient-signing-field--locked {
-  opacity: 0.55;
-  border: 1px dashed rgba(100, 116, 139, 0.45);
-  background: rgba(248, 250, 252, 0.75);
+.vs01-recipient-signing-field--mine.vs01-recipient-signing-field--editable.lawdog-signing-field {
+  --lawdog-field-border: rgba(16, 185, 129, 0.72);
+  --lawdog-field-bg: rgba(255, 255, 255, 0.96);
+  --lawdog-field-shadow: 0 2px 10px rgba(15, 23, 42, 0.12);
+}
+
+.vs01-recipient-signing-field--other.vs01-recipient-signing-field--locked.lawdog-signing-field {
+  opacity: 0.92;
+  --lawdog-field-border: rgba(100, 116, 139, 0.55);
+  --lawdog-field-bg: rgba(248, 250, 252, 0.92);
+  --lawdog-field-shadow: 0 1px 4px rgba(15, 23, 42, 0.1);
+  border-style: dashed;
   pointer-events: none;
+}
+
+.vs01-recipient-signing-view .vs01-recipient-signing-readonly-val {
+  color: #0f172a;
 }
 
 .vs01-recipient-signing-field--signer-done {
@@ -4940,7 +4999,8 @@ button.vs01-upload-btn:disabled {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #b45309;
+  color: #9a3412;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
 .vs01-recipient-signature-slot__landing {

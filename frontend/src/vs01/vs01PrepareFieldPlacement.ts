@@ -5,10 +5,12 @@ import {
   vs01DiagnosticsEnabled,
 } from "./vs01SignerFieldAssignment";
 import {
+  clampPrepareFieldRectToSafeBounds,
   computePrepareRectFromClick,
+  fieldRectsOverlap,
   findNonOverlappingPrepareRect,
   isRectInPrepareAutoInitialsSafeZone,
-  layoutPrepareAutoInitialsRectOnPage,
+  PREPARE_AUTO_INITIALS_LOWER_Y_MIN,
   logVs01FieldOverlapAdjusted,
   newSigningFieldId,
   normalizePlacedFieldGeometryIfBelowMinimum,
@@ -21,6 +23,18 @@ import {
 import type { Vs01RecipientFieldType, Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareRoleAuthority } from "./vs01PrepareRoleAuthority";
 import {
+  buildVs01PlacementContext,
+  findSafeInitialsRectOnPage,
+  logVs01InitialsPageDecision,
+} from "./vs01FieldGeometry";
+import {
+  resolveVs01InitialsPlacementPolicy,
+  type Vs01InitialsPlacementPolicy,
+} from "./vs01InitialsPlacementPolicy";
+import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
+import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
+import { pageLayoutForIndex } from "./vs01PageTextLayout";
+import {
   defaultPrepareTemplateStoredValue,
   logVs01PlacementFieldAdded,
   logVs01PlacementFieldRejected,
@@ -29,6 +43,18 @@ import {
   logVs01PlacementRectNudged,
   logVs01PlacementRectSnapped,
 } from "./vs01PrepareTemplateField";
+
+function logVs01FieldGenerated(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-field-generated]", payload);
+}
+
+function logVs01FieldRejected(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[vs01-field-rejected]", payload);
+}
 import { resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
 
 export const PREPARE_FIELD_ASSIGNMENT_SOURCE = "prepare_active_role" as const;
@@ -198,6 +224,12 @@ export function buildPrepareAutoInitialsEveryPage(args: {
   skippedPages: Set<number>;
   existingFields: PlacedSigningField[];
   valueCtx: SigningPlacementValueContext;
+  /** Canonical agreement text, used to suppress optional initials on text-heavy signature pages. */
+  corpusText?: string | null;
+  pageLayouts?: readonly Vs01PageTextLayout[] | null;
+  documentId?: string | null;
+  /** When set, only eligible pages from document-wide policy are considered. */
+  initialsPolicy?: Vs01InitialsPlacementPolicy | null;
 }): PlacedSigningField[] {
   const dims = prepareAutoInitialsPlacementDims();
   const { width, height } = dims;
@@ -216,23 +248,70 @@ export function buildPrepareAutoInitialsEveryPage(args: {
   const placedSoFar: PlacedSigningField[] = [...args.existingFields];
   let added = 0;
   let skipped = 0;
-  for (let p = 0; p < args.pageCount; p++) {
+  if (args.initialsPolicy?.mode === "suppressed_document_wide") {
+    return [];
+  }
+  const policy = args.initialsPolicy;
+  const placementCtx = buildVs01PlacementContext({
+    corpusText: args.corpusText,
+    pageCount: args.pageCount,
+    pageLayouts: args.pageLayouts ?? getVs01DocumentPageLayouts(args.documentId),
+    documentId: args.documentId,
+    roleCount: 1,
+  });
+  const reconciledLayouts = placementCtx.layouts;
+  const signatureLastPage = policy?.witnessPageIndex ?? placementCtx.witnessPageIndex ?? -1;
+  const pagesToVisit =
+    policy?.mode === "placed_all_eligible"
+      ? policy.eligiblePages
+      : Array.from({ length: args.pageCount }, (_, i) => i);
+  for (const p of pagesToVisit) {
     if (args.skippedPages.has(p)) {
       skipped += 1;
+      logVs01InitialsPageDecision({
+        page: p,
+        roleIdShort: roleId.slice(0, 16),
+        partyIndex,
+        decision: "skipped",
+        reason: "user_skipped_slot",
+      });
       continue;
     }
     if (pagesWithRoleInitials.has(p)) {
       skipped += 1;
+      logVs01InitialsPageDecision({
+        page: p,
+        roleIdShort: roleId.slice(0, 16),
+        partyIndex,
+        decision: "skipped",
+        reason: "already_has_initials",
+      });
       continue;
     }
     const onPage = placedSoFar.filter((f) => f.page === p);
-    const layout = layoutPrepareAutoInitialsRectOnPage({
-      partyIndex,
-      page: p,
-      existingFields: placedSoFar,
-      roleId,
-      dims,
-    });
+    const fieldObstacles = onPage.map((f) => ({
+      x: f.x,
+      y: f.y,
+      width: f.width,
+      height: f.height,
+    }));
+    const policyRect = policy?.rectByPartyIndex.get(partyIndex) ?? null;
+    const safe = policyRect
+      ? { rect: policyRect, anchorKind: "initials_margin" as const }
+      : findSafeInitialsRectOnPage({
+          page: p,
+          partyIndex,
+          pageLayout: pageLayoutForIndex(reconciledLayouts, p),
+          corpusText: args.corpusText,
+          signatureLastPage,
+          fieldObstacles,
+          dims,
+        });
+    const layout = {
+      rect: safe.rect,
+      lane: partyIndex,
+      collisionCount: safe.rect ? 0 : 1,
+    };
     if (vs01DiagnosticsEnabled()) {
       // eslint-disable-next-line no-console
       console.info("[vs01-auto-initials-layout]", {
@@ -247,6 +326,21 @@ export function buildPrepareAutoInitialsEveryPage(args: {
     }
     if (!layout.rect) {
       skipped += 1;
+      logVs01InitialsPageDecision({
+        page: p,
+        roleIdShort: roleId.slice(0, 16),
+        partyIndex,
+        decision: "skipped",
+        reason: safe.anchorKind === "initials_suppressed" ? "signature_page_or_no_margin" : "no_safe_margin",
+        collisionCount: layout.collisionCount,
+      });
+      logVs01FieldRejected({
+        type: "initials",
+        page: p,
+        source: "auto_initials",
+        reason: "no_safe_margin",
+        partyIndex,
+      });
       if (vs01DiagnosticsEnabled()) {
         // eslint-disable-next-line no-console
         console.info("[vs01-auto-initials-layout]", {
@@ -258,13 +352,37 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       }
       continue;
     }
-    const resolved = findNonOverlappingPrepareRect({
-      desiredRect: layout.rect,
-      page: p,
-      roleId,
-      existingFields: onPage,
-      placementMode: "auto_initials",
-    });
+    const clampedLayout = clampPrepareFieldRectToSafeBounds(layout.rect, { kind: "initials" });
+    let resolved =
+      layout.collisionCount === 0
+        ? { ...clampedLayout, adjusted: false }
+        : findNonOverlappingPrepareRect({
+            desiredRect: clampedLayout,
+            page: p,
+            roleId,
+            existingFields: onPage,
+            placementMode: "manual",
+          });
+    let guard = 0;
+    while (onPage.some((o) => fieldRectsOverlap(o, resolved)) && guard < 28) {
+      resolved = {
+        ...resolved,
+        y: Math.max(
+          PREPARE_AUTO_INITIALS_LOWER_Y_MIN,
+          resolved.y - (height + 0.012),
+        ),
+      };
+      guard += 1;
+    }
+    if (onPage.some((o) => fieldRectsOverlap(o, resolved))) {
+      resolved = findNonOverlappingPrepareRect({
+        desiredRect: resolved,
+        page: p,
+        roleId,
+        existingFields: onPage,
+        placementMode: "manual",
+      });
+    }
     if (resolved.adjusted && vs01DiagnosticsEnabled()) {
       // eslint-disable-next-line no-console
       console.info("[vs01-auto-initials-collision-resolved]", {
@@ -290,7 +408,17 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       autoInitials: true,
     };
     const stamped = stampPrepareSenderFieldOrReject(raw, args.role, roleId, PREPARE_FIELD_ASSIGNMENT_SOURCE);
-    if (!stamped) continue;
+    if (!stamped) {
+      logVs01FieldRejected({
+        type: "initials",
+        page: p,
+        rect: { x: raw.x, y: raw.y, width: raw.width, height: raw.height },
+        source: "auto_initials",
+        reason: "assignment_rejected",
+        partyIndex,
+      });
+      continue;
+    }
     const withSource = {
       ...stamped,
       assignmentSource: PREPARE_FIELD_ASSIGNMENT_SOURCE as typeof PREPARE_FIELD_ASSIGNMENT_SOURCE,
@@ -299,6 +427,21 @@ export function buildPrepareAutoInitialsEveryPage(args: {
     out.push(field);
     placedSoFar.push(field);
     added += 1;
+    logVs01InitialsPageDecision({
+      page: p,
+      roleIdShort: roleId.slice(0, 16),
+      partyIndex,
+      decision: "placed",
+      rect: { x: field.x, y: field.y, width: field.width, height: field.height },
+      collisionCount: layout.collisionCount,
+    });
+    logVs01FieldGenerated({
+      type: field.type,
+      page: field.page,
+      rect: { x: field.x, y: field.y, width: field.width, height: field.height },
+      source: "auto_initials",
+      partyIndex,
+    });
     if (vs01DiagnosticsEnabled()) {
       // eslint-disable-next-line no-console
       console.info("[vs01-auto-initials-final]", {
@@ -348,8 +491,23 @@ export function buildPrepareAutoInitialsForAllRoles(args: {
   skippedSlots: Set<string>;
   existingFields: PlacedSigningField[];
   valueCtxForRole: (role: Vs01PrepareSigningRole) => SigningPlacementValueContext;
+  corpusText?: string | null;
+  pageLayouts?: readonly Vs01PageTextLayout[] | null;
+  documentId?: string | null;
 }): PlacedSigningField[] {
   const manual = args.existingFields.filter((f) => !f.autoInitials);
+  const partyIndices = args.roles.map((r) => r.partyIndex);
+  const initialsPolicy = resolveVs01InitialsPlacementPolicy({
+    pageCount: args.pageCount,
+    partyIndices,
+    corpusText: args.corpusText,
+    pageLayouts: args.pageLayouts,
+    documentId: args.documentId,
+    existingFields: args.existingFields,
+  });
+  if (initialsPolicy.mode === "suppressed_document_wide") {
+    return [];
+  }
   const out: PlacedSigningField[] = [];
   let placedSoFar: PlacedSigningField[] = [...manual];
   for (const role of args.roles) {
@@ -364,11 +522,33 @@ export function buildPrepareAutoInitialsForAllRoles(args: {
       skippedPages,
       existingFields: [...placedSoFar, ...out],
       valueCtx: args.valueCtxForRole(role),
+      corpusText: args.corpusText,
+      pageLayouts: args.pageLayouts,
+      documentId: args.documentId,
+      initialsPolicy,
     });
     out.push(...batch);
     placedSoFar = [...manual, ...out];
   }
   return out;
+}
+
+export function resolvePrepareAutoInitialsPolicyForRoles(args: {
+  roles: Vs01PrepareSigningRole[];
+  pageCount: number;
+  corpusText?: string | null;
+  pageLayouts?: readonly Vs01PageTextLayout[] | null;
+  documentId?: string | null;
+  existingFields?: PlacedSigningField[];
+}): Vs01InitialsPlacementPolicy {
+  return resolveVs01InitialsPlacementPolicy({
+    pageCount: args.pageCount,
+    partyIndices: args.roles.map((r) => r.partyIndex),
+    corpusText: args.corpusText,
+    pageLayouts: args.pageLayouts,
+    documentId: args.documentId,
+    existingFields: args.existingFields,
+  });
 }
 
 export function createPrepareStampedSenderField(args: {

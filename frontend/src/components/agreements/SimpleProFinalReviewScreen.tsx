@@ -242,6 +242,15 @@ export function SimpleProFinalReviewScreen({
           </p>
         )}
       </div>
+      {signersReady ? (
+        <p
+          className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-[11px] leading-relaxed text-stone-700"
+          data-testid="simple-pro-final-review-signing-fields-note"
+        >
+          Signature blocks stay as clean agreement text here. LawDog will place matching e-signature fields on the
+          By lines when you continue to signing.
+        </p>
+      ) : null}
 
       <div className="flex flex-col gap-2">
         <button

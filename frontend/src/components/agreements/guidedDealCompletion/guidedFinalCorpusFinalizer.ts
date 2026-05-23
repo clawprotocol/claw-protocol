@@ -26,12 +26,26 @@ import {
 } from "./canonicalFinalPartyManifest";
 import {
   GUIDED_FINALIZER_HYDRATED_ONLY_SOURCES,
+  normalizeGuidedCorpusHeadingArtifacts,
   normalizePartyNameSpacingInCorpus,
   removeDraftTemplateBannerFromCorpus,
+  stripDuplicatePreWitnessIdentityFragment,
   stripGuidedPlaceholderBracketArtifacts,
 } from "./guidedFinalReviewToSigning";
+import { corpusSignatureBlocksHaveRequiredByLines } from "./signatureRegion";
 import { mergeAllGuidedAnswersIntoCorpus } from "./guidedSectionAwareMerge";
 import { prepareCanonicalWorkingDraftForFinalization } from "./canonicalWorkingAgreementDraft";
+import {
+  buildCanonicalGuidedAnswerManifest,
+  describeCanonicalManifestMissingItem,
+  validateCorpusAgainstCanonicalManifest,
+} from "./guidedCanonicalAnswerManifest";
+import {
+  logGuidedCorpusStructureBlocked,
+  logGuidedCorpusStructureNormalization,
+  normalizeGuidedProCorpusStructure,
+  validateNormalizedCorpusStructure,
+} from "./guidedCanonicalCorpusNormalizer";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
 
@@ -70,6 +84,7 @@ export type GuidedFinalCorpusDiagnostics = {
   finalHash: string;
   validationMissing: string[];
   validationContradictions: string[];
+  structureDefects: string[];
 };
 
 export type FinalizeGuidedProAgreementCorpusArgs = {
@@ -121,28 +136,28 @@ export type FinalGuidedProCorpusValidation = {
   contradictions: string[];
 };
 
-const VALIDATION_MISSING_LABELS: Record<string, string> = {
-  payment_timing: "Net 30 payment terms missing from Fees and Payment",
-  phase_payment_allocation: "Build-heavy phase allocation missing from commercial terms",
-  saas_sla: "99.9% uptime / SLA clause missing from Support section",
-  ip_ownership: "Client ownership of deliverables missing from Ownership section",
-  provider_preexisting_carveout: "Provider pre-existing IP carveout missing",
-  termination_notice: "30-day termination notice missing from Term section",
-};
-
-export function describeGuidedValidationMissingItems(missing: readonly string[]): string[] {
-  return missing.map((id) => VALIDATION_MISSING_LABELS[id] ?? `Missing guided answer evidence: ${id}`);
+export function describeGuidedValidationMissingItems(
+  missing: readonly string[],
+  guidedSession?: GuidedCompletionSession | null,
+): string[] {
+  const manifest = buildCanonicalGuidedAnswerManifest(guidedSession);
+  return missing.map((id) => {
+    const entry = manifest.entries.find((e) => e.variableId === id);
+    if (entry) return describeCanonicalManifestMissingItem(entry);
+    if (id === "provider_preexisting_carveout") {
+      return "Provider pre-existing IP carveout missing from Ownership section";
+    }
+    return `Missing guided answer evidence: ${id}`;
+  });
 }
 
-function selectedAnswerRequires(
-  session: GuidedCompletionSession | null | undefined,
-  idPattern: RegExp,
-  answerPattern: RegExp,
-): boolean {
+function sessionRequiresIpOwnershipCheck(session: GuidedCompletionSession | null | undefined): boolean {
   if (!session) return false;
   return Object.entries(session.answered).some(([id, answer]) => {
     const a = (answer || "").trim();
-    return Boolean(a) && (idPattern.test(id) || answerPattern.test(a));
+    if (!a) return false;
+    if (!/^(?:ip_ownership|ip_allocation|ip_ownership_contradiction)$/i.test(id)) return false;
+    return /company|client/i.test(a) && /own|deliverable/i.test(a);
   });
 }
 
@@ -151,34 +166,19 @@ export function validateFinalGuidedProCorpusBeforeFreeze(args: {
   guidedSession: GuidedCompletionSession | null | undefined;
 }): FinalGuidedProCorpusValidation {
   const body = (args.body || "").replace(/\s+/g, " ");
-  const missing: string[] = [];
   const contradictions: string[] = [];
-  const needsPayment = selectedAnswerRequires(args.guidedSession, /payment|invoice|fee/i, /\bnet\s*30\b|invoice|30\s*days?/i);
-  const needsPhase = selectedAnswerRequires(args.guidedSession, /phase|allocation|schedule/i, /build-heavy|phase|split|third/i);
-  const needsSla = selectedAnswerRequires(args.guidedSession, /sla|uptime|support/i, /99\.9|uptime|availability/i);
-  const needsIp = selectedAnswerRequires(args.guidedSession, /ip|ownership|deliverable|work/i, /company|client|own|deliverable/i);
-  const needsTermination = selectedAnswerRequires(args.guidedSession, /renewal|termination|notice/i, /30\s*days?|notice|termination/i);
+  const manifest = buildCanonicalGuidedAnswerManifest(args.guidedSession);
+  const validation = validateCorpusAgainstCanonicalManifest(body, manifest);
+  const missing = [...validation.missing];
 
-  if (needsPayment && !/\bNet\s*30\b|invoice(?:s)?\s+(?:are\s+)?(?:due|payable).{0,60}(?:30|thirty)\s+days?/i.test(body)) {
-    missing.push("payment_timing");
-  }
-  if (needsPhase && !/\bbuild-heavy\b|build.{0,40}(?:rollout|launch|support)|one[-\s]?third|thirds|phase allocation/i.test(body)) {
-    missing.push("phase_payment_allocation");
-  }
-  if (needsSla && !/(?:99\.9\s*%.{0,80}(?:uptime|availability)|(?:uptime|availability).{0,80}99\.9\s*%)/i.test(body)) {
-    missing.push("saas_sla");
-  }
+  const needsIp = sessionRequiresIpOwnershipCheck(args.guidedSession);
   if (
     needsIp &&
-    !/(?:(?:Client|Company).{0,80}owns?.{0,80}(?:project\s+)?(?:deliverables|work product)|(?:deliverables|work product).{0,80}(?:assigned to|owned by).{0,40}(?:Client|Company))/i.test(body)
+    !/\b(?:pre-existing|background)\s+(?:tools|materials|technology|ip|intellectual property|know-how)/i.test(body)
   ) {
-    missing.push("ip_ownership");
-  }
-  if (needsIp && !/\b(?:pre-existing|background)\s+(?:tools|materials|technology|ip|intellectual property|know-how)/i.test(body)) {
-    missing.push("provider_preexisting_carveout");
-  }
-  if (needsTermination && !/\b(?:30|thirty)\s+days?.{0,30}(?:written\s+)?notice\b/i.test(body)) {
-    missing.push("termination_notice");
+    if (!missing.includes("provider_preexisting_carveout")) {
+      missing.push("provider_preexisting_carveout");
+    }
   }
 
   if (needsIp && /\b(?:Service Provider|Provider)\s+owns?\s+(?:all\s+)?(?:project\s+)?(?:deliverables|work product)\b/i.test(body)) {
@@ -330,6 +330,7 @@ export function finalizeGuidedProAgreementCorpus(
     finalHash: "",
     validationMissing: [],
     validationContradictions: [],
+    structureDefects: [],
   };
 
   const workingSeed = args.candidates
@@ -414,13 +415,21 @@ export function finalizeGuidedProAgreementCorpus(
   body = identityDirect.body;
   diagnostics.repairs.push(...identityDirect.repairs);
 
-  if (args.signerManifest && args.signerIdentities.length > 0 && diagnostics.signaturePolishCount === 0) {
-    const rebuilt = rebuildSignatureBlocksWithPartyIdentities(body, args.signerIdentities);
-    if (!shouldRejectSignerIdentityCorpusShrink(body.length, rebuilt.text.length)) {
-      body = rebuilt.text;
-      diagnostics.signaturePolishCount += rebuilt.count;
-      diagnostics.signatureRebuilt = rebuilt.count > 0;
-      if (rebuilt.count > 0) diagnostics.repairs.push("signature_blocks_rebuilt");
+  if (args.signerIdentities.length >= 2) {
+    const lacksByAnchors = !corpusSignatureBlocksHaveRequiredByLines(body, args.signerIdentities.length);
+    if (
+      lacksByAnchors ||
+      (args.signerManifest && diagnostics.signaturePolishCount === 0)
+    ) {
+      const rebuilt = rebuildSignatureBlocksWithPartyIdentities(body, args.signerIdentities);
+      if (!shouldRejectSignerIdentityCorpusShrink(body.length, rebuilt.text.length)) {
+        body = rebuilt.text;
+        diagnostics.signaturePolishCount += rebuilt.count;
+        diagnostics.signatureRebuilt = rebuilt.count > 0;
+        if (rebuilt.count > 0) {
+          diagnostics.repairs.push(lacksByAnchors ? "signature:by_lines_added" : "signature_blocks_rebuilt");
+        }
+      }
     }
   }
 
@@ -455,6 +464,9 @@ export function finalizeGuidedProAgreementCorpus(
     diagnostics.validationContradictions = repairedValidation.contradictions;
   }
 
+  const headingArtifacts = normalizeGuidedCorpusHeadingArtifacts(body);
+  body = headingArtifacts.text;
+  diagnostics.repairs.push(...headingArtifacts.repairs);
   body = normalizePartyNameSpacingInCorpus(body);
   diagnostics.repairs.push("spacing:party_names");
   const banner = removeDraftTemplateBannerFromCorpus(body);
@@ -463,7 +475,42 @@ export function finalizeGuidedProAgreementCorpus(
   const stripped = stripGuidedPlaceholderBracketArtifacts(body);
   body = stripped.text;
   diagnostics.repairs.push(...stripped.repairs);
+  const preWitnessIdentity = stripDuplicatePreWitnessIdentityFragment(body, args.signerIdentities);
+  body = preWitnessIdentity.text;
+  diagnostics.repairs.push(...preWitnessIdentity.repairs);
+  const structureNormalized = normalizeGuidedProCorpusStructure(body);
+  body = structureNormalized.text;
+  diagnostics.repairs.push(...structureNormalized.repairs.map((r) => `structure:${r}`));
+  logGuidedCorpusStructureNormalization({
+    repairs: structureNormalized.repairs.length,
+    bodyLen: body.length,
+  });
+  let structureCheck = validateNormalizedCorpusStructure(body);
+  if (!structureCheck.ok) {
+    const retry = normalizeGuidedProCorpusStructure(body);
+    body = retry.text;
+    diagnostics.repairs.push(...retry.repairs.map((r) => `structure_retry:${r}`));
+    structureCheck = validateNormalizedCorpusStructure(body);
+  }
+  diagnostics.structureDefects = structureCheck.defects;
+  if (!structureCheck.ok) {
+    diagnostics.validationContradictions.push(
+      ...structureCheck.defects.map((d) => `corpus_structure:${d}`),
+    );
+    logGuidedCorpusStructureBlocked({ defects: structureCheck.defects, bodyLen: body.length });
+  }
   body = normalizePartyNameSpacingInCorpus(body);
+  if (
+    args.signerIdentities.length >= 2 &&
+    !corpusSignatureBlocksHaveRequiredByLines(body, args.signerIdentities.length)
+  ) {
+    const rebuilt = rebuildSignatureBlocksWithPartyIdentities(body, args.signerIdentities);
+    if (!shouldRejectSignerIdentityCorpusShrink(body.length, rebuilt.text.length)) {
+      body = rebuilt.text;
+      diagnostics.signatureRebuilt = true;
+      diagnostics.repairs.push("signature:final_by_line_guard");
+    }
+  }
 
   const fatalScan =
     args.signerIdentities.length > 0 || Boolean(args.signerManifest)

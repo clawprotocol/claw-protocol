@@ -162,7 +162,10 @@ describe("guided Pro final review test41 regression", () => {
     });
     expect(validation.ok).toBe(false);
     expect(validation.missing.length).toBeGreaterThan(0);
-    const detail = describeGuidedFinalizeValidationBlock({ validationMissing: validation.missing });
+    const detail = describeGuidedFinalizeValidationBlock({
+      validationMissing: validation.missing,
+      guidedSession: session(),
+    });
     expect(detail).toBeTruthy();
     expect(detail).toMatch(/99\.9%|SLA|uptime/i);
   });
@@ -194,8 +197,9 @@ describe("guided Pro final review test41 regression", () => {
     expect(intake).toContain('void continueGuidedSignerSetupToFinalReview("sticky_cta")');
     expect(intake).toContain('setCreateFlowPhase("finalizing_final_review")');
     const modalIdx = intake.indexOf("onRetryFinalReview");
-    const modalBlock = intake.slice(modalIdx, modalIdx + 400);
+    const modalBlock = intake.slice(modalIdx, modalIdx + 900);
     expect(modalBlock).toContain("continueGuidedSignerSetupToFinalReview");
+    expect(modalBlock).toContain("logGuidedFinalReviewRetryStart");
     expect(modalBlock).not.toContain("scrollGuidedSignerSetupIntoView");
   });
 

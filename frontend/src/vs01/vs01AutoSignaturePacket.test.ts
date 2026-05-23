@@ -84,7 +84,8 @@ Date: _________________________
     expect(result.fields.every((f) => f.type === "signature")).toBe(true);
     for (const f of result.fields) {
       expect(f.y + f.height).toBeLessThanOrEqual(0.9);
-      expect(f.x).toBeCloseTo(0.118, 2);
+      expect(f.x).toBeGreaterThan(0.05);
+      expect(f.width).toBeGreaterThan(0.15);
     }
   });
 

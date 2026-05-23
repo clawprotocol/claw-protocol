@@ -725,8 +725,16 @@ import {
   describeGuidedFinalizeValidationBlock,
   resolveGuidedFinalizeModalBlockedPresentation,
   isGuidedSignerSetupContinueToFinalReviewReason,
+  logGuidedFinalReviewRetryStart,
+  logGuidedFinalReviewRetryAnswers,
+  logGuidedFinalReviewRetrySuccess,
+  logGuidedFinalReviewRetryFailed,
   type GuidedFinalReviewCtaRoute,
 } from "./guidedDealCompletion/guidedSignerSetupToFinalReview";
+import {
+  buildCanonicalGuidedAnswerManifest,
+  summarizeCanonicalManifestForLog,
+} from "./guidedDealCompletion/guidedCanonicalAnswerManifest";
 import {
   logGuidedFinalReviewApplyReadiness,
   logGuidedFinalReviewApplyStatusRecovered,
@@ -2668,6 +2676,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [guidedFinalReviewUnlockedAt, setGuidedFinalReviewUnlockedAt] = useState<number | null>(null);
   const guidedFinalReviewExplicitlyUnlockedRef = useRef(false);
   const guidedFinalReviewNavigationInFlightRef = useRef(false);
+  const guidedFinalReviewRetryPendingRef = useRef(false);
   const guidedFinalReviewTransitionPromiseRef = useRef<Promise<void> | null>(null);
   const guidedSignatureTrackInFlightRef = useRef(false);
   const finalReviewSendPathChosenRef = useRef(false);
@@ -15217,6 +15226,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           : describeGuidedFinalizeValidationBlock({
               validationMissing: finalCorpus.diagnostics.validationMissing,
               validationContradictions: finalCorpus.diagnostics.validationContradictions,
+              guidedSession: guidedCompletionSessionRef.current ?? guidedCompletionSession,
             }) ?? userMessageForGuidedSignerSetupContinueBlock(blockReason);
       const blockedPresentation = resolveGuidedFinalizeModalBlockedPresentation({
         reason: blockReason,
@@ -15240,6 +15250,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reason: blockReason,
         phase: createFlowPhase,
       });
+      if (guidedFinalReviewRetryPendingRef.current) {
+        logGuidedFinalReviewRetryFailed({
+          reason: blockReason,
+          validationMissing: finalCorpus.diagnostics.validationMissing,
+          validationContradictions: finalCorpus.diagnostics.validationContradictions,
+          unresolvedPlaceholders: finalCorpus.unresolvedPlaceholders,
+          selectedSource: finalCorpus.diagnostics.selectedSource,
+        });
+        guidedFinalReviewRetryPendingRef.current = false;
+      }
       return false;
     }
     if (draft) {
@@ -15331,6 +15351,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hash: finalCorpus.diagnostics.finalHash,
         len: finalCorpus.body.length,
       });
+      if (guidedFinalReviewRetryPendingRef.current) {
+        logGuidedFinalReviewRetrySuccess({
+          bodyLen: finalCorpus.body.length,
+          selectedSource: finalCorpus.diagnostics.selectedSource,
+          hash: finalCorpus.diagnostics.finalHash,
+        });
+        guidedFinalReviewRetryPendingRef.current = false;
+      }
       logGuidedFinalizeModalStage("ready_to_sign");
       setGuidedFinalizeModalStage("ready_to_sign");
       window.setTimeout(() => {
@@ -18978,6 +19006,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   }
                 }}
                 onRetryFinalReview={() => {
+                  guidedFinalReviewRetryPendingRef.current = true;
+                  const retrySession = guidedCompletionSessionRef.current ?? guidedCompletionSession;
+                  const retryManifest = buildCanonicalGuidedAnswerManifest(retrySession);
+                  logGuidedFinalReviewRetryStart({
+                    route: "modal_cta",
+                    answeredCount: retryManifest.answeredVariableIds.length,
+                  });
+                  logGuidedFinalReviewRetryAnswers(summarizeCanonicalManifestForLog(retryManifest));
                   setGuidedFinalizeModalStage(null);
                   setGuidedFinalizeModalBlockedMessage(null);
                   setGuidedFinalizeModalBlockedPresentation(null);

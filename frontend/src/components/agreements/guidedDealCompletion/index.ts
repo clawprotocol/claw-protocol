@@ -145,7 +145,16 @@ export {
   logGuidedFinalCorpusBlockedPlaceholderIdentityMismatch,
   logGuidedFinalCorpusFinalized,
   GUIDED_FINAL_CORPUS_MIN_LEN,
+  validateFinalGuidedProCorpusBeforeFreeze,
+  describeGuidedValidationMissingItems,
 } from "./guidedFinalCorpusFinalizer";
+export {
+  buildCanonicalGuidedAnswerManifest,
+  validateCorpusAgainstCanonicalManifest,
+  summarizeCanonicalManifestForLog,
+  type CanonicalGuidedAnswerEntry,
+  type CanonicalGuidedAnswerManifest,
+} from "./guidedCanonicalAnswerManifest";
 export {
   logGuidedFinalReviewAuthoritativeBody,
   logGuidedFinalReviewRender,

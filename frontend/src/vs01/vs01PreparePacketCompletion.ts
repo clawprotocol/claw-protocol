@@ -21,6 +21,9 @@ export const PREPARE_PACKET_BRIDGE_LEAD =
 export const PREPARE_PACKET_BRIDGE_PRIMARY_CTA = "Continue to signing links";
 export const PREPARE_PACKET_BRIDGE_SECONDARY_CTA = "Edit field placement";
 export const PREPARE_PACKET_INITIALS_TOGGLE_LABEL = "Add initials to each page";
+export const PREPARE_PACKET_INITIALS_SUPPRESSED_HINT =
+  "Initials could not be placed safely on every eligible page — only signature fields are required.";
+
 export const PREPARE_PACKET_INITIALS_TOGGLE_HINT =
   "Optional. Signers can still complete the agreement without changing placement.";
 

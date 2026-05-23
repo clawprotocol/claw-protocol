@@ -19,6 +19,10 @@ import {
   RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
 } from "../compliance/disclosureCopy";
 import { completeSignSession, createSignSession, fetchDocumentContent } from "./vs01Api";
+import { clearVs01DocumentPageLayouts, setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
+import { buildVs01PlacementContext } from "./vs01FieldGeometry";
+import { extractPdfPageLayoutsFromBlob } from "./vs01PdfPageLayout";
+import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 import { firstPlausibleEmailInSignerRef, isPlausibleEmail } from "./detailsStepValidation";
 import type {
@@ -37,6 +41,7 @@ import {
   buildPrepareAutoInitialsForAllRoles,
   createPrepareStampedSenderField,
   prepareAutoInitialsSkipKey,
+  resolvePrepareAutoInitialsPolicyForRoles,
 } from "./vs01PrepareFieldPlacement";
 import {
   PrepareSigningFieldBody,
@@ -53,6 +58,7 @@ import {
   prepareTemplateDisplayForField,
 } from "./vs01PrepareTemplateField";
 import { isKnownPrepareSignerName, resolvePreparePartyEntityLabel } from "./vs01PrepareSignerDisplay";
+import { LawDogSigningField } from "./LawDogSigningField";
 import { useVs01PrepareRoleAuthorityOptional } from "./Vs01PrepareRoleAuthorityContext";
 import {
   PREPARE_PACKET_FIELD_TOOLS,
@@ -85,6 +91,7 @@ import {
   PREPARE_PACKET_BRIDGE_SECONDARY_CTA,
   PREPARE_PACKET_INITIALS_TOGGLE_LABEL,
   PREPARE_PACKET_INITIALS_TOGGLE_HINT,
+  PREPARE_PACKET_INITIALS_SUPPRESSED_HINT,
 } from "./vs01PreparePacketCompletion";
 import {
   logVs01ActiveRoleAfterPlace,
@@ -101,6 +108,9 @@ import {
 import {
   autoSignaturePacketStatusMessage,
   buildAutoSignaturePacketForAllRoles,
+  logVs01PersistedGeometryHash,
+  removeStaleSignatureOnlyAutoplaceFields,
+  resolveAutoSignaturePacketMode,
 } from "./vs01AutoSignaturePacket";
 import { Vs01PrepPreparedBanner } from "./Vs01PrepPreparedBanner";
 import { logUxTrustEvent } from "../lib/uxTrustAssertions";
@@ -320,6 +330,7 @@ export function StepPrepareSignature({
 
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
+  const [pageLayouts, setPageLayouts] = useState<Vs01PageTextLayout[] | null>(null);
   const [pdfDocReady, setPdfDocReady] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -329,7 +340,7 @@ export function StepPrepareSignature({
   const autoSignatureSeededRef = useRef(false);
   const autoPlacementComplete = Boolean(autoPrepBannerMessage);
   const showManualPlacementUi =
-    !agreementBridgePlacementCopy || manualPlacementOverride || !autoPlacementComplete;
+    !agreementBridgePlacementCopy || manualPlacementOverride;
 
   const fieldsRef = useRef(fields);
   fieldsRef.current = fields;
@@ -495,11 +506,16 @@ export function StepPrepareSignature({
   }, [typedName, initialsTouched]);
 
   useEffect(() => {
+    clearVs01DocumentPageLayouts();
     setSelectedFieldId(null);
     setCurrentPage(1);
     setNumPages(0);
+    setPageLayouts(null);
     setPdfDocReady(false);
     setPreviewError(null);
+    setAutoPrepBannerMessage(null);
+    setManualPlacementOverride(false);
+    autoSignatureSeededRef.current = false;
     setAutoInitialsEveryPage(false);
     setSkippedAutoInitialsSlots(new Set());
     setArmedTool(null);
@@ -524,6 +540,15 @@ export function StepPrepareSignature({
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setPdfUrl(objectUrl);
+        try {
+          const layouts = await extractPdfPageLayoutsFromBlob(blob);
+          if (!cancelled) {
+            setPageLayouts(layouts);
+            setVs01DocumentPageLayouts(documentId.trim(), layouts);
+          }
+        } catch {
+          if (!cancelled) setPageLayouts(null);
+        }
       } catch (e) {
         if (!cancelled) {
           setPdfUrl(null);
@@ -720,6 +745,9 @@ export function StepPrepareSignature({
           existingFields: prev,
           valueCtxForRole: (role) =>
             buildPrepareTemplateValueContext(role, ownerValueCtx),
+          corpusText: prepareCorpusText,
+          pageLayouts,
+          documentId,
         });
         return [...manual, ...auto];
       }
@@ -738,6 +766,9 @@ export function StepPrepareSignature({
     agreementBridgePlacementCopy,
     prepareSignerRoles,
     signerEmailForPlacement,
+    prepareCorpusText,
+    pageLayouts,
+    documentId,
   ]);
 
   /** Keep auto-initials text in sync when the user edits initials/name, without rebuilding positions. */
@@ -773,9 +804,71 @@ export function StepPrepareSignature({
     prepareSignerRoles,
   ]);
 
+  const witnessPageIndex = useMemo(() => {
+    if (numPages <= 0) return 0;
+    if (!prepareCorpusText && !pageLayouts?.length) return numPages - 1;
+    return (
+      buildVs01PlacementContext({
+        corpusText: prepareCorpusText,
+        pageCount: numPages,
+        pageLayouts,
+        documentId,
+        roleCount: prepareSignerRoles?.length ?? 2,
+      }).witnessPageIndex ?? numPages - 1
+    );
+  }, [numPages, prepareCorpusText, pageLayouts, documentId, prepareSignerRoles?.length]);
+
+  const initialsPlacementPolicy = useMemo(() => {
+    if (!autoInitialsEveryPage || numPages <= 0 || !prepareSignerRoles?.length) return null;
+    return resolvePrepareAutoInitialsPolicyForRoles({
+      roles: prepareSignerRoles,
+      pageCount: numPages,
+      corpusText: prepareCorpusText,
+      pageLayouts,
+      documentId,
+      existingFields: fields,
+    });
+  }, [
+    autoInitialsEveryPage,
+    numPages,
+    prepareSignerRoles,
+    prepareCorpusText,
+    pageLayouts,
+    documentId,
+    fields,
+  ]);
+
+  const autoPacketMode = useMemo(() => {
+    if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length || numPages <= 0) {
+      return "full_stack" as const;
+    }
+    return resolveAutoSignaturePacketMode({
+      corpusText: prepareCorpusText,
+      pageLayouts,
+      lastPage: witnessPageIndex,
+      roleCount: prepareSignerRoles.length,
+    });
+  }, [
+    agreementBridgePlacementCopy,
+    prepareSignerRoles,
+    numPages,
+    prepareCorpusText,
+    pageLayouts,
+    witnessPageIndex,
+  ]);
+
+  useEffect(() => {
+    if (autoPacketMode !== "signature_only") return;
+    setFields((prev) => {
+      const next = removeStaleSignatureOnlyAutoplaceFields(prev);
+      return next.length === prev.length ? prev : next;
+    });
+  }, [autoPacketMode, setFields]);
+
   /** Default: auto-place signature block on last page when bridge opens with no manual fields yet. */
   useEffect(() => {
     if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length || numPages <= 0) return;
+    if (!prepareCorpusText && !pageLayouts?.length) return;
     if (autoSignatureSeededRef.current) return;
     const hasSignature = fields.some((f) => f.type === "signature" && !f.autoInitials);
     if (hasSignature) {
@@ -793,16 +886,23 @@ export function StepPrepareSignature({
       existingFields: fields,
       ownerValueCtx,
       corpusText: prepareCorpusText,
+      pageLayouts,
+      documentId,
     });
     if (result.placedCount > 0) {
       autoSignatureSeededRef.current = true;
       const aid = (prepareAgreementId ?? "").trim();
-      if (aid) markAgreementFieldsPlacedCount(aid, result.placedCount);
+      if (aid) markAgreementFieldsPlacedCount(aid, result.requiredSignatureCount);
+      const merged = [...fields, ...result.fields];
+      logVs01PersistedGeometryHash("prepare_auto_packet", merged);
       setFields((prev) => [...prev, ...result.fields]);
       setAutoPrepBannerMessage(autoSignaturePacketStatusMessage(result));
       logUxTrustEvent("guided_causality", {
         surface: "vs01_auto_signature_packet",
         placedCount: result.placedCount,
+        requiredSignatureCount: result.requiredSignatureCount,
+        optionalFieldCount: result.optionalFieldCount,
+        mode: result.mode,
         confidence: result.confidence,
       });
     } else {
@@ -817,6 +917,8 @@ export function StepPrepareSignature({
     signerEmailForPlacement,
     setFields,
     prepareCorpusText,
+    pageLayouts,
+    documentId,
   ]);
 
   const onPagePlacementClick = useCallback(
@@ -1423,7 +1525,7 @@ export function StepPrepareSignature({
           <Vs01PrepPreparedBanner
             agreementTitle={prepareSignerRoles[0]?.entityName ?? "Your agreement"}
             signerCount={prepareSignerRoles.length}
-            fieldCount={fields.filter((f) => !f.autoInitials).length}
+            fieldCount={fields.filter((f) => f.type === "signature" && !f.autoInitials).length}
             autoPrepared={Boolean(autoPrepBannerMessage)}
             message={autoPrepBannerMessage}
           />
@@ -1587,8 +1689,15 @@ export function StepPrepareSignature({
                                       const isActiveRoleField =
                                         !agreementBridgePlacementCopy || fieldMatchesActive(field);
                                       return (
-                                        <div
+                                        <LawDogSigningField
                                           key={field.id}
+                                          fieldType={field.type}
+                                          signerName={fieldRole?.signerName ?? fieldRole?.signerEmail ?? ""}
+                                          signerRole={fieldRole?.kind ?? field.assignedSignerRoleKind ?? ""}
+                                          locked={!isActiveRoleField}
+                                          required={field.type === "signature"}
+                                          active={isSel}
+                                          value={typeof field.value === "string" ? field.value : ""}
                                           data-field-id={field.id}
                                           {...(fieldDisplay
                                             ? prepareFieldDataAttributes(field, fieldRole, fieldDisplay)
@@ -1771,7 +1880,7 @@ export function StepPrepareSignature({
                                               onPointerDown={(e) => onResizeHandlePointerDown(e, field)}
                                             />
                                           ) : null}
-                                        </div>
+                                        </LawDogSigningField>
                                       );
                                     })}
                                   </div>
@@ -2051,7 +2160,11 @@ export function StepPrepareSignature({
             </span>
           </label>
           {agreementBridgePlacementCopy ? (
-            <p className="vs01-prepare-initials-hint">{PREPARE_PACKET_INITIALS_TOGGLE_HINT}</p>
+            <p className="vs01-prepare-initials-hint">
+              {initialsPlacementPolicy?.mode === "suppressed_document_wide"
+                ? PREPARE_PACKET_INITIALS_SUPPRESSED_HINT
+                : PREPARE_PACKET_INITIALS_TOGGLE_HINT}
+            </p>
           ) : null}
 
           {agreementBridgePlacementCopy ? (

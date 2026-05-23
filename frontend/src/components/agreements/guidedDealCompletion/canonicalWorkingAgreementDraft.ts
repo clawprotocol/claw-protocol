@@ -13,6 +13,7 @@ import {
   stripMisplacedGuidedClausesBeforeSignature,
   normalizeGuidedCorpusSectionFormatting,
 } from "./guidedSectionAwareMerge";
+import { normalizeGuidedProCorpusStructure } from "./guidedCanonicalCorpusNormalizer";
 import { scanFatalPartyPlaceholdersAfterManifestApply, type CanonicalFinalPartyManifest } from "./canonicalFinalPartyManifest";
 
 export const CANONICAL_WORKING_DRAFT_SOURCE = "canonical_working_draft" as const;
@@ -71,6 +72,9 @@ export function prepareCanonicalWorkingDraftForFinalization(args: {
   const merged = mergeAllGuidedAnswersIntoCorpus(out, args.guidedSession);
   out = merged.body;
   repairs.push(...merged.repairs);
+  const structured = normalizeGuidedProCorpusStructure(out);
+  out = structured.text;
+  repairs.push(...structured.repairs.map((r) => `structure:${r}`));
   logCanonicalWorkingDraftNormalization({ repairs: repairs.length, bodyLen: out.length });
   return { body: out, repairs };
 }

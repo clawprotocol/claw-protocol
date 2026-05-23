@@ -686,9 +686,6 @@ export function mergeRecipientManifestFieldsForSignerRole(args: {
   senderPlacedFields: PlacedSigningField[];
 }): Vs01RecipientPlacedField[] {
   const base = args.recipientPlacedFields.filter((f) => f.counterpartyId === args.counterpartyId);
-  if (args.signerRoleId === args.ownerRole.roleId) {
-    return base;
-  }
   const seen = new Set(base.map((f) => f.id));
   const out = [...base];
   for (const sf of args.senderPlacedFields) {
@@ -697,6 +694,45 @@ export function mergeRecipientManifestFieldsForSignerRole(args: {
     if (!conv || seen.has(conv.id)) continue;
     seen.add(conv.id);
     out.push(conv);
+  }
+  return out;
+}
+
+/** Counterparty id stamped on sender→recipient conversion for a prepare role. */
+export function recipientCounterpartyIdForPrepareRole(role: Vs01PrepareSigningRole): string {
+  return (role.vs01CounterpartyId ?? role.partyId).trim();
+}
+
+/**
+ * All packet fields visible on recipient signing (active signer + locked counterparty overlays).
+ * Merges sender-layer prep fields into recipient execution shape per role.
+ */
+export function buildRecipientSigningDocumentFields(args: {
+  ownerRole: Vs01PrepareSigningRole;
+  roles: Vs01PrepareSigningRole[];
+  recipientPlacedFields: Vs01RecipientPlacedField[];
+  senderPlacedFields: PlacedSigningField[];
+}): Vs01RecipientPlacedField[] {
+  const seen = new Set<string>();
+  const out: Vs01RecipientPlacedField[] = [];
+  const add = (f: Vs01RecipientPlacedField) => {
+    if (seen.has(f.id)) return;
+    seen.add(f.id);
+    out.push(f);
+  };
+  for (const f of args.recipientPlacedFields) add(f);
+  for (const role of args.roles) {
+    const cpId = recipientCounterpartyIdForPrepareRole(role);
+    for (const f of mergeRecipientManifestFieldsForSignerRole({
+      ownerRole: args.ownerRole,
+      roles: args.roles,
+      counterpartyId: cpId,
+      signerRoleId: role.roleId,
+      recipientPlacedFields: args.recipientPlacedFields,
+      senderPlacedFields: args.senderPlacedFields,
+    })) {
+      add(f);
+    }
   }
   return out;
 }

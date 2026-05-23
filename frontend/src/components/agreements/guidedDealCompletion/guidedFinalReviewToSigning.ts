@@ -11,8 +11,10 @@ import { GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN, type CanonicalSignerManifest } fr
 import { fingerprintAgreementBody } from "./guidedSigningPacketVersion";
 import {
   rebuildSignatureBlocksWithPartyIdentities,
+  shouldRejectSignerIdentityCorpusShrink,
   type CanonicalPartyIdentity,
 } from "./signerPartyIdentity";
+import { corpusSignatureBlocksHaveRequiredByLines } from "./signatureRegion";
 
 export type ResolveGuidedSigningAuthoritativeArgs = {
   snapshot?: string;
@@ -192,7 +194,35 @@ export function normalizePartyNameSpacingInCorpus(text: string): string {
   return text
     .replace(/\bbetween(?=[A-Za-z\[])/g, "between ")
     .replace(/\band(?=[A-Za-z\[])/g, "and ")
+    .replace(/([A-Za-z0-9\])])(\("(Client|Service Provider))/gi, '$1 $2')
+    .replace(/([A-Za-z0-9\])])(\(")/g, "$1 $2")
     .replace(/ {2,}/g, " ");
+}
+
+/** Strip guided-merge markdown heading artifacts and normalize party parentheticals. */
+export function normalizeGuidedCorpusHeadingArtifacts(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = text
+    .replace(/\*\*(\d+(?:\.\d+)*\.)\s+/g, (_, n) => {
+      repairs.push("heading_leading_markdown");
+      return `${n} `;
+    })
+    .replace(/^(\s*)\d+\.\d+\.\s*(\d+)\.\s*/gm, (_, indent, n) => {
+      repairs.push("malformed_section_number");
+      return `${indent}${n}. `;
+    })
+    .replace(/^(\s*\d+\.)\s*(?=[A-Z])/gm, (_, n) => {
+      repairs.push("section_heading_spacing");
+      return `${n} `;
+    })
+    .replace(/(\d+(?:\.\d+)*\.)\s+([^*\n]+)\*\*/g, (_, n, title) => {
+      repairs.push("heading_trailing_markdown");
+      return `${n} ${String(title).trim()}`;
+    })
+    .replace(/\n{3,}/g, "\n\n");
+  out = normalizePartyNameSpacingInCorpus(out);
+  if (repairs.length > 0) repairs.push("heading_artifacts");
+  return { text: out, repairs };
 }
 
 export function dedupeGuidedAnswerClauses(text: string): { text: string; repairs: string[] } {
@@ -220,6 +250,71 @@ export function dedupeGuidedAnswerClauses(text: string): { text: string; repairs
   return { text: out.join("\n\n").replace(/\n{3,}/g, "\n\n"), repairs };
 }
 
+function canonicalIdentityNeedles(identities: readonly CanonicalPartyIdentity[]): Set<string> {
+  const needles = new Set<string>();
+  for (const id of identities) {
+    for (const raw of [id.partyDisplayName, id.representativeName ?? "", id.title ?? ""]) {
+      const norm = normLoosePartyName(raw);
+      if (norm) needles.add(norm);
+    }
+  }
+  return needles;
+}
+
+function looksLikeSignatureIdentityFragmentLine(line: string, needles: Set<string>): boolean {
+  const t = line.trim();
+  if (!t) return true;
+  if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*/i.test(t)) return true;
+  if (/^(?:Name|Title|Date|Email)\s*:/i.test(t)) return true;
+  if (/^By\s*:/i.test(t)) return true;
+  if (/^_{4,}$/.test(t)) return true;
+  const withoutLabel = t.replace(/^(?:Name|Title|Date|Email)\s*:\s*/i, "");
+  const norm = normLoosePartyName(withoutLabel);
+  return needles.has(norm);
+}
+
+/**
+ * Some model outputs place a partial identity/signature fragment immediately before
+ * the canonical witness block. Remove only that terminal fragment so VS01 anchors
+ * see a single execution block and the PDF has clean whitespace before it.
+ */
+export function stripDuplicatePreWitnessIdentityFragment(
+  text: string,
+  identities: readonly CanonicalPartyIdentity[],
+): { text: string; repairs: string[] } {
+  const witness = text.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witness <= 0 || identities.length < 1) return { text, repairs: [] };
+  const before = text.slice(0, witness).trimEnd();
+  const after = text.slice(witness).trimStart();
+  const lines = before.replace(/\r\n/g, "\n").split("\n");
+  const needles = canonicalIdentityNeedles(identities);
+  let start = lines.length;
+  let meaningful = 0;
+  let hasSigLabel = false;
+
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+    if (!looksLikeSignatureIdentityFragmentLine(line, needles)) break;
+    start = i;
+    if (trimmed) {
+      meaningful += 1;
+      if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+|Name|Title|Date|Email)\s*:?/i.test(trimmed)) {
+        hasSigLabel = true;
+      }
+    }
+  }
+
+  if (meaningful < 3 || !hasSigLabel || start >= lines.length) {
+    return { text, repairs: [] };
+  }
+  const kept = lines.slice(0, start).join("\n").trimEnd();
+  return {
+    text: `${kept}\n\n${after}`.replace(/\n{3,}/g, "\n\n"),
+    repairs: ["signature:pre_witness_identity_fragment_removed"],
+  };
+}
+
 /** Final corpus cleanup before signing: spacing, placeholders, dedupe, signature block. */
 export function prepareGuidedSigningCorpusCleanup(args: {
   body: string;
@@ -231,6 +326,10 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   const repairs: string[] = [];
   let out = normalizePartyNameSpacingInCorpus((args.body || "").trim());
   repairs.push("spacing:party_names");
+
+  const heading = normalizeGuidedCorpusHeadingArtifacts(out);
+  out = heading.text;
+  repairs.push(...heading.repairs);
 
   const banner = removeDraftTemplateBannerFromCorpus(out);
   out = banner.text;
@@ -248,6 +347,10 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   out = dedupe.text;
   repairs.push(...dedupe.repairs);
 
+  const preWitnessIdentity = stripDuplicatePreWitnessIdentityFragment(out, identities);
+  out = preWitnessIdentity.text;
+  repairs.push(...preWitnessIdentity.repairs);
+
   out = normalizePartyNameSpacingInCorpus(out);
   repairs.push("spacing:post_manifest");
 
@@ -255,10 +358,18 @@ export function prepareGuidedSigningCorpusCleanup(args: {
     !/\bIN WITNESS WHEREOF\b/i.test(out) ||
     /name\s*:\s*_{4,}/i.test(out.slice(-1800)) ||
     /\[?\s*(?:your company name|service provider name)\s*\]?/i.test(out.slice(-1800));
-  if (needsSignatureTail && identities.length >= 2) {
+  const lacksByAnchors =
+    identities.length >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, identities.length);
+  if ((needsSignatureTail || lacksByAnchors) && identities.length >= 2) {
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities(out, identities);
-    out = rebuilt.text;
-    if (rebuilt.count > 0) repairs.push("signature:block_rebuilt");
+    if (!shouldRejectSignerIdentityCorpusShrink(out.length, rebuilt.text.length)) {
+      out = rebuilt.text;
+      if (rebuilt.count > 0) repairs.push(lacksByAnchors ? "signature:by_lines_added" : "signature:block_rebuilt");
+    }
+  }
+
+  if (identities.length >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, identities.length)) {
+    repairs.push("signature:by_lines_still_missing");
   }
 
   return { body: out, repairs, hash: fingerprintAgreementBody(out) };

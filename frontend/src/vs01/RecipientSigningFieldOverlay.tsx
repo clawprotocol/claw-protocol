@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { Vs01Counterparty, Vs01RecipientPlacedField } from "./types";
 import { labelForRecipientFieldType } from "./signingFields";
 import { recipientFieldBelongsToLockedSigner } from "./vs01SignerFieldAssignment";
@@ -8,6 +9,13 @@ import {
   recipientFieldStatusPillLabel,
   resolveRecipientSigningAutoValue,
 } from "./recipientSigningFieldUtils";
+import { LawDogSigningField } from "./LawDogSigningField";
+
+function logVs01SigningFieldRender(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-signing-field-render]", payload);
+}
 
 function formatIsoDateDisplay(iso: string): string {
   const t = iso.trim();
@@ -61,30 +69,12 @@ export function RecipientSigningFieldOverlay({
       ? field.value
       : ""
     : resolveRecipientSigningAutoValue(field, cpById);
-  if (isRecipientSigningMetadataType(field.type)) {
-    const metaLabel =
-      field.type === "printed_name"
-        ? "Printed name"
-        : field.type === "date"
-          ? "Date"
-          : field.type === "email"
-            ? "Email"
-            : field.textPurpose === "title"
-              ? "Title"
-              : labelForRecipientFieldType(field.type);
-    const shown =
-      field.type === "date" ? formatIsoDateDisplay(displayVal) : displayVal.trim() || "—";
-    return (
-      <div
-        className={`vs01-recipient-meta-inline${isMine ? " vs01-recipient-meta-inline--mine" : " vs01-recipient-meta-inline--other"}`}
-        style={style}
-        aria-label={`${metaLabel}: ${shown}`}
-        data-field-id={field.id}
-      >
-        <span className="vs01-recipient-meta-inline__text">{shown}</span>
-      </div>
-    );
-  }
+  const signerLabel =
+    field.assignedSignerRoleLabel?.trim() ||
+    cpById.get(field.counterpartyId)?.name?.trim() ||
+    "";
+  const fieldVisible = field.width > 0 && field.height > 0;
+  const isMetadata = isRecipientSigningMetadataType(field.type);
 
   const pillClass =
     pill === "signed"
@@ -109,11 +99,78 @@ export function RecipientSigningFieldOverlay({
     .filter(Boolean)
     .join(" ");
 
+  const overlayClassName = isMetadata
+    ? `vs01-recipient-meta-inline${isMine ? " vs01-recipient-meta-inline--mine" : " vs01-recipient-meta-inline--other"}`
+    : boxClass;
+
+  useEffect(() => {
+    logVs01SigningFieldRender({
+      signerId: field.assignedSignerRoleId ?? field.counterpartyId,
+      fieldType: field.type,
+      page: field.page,
+      x: field.x,
+      y: field.y,
+      w: field.width,
+      h: field.height,
+      locked: !editable,
+      visible: fieldVisible,
+      className: overlayClassName,
+    });
+  }, [
+    field.id,
+    field.page,
+    field.x,
+    field.y,
+    field.width,
+    field.height,
+    field.type,
+    editable,
+    fieldVisible,
+    overlayClassName,
+  ]);
+
+  if (isMetadata) {
+    const metaLabel =
+      field.type === "printed_name"
+        ? "Printed name"
+        : field.type === "date"
+          ? "Date"
+          : field.type === "email"
+            ? "Email"
+            : field.textPurpose === "title"
+              ? "Title"
+              : labelForRecipientFieldType(field.type);
+    const shown =
+      field.type === "date" ? formatIsoDateDisplay(displayVal) : displayVal.trim() || "—";
+    return (
+      <LawDogSigningField
+        fieldType={field.type}
+        signerName={field.assignedSignerRoleLabel ?? cpById.get(field.counterpartyId)?.name ?? ""}
+        signerRole={field.assignedSignerRoleKind ?? ""}
+        locked={!editable}
+        required={false}
+        value={shown}
+        className={`vs01-recipient-meta-inline${isMine ? " vs01-recipient-meta-inline--mine" : " vs01-recipient-meta-inline--other"}`}
+        style={style}
+        aria-label={`${metaLabel}: ${shown}`}
+        data-field-id={field.id}
+      >
+        <span className="vs01-recipient-meta-inline__text">{shown}</span>
+      </LawDogSigningField>
+    );
+  }
+
   if (field.type === "signature") {
     const hasSig = displayVal.trim().length > 0;
     return (
-      <div
+      <LawDogSigningField
         key={field.id}
+        fieldType={field.type}
+        signerName={field.assignedSignerRoleLabel ?? cpById.get(field.counterpartyId)?.name ?? ""}
+        signerRole={field.assignedSignerRoleKind ?? ""}
+        locked={!editable}
+        required
+        value={displayVal}
         data-field-id={field.id}
         className={`${boxClass} vs01-recipient-signature-slot`}
         style={{
@@ -121,8 +178,12 @@ export function RecipientSigningFieldOverlay({
           zIndex: isMine ? 4 : 2,
           pointerEvents: editable ? "auto" : "none",
         }}
+        active={editable && !hasSig}
         aria-disabled={!editable}
       >
+        {signerLabel ? (
+          <span className="lawdog-signing-field__signer">{signerLabel}</span>
+        ) : null}
         {editable ? (
           <>
             <p className="vs01-recipient-signature-slot__cta" id={`sig-cta-${field.id}`}>
@@ -170,15 +231,21 @@ export function RecipientSigningFieldOverlay({
             </span>
           </>
         )}
-      </div>
+      </LawDogSigningField>
     );
   }
 
   if (field.type === "initials") {
     const hasIni = displayVal.trim().length > 0;
     return (
-      <div
+      <LawDogSigningField
         key={field.id}
+        fieldType={field.type}
+        signerName={field.assignedSignerRoleLabel ?? cpById.get(field.counterpartyId)?.name ?? ""}
+        signerRole={field.assignedSignerRoleKind ?? ""}
+        locked={!editable}
+        required={false}
+        initials={displayVal}
         data-field-id={field.id}
         className={`${boxClass} vs01-recipient-initials-slot`}
         style={{
@@ -186,9 +253,15 @@ export function RecipientSigningFieldOverlay({
           zIndex: isMine ? 4 : 2,
           pointerEvents: editable ? "auto" : "none",
         }}
+        active={editable && !hasIni}
         aria-disabled={!editable}
       >
-        <span className="vs01-sign-placement-label">{labelForRecipientFieldType("initials")}</span>
+        {signerLabel ? (
+          <span className="lawdog-signing-field__signer">{signerLabel}</span>
+        ) : null}
+        <span className="vs01-sign-placement-label lawdog-signing-field__label">
+          {labelForRecipientFieldType("initials")}
+        </span>
         {!isMine && pillLabel ? (
           <span className={`vs01-recipient-signing-pill ${pillClass}`}>{pillLabel}</span>
         ) : null}
@@ -217,7 +290,7 @@ export function RecipientSigningFieldOverlay({
         ) : (
           <span className="vs01-recipient-signing-readonly-val">{displayVal.trim() || "—"}</span>
         )}
-      </div>
+      </LawDogSigningField>
     );
   }
 

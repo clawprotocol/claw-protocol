@@ -94,12 +94,14 @@ describe("guidedSignerSetupToFinalReview", () => {
     expect(modal.ctaLabel).toBeNull();
   });
 
-  it("test41: internal failure uses Retry final review CTA", () => {
+  it("test41: internal failure uses Retry final review CTA with generic copy", () => {
     const modal = resolveGuidedFinalizeModalBlockedPresentation({
       reason: "guided_validation_incomplete",
       workingDraftLen: 900,
       validationMissing: ["saas_sla"],
     });
+    expect(modal.headline).toBe("Final review needs another pass.");
+    expect(modal.body).not.toMatch(/Net\s*30/i);
     expect(modal.ctaLabel).toBe("Retry final review");
     expect(modal.kind).toBe("internal_retry");
   });

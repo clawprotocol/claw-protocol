@@ -6,6 +6,10 @@
 import type { GuidedCompletionSession } from "./types";
 import { listGuidedAnsweredVariableIds } from "./guidedAnswerApplyOrchestration";
 import {
+  buildCanonicalGuidedAnswerManifest,
+  resolveClauseSpecForManifestEntry,
+} from "./guidedCanonicalAnswerManifest";
+import {
   findSectionAnchor,
   normalizeGuidedSectionHeadingLine,
   resolveGuidedQuestionTarget,
@@ -30,6 +34,7 @@ type ClauseSpec = {
   clause: (answer: string) => string;
 };
 
+/** Legacy defaults when session is unavailable — prefer manifest-driven clauses. */
 const CLAUSE_BY_QUESTION: Record<string, ClauseSpec> = {
   payment_timing: {
     evidence: /\bNet\s*(?:30|thirty)\b/i,
@@ -57,6 +62,18 @@ const CLAUSE_BY_QUESTION: Record<string, ClauseSpec> = {
       "Either party may terminate for convenience with 30 days written notice, subject to payment for work performed and survival of confidentiality, payment, and ownership obligations.",
   },
 };
+
+function resolveClauseSpecForQuestion(
+  questionId: string,
+  session?: GuidedCompletionSession | null,
+): ClauseSpec | null {
+  if (session) {
+    const manifest = buildCanonicalGuidedAnswerManifest(session);
+    const entry = manifest.entries.find((e) => e.variableId === questionId);
+    if (entry) return resolveClauseSpecForManifestEntry(entry);
+  }
+  return CLAUSE_BY_QUESTION[questionId] ?? null;
+}
 
 const PREEXISTING_CARVEOUT =
   "Provider retains ownership of pre-existing tools, templates, know-how, and background technology used in performing the services.";
@@ -119,6 +136,14 @@ export function normalizeGuidedCorpusSectionFormatting(text: string): { text: st
       repairs.push("markdown_heading");
       return `${n}. `;
     })
+    .replace(/^(\s*)\d+\.\d+\.\s*(\d+)\.\s*/gm, (_, indent, n) => {
+      repairs.push("malformed_section_number");
+      return `${indent}${n}. `;
+    })
+    .replace(/^(\s*\d+\.)\s*(?=[A-Z])/gm, (_, n) => {
+      repairs.push("section_heading_spacing");
+      return `${n} `;
+    })
     .replace(/\bElectronic\s*\n+\s*Signatures\b/gi, () => {
       repairs.push("electronic_signatures_join");
       return "Electronic Signatures";
@@ -129,6 +154,95 @@ export function normalizeGuidedCorpusSectionFormatting(text: string): { text: st
 
 function clauseAlreadyPresent(body: string, spec: ClauseSpec): boolean {
   return spec.evidence.test(body);
+}
+
+function findTargetSectionRange(text: string, target: GuidedRevisionTarget): { start: number; end: number } | null {
+  const anchor = findSectionAnchor(text, target);
+  if (!anchor.found) return null;
+  const lines = normLines(text);
+  let startOffset = 0;
+  for (let i = 0; i < anchor.lineIndex; i++) {
+    startOffset += lines[i].length + 1;
+  }
+  let endLine = lines.length;
+  for (let i = anchor.lineIndex + 1; i < lines.length; i++) {
+    const t = normalizeGuidedSectionHeadingLine(lines[i]);
+    if (/^(?:\d+\.\s+|SCHEDULE\s+[A-Z]|IN WITNESS WHEREOF|EXECUTION|SIGNATURES?)\b/i.test(t)) {
+      endLine = i;
+      break;
+    }
+  }
+  let endOffset = 0;
+  for (let i = 0; i < endLine; i++) {
+    endOffset += lines[i].length + 1;
+  }
+  return { start: startOffset, end: Math.min(text.length, endOffset) };
+}
+
+function clauseAlreadyPresentInTargetSection(
+  body: string,
+  target: GuidedRevisionTarget,
+  spec: ClauseSpec,
+): boolean {
+  const range = findTargetSectionRange(body, target);
+  if (!range) return false;
+  return spec.evidence.test(body.slice(range.start, range.end));
+}
+
+function removeExactClauseEverywhere(body: string, clause: string): { body: string; removed: boolean } {
+  const needle = clause.trim();
+  if (!needle) return { body, removed: false };
+  const next = body
+    .split("\n")
+    .filter((line) => line.trim() !== needle)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+  return { body: next, removed: next !== body };
+}
+
+function insertClauseBySectionNumber(
+  body: string,
+  target: GuidedRevisionTarget,
+  clause: string,
+): { body: string; inserted: boolean; createdSection: boolean } {
+  if (target.sectionNumber == null) {
+    const inserted = insertClauseInSection(body, target, clause);
+    return { body: inserted.text, inserted: inserted.merged, createdSection: inserted.createdSection };
+  }
+  const lines = normLines(body);
+  const sigLine = findSignatureLineIndex(lines);
+  const headingRe = new RegExp(`^\\s*${target.sectionNumber}\\.\\s+`, "i");
+  let headingLine = -1;
+  for (let i = 0; i < sigLine; i++) {
+    if (headingRe.test(normalizeGuidedSectionHeadingLine(lines[i]))) {
+      headingLine = i;
+      break;
+    }
+  }
+  if (headingLine < 0) {
+    const insertAt = findInsertLineForNewSection(lines, target.sectionNumber);
+    lines.splice(insertAt, 0, "", `${target.sectionNumber}. ${target.sectionLabel}`, clause.trim());
+    return {
+      body: lines.join("\n").replace(/\n{3,}/g, "\n\n"),
+      inserted: true,
+      createdSection: true,
+    };
+  }
+  let insertAt = sigLine;
+  for (let i = headingLine + 1; i < sigLine; i++) {
+    const t = normalizeGuidedSectionHeadingLine(lines[i]);
+    const m = t.match(/^(\d+)\.\s+/);
+    if (m && Number(m[1]) !== target.sectionNumber) {
+      insertAt = i;
+      break;
+    }
+  }
+  lines.splice(insertAt, 0, "", clause.trim());
+  return {
+    body: lines.join("\n").replace(/\n{3,}/g, "\n\n"),
+    inserted: true,
+    createdSection: false,
+  };
 }
 
 function findSignatureLineIndex(lines: string[]): number {
@@ -156,9 +270,6 @@ function insertClauseInSection(
   target: GuidedRevisionTarget,
   clause: string,
 ): { text: string; merged: boolean; createdSection: boolean } {
-  if (text.toLowerCase().includes(clause.toLowerCase().slice(0, 48))) {
-    return { text, merged: false, createdSection: false };
-  }
   const anchor = findSectionAnchor(text, target);
   const lines = normLines(text);
   if (anchor.found) {
@@ -202,7 +313,7 @@ export function mergeSingleGuidedAnswerIntoCorpus(args: {
   questionId: string;
   session?: GuidedCompletionSession | null;
 }): GuidedSectionMergeResult {
-  const spec = CLAUSE_BY_QUESTION[args.questionId];
+  const spec = resolveClauseSpecForQuestion(args.questionId, args.session);
   const target = resolveGuidedQuestionTarget(args.questionId);
   const repairs: string[] = [];
   const merges: GuidedSectionMergeRepair[] = [];
@@ -211,16 +322,18 @@ export function mergeSingleGuidedAnswerIntoCorpus(args: {
   if (!spec) {
     return { body: out, repairs, merges };
   }
-  if (clauseAlreadyPresent(out, spec)) {
+  if (clauseAlreadyPresentInTargetSection(out, target, spec)) {
     merges.push({ questionId: args.questionId, action: "skipped_present", sectionLabel: target.sectionLabel });
     return { body: out, repairs, merges };
   }
+  const misplaced = clauseAlreadyPresent(out, spec);
 
   const clause = spec.clause((args.session?.answered[args.questionId] ?? "").trim());
   const inserted = insertClauseInSection(out, target, clause);
   if (inserted.merged) {
     out = inserted.text;
     repairs.push(`section_merge:${args.questionId}`);
+    if (misplaced) repairs.push(`section_merge:${args.questionId}:misplaced_copy_detected`);
     const action = inserted.createdSection ? "created_section" : "merged";
     merges.push({ questionId: args.questionId, action, sectionLabel: target.sectionLabel });
     logGuidedSectionMerge({ questionId: args.questionId, action, section: target.sectionLabel });
@@ -269,6 +382,26 @@ export function mergeAllGuidedAnswersIntoCorpus(
     out = result.body;
     allRepairs.push(...result.repairs);
     allMerges.push(...result.merges);
+  }
+
+  for (const questionId of ids) {
+    const spec = resolveClauseSpecForQuestion(questionId, session);
+    if (!spec) continue;
+    const target = resolveGuidedQuestionTarget(questionId);
+    const clause = spec.clause((session?.answered[questionId] ?? "").trim()).trim();
+    if (!clause || !spec.evidence.test(out)) continue;
+    const removed = removeExactClauseEverywhere(out, clause);
+    if (!removed.removed && clauseAlreadyPresentInTargetSection(out, target, spec)) continue;
+    const inserted = insertClauseBySectionNumber(removed.body, target, clause);
+    if (inserted.inserted) {
+      out = inserted.body;
+      allRepairs.push(`section_normalize:${questionId}${removed.removed ? ":relocated" : ""}`);
+      allMerges.push({
+        questionId,
+        action: inserted.createdSection ? "created_section" : "merged",
+        sectionLabel: target.sectionLabel,
+      });
+    }
   }
 
   logGuidedCorpusNormalization({ repairs: allRepairs.length, merges: allMerges.length });

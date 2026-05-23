@@ -32,7 +32,7 @@ export const SIGNATURE_BLOCK_REGION_TOP = 0.52;
 export const SIGNATURE_BLOCK_REGION_BOTTOM = PREPARE_PAGE_FOOTER_BAND_Y - 0.035;
 export const SIGNATURE_BY_LINE_X = 0.118;
 export const SIGNATURE_BY_LINE_WIDTH = 0.36;
-export const SIGNATURE_BY_LINE_HEIGHT = 0.065;
+export const SIGNATURE_BY_LINE_HEIGHT = 0.045;
 
 function parseSignatureTailAnchors(tailText: string): SignatureLineAnchor[] {
   const lines = tailText.replace(/\r\n/g, "\n").split("\n");
@@ -71,20 +71,42 @@ function parseSignatureTailAnchors(tailText: string): SignatureLineAnchor[] {
 export function findSignatureLineAnchorsFromCorpusText(corpusText: string): SignatureLineAnchor[] {
   const text = (corpusText || "").trim();
   if (text.length < 80) return [];
-  const start = signaturePatchStartIndex(text);
-  const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
+  const witness = text.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witness < 0) return [];
+  const tail = text.slice(witness);
   return parseSignatureTailAnchors(tail);
 }
 
-/** True when corpus signature blocks already include human Name/Title lines (no editable fields needed). */
+function signatureTailText(corpusText: string): string {
+  const tailStart = signaturePatchStartIndex(corpusText);
+  return tailStart >= 0 ? corpusText.slice(tailStart) : corpusText.slice(Math.floor(corpusText.length * 0.72));
+}
+
+function partySignatureBlocksFromTail(tail: string): string[] {
+  const parts = tail.split(/\n(?=\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:)/i);
+  return parts.filter((block) => /^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:/im.test(block.trim()));
+}
+
+/** True when corpus signature blocks already include human Name lines as document text (signature-only placement). */
 export function corpusHasPrefilledSignatureIdentity(corpusText: string | null | undefined): boolean {
   const text = (corpusText || "").trim();
   if (text.length < 80) return false;
-  const anchors = findSignatureLineAnchorsFromCorpusText(text);
-  if (anchors.length < 1) return false;
-  const tailStart = signaturePatchStartIndex(text);
-  const tail = tailStart >= 0 ? text.slice(tailStart) : text.slice(Math.floor(text.length * 0.72));
-  return /\bName\s*:\s*\S+/i.test(tail) && /\b(?:Title\s*:\s*\S+|Date\s*:\s*[_\-\s]+)/i.test(tail);
+  const tail = signatureTailText(text);
+  const blocks = partySignatureBlocksFromTail(tail);
+  if (blocks.length < 1) {
+    return /\bName\s*:\s*\S+/i.test(tail);
+  }
+  let withName = 0;
+  for (const block of blocks) {
+    if (/\bName\s*:\s*\S+/i.test(block)) withName += 1;
+  }
+  return withName >= Math.min(2, blocks.length) && withName >= 1;
+}
+
+export function logVs01FieldGeometry(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-field-geometry]", payload);
 }
 
 export function logSignatureAnchorPlacementMiss(payload: Record<string, unknown>): void {
@@ -113,11 +135,11 @@ export function signatureAnchorToPrepareRect(args: {
   if (args.fieldType === "signature") {
     let y: number;
     if (args.anchor) {
-      const lineRatio = args.anchor.byLineIndexInTail / Math.max(1, args.anchor.tailLineCount - 1);
-      y =
+      const lineHeight = regionH / Math.max(12, args.anchor.tailLineCount);
+      const byLineCenter =
         SIGNATURE_BLOCK_REGION_TOP +
-        lineRatio * regionH -
-        SIGNATURE_BY_LINE_HEIGHT * 0.4;
+        (args.anchor.byLineIndexInTail + 0.58) * lineHeight;
+      y = byLineCenter - SIGNATURE_BY_LINE_HEIGHT * 0.5;
     } else {
       logSignatureAnchorPlacementMiss({
         partyIndex: args.partyIndex,
@@ -145,7 +167,7 @@ export function signatureAnchorToPrepareRect(args: {
         : args.anchor?.nameLineRatio ?? 0.28;
   const y =
     (args.anchor
-      ? SIGNATURE_BLOCK_REGION_TOP + ratio * regionH
+      ? SIGNATURE_BLOCK_REGION_TOP + (ratio * regionH)
       : args.fallbackLaneY ?? fallbackSignatureY(args.partyIndex, roleCount, 0.04)) - 0.01;
   const width = 0.3;
   const height = 0.04;
