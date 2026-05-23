@@ -48,10 +48,8 @@ describe("packet-level auto initials", () => {
       corpusText: AUTO_INITIALS_CORPUS,
       pageLayouts,
     });
-    const witnessPage = pageCount - 1;
-    const eligiblePages = Array.from({ length: witnessPage }, (_, i) => i);
     expect(autos.length).toBeGreaterThan(0);
-    expect(autos).toHaveLength(roles.length * eligiblePages.length);
+    expect(autos).toHaveLength(roles.length * pageCount);
     const ids = autos.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -100,6 +98,6 @@ describe("packet-level auto initials", () => {
       pageLayouts,
     });
     expect(autos.filter((f) => f.page === 0)).toHaveLength(0);
-    expect(autos.some((f) => f.page === 1)).toBe(false);
+    expect(autos.some((f) => f.page === 1)).toBe(true);
   });
 });

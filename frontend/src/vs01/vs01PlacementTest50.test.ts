@@ -151,9 +151,9 @@ describe("VS01 placement test50 — visible signature block + initials regressio
     });
     const witnessPage = detectWitnessSignaturePageIndex(denseLayouts, CORPUS_BODY, 2) ?? pageCount - 1;
     const ownerInitials = initials.filter((f) => f.assignedPartyIndex === 0);
-    expect(ownerInitials.length).toBeGreaterThanOrEqual(witnessPage);
+    expect(ownerInitials.length).toBeGreaterThanOrEqual(pageCount);
+    expect(ownerInitials.some((f) => f.page === witnessPage)).toBe(true);
     for (const f of ownerInitials) {
-      expect(f.page).toBeLessThan(witnessPage);
       expect(f.x).toBeGreaterThan(0.75);
     }
   });

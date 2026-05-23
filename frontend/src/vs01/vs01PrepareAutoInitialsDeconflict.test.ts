@@ -6,7 +6,8 @@ import {
   prepareAutoInitialsFieldId,
 } from "./vs01PrepareFieldPlacement";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
-import { fieldRectsOverlap, findNonOverlappingPrepareRect, isRectInPrepareAutoInitialsSafeZone } from "./signingFields";
+import { fieldRectsOverlap, findNonOverlappingPrepareRect } from "./signingFields";
+import { verifyInitialsRectClear } from "./vs01InitialsSafeZone";
 import { stampSenderFieldWithPrepareRole } from "./vs01SignerFieldAssignment";
 import {
   resolvePrepareSignerDisplayName,
@@ -58,7 +59,7 @@ describe("buildPrepareAutoInitialsEveryPage deconflict", () => {
       }
     }
     for (const f of existing) {
-      expect(isRectInPrepareAutoInitialsSafeZone(f)).toBe(true);
+      expect(verifyInitialsRectClear({ rect: f, pageLayout: null, fieldObstacles: [] }).ok).toBe(true);
     }
   });
 
@@ -86,7 +87,7 @@ describe("buildPrepareAutoInitialsEveryPage deconflict", () => {
     });
     expect(autos.length).toBe(1);
     expect(fieldRectsOverlap(sig, autos[0]!)).toBe(false);
-    expect(isRectInPrepareAutoInitialsSafeZone(autos[0]!)).toBe(true);
+    expect(verifyInitialsRectClear({ rect: autos[0]!, pageLayout: null, fieldObstacles: [sig] }).ok).toBe(true);
   });
 
   it("re-running checkbox does not duplicate initials for same role/page", () => {

@@ -147,8 +147,8 @@ describe("VS01 placement test49 — normalized corpus + initials policy", () => 
         }
       }
       const ownerRects = initials.filter((f) => f.assignedPartyIndex === 0);
-      const yValues = ownerRects.map((f) => f.y);
-      expect(new Set(yValues.map((y) => y.toFixed(3))).size).toBe(1);
+      expect(ownerRects.length).toBeGreaterThanOrEqual(4);
+      expect(new Set(ownerRects.map((f) => f.page)).size).toBeGreaterThanOrEqual(4);
     }
   });
 

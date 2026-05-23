@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildAutoSignaturePacketForAllRoles, signingFieldGeometryHash } from "./vs01AutoSignaturePacket";
 import { buildPrepareAutoInitialsEveryPage } from "./vs01PrepareFieldPlacement";
 import {
@@ -14,10 +14,12 @@ import {
   SIGNATURE_BLOCK_REGION_BOTTOM,
   findSignatureLineAnchorsFromCorpusText,
 } from "./vs01SignatureBlockAnchors";
+import { fieldOverlapsDocumentText } from "./vs01FieldGeometry";
 import {
   buildCorpusSimulatedPageLayouts,
   findByLinePlacementsFromPageLayout,
   pageLayoutForIndex,
+  textRectsToObstacles,
 } from "./vs01PageTextLayout";
 import {
   buildRecipientSigningDocumentFields,
@@ -152,26 +154,24 @@ describe("VS01 signing field visibility test45", () => {
     expect(layout.rect!.y).toBeGreaterThan(PREPARE_AUTO_INITIALS_UPPER_Y_MAX);
   });
 
-  it("suppresses optional initials on text-heavy signature page instead of overlapping agreement text", () => {
+  it("places optional initials on signature page without overlapping agreement text", () => {
     const r = roles();
     const owner = r[0]!;
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      const autos = buildPrepareAutoInitialsEveryPage({
-        role: owner,
-        pageCount: 1,
-        skippedPages: new Set(),
-        existingFields: [],
-        valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
-        corpusText: CORPUS,
-      });
-      expect(autos).toHaveLength(0);
-      expect(warn).toHaveBeenCalledWith(
-        "[vs01-initials-placement-suppressed]",
-        expect.objectContaining({ page: 0, reason: "signature_page_not_blank" }),
-      );
-    } finally {
-      warn.mockRestore();
+    const layouts = buildCorpusSimulatedPageLayouts(CORPUS, 1);
+    const autos = buildPrepareAutoInitialsEveryPage({
+      role: owner,
+      pageCount: 1,
+      skippedPages: new Set(),
+      existingFields: [],
+      valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
+      corpusText: CORPUS,
+      pageLayouts: layouts,
+    });
+    expect(autos.length).toBeGreaterThan(0);
+    for (const f of autos) {
+      const layout = pageLayoutForIndex(layouts, f.page);
+      const obstacles = textRectsToObstacles(layout?.textRects ?? []);
+      expect(fieldOverlapsDocumentText(f, obstacles)).toBe(false);
     }
   });
 

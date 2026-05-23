@@ -3,8 +3,6 @@
  */
 
 import {
-  PREPARE_PAGE_FOOTER_BAND_Y,
-  PREPARE_PAGE_WATERMARK_BAND_Y,
   clampPrepareFieldRectToSafeBounds,
   fieldRectsOverlap,
   prepareAutoInitialsPlacementDims,
@@ -21,10 +19,14 @@ import {
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import {
+  selectVerifiedInitialsRect,
+  textObstaclesForInitialsPlacement,
+  yBelowPageText,
+} from "./vs01InitialsSafeZone";
+import {
   findSignatureLinePlacementsFromPageLayout,
   pageLayoutForIndex,
   reconcileVs01PageLayouts,
-  signatureTailTextRectsOnPage,
   textRectsToObstacles,
   type Vs01ByLinePlacement,
   type Vs01PageTextLayout,
@@ -38,8 +40,6 @@ export type Vs01FieldPlacementAnchorKind =
   | "initials_suppressed";
 
 const TEXT_OVERLAP_PAD = 0.01;
-const INITIALS_TEXT_PAD = 0.012;
-const INITIALS_MARGIN_RIGHT = 0.072;
 const INITIALS_BOTTOM_SCAN_X_MIN = 0.66;
 
 export function logVs01FieldOverlapRejected(payload: Record<string, unknown>): void {
@@ -73,15 +73,17 @@ export function logVs01InitialsFieldGenerated(payload: Record<string, unknown>):
 
 export function footerInitialsFallbackRect(
   partyIndex: number,
+  pageLayout: Vs01PageTextLayout | null | undefined,
   dims?: { width: number; height: number },
 ): { x: number; y: number; width: number; height: number } {
   const { width: w, height: h } = dims ?? prepareAutoInitialsPlacementDims();
   const lane = Math.max(0, Math.floor(partyIndex));
   const compactW = Math.min(w, 0.1);
+  const y = yBelowPageText(pageLayout, h);
   return clampPrepareFieldRectToSafeBounds(
     {
       x: Math.max(INITIALS_BOTTOM_SCAN_X_MIN, 0.86 - lane * (compactW + 0.014)),
-      y: 0.92,
+      y,
       width: compactW,
       height: h,
     },
@@ -121,13 +123,6 @@ export function textObstaclesForSignaturePlacement(
     return !partyLineAboveBy;
   });
   return textRectsToObstacles(filtered);
-}
-
-function footerWatermarkObstacles(): Array<{ x: number; y: number; width: number; height: number }> {
-  return [
-    { x: 0, y: PREPARE_PAGE_FOOTER_BAND_Y, width: 1, height: 0.1 },
-    { x: 0.04, y: PREPARE_PAGE_WATERMARK_BAND_Y, width: 0.92, height: 0.05 },
-  ];
 }
 
 export function fieldOverlapsDocumentText(
@@ -296,31 +291,17 @@ export function findSafeInitialsRectOnPage(args: {
   partyIndex: number;
   pageLayout: Vs01PageTextLayout | null;
   corpusText?: string | null;
-  /** Last page index when corpus has witness signature blocks. */
+  /** @deprecated Signature page is included; only post-document pages are skipped. */
   signatureLastPage?: number;
   fieldObstacles: readonly { x: number; y: number; width: number; height: number }[];
   dims?: { width: number; height: number };
+  isSignaturePage?: boolean;
 }): {
   rect: { x: number; y: number; width: number; height: number } | null;
   anchorKind: Vs01FieldPlacementAnchorKind;
 } {
   const dims = args.dims ?? prepareAutoInitialsPlacementDims();
-  const { width: w, height: h } = dims;
-  const lane = Math.max(0, Math.floor(args.partyIndex));
-  const textObstacles = [
-    ...footerWatermarkObstacles(),
-    ...textRectsToObstacles(
-      (args.pageLayout?.textRects ?? []).filter((r) => r.kind === "body"),
-      INITIALS_TEXT_PAD,
-    ),
-  ];
-
-  const signatureLastPage =
-    args.signatureLastPage ??
-    (args.corpusText && findSignatureLineAnchorsFromCorpusText(args.corpusText).length > 0
-      ? args.page
-      : -1);
-  if (signatureLastPage >= 0 && args.page > signatureLastPage) {
+  if (args.signatureLastPage != null && args.signatureLastPage >= 0 && args.page > args.signatureLastPage) {
     logVs01InitialsPlacementSuppressed({
       page: args.page,
       reason: "post_signature_page",
@@ -328,88 +309,28 @@ export function findSafeInitialsRectOnPage(args: {
     });
     return { rect: null, anchorKind: "initials_suppressed" };
   }
-  if (signatureLastPage >= 0 && args.page === signatureLastPage) {
-    const tailRects = args.pageLayout && args.corpusText
-      ? signatureTailTextRectsOnPage(args.pageLayout, args.corpusText)
-      : [];
-    if (tailRects.length > 0) {
-      logVs01InitialsPlacementSuppressed({
-        page: args.page,
-        reason: "signature_page_not_blank",
-        partyIndex: args.partyIndex,
-      });
-      return { rect: null, anchorKind: "initials_suppressed" };
-    }
-  }
 
-  const yBottom = Math.min(
-    1 - 0.08 - h,
-    PREPARE_PAGE_WATERMARK_BAND_Y - h - 0.014,
-    PREPARE_PAGE_FOOTER_BAND_Y - h - 0.014,
-  );
-  const yLow = yBottom - 0.14;
-  const xRight = 1 - INITIALS_MARGIN_RIGHT - w - lane * (w + 0.014);
-  const pad = 0.014;
-
-  const tryRect = (rect: { x: number; y: number; width: number; height: number }) => {
-    if (rect.x + rect.width > 1 - INITIALS_MARGIN_RIGHT + 1e-5) return false;
-    if (rect.x < INITIALS_BOTTOM_SCAN_X_MIN - 1e-5) return false;
-    if (rect.y + rect.height > PREPARE_PAGE_FOOTER_BAND_Y + 1e-5) return false;
-    if (fieldOverlapsDocumentText(rect, textObstacles, INITIALS_TEXT_PAD)) {
-      logVs01FieldOverlapRejected({
-        page: args.page,
-        partyIndex: args.partyIndex,
-        type: "initials",
-        x: rect.x,
-        y: rect.y,
-      });
-      return false;
-    }
-    if (args.fieldObstacles.some((o) => fieldRectsOverlap(rect, o, pad))) return false;
-    return true;
-  };
-
-  for (let y = yBottom; y >= yLow - 1e-5; y -= 0.042) {
-    for (let x = Math.min(xRight, 1 - w); x >= INITIALS_BOTTOM_SCAN_X_MIN - 1e-5; x -= 0.028) {
-      const rect = clampPrepareFieldRectToSafeBounds(
-        { x: Math.max(0, x), y: Math.max(0, y), width: w, height: h },
-        { kind: "initials" },
-      );
-      if (tryRect(rect)) {
-        logVs01FieldGeometry({
-          page: args.page,
-          type: "initials",
-          rect,
-          anchorKind: "initials_margin",
-          overlap: false,
-          partyIndex: args.partyIndex,
-        });
-        return { rect, anchorKind: "initials_margin" };
-      }
-    }
-  }
-
-  const footerRect = footerInitialsFallbackRect(args.partyIndex, dims);
-  if (!args.fieldObstacles.some((o) => fieldRectsOverlap(footerRect, o, 0.01))) {
-    logVs01InitialsPlacementFallback({
-      page: args.page,
-      partyIndex: args.partyIndex,
-      reason: "footer_band",
-      x: footerRect.x,
-      y: footerRect.y,
-    });
+  const selected = selectVerifiedInitialsRect({
+    page: args.page,
+    partyIndex: args.partyIndex,
+    pageLayout: args.pageLayout,
+    fieldObstacles: args.fieldObstacles,
+    dims,
+    isSignaturePage: args.isSignaturePage ?? false,
+  });
+  if (selected.rect) {
     logVs01InitialsFieldGenerated({
       page: args.page,
       partyIndex: args.partyIndex,
-      rect: footerRect,
-      source: "footer_fallback",
+      rect: selected.rect,
+      source: selected.candidate ?? "verified_safe_zone",
     });
-    return { rect: footerRect, anchorKind: "initials_margin" };
+    return { rect: selected.rect, anchorKind: "initials_margin" };
   }
 
   logVs01InitialsPlacementSuppressed({
     page: args.page,
-    reason: "no_clear_margin",
+    reason: "no_verified_safe_candidate",
     partyIndex: args.partyIndex,
   });
   return { rect: null, anchorKind: "initials_suppressed" };
@@ -426,9 +347,7 @@ export function assertFieldsClearOfText(
       if (fieldOverlapsDocumentText(f, obstacles)) return false;
       continue;
     }
-    const obstacles = textRectsToObstacles(
-      (layout?.textRects ?? []).filter((r) => r.kind === "body"),
-    );
+    const obstacles = textObstaclesForInitialsPlacement(layout);
     if (fieldOverlapsDocumentText(f, obstacles)) return false;
   }
   return true;

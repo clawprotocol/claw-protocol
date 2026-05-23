@@ -143,19 +143,22 @@ export function evaluateVs01SigningAutoPlacementQuality(args: {
   layoutSignatureLineCount: number;
   corpusAnchorCount: number;
   intendsInitials?: boolean;
+  initialsOverlapText?: boolean;
 }): Vs01SigningAutoPlacementQuality {
   const warnings: string[] = [];
   const signatureOk = args.signatureFieldCount >= args.roleCount;
-  const minInitialsPages = Math.max(0, args.witnessPageIndex);
   const intendsInitials = args.intendsInitials !== false;
+  const expectedInitialsMin = Math.max(1, args.pageCount) * Math.max(1, args.roleCount);
   const initialsOk =
     !intendsInitials ||
     (args.initialsFieldCount > 0 &&
-      args.initialsFieldCount >= minInitialsPages * Math.max(1, args.roleCount) * 0.5);
+      args.initialsFieldCount >= expectedInitialsMin * 0.85 &&
+      args.initialsOverlapText !== true);
   const hasVisibleAnchors =
     args.layoutSignatureLineCount >= args.roleCount || args.corpusAnchorCount >= args.roleCount;
   if (!signatureOk) warnings.push("signature_count_below_signer_count");
   if (intendsInitials && args.initialsFieldCount === 0) warnings.push("initials_missing");
+  if (intendsInitials && args.initialsOverlapText) warnings.push("initials_overlap_text");
   if (!hasVisibleAnchors) warnings.push("signature_lines_not_anchored_to_visible_block");
   const placementOk = signatureOk && (!intendsInitials || initialsOk) && hasVisibleAnchors;
   return { placementOk, signatureOk, initialsOk, warnings };

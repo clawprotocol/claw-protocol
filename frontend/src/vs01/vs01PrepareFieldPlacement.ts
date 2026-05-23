@@ -27,6 +27,7 @@ import {
   findSafeInitialsRectOnPage,
   logVs01InitialsPageDecision,
 } from "./vs01FieldGeometry";
+import { layoutHasPlaceableInitialsContent, verifyInitialsRectClear } from "./vs01InitialsSafeZone";
 import {
   resolveVs01InitialsPlacementPolicy,
   type Vs01InitialsPlacementPolicy,
@@ -260,12 +261,23 @@ export function buildPrepareAutoInitialsEveryPage(args: {
     roleCount: 1,
   });
   const reconciledLayouts = placementCtx.layouts;
-  const signatureLastPage = policy?.witnessPageIndex ?? placementCtx.witnessPageIndex ?? -1;
   const pagesToVisit =
     policy?.mode === "placed_all_eligible"
       ? policy.eligiblePages
       : Array.from({ length: args.pageCount }, (_, i) => i);
   for (const p of pagesToVisit) {
+    const pageLayoutForVisit = pageLayoutForIndex(reconciledLayouts, p);
+    if (!layoutHasPlaceableInitialsContent(pageLayoutForVisit)) {
+      skipped += 1;
+      logVs01InitialsPageDecision({
+        page: p,
+        roleIdShort: roleId.slice(0, 16),
+        partyIndex,
+        decision: "skipped",
+        reason: "footer_only_or_empty_page",
+      });
+      continue;
+    }
     if (args.skippedPages.has(p)) {
       skipped += 1;
       logVs01InitialsPageDecision({
@@ -295,18 +307,16 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       width: f.width,
       height: f.height,
     }));
-    const policyRect = policy?.rectByPartyIndex.get(partyIndex) ?? null;
-    const safe = policyRect
-      ? { rect: policyRect, anchorKind: "initials_margin" as const }
-      : findSafeInitialsRectOnPage({
-          page: p,
-          partyIndex,
-          pageLayout: pageLayoutForIndex(reconciledLayouts, p),
-          corpusText: args.corpusText,
-          signatureLastPage,
-          fieldObstacles,
-          dims,
-        });
+    const witnessPage = policy?.witnessPageIndex ?? placementCtx.witnessPageIndex ?? -1;
+    const safe = findSafeInitialsRectOnPage({
+      page: p,
+      partyIndex,
+      pageLayout: pageLayoutForIndex(reconciledLayouts, p),
+      corpusText: args.corpusText,
+      fieldObstacles,
+      dims,
+      isSignaturePage: p === witnessPage,
+    });
     const layout = {
       rect: safe.rect,
       lane: partyIndex,
@@ -395,6 +405,23 @@ export function buildPrepareAutoInitialsEveryPage(args: {
         toX: resolved.x,
         toY: resolved.y,
       });
+    }
+    const pageLayout = pageLayoutForIndex(reconciledLayouts, p);
+    const clearCheck = verifyInitialsRectClear({
+      rect: resolved,
+      pageLayout,
+      fieldObstacles: onPage,
+    });
+    if (!clearCheck.ok) {
+      skipped += 1;
+      logVs01InitialsPageDecision({
+        page: p,
+        roleIdShort: roleId.slice(0, 16),
+        partyIndex,
+        decision: "skipped",
+        reason: clearCheck.overlapText ? "overlaps_document_text" : "overlaps_field",
+      });
+      continue;
     }
     const raw: PlacedSigningField = {
       id: prepareAutoInitialsFieldId(roleId, p),

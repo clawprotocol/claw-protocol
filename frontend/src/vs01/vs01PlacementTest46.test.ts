@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildAutoSignaturePacketForAllRoles,
   signingFieldGeometryHash,
@@ -15,10 +15,7 @@ import {
   pageLayoutForIndex,
   textRectsToObstacles,
 } from "./vs01PageTextLayout";
-import {
-  fieldRectsOverlap,
-  PREPARE_PAGE_FOOTER_BAND_Y,
-} from "./signingFields";
+import { PREPARE_PAGE_FOOTER_BAND_Y } from "./signingFields";
 import {
   findSignatureLineAnchorsFromCorpusText,
   signatureRectsFollowBlockOrder,
@@ -104,62 +101,44 @@ describe("VS01 placement test46 — layout-anchored geometry", () => {
     expect(cpSig.y + cpSig.height).toBeLessThan(PREPARE_PAGE_FOOTER_BAND_Y);
   });
 
-  it("does not place initials on the signature page or over dense text", () => {
+  it("places initials on the signature page without overlapping dense text", () => {
     const r = roles();
     const owner = r[0]!;
     const layouts = buildCorpusSimulatedPageLayouts(TEST46_CORPUS, 3);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      const autos = buildPrepareAutoInitialsEveryPage({
-        role: owner,
-        pageCount: 3,
-        skippedPages: new Set(),
-        existingFields: [],
-        valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
-        corpusText: TEST46_CORPUS,
-        pageLayouts: layouts,
-      });
-      expect(autos.every((f) => f.page !== 2)).toBe(true);
-      for (const f of autos) {
-        const layout = pageLayoutForIndex(layouts, f.page);
-        const obstacles = textRectsToObstacles(layout?.textRects ?? []);
-        expect(fieldOverlapsDocumentText(f, obstacles)).toBe(false);
-        for (const t of layout?.textRects ?? []) {
-          if (/^(Name|Title|Date|By)\s*:/i.test(t.text.trim())) {
-            expect(fieldRectsOverlap(f, t)).toBe(false);
-          }
-        }
-      }
-      expect(
-        warn.mock.calls.some(
-          (c) => c[0] === "[vs01-initials-placement-suppressed]" && c[1]?.page === 2,
-        ),
-      ).toBe(true);
-    } finally {
-      warn.mockRestore();
+    const autos = buildPrepareAutoInitialsEveryPage({
+      role: owner,
+      pageCount: 3,
+      skippedPages: new Set(),
+      existingFields: [],
+      valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
+      corpusText: TEST46_CORPUS,
+      pageLayouts: layouts,
+    });
+    expect(autos.some((f) => f.page === 2)).toBe(true);
+    for (const f of autos) {
+      const layout = pageLayoutForIndex(layouts, f.page);
+      const obstacles = textRectsToObstacles(layout?.textRects ?? []);
+      expect(fieldOverlapsDocumentText(f, obstacles)).toBe(false);
     }
   });
 
-  it("suppresses initials when bottom-right margin is not clear of text", () => {
+  it("places initials on dense single-page corpus without overlapping text", () => {
     const dense = `${"Dense legal paragraph line with terms and obligations. ".repeat(30)}\n${TEST46_TAIL}`;
     const layouts = buildCorpusSimulatedPageLayouts(dense, 1);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      const autos = buildPrepareAutoInitialsEveryPage({
-        role: roles()[0]!,
-        pageCount: 1,
-        skippedPages: new Set(),
-        existingFields: [],
-        valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
-        corpusText: dense,
-        pageLayouts: layouts,
-      });
-      expect(autos).toHaveLength(0);
-      expect(
-        warn.mock.calls.some((c) => c[0] === "[vs01-initials-placement-suppressed]"),
-      ).toBe(true);
-    } finally {
-      warn.mockRestore();
+    const autos = buildPrepareAutoInitialsEveryPage({
+      role: roles()[0]!,
+      pageCount: 1,
+      skippedPages: new Set(),
+      existingFields: [],
+      valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
+      corpusText: dense,
+      pageLayouts: layouts,
+    });
+    expect(autos.length).toBeGreaterThan(0);
+    for (const f of autos) {
+      const layout = pageLayoutForIndex(layouts, f.page);
+      const obstacles = textRectsToObstacles(layout?.textRects ?? []);
+      expect(fieldOverlapsDocumentText(f, obstacles)).toBe(false);
     }
   });
 

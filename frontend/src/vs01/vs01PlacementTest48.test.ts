@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildAutoSignaturePacketForAllRoles,
   removeStaleSignatureOnlyAutoplaceFields,
@@ -167,36 +167,20 @@ describe("VS01 placement test48 — witness page geometry", () => {
     expect(cp.x).toBeCloseTo(by[1]!.x, 2);
   });
 
-  it("skips initials on witness page and footer-only page 5", () => {
+  it("places initials on witness page and skips footer-only page 5", () => {
     const pdfLike = buildTest48PdfLikeLayouts();
     const owner = roles()[0]!;
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
-    try {
-      const initials = buildPrepareAutoInitialsEveryPage({
-        role: owner,
-        pageCount: PAGE_COUNT,
-        skippedPages: new Set(),
-        existingFields: [],
-        valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
-        corpusText: TEST48_CORPUS,
-        pageLayouts: pdfLike,
-      });
-      expect(initials.some((f) => f.page === WITNESS_PAGE_INDEX)).toBe(false);
-      expect(initials.some((f) => f.page === PAGE_COUNT - 1)).toBe(false);
-      const placedPages = new Set(initials.map((f) => f.page));
-      for (const p of placedPages) {
-        expect(p).toBeLessThan(WITNESS_PAGE_INDEX);
-      }
-      const decisions = info.mock.calls
-        .filter((c) => c[0] === "[vs01-initials-page-decision]")
-        .map((c) => c[1] as { page: number; decision: string });
-      const witnessDecision = decisions.find((d) => d.page === WITNESS_PAGE_INDEX);
-      expect(witnessDecision?.decision).toBe("skipped");
-    } finally {
-      warn.mockRestore();
-      info.mockRestore();
-    }
+    const initials = buildPrepareAutoInitialsEveryPage({
+      role: owner,
+      pageCount: PAGE_COUNT,
+      skippedPages: new Set(),
+      existingFields: [],
+      valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
+      corpusText: TEST48_CORPUS,
+      pageLayouts: pdfLike,
+    });
+    expect(initials.some((f) => f.page === WITNESS_PAGE_INDEX)).toBe(true);
+    expect(initials.some((f) => f.page === PAGE_COUNT - 1)).toBe(false);
   });
 
   it("prepare and recipient signing share the same geometry hash", () => {

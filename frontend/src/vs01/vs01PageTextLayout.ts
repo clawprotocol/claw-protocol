@@ -174,6 +174,8 @@ function pickWitnessPageIndex(
       : null;
   if (pdfIdx == null) return corpusIdx;
   if (corpusIdx == null) return pdfIdx;
+  const pdfSig = findSignatureLinePlacementsFromPageLayout(pageLayoutForIndex(pdfLayouts, pdfIdx));
+  if (pdfSig.length >= minRoles) return pdfIdx;
   const pdfScore = scoreWitnessPage(pageLayoutForIndex(pdfLayouts, pdfIdx)).score;
   const corpusScore = scoreWitnessPage(pageLayoutForIndex(corpusLayouts, corpusIdx)).score;
   return corpusScore >= pdfScore ? corpusIdx : pdfIdx;

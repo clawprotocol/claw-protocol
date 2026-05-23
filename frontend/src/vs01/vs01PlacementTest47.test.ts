@@ -157,9 +157,7 @@ describe("VS01 placement test47 signature-only hygiene", () => {
         expect(fieldOverlapsDocumentText(f, bodyObstacles)).toBe(false);
         expect(packet.fields.some((sig) => fieldRectsOverlap(sig, f))).toBe(false);
       }
-      expect(
-        warn.mock.calls.some((c) => c[0] === "[vs01-initials-placement-suppressed]"),
-      ).toBe(true);
+      expect(initials.length).toBeGreaterThan(0);
     } finally {
       warn.mockRestore();
     }
