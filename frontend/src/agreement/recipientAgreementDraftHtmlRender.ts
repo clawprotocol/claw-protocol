@@ -4,6 +4,7 @@
  */
 
 import type { AgreementDraft } from "./agreementTypes";
+import { corpusHasVisibleSignatureExecutionLines } from "../components/agreements/guidedDealCompletion/signatureRegion";
 import { extractAgreementParties } from "./extractAgreementParties";
 import { normalizeJurisdictionDisplay } from "./jurisdictionNormalize";
 import { formatLegalPartyList } from "../components/agreements/formatLegalPartyList";
@@ -45,9 +46,11 @@ export function renderAgreementDraftHtmlLikeBackend(draft: AgreementDraft): stri
       "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>" +
       body +
       "</pre>" +
-      "<p style='margin-top:18px;font-size:12px;color:#475569;text-align:center'>" +
-      "Execution and signature placement are handled in the electronic signing step." +
-      "</p>" +
+      (corpusHasVisibleSignatureExecutionLines(purposeRaw)
+        ? ""
+        : "<p style='margin-top:18px;font-size:12px;color:#475569;text-align:center'>" +
+          "Execution and signature placement are handled in the electronic signing step." +
+          "</p>") +
       "</article>"
     );
   }

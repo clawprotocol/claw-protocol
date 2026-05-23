@@ -52,7 +52,10 @@ function parseSignatureTailAnchors(tailText: string): SignatureLineAnchor[] {
       }
     }
     if (!current) continue;
-    if (/^By\s*:/i.test(trimmed) && !out.some((a) => a.partyIndex === current!.partyIndex)) {
+    if (
+      /^(?:By|Signature)\s*:/i.test(trimmed) &&
+      !out.some((a) => a.partyIndex === current!.partyIndex)
+    ) {
       const rel = i / Math.max(1, tailLineCount - 1);
       out.push({
         partyIndex: current.partyIndex,
@@ -113,6 +116,24 @@ export function logSignatureAnchorPlacementMiss(payload: Record<string, unknown>
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.warn("[vs01-signature-anchor-miss]", payload);
+}
+
+export function logVs01SignatureAnchorResolved(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-signature-anchor-resolved]", payload);
+}
+
+export function logVs01SignatureAnchorFallbackVisibleLines(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-signature-anchor-fallback-visible-lines]", payload);
+}
+
+export function logVs01SignaturePlacementInvalid(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[vs01-signature-placement-invalid]", payload);
 }
 
 function fallbackSignatureY(partyIndex: number, roleCount: number, height: number): number {

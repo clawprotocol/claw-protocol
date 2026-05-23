@@ -232,7 +232,11 @@ function buildSignatureBlocks(identities: readonly CanonicalPartyIdentity[]): {
     if (!id.partyDisplayName) continue;
     const lines: string[] = [`${id.blockHeading}:`];
     lines.push(id.partyDisplayName);
-    lines.push("By: __________________________");
+    lines.push(
+      id.isIndividual
+        ? "Signature: __________________________"
+        : "By: __________________________",
+    );
     const signName = signatureNameForIdentity(id);
     lines.push(`Name: ${signName}`);
     if (!id.isIndividual || id.title?.trim()) {

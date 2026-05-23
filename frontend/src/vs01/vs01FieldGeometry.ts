@@ -13,13 +13,15 @@ import {
 import {
   findSignatureLineAnchorsFromCorpusText,
   logVs01FieldGeometry,
+  logVs01SignatureAnchorFallbackVisibleLines,
+  logVs01SignaturePlacementInvalid,
   signatureAnchorToPrepareRect,
   SIGNATURE_BY_LINE_HEIGHT,
 } from "./vs01SignatureBlockAnchors";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import {
-  findByLinePlacementsFromPageLayout,
+  findSignatureLinePlacementsFromPageLayout,
   pageLayoutForIndex,
   reconcileVs01PageLayouts,
   signatureTailTextRectsOnPage,
@@ -57,6 +59,36 @@ export function logVs01InitialsPlacementSuppressed(payload: Record<string, unkno
   console.warn("[vs01-initials-placement-suppressed]", payload);
 }
 
+export function logVs01InitialsPlacementFallback(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-initials-placement-fallback]", payload);
+}
+
+export function logVs01InitialsFieldGenerated(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-initials-field-generated]", payload);
+}
+
+export function footerInitialsFallbackRect(
+  partyIndex: number,
+  dims?: { width: number; height: number },
+): { x: number; y: number; width: number; height: number } {
+  const { width: w, height: h } = dims ?? prepareAutoInitialsPlacementDims();
+  const lane = Math.max(0, Math.floor(partyIndex));
+  const compactW = Math.min(w, 0.1);
+  return clampPrepareFieldRectToSafeBounds(
+    {
+      x: Math.max(INITIALS_BOTTOM_SCAN_X_MIN, 0.86 - lane * (compactW + 0.014)),
+      y: 0.92,
+      width: compactW,
+      height: h,
+    },
+    { kind: "initials" },
+  );
+}
+
 export function logVs01SignatureAnchorMissing(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
@@ -77,7 +109,7 @@ export function textObstaclesForSignaturePlacement(
   layout: Vs01PageTextLayout | null | undefined,
 ): Array<{ x: number; y: number; width: number; height: number }> {
   const all = layout?.textRects ?? [];
-  const byLines = all.filter((r) => /^By\s*:/i.test(r.text.trim()));
+  const byLines = all.filter((r) => /^(?:By|Signature)\s*:/i.test(r.text.trim()));
   const body = all.filter((r) => r.kind === "body");
   const filtered = body.filter((r) => {
     const partyLineAboveBy = byLines.some(
@@ -138,10 +170,8 @@ export function resolveSignatureRectForRole(args: {
   byPlacement: Vs01ByLinePlacement | null;
 } {
   const layout = pageLayoutForIndex(args.pageLayouts, args.lastPage);
-  const byLines = findByLinePlacementsFromPageLayout(layout);
-  const by =
-    byLines.find((b) => b.partyIndex === args.role.partyIndex) ??
-  null;
+  const byLines = findSignatureLinePlacementsFromPageLayout(layout);
+  const by = byLines.find((b) => b.partyIndex === args.role.partyIndex) ?? null;
 
   if (by) {
     const rect = byLinePlacementToSignatureRect(by);
@@ -186,19 +216,47 @@ export function resolveSignatureRectForRole(args: {
   }
 
   if (witnessBlockPresent(args.corpusText)) {
+    const corpusAnchors = findSignatureLineAnchorsFromCorpusText(args.corpusText ?? "");
+    const corpusAnchor = corpusAnchors.find((a) => a.partyIndex === args.role.partyIndex) ?? null;
+    if (corpusAnchor) {
+      const rect = by
+        ? byLinePlacementToSignatureRect(by)
+        : signatureAnchorToPrepareRect({
+            anchor: corpusAnchor,
+            partyIndex: args.role.partyIndex,
+            roleCount: args.roleCount,
+            fieldType: "signature",
+          });
+      logVs01SignatureAnchorFallbackVisibleLines({
+        partyIndex: args.role.partyIndex,
+        page: args.lastPage,
+        blockHeading: corpusAnchor.blockHeading,
+        layoutByLines: byLines.length,
+      });
+      logVs01SignatureAnchorUsed({
+        partyIndex: args.role.partyIndex,
+        page: args.lastPage,
+        blockHeading: corpusAnchor.blockHeading,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        source: by ? "layout_visible_lines" : "corpus_visible_lines",
+      });
+      return { rect, anchorKind: by ? "by_line_layout" : "by_line_corpus", byPlacement: by };
+    }
+    logVs01SignaturePlacementInvalid({
+      partyIndex: args.role.partyIndex,
+      pageIndex: args.lastPage,
+      visibleLineCount: byLines.length,
+      signerCount: args.roleCount,
+      reason: "witness_block_missing_execution_lines",
+    });
     logVs01SignatureAnchorMissing({
       role: args.role.kind,
       partyIndex: args.role.partyIndex,
       pageIndex: args.lastPage,
       reason: "witness_block_missing_by_lines",
       byLinesOnPage: byLines.length,
-    });
-    logVs01FieldGeometry({
-      page: args.lastPage,
-      role: args.role.kind,
-      type: "signature",
-      anchorKind: "manual_required",
-      partyIndex: args.role.partyIndex,
     });
     return { rect: null, anchorKind: "manual_required", byPlacement: null };
   }
@@ -221,15 +279,6 @@ export function resolveSignatureRectForRole(args: {
       width: rect.width,
       source: "corpus_anchor",
     });
-    logVs01FieldGeometry({
-      page: args.lastPage,
-      role: args.role.kind,
-      type: "signature",
-      rect,
-      anchorKind: "by_line_corpus",
-      overlap: false,
-      partyIndex: args.role.partyIndex,
-    });
     return { rect, anchorKind: "by_line_corpus", byPlacement: null };
   }
 
@@ -238,16 +287,6 @@ export function resolveSignatureRectForRole(args: {
     partyIndex: args.role.partyIndex,
     roleCount: args.roleCount,
     fieldType: "signature",
-  });
-  logVs01FieldGeometry({
-    page: args.lastPage,
-    role: args.role.kind,
-    type: "signature",
-    rect: fallback,
-    anchorKind: "by_line_corpus",
-    overlap: false,
-    partyIndex: args.role.partyIndex,
-    fallbackLane: true,
   });
   return { rect: fallback, anchorKind: "by_line_corpus", byPlacement: null };
 }
@@ -270,7 +309,10 @@ export function findSafeInitialsRectOnPage(args: {
   const lane = Math.max(0, Math.floor(args.partyIndex));
   const textObstacles = [
     ...footerWatermarkObstacles(),
-    ...textRectsToObstacles(args.pageLayout?.textRects ?? [], INITIALS_TEXT_PAD),
+    ...textRectsToObstacles(
+      (args.pageLayout?.textRects ?? []).filter((r) => r.kind === "body"),
+      INITIALS_TEXT_PAD,
+    ),
   ];
 
   const signatureLastPage =
@@ -347,6 +389,24 @@ export function findSafeInitialsRectOnPage(args: {
     }
   }
 
+  const footerRect = footerInitialsFallbackRect(args.partyIndex, dims);
+  if (!args.fieldObstacles.some((o) => fieldRectsOverlap(footerRect, o, 0.01))) {
+    logVs01InitialsPlacementFallback({
+      page: args.page,
+      partyIndex: args.partyIndex,
+      reason: "footer_band",
+      x: footerRect.x,
+      y: footerRect.y,
+    });
+    logVs01InitialsFieldGenerated({
+      page: args.page,
+      partyIndex: args.partyIndex,
+      rect: footerRect,
+      source: "footer_fallback",
+    });
+    return { rect: footerRect, anchorKind: "initials_margin" };
+  }
+
   logVs01InitialsPlacementSuppressed({
     page: args.page,
     reason: "no_clear_margin",
@@ -421,11 +481,11 @@ export function vs01SignatureManualPlacementRequired(args: {
 }): boolean {
   if (!witnessBlockPresent(args.corpusText)) return false;
   const layout = pageLayoutForIndex(args.pageLayouts, args.lastPage);
-  const byLines = findByLinePlacementsFromPageLayout(layout);
-  if (byLines.length >= args.roles.length) return false;
+  const sigLines = findSignatureLinePlacementsFromPageLayout(layout);
+  if (sigLines.length >= args.roles.length) return false;
   return true;
 }
 
 export function geometryUsesLayoutByAnchors(pageLayouts: readonly Vs01PageTextLayout[], lastPage: number): boolean {
-  return findByLinePlacementsFromPageLayout(pageLayoutForIndex(pageLayouts, lastPage)).length > 0;
+  return findSignatureLinePlacementsFromPageLayout(pageLayoutForIndex(pageLayouts, lastPage)).length > 0;
 }

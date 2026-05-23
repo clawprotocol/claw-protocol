@@ -43,7 +43,7 @@ function estimateLineWidth(line: string): number {
 function classifyLineKind(line: string): Vs01TextRectKind {
   const t = line.trim();
   if (/^(CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return "heading";
-  if (/^(By|Name|Title|Date)\s*:/i.test(t)) return "signature_label";
+  if (/^(By|Signature|Name|Title|Date)\s*:/i.test(t)) return "signature_label";
   if (/^IN WITNESS WHEREOF/i.test(t)) return "heading";
   return "body";
 }
@@ -138,17 +138,45 @@ function normalizePdfPageLayouts(
   return out;
 }
 
-function scoreWitnessPage(layout: Vs01PageTextLayout): {
+export function scoreWitnessPage(layout: Vs01PageTextLayout | null | undefined): {
   score: number;
   byCount: number;
   hasWitness: boolean;
 } {
-  const by = findByLinePlacementsFromPageLayout(layout);
+  if (!layout?.textRects.length) return { score: -1, byCount: 0, hasWitness: false };
+  const sigLines = findSignatureLinePlacementsFromPageLayout(layout);
   const hasWitness = layout.textRects.some((r) => /\bIN WITNESS WHEREOF\b/i.test(r.text));
-  let score = by.length * 100;
+  const hasScheduleOnly =
+    layout.textRects.some((r) => /\bSCHEDULE\s+A\b/i.test(r.text)) &&
+    sigLines.length === 0 &&
+    !hasWitness;
+  const hasExecutionPlaceholder = layout.textRects.some((r) =>
+    /Execution and signature placement are handled/i.test(r.text),
+  );
+  let score = sigLines.length * 100;
   if (hasWitness) score += 40;
-  if (by.length >= 2) score += 50;
-  return { score, byCount: by.length, hasWitness };
+  if (sigLines.length >= 2) score += 50;
+  if (hasScheduleOnly) score -= 250;
+  if (hasExecutionPlaceholder && !hasWitness && sigLines.length === 0) score -= 200;
+  return { score, byCount: sigLines.length, hasWitness };
+}
+
+function pickWitnessPageIndex(
+  pdfLayouts: readonly Vs01PageTextLayout[],
+  corpusLayouts: readonly Vs01PageTextLayout[],
+  corpusText: string | null | undefined,
+  minRoles: number,
+): number | null {
+  const pdfIdx = detectWitnessSignaturePageIndex(pdfLayouts, corpusText, minRoles);
+  const corpusIdx =
+    corpusLayouts.length > 0
+      ? detectWitnessSignaturePageIndex(corpusLayouts, corpusText, minRoles)
+      : null;
+  if (pdfIdx == null) return corpusIdx;
+  if (corpusIdx == null) return pdfIdx;
+  const pdfScore = scoreWitnessPage(pageLayoutForIndex(pdfLayouts, pdfIdx)).score;
+  const corpusScore = scoreWitnessPage(pageLayoutForIndex(corpusLayouts, corpusIdx)).score;
+  return corpusScore >= pdfScore ? corpusIdx : pdfIdx;
 }
 
 /** Scan all page layouts for the page that contains the canonical witness / By: block. */
@@ -181,8 +209,8 @@ function mergeWitnessPageLayout(
   corpusPage: Vs01PageTextLayout,
   pageIndex: number,
 ): Vs01PageTextLayout {
-  const pdfBy = findByLinePlacementsFromPageLayout(pdfPage);
-  if (pdfBy.length >= 2 && pdfPage) {
+  const pdfSig = findSignatureLinePlacementsFromPageLayout(pdfPage);
+  if (pdfSig.length >= 2 && pdfPage) {
     return { ...pdfPage, pageIndex };
   }
   return { ...corpusPage, pageIndex, source: "corpus_sim" };
@@ -221,17 +249,15 @@ export function reconcileVs01PageLayouts(args: {
     corpus.length >= 40 ? buildCorpusSimulatedPageLayouts(corpus, finalPageCount) : [];
   const simulatedPageCount = corpusLayouts.length;
 
-  let witnessPageIndex =
-    detectWitnessSignaturePageIndex(pdfLayouts, corpus, roleCount) ??
-    detectWitnessSignaturePageIndex(corpusLayouts, corpus, roleCount);
+  let witnessPageIndex = pickWitnessPageIndex(pdfLayouts, corpusLayouts, corpus, roleCount);
 
   const layouts: Vs01PageTextLayout[] = [];
   for (let i = 0; i < finalPageCount; i += 1) {
     const pdf = pageLayoutForIndex(pdfLayouts, i);
     const corpusPage = pageLayoutForIndex(corpusLayouts, i);
     if (witnessPageIndex === i && corpusPage) {
-      const pdfBy = findByLinePlacementsFromPageLayout(pdf);
-      if (pdfBy.length < roleCount) {
+      const pdfSig = findSignatureLinePlacementsFromPageLayout(pdf);
+      if (pdfSig.length < roleCount) {
         layouts.push(mergeWitnessPageLayout(pdf, corpusPage, i));
         continue;
       }
@@ -296,26 +322,30 @@ const BLOCK_HEADING_RES = [
   { re: /^\s*PARTY\s+(\d+)\s*:?\s*$/i, partyIndex: -1, label: "PARTY" },
 ];
 
-function parseByLineWidth(lineText: string, lineRectWidth: number): number {
+function parseSignatureLineWidth(lineText: string, lineRectWidth: number): number {
   const underline = lineText.match(/_+/);
   if (underline?.[0]) {
     return Math.min(0.58, Math.max(0.2, underline[0].length * CORPUS_CHAR_WIDTH));
   }
-  const afterBy = lineText.replace(/^By\s*:\s*/i, "").trim();
-  if (afterBy.length > 0) {
-    return Math.min(0.58, Math.max(0.2, afterBy.length * CORPUS_CHAR_WIDTH));
+  const afterLabel = lineText.replace(/^(?:By|Signature)\s*:\s*/i, "").trim();
+  if (afterLabel.length > 0) {
+    return Math.min(0.58, Math.max(0.2, afterLabel.length * CORPUS_CHAR_WIDTH));
   }
   return Math.min(0.48, Math.max(0.22, lineRectWidth * 0.72));
 }
 
-function byPrefixNormX(lineText: string, lineX: number): number {
-  const m = lineText.match(/^By\s*:\s*/i);
+function signatureLinePrefixNormX(lineText: string, lineX: number): number {
+  const m = lineText.match(/^(?:By|Signature)\s*:\s*/i);
   const prefixChars = m ? m[0].length : 4;
   return lineX + prefixChars * CORPUS_CHAR_WIDTH;
 }
 
-/** Locate witness-block `By:` lines from rendered/simulated page text geometry. */
-export function findByLinePlacementsFromPageLayout(
+function isSignatureExecutionLine(text: string): boolean {
+  return /^(?:By|Signature)\s*:/i.test(text.trim());
+}
+
+/** Locate witness-block `By:` / `Signature:` lines from rendered/simulated page text geometry. */
+export function findSignatureLinePlacementsFromPageLayout(
   layout: Vs01PageTextLayout | null | undefined,
 ): Vs01ByLinePlacement[] {
   if (!layout?.textRects.length) return [];
@@ -334,13 +364,13 @@ export function findByLinePlacementsFromPageLayout(
         break;
       }
     }
-    if (!/^By\s*:/i.test(trimmed)) continue;
+    if (!isSignatureExecutionLine(trimmed)) continue;
     const partyIndex =
       current?.partyIndex ?? (out.length === 0 ? 0 : out.length === 1 ? 1 : out.length);
     const blockHeading = current?.blockHeading ?? (partyIndex === 0 ? "CLIENT" : "SERVICE PROVIDER");
     if (out.some((a) => a.partyIndex === partyIndex)) continue;
-    const width = parseByLineWidth(trimmed, rect.width);
-    const x = byPrefixNormX(trimmed, rect.x);
+    const width = parseSignatureLineWidth(trimmed, rect.width);
+    const x = signatureLinePrefixNormX(trimmed, rect.x);
     out.push({
       partyIndex,
       blockHeading,
@@ -352,6 +382,13 @@ export function findByLinePlacementsFromPageLayout(
     });
   }
   return out.sort((a, b) => a.partyIndex - b.partyIndex);
+}
+
+/** @deprecated Use {@link findSignatureLinePlacementsFromPageLayout}. */
+export function findByLinePlacementsFromPageLayout(
+  layout: Vs01PageTextLayout | null | undefined,
+): Vs01ByLinePlacement[] {
+  return findSignatureLinePlacementsFromPageLayout(layout);
 }
 
 /** Text rects on the signature tail page (witness block through end). */

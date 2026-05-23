@@ -408,4 +408,19 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     expect(html).toContain("Draft Agreement (non-binding template)");
   });
 
+  it("buildSendRouteReadonlyHtmlFromPlain keeps witness execution lines without duplicate execution footer", () => {
+    const corpus = `
+IN WITNESS WHEREOF
+
+CLIENT:
+Acme LLC
+By: __________________________
+Name: Anthem H Blanchard
+Date: _________________________
+`.trim();
+    const html = buildSendRouteReadonlyHtmlFromPlain(corpus);
+    expect(html).toContain("By:");
+    expect(html).not.toContain("Execution and signature placement are handled");
+  });
+
 });

@@ -1,4 +1,5 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { corpusHasVisibleSignatureExecutionLines } from "./guidedDealCompletion/signatureRegion";
 import { resolvePaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { escapeHtml } from "./premiumAgreementDocumentHtml";
@@ -263,6 +264,11 @@ export function buildSendRouteReadonlyHtmlFromPlain(
       : "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>" +
         escapeHtml(label) +
         "</p>";
+  const executionNoteBlock = corpusHasVisibleSignatureExecutionLines(plain.trim())
+    ? ""
+    : "<p style='margin-top:18px;font-size:12px;color:#475569;text-align:center'>" +
+      "Execution and signature placement are handled in the electronic signing step." +
+      "</p>";
   return (
     "<article style='position:relative;max-width:720px;margin:0 auto'>" +
     labelBlock +
@@ -270,9 +276,7 @@ export function buildSendRouteReadonlyHtmlFromPlain(
     "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>" +
     body +
     "</pre>" +
-    "<p style='margin-top:18px;font-size:12px;color:#475569;text-align:center'>" +
-    "Execution and signature placement are handled in the electronic signing step." +
-    "</p>" +
+    executionNoteBlock +
     "</article>"
   );
 }

@@ -99,11 +99,22 @@ export function countSignatureBlockHeadingsInTail(text: string): number {
   return (tail.match(/^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:/gim) || []).length;
 }
 
-/** Count `By:` lines in the signature tail (VS01 anchor requirement). */
-export function countSignatureByLinesInTail(text: string): number {
+/** Count execution-line anchors (`By:` or `Signature:`) in the signature tail. */
+export function countSignatureExecutionLinesInTail(text: string): number {
   const start = signaturePatchStartIndex(text);
   const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
-  return (tail.match(/^\s*By\s*:/gim) || []).length;
+  return (tail.match(/^\s*(?:By|Signature)\s*:/gim) || []).length;
+}
+
+/** @deprecated Use {@link countSignatureExecutionLinesInTail}. */
+export function countSignatureByLinesInTail(text: string): number {
+  return countSignatureExecutionLinesInTail(text);
+}
+
+export function corpusHasVisibleSignatureExecutionLines(text: string): boolean {
+  const trimmed = (text || "").trim();
+  if (!/\bIN WITNESS WHEREOF\b/i.test(trimmed)) return false;
+  return /^\s*(?:By|Signature)\s*:/im.test(trimmed);
 }
 
 export function corpusSignatureBlocksHaveRequiredByLines(
@@ -111,7 +122,7 @@ export function corpusSignatureBlocksHaveRequiredByLines(
   partyCount: number,
 ): boolean {
   const headings = countSignatureBlockHeadingsInTail(text);
-  const byLines = countSignatureByLinesInTail(text);
-  if (headings > 0) return byLines >= headings;
-  return byLines >= Math.min(2, Math.max(1, partyCount));
+  const executionLines = countSignatureExecutionLinesInTail(text);
+  if (headings > 0) return executionLines >= headings;
+  return executionLines >= Math.min(2, Math.max(1, partyCount));
 }

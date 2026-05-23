@@ -265,7 +265,7 @@ describe("VS01 placement test48 — witness page geometry", () => {
     expect(sigs.some((f) => f.page === PAGE_COUNT - 1)).toBe(false);
   });
 
-  it("requires manual placement when witness exists but By lines are missing (no generic fallback)", () => {
+  it("recovers layout anchors from corpus when PDF witness page lacks By lines", () => {
     const layouts = witnessPageWithoutByLines();
     const ctx = buildVs01PlacementContext({
       corpusText: TEST48_CORPUS,
@@ -280,7 +280,7 @@ describe("VS01 placement test48 — witness page geometry", () => {
         pageLayouts: ctx.layouts,
         lastPage: ctx.witnessPageIndex ?? WITNESS_PAGE_INDEX,
       }),
-    ).toBe(true);
+    ).toBe(false);
     const ownerPlacement = resolveSignatureRectForRole({
       role: { partyIndex: 0, kind: "owner" },
       roleCount: 2,
@@ -288,8 +288,8 @@ describe("VS01 placement test48 — witness page geometry", () => {
       pageLayouts: ctx.layouts,
       lastPage: ctx.witnessPageIndex ?? WITNESS_PAGE_INDEX,
     });
-    expect(ownerPlacement.rect).toBeNull();
-    expect(ownerPlacement.anchorKind).toBe("manual_required");
+    expect(ownerPlacement.rect).not.toBeNull();
+    expect(ownerPlacement.anchorKind).toBe("by_line_layout");
   });
 
   it("clears stale document layout cache on fresh document id", () => {

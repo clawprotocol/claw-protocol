@@ -12,8 +12,15 @@ import {
   buildVs01PlacementContext,
   fieldOverlapsDocumentText,
   findSafeInitialsRectOnPage,
+  footerInitialsFallbackRect,
+  logVs01InitialsPlacementFallback,
 } from "./vs01FieldGeometry";
-import { pageLayoutForIndex, textRectsToObstacles, type Vs01PageTextLayout } from "./vs01PageTextLayout";
+import {
+  buildCorpusSimulatedPageLayouts,
+  pageLayoutForIndex,
+  textRectsToObstacles,
+  type Vs01PageTextLayout,
+} from "./vs01PageTextLayout";
 
 export type Vs01InitialsPlacementMode = "placed_all_eligible" | "suppressed_document_wide";
 
@@ -28,8 +35,6 @@ export type Vs01InitialsPlacementPolicy = {
   rectByPartyIndex: Map<number, { x: number; y: number; width: number; height: number }>;
 };
 
-const DOC_WIDE_FAIL_RATIO = 0.2;
-
 export function logVs01InitialsPolicy(payload: Record<string, unknown>): void {
   // eslint-disable-next-line no-console
   console.info("[vs01-initials-policy]", payload);
@@ -38,8 +43,7 @@ export function logVs01InitialsPolicy(payload: Record<string, unknown>): void {
 function isFooterOnlyPage(layout: Vs01PageTextLayout | null): boolean {
   const rects = layout?.textRects ?? [];
   if (rects.length === 0) return true;
-  const body = rects.filter((r) => r.kind === "body");
-  if (body.length > 0) return false;
+  if (rects.some((r) => r.kind === "body" || r.kind === "heading")) return false;
   return rects.every((r) => r.kind === "footer" || r.y >= 0.9);
 }
 
@@ -59,8 +63,12 @@ function pageAcceptsInitialsRect(args: {
   pageLayout: Vs01PageTextLayout | null;
   fieldObstacles: readonly { x: number; y: number; width: number; height: number }[];
 }): boolean {
-  const obstacles = textRectsToObstacles(args.pageLayout?.textRects ?? [], 0.012);
-  if (fieldOverlapsDocumentText(args.rect, obstacles, 0.012)) return false;
+  const obstacles = textRectsToObstacles(
+    (args.pageLayout?.textRects ?? []).filter((r) => r.kind === "body"),
+    0.008,
+  );
+  const inFooterBand = args.rect.y >= 0.86;
+  if (!inFooterBand && fieldOverlapsDocumentText(args.rect, obstacles, 0.012)) return false;
   if (args.fieldObstacles.some((o) => fieldRectsOverlap(args.rect, o, 0.014))) return false;
   return true;
 }
@@ -82,13 +90,19 @@ export function resolveVs01InitialsPlacementPolicy(args: {
     roleCount: Math.max(2, args.partyIndices.length),
   });
   const witnessPageIndex = placementCtx.witnessPageIndex ?? pageCount - 1;
+  const corpus = (args.corpusText ?? "").trim();
+  const corpusLayouts =
+    corpus.length >= 40 ? buildCorpusSimulatedPageLayouts(corpus, pageCount) : [];
   const dims = prepareAutoInitialsPlacementDims();
   const eligiblePages: number[] = [];
   const skippedPages: number[] = [];
 
   for (let p = 0; p < witnessPageIndex; p += 1) {
     const layout = pageLayoutForIndex(placementCtx.layouts, p);
-    if (isFooterOnlyPage(layout) || !hasSubstantivePageContent(layout)) {
+    const corpusPage = pageLayoutForIndex(corpusLayouts, p);
+    const effective =
+      layout && layout.textRects.length > 0 ? layout : corpusPage ?? layout;
+    if (isFooterOnlyPage(effective) || !hasSubstantivePageContent(effective)) {
       skippedPages.push(p);
       continue;
     }
@@ -153,9 +167,13 @@ export function resolveVs01InitialsPlacementPolicy(args: {
       break;
     }
     if (!anchor) {
-      failures += args.partyIndices.length;
-      attempts += eligiblePages.length;
-      continue;
+      anchor = footerInitialsFallbackRect(partyIndex, dims);
+      logVs01InitialsPlacementFallback({
+        partyIndex,
+        reason: "policy_footer_band",
+        x: anchor.x,
+        y: anchor.y,
+      });
     }
     rectByPartyIndex.set(partyIndex, anchor);
     for (const p of eligiblePages) {
@@ -186,14 +204,14 @@ export function resolveVs01InitialsPlacementPolicy(args: {
   }
 
   const failRatio = attempts > 0 ? failures / attempts : 1;
-  if (failRatio > DOC_WIDE_FAIL_RATIO || rectByPartyIndex.size < args.partyIndices.length) {
+  if (rectByPartyIndex.size < args.partyIndices.length) {
     const policy: Vs01InitialsPlacementPolicy = {
       mode: "suppressed_document_wide",
       witnessPageIndex,
       eligiblePages,
       placedPages: [],
       skippedPages,
-      suppressedReason: failRatio > DOC_WIDE_FAIL_RATIO ? "inconsistent_margin_band" : "anchor_unavailable",
+      suppressedReason: "anchor_unavailable",
       rectByPartyIndex: new Map(),
     };
     logVs01InitialsPolicy({

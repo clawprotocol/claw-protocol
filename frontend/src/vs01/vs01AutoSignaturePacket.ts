@@ -15,14 +15,18 @@ import {
   signatureAnchorToPrepareRect,
   corpusHasPrefilledSignatureIdentity,
   logSignatureAnchorPlacementMiss,
+  logVs01SignatureAnchorResolved,
+  logVs01SignaturePlacementInvalid,
 } from "./vs01SignatureBlockAnchors";
 import {
   buildVs01PlacementContext,
-  geometryUsesLayoutByAnchors,
   resolveSignatureRectForRole,
 } from "./vs01FieldGeometry";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
-import { findByLinePlacementsFromPageLayout, pageLayoutForIndex } from "./vs01PageTextLayout";
+import {
+  findSignatureLinePlacementsFromPageLayout,
+  pageLayoutForIndex,
+} from "./vs01PageTextLayout";
 import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { stampPrepareSenderFieldOrReject, type Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { PREPARE_FIELD_ASSIGNMENT_SOURCE } from "./vs01PrepareFieldPlacement";
@@ -105,21 +109,56 @@ function layoutHasCanonicalSignatureIdentityBlocks(
   roleCount: number,
 ): boolean {
   const layout = pageLayoutForIndex(pageLayouts, lastPage);
-  const byLines = findByLinePlacementsFromPageLayout(layout);
-  if (byLines.length < Math.min(1, roleCount)) return false;
+  const sigLines = findSignatureLinePlacementsFromPageLayout(layout);
+  if (sigLines.length < Math.min(1, roleCount)) return false;
   const lines = (layout?.textRects ?? [])
     .map((r) => r.text.trim())
     .filter(Boolean);
   let completeBlocks = 0;
-  for (const by of byLines) {
-    const start = lines.findIndex((line) => line === by.lineText);
+  for (const sig of sigLines) {
+    const start = lines.findIndex((line) => line === sig.lineText);
     if (start < 0) continue;
     const window = lines.slice(start, start + 5).join("\n");
     if (/\bName\s*:\s*\S+/i.test(window) && /\bDate\s*:/i.test(window)) {
       completeBlocks += 1;
     }
   }
-  return completeBlocks >= Math.min(roleCount, byLines.length);
+  return completeBlocks >= Math.min(roleCount, sigLines.length);
+}
+
+export type Vs01SigningAutoPlacementQuality = {
+  placementOk: boolean;
+  signatureOk: boolean;
+  initialsOk: boolean;
+  warnings: string[];
+};
+
+/** Gate misleading auto-placement success when signatures or initials are incomplete. */
+export function evaluateVs01SigningAutoPlacementQuality(args: {
+  signatureFieldCount: number;
+  initialsFieldCount: number;
+  roleCount: number;
+  pageCount: number;
+  witnessPageIndex: number;
+  layoutSignatureLineCount: number;
+  corpusAnchorCount: number;
+  intendsInitials?: boolean;
+}): Vs01SigningAutoPlacementQuality {
+  const warnings: string[] = [];
+  const signatureOk = args.signatureFieldCount >= args.roleCount;
+  const minInitialsPages = Math.max(0, args.witnessPageIndex);
+  const intendsInitials = args.intendsInitials !== false;
+  const initialsOk =
+    !intendsInitials ||
+    (args.initialsFieldCount > 0 &&
+      args.initialsFieldCount >= minInitialsPages * Math.max(1, args.roleCount) * 0.5);
+  const hasVisibleAnchors =
+    args.layoutSignatureLineCount >= args.roleCount || args.corpusAnchorCount >= args.roleCount;
+  if (!signatureOk) warnings.push("signature_count_below_signer_count");
+  if (intendsInitials && args.initialsFieldCount === 0) warnings.push("initials_missing");
+  if (!hasVisibleAnchors) warnings.push("signature_lines_not_anchored_to_visible_block");
+  const placementOk = signatureOk && (!intendsInitials || initialsOk) && hasVisibleAnchors;
+  return { placementOk, signatureOk, initialsOk, warnings };
 }
 
 export function resolveAutoSignaturePacketMode(args: {
@@ -220,7 +259,9 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   const pageLayouts = placementCtx.layouts;
   const witnessPage = placementCtx.witnessPageIndex ?? pageCount - 1;
   const anchors = args.corpusText ? findSignatureLineAnchorsFromCorpusText(args.corpusText) : [];
-  const layoutByLines = findByLinePlacementsFromPageLayout(pageLayoutForIndex(pageLayouts, witnessPage));
+  const layoutByLines = findSignatureLinePlacementsFromPageLayout(
+    pageLayoutForIndex(pageLayouts, witnessPage),
+  );
   const mode = resolveAutoSignaturePacketMode({
     corpusText: args.corpusText,
     pageLayouts,
@@ -247,6 +288,7 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   }
 
   let anchorPlacements = 0;
+  let layoutAnchorPlacements = 0;
 
   for (const role of args.roles) {
     if (roleHasSignatureBlock([...placedSoFar, ...out], role.roleId, witnessPage)) continue;
@@ -275,10 +317,15 @@ export function buildAutoSignaturePacketForAllRoles(args: {
           });
           continue;
         }
-        if (
-          placement.anchorKind === "by_line_layout" ||
-          placement.anchorKind === "by_line_corpus"
-        ) {
+        if (placement.anchorKind === "by_line_layout") {
+          anchorPlacements += 1;
+          layoutAnchorPlacements += 1;
+          logVs01SignatureAnchorResolved({
+            partyIndex: role.partyIndex,
+            page: witnessPage,
+            anchorKind: placement.anchorKind,
+          });
+        } else if (placement.anchorKind === "by_line_corpus" && anchors.some((a) => a.partyIndex === role.partyIndex)) {
           anchorPlacements += 1;
         }
         const clamped = placement.rect;
@@ -360,16 +407,25 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   const placedCount = out.length;
   const signatureFields = out.filter((f) => f.type === "signature").length;
   const optionalFieldCount = placedCount - signatureFields;
-  const anchorBacked = witnessPresent
-    ? anchorPlacements >= args.roles.length &&
-      (layoutByLines.length >= args.roles.length ||
-        anchors.length >= args.roles.length ||
-        geometryUsesLayoutByAnchors(pageLayouts, witnessPage))
-    : anchorPlacements >= args.roles.length;
+  const anchorBacked =
+    layoutAnchorPlacements >= args.roles.length ||
+    (witnessPresent &&
+      layoutByLines.length >= args.roles.length &&
+      anchorPlacements >= args.roles.length) ||
+    (!witnessPresent && anchorPlacements >= args.roles.length && anchors.length >= args.roles.length);
+  if (witnessPresent && layoutByLines.length < args.roles.length && anchors.length < args.roles.length) {
+    logVs01SignaturePlacementInvalid({
+      witnessPage,
+      visibleLineCount: Math.max(layoutByLines.length, anchors.length),
+      signerCount: args.roles.length,
+      reason: "insufficient_visible_execution_lines",
+    });
+  }
   const confidence: AutoSignaturePacketResult["confidence"] =
     mode === "signature_only"
       ? signatureFields >= args.roles.length &&
         anchorBacked &&
+        layoutAnchorPlacements >= args.roles.length &&
         out.every((f) => f.type === "signature")
         ? "high"
         : "draft"
@@ -397,13 +453,34 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   }
 
   if (placedCount > 0) {
-    // eslint-disable-next-line no-console
-    console.info("[signing-auto-placement-success]", { placedCount, confidence });
+    const quality = evaluateVs01SigningAutoPlacementQuality({
+      signatureFieldCount: signatureFields,
+      initialsFieldCount: 0,
+      roleCount: args.roles.length,
+      pageCount,
+      witnessPageIndex: witnessPage,
+      layoutSignatureLineCount: layoutByLines.length,
+      corpusAnchorCount: anchors.length,
+      intendsInitials: false,
+    });
+    if (quality.placementOk && confidence === "high") {
+      // eslint-disable-next-line no-console
+      console.info("[signing-auto-placement-success]", { placedCount, confidence });
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn("[signing-auto-placement-incomplete]", {
+        placedCount,
+        confidence,
+        warnings: quality.warnings,
+      });
+    }
     // eslint-disable-next-line no-console
     console.info("[signature-fields-auto-placed]", {
       signerCount: args.roles.length,
       fieldCount: placedCount,
       source: "signature_blocks",
+      layoutSignatureLines: layoutByLines.length,
+      corpusAnchors: anchors.length,
     });
   } else {
     // eslint-disable-next-line no-console
