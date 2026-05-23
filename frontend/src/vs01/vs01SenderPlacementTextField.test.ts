@@ -69,19 +69,19 @@ describe("VS01 sender placement: Text field", () => {
     expect(free.value).toBe("");
   });
 
-  it("uses a wider default box for freeform Text than for Printed name (sender + recipient)", () => {
+  it("uses aligned default boxes for Text and Printed name (sender + recipient)", () => {
     const textS = defaultSizeForType("text");
     const printedS = defaultSizeForType("printed_name");
-    expect(textS.width).toBeGreaterThan(printedS.width);
+    expect(textS.width).toBeGreaterThanOrEqual(printedS.width);
     expect(textS.height).toBeGreaterThan(0.028);
     const textR = defaultSizeForRecipientField("text");
     const printedR = defaultSizeForRecipientField("printed_name");
-    expect(textR.width).toBeGreaterThan(printedR.width);
+    expect(textR.width).toBeGreaterThanOrEqual(printedR.width);
   });
 
   it("uses compact line-like default heights for Text and Email", () => {
-    expect(defaultSizeForType("text").height).toBeLessThanOrEqual(0.036);
-    expect(defaultSizeForType("email").height).toBeLessThanOrEqual(0.036);
+    expect(defaultSizeForType("text").height).toBeLessThanOrEqual(0.045);
+    expect(defaultSizeForType("email").height).toBeLessThanOrEqual(0.045);
     expect(defaultSizeForType("email").width).toBeGreaterThanOrEqual(defaultSizeForType("text").width);
   });
 });
@@ -112,11 +112,11 @@ describe("VS01 manual field sizing map and resize bounds", () => {
 
   it("defaults line-like text, email, date, and printed_name (not oversized blocks)", () => {
     const { text, email, date, printed_name } = VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM;
-    expect(text.height).toBeLessThanOrEqual(0.034);
+    expect(text.height).toBeLessThanOrEqual(0.045);
     expect(email.height).toBe(text.height);
-    expect(date.height).toBe(text.height);
+    expect(date.height).toBeLessThanOrEqual(0.045);
     expect(printed_name.height).toBe(text.height);
-    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.signature.height).toBeLessThanOrEqual(0.056);
+    expect(VS01_MANUAL_FIELD_DEFAULT_SIZE_NORM.signature.height).toBeLessThanOrEqual(0.075);
   });
 
   it("orders default widths: email >= text >= printed_name and email > date", () => {

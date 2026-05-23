@@ -117,7 +117,7 @@ describe("guided final review flow", () => {
   it("test22: final review unlocks when apply + signers both complete", () => {
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("evaluateGuidedFinalReviewUnlockGate");
-    expect(intake).toContain("handleGuidedPreReviewContinueToFinalReview");
+    expect(intake).toContain("continueGuidedSignerSetupToFinalReview");
     expect(intake).toContain("guidedAnswerApplyStatus");
     expect(intake).toContain("resolveGuidedFrozenAnswerCount");
     expect(intake).not.toContain("Applying your 0 answers");

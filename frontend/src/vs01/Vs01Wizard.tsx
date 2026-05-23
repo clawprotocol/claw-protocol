@@ -181,6 +181,7 @@ export function Vs01Wizard({
     RECIPIENT_AGREEMENT_ID || null,
   );
   const [prepareActiveSignerRoleId, setPrepareActiveSignerRoleId] = useState<string | null>(null);
+  const [prepareCorpusText, setPrepareCorpusText] = useState<string | null>(null);
   const bridgeHydratedSeedSid = useRef<string | null>(null);
   const bridgeHandoffSnapshotRef = useRef<AgreementVs01BridgeSession | null>(null);
   const [step, setStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.step ?? initialStep);
@@ -264,10 +265,12 @@ export function Vs01Wizard({
 
   useEffect(() => {
     if (!VS01_URL_BOOT) return;
+    const receiptId = (VS01_URL_BOOT.receiptId ?? "").trim();
+    if (!receiptId) return;
     let cancelled = false;
     void (async () => {
       try {
-        const data = await getReceipt(VS01_URL_BOOT.receiptId);
+        const data = await getReceipt(receiptId);
         if (cancelled) return;
         const raw = data.receipt !== undefined ? data.receipt : data;
         let hash: string | null = null;
@@ -599,6 +602,7 @@ export function Vs01Wizard({
           const ownerR = rolesForM[0]!;
           flushSync(() => {
             setVs01LinkedAgreementId(bridge.agreementId);
+            setPrepareCorpusText((bridge.agreementCorpusText ?? "").trim() || null);
             setAgreementTitle(titleForUi);
             setCreatorName(cn);
             setCreatorEmail(ce);
@@ -1130,6 +1134,7 @@ export function Vs01Wizard({
                 senderMessage={senderMessage}
                 agreementBridgePlacementCopy={paidProAgreementBridgeSkip}
                 prepareAgreementId={vs01LinkedAgreementId || null}
+                prepareCorpusText={prepareCorpusText}
                 prepareSignerRoles={prepareSignerRoles}
                 prepareRecipientPlacedFields={recipientPlacedFields}
                 onPrepareSignerMetadataChange={handlePrepareSignerMetadataChange}

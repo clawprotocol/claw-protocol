@@ -102,4 +102,19 @@ describe("buildVs01PrepareSigningRoles signer identity", () => {
     expect(merged?.parties[1]?.signerTitle).toBe("General Counsel");
     expect(merged?.parties[0]?.signerName).toBeUndefined();
   });
+
+  it("individual counterparty uses party name as signer, not email local part", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_individual",
+      creatorName: "Acme LLC",
+      creatorEmail: "anthem@acme.com",
+      ownerSignerName: "Anthem Blanchard",
+      ownerSignerTitle: "Manager",
+      counterparties: [{ id: "cp1", name: "Joe Smith", email: "joem@gmail.com" }],
+    });
+    expect(roles[1]!.signerName).toBe("Joe Smith");
+    const display = resolvePreparePrintedNameDisplay(roles[1]!, "prepare_display");
+    expect(display.primary).toBe("Joe Smith");
+    expect(display.isPlaceholder).toBe(false);
+  });
 });

@@ -430,9 +430,17 @@ export function findConservativeNonOverlappingPrepareRect(args: {
   nudgeSteps: number;
 } {
   const { width, height } = args.desiredRect;
-  const obstacles = args.existingFields
-    .filter((f) => (f.page == null || f.page === args.page) && f.id !== args.excludeFieldId)
-    .map((f) => ({ x: f.x, y: f.y, width: f.width, height: f.height }));
+  const obstacles = [
+    ...args.existingFields
+      .filter((f) => (f.page == null || f.page === args.page) && f.id !== args.excludeFieldId)
+      .map((f) => ({ x: f.x, y: f.y, width: f.width, height: f.height })),
+    ...buildPreparePageLayoutObstacleRects(args.page).map((f) => ({
+      x: f.x,
+      y: f.y,
+      width: f.width,
+      height: f.height,
+    })),
+  ];
   let rect = clampFieldRectToPage(args.desiredRect.x, args.desiredRect.y, width, height);
   const overlaps = () => obstacles.some((o) => prepareRectsHaveSignificantOverlap(rect, o));
   if (!overlaps()) {
@@ -515,7 +523,7 @@ const AUTO_INITIALS_MARGIN_X = 0.056;
 /** Bottom anchor: gray auto slots sit above draft footer band and clear typical signature rows. */
 const AUTO_INITIALS_MARGIN_Y = 0.1;
 
-const AUTO_INITIALS_MARGIN_RIGHT = 0.02;
+const AUTO_INITIALS_MARGIN_RIGHT = 0.048;
 /**
  * Normalized clearance from physical page bottom to the bottom edge of the gray auto box.
  * Tuned with VS01 signing PDF seed bottom inset (~72pt / 792pt) so initials sit in reserved blank,
@@ -588,6 +596,48 @@ export function prepareAutoInitialsPlacementDims(): { width: number; height: num
 
 const PREPARE_SIGNATURE_OBSTACLE_PAD = 0.028;
 
+/** Reserved footer / watermark band — keep prepare fields out of draft footer ink. */
+export const PREPARE_PAGE_FOOTER_BAND_Y = 0.9;
+export const PREPARE_PAGE_WATERMARK_BAND_Y = 0.875;
+
+export function buildPreparePageLayoutObstacleRects(page: number): PrepareRectObstacle[] {
+  return [
+    { id: `footer_${page}`, page, x: 0, y: PREPARE_PAGE_FOOTER_BAND_Y, width: 1, height: 0.1 },
+    { id: `watermark_${page}`, page, x: 0.04, y: PREPARE_PAGE_WATERMARK_BAND_Y, width: 0.92, height: 0.05 },
+  ];
+}
+
+export const PREPARE_FIELD_SAFE_MARGIN_X = 0.052;
+export const PREPARE_FIELD_SAFE_MARGIN_Y = 0.04;
+
+/** Clamp normalized prepare field rect inside page bounds and above footer/watermark bands. */
+export function clampPrepareFieldRectToSafeBounds(
+  rect: { x: number; y: number; width: number; height: number },
+  opts?: { kind?: "signature" | "initials" | "generic" },
+): { x: number; y: number; width: number; height: number } {
+  const kind = opts?.kind ?? "generic";
+  const maxY =
+    kind === "initials"
+      ? PREPARE_PAGE_FOOTER_BAND_Y - rect.height - 0.008
+      : PREPARE_PAGE_FOOTER_BAND_Y - rect.height - 0.012;
+  const minX = kind === "initials" ? AUTO_INITIALS_BOTTOM_SWEEP_X_MIN : PREPARE_FIELD_SAFE_MARGIN_X;
+  const maxX = 1 - PREPARE_FIELD_SAFE_MARGIN_X - rect.width;
+  let x = Math.max(minX, Math.min(maxX, rect.x));
+  let y = Math.max(PREPARE_FIELD_SAFE_MARGIN_Y, Math.min(maxY, rect.y));
+  if (y + rect.height > PREPARE_PAGE_WATERMARK_BAND_Y && x + rect.width > 0.7) {
+    x = Math.min(x, 0.68 - rect.width);
+  }
+  return { x, y, width: rect.width, height: rect.height };
+}
+
+const PREPARE_AUTO_INITIALS_Y_SCAN_MIN = 0.14;
+const PREPARE_AUTO_INITIALS_Y_SCAN_MAX = 0.685;
+const PREPARE_AUTO_INITIALS_Y_SCAN_STEP = 0.042;
+/** Upper-right safe lane for prepare auto-initials (avoids mobile clipping at page edge). */
+export const PREPARE_AUTO_INITIALS_UPPER_Y_MIN = 0.085;
+export const PREPARE_AUTO_INITIALS_UPPER_Y_MAX = 0.21;
+export const PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN = 0.072;
+
 function expandNormRectForPad(
   rect: { x: number; y: number; width: number; height: number },
   pad: number,
@@ -627,13 +677,26 @@ export function buildPreparePageObstacleRects(
   return out;
 }
 
-/** True when a rect sits in the reserved bottom-right initials band (prepare packet). */
+/** True when a rect sits in the reserved initials safe zone (upper-right body lane). */
 export function isRectInPrepareAutoInitialsSafeZone(rect: {
   x: number;
   y: number;
   width: number;
   height: number;
 }): boolean {
+  const maxX = 1 - PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN;
+  const inUpperLane =
+    rect.x + rect.width <= maxX + 1e-5 &&
+    rect.x >= PREPARE_FIELD_SAFE_MARGIN_X - 1e-5 &&
+    rect.y >= PREPARE_AUTO_INITIALS_UPPER_Y_MIN - 1e-5 &&
+    rect.y + rect.height <= PREPARE_AUTO_INITIALS_UPPER_Y_MAX + 1e-5;
+  if (inUpperLane) return true;
+  const inRightLane =
+    rect.x + rect.width <= 1 - AUTO_INITIALS_MARGIN_RIGHT + 1e-5 &&
+    rect.x >= AUTO_INITIALS_BOTTOM_SWEEP_X_MIN - 1e-5 &&
+    rect.y >= PREPARE_AUTO_INITIALS_Y_SCAN_MIN - 1e-5 &&
+    rect.y + rect.height <= PREPARE_PAGE_FOOTER_BAND_Y + 1e-5;
+  if (inRightLane) return true;
   const yBottom = 1 - AUTO_INITIALS_MARGIN_BOTTOM - rect.height;
   const yLow = yBottom - AUTO_INITIALS_BOTTOM_BAND_HEIGHT;
   return (
@@ -651,8 +714,8 @@ export type PrepareAutoInitialsLayoutResult = {
 };
 
 /**
- * Deterministic bottom-right initials slot for one prepare signer on one page.
- * Uses the same margin-band scanner as legacy auto-initials (no upward scatter).
+ * Deterministic upper-right initials slot for one prepare signer on one page.
+ * Prefers a mobile-safe lane inside the document body, clear of footer/watermark/signature blocks.
  */
 export function layoutPrepareAutoInitialsRectOnPage(args: {
   partyIndex: number;
@@ -663,17 +726,70 @@ export function layoutPrepareAutoInitialsRectOnPage(args: {
 }): PrepareAutoInitialsLayoutResult {
   const dims = args.dims ?? prepareAutoInitialsPlacementDims();
   const lane = Math.max(0, Math.floor(args.partyIndex));
-  const obstacles = buildPreparePageObstacleRects(args.existingFields, args.page, {
+  const layoutObstacles = buildPreparePageLayoutObstacleRects(args.page);
+  const fieldObstacles = buildPreparePageObstacleRects(args.existingFields, args.page, {
     excludeRoleAutoInitialsId: args.roleId,
   });
-  const probe = findAutoInitialsMarginSlotOrNull(dims, obstacles, { columnOffset: lane });
+  const obstacles = [...fieldObstacles, ...layoutObstacles.map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }))];
+  const xRight =
+    1 -
+    PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN -
+    dims.width -
+    lane * (dims.width + AUTO_INITIALS_COLUMN_GAP);
+  const xStart = Math.max(PREPARE_FIELD_SAFE_MARGIN_X, xRight);
   let collisionCount = 0;
-  if (probe) {
+  for (
+    let y = PREPARE_AUTO_INITIALS_UPPER_Y_MIN;
+    y <= PREPARE_AUTO_INITIALS_UPPER_Y_MAX + 1e-5;
+    y += PREPARE_AUTO_INITIALS_Y_SCAN_STEP
+  ) {
+    for (
+      let x = xStart;
+      x + dims.width <= 1 - PREPARE_AUTO_INITIALS_SAFE_RIGHT_MARGIN + 1e-5;
+      x -= AUTO_INITIALS_X_SCAN_STEP
+    ) {
+      const rect = { x, y, width: dims.width, height: dims.height };
+      const hits = obstacles.filter((o) => normRectsOverlap(rect, o, AUTO_INITIALS_OBSTACLE_PAD));
+      if (hits.length === 0) {
+        return {
+          rect: clampPrepareFieldRectToSafeBounds(rect, { kind: "initials" }),
+          lane,
+          collisionCount: 0,
+        };
+      }
+      collisionCount = Math.max(collisionCount, hits.length);
+    }
+  }
+  for (let y = PREPARE_AUTO_INITIALS_Y_SCAN_MIN; y <= PREPARE_AUTO_INITIALS_Y_SCAN_MAX + 1e-5; y += PREPARE_AUTO_INITIALS_Y_SCAN_STEP) {
+    for (
+      let x = xStart;
+      x + dims.width <= 1 - AUTO_INITIALS_MARGIN_RIGHT + 1e-5;
+      x -= AUTO_INITIALS_X_SCAN_STEP
+    ) {
+      const rect = { x, y, width: dims.width, height: dims.height };
+      const hits = obstacles.filter((o) => normRectsOverlap(rect, o, AUTO_INITIALS_OBSTACLE_PAD));
+      if (hits.length === 0) {
+        return {
+          rect: clampPrepareFieldRectToSafeBounds(rect, { kind: "initials" }),
+          lane,
+          collisionCount: 0,
+        };
+      }
+      collisionCount = Math.max(collisionCount, hits.length);
+    }
+  }
+  const probe = findAutoInitialsMarginSlotOrNull(dims, obstacles, { columnOffset: lane });
+  if (probe && probe.y + probe.height <= PREPARE_PAGE_FOOTER_BAND_Y) {
     for (const o of obstacles) {
       if (fieldRectsOverlap(probe, o, AUTO_INITIALS_OBSTACLE_PAD)) collisionCount += 1;
     }
+    return {
+      rect: clampPrepareFieldRectToSafeBounds(probe, { kind: "initials" }),
+      lane,
+      collisionCount,
+    };
   }
-  return { rect: probe, lane, collisionCount };
+  return { rect: null, lane, collisionCount };
 }
 
 export type PrepareRectObstacle = {

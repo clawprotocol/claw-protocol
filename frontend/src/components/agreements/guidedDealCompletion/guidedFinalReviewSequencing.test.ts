@@ -169,6 +169,39 @@ describe("guided final review sequencing (test23/test24)", () => {
     expect(isGuidedContinueToFinalReviewCta(cta?.label ?? "")).toBe(true);
   });
 
+  it("signers complete + idle apply still enables final review CTA so apply can run after click", () => {
+    const ctaPlacement = resolveGuidedFinalReviewCtaVisibility({
+      signerSetupActive: true,
+      signerSlotsComplete: true,
+      applyStatus: "idle",
+      bulkApplying: false,
+      stickyBottomBarVisible: false,
+      finalReviewUnlocked: false,
+    });
+    expect(ctaPlacement.showInline).toBe(true);
+    const cta = resolveGuidedSignerSetupStickyCta({
+      signerStatus: resolveGuidedSignerSetupStatus(true),
+      applyStatus: "idle",
+    });
+    expect(cta.label).toBe("Continue to final review");
+  });
+
+  it("modal is wired to final-review continue, not automatic post-answer apply", () => {
+    const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
+    const autoApplyIdx = intake.indexOf("guidedPendingAutoApplyRef.current = false;");
+    const continueIdx = intake.indexOf("const continueGuidedSignerSetupToFinalReview");
+    const continueBlock = intake.slice(continueIdx, continueIdx + 12000);
+    expect(autoApplyIdx).toBeGreaterThan(-1);
+    expect(continueBlock).toContain('setGuidedFinalizeModalStage("finalizing_agreement")');
+    expect(
+      continueBlock.includes("await handleGuidedBulkApply") ||
+        continueBlock.includes("commitGuidedApplyFromExistingCorpus"),
+    ).toBe(true);
+    expect(continueBlock).toContain("resolveGuidedFinalReviewApplyReadinessFromSession");
+    expect(continueBlock).toContain("commitGuidedApplyFromExistingCorpus");
+    expect(continueBlock).toContain("handleGuidedOpenFinalReview({ modalAlreadyActive: true })");
+  });
+
   it("signers incomplete keeps Add signer details disabled even when apply applied", () => {
     const cta = resolveGuidedSignerSetupStickyCta({
       signerStatus: resolveGuidedSignerSetupStatus(false),

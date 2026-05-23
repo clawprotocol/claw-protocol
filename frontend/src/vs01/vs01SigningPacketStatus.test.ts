@@ -91,6 +91,56 @@ describe("vs01 signing packet status cards", () => {
     expect(cards[1]?.primaryLabel).toBe("Open signer view");
   });
 
+  it("renders Acme LLC and Joe Smith as independent signer cards", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: AG,
+      creatorName: "Acme LLC",
+      creatorEmail: "anthem@acme.com",
+      ownerSignerName: "Anthem Blanchard",
+      ownerSignerTitle: "Manager",
+      counterparties: [
+        { id: "cp_joe", name: "Joe Smith", email: "js2345@gmail.com", signerName: "Joe Smith" },
+      ],
+    });
+    const owner = roles[0]!;
+    const handoff: PaidProVs01PostSignHandoffV1 = {
+      v: 1,
+      agreementId: AG,
+      agreementTitle: "AI Automation Services Agreement",
+      vs01DocumentId: "doc_acme",
+      receiptId: "",
+      receiptHashSha256: null,
+      packetPrepareOnly: true,
+      savedAt: new Date().toISOString(),
+      ownerSignerRoleId: owner.roleId,
+      senderMustSignFirst: true,
+      ownerSigningUrl: "https://example.com/?vs01_recipient_sign=1",
+      signers: [
+        {
+          counterpartyId: "cp_joe",
+          displayName: "Joe Smith",
+          email: "js2345@gmail.com",
+          signingUrl: "https://example.com/?vs01_recipient_sign=1&signer_role_id=cp",
+          signerRoleId: roles[1]!.roleId,
+        },
+      ],
+    };
+    const cards = buildPacketStatusCards({
+      handoff,
+      roles,
+      statusByKey: {},
+      ownerSigningUrl: handoff.ownerSigningUrl ?? "",
+    });
+    expect(cards).toHaveLength(2);
+    expect(cards[0]?.partyName).toBe("Acme LLC");
+    expect(cards[0]?.signerName).toBe("Anthem Blanchard");
+    expect(cards[0]?.showSignerMetaLine).toBe(true);
+    expect(cards[1]?.partyName).toBe("Joe Smith");
+    expect(cards[1]?.showSignerMetaLine).toBe(false);
+    expect(cards[1]?.signerName).toBe("Joe Smith");
+    expect(JSON.stringify(cards)).not.toMatch(/Also included|nested/i);
+  });
+
   it("does not concatenate party name and status pill", () => {
     const { roles, handoff: h } = buildRolesAndHandoff();
     const cards = buildPacketStatusCards({

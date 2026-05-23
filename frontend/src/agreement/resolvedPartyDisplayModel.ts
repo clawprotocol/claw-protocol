@@ -46,6 +46,12 @@ function formatEmailLocalPart(email: string): string {
     .join(" ");
 }
 
+function looksLikeLegalEntityPartyName(name: string): boolean {
+  const t = name.trim();
+  if (!t) return false;
+  return /\b(LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company)\.?$/i.test(t);
+}
+
 function pickDisplayName(args: {
   signerName?: string;
   recipientName?: string;
@@ -59,17 +65,28 @@ function pickDisplayName(args: {
   const entity = (args.entityName || "").trim();
   const email = stripRecipientEmailNoise(args.email || "");
 
-  if (signer && !isSemanticPartyPlaceholder(signer)) {
-    return { displayName: finalizePartyDisplayNameForUserFacing(signer, args.intakeText), source: "signer" };
+  const entityCandidate = recipient || entity;
+  if (
+    entityCandidate &&
+    !isSemanticPartyPlaceholder(entityCandidate) &&
+    looksLikeLegalEntityPartyName(entityCandidate)
+  ) {
+    return {
+      displayName: finalizePartyDisplayNameForUserFacing(entityCandidate, args.intakeText),
+      source: recipient ? "intake" : "draft",
+    };
   }
   if (recipient && !isSemanticPartyPlaceholder(recipient)) {
     return { displayName: finalizePartyDisplayNameForUserFacing(recipient, args.intakeText), source: "intake" };
   }
-  if (isPlausibleEmail(email)) {
-    return { displayName: formatEmailLocalPart(email), source: "email" };
-  }
   if (entity && !isSemanticPartyPlaceholder(entity)) {
     return { displayName: finalizePartyDisplayNameForUserFacing(entity, args.intakeText), source: "draft" };
+  }
+  if (signer && !isSemanticPartyPlaceholder(signer)) {
+    return { displayName: finalizePartyDisplayNameForUserFacing(signer, args.intakeText), source: "signer" };
+  }
+  if (isPlausibleEmail(email)) {
+    return { displayName: formatEmailLocalPart(email), source: "email" };
   }
   const idx = args.partyIndex ?? 0;
   return { displayName: `Signer ${idx + 1}`, source: "fallback" };

@@ -87,6 +87,46 @@ describe("signerPartyIdentity (test26)", () => {
     expect(text).not.toMatch(/SERVICE PROVIDER:[\s\S]*?Name:\s*Acme LLC/i);
   });
 
+  it("patches generic opening party labels with known party names before signing", () => {
+    const body = `MASTER SERVICES AGREEMENT
+
+This Master Services Agreement is entered into by and between Client and Service Provider.
+
+1. Services
+The Client may request automation services from the Service Provider.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+By: __________________________
+Name: ________________________
+Title: _________________________
+Date: _________________________
+
+SERVICE PROVIDER:
+By: __________________________
+Name: ________________________
+Title: _________________________
+Date: _________________________
+`;
+    const ids = resolveCanonicalPartyIdentitiesFromSignerSetup({
+      ...signerArgs,
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      partySignerNames: ["Anthem Blanchard", "Joe Smith"],
+      partySignerTitles: ["Manager", ""],
+      draftPartyNames: ["Acme LLC", "Joe Smith"],
+    });
+    const { text } = applySignerPartyIdentityToAuthoritativeAgreement(
+      body,
+      ids,
+      "Between Acme LLC and Joe Smith.",
+    );
+    const opening = text.slice(0, 300);
+    expect(opening).toContain('between Acme LLC ("Client") and Joe Smith ("Service Provider")');
+    expect(opening).not.toMatch(/between\s+Client\s+and\s+Service Provider/i);
+  });
+
   it("applies identities to corpus: removes bracket placeholders and fills signature names", () => {
     const ids = resolveCanonicalPartyIdentitiesFromSignerSetup(signerArgs);
     const { text } = applySignerPartyIdentityToAuthoritativeAgreement(
@@ -109,6 +149,22 @@ describe("signerPartyIdentity (test26)", () => {
     const lines = formatSignerPartyIdentityConfirmationLines(ids);
     expect(lines.join("\n")).toContain("Client: Anthem H Blanchard anthemhayek@gmail.com");
     expect(lines.join("\n")).toContain("Service Provider: Joe Smith joesmith328@me.com");
+  });
+
+  it("test35: ignores draft template placeholders when recipient names are set", () => {
+    const ids = resolveCanonicalPartyIdentitiesFromSignerSetup({
+      ...signerArgs,
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      partySignerNames: ["Anthem H Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      draftPartyNames: ["[Your Company Name]", "[Service Provider Name]"],
+    });
+    expect(ids[0].partyDisplayName).toBe("Acme LLC");
+    expect(ids[0].representativeName).toBe("Anthem H Blanchard");
+    expect(ids[1].partyDisplayName).toBe("Joe Smith");
+    const lines = formatSignerPartyIdentityConfirmationLines(ids);
+    expect(lines.join("\n")).not.toContain("[Your Company Name]");
   });
 
   it("entity party keeps separate representative when display is entity", () => {

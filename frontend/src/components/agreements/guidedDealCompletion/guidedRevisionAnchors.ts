@@ -65,7 +65,7 @@ const TARGET_BY_QUESTION: Record<string, Omit<GuidedRevisionTarget, "questionKey
     sectionNumber: 4,
     sectionLabel: "Ownership and Work Product",
     instructionSectionLine: "Section 4 — Ownership and Work Product (Intellectual Property)",
-    headingPatterns: [/^\s*4\.\s+.*(?:INTELLECTUAL|OWNERSHIP|WORK\s+PRODUCT)/i],
+    headingPatterns: [/^\s*4\.\s+.*(?:INTELLECTUAL|OWNERSHIP|WORK\s+PRODUCT|\bIP\b|DELIVERABLE)/i],
     forbiddenBeforeSection1: [/\b(?:net\s+\d+|invoice|monthly\s+fee)\b/i, /\b(?:uptime|sla)\b/i],
   },
   ip_allocation: {
@@ -79,7 +79,7 @@ const TARGET_BY_QUESTION: Record<string, Omit<GuidedRevisionTarget, "questionKey
     sectionNumber: 5,
     sectionLabel: "Support Expectations",
     instructionSectionLine: "Section 5 — Support Expectations (SLA / uptime if applicable)",
-    headingPatterns: [/^\s*5\.\s+.*(?:SUPPORT|SLA|SERVICE\s+LEVEL|MAINTENANCE)/i],
+    headingPatterns: [/^\s*5\.\s+.*(?:SUPPORT|SLA|SERVICE\s+LEVEL|MAINTENANCE|UPTIME|AVAILABILITY)/i],
     forbiddenBeforeSection1: [/\b(?:total\s+fee|invoice|net\s+\d+)\b/i, /\bwork\s+product\s+ownership\b/i],
   },
   support_obligations: {
@@ -158,19 +158,38 @@ export function buildSectionOnlyRefineInstruction(
   return `${prefix}Update "${variableLabel}" to reflect: ${a}.`;
 }
 
+/** Strip markdown/list decoration so numbered headings match reliably. */
+export function normalizeGuidedSectionHeadingLine(line: string): string {
+  return (line || "")
+    .trim()
+    .replace(/^[*#_\s]+/, "")
+    .replace(/[*_]+$/g, "")
+    .trim();
+}
+
 export function findSectionAnchor(documentText: string, target: GuidedRevisionTarget): GuidedSectionAnchor {
   const lines = documentText.replace(/\r\n/g, "\n").split("\n");
+  const labelPattern = target.sectionLabel
+    ? new RegExp(target.sectionLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    : null;
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i].trim();
+    const line = normalizeGuidedSectionHeadingLine(lines[i]);
     if (!line) continue;
     if (target.headingPatterns.some((p) => p.test(line))) {
       return { found: true, lineIndex: i, headingText: line };
     }
     if (target.sectionNumber != null) {
-      const numRe = new RegExp(`^\\s*${target.sectionNumber}\\.\\s+`, "i");
+      const numRe = new RegExp(`^${target.sectionNumber}\\.\\s+`, "i");
       if (numRe.test(line)) {
         return { found: true, lineIndex: i, headingText: line };
       }
+      const sectionWordRe = new RegExp(`^Section\\s+${target.sectionNumber}\\b`, "i");
+      if (sectionWordRe.test(line)) {
+        return { found: true, lineIndex: i, headingText: line };
+      }
+    }
+    if (labelPattern && /^\d+\.\s+/.test(line) && labelPattern.test(line)) {
+      return { found: true, lineIndex: i, headingText: line };
     }
   }
   return { found: false, lineIndex: -1, headingText: "" };

@@ -41,10 +41,13 @@ function displayNameForPartyIndex(args: ResolveGuidedPreReviewSignerSlotsArgs, i
 }
 
 function partyHasIdentity(args: ResolveGuidedPreReviewSignerSlotsArgs, index: number): boolean {
-  const signer = (args.partySignerNames[index] ?? "").trim();
-  if (isUsablePartyIdentity(signer)) return true;
   if (isUsablePartyIdentity(displayNameForPartyIndex(args, index))) return true;
   if (isUsablePartyIdentity((args.draftPartyNames[index] ?? "").trim())) return true;
+  // Counterparty individuals may use signer name as the party identity (e.g. Joe Smith).
+  if (index >= 1) {
+    const signer = (args.partySignerNames[index] ?? "").trim();
+    if (isUsablePartyIdentity(signer)) return true;
+  }
   return false;
 }
 

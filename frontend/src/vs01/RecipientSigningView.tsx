@@ -155,7 +155,8 @@ export function RecipientSigningView({
 
   const lockedCp = lockedCounterpartyId.trim();
   const signer = cpById.get(lockedCp);
-  const signerName = signer?.name.trim() || "Signer";
+  const signerName =
+    signer?.signerName?.trim() || signer?.name.trim() || "Signer";
   const signerEmail = signer?.email.trim() || "";
   const documentFields = recipientFields;
 
@@ -372,7 +373,7 @@ export function RecipientSigningView({
       const remaining = editableMyFields.filter((f) => !recipientEditableFieldIsComplete(f)).length;
       onError(
         remaining === 1
-          ? "Add your signature and initials before finishing."
+          ? "Review the document, sign the highlighted signature box, and add initials if shown."
           : `Complete your signature and initials (${remaining} remaining) before finishing.`,
       );
       return;
@@ -615,7 +616,7 @@ export function RecipientSigningView({
 
         <p className="vs01-sign-doc-foot-hint vs01-recipient-signing-foot">
           {placementSurface && !previewLoading && !manifestDecodeError
-            ? "Add your signature and initials in the highlighted boxes, then choose Finish signing."
+            ? "Review the document, sign the highlighted signature box, and add initials if shown."
             : null}
         </p>
       </div>

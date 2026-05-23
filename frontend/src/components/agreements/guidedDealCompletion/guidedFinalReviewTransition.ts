@@ -8,6 +8,7 @@ import {
   type CanUnlockGuidedFinalReviewArgs,
   GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA,
 } from "./guidedAnswerApplyOrchestration";
+import { isGuidedApplyEquivalentForFinalReview } from "./guidedFinalReviewApplyReadiness";
 
 export type GuidedFinalReviewUnlockBlockReason =
   | "signers_incomplete"
@@ -22,8 +23,16 @@ export type GuidedFinalReviewUnlockEvaluation = {
   reason: GuidedFinalReviewUnlockBlockReason | null;
 };
 
+export type EvaluateGuidedFinalReviewUnlockGateArgs = CanUnlockGuidedFinalReviewArgs & {
+  partyPlaceholdersUnresolved?: boolean;
+  guidedCompletionPhase?: string;
+  guidedSessionComplete?: boolean;
+  answeredCount?: number;
+  hasAppliedSummary?: boolean;
+};
+
 export function evaluateGuidedFinalReviewUnlockGate(
-  args: CanUnlockGuidedFinalReviewArgs & { partyPlaceholdersUnresolved?: boolean },
+  args: EvaluateGuidedFinalReviewUnlockGateArgs,
 ): GuidedFinalReviewUnlockEvaluation {
   if (args.signersEditing) {
     return { ok: false, reason: "signer_field_focused" };
@@ -37,11 +46,24 @@ export function evaluateGuidedFinalReviewUnlockGate(
   if (args.partyPlaceholdersUnresolved) {
     return { ok: false, reason: "party_placeholders_unresolved" };
   }
-  if (args.applyStatus !== "applied") {
-    return { ok: false, reason: "apply_not_complete" };
-  }
   if (args.signerStatus !== "complete") {
     return { ok: false, reason: "signers_incomplete" };
+  }
+  const applyEquivalent = isGuidedApplyEquivalentForFinalReview({
+    applyStatus: args.applyStatus,
+    guidedCompletionPhase: args.guidedCompletionPhase ?? "",
+    guidedSessionComplete: Boolean(args.guidedSessionComplete),
+    answeredCount: args.answeredCount ?? 0,
+    authoritativeBodyLen: args.authoritativeBodyLen ?? 0,
+    hasAppliedSummary: args.hasAppliedSummary,
+  });
+  if (!applyEquivalent && args.applyStatus !== "applied") {
+    const bodyReady = (args.authoritativeBodyLen ?? 0) >= 500;
+    const signersReady = args.signerStatus === "complete";
+    if (bodyReady && signersReady && args.applyStatus !== "applying") {
+      return { ok: true, reason: null };
+    }
+    return { ok: false, reason: "apply_not_complete" };
   }
   return { ok: true, reason: null };
 }
@@ -78,7 +100,9 @@ export function resolveGuidedFinalReviewCtaVisibility(
     args.signerSlotsComplete &&
     args.applyStatus !== "applying" &&
     !args.bulkApplying &&
-    (args.applyStatus === "applied" || args.applyStatus === "failed_retryable");
+    (args.applyStatus === "idle" ||
+      args.applyStatus === "applied" ||
+      args.applyStatus === "failed_retryable");
   if (!ready) {
     return { showSticky: false, showInline: false };
   }
@@ -117,4 +141,18 @@ export function logGuidedFinalReviewNavigationDeduped(): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[guided-final-review-navigation-deduped]");
+}
+
+export function isGuidedFinalReviewTransientApplyNotComplete(args: {
+  reason: GuidedFinalReviewUnlockBlockReason | null;
+  signersComplete: boolean;
+  authoritativeBodyLen: number;
+  applyStatus: GuidedAnswerApplyStatus;
+}): boolean {
+  return (
+    args.reason === "apply_not_complete" &&
+    args.signersComplete &&
+    args.authoritativeBodyLen >= 500 &&
+    args.applyStatus !== "applying"
+  );
 }

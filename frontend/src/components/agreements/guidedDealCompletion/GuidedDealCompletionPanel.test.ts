@@ -35,7 +35,8 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     expect(panel).not.toContain("Applying update");
     expect(panel).not.toContain("onApplyAnswer");
     expect(optionCard).toContain("Why:");
-    expect(optionCard).toContain("Will update:");
+    expect(optionCard).toContain("Updates:");
+    expect(optionCard).not.toContain("Will update:");
     expect(optionCard).toContain("More details");
     expect(panel).toContain("guided-skip-tertiary");
     expect(panel).toContain("guided-saved-flash");
@@ -44,7 +45,8 @@ describe("GuidedDealCompletionPanel Genesis UX contract", () => {
     expect(panel).toContain("GuidedBulkApplyChecklist");
     expect(panel).toContain("GuidedReviewFlowBanner");
     expect(panel).toContain("guided-clause-updates-preview");
-    expect(panel).toContain("Queued update");
+    expect(panel).toContain("Updated ·");
+    expect(panel).not.toContain("Queued update ·");
     expect(panel).toContain("Updating your agreement");
     expect(panel).toContain("formatGuidedProgressLabel");
     expect(panel).toContain("guided-show-other-options");

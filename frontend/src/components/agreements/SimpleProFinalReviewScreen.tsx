@@ -31,6 +31,10 @@ export type SimpleProFinalReviewScreenProps = {
   corpusRecoveryMessage?: string | null;
   /** When false, checklist shows without broken jump links (DOM anchors missing). */
   enableSectionJump?: boolean;
+  signaturePrimaryLabel?: string;
+  signatureSecondaryLabel?: string;
+  reviewSecondaryLabel?: string;
+  onChangeSigningOrder?: () => void;
   onSendForSignature: () => void;
   onSendForReview: () => void;
   onCopyAgreement: () => void;
@@ -68,6 +72,10 @@ export function SimpleProFinalReviewScreen({
   suppressPostReviewEditUx = false,
   corpusRecoveryMessage = null,
   enableSectionJump = true,
+  signaturePrimaryLabel = "Send for signature",
+  signatureSecondaryLabel = "Change signing order",
+  reviewSecondaryLabel = "Send for review",
+  onChangeSigningOrder,
   onSendForSignature,
   onSendForReview,
   onCopyAgreement,
@@ -243,9 +251,20 @@ export function SimpleProFinalReviewScreen({
           onClick={onSendForSignature}
           data-testid="simple-pro-send-for-signature"
         >
-          Send for signature
+          {signaturePrimaryLabel}
         </button>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          {onChangeSigningOrder ? (
+            <button
+              type="button"
+              className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+              disabled={sendDisabled || packetStale || bulkApplyBusy}
+              onClick={onChangeSigningOrder}
+              data-testid="simple-pro-change-signing-order"
+            >
+              {signatureSecondaryLabel}
+            </button>
+          ) : null}
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
@@ -253,7 +272,7 @@ export function SimpleProFinalReviewScreen({
             onClick={onSendForReview}
             data-testid="simple-pro-send-for-review"
           >
-            Send for review
+            {reviewSecondaryLabel}
           </button>
           <button
             type="button"

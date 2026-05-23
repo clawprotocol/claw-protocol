@@ -92,7 +92,32 @@ export function extractGuidedNumericTransition(
   return { label: "Fee / amount", before: prev.slice(0, 80), after: next.slice(0, 80) };
 }
 
-/** Queued update — anticipation only, no live mutation implied. */
+/** Progressive section merge — authoritative working corpus updated immediately. */
+export function reinforceGuidedProgressiveSectionApply(args: {
+  variableId: string;
+  preBodyLen: number;
+  postBodyLen: number;
+}): { toast: string; areaLabel: string } {
+  const target = resolveGuidedQuestionTarget(args.variableId);
+  const areaLabel = resolveGuidedQuestionConfig(args.variableId).finalAppliedAreaLabel;
+
+  // eslint-disable-next-line no-console
+  console.info("[guided-progressive-section-apply]", {
+    variableId: args.variableId,
+    section: target.sectionLabel,
+    preBodyLen: args.preBodyLen,
+    postBodyLen: args.postBodyLen,
+    delta: args.postBodyLen - args.preBodyLen,
+  });
+
+  window.requestAnimationFrame(() => {
+    highlightGuidedSectionInDocument(target, { mode: "applied", scroll: false });
+  });
+
+  return { toast: formatGuidedAuthoritativeUpdatedToast(), areaLabel };
+}
+
+/** Queued update — only when progressive merge could not anchor into a section. */
 export function reinforceGuidedQueuedUpdate(payload: GuidedAnswerCausalityPayload): {
   toast: string;
   areaLabel: string;

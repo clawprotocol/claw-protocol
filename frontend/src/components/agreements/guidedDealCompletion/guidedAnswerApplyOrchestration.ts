@@ -4,6 +4,7 @@
 
 import type { GuidedCompletionSession } from "./types";
 import type { GuidedProStickyCta } from "./guidedProUxState";
+import { isGuidedApplyEquivalentForFinalReview } from "./guidedFinalReviewApplyReadiness";
 
 export type GuidedAnswerApplyStatus = "idle" | "applying" | "applied" | "failed_retryable";
 
@@ -61,10 +62,26 @@ export type CanUnlockGuidedFinalReviewArgs = {
   signerMetadataDebouncing?: boolean;
 };
 
-export function canUnlockGuidedFinalReview(args: CanUnlockGuidedFinalReviewArgs): boolean {
+export function canUnlockGuidedFinalReview(
+  args: CanUnlockGuidedFinalReviewArgs & {
+    guidedCompletionPhase?: string;
+    guidedSessionComplete?: boolean;
+    answeredCount?: number;
+    hasAppliedSummary?: boolean;
+  },
+): boolean {
   if (args.signersEditing || args.signerMetadataDebouncing) return false;
   if ((args.authoritativeBodyLen ?? 500) < 500) return false;
-  return args.applyStatus === "applied" && args.signerStatus === "complete";
+  if (args.signerStatus !== "complete") return false;
+  if (args.applyStatus === "applied") return true;
+  return isGuidedApplyEquivalentForFinalReview({
+    applyStatus: args.applyStatus,
+    guidedCompletionPhase: args.guidedCompletionPhase ?? "",
+    guidedSessionComplete: Boolean(args.guidedSessionComplete),
+    answeredCount: args.answeredCount ?? 0,
+    authoritativeBodyLen: args.authoritativeBodyLen ?? 0,
+    hasAppliedSummary: args.hasAppliedSummary,
+  });
 }
 
 export const GUIDED_SIGNER_SETUP_HEADLINE = "Add signer/reviewer details";

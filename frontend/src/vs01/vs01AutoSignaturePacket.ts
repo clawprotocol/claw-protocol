@@ -5,9 +5,12 @@
 import {
   findNonOverlappingPrepareRect,
   newSigningFieldId,
+  PREPARE_PAGE_FOOTER_BAND_Y,
+  clampPrepareFieldRectToSafeBounds,
   type PlacedSigningField,
   type SigningPlacementValueContext,
 } from "./signingFields";
+import { findSignatureLineAnchorsFromCorpusText, signatureAnchorToPrepareRect, corpusHasPrefilledSignatureIdentity, logSignatureAnchorPlacementMiss } from "./vs01SignatureBlockAnchors";
 import { stampPrepareSenderFieldOrReject, type Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { PREPARE_FIELD_ASSIGNMENT_SOURCE } from "./vs01PrepareFieldPlacement";
 import { buildPrepareTemplateValueContext, defaultPrepareTemplateStoredValue } from "./vs01PrepareTemplateField";
@@ -25,15 +28,38 @@ const SIGNATURE_BLOCK_TOOLS: Array<{
   dy: number;
 }> = [
   { type: "signature", dy: 0 },
-  { type: "printed_name", dy: 0.055 },
-  { type: "text", textPurpose: "title", dy: 0.105 },
-  { type: "date", dy: 0.155 },
+  { type: "printed_name", dy: 0.065 },
+  { type: "text", textPurpose: "title", dy: 0.13 },
+  { type: "date", dy: 0.195 },
 ];
 
-function laneBaseX(partyIndex: number, roleCount: number): number {
-  if (roleCount <= 1) return 0.1;
-  const lane = Math.min(Math.max(0, partyIndex), roleCount - 1);
-  return 0.08 + lane * (0.54 / Math.max(1, roleCount - 1)) * (roleCount > 2 ? 1 : 0);
+const AUTO_SIGNATURE_ONLY_TOOLS: Array<{
+  type: "signature" | "printed_name" | "text" | "date";
+  textPurpose?: "title";
+  dy: number;
+}> = [{ type: "signature", dy: 0 }];
+
+/** Keep auto signature stacks above footer/watermark bands. */
+const AUTO_SIGNATURE_MAX_Y = 0.82;
+
+function resolveAutoSignatureBlockTools(corpusText?: string | null) {
+  if (corpusHasPrefilledSignatureIdentity(corpusText)) {
+    return AUTO_SIGNATURE_ONLY_TOOLS;
+  }
+  return SIGNATURE_BLOCK_TOOLS;
+}
+
+function anchoredSignatureRect(args: {
+  anchor: ReturnType<typeof findSignatureLineAnchorsFromCorpusText>[number] | null;
+  partyIndex: number;
+  roleCount: number;
+}): { x: number; y: number; width: number; height: number } {
+  return signatureAnchorToPrepareRect({
+    anchor: args.anchor,
+    partyIndex: args.partyIndex,
+    roleCount: args.roleCount,
+    fieldType: "signature",
+  });
 }
 
 function roleHasSignatureBlock(existing: PlacedSigningField[], roleId: string, page: number): boolean {
@@ -73,6 +99,8 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   pageCount: number;
   existingFields: PlacedSigningField[];
   ownerValueCtx: SigningPlacementValueContext;
+  /** Agreement corpus text — used to anchor fields on signature block lines. */
+  corpusText?: string | null;
 }): AutoSignaturePacketResult {
   const pageCount = Math.max(1, args.pageCount);
   const lastPage = pageCount - 1;
@@ -80,6 +108,15 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   const out: PlacedSigningField[] = [];
   let placedSoFar = [...manual];
   const roleCount = args.roles.length;
+  const anchors = args.corpusText ? findSignatureLineAnchorsFromCorpusText(args.corpusText) : [];
+  const blockTools = resolveAutoSignatureBlockTools(args.corpusText);
+  if (args.corpusText && anchors.length < Math.min(2, args.roles.length)) {
+    logSignatureAnchorPlacementMiss({
+      roleCount: args.roles.length,
+      anchorsFound: anchors.length,
+      corpusLen: args.corpusText.length,
+    });
+  }
 
   for (const role of args.roles) {
     if (roleHasSignatureBlock([...placedSoFar, ...out], role.roleId, lastPage)) continue;
@@ -87,24 +124,41 @@ export function buildAutoSignaturePacketForAllRoles(args: {
       role.kind === "owner"
         ? args.ownerValueCtx
         : buildPrepareTemplateValueContext(role, args.ownerValueCtx);
-    const baseX = laneBaseX(role.partyIndex, roleCount);
-    const baseY = 0.68;
+    const anchor = anchors.find((a) => a.partyIndex === role.partyIndex) ?? null;
 
-    for (const tool of SIGNATURE_BLOCK_TOOLS) {
-      const desired = {
-        x: baseX,
-        y: Math.min(0.88, baseY + tool.dy),
-        width: tool.type === "signature" ? 0.34 : 0.3,
-        height: tool.type === "signature" ? 0.07 : 0.04,
-      };
-      const resolved = findNonOverlappingPrepareRect({
-        desiredRect: desired,
-        page: lastPage,
-        roleId: role.roleId,
-        existingFields: [...placedSoFar, ...out],
-        placementMode: "manual",
-      });
-      const field = createAutoField(role, lastPage, tool.type, resolved, valueCtx, tool.textPurpose);
+    for (const tool of blockTools) {
+      const anchored =
+        tool.type === "signature"
+          ? anchoredSignatureRect({ anchor, partyIndex: role.partyIndex, roleCount })
+          : signatureAnchorToPrepareRect({
+              anchor,
+              partyIndex: role.partyIndex,
+              roleCount,
+              fieldType: tool.type,
+            });
+      const useAnchorY = Boolean(anchor) || tool.type === "signature";
+      const desired = clampPrepareFieldRectToSafeBounds(
+        {
+          x: anchored.x,
+          y: useAnchorY ? anchored.y : Math.min(AUTO_SIGNATURE_MAX_Y - tool.dy, anchored.y),
+          width: tool.type === "signature" ? anchored.width : 0.3,
+          height: tool.type === "signature" ? anchored.height : 0.04,
+        },
+        { kind: "signature" },
+      );
+      if (desired.y + desired.height > PREPARE_PAGE_FOOTER_BAND_Y) continue;
+      const resolved =
+        tool.type === "signature" && anchor
+          ? desired
+          : findNonOverlappingPrepareRect({
+              desiredRect: desired,
+              page: lastPage,
+              roleId: role.roleId,
+              existingFields: [...placedSoFar, ...out],
+              placementMode: "manual",
+            });
+      const clamped = clampPrepareFieldRectToSafeBounds(resolved, { kind: "signature" });
+      const field = createAutoField(role, lastPage, tool.type, clamped, valueCtx, tool.textPurpose);
       if (field) {
         out.push(field);
         placedSoFar = [...manual, ...out];
@@ -113,8 +167,15 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   }
 
   const placedCount = out.length;
+  const signatureOnlyMode = corpusHasPrefilledSignatureIdentity(args.corpusText);
   const confidence: AutoSignaturePacketResult["confidence"] =
-    placedCount >= args.roles.length * 2 ? "high" : "draft";
+    signatureOnlyMode
+      ? placedCount >= args.roles.length && anchors.length >= Math.min(2, args.roles.length)
+        ? "high"
+        : "draft"
+      : placedCount >= args.roles.length * 2 && anchors.length >= Math.min(2, args.roles.length)
+        ? "high"
+        : "draft";
 
   // eslint-disable-next-line no-console
   console.info("[signing-auto-placement-start]", {
@@ -137,6 +198,12 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   if (placedCount > 0) {
     // eslint-disable-next-line no-console
     console.info("[signing-auto-placement-success]", { placedCount, confidence });
+    // eslint-disable-next-line no-console
+    console.info("[signature-fields-auto-placed]", {
+      signerCount: args.roles.length,
+      fieldCount: placedCount,
+      source: "signature_blocks",
+    });
   } else {
     // eslint-disable-next-line no-console
     console.warn("[signing-auto-placement-fallback]", { pageCount, roleCount: args.roles.length });

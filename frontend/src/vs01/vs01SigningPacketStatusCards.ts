@@ -2,15 +2,29 @@ import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff"
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { signerKeyForHandoffRow, type Vs01SignerPacketStatus } from "./vs01SigningPacketStatusStore";
 
+export function shouldShowPacketSignerMetaLine(args: {
+  partyName: string;
+  signerName: string | null | undefined;
+  isEntityParty: boolean;
+}): boolean {
+  const party = (args.partyName || "").trim();
+  const signer = (args.signerName || "").trim();
+  if (!signer) return false;
+  if (!args.isEntityParty) return false;
+  return signer.toLowerCase() !== party.toLowerCase();
+}
+
 export type PacketStatusCardRow = {
   key: string;
   roleId: string;
   partyIndex: number;
   isOwner: boolean;
+  roleLabel: string | null;
   partyName: string;
   signerName: string | null;
   signerTitle: string | null;
   signerEmail: string | null;
+  showSignerMetaLine: boolean;
   signingUrl: string;
   status: Vs01SignerPacketStatus;
   statusPill: string;
@@ -45,10 +59,16 @@ export function buildPacketStatusCards(args: {
       roleId: ownerRole.roleId,
       partyIndex: ownerRole.partyIndex,
       isOwner: true,
+      roleLabel: "Client",
       partyName: ownerRole.entityName?.trim() || "Sender",
       signerName: ownerRole.signerName?.trim() || null,
       signerTitle: ownerRole.signerTitle?.trim() || null,
       signerEmail: ownerRole.signerEmail?.trim() || null,
+      showSignerMetaLine: shouldShowPacketSignerMetaLine({
+        partyName: ownerRole.entityName?.trim() || "Sender",
+        signerName: ownerRole.signerName,
+        isEntityParty: ownerRole.isEntityParty,
+      }),
       signingUrl: ownerUrl,
       status: ownerStatus,
       statusPill: statusPillLabel(ownerStatus),
@@ -66,15 +86,23 @@ export function buildPacketStatusCards(args: {
     );
     const key = signerKeyForHandoffRow(row, row.signerRoleId);
     const st = args.statusByKey[key] ?? "waiting";
+    const partyName = role?.entityName?.trim() || row.displayName?.trim() || "Signer";
+    const signerName = role?.signerName?.trim() || null;
     out.push({
       key,
       roleId: role?.roleId ?? row.signerRoleId ?? key,
       partyIndex: role?.partyIndex ?? 0,
       isOwner: false,
-      partyName: row.displayName?.trim() || role?.entityName?.trim() || "Signer",
-      signerName: role?.signerName?.trim() || null,
+      roleLabel: role?.kind === "counterparty" ? "Counterparty" : null,
+      partyName,
+      signerName,
       signerTitle: role?.signerTitle?.trim() || null,
       signerEmail: row.email?.trim() || role?.signerEmail?.trim() || null,
+      showSignerMetaLine: shouldShowPacketSignerMetaLine({
+        partyName,
+        signerName,
+        isEntityParty: role?.isEntityParty ?? true,
+      }),
       signingUrl: row.signingUrl?.trim() ?? "",
       status: st,
       statusPill: statusPillLabel(st),

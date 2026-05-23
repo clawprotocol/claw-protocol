@@ -7,6 +7,7 @@ export type CreateFlowProductionPhase =
   | "complexity_choice_required"
   | "draft_ready_for_review"
   | "signer_setup_required"
+  | "finalizing_final_review"
   | "updated_agreement_ready"
   | "guided_final_review"
   | "recipient_setup_required"
@@ -14,6 +15,10 @@ export type CreateFlowProductionPhase =
 
 export function isGuidedFinalReviewPhase(phase: CreateFlowProductionPhase): boolean {
   return phase === "guided_final_review";
+}
+
+export function isFinalizingFinalReviewPhase(phase: CreateFlowProductionPhase): boolean {
+  return phase === "finalizing_final_review";
 }
 
 export function isUpdatedAgreementReadyPhase(phase: CreateFlowProductionPhase): boolean {
@@ -40,6 +45,8 @@ export function createFlowPrimaryCtaLabel(phase: CreateFlowProductionPhase): str
       return "Continue";
     case "signer_setup_required":
       return "Add signer details";
+    case "finalizing_final_review":
+      return "Continue to final review";
     case "updated_agreement_ready":
       return "Review updated agreement";
     case "guided_final_review":

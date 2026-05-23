@@ -96,6 +96,8 @@ export function buildVs01PrepareSigningRoles(args: {
       .map((x) => (x ?? "").trim())
       .find((x) => isPlausibleEmail(x));
     const partyName = c.name.trim();
+    const preparedSignerName = prepareRoleSignerName(c.signerName, partyName);
+    const isEntityParty = looksLikeLegalEntityPartyNameLocal(c.name);
     out.push({
       roleId,
       partyIndex: idx,
@@ -103,11 +105,11 @@ export function buildVs01PrepareSigningRoles(args: {
       entityName: partyName,
       partyName,
       roleLabel: partyName,
-      signerName: prepareRoleSignerName(c.signerName, partyName),
+      signerName: preparedSignerName ?? (!isEntityParty ? partyName : undefined),
       signerTitle: signerMetadataInputRaw(c.signerTitle) || undefined,
       signerEmail: rowEmail || undefined,
       reviewEmail: c.reviewEmail?.trim() || undefined,
-      isEntityParty: looksLikeLegalEntityPartyNameLocal(c.name),
+      isEntityParty,
       requiresSignature: true,
       vs01CounterpartyId: c.id,
       kind: "counterparty",

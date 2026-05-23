@@ -54,6 +54,8 @@ export type AgreementVs01BridgeSession = {
   ownerIsPreparingPacket?: boolean;
   /** Explicit VS01 bridge mode for diagnostics and gating. */
   agreementBridgeMode?: "prepare_signing_packet";
+  /** Plain-text agreement corpus for signature-block anchor placement in VS01 prepare. */
+  agreementCorpusText?: string;
   /**
    * Set when bridging from reviewer-approved “Finalize for signing” (not Simple Send intake).
    * Drives VS01 shell copy (“reviewer already approved”) vs generic agreement bridge.
@@ -471,11 +473,28 @@ function bridgeParticipantsFromDraft(draft: AgreementDraft | null): AgreementPar
   return canonical;
 }
 
+function resolveBridgeAgreementCorpusFromDraft(draft: AgreementDraft | null): string {
+  const d = draft as {
+    server_full_document_text?: string | null;
+    premium_server_full_document_text?: string | null;
+    premium_full_document_text?: string | null;
+    document_text?: string | null;
+  } | null;
+  return (
+    String(d?.server_full_document_text ?? "").trim() ||
+    String(d?.premium_server_full_document_text ?? "").trim() ||
+    String(d?.premium_full_document_text ?? "").trim() ||
+    String(d?.document_text ?? "").trim()
+  );
+}
+
 /** Map agreement parties → VS01 creator + counterparties (non-owner signers/recipients). */
 export function buildAgreementVs01BridgeSession(params: {
   agreementId: string;
   vs01DocumentId: string;
   draft: AgreementDraft | null;
+  /** Override corpus used for VS01 signature-block anchor placement. */
+  agreementCorpusText?: string | null;
   /** Set when bridging from paid Pro sender-first `/app/send` → VS01 e-sign. */
   senderFirstLawdogHandoff?: boolean;
   /** Reviewer approved without edits — finalize-for-signing handoff (not send-page intake). */
@@ -505,6 +524,8 @@ export function buildAgreementVs01BridgeSession(params: {
   assertSignerMetadataPreserved(participants, participants, "vs01-bridge-build");
   const senderFirst = Boolean(params.senderFirstLawdogHandoff);
   const reviewerApproved = Boolean(params.reviewerApprovedCleanHandoff);
+  const agreementCorpusText =
+    (params.agreementCorpusText ?? "").trim() || resolveBridgeAgreementCorpusFromDraft(params.draft);
   return {
     vs01DocumentId: params.vs01DocumentId.trim(),
     agreementId: params.agreementId.trim(),
@@ -528,6 +549,7 @@ export function buildAgreementVs01BridgeSession(params: {
         } as const)
       : {}),
     ...(reviewerApproved ? { reviewerApprovedCleanHandoff: true as const } : {}),
+    ...(agreementCorpusText.length >= 200 ? { agreementCorpusText } : {}),
   };
 }
 
@@ -719,6 +741,8 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
   recipientSetup?: RecipientSetupEmailInput | null;
   /** Reviewer-approved clean path (Simple done finalize) — VS01 shell shows reviewer-aware copy. */
   reviewerApprovedCleanHandoff?: boolean;
+  /** Final agreement plain text for VS01 signature-block anchor placement. */
+  agreementCorpusText?: string | null;
 }): Promise<boolean> {
   const id = String(options.agreementId || "").trim();
   if (!id) return false;
@@ -737,6 +761,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     draft: merged,
     senderFirstLawdogHandoff: true,
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
+    agreementCorpusText: options.agreementCorpusText,
   });
   logAgreementVs01BridgePreflight(bridge);
   logVs01BridgeSignerMetadata(bridge);

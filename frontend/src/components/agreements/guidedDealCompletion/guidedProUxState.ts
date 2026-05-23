@@ -6,7 +6,7 @@
  */
 
 import type { CreateFlowProductionPhase } from "../createFlowTypes";
-import { isGuidedFinalReviewPhase, isUpdatedAgreementReadyPhase } from "../createFlowTypes";
+import { isFinalizingFinalReviewPhase, isGuidedFinalReviewPhase, isUpdatedAgreementReadyPhase } from "../createFlowTypes";
 import type { GuidedCompletionPhase } from "./guidedCompletionPhase";
 import type { GuidedAnswerApplyStatus } from "./guidedAnswerApplyOrchestration";
 import {
@@ -66,6 +66,7 @@ export function guidedProUxBlocksRecipientSetup(args: {
 }): boolean {
   if (args.guidedBulkApplying || args.guidedCompletionPhase === "applying_all") return true;
   if (args.createFlowPhase === "signer_setup_required") return true;
+  if (isFinalizingFinalReviewPhase(args.createFlowPhase)) return true;
   if (
     args.guidedCompletionPhase === "collecting_answers" ||
     args.guidedCompletionPhase === "ready_to_apply"
@@ -105,11 +106,13 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
   /** Stay on signer setup until user explicitly continues — never promote on background apply alone. */
   if (
     args.hasGuidedSession &&
-    args.createFlowPhase === "signer_setup_required" &&
+    (args.createFlowPhase === "signer_setup_required" || isFinalizingFinalReviewPhase(args.createFlowPhase)) &&
     !args.finalReviewExplicitlyOpened &&
     args.guidedCompletionPhase !== "applying_all"
   ) {
-    return "signer_setup_required";
+    return isFinalizingFinalReviewPhase(args.createFlowPhase)
+      ? "updated_agreement_ready"
+      : "signer_setup_required";
   }
 
   const applyStatus = resolveGuidedAnswerApplyStatus({

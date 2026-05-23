@@ -67,7 +67,7 @@ export function GuidedQuestionOptionCard({
       ) : null}
       {!compact ? (
         <p className="mt-0.5 text-[11px] leading-snug text-stone-700">
-          <span className="font-semibold text-stone-800">Will update: </span>
+          <span className="font-semibold text-stone-800">Updates: </span>
           {expanded && lawDogWillFull ? lawDogWillFull : lawDogWill}
         </p>
       ) : null}

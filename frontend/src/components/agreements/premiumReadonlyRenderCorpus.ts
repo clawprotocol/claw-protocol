@@ -52,6 +52,43 @@ export function scorePremiumReadonlyCorpusCandidate(text: string): number {
   return trimmed.length + premiumReadonlyCorpusSignalHits(trimmed) * 220;
 }
 
+/** FNV-1a 32-bit — stable compare for free-vs-paid corpus audit. */
+export function hashPlainTextCorpus(text: string): string {
+  let h = 2166136261;
+  const s = text || "";
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return String(h >>> 0);
+}
+
+export function corpusMatchesFreeBasicDraft(
+  selectedPlain: string,
+  freeBaselinePlain: string,
+): boolean {
+  const selected = (selectedPlain || "").trim();
+  const free = (freeBaselinePlain || "").trim();
+  if (!selected || !free) return false;
+  return hashPlainTextCorpus(selected) === hashPlainTextCorpus(free);
+}
+
+/** Reject thin free/starter preview masquerading as paid Pro authority after checkout. */
+export function shouldRejectFreeBasicDraftForPaidProPick(args: {
+  selectedPlain: string;
+  freeBaselinePlain: string;
+  premiumCheckoutCompleted?: boolean;
+  paidAuthoritativeFallback?: string | null;
+}): boolean {
+  if (!args.premiumCheckoutCompleted) return false;
+  const selected = (args.selectedPlain || "").trim();
+  const free = (args.freeBaselinePlain || "").trim();
+  if (!selected || !free) return false;
+  if (!corpusMatchesFreeBasicDraft(selected, free)) return false;
+  const fallback = (args.paidAuthoritativeFallback || "").trim();
+  return fallback.length >= 500 && fallback.length > selected.length + 80;
+}
+
 export function premiumRenderCorpusContainsSignals(text: string): {
   contains_commission: boolean;
   contains_exclusivity: boolean;
@@ -189,8 +226,30 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
 
   const plain = (res.text || "").trim();
-  const finalizedPlain =
+  let finalizedPlain =
     args.draft && plain ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(plain, args.draft, args.intakeText ?? null) : plain;
+  const freeBaseline =
+    args.draft && args.premiumCheckoutCompleted
+      ? buildAgreementPreviewTextCore(args.draft, { starterPreview: true })
+      : "";
+  const paidFallback = (args.paidAuthoritativeProBody || legacySnap || hydratedHintForResolver || "").trim();
+  if (
+    shouldRejectFreeBasicDraftForPaidProPick({
+      selectedPlain: finalizedPlain,
+      freeBaselinePlain: freeBaseline,
+      premiumCheckoutCompleted: args.premiumCheckoutCompleted,
+      paidAuthoritativeFallback: paidFallback,
+    })
+  ) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("[premium-picker-audit] rejected_free_basic_draft_for_paid_authority", {
+        selectedLen: finalizedPlain.length,
+        fallbackLen: paidFallback.length,
+      });
+    }
+    finalizedPlain = paidFallback;
+  }
   const nonThin =
     finalizedPlain.length >= 1200 || premiumReadonlyCorpusSignalHits(finalizedPlain) >= 3;
 

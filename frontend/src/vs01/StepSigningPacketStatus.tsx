@@ -61,6 +61,8 @@ function PacketStatusCard({
         <div className="vs01-packet-status-card-title-block">
           {card.isOwner ? (
             <span className="vs01-packet-status-owner-tag">You / sender</span>
+          ) : card.roleLabel ? (
+            <span className="vs01-packet-status-owner-tag">{card.roleLabel}</span>
           ) : null}
           <h2 className="vs01-packet-status-party-name">{card.partyName}</h2>
         </div>
@@ -72,7 +74,9 @@ function PacketStatusCard({
         </span>
       </div>
       <div className="vs01-packet-status-card-body">
-        {card.signerName ? <SignerMetaLine label="Signer" value={card.signerName} /> : null}
+        {card.showSignerMetaLine && card.signerName ? (
+          <SignerMetaLine label="Signer" value={card.signerName} />
+        ) : null}
         {card.signerTitle ? <SignerMetaLine label="Title" value={card.signerTitle} /> : null}
         {card.signerEmail ? <SignerMetaLine label="Email" value={card.signerEmail} /> : null}
         {card.hint ? <p className="vs01-packet-status-hint">{card.hint}</p> : null}

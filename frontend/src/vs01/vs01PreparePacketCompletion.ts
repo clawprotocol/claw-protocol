@@ -14,7 +14,15 @@ export const PREPARE_BLOCKED_PANEL_BODY =
   "Each signer needs one signature field. Other fields are optional.";
 export const PREPARE_OPTIONAL_FIELDS_HINT =
   "Optional: add name, title, or date fields if you want LawDog to prefill them.";
-export const PREPARE_PACKET_READY_COPY = "Packet ready — continue to signing links.";
+export const PREPARE_PACKET_READY_COPY = "Signature fields are ready — continue to signing links.";
+export const PREPARE_PACKET_BRIDGE_HEADLINE = "Signature fields are ready.";
+export const PREPARE_PACKET_BRIDGE_LEAD =
+  "LawDog placed signature fields next to each signer’s signature line. Initials are optional.";
+export const PREPARE_PACKET_BRIDGE_PRIMARY_CTA = "Continue to signing links";
+export const PREPARE_PACKET_BRIDGE_SECONDARY_CTA = "Edit field placement";
+export const PREPARE_PACKET_INITIALS_TOGGLE_LABEL = "Add initials to each page";
+export const PREPARE_PACKET_INITIALS_TOGGLE_HINT =
+  "Optional. Signers can still complete the agreement without changing placement.";
 
 const MISSING_LABEL: Record<string, string> = {
   signature: "Signature",

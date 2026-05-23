@@ -3,26 +3,26 @@
  * Deterministic local substitution (no model call).
  */
 
-import { signerMetadataInputRaw } from "../../../agreement/signerMetadataNormalize";
-import { isDisallowedPartyPhrase } from "../paidProPartyNamePreserve";
 import { buildPartyEntries, normalizeSignatureBlockHeadings } from "../paidProAgreementPolish";
 import {
-  collectSemanticPartyPlaceholderFragments,
   repairAgreementTemplatePlaceholders,
 } from "../agreementTemplatePlaceholderSafety";
-import { looksLikeEmail, stripRecipientEmailNoise } from "../recipientEmailValidation";
 import { isPlaceholderPartyName } from "../starterPartyLimits";
-import {
-  linearPremiumRecipientSlots,
-  readPremiumRecipientHandoff,
-  type PremiumRecipientHandoffV2,
-} from "../premiumPartyNamesHandoff";
+import type { PremiumRecipientHandoffV2 } from "../premiumPartyNamesHandoff";
 import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreReviewSignerSlots";
 import {
+  findSignatureRegionEnd,
   findSignatureRegionStart,
   isSafeSignatureTailReplacement,
   signaturePatchStartIndex,
 } from "./signatureRegion";
+import {
+  applyCanonicalManifestPlaceholdersToCorpus,
+  buildCanonicalFinalPartyManifestFromIdentities,
+  formatCanonicalFinalPartyManifestLines,
+  manifestToCanonicalPartyIdentities,
+  resolveCanonicalFinalPartyManifest,
+} from "./canonicalFinalPartyManifest";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company)\.?$/i;
@@ -49,14 +49,11 @@ export type ResolveCanonicalPartyIdentitiesArgs = ResolveGuidedPreReviewSignerSl
   handoff?: PremiumRecipientHandoffV2 | null;
 };
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function usablePartyName(raw: string): string {
-  const t = (raw || "").trim();
-  if (t.length < 2 || isPlaceholderPartyName(t) || isDisallowedPartyPhrase(t)) return "";
-  return t;
+/** Single source of truth for party display names used by polish, corpus, and handoff. */
+export function resolveCanonicalPartyIdentitiesFromSignerSetup(
+  args: ResolveCanonicalPartyIdentitiesArgs,
+): CanonicalPartyIdentity[] {
+  return manifestToCanonicalPartyIdentities(resolveCanonicalFinalPartyManifest(args));
 }
 
 export function isIndividualPartyName(name: string): boolean {
@@ -69,110 +66,8 @@ export function isIndividualPartyName(name: string): boolean {
   return words.every((w) => /^[A-Z][A-Za-z'.-]*$/.test(w) || /^[A-Z]\.$/.test(w));
 }
 
-function defaultBlockHeading(index: number, roleLabel?: string): string {
-  const role = (roleLabel || "").trim().toLowerCase();
-  if (/client|company|customer|buyer/.test(role)) return "CLIENT";
-  if (/provider|vendor|contractor|consultant|service|developer/.test(role)) return "SERVICE PROVIDER";
-  if (index === 0) return "CLIENT";
-  if (index === 1) return "SERVICE PROVIDER";
-  return `PARTY ${index + 1}`;
-}
-
-function displayLabelForHeading(heading: string): string {
-  if (heading === "CLIENT") return "Client";
-  if (heading === "SERVICE PROVIDER") return "Service Provider";
-  return heading
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/** Single source of truth for party display names used by polish, corpus, and handoff. */
-export function resolveCanonicalPartyIdentitiesFromSignerSetup(
-  args: ResolveCanonicalPartyIdentitiesArgs,
-): CanonicalPartyIdentity[] {
-  const handoff = args.handoff ?? readPremiumRecipientHandoff();
-  const slotCount = Math.max(args.partyCount, 2);
-  const handoffSlots = handoff ? linearPremiumRecipientSlots(handoff, slotCount) : [];
-  const identities: CanonicalPartyIdentity[] = [];
-
-  for (let i = 0; i < slotCount; i++) {
-    const slot = handoffSlots[i];
-    const recipientDisplay =
-      i === 0 ? args.recipient1Name : i === 1 ? args.recipient2Name : "";
-    const signerRef = usablePartyName((args.partySignerNames[i] ?? "").trim());
-    const signerHandoff = usablePartyName(signerMetadataInputRaw(slot?.signerName));
-    const handoffName = usablePartyName(slot?.name ?? "");
-    const draftName = usablePartyName((args.draftPartyNames[i] ?? "").trim());
-
-    let partyDisplayName =
-      usablePartyName(recipientDisplay) ||
-      handoffName ||
-      draftName ||
-      signerRef ||
-      signerHandoff;
-
-    if (!partyDisplayName && signerRef) partyDisplayName = signerRef;
-    if (!partyDisplayName && signerHandoff) partyDisplayName = signerHandoff;
-
-    let representativeName: string | null = null;
-    if (
-      signerRef &&
-      partyDisplayName &&
-      normLoose(signerRef) !== normLoose(partyDisplayName) &&
-      ENTITY_SUFFIX.test(partyDisplayName)
-    ) {
-      representativeName = signerRef;
-    } else if (
-      signerHandoff &&
-      partyDisplayName &&
-      normLoose(signerHandoff) !== normLoose(partyDisplayName) &&
-      ENTITY_SUFFIX.test(partyDisplayName)
-    ) {
-      representativeName = signerHandoff;
-    }
-
-    const titleRaw =
-      signerMetadataInputRaw(slot?.signerTitle) ||
-      signerMetadataInputRaw((args.partySignerTitles ?? [])[i]);
-    const title = titleRaw.trim() || null;
-
-    const emailRaw =
-      i === 0
-        ? args.recipient1Email
-        : i === 1
-          ? args.recipient2Email
-          : args.extraPartyReviewEmails[i - 2] ?? slot?.email ?? "";
-    const email = looksLikeEmail(stripRecipientEmailNoise(emailRaw))
-      ? stripRecipientEmailNoise(emailRaw)
-      : "";
-
-    const role = args.draftPartyRoles?.[i] ?? slot?.role ?? "";
-    identities.push({
-      index: i,
-      partyDisplayName,
-      email,
-      representativeName,
-      title,
-      blockHeading: defaultBlockHeading(i, role),
-      isIndividual: partyDisplayName ? isIndividualPartyName(partyDisplayName) : false,
-    });
-  }
-
-  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
-    // eslint-disable-next-line no-console
-    console.info("[signer-party-identity-resolved]", {
-      partyCount: identities.length,
-      names: identities.map((p) => p.partyDisplayName),
-      withEmail: identities.filter((p) => p.email).length,
-      individuals: identities.filter((p) => p.isIndividual).length,
-    });
-  }
-
-  return identities;
-}
-
-function normLoose(s: string): string {
-  return s.replace(/\s+/g, " ").trim().toLowerCase();
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function resolvePaidProPolishPartyNamesFromIdentities(
@@ -216,6 +111,40 @@ function replaceRecitalPartyTokens(text: string, identities: readonly CanonicalP
       out.slice(head2.length);
   }
   return out;
+}
+
+function replaceGenericOpeningPartyLabels(
+  text: string,
+  identities: readonly CanonicalPartyIdentity[],
+): { text: string; count: number } {
+  const client = identities[0]?.partyDisplayName?.trim();
+  const provider = identities[1]?.partyDisplayName?.trim();
+  if (!client || !provider) return { text, count: 0 };
+
+  const headLen = Math.min(text.length, 2_500);
+  let head = text.slice(0, headLen);
+  const tail = text.slice(headLen);
+  let count = 0;
+
+  const replaceHead = (re: RegExp, replacement: string) => {
+    head = head.replace(re, (...args: unknown[]) => {
+      const match = String(args[0] ?? "");
+      if (!match.trim()) return match;
+      count += 1;
+      return replacement;
+    });
+  };
+
+  replaceHead(
+    /\bbetween\s+(?:the\s+)?Client\s*(?:\(\s*["“]?Client["”]?\s*\))?\s+and\s+(?:the\s+)?Service Provider\s*(?:\(\s*["“]?Service Provider["”]?\s*\))?/i,
+    `between ${client} ("Client") and ${provider} ("Service Provider")`,
+  );
+  replaceHead(
+    /\bby\s+and\s+between\s+(?:the\s+)?Client\s*(?:\(\s*["“]?Client["”]?\s*\))?\s+and\s+(?:the\s+)?Service Provider\s*(?:\(\s*["“]?Service Provider["”]?\s*\))?/i,
+    `by and between ${client} ("Client") and ${provider} ("Service Provider")`,
+  );
+
+  return { text: head + tail, count };
 }
 
 export function resolvePartyIndexForSignatureLine(
@@ -303,17 +232,45 @@ function buildSignatureBlocks(identities: readonly CanonicalPartyIdentity[]): {
     if (!id.partyDisplayName) continue;
     const lines: string[] = [`${id.blockHeading}:`];
     lines.push(id.partyDisplayName);
-    if (!id.isIndividual) {
-      lines.push("By: __________________________");
-    }
-    const signName = id.representativeName || id.partyDisplayName;
+    lines.push("By: __________________________");
+    const signName = signatureNameForIdentity(id);
     lines.push(`Name: ${signName}`);
-    lines.push(`Title: ${id.title?.trim() || "_________________________"}`);
+    if (!id.isIndividual || id.title?.trim()) {
+      lines.push(`Title: ${id.title?.trim() || "_________________________"}`);
+    }
     lines.push("Date: _________________________");
     blocks.push(lines.join("\n"));
     count += 1;
   }
   return { blocks, count };
+}
+
+export function rebuildSignatureBlocksWithPartyIdentities(
+  text: string,
+  identities: readonly CanonicalPartyIdentity[],
+): { text: string; count: number } {
+  const { blocks, count } = buildSignatureBlocks(identities);
+  if (!blocks.length) return { text, count: 0 };
+  const trimmed = text.trimEnd();
+  const marker = findSignatureRegionStart(trimmed);
+  const witnessLine = "IN WITNESS WHEREOF, the Parties execute this Agreement.";
+  const signatureTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;
+
+  if (marker < 0) {
+    const witnessAlready = /\bIN WITNESS WHEREOF\b/i.test(trimmed.slice(-1200));
+    return {
+      text: witnessAlready
+        ? `${trimmed}\n\n${blocks.join("\n\n")}\n`
+        : `${trimmed}\n\n${signatureTail}`,
+      count,
+    };
+  }
+
+  const patchEnd = findSignatureRegionEnd(trimmed, marker);
+  const before = trimmed.slice(0, marker).trimEnd();
+  const after = trimmed.slice(patchEnd).trimStart();
+  const rebuilt = after ? `${before}\n\n${signatureTail.trimEnd()}\n\n${after}\n` : `${before}\n\n${signatureTail}`;
+  return { text: rebuilt, count };
 }
 
 function polishSignatureBlocksWithPartyIdentities(
@@ -390,8 +347,13 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
 
   const bodyLenBefore = body.length;
   let out = body;
+  const manifest = buildCanonicalFinalPartyManifestFromIdentities(identities);
+  const manifestPatch = applyCanonicalManifestPlaceholdersToCorpus(out, manifest);
+  out = manifestPatch.text;
   out = replaceBracketPartyPlaceholders(out, identities);
   out = replaceRecitalPartyTokens(out, identities);
+  const openingPatch = replaceGenericOpeningPartyLabels(out, identities);
+  out = openingPatch.text;
 
   const repair = repairAgreementTemplatePlaceholders(out, {
     intakeRaw,
@@ -423,7 +385,8 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
     };
   }
 
-  const signaturePolishCount = sigFill.count + blockPolish.count + headings.log.replacedCount;
+  const signaturePolishCount =
+    openingPatch.count + sigFill.count + blockPolish.count + headings.log.replacedCount;
 
   if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
     // eslint-disable-next-line no-console
@@ -448,10 +411,10 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
 export function agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup(
   text: string,
 ): boolean {
-  const semantic = collectSemanticPartyPlaceholderFragments(text);
-  if (semantic.some((f) => /Your Company Name|Service Provider Name/i.test(f))) return true;
   if (/\[your\s+company\s+name\]/i.test(text)) return true;
   if (/\[service\s+provider\s+name\]/i.test(text)) return true;
+  if (/\bYour Company Name\b/i.test(text)) return true;
+  if (/\bService Provider Name\b/i.test(text)) return true;
 
   const marker = text.search(SIG_TAIL_PLACEHOLDER_RE);
   if (marker >= 0) {
@@ -474,13 +437,7 @@ export function logSignerPartyPlaceholderBlockedFinalReview(payload: {
 export function formatSignerPartyIdentityConfirmationLines(
   identities: readonly CanonicalPartyIdentity[],
 ): string[] {
-  return identities
-    .filter((p) => p.partyDisplayName)
-    .map((p) => {
-      const label = displayLabelForHeading(p.blockHeading);
-      const email = p.email ? ` ${p.email}` : "";
-      return `${label}: ${p.partyDisplayName}${email}`;
-    });
+  return formatCanonicalFinalPartyManifestLines(buildCanonicalFinalPartyManifestFromIdentities(identities));
 }
 
 export function mergeDraftPartiesFromCanonicalIdentities<
@@ -506,8 +463,14 @@ export function mergeDraftPartiesFromCanonicalIdentities<
       name: id.partyDisplayName,
       email: id.email || String(prev.email ?? "").trim() || undefined,
       role: prev.role || "party",
-      signerName: id.representativeName ?? prev.signerName ?? undefined,
-      signerTitle: id.title ?? prev.signerTitle ?? undefined,
+      signerName:
+        id.representativeName ??
+        (id.isIndividual ? id.partyDisplayName : undefined) ??
+        prev.signerName ??
+        undefined,
+      signerTitle: id.isIndividual
+        ? id.title ?? undefined
+        : id.title ?? prev.signerTitle ?? undefined,
     };
   }
   return { ...draft, parties };

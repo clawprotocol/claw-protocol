@@ -598,7 +598,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain('id="guided-deal-completion-primary"');
     const executeIdx = intake.indexOf('logGuidedSendCtaBlocked("executePrimaryCta"');
     expect(executeIdx).toBeGreaterThanOrEqual(0);
-    expect(intake.slice(executeIdx - 400, executeIdx)).toMatch(/continue_to_recipients|premium_continue_to_signers/);
+    expect(intake.slice(executeIdx - 700, executeIdx)).toMatch(/continue_to_recipients|premium_continue_to_signers/);
   });
 
   it("test18: armed recipient advance only after explicit guided final review phase", () => {
@@ -610,11 +610,45 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(advBlock).toContain("guidedFinalReviewExplicitlyOpened");
   });
 
-  it("test20: background apply after last answer; explicit continue CTA only", () => {
+  it("test31: final review continue recovers idle apply and sync corpus commit", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain("handleGuidedPreReviewContinueToFinalReview");
+    expect(intake).toContain("resolveGuidedFinalReviewApplyReadinessFromSession");
+    expect(intake).toContain("commitGuidedApplyFromExistingCorpus");
+    expect(intake).toContain("logGuidedFinalReviewApplyStatusRecovered");
+    expect(intake).toContain("logGuidedFinalReviewSyncApplyStarted");
+    expect(intake).toContain("pickBestAuthoritativeCorpusPlain");
+    expect(intake).toContain("guidedSessionComplete");
+    const corpusPicker = readFileSync(join(__dirname, "premiumReadonlyRenderCorpus.ts"), "utf8");
+    expect(corpusPicker).toContain("shouldRejectFreeBasicDraftForPaidProPick");
+    const readiness = readFileSync(
+      join(__dirname, "guidedDealCompletion/guidedFinalReviewApplyReadiness.ts"),
+      "utf8",
+    );
+    expect(readiness).toContain("[guided-final-review-apply-readiness]");
+    expect(readiness).toContain("[guided-final-review-apply-status-recovered]");
+  });
+
+  it("test33: guided final review CTA routes to signing, not legacy recipients", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("guided_final_review_ready_to_sign");
+    expect(intake).toContain("Create signing links");
+    expect(intake).toContain("continueGuidedFinalReviewToSigning({ intent: \"signature\" })");
+    const routeIdx = intake.indexOf('cta.reason === "guided_final_review_ready_to_sign"');
+    expect(routeIdx).toBeGreaterThan(0);
+    const routeBlock = intake.slice(routeIdx, routeIdx + 1200);
+    expect(routeBlock).toContain("finalizeAndFreezeGuidedFinalCorpus");
+    expect(routeBlock).toContain("continueGuidedFinalReviewToSigning");
+    expect(routeBlock).not.toContain("advancePaidProToRecipientSetup");
+    expect(routeBlock).not.toContain("handOffProductionDraftToRecipients");
+    expect(intake).toContain('reviewSecondaryLabel="Send for review first"');
+  });
+
+  it("test20: answer apply waits for signer setup continue; explicit continue CTA only", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("continueGuidedSignerSetupToFinalReview");
     expect(intake).toContain("backgroundDuringSignerSetup");
-    expect(intake).toContain("logGuidedBackgroundApplyStarted");
+    expect(intake).toContain("Keep signer setup interactive");
+    expect(intake).toContain('setGuidedFinalizeModalStage("applying_answers")');
     expect(intake).toContain("signer_setup_ready_final_review");
     expect(intake).toContain("resolveGuidedPreReviewSignerSlots");
     expect(intake).toContain("logSignerSetupIncomplete");
@@ -679,7 +713,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("test28: signer identity patch preserves corpus and final review recovery", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("guidedPreIdentityAuthoritativeRef");
-    expect(intake).toContain("identityApply.rejected");
+    expect(intake).toContain("finalizeAndFreezeGuidedFinalCorpus");
+    expect(intake).toContain("finalizeGuidedProAgreementCorpus");
     expect(intake).toContain("recoveryAuthoritativePlain");
     expect(intake).toContain("suppressPostReviewEditUx");
     expect(intake).toContain("corpusRecoveryMessage");
@@ -690,6 +725,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(identity).toContain("[signer-party-identity-apply-rejected]");
     expect(identity).toContain("shouldRejectSignerIdentityCorpusShrink");
     expect(identity).toContain("findSignatureRegionStart");
+    const finalizer = readFileSync(
+      join(__dirname, "guidedDealCompletion/guidedFinalCorpusFinalizer.ts"),
+      "utf8",
+    );
+    expect(finalizer).toContain("identityApply.rejected");
+    expect(finalizer).toContain("[guided-final-corpus-blocked-placeholder-identity-mismatch]");
     const corpus = readFileSync(join(__dirname, "simpleProFinalReviewCorpus.ts"), "utf8");
     expect(corpus).toContain("[guided-final-review-corpus-recovered]");
     expect(corpus).toContain("[guided-final-review-corpus-blocked]");
@@ -734,6 +775,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("guidedSigningConfirmationActive");
     expect(intake).toContain("GuidedProSigningConfirmationScreen");
     expect(intake).toContain("ensureGuidedSigningCorpusReady");
+    expect(intake).toContain("completeGuidedSigningHandoff");
     const signing = readFileSync(
       join(__dirname, "guidedDealCompletion/guidedSigningConfirmation.ts"),
       "utf8",
@@ -743,7 +785,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(signing).toContain("[guided-signing-confirmation-mounted]");
     expect(intake).toContain("logGuidedFinalReviewSendSignatureStart");
     expect(intake).toContain("handleGuidedSigningConfirmationContinue");
-    expect(intake).toContain("setPremiumSendConfirmOpen(true)");
+    expect(intake).toContain("openConfirmModal: true");
+    expect(intake).toContain("enterGuidedSignatureTrackRoute");
+    expect(intake).toContain("logGuidedSignatureGenericSendBypassed");
+    expect(intake).toContain("preparing_signing_links");
+    expect(intake).toContain("adding_signature_fields");
+    expect(intake).toContain("signing_packet_ready");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
     const sendBlock = intake.slice(sendIdx, sendIdx + 2500);
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
@@ -761,19 +808,25 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(screen).not.toContain("Describe a change");
     expect(screen).not.toContain("Add recipient emails");
     expect(screen).not.toContain("textarea");
-    expect(screen).toContain("guided-signing-order-self-first");
+    expect(intake).toContain('signaturePrimaryLabel="Create signing links"');
+    expect(intake).toContain('reviewSecondaryLabel="Send for review first"');
+    expect(intake).toContain("onChangeSigningOrder");
     expect(screen).toContain("Back to final review");
     const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
     const enterBlock = intake.slice(enterIdx, enterIdx + 600);
     expect(enterBlock).toContain("continueGuidedFinalReviewToSigning({ intent })");
     expect(intake).toContain("GuidedFinalizeModal");
     expect(intake).toContain("logGuidedFinalizeModalEnter");
+    expect(intake).toContain("preparing_final_signing_version");
+    expect(intake).toContain("ready_to_sign");
   });
 
   it("test26: signer party identity applied before final review", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("resolveCanonicalPartyIdentitiesFromSignerSetup");
-    expect(intake).toContain("applySignerPartyIdentityToAuthoritativeAgreement");
+    expect(intake).toContain("resolveCanonicalFinalPartyManifest");
+    expect(intake).toContain("guidedFinalPartyManifest");
+    expect(intake).toContain("finalizeGuidedProAgreementCorpus");
     expect(intake).toContain("agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup");
     expect(intake).toContain("guidedSignerFinalVersionLines");
     expect(intake).toContain("finalVersionPartyLines");
@@ -787,10 +840,20 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       join(__dirname, "guidedDealCompletion/signerPartyIdentity.ts"),
       "utf8",
     );
-    expect(identity).toContain("[signer-party-identity-resolved]");
+    const manifestModule = readFileSync(
+      join(__dirname, "guidedDealCompletion/canonicalFinalPartyManifest.ts"),
+      "utf8",
+    );
+    expect(manifestModule).toContain("[canonical-final-party-manifest]");
     expect(identity).toContain("[signer-party-identity-applied-to-corpus]");
     expect(identity).toContain("[signer-party-placeholder-blocked-final-review]");
     expect(identity).toContain("[signature-block-party-polish-applied]");
+    const finalizer = readFileSync(
+      join(__dirname, "guidedDealCompletion/guidedFinalCorpusFinalizer.ts"),
+      "utf8",
+    );
+    expect(finalizer).toContain("applySignerPartyIdentityToAuthoritativeAgreement");
+    expect(finalizer).toContain("rebuildSignatureBlocksWithPartyIdentities");
   });
 
   it("test25: soft-pass apply outcome and retry CTA copy", () => {

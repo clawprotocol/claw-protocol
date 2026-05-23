@@ -25,6 +25,19 @@ describe("resolveGuidedPreReviewSignerSlots", () => {
     expect(r.incompleteIndices).toContain(1);
   });
 
+  it("test38: client representative name alone does not satisfy party 0 entity identity", () => {
+    const r = resolveGuidedPreReviewSignerSlots({
+      ...BASE,
+      draftPartyNames: ["", "Joe Smith"],
+      partySignerNames: ["Anthem Blanchard", "Joe Smith"],
+      recipient2Name: "Joe Smith",
+      recipient1Email: "anthem@acme.test",
+      recipient2Email: "joe@example.test",
+    });
+    expect(r.complete).toBe(false);
+    expect(r.incompleteIndices).toContain(0);
+  });
+
   it("both parties with identity and counterparty email complete for signature", () => {
     const r = resolveGuidedPreReviewSignerSlots({
       ...BASE,

@@ -251,6 +251,6 @@ describe("prepare placement UI copy guards", () => {
     expect(prepareSrc).toContain("PREPARE_PACKET_READY_COPY");
     expect(completeSrc).toContain("PREPARE_BLOCKED_PANEL_TITLE");
     expect(completeSrc).not.toContain("Required fields still missing");
-    expect(PREPARE_PACKET_READY_COPY).toBe("Packet ready — continue to signing links.");
+    expect(PREPARE_PACKET_READY_COPY).toBe("Signature fields are ready — continue to signing links.");
   });
 });

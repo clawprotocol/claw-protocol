@@ -79,6 +79,12 @@ import {
   PREPARE_BLOCKED_PANEL_TITLE,
   PREPARE_OPTIONAL_FIELDS_HINT,
   PREPARE_PACKET_READY_COPY,
+  PREPARE_PACKET_BRIDGE_HEADLINE,
+  PREPARE_PACKET_BRIDGE_LEAD,
+  PREPARE_PACKET_BRIDGE_PRIMARY_CTA,
+  PREPARE_PACKET_BRIDGE_SECONDARY_CTA,
+  PREPARE_PACKET_INITIALS_TOGGLE_LABEL,
+  PREPARE_PACKET_INITIALS_TOGGLE_HINT,
 } from "./vs01PreparePacketCompletion";
 import {
   logVs01ActiveRoleAfterPlace,
@@ -142,6 +148,8 @@ export type StepPrepareSignatureProps = {
   fields: PlacedSigningField[];
   /** Called on every field mutation (add/remove/move/resize/value edit). Parent must apply the update. */
   onFieldsChange: (fields: PlacedSigningField[]) => void;
+  /** Agreement plain text for signature-block line anchor placement. */
+  prepareCorpusText?: string | null;
   onBack?: () => void;
   onContinue?: () => void;
 };
@@ -239,6 +247,7 @@ export function StepPrepareSignature({
   prepareRecipientPlacedFields = [],
   fields,
   onFieldsChange,
+  prepareCorpusText = null,
   onBack,
   onContinue,
 }: StepPrepareSignatureProps) {
@@ -783,6 +792,7 @@ export function StepPrepareSignature({
       pageCount: numPages,
       existingFields: fields,
       ownerValueCtx,
+      corpusText: prepareCorpusText,
     });
     if (result.placedCount > 0) {
       autoSignatureSeededRef.current = true;
@@ -806,6 +816,7 @@ export function StepPrepareSignature({
     fields,
     signerEmailForPlacement,
     setFields,
+    prepareCorpusText,
   ]);
 
   const onPagePlacementClick = useCallback(
@@ -1401,13 +1412,11 @@ export function StepPrepareSignature({
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title" className="vs01-sign-step">
       <header className="vs01-sign-step-header">
         <h2 id="vs01-step-prepare-title" className="vs01-card-title">
-          {agreementBridgePlacementCopy ? "LawDog prepared your signing packet" : "Sign your document"}
+          {agreementBridgePlacementCopy ? PREPARE_PACKET_BRIDGE_HEADLINE : "Sign your document"}
         </h2>
         <p className="vs01-card-help vs01-sign-step-lead">
           {agreementBridgePlacementCopy
-            ? autoPlacementComplete && !manualPlacementOverride
-              ? "Signature fields were placed automatically. Review once, then send."
-              : "Adjust field placement if needed, then continue when ready."
+            ? PREPARE_PACKET_BRIDGE_LEAD
             : "Choose a field type, then click once where it should go."}
         </p>
         {agreementBridgePlacementCopy && prepareSignerRoles?.length ? (
@@ -1796,20 +1805,22 @@ export function StepPrepareSignature({
           </div>
           <p className="vs01-sign-doc-foot-hint">
             {placementSurface && !previewLoading
-              ? selectedFieldId
-                ? "Scroll the document area (mouse wheel, trackpad, or scrollbar) if a page is off-screen. Drag the field to move it; use the corner handle to resize."
-                : placementArmed
-                  ? "Scroll the document area (mouse wheel, trackpad, or scrollbar) to reach every page, then click once where the field should go."
-                  : "Scroll the document area (mouse wheel, trackpad, or scrollbar) to review every page. Choose a field type, then click once on the page to add it."
+              ? agreementBridgePlacementCopy && !manualPlacementOverride
+                ? null
+                : selectedFieldId
+                  ? "Scroll the document area (mouse wheel, trackpad, or scrollbar) if a page is off-screen. Drag the field to move it; use the corner handle to resize."
+                  : placementArmed
+                    ? "Scroll the document area (mouse wheel, trackpad, or scrollbar) to reach every page, then click once where the field should go."
+                    : "Scroll the document area (mouse wheel, trackpad, or scrollbar) to review every page. Choose a field type, then click once on the page to add it."
               : null}
           </p>
         </div>
 
         <aside className="vs01-sign-rail" aria-label="Signing controls">
-          {agreementBridgePlacementCopy && prepareSignerRoles && prepareSignerRoles.length > 0 ? (
+          {agreementBridgePlacementCopy && prepareSignerRoles && prepareSignerRoles.length > 0 && manualPlacementOverride ? (
             <div className="vs01-prepare-role-picker mb-3" role="group" aria-label="Signer role for field placement">
               <p className="vs01-sign-rail-line text-xs font-medium text-slate-500 dark:text-slate-400">
-                Placing fields for
+                Edit field placement for
               </p>
               <div className="mt-1 flex flex-col gap-1">
                 {prepareSignerRoles.map((r) => {
@@ -1876,11 +1887,11 @@ export function StepPrepareSignature({
                   {named.map((c) => (
                     <li key={c.id} className="vs01-sign-rail-recipient-item">
                       <span className="vs01-sign-rail-recipient-name">{c.name.trim()}</span>
-                      {agreementBridgePlacementCopy ? (
+                      {agreementBridgePlacementCopy &&
+                      c.signerName?.trim() &&
+                      c.signerName.trim().toLowerCase() !== c.name.trim().toLowerCase() ? (
                         <span className="vs01-sign-rail-recipient-email">
-                          Signer:{" "}
-                          {c.signerName?.trim() ||
-                            (c.email.trim() ? "Signer will confirm name" : "Signer")}
+                          Signer: {c.signerName.trim()}
                           {c.signerTitle?.trim() ? ` · ${c.signerTitle.trim()}` : ""}
                         </span>
                       ) : null}
@@ -1905,14 +1916,14 @@ export function StepPrepareSignature({
               onClick={() => setManualPlacementOverride(true)}
               data-testid="vs01-edit-field-placement"
             >
-              Edit field placement
+              {PREPARE_PACKET_BRIDGE_SECONDARY_CTA}
             </button>
           ) : null}
           {showManualPlacementUi ? (
           <div className="vs01-sign-toolbar" role="toolbar" aria-label="Choose what to place">
-            {agreementBridgePlacementCopy && activePrepareRole ? (
+            {agreementBridgePlacementCopy && activePrepareRole && manualPlacementOverride ? (
               <p className="vs01-sign-placing-for-role" role="status">
-                Placing fields for: <strong>{activePrepareRole.entityName}</strong>
+                Editing placement for: <strong>{activePrepareRole.entityName}</strong>
                 {activePrepareRole.kind === "owner" ? (
                   <span className="vs01-sign-placing-for-role-tag"> (you / sender)</span>
                 ) : (
@@ -2035,14 +2046,12 @@ export function StepPrepareSignature({
             />
             <span>
               {agreementBridgePlacementCopy
-                ? "Add initials on every page for all signers"
+                ? PREPARE_PACKET_INITIALS_TOGGLE_LABEL
                 : "Add my initials box to every page"}
             </span>
           </label>
           {agreementBridgePlacementCopy ? (
-            <p className="vs01-prepare-initials-hint">
-              Packet default: one toggle places initials for every signer on every page. Auto-initials do not count toward required fields.
-            </p>
+            <p className="vs01-prepare-initials-hint">{PREPARE_PACKET_INITIALS_TOGGLE_HINT}</p>
           ) : null}
 
           {agreementBridgePlacementCopy ? (
@@ -2190,8 +2199,7 @@ export function StepPrepareSignature({
 
           {!receiptId && agreementBridgePlacementCopy ? (
             <p className="vs01-sign-rail-helper" role="note">
-              You are placing template fields only. The sender does not sign here — each signer completes their own
-              signing session from their link.
+              {PREPARE_PACKET_BRIDGE_LEAD}
             </p>
           ) : null}
 
@@ -2215,9 +2223,7 @@ export function StepPrepareSignature({
                 ? "Signature added ✓"
                 : agreementBridgePlacementCopy
                   ? packetChecklist.allReady
-                    ? autoPlacementComplete && !manualPlacementOverride
-                      ? "Review and send"
-                      : "Send signing links"
+                    ? PREPARE_PACKET_BRIDGE_PRIMARY_CTA
                     : "Continue"
                   : busySession
                     ? "Working…"

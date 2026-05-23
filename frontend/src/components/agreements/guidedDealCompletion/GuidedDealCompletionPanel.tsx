@@ -394,7 +394,7 @@ export function GuidedDealCompletionPanel({
               className="rounded-md border border-stone-200/90 bg-stone-50/90 px-2.5 py-2"
               data-testid="guided-clause-updates-preview"
             >
-              <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">Will update</p>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">Section updates</p>
               <ul className="mt-1 space-y-0.5">
                 {clauseUpdates.map((label) => (
                   <li key={label} className="text-[11px] text-stone-800">
@@ -424,11 +424,10 @@ export function GuidedDealCompletionPanel({
                 <span className="font-semibold">Saved.</span>{" "}
                 {pendingAreaLabel ? (
                   <>
-                    Queued update · <span className="font-semibold">{pendingAreaLabel}</span> — applies when you
-                    finish the questions.
+                    Updated · <span className="font-semibold">{pendingAreaLabel}</span>
                   </>
                 ) : (
-                  <>Queued — applies when you finish the questions.</>
+                  <>Agreement updated.</>
                 )}
               </p>
             </div>

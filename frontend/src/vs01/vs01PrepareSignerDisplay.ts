@@ -113,16 +113,30 @@ export function resolvePrepareSignerDisplayName(
     return { value: known, source: "role_signer_name", isPlaceholder: false };
   }
 
-  const inferred = inferSignerDisplayNameFromRole(role);
-  if (inferred) {
+  const party = resolvePreparePartyEntityLabel(role);
+  if (party && !role.isEntityParty) {
     logVs01SignerNameSource({
       mode,
       roleKind: role.kind,
       partyId: role.partyId,
-      source: "email_local_part",
+      source: "individual_party_name",
       knownSignerName: true,
     });
-    return { value: inferred, source: "email_local_part", isPlaceholder: false };
+    return { value: party, source: "individual_party_name", isPlaceholder: false };
+  }
+
+  if (!role.isEntityParty) {
+    const inferred = inferSignerDisplayNameFromRole(role);
+    if (inferred) {
+      logVs01SignerNameSource({
+        mode,
+        roleKind: role.kind,
+        partyId: role.partyId,
+        source: "email_local_part",
+        knownSignerName: true,
+      });
+      return { value: inferred, source: "email_local_part", isPlaceholder: false };
+    }
   }
 
   logVs01SignerNameSource({

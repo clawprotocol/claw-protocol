@@ -159,12 +159,17 @@ export function resolveGuidedCompletionRenderDocument(
     cands.push({ plain: adt, source: "agreement_document_text", rank: 4 });
   }
   if (!postGuided) {
-    if (preview.length >= 400 && !args.guidedCompletionActive) {
+    const previewShorterThanAuthority =
+      authoritativeExists &&
+      preview.length >= 400 &&
+      preview.length < Math.max(lastKnown.length, authHydrated.length) * 0.95;
+    if (preview.length >= 400 && !args.guidedCompletionActive && !previewShorterThanAuthority) {
       cands.push({ plain: preview, source: "rendered_preview", rank: 5 });
     } else if (
       preview.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
       args.guidedCompletionActive &&
-      !authoritativeExists
+      !authoritativeExists &&
+      !previewShorterThanAuthority
     ) {
       cands.push({ plain: preview, source: "rendered_preview", rank: 5 });
     }

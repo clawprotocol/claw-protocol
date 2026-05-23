@@ -58,3 +58,36 @@ export function isSafeSignatureTailReplacement(text: string, marker: number): bo
   const minFraction = text.length >= 2000 ? SIGNATURE_REGION_MIN_FRACTION : 0.12;
   return marker >= Math.floor(text.length * minFraction);
 }
+
+/**
+ * End offset (exclusive) of an existing signature tail starting at `start`.
+ * Preserves substantive content that was incorrectly placed after signature blocks.
+ */
+export function findSignatureRegionEnd(text: string, start: number): number {
+  if (start < 0) return text.length;
+  const lines = text.slice(start).split("\n");
+  let offset = 0;
+  let afterHeading = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      offset += line.length + 1;
+      continue;
+    }
+    const isWitness = /^\s*IN WITNESS WHEREOF\b/i.test(trimmed);
+    const isHeading = /^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed);
+    const isSigField =
+      /^\s*(?:By|Name|Title|Date|Email|Signature)\s*:/i.test(trimmed) || /^_{4,}$/.test(trimmed);
+    if (isWitness || isHeading || isSigField) {
+      afterHeading = isHeading || afterHeading;
+      offset += line.length + 1;
+      continue;
+    }
+    if (afterHeading && trimmed.length <= 80) {
+      offset += line.length + 1;
+      continue;
+    }
+    break;
+  }
+  return start + offset;
+}

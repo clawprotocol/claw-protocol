@@ -92,6 +92,8 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   premiumSendIntent: PremiumSendIntent;
   recipientSetup?: RecipientSetupEmailInput | null;
   logSource: string;
+  /** Final agreement plain text for VS01 signature-block anchor placement. */
+  agreementCorpusText?: string | null;
 }): Promise<PaidProPostRecipientSetupResult> {
   const id = String(options.agreementId || "").trim();
   if (!id) {
@@ -147,6 +149,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     draft: options.draft,
     logReason: options.logSource,
     recipientSetup: options.recipientSetup ?? null,
+    agreementCorpusText: options.agreementCorpusText,
   });
 
   if (vs01Ok) {

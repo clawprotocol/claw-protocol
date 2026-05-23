@@ -141,6 +141,34 @@ export {
   type GuidedReviewFlowStateId,
 } from "./guidedReviewFlowState";
 export {
+  finalizeGuidedProAgreementCorpus,
+  logGuidedFinalCorpusBlockedPlaceholderIdentityMismatch,
+  logGuidedFinalCorpusFinalized,
+  GUIDED_FINAL_CORPUS_MIN_LEN,
+} from "./guidedFinalCorpusFinalizer";
+export {
+  logGuidedFinalReviewAuthoritativeBody,
+  logGuidedFinalReviewRender,
+  logGuidedPlaceholderScan,
+  resolveGuidedFinalReviewAuthoritativeBody,
+  scanGuidedAuthoritativePlaceholders,
+  GUIDED_FINAL_REVIEW_SOURCE_PRIORITY,
+} from "./guidedFinalReviewAuthoritativeBody";
+export {
+  resolveCanonicalFinalPartyManifest,
+  formatCanonicalFinalPartyManifestLines,
+  applyCanonicalManifestPlaceholdersToCorpus,
+  scanFatalPartyPlaceholdersAfterManifestApply,
+  isTemplatePartyPlaceholderName,
+  userMessageForGuidedFinalReviewPartyBlock,
+} from "./canonicalFinalPartyManifest";
+export type {
+  FinalizeGuidedProAgreementCorpusArgs,
+  FinalizeGuidedProAgreementCorpusResult,
+  GuidedFinalCorpusCandidate,
+  GuidedFinalCorpusDiagnostics,
+} from "./guidedFinalCorpusFinalizer";
+export {
   fingerprintAgreementBody,
   readSigningPacketGuidedVersion,
   readSigningPacketPrepSnapshot,

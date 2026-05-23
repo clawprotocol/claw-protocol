@@ -1,9 +1,67 @@
 import { describe, expect, it } from "vitest";
-import { resolveGuidedSigningAuthoritativePlain } from "./guidedFinalReviewToSigning";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  buildGuidedSignaturePacketFromManifest,
+  assertGuidedVs01SigningHandoffReady,
+  dedupeGuidedAnswerClauses,
+  normalizePartyNameSpacingInCorpus,
+  prepareGuidedSigningCorpusCleanup,
+  resolveGuidedSigningAuthoritativePlain,
+  selectGuidedSignatureTrackCorpus,
+  shouldBypassGenericOnGenerateForGuidedSignature,
+  shouldShowPacketSignerMetaLine,
+  isGuidedSigningPlaceholderPreviewBody,
+} from "./guidedFinalReviewToSigning";
+import { finalizeGuidedProAgreementCorpus } from "./guidedFinalCorpusFinalizer";
+import { resolveCanonicalFinalPartyManifest } from "./canonicalFinalPartyManifest";
+import { buildCanonicalSignerManifest } from "./guidedReviewSigningContinuity";
 import { GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN } from "./guidedReviewSigningContinuity";
+import type { GuidedCompletionSession } from "./types";
 
 const LONG = "A".repeat(14_483);
 const SHORT_RENDERED = "B".repeat(8_954);
+
+function session(): GuidedCompletionSession {
+  const ids = [
+    "payment_timing",
+    "phase_payment_allocation",
+    "saas_sla",
+    "ip_ownership",
+    "renewal_notice",
+  ];
+  return {
+    sessionKey: "gen:test36",
+    queue: ids,
+    variables: ids.map((id) => ({
+      id,
+      category: "compensation",
+      label: id,
+      question: `Question ${id}?`,
+      severity: "important",
+      suggestedDefaults: [],
+      agreementImpact: "x",
+      requiredForExecution: true,
+      applicableAgreementFamilies: ["services_agreement"],
+      uiControlType: "pills",
+      currentValue: null,
+      confidence: 0.9,
+      affectsSections: [],
+    })),
+    answered: {
+      payment_timing: "Net 30",
+      phase_payment_allocation: "Build-heavy split / phase allocation",
+      saas_sla: "99.9% uptime",
+      ip_ownership: "Company owns project deliverables",
+      renewal_notice: "30 days notice",
+    },
+    skipped: new Set(),
+    currentIndex: ids.length,
+    completenessPercent: 100,
+    agreementFamily: "services_agreement",
+    frozenTotalQuestions: ids.length,
+  };
+}
 
 describe("resolveGuidedSigningAuthoritativePlain", () => {
   it("prefers frozen authoritative corpus over shortened rendered preview", () => {
@@ -22,5 +80,260 @@ describe("resolveGuidedSigningAuthoritativePlain", () => {
       renderedPreview: SHORT_RENDERED,
     });
     expect(plain.length).toBeGreaterThanOrEqual(GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN);
+  });
+});
+
+describe("guided signature track (test36)", () => {
+  it("selects only frozen signer-applied / signing / accepted-review corpora", () => {
+    const body = "D".repeat(GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN + 50);
+    const preview = "Preview [Your Company Name] ".repeat(80);
+    expect(
+      selectGuidedSignatureTrackCorpus({
+        finalizedSignerApplied: body,
+        acceptedReview: "short",
+      }).source,
+    ).toBe("finalized_signer_applied_guided_corpus");
+    expect(
+      selectGuidedSignatureTrackCorpus({
+        finalizedSigning: body,
+      }).source,
+    ).toBe("finalized_signing_corpus");
+    expect(selectGuidedSignatureTrackCorpus({ acceptedReview: body }).source).toBe("accepted_review");
+    expect(selectGuidedSignatureTrackCorpus({}).source).toBe("none");
+    expect(
+      selectGuidedSignatureTrackCorpus({
+        finalizedSignerApplied: preview,
+        finalizedSigning: preview,
+        acceptedReview: preview,
+      }).source,
+    ).toBe("none");
+    expect(isGuidedSigningPlaceholderPreviewBody(preview)).toBe(true);
+    expect(isGuidedSigningPlaceholderPreviewBody(body)).toBe(false);
+  });
+
+  it("normalizes betweenAcme / andJoe spacing and dedupes guided answer clauses", () => {
+    const spaced = normalizePartyNameSpacingInCorpus(
+      "entered by and betweenAcme LLC andJoe Smith with principal place of business at address on file.",
+    );
+    expect(spaced).toContain("between Acme LLC");
+    expect(spaced).toContain("and Joe Smith");
+
+    const dup = dedupeGuidedAnswerClauses(
+      "Invoices are due Net 30 from receipt.\n\nInvoices are due Net 30 from receipt again.\n\nSchedule A phase allocation is build-heavy.",
+    );
+    expect(dup.text.match(/Net 30/g)?.length).toBe(1);
+    expect(dup.repairs).toContain("dedupe:net_30");
+  });
+
+  it("prepares signing corpus with complete signature blocks and no bracket placeholders", () => {
+    const manifest = resolveCanonicalFinalPartyManifest({
+      partyCount: 2,
+      partySignerNames: ["Anthem Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      recipient1Email: "anthem@example.test",
+      recipient2Email: "joe@example.test",
+      extraPartyReviewEmails: [],
+      draftPartyNames: ["Acme LLC", "Joe Smith"],
+      sendMode: "signature",
+      recipientsDeferred: false,
+    });
+    const base =
+      "SERVICES AGREEMENT\n\nThis agreement is betweenAcme LLC andJoe Smith.\n\n" +
+      "Invoices are due Net 30 from receipt.\nSchedule A phase allocation is build-heavy.\n" +
+      "Provider will target 99.9% monthly uptime.\nCompany owns the project deliverables after payment, subject only to Provider pre-existing tools.\n" +
+      "Either party may terminate with 30 days written notice.\n\n" +
+      "Commercial safeguard paragraph. ".repeat(120);
+    const cleaned = prepareGuidedSigningCorpusCleanup({ body: base, partyManifest: manifest });
+    expect(cleaned.body).toMatch(/\bbetween Acme LLC\b/);
+    expect(cleaned.body).toMatch(/\band Joe Smith\b/);
+    expect(cleaned.body).not.toMatch(/\[Your Company Name\]|\[Service Provider Name\]|\[Client Address\]/i);
+    expect(cleaned.body).toMatch(/\bNet 30\b/i);
+    expect(cleaned.body).toMatch(/\bbuild-heavy\b/i);
+    expect(cleaned.body).toMatch(/\b99\.9\s*%/i);
+    expect(cleaned.body).toMatch(/\bCompany owns the project deliverables\b/i);
+    expect(cleaned.body).toMatch(/\b30\s+days?.{0,24}notice\b/i);
+    expect(cleaned.body).toMatch(
+      /CLIENT:\s*\nAcme LLC\s*\nBy: __________________________\s*\nName: Anthem Blanchard\s*\nTitle: Manager/,
+    );
+    expect(cleaned.body).toMatch(
+      /SERVICE PROVIDER:\s*\nJoe Smith\s*\nBy: __________________________\s*\nName: Joe Smith/,
+    );
+    expect(cleaned.body).not.toMatch(/SERVICE PROVIDER:[\s\S]*?Title: Manager/i);
+  });
+
+  it("builds signing packet manifest with two signers", () => {
+    const manifest = resolveCanonicalFinalPartyManifest({
+      partyCount: 2,
+      partySignerNames: ["Anthem Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      recipient1Email: "anthem@example.test",
+      recipient2Email: "joe@example.test",
+      extraPartyReviewEmails: [],
+      draftPartyNames: ["Acme LLC", "Joe Smith"],
+      sendMode: "signature",
+      recipientsDeferred: false,
+    });
+    const packet = buildGuidedSignaturePacketFromManifest(manifest, true);
+    expect(packet.entries).toHaveLength(2);
+    expect(packet.entries[0].partyName).toBe("Acme LLC");
+    expect(packet.entries[0].signerName).toBe("Anthem Blanchard");
+    expect(packet.entries[1].partyName).toBe("Joe Smith");
+    expect(packet.entries[1].signerName).toBe("Joe Smith");
+    expect(
+      shouldShowPacketSignerMetaLine({
+        partyName: "Acme LLC",
+        signerName: "Anthem Blanchard",
+        isEntityParty: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowPacketSignerMetaLine({
+        partyName: "Joe Smith",
+        signerName: "Joe Smith",
+        isEntityParty: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("copy/export/sign share one finalized hash from finalizer + cleanup", () => {
+    const manifest = resolveCanonicalFinalPartyManifest({
+      partyCount: 2,
+      partySignerNames: ["Anthem Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      recipient1Email: "anthem@example.test",
+      recipient2Email: "joe@example.test",
+      extraPartyReviewEmails: [],
+      draftPartyNames: ["[Your Company Name]", "[Service Provider Name]"],
+      sendMode: "signature",
+      recipientsDeferred: false,
+    });
+    const body =
+      "SERVICES AGREEMENT\n\nbetween [Your Company Name] and [Service Provider Name].\n\n" +
+      "1. Scope of Services\nProvider will deliver automation services.\n\n" +
+      "2. Fees and Payment\nCompany will pay monthly fees.\n\n" +
+      "3. Confidentiality\nEach party will protect confidential information.\n\n" +
+      "4. Ownership and Work Product\nOwnership will be as stated in this Agreement.\n\n" +
+      "5. Support and Service Levels\nProvider will provide commercially reasonable support.\n\n" +
+      "6. Term and Termination\nThe term continues until terminated.\n\n" +
+      "7. General Terms\nElectronic Signatures are permitted.\n\n" +
+      "Commercial safeguard paragraph. ".repeat(130) +
+      "\n\nIN WITNESS WHEREOF\n\nCLIENT:\n[Your Company Name]\nName: ______\n\nSERVICE PROVIDER:\n[Service Provider Name]\nName: ______\n";
+    const identities = buildCanonicalSignerManifest({
+      identities: manifest.parties.map((p, index) => ({
+        index,
+        partyDisplayName: p.partyName,
+        email: p.email,
+        representativeName: p.signerName,
+        title: p.signerTitle,
+        blockHeading: index === 0 ? "CLIENT" : "SERVICE PROVIDER",
+        isIndividual: index === 1,
+      })),
+      signFirst: true,
+    });
+    const finalized = finalizeGuidedProAgreementCorpus({
+      candidates: [{ source: "hydrated_premium_with_signers", body, paid: true }],
+      guidedSession: session(),
+      signerIdentities: identities.entries.map((e, index) => ({
+        index,
+        partyDisplayName: e.partyName,
+        email: e.email,
+        representativeName: e.signerName,
+        title: e.title,
+        blockHeading: index === 0 ? "CLIENT" : "SERVICE PROVIDER",
+        isIndividual: index === 1,
+      })),
+      signerManifest: identities,
+      partyManifest: manifest,
+      originalIntake: "AI automation support agreement",
+    });
+    expect(finalized.ok).toBe(true);
+    const cleaned = prepareGuidedSigningCorpusCleanup({
+      body: finalized.body,
+      partyManifest: manifest,
+    });
+    expect(cleaned.hash).toBeTruthy();
+    expect(new Set([cleaned.hash, cleaned.hash, cleaned.hash]).size).toBe(1);
+  });
+
+  it("shouldBypassGenericOnGenerateForGuidedSignature when guided final review signature path is active", () => {
+    expect(
+      shouldBypassGenericOnGenerateForGuidedSignature({
+        createFlowPhase: "guided_final_review",
+        signatureIntentActive: true,
+        finalReviewSendPathChosen: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassGenericOnGenerateForGuidedSignature({
+        createFlowPhase: "guided_final_review",
+        signatureIntentActive: true,
+        finalReviewSendPathChosen: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("AgreementBuilderIntake routes signature track without generic onGenerate", () => {
+    const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("enterGuidedSignatureTrackRoute");
+    expect(intake).toContain("executePaidProPostRecipientSetupHandoff");
+    expect(intake).toContain("logGuidedSignatureTrackStart");
+    expect(intake).toContain("logGuidedSignatureRouteEntered");
+    expect(intake).toContain("logGuidedSignatureGenericSendBypassed");
+    expect(intake).toContain('logSource: "guided_signature_track"');
+    const handoffIdx = intake.indexOf("const completeGuidedSigningHandoff = React.useCallback");
+    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 2200);
+    expect(handoffBlock).toContain("ensureGuidedSigningCorpusReady");
+    expect(handoffBlock).toContain("mergeDraftPartiesFromCanonicalIdentities");
+    expect(handoffBlock).toContain("enterGuidedSignatureTrackRoute");
+    expect(handoffBlock).not.toContain("void onGenerate()");
+    const signingIdx = intake.indexOf("const continueGuidedFinalReviewToSigning = React.useCallback");
+    const signingBlock = intake.slice(signingIdx, signingIdx + 1200);
+    expect(signingBlock).toContain("enterGuidedSignatureTrackRoute");
+  });
+
+  it("auto-placement module logs signature-fields-auto-placed", () => {
+    const src = readFileSync(join(__dirname, "../../../vs01/vs01AutoSignaturePacket.ts"), "utf8");
+    expect(src).toContain("[signature-fields-auto-placed]");
+  });
+
+  it("test38: VS01 handoff assertion requires Acme entity + Anthem rep + frozen corpus", () => {
+    const manifest = resolveCanonicalFinalPartyManifest({
+      partyCount: 2,
+      partySignerNames: ["Anthem Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      recipient1Email: "anthem@example.test",
+      recipient2Email: "joe@example.test",
+      extraPartyReviewEmails: [],
+      draftPartyNames: ["Acme LLC", "Joe Smith"],
+      sendMode: "signature",
+      recipientsDeferred: false,
+    });
+    const body = "D".repeat(GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN + 50);
+    expect(
+      assertGuidedVs01SigningHandoffReady({
+        manifest,
+        corpusSource: "finalized_signing_corpus",
+        corpusBody: body,
+      }).ok,
+    ).toBe(true);
+    expect(
+      assertGuidedVs01SigningHandoffReady({
+        manifest,
+        corpusSource: "none",
+        corpusBody: body,
+      }).ok,
+    ).toBe(false);
+    expect(manifest.parties[0].partyName).toBe("Acme LLC");
+    expect(manifest.parties[0].signerName).toBe("Anthem Blanchard");
+    expect(manifest.parties[1].partyName).toBe("Joe Smith");
+    expect(manifest.parties[1].signerTitle).toBeNull();
   });
 });

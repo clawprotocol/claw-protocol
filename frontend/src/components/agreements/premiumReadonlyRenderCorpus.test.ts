@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   buildPremiumDeliverablePlainTextFromDraft,
+  corpusMatchesFreeBasicDraft,
   pickPremiumPaidReadonlyPlainText,
   premiumRenderCorpusContainsSignals,
   scorePremiumReadonlyCorpusCandidate,
+  shouldRejectFreeBasicDraftForPaidProPick,
 } from "./premiumReadonlyRenderCorpus";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
@@ -131,5 +133,19 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
     expect(out.plainText.length).toBeGreaterThan(thinAdt.length + 100);
     expect(premiumRenderCorpusContainsSignals(out.plainText).contains_commission).toBe(true);
     expect(out.plainText.trim()).toBe(rebuilt.trim());
+  });
+
+  it("test31: rejects free-basic draft hash for paid checkout when authoritative fallback exists", () => {
+    const free = "Starter free preview ".repeat(35);
+    const paid = "LawDog Pro commercial safeguards ".repeat(90);
+    expect(corpusMatchesFreeBasicDraft(free, free)).toBe(true);
+    expect(
+      shouldRejectFreeBasicDraftForPaidProPick({
+        selectedPlain: free,
+        freeBaselinePlain: free,
+        premiumCheckoutCompleted: true,
+        paidAuthoritativeFallback: paid,
+      }),
+    ).toBe(true);
   });
 });
