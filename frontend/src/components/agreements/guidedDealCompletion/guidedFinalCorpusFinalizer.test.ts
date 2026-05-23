@@ -225,7 +225,9 @@ describe("guided final corpus finalizer (test32)", () => {
     expect(result.body).toMatch(/\b30\s+days?.{0,30}notice\b/i);
     expect(result.body).not.toMatch(/\[Client's Full Legal Name\]|\[Client's Address\]|\[Service Provider's Address\]|Your Company Name|Service Provider Name|\[Your Company Name\]/i);
     expect(result.body).toMatch(/CLIENT:\s*\nAcme LLC\s*\nBy: __________________________\s*\nName: Anthem H Blanchard\s*\nTitle: Manager\s*\nDate: _________________________/);
-    expect(result.body).toMatch(/SERVICE PROVIDER:\s*\nJoe Smith\s*\nBy: __________________________\s*\nName: Joe Smith\s*\nDate: _________________________/);
+    expect(result.body).toMatch(
+      /SERVICE PROVIDER:\s*\nJoe Smith\s*\n(?:By|Signature):\s*_{2,}\s*\nName: Joe Smith\s*\nDate: _________________________/i,
+    );
   });
 
   it("test33: prefers hydrated authority over weak last_accepted candidate by source priority", () => {

@@ -15,6 +15,7 @@ import {
   type CanonicalPartyIdentity,
 } from "./signerPartyIdentity";
 import { corpusSignatureBlocksHaveRequiredByLines } from "./signatureRegion";
+import { stripStaleExecutionPlacementCorpusCopy } from "./guidedCorpusLineRepairs";
 
 export type ResolveGuidedSigningAuthoritativeArgs = {
   snapshot?: string;
@@ -346,6 +347,10 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   const dedupe = dedupeGuidedAnswerClauses(out);
   out = dedupe.text;
   repairs.push(...dedupe.repairs);
+
+  const executionFooter = stripStaleExecutionPlacementCorpusCopy(out);
+  out = executionFooter.text;
+  repairs.push(...executionFooter.repairs);
 
   const preWitnessIdentity = stripDuplicatePreWitnessIdentityFragment(out, identities);
   out = preWitnessIdentity.text;

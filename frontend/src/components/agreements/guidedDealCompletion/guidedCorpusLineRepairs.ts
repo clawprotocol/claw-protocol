@@ -1,0 +1,213 @@
+/**
+ * Line-level guided Pro corpus repairs before section parsing / normalization.
+ */
+
+import { findSignatureRegionStart } from "./signatureRegion";
+
+const MERGED_SUBCLAUSE_IN_LINE_RE =
+  /^(\d+\.\d+)\s+(.+?)\s+(\d+\.\d+)\s+(.+)$/;
+
+const EXECUTION_PLACEMENT_FOOTER_RE =
+  /Execution and signature placement are handled in the electronic signing step\.?/gi;
+
+/** Split lines like "6.1 Each Party... 8.1 All notices..." into separate subclauses. */
+export function splitMergedSubclauseLine(line: string): string[] {
+  const trimmed = line.trim();
+  if (!trimmed) return [line];
+  const merged = trimmed.match(MERGED_SUBCLAUSE_IN_LINE_RE);
+  if (!merged) return [line];
+  return [`${merged[1]} ${merged[2]}`, `${merged[3]} ${merged[4]}`];
+}
+
+export function splitMergedSubclausesInText(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    const parts = splitMergedSubclauseLine(line);
+    if (parts.length > 1) repairs.push("split_merged_subclause");
+    out.push(...parts);
+  }
+  return { text: out.join("\n"), repairs };
+}
+
+/** Remove exact duplicate non-empty lines (common for invoice boilerplate). */
+export function dedupeRepeatingSentenceLines(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+    const key = line.trim().toLowerCase();
+    if (key.length >= 48) {
+      if (seen.has(key)) {
+        repairs.push("dedupe_line");
+        continue;
+      }
+      seen.add(key);
+    }
+    out.push(line);
+  }
+  return { text: out.join("\n"), repairs };
+}
+
+export function stripStaleExecutionPlacementCorpusCopy(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const hasWitness = /\bIN WITNESS WHEREOF\b/i.test(text);
+  const hasByLine = /\b(?:By|Signature)\s*:\s*_{2,}/i.test(text);
+  if (!hasWitness && !hasByLine) return { text, repairs };
+  if (!EXECUTION_PLACEMENT_FOOTER_RE.test(text)) return { text, repairs };
+  EXECUTION_PLACEMENT_FOOTER_RE.lastIndex = 0;
+  const next = text.replace(EXECUTION_PLACEMENT_FOOTER_RE, "").replace(/\n{3,}/g, "\n\n").trim();
+  repairs.push("strip_execution_placement_footer");
+  return { text: next, repairs };
+}
+
+/**
+ * Remove top-level guided-answer section dumps that appear after Electronic Signatures
+ * and before the witness block (answers belong in canonical sections only).
+ */
+export function stripTrailingGuidedSectionDumpBeforeWitness(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return { text, repairs };
+  const before = text.slice(0, witnessIdx);
+  const tail = text.slice(witnessIdx);
+  const electronicIdx = before.search(/\b9\.\s+Electronic Signatures/i);
+  if (electronicIdx < 0) return { text, repairs };
+
+  const afterElectronic = before.slice(electronicIdx);
+  const dumpHeadingRe =
+    /^(?:2\.\s+Fees and Payment|4\.\s+Ownership and Work Product|5\.\s+Support Expectations|6\.\s+Term and Termination)\s*$/im;
+  if (!dumpHeadingRe.test(afterElectronic)) return { text, repairs };
+
+  const lines = before.split("\n");
+  let cutAt = lines.length;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const t = lines[i]?.trim() ?? "";
+    if (dumpHeadingRe.test(t)) {
+      cutAt = i;
+      repairs.push(`strip_trailing_guided_dump:${t.slice(0, 28)}`);
+      break;
+    }
+  }
+  if (cutAt >= lines.length) return { text, repairs };
+  const kept = lines.slice(0, cutAt).join("\n").trimEnd();
+  return { text: `${kept}\n\n${tail}`.replace(/\n{3,}/g, "\n\n"), repairs };
+}
+
+export function extractOrphanSubclausesFromBodyLines(
+  bodyLines: string[],
+  hostSectionNumber: number | null,
+): { kept: string[]; orphans: Map<number, string[]> } {
+  const kept: string[] = [];
+  const orphans = new Map<number, string[]>();
+  for (const raw of bodyLines) {
+    for (const line of splitMergedSubclauseLine(raw)) {
+      const t = line.trim();
+      const sub = t.match(/^(\d+)\.(\d+)\s+/);
+      if (sub && hostSectionNumber != null && Number(sub[1]) !== hostSectionNumber) {
+        const n = Number(sub[1]);
+        const bucket = orphans.get(n) ?? [];
+        bucket.push(line);
+        orphans.set(n, bucket);
+        continue;
+      }
+      if (sub && hostSectionNumber == null && Number(sub[1]) >= 2) {
+        const n = Number(sub[1]);
+        const bucket = orphans.get(n) ?? [];
+        bucket.push(line);
+        orphans.set(n, bucket);
+        continue;
+      }
+      kept.push(line);
+    }
+  }
+  return { kept, orphans };
+}
+
+const SECTION_NUMBER_TO_CANONICAL: Record<number, string> = {
+  1: "purpose",
+  2: "fees",
+  3: "confidentiality",
+  4: "ownership",
+  5: "support",
+  6: "term",
+  7: "notices",
+  8: "miscellaneous",
+  9: "electronic_signatures",
+};
+
+export function applyOrphanSubclausesToSections(
+  sections: Array<{ originalNumber: number | null; bodyLines: string[] }>,
+  introLines: string[],
+): {
+  sections: Array<{ originalNumber: number | null; bodyLines: string[] }>;
+  introLines: string[];
+  remainingOrphans: Map<number, string[]>;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  const orphanByNumber = new Map<number, string[]>();
+
+  const introOrphans = extractOrphanSubclausesFromBodyLines(introLines, null);
+  introLines = introOrphans.kept;
+  for (const [n, lines] of introOrphans.orphans) {
+    orphanByNumber.set(n, [...(orphanByNumber.get(n) ?? []), ...lines]);
+    repairs.push(`orphan_from_intro:${n}`);
+  }
+
+  const nextSections = sections.map((section) => {
+    const { kept, orphans } = extractOrphanSubclausesFromBodyLines(
+      section.bodyLines,
+      section.originalNumber,
+    );
+    for (const [n, lines] of orphans) {
+      orphanByNumber.set(n, [...(orphanByNumber.get(n) ?? []), ...lines]);
+      repairs.push(`orphan_from_section:${section.originalNumber ?? "?"}:${n}`);
+    }
+    return { ...section, bodyLines: kept };
+  });
+
+  for (const section of nextSections) {
+    const n = section.originalNumber;
+    if (n == null) continue;
+    const orphanLines = orphanByNumber.get(n);
+    if (!orphanLines?.length) continue;
+    section.bodyLines = [...section.bodyLines, ...orphanLines];
+    orphanByNumber.delete(n);
+    repairs.push(`orphan_applied:${n}`);
+  }
+
+  return { sections: nextSections, introLines, remainingOrphans: orphanByNumber, repairs };
+}
+
+export function canonicalKeyForSectionNumber(sectionNumber: number): string | null {
+  return SECTION_NUMBER_TO_CANONICAL[sectionNumber] ?? null;
+}
+
+export function repairGuidedCorpusLinesBeforeStructure(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = (text || "").trim();
+  if (!out) return { text: out, repairs };
+
+  const split = splitMergedSubclausesInText(out);
+  out = split.text;
+  repairs.push(...split.repairs);
+
+  const dedupeLines = dedupeRepeatingSentenceLines(out);
+  out = dedupeLines.text;
+  repairs.push(...dedupeLines.repairs);
+
+  const stripDump = stripTrailingGuidedSectionDumpBeforeWitness(out);
+  out = stripDump.text;
+  repairs.push(...stripDump.repairs);
+
+  const stripFooter = stripStaleExecutionPlacementCorpusCopy(out);
+  out = stripFooter.text;
+  repairs.push(...stripFooter.repairs);
+
+  const sigStart = findSignatureRegionStart(out);
+  if (sigStart < 0) return { text: out, repairs };
+
+  return { text: out, repairs };
+}

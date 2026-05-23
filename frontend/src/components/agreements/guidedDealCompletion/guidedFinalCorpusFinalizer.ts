@@ -41,8 +41,8 @@ import {
   validateCorpusAgainstCanonicalManifest,
 } from "./guidedCanonicalAnswerManifest";
 import {
-  logGuidedCorpusStructureBlocked,
-  logGuidedCorpusStructureNormalization,
+  logGuidedCorpusIntegrityFail,
+  logGuidedCorpusSectionNormalized,
   normalizeGuidedProCorpusStructure,
   validateNormalizedCorpusStructure,
 } from "./guidedCanonicalCorpusNormalizer";
@@ -481,7 +481,11 @@ export function finalizeGuidedProAgreementCorpus(
   const structureNormalized = normalizeGuidedProCorpusStructure(body);
   body = structureNormalized.text;
   diagnostics.repairs.push(...structureNormalized.repairs.map((r) => `structure:${r}`));
-  logGuidedCorpusStructureNormalization({
+  logGuidedCorpusSectionNormalized({
+    beforeSections: structureNormalized.repairs.filter((r) => r.startsWith("canonical_section:")).length,
+    afterSections: (body.match(/^\s*\d+\.\s+[A-Za-z]/gm) ?? []).length,
+    dedupedClauses: structureNormalized.repairs.filter((r) => r.startsWith("dedupe")).length,
+    reordered: structureNormalized.repairs.some((r) => r.includes("orphan") || r.includes("merge_duplicate")),
     repairs: structureNormalized.repairs.length,
     bodyLen: body.length,
   });
@@ -497,7 +501,7 @@ export function finalizeGuidedProAgreementCorpus(
     diagnostics.validationContradictions.push(
       ...structureCheck.defects.map((d) => `corpus_structure:${d}`),
     );
-    logGuidedCorpusStructureBlocked({ defects: structureCheck.defects, bodyLen: body.length });
+    logGuidedCorpusIntegrityFail({ defects: structureCheck.defects, bodyLen: body.length });
   }
   body = normalizePartyNameSpacingInCorpus(body);
   if (

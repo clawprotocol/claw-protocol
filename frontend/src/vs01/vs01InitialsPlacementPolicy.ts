@@ -6,9 +6,11 @@ import { prepareAutoInitialsPlacementDims, type PlacedSigningField } from "./sig
 import { buildVs01PlacementContext, findSafeInitialsRectOnPage } from "./vs01FieldGeometry";
 import {
   buildCorpusSimulatedPageLayouts,
+  mergePageLayoutForInitials,
   pageLayoutForIndex,
   type Vs01PageTextLayout,
 } from "./vs01PageTextLayout";
+import { layoutHasPlaceableInitialsContent } from "./vs01InitialsSafeZone";
 
 export type Vs01InitialsPlacementMode = "placed_all_eligible" | "suppressed_document_wide";
 
@@ -28,20 +30,11 @@ export function logVs01InitialsPolicy(payload: Record<string, unknown>): void {
   console.info("[vs01-initials-policy]", payload);
 }
 
-function isFooterOnlyPage(layout: Vs01PageTextLayout | null): boolean {
-  const rects = layout?.textRects ?? [];
-  if (rects.length === 0) return true;
-  if (rects.some((r) => r.kind === "body" || r.kind === "heading")) return false;
-  return rects.every((r) => r.kind === "footer" || r.y >= 0.9);
-}
-
-function hasSubstantivePageContent(layout: Vs01PageTextLayout | null): boolean {
-  const rects = layout?.textRects ?? [];
-  if (rects.length === 0) return false;
-  const substantive = rects.filter(
-    (r) => r.kind === "body" || r.kind === "heading" || (r.text.trim().length > 24 && r.kind !== "footer"),
-  );
-  return substantive.length > 0;
+function effectivePageLayout(
+  pdfLayout: Vs01PageTextLayout | null,
+  corpusLayout: Vs01PageTextLayout | null,
+): Vs01PageTextLayout | null {
+  return mergePageLayoutForInitials(pdfLayout, corpusLayout);
 }
 
 export function resolveVs01InitialsPlacementPolicy(args: {
@@ -71,13 +64,8 @@ export function resolveVs01InitialsPlacementPolicy(args: {
   for (let p = 0; p < pageCount; p += 1) {
     const layout = pageLayoutForIndex(placementCtx.layouts, p);
     const corpusPage = pageLayoutForIndex(corpusLayouts, p);
-    const effective =
-      layout && layout.textRects.length > 0 ? layout : corpusPage ?? layout;
-    if (p === witnessPageIndex) {
-      eligiblePages.push(p);
-      continue;
-    }
-    if (isFooterOnlyPage(effective) || !hasSubstantivePageContent(effective)) {
+    const effective = effectivePageLayout(layout, corpusPage);
+    if (!layoutHasPlaceableInitialsContent(effective)) {
       skippedPages.push(p);
       continue;
     }
@@ -120,7 +108,10 @@ export function resolveVs01InitialsPlacementPolicy(args: {
       const safe = findSafeInitialsRectOnPage({
         page: p,
         partyIndex,
-        pageLayout: pageLayoutForIndex(placementCtx.layouts, p),
+        pageLayout: effectivePageLayout(
+          pageLayoutForIndex(placementCtx.layouts, p),
+          pageLayoutForIndex(corpusLayouts, p),
+        ),
         corpusText: args.corpusText,
         fieldObstacles,
         dims,

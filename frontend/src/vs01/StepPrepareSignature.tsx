@@ -112,6 +112,10 @@ import {
   removeStaleSignatureOnlyAutoplaceFields,
   resolveAutoSignaturePacketMode,
 } from "./vs01AutoSignaturePacket";
+import {
+  formatVs01InitialsOnlyStatusLine,
+  summarizeVs01SigningPacketInitials,
+} from "./vs01SigningPacketInitials";
 import { Vs01PrepPreparedBanner } from "./Vs01PrepPreparedBanner";
 import { logUxTrustEvent } from "../lib/uxTrustAssertions";
 import { markAgreementFieldsPlacedCount } from "./vs01WorkspaceSigningStatus";
@@ -818,6 +822,32 @@ export function StepPrepareSignature({
     );
   }, [numPages, prepareCorpusText, pageLayouts, documentId, prepareSignerRoles?.length]);
 
+  useEffect(() => {
+    if (!agreementBridgePlacementCopy || numPages <= 0) return;
+    setAutoInitialsEveryPage(true);
+  }, [agreementBridgePlacementCopy, documentId, numPages]);
+
+  const initialsPacketSummary = useMemo(() => {
+    if (!autoInitialsEveryPage || numPages <= 0 || !prepareSignerRoles?.length) return null;
+    return summarizeVs01SigningPacketInitials({
+      fields,
+      pageCount: numPages,
+      roleCount: prepareSignerRoles.length,
+      partyIndices: prepareSignerRoles.map((r) => r.partyIndex),
+      corpusText: prepareCorpusText,
+      pageLayouts,
+      documentId,
+    });
+  }, [
+    autoInitialsEveryPage,
+    numPages,
+    prepareSignerRoles,
+    fields,
+    prepareCorpusText,
+    pageLayouts,
+    documentId,
+  ]);
+
   const initialsPlacementPolicy = useMemo(() => {
     if (!autoInitialsEveryPage || numPages <= 0 || !prepareSignerRoles?.length) return null;
     return resolvePrepareAutoInitialsPolicyForRoles({
@@ -836,6 +866,31 @@ export function StepPrepareSignature({
     pageLayouts,
     documentId,
     fields,
+  ]);
+
+  useEffect(() => {
+    if (!agreementBridgePlacementCopy || !autoInitialsEveryPage) return;
+    const sigCount = fields.filter((f) => f.type === "signature" && !f.autoInitials).length;
+    if (sigCount <= 0) return;
+    const initialsLine = formatVs01InitialsOnlyStatusLine(initialsPacketSummary);
+    setAutoPrepBannerMessage(
+      autoSignaturePacketStatusMessage(
+        {
+          fields: [],
+          confidence: "high",
+          placedCount: sigCount,
+          mode: "signature_only",
+          requiredSignatureCount: sigCount,
+          optionalFieldCount: 0,
+        },
+        { initialsStatusLine: initialsLine },
+      ),
+    );
+  }, [
+    agreementBridgePlacementCopy,
+    autoInitialsEveryPage,
+    fields,
+    initialsPacketSummary,
   ]);
 
   const autoPacketMode = useMemo(() => {
@@ -896,7 +951,11 @@ export function StepPrepareSignature({
       const merged = [...fields, ...result.fields];
       logVs01PersistedGeometryHash("prepare_auto_packet", merged);
       setFields((prev) => [...prev, ...result.fields]);
-      setAutoPrepBannerMessage(autoSignaturePacketStatusMessage(result));
+      setAutoPrepBannerMessage(
+        autoSignaturePacketStatusMessage(result, {
+          initialsStatusLine: null,
+        }),
+      );
       logUxTrustEvent("guided_causality", {
         surface: "vs01_auto_signature_packet",
         placedCount: result.placedCount,

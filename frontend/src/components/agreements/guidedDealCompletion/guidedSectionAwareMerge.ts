@@ -327,8 +327,15 @@ export function mergeSingleGuidedAnswerIntoCorpus(args: {
     return { body: out, repairs, merges };
   }
   const misplaced = clauseAlreadyPresent(out, spec);
-
   const clause = spec.clause((args.session?.answered[args.questionId] ?? "").trim());
+  if (misplaced) {
+    const removed = removeExactClauseEverywhere(out, clause);
+    if (removed.removed) {
+      out = removed.body;
+      repairs.push(`section_merge:${args.questionId}:removed_misplaced_copy`);
+    }
+  }
+
   const inserted = insertClauseInSection(out, target, clause);
   if (inserted.merged) {
     out = inserted.text;

@@ -9,6 +9,11 @@ import {
   stripMisplacedGuidedClausesBeforeSignature,
 } from "./guidedSectionAwareMerge";
 import { dedupeGuidedAnswerClauses } from "./guidedFinalReviewToSigning";
+import {
+  applyOrphanSubclausesToSections,
+  canonicalKeyForSectionNumber,
+  repairGuidedCorpusLinesBeforeStructure,
+} from "./guidedCorpusLineRepairs";
 
 export type CanonicalSectionKey =
   | "purpose"
@@ -321,6 +326,10 @@ export function normalizeGuidedProCorpusStructure(text: string): { text: string;
   let working = (text || "").trim();
   if (!working) return { text: working, repairs };
 
+  const lineRepairs = repairGuidedCorpusLinesBeforeStructure(working);
+  working = lineRepairs.text;
+  repairs.push(...lineRepairs.repairs);
+
   const formatted = normalizeGuidedCorpusSectionFormatting(working);
   working = formatted.text;
   repairs.push(...formatted.repairs);
@@ -343,9 +352,33 @@ export function normalizeGuidedProCorpusStructure(text: string): { text: string;
   const lines = dangling.lines;
   const sigLine = signatureStartLine(lines);
   const signatureTail = joinLines(lines.slice(sigLine));
-  const { introLines, sections } = parseSectionsFromLines(lines, sigLine);
+  let { introLines, sections } = parseSectionsFromLines(lines, sigLine);
+  const orphanRepartition = applyOrphanSubclausesToSections(sections, introLines);
+  introLines = orphanRepartition.introLines;
+  sections = orphanRepartition.sections as ParsedCorpusSection[];
+  repairs.push(...orphanRepartition.repairs);
 
   const mergedByKey = new Map<CanonicalSectionKey, ParsedCorpusSection>();
+  for (const [sectionNumber, lines] of orphanRepartition.remainingOrphans) {
+    const keyName = canonicalKeyForSectionNumber(sectionNumber);
+    if (!keyName || lines.length === 0) continue;
+    const key = keyName as CanonicalSectionKey;
+    const existing = mergedByKey.get(key);
+    if (existing) {
+      mergedByKey.set(key, {
+        ...existing,
+        bodyLines: mergeSectionBodies(existing.bodyLines, lines),
+      });
+    } else {
+      mergedByKey.set(key, {
+        originalNumber: sectionNumber,
+        heading: CANONICAL_SECTION_SPECS.find((s) => s.key === key)?.label ?? `Section ${sectionNumber}`,
+        bodyLines: lines,
+        canonicalKey: key,
+      });
+    }
+    repairs.push(`orphan_bucket:${sectionNumber}`);
+  }
   const unknownSections: ParsedCorpusSection[] = [];
 
   for (const section of sections) {
@@ -431,6 +464,10 @@ export function normalizeGuidedProCorpusStructure(text: string): { text: string;
   body = secondPass.text;
   repairs.push(...secondPass.repairs);
 
+  const finalLineRepairs = repairGuidedCorpusLinesBeforeStructure(body);
+  body = finalLineRepairs.text;
+  repairs.push(...finalLineRepairs.repairs.map((r) => `final:${r}`));
+
   body = body
     .replace(/\b7\.\s+8\.\s+Notices\b/gi, () => {
       repairs.push("final_malformed_notices_heading");
@@ -482,13 +519,36 @@ export function validateNormalizedCorpusStructure(text: string): {
   if ((text.match(/\bIN WITNESS WHEREOF\b/gi) ?? []).length > 1) {
     defects.push("duplicate_witness_block");
   }
+  if (/^[^\n]*\b6\.1\b[^\n]*\b8\.1\b[^\n]*$/im.test(text)) {
+    defects.push("merged_subclause_line");
+  }
+  if ((text.match(/Contractor will invoice Company monthly in arrears/gi) ?? []).length > 1) {
+    defects.push("duplicate_invoice_clause");
+  }
+  const feesAfterNine = preWitness.search(/\b9\.\s+Electronic Signatures[\s\S]*\n\s*2\.\s+Fees and Payment/i);
+  if (feesAfterNine >= 0) {
+    defects.push("guided_section_dump_after_electronic_signatures");
+  }
+  if (/Execution and signature placement are handled in the electronic signing step/i.test(text)) {
+    defects.push("stale_execution_placement_footer");
+  }
   return { ok: defects.length === 0, defects };
 }
 
-export function logGuidedCorpusStructureNormalization(payload: Record<string, unknown>): void {
+export function logGuidedCorpusSectionNormalized(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
-  console.info("[guided-corpus-structure-normalization]", payload);
+  console.info("[guided-corpus-section-normalized]", payload);
+}
+
+export function logGuidedCorpusIntegrityFail(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[guided-corpus-integrity-fail]", payload);
+}
+
+export function logGuidedCorpusStructureNormalization(payload: Record<string, unknown>): void {
+  logGuidedCorpusSectionNormalized(payload);
 }
 
 export function logGuidedCorpusStructureBlocked(payload: Record<string, unknown>): void {

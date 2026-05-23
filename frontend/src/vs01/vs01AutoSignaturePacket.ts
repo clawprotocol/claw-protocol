@@ -500,14 +500,21 @@ export function buildAutoSignaturePacketForAllRoles(args: {
   };
 }
 
-export function autoSignaturePacketStatusMessage(result: AutoSignaturePacketResult): string | null {
+export function autoSignaturePacketStatusMessage(
+  result: AutoSignaturePacketResult,
+  opts?: { initialsStatusLine?: string | null },
+): string | null {
   if (result.placedCount <= 0) {
     // eslint-disable-next-line no-console
     console.info("[signing-auto-placement-needs-review]", { placedCount: 0 });
     return null;
   }
   if (result.mode === "signature_only") {
-    return `${result.requiredSignatureCount} signature field${result.requiredSignatureCount === 1 ? "" : "s"} placed. Initials added where safe.`;
+    const sig = `${result.requiredSignatureCount} signature field${result.requiredSignatureCount === 1 ? "" : "s"} placed`;
+    if (opts?.initialsStatusLine?.trim()) {
+      return `${sig}. ${opts.initialsStatusLine.trim()}`;
+    }
+    return `${sig}.`;
   }
   if (result.confidence === "high") {
     return "Signature fields were placed automatically. Review once, then send.";

@@ -34,7 +34,11 @@ import {
 } from "./vs01InitialsPlacementPolicy";
 import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
-import { pageLayoutForIndex } from "./vs01PageTextLayout";
+import {
+  buildCorpusSimulatedPageLayouts,
+  mergePageLayoutForInitials,
+  pageLayoutForIndex,
+} from "./vs01PageTextLayout";
 import {
   defaultPrepareTemplateStoredValue,
   logVs01PlacementFieldAdded,
@@ -261,12 +265,19 @@ export function buildPrepareAutoInitialsEveryPage(args: {
     roleCount: 1,
   });
   const reconciledLayouts = placementCtx.layouts;
+  const corpusLayouts =
+    (args.corpusText ?? "").trim().length >= 40
+      ? buildCorpusSimulatedPageLayouts(args.corpusText!, args.pageCount)
+      : [];
   const pagesToVisit =
     policy?.mode === "placed_all_eligible"
       ? policy.eligiblePages
       : Array.from({ length: args.pageCount }, (_, i) => i);
   for (const p of pagesToVisit) {
-    const pageLayoutForVisit = pageLayoutForIndex(reconciledLayouts, p);
+    const pageLayoutForVisit = mergePageLayoutForInitials(
+      pageLayoutForIndex(reconciledLayouts, p),
+      pageLayoutForIndex(corpusLayouts, p),
+    );
     if (!layoutHasPlaceableInitialsContent(pageLayoutForVisit)) {
       skipped += 1;
       logVs01InitialsPageDecision({
@@ -311,7 +322,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
     const safe = findSafeInitialsRectOnPage({
       page: p,
       partyIndex,
-      pageLayout: pageLayoutForIndex(reconciledLayouts, p),
+      pageLayout: pageLayoutForVisit,
       corpusText: args.corpusText,
       fieldObstacles,
       dims,
@@ -406,10 +417,9 @@ export function buildPrepareAutoInitialsEveryPage(args: {
         toY: resolved.y,
       });
     }
-    const pageLayout = pageLayoutForIndex(reconciledLayouts, p);
     const clearCheck = verifyInitialsRectClear({
       rect: resolved,
-      pageLayout,
+      pageLayout: pageLayoutForVisit,
       fieldObstacles: onPage,
     });
     if (!clearCheck.ok) {

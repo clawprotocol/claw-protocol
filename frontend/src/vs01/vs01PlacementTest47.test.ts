@@ -103,9 +103,7 @@ describe("VS01 placement test47 signature-only hygiene", () => {
     expect(packet.fields.some((f) => f.type === "printed_name")).toBe(false);
     expect(packet.fields.some((f) => f.type === "text")).toBe(false);
     expect(packet.fields.some((f) => f.type === "date")).toBe(false);
-    expect(autoSignaturePacketStatusMessage(packet)).toBe(
-      "2 signature fields placed. Initials added where safe.",
-    );
+    expect(autoSignaturePacketStatusMessage(packet)).toBe("2 signature fields placed.");
   });
 
   it("cleans stale autoplace name/title/date overlays in automatic signature_only mode", () => {

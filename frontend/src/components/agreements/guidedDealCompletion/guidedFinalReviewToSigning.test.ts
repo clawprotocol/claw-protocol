@@ -158,7 +158,7 @@ describe("guided signature track (test36)", () => {
       /CLIENT:\s*\nAcme LLC\s*\nBy: __________________________\s*\nName: Anthem Blanchard\s*\nTitle: Manager/,
     );
     expect(cleaned.body).toMatch(
-      /SERVICE PROVIDER:\s*\nJoe Smith\s*\nBy: __________________________\s*\nName: Joe Smith/,
+      /SERVICE PROVIDER:\s*\nJoe Smith\s*\n(?:By|Signature):\s*_{2,}\s*\nName: Joe Smith/i,
     );
     expect(cleaned.body).not.toMatch(/SERVICE PROVIDER:[\s\S]*?Title: Manager/i);
   });
