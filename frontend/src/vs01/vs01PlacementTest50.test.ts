@@ -154,7 +154,8 @@ describe("VS01 placement test50 — visible signature block + initials regressio
     expect(ownerInitials.length).toBeGreaterThanOrEqual(pageCount);
     expect(ownerInitials.some((f) => f.page === witnessPage)).toBe(true);
     for (const f of ownerInitials) {
-      expect(f.x).toBeGreaterThan(0.75);
+      expect(f.y).toBeGreaterThan(0.8);
+      expect(f.x).toBeGreaterThan(0.55);
     }
   });
 

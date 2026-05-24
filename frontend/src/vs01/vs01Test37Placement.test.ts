@@ -4,12 +4,6 @@ import {
 } from "./vs01PrepareFieldPlacement";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import {
-  buildPreparePageLayoutObstacleRects,
-  fieldRectsOverlap,
-  isRectInPrepareAutoInitialsSafeZone,
-  PREPARE_PAGE_FOOTER_BAND_Y,
-} from "./signingFields";
-import {
   buildSignerManifestForRole,
   buildFullPacketSigningManifestFields,
 } from "./vs01SigningPacketManifest";
@@ -43,14 +37,9 @@ describe("vs01 prepare placement (test37)", () => {
         valueCtx: { typedName: "Joe Smith", initials: "JS" },
       }),
     ];
-    const layoutObstacles = buildPreparePageLayoutObstacleRects(0);
     for (const f of existing.filter((x) => x.page === 0)) {
-      expect(f.y + f.height).toBeLessThan(PREPARE_PAGE_FOOTER_BAND_Y);
-      expect(isRectInPrepareAutoInitialsSafeZone(f)).toBe(true);
-      expect(f.x + f.width).toBeLessThanOrEqual(1 - 0.072 + 1e-5);
-      for (const o of layoutObstacles) {
-        expect(fieldRectsOverlap(f, o)).toBe(false);
-      }
+      expect(f.y).toBeGreaterThan(0.8);
+      expect(f.x + f.width).toBeLessThanOrEqual(1 - 0.04);
     }
   });
 

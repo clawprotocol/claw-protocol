@@ -21,7 +21,12 @@ import {
 } from "./vs01SignaturePlacement";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
-import { placeCanonicalInitialsRect } from "./vs01InitialsCanonicalPlacement";
+import {
+  computeInitialsDomPlacementNormalized,
+  logInitialsDomPlacementForPage,
+  VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+  VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+} from "./vs01InitialsDomPlacement";
 import { textObstaclesForInitialsPlacement, yBelowPageText } from "./vs01InitialsSafeZone";
 import {
   findSignatureLinePlacementsFromPageLayout,
@@ -286,7 +291,6 @@ export function findSafeInitialsRectOnPage(args: {
   rect: { x: number; y: number; width: number; height: number } | null;
   anchorKind: Vs01FieldPlacementAnchorKind;
 } {
-  const dims = args.dims ?? prepareAutoInitialsPlacementDims();
   if (args.signatureLastPage != null && args.signatureLastPage >= 0 && args.page > args.signatureLastPage) {
     logVs01InitialsPlacementSuppressed({
       page: args.page,
@@ -296,31 +300,45 @@ export function findSafeInitialsRectOnPage(args: {
     return { rect: null, anchorKind: "initials_suppressed" };
   }
 
-  const placed = placeCanonicalInitialsRect({
-    page: args.page,
+  const signerCount = Math.max(1, args.signerCount ?? 2);
+  const signatureObstacles = args.fieldObstacles.filter((o) => o.width > 0.04 && o.height > 0.02);
+  const placedNorm = computeInitialsDomPlacementNormalized({
     signerIndex: args.partyIndex,
-    signerCount: Math.max(1, args.signerCount ?? 2),
-    fieldObstacles: args.fieldObstacles,
-    pageLayout: args.pageLayout,
-    dims,
-    logPagePlan: args.partyIndex === 0,
+    signerCount,
+    fieldObstacles: signatureObstacles,
+    allowSignatureShift: true,
+    pageWidth: VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+    pageHeight: VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
   });
-  if (placed.rect) {
-    logVs01InitialsFieldGenerated({
+  if (args.partyIndex === 0) {
+    logInitialsDomPlacementForPage({
       page: args.page,
-      partyIndex: args.partyIndex,
-      rect: placed.rect,
-      source: placed.shifted ? "canonical_bottom_right_shifted" : "canonical_bottom_right",
+      pageWidth: VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+      pageHeight: VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+      signerIndex: args.partyIndex,
+      placement: placedNorm.dom,
     });
-    return { rect: placed.rect, anchorKind: "initials_margin" };
   }
-
-  logVs01InitialsPlacementSuppressed({
+  logVs01InitialsFieldGenerated({
     page: args.page,
-    reason: placed.missingReason ?? "canonical_placement_failed",
     partyIndex: args.partyIndex,
+    rect: {
+      x: placedNorm.x,
+      y: placedNorm.y,
+      width: placedNorm.width,
+      height: placedNorm.height,
+    },
+    source: "dom_bottom_right",
   });
-  return { rect: null, anchorKind: "initials_suppressed" };
+  return {
+    rect: {
+      x: placedNorm.x,
+      y: placedNorm.y,
+      width: placedNorm.width,
+      height: placedNorm.height,
+    },
+    anchorKind: "initials_margin",
+  };
 }
 
 export function assertFieldsClearOfText(

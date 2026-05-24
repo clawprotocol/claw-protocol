@@ -10,13 +10,8 @@ import {
   resolveRecipientSigningAutoValue,
 } from "./recipientSigningFieldUtils";
 import { LawDogSigningField } from "./LawDogSigningField";
-import {
-  logVs01InitialsCoordinateAudit,
-  logVs01InitialsVisualBottomRightCheck,
-  normalizedPdfRectToCssPercent,
-  normalizedPdfRectToCssRect,
-  vs01InitialsVisualBottomRightCheck,
-} from "./vs01FieldCssGeometry";
+import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
+import { Vs01InitialsDomFieldShell } from "./Vs01InitialsDomFieldShell";
 
 function logVs01SigningFieldRender(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
@@ -40,6 +35,8 @@ export type RecipientSigningFieldOverlayProps = {
   recipientAgreementId: string | null;
   cpById: Map<string, Vs01Counterparty>;
   onUpdateValue: (fieldId: string, value: string) => void;
+  signerCount?: number;
+  pageFieldObstacles?: readonly { x: number; y: number; width: number; height: number }[];
 };
 
 export function RecipientSigningFieldOverlay({
@@ -49,8 +46,18 @@ export function RecipientSigningFieldOverlay({
   recipientAgreementId,
   cpById,
   onUpdateValue,
+  signerCount = 2,
+  pageFieldObstacles = [],
 }: RecipientSigningFieldOverlayProps) {
-  const style = normalizedPdfRectToCssPercent(field);
+  const useDomInitials = field.type === "initials" && field.autoInitials === true;
+  const percentStyle = normalizedPdfRectToCssPercent(field);
+  const staticStyle = {
+    position: "absolute" as const,
+    left: percentStyle.left,
+    top: percentStyle.top,
+    width: percentStyle.width,
+    height: percentStyle.height,
+  };
 
   const isMine = recipientFieldBelongsToLockedSigner(
     field,
@@ -129,52 +136,6 @@ export function RecipientSigningFieldOverlay({
     overlayClassName,
   ]);
 
-  useEffect(() => {
-    if (field.type !== "initials") return;
-    const el = document.querySelector<HTMLElement>(`[data-field-id="${CSS.escape(field.id)}"]`);
-    const host = el?.closest<HTMLElement>(".vs01-sign-page-placement-host");
-    if (!el || !host) return;
-    const hostRect = host.getBoundingClientRect();
-    const cssRect = normalizedPdfRectToCssRect(field, {
-      width: hostRect.width,
-      height: hostRect.height,
-    });
-    const scaleX = hostRect.width > 0 ? hostRect.width : 1;
-    const scaleY = hostRect.height > 0 ? hostRect.height : 1;
-    logVs01InitialsCoordinateAudit({
-      page: field.page,
-      fieldType: field.type,
-      normalizedRect: {
-        x: field.x,
-        y: field.y,
-        width: field.width,
-        height: field.height,
-      },
-      pdfPageWidth: null,
-      pdfPageHeight: null,
-      viewportWidth: hostRect.width,
-      viewportHeight: hostRect.height,
-      domPageWidth: hostRect.width,
-      domPageHeight: hostRect.height,
-      renderedCssLeft: cssRect.left,
-      renderedCssTop: cssRect.top,
-      renderedCssWidth: cssRect.width,
-      renderedCssHeight: cssRect.height,
-      yOrigin: "top-left",
-      scaleX,
-      scaleY,
-    });
-    logVs01InitialsVisualBottomRightCheck({
-      page: field.page,
-      ...vs01InitialsVisualBottomRightCheck({
-        rect: field,
-        pageWidthPx: hostRect.width,
-        pageHeightPx: hostRect.height,
-        allowShiftedUp: true,
-      }),
-    });
-  }, [field.id, field.type, field.page, field.x, field.y, field.width, field.height]);
-
   if (isMetadata) {
     const metaLabel =
       field.type === "printed_name"
@@ -197,7 +158,7 @@ export function RecipientSigningFieldOverlay({
         required={false}
         value={shown}
         className={`vs01-recipient-meta-inline${isMine ? " vs01-recipient-meta-inline--mine" : " vs01-recipient-meta-inline--other"}`}
-        style={style}
+        style={staticStyle}
         aria-label={`${metaLabel}: ${shown}`}
         data-field-id={field.id}
       >
@@ -220,7 +181,7 @@ export function RecipientSigningFieldOverlay({
         data-field-id={field.id}
         className={`${boxClass} vs01-recipient-signature-slot`}
         style={{
-          ...style,
+          ...staticStyle,
           zIndex: isMine ? 4 : 2,
           pointerEvents: editable ? "auto" : "none",
         }}
@@ -283,60 +244,71 @@ export function RecipientSigningFieldOverlay({
 
   if (field.type === "initials") {
     const hasIni = displayVal.trim().length > 0;
+    const partyIndex = field.assignedPartyIndex ?? 0;
     return (
-      <LawDogSigningField
-        key={field.id}
-        fieldType={field.type}
-        signerName={field.assignedSignerRoleLabel ?? cpById.get(field.counterpartyId)?.name ?? ""}
-        signerRole={field.assignedSignerRoleKind ?? ""}
-        locked={!editable}
-        required={false}
-        initials={displayVal}
-        data-field-id={field.id}
+      <Vs01InitialsDomFieldShell
+        enabled={useDomInitials}
+        page={field.page}
+        signerIndex={partyIndex}
+        signerCount={signerCount}
+        normalizedFallback={field}
+        fieldObstacles={pageFieldObstacles}
         className={`${boxClass} vs01-recipient-initials-slot`}
-        style={{
-          ...style,
+        styleExtras={{
           zIndex: isMine ? 4 : 2,
           pointerEvents: editable ? "auto" : "none",
         }}
-        active={editable && !hasIni}
-        aria-disabled={!editable}
       >
-        {signerLabel ? (
-          <span className="lawdog-signing-field__signer">{signerLabel}</span>
-        ) : null}
-        <span className="vs01-sign-placement-label lawdog-signing-field__label">
-          {labelForRecipientFieldType("initials")}
-        </span>
-        {!isMine && pillLabel ? (
-          <span className={`vs01-recipient-signing-pill ${pillClass}`}>{pillLabel}</span>
-        ) : null}
-        {editable ? (
-          <>
-            {pillLabel && !hasIni ? (
-              <span className={`vs01-recipient-signing-pill ${pillClass}`}>{pillLabel}</span>
-            ) : null}
-            <input
-              type="text"
-              className="vs01-recipient-initials-slot__input"
-              value={displayVal}
-              placeholder="Initials"
-              maxLength={8}
-              autoComplete="off"
-              aria-label="Initials"
-              onChange={(ev) => onUpdateValue(field.id, ev.target.value)}
-              onPointerDown={(ev) => ev.stopPropagation()}
-            />
-            {hasIni && pill === "ready" ? (
-              <span className="vs01-recipient-signing-pill vs01-recipient-signing-pill--ready">
-                Ready
-              </span>
-            ) : null}
-          </>
-        ) : (
-          <span className="vs01-recipient-signing-readonly-val">{displayVal.trim() || "—"}</span>
-        )}
-      </LawDogSigningField>
+        <LawDogSigningField
+          key={field.id}
+          fieldType={field.type}
+          signerName={field.assignedSignerRoleLabel ?? cpById.get(field.counterpartyId)?.name ?? ""}
+          signerRole={field.assignedSignerRoleKind ?? ""}
+          locked={!editable}
+          required={false}
+          initials={displayVal}
+          data-field-id={field.id}
+          className="vs01-recipient-initials-slot__inner"
+          style={{ position: "relative", width: "100%", height: "100%", inset: undefined }}
+          active={editable && !hasIni}
+          aria-disabled={!editable}
+        >
+          {signerLabel ? (
+            <span className="lawdog-signing-field__signer">{signerLabel}</span>
+          ) : null}
+          <span className="vs01-sign-placement-label lawdog-signing-field__label">
+            {labelForRecipientFieldType("initials")}
+          </span>
+          {!isMine && pillLabel ? (
+            <span className={`vs01-recipient-signing-pill ${pillClass}`}>{pillLabel}</span>
+          ) : null}
+          {editable ? (
+            <>
+              {pillLabel && !hasIni ? (
+                <span className={`vs01-recipient-signing-pill ${pillClass}`}>{pillLabel}</span>
+              ) : null}
+              <input
+                type="text"
+                className="vs01-recipient-initials-slot__input"
+                value={displayVal}
+                placeholder="Initials"
+                maxLength={8}
+                autoComplete="off"
+                aria-label="Initials"
+                onChange={(ev) => onUpdateValue(field.id, ev.target.value)}
+                onPointerDown={(ev) => ev.stopPropagation()}
+              />
+              {hasIni && pill === "ready" ? (
+                <span className="vs01-recipient-signing-pill vs01-recipient-signing-pill--ready">
+                  Ready
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <span className="vs01-recipient-signing-readonly-val">{displayVal.trim() || "—"}</span>
+          )}
+        </LawDogSigningField>
+      </Vs01InitialsDomFieldShell>
     );
   }
 

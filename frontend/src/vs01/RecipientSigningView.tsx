@@ -605,6 +605,20 @@ export function RecipientSigningView({
                                             recipientAgreementId={recipientAgreementId}
                                             cpById={cpById}
                                             onUpdateValue={updateFieldValue}
+                                            signerCount={Math.max(
+                                              2,
+                                              new Set(
+                                                documentFields.map((f) => f.assignedPartyIndex ?? 0),
+                                              ).size,
+                                            )}
+                                            pageFieldObstacles={fieldsHere
+                                              .filter((f) => f.id !== field.id)
+                                              .map((f) => ({
+                                                x: f.x,
+                                                y: f.y,
+                                                width: f.width,
+                                                height: f.height,
+                                              }))}
                                           />
                                         ))}
                                       </div>

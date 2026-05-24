@@ -5,12 +5,9 @@ import {
   vs01DiagnosticsEnabled,
 } from "./vs01SignerFieldAssignment";
 import {
-  clampPrepareFieldRectToSafeBounds,
   computePrepareRectFromClick,
-  fieldRectsOverlap,
   findNonOverlappingPrepareRect,
   isRectInPrepareAutoInitialsSafeZone,
-  PREPARE_AUTO_INITIALS_LOWER_Y_MIN,
   logVs01FieldOverlapAdjusted,
   newSigningFieldId,
   normalizePlacedFieldGeometryIfBelowMinimum,
@@ -27,7 +24,6 @@ import {
   findSafeInitialsRectOnPage,
   logVs01InitialsPageDecision,
 } from "./vs01FieldGeometry";
-import { verifyCanonicalInitialsRectClear } from "./vs01InitialsCanonicalPlacement";
 import { layoutHasPlaceableInitialsContent } from "./vs01InitialsSafeZone";
 import {
   resolveVs01InitialsPlacementPolicy,
@@ -377,79 +373,15 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       }
       continue;
     }
-    const clampedLayout = clampPrepareFieldRectToSafeBounds(layout.rect, { kind: "initials" });
-    let resolved =
-      layout.collisionCount === 0
-        ? { ...clampedLayout, adjusted: false }
-        : findNonOverlappingPrepareRect({
-            desiredRect: clampedLayout,
-            page: p,
-            roleId,
-            existingFields: onPage,
-            placementMode: "manual",
-          });
-    let guard = 0;
-    while (onPage.some((o) => fieldRectsOverlap(o, resolved)) && guard < 28) {
-      resolved = {
-        ...resolved,
-        y: Math.max(
-          PREPARE_AUTO_INITIALS_LOWER_Y_MIN,
-          resolved.y - (height + 0.012),
-        ),
-      };
-      guard += 1;
-    }
-    if (onPage.some((o) => fieldRectsOverlap(o, resolved))) {
-      resolved = findNonOverlappingPrepareRect({
-        desiredRect: resolved,
-        page: p,
-        roleId,
-        existingFields: onPage,
-        placementMode: "manual",
-      });
-    }
-    if (resolved.adjusted && vs01DiagnosticsEnabled()) {
-      // eslint-disable-next-line no-console
-      console.info("[vs01-auto-initials-collision-resolved]", {
-        roleIdShort: roleId.slice(0, 16),
-        page: p,
-        partyIndex,
-        lane: layout.lane,
-        fromX: layout.rect.x,
-        fromY: layout.rect.y,
-        toX: resolved.x,
-        toY: resolved.y,
-      });
-    }
-    const clearCheck = verifyCanonicalInitialsRectClear({
-      rect: resolved,
-      pageLayout: pageLayoutForVisit,
-      fieldObstacles: onPage,
-      signerCount: args.signerCount ?? 2,
-    });
-    if (!clearCheck.ok) {
-      skipped += 1;
-      logVs01InitialsPageDecision({
-        page: p,
-        roleIdShort: roleId.slice(0, 16),
-        partyIndex,
-        decision: "skipped",
-        reason: clearCheck.overlapText
-          ? "overlaps_document_text"
-          : clearCheck.overlapSignature
-            ? "overlaps_signature_field"
-            : "overlaps_footer",
-      });
-      continue;
-    }
+    const resolved = layout.rect;
     const raw: PlacedSigningField = {
       id: prepareAutoInitialsFieldId(roleId, p),
       type: "initials",
       page: p,
       x: resolved.x,
       y: resolved.y,
-      width,
-      height,
+      width: resolved.width,
+      height: resolved.height,
       value: defaultPrepareTemplateStoredValue("initials", args.role, args.valueCtx),
       autoInitials: true,
     };

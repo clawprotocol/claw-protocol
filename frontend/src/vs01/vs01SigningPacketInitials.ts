@@ -3,14 +3,16 @@
  */
 
 import type { PlacedSigningField } from "./signingFields";
-import { verifyCanonicalInitialsRectClear } from "./vs01InitialsCanonicalPlacement";
+import {
+  computeInitialsDomPlacementPx,
+  initialsDomSignerColumn,
+  validateInitialsDomPlacement,
+  VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+  VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+} from "./vs01InitialsDomPlacement";
 import { textObstaclesForInitialsPlacement } from "./vs01InitialsSafeZone";
 import { verifySignatureRectClear } from "./vs01SignaturePlacement";
 import { buildVs01PlacementContext } from "./vs01FieldGeometry";
-import {
-  logVs01InitialsVisualBottomRightCheck,
-  vs01InitialsVisualBottomRightCheck,
-} from "./vs01FieldCssGeometry";
 import {
   buildCorpusSimulatedPageLayouts,
   mergePageLayoutForInitials,
@@ -152,9 +154,6 @@ export function summarizeVs01SigningPacketInitials(args: {
   }
 
   for (const p of eligiblePages) {
-    const pdfLayout = pageLayoutForIndex(reconciledLayouts, p);
-    const corpusLayout = pageLayoutForIndex(corpusLayouts, p);
-    const effective = mergePageLayoutForInitials(pdfLayout, corpusLayout);
     const onPage = args.fields.filter((f) => f.page === p);
     const partiesWithInitials = new Set(
       initialsFields
@@ -178,24 +177,27 @@ export function summarizeVs01SigningPacketInitials(args: {
     }
 
     for (const field of initialsFields.filter((f) => f.page === p)) {
+      const partyIndex = field.assignedPartyIndex ?? 0;
       const fieldObstacles = onPage
         .filter((o) => o.id !== field.id)
         .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
-      const check = verifyCanonicalInitialsRectClear({
-        rect: field,
-        pageLayout: effective,
-        fieldObstacles,
+      const dom = computeInitialsDomPlacementPx({
+        pageWidth: VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+        pageHeight: VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+        signerIndex: partyIndex,
         signerCount: roleCount,
+        fieldObstacles,
+        allowSignatureShift: true,
       });
-      const visual = vs01InitialsVisualBottomRightCheck({
-        rect: field,
-        pageWidthPx: 612,
-        pageHeightPx: 792,
-        overlapsTextApprox: check.overlapText,
-        allowShiftedUp: true,
+      const { colFromRight } = initialsDomSignerColumn(partyIndex, roleCount);
+      const domCheck = validateInitialsDomPlacement({
+        page: p,
+        signerIndex: partyIndex,
+        placement: dom,
+        isRightmostInRow: colFromRight === 0,
+        shiftedForSignature: dom.bottomDistance > 96,
       });
-      logVs01InitialsVisualBottomRightCheck({ page: p, ...visual });
-      if (!check.ok || !visual.passed) {
+      if (!domCheck.passed) {
         unsafeInitialsCount += 1;
       }
     }

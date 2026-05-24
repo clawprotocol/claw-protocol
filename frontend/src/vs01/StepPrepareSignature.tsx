@@ -22,6 +22,7 @@ import { completeSignSession, createSignSession, fetchDocumentContent } from "./
 import { clearVs01DocumentPageLayouts, setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { buildVs01PlacementContext } from "./vs01FieldGeometry";
 import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
+import { Vs01InitialsDomFieldShell } from "./Vs01InitialsDomFieldShell";
 import { extractPdfPageLayoutsFromBlob } from "./vs01PdfPageLayout";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -1713,19 +1714,20 @@ export function StepPrepareSignature({
                                     renderAnnotationLayer={false}
                                   />
                                   <div className="vs01-pdf-footer-watermark-shim" aria-hidden />
-                                  <div
-                                    className={`vs01-sign-placement-click-layer${
-                                      placementArmed
-                                        ? " vs01-sign-placement-click-layer--armed"
-                                        : " vs01-sign-placement-click-layer--idle"
-                                    }`}
-                                    aria-hidden
-                                    onClick={placementArmed ? (ev) => onPagePlacementClick(p, ev) : undefined}
-                                  />
-                                  <div
-                                    className={`vs01-sign-overlay${fieldsHere.length > 0 ? " vs01-sign-overlay--placed" : ""}`}
-                                    role="presentation"
-                                  >
+                                  <div className="vs01-sign-page-placement-host">
+                                    <div
+                                      className={`vs01-sign-placement-click-layer${
+                                        placementArmed
+                                          ? " vs01-sign-placement-click-layer--armed"
+                                          : " vs01-sign-placement-click-layer--idle"
+                                      }`}
+                                      aria-hidden
+                                      onClick={placementArmed ? (ev) => onPagePlacementClick(p, ev) : undefined}
+                                    />
+                                    <div
+                                      className={`vs01-sign-overlay${fieldsHere.length > 0 ? " vs01-sign-overlay--placed" : ""}`}
+                                      role="presentation"
+                                    >
                                     {showDragHint && p === pageIndex0 ? (
                                       <div className="vs01-sign-drag-hint" role="status">
                                         Drag to move
@@ -1747,7 +1749,29 @@ export function StepPrepareSignature({
                                       const textVal = typeof field.value === "string" ? field.value : "";
                                       const isActiveRoleField =
                                         !agreementBridgePlacementCopy || fieldMatchesActive(field);
-                                      return (
+                                      const boxClassName = `vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
+                                        field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
+                                      }${
+                                        field.type === "signature" &&
+                                        (findPrepareSigningRole(prepareSignerRoles, field.assignedSignerRoleId)
+                                          ?.kind ??
+                                          field.assignedSignerRoleKind) === "counterparty"
+                                          ? " vs01-sign-placement-box--counterparty-signature"
+                                          : ""
+                                      }${isSel ? " vs01-sign-placement-box--selected" : ""}${
+                                        pop ? " vs01-sign-placement-box--pop" : ""
+                                      }${!isActiveRoleField ? " vs01-sign-placement-box--other-role" : ""}`;
+                                      const pageObstacles = fieldsHere
+                                        .filter((f) => f.id !== field.id)
+                                        .map((f) => ({
+                                          x: f.x,
+                                          y: f.y,
+                                          width: f.width,
+                                          height: f.height,
+                                        }));
+                                      const useDomInitials =
+                                        field.type === "initials" && field.autoInitials === true;
+                                      const fieldBody = (
                                         <LawDogSigningField
                                           key={field.id}
                                           fieldType={field.type}
@@ -1761,25 +1785,27 @@ export function StepPrepareSignature({
                                           {...(fieldDisplay
                                             ? prepareFieldDataAttributes(field, fieldRole, fieldDisplay)
                                             : {})}
-                                          className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
-                                            field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
-                                          }${
-                                            field.type === "signature" &&
-                                            (findPrepareSigningRole(prepareSignerRoles, field.assignedSignerRoleId)
-                                              ?.kind ??
-                                              field.assignedSignerRoleKind) === "counterparty"
-                                              ? " vs01-sign-placement-box--counterparty-signature"
-                                              : ""
-                                          }${isSel ? " vs01-sign-placement-box--selected" : ""}${
-                                            pop ? " vs01-sign-placement-box--pop" : ""
-                                          }${!isActiveRoleField ? " vs01-sign-placement-box--other-role" : ""}`}
-                                          style={{
-                                            left: cssRect.left,
-                                            top: cssRect.top,
-                                            width: cssRect.width,
-                                            height: cssRect.height,
-                                            zIndex: isSel ? 4 : 3,
-                                          }}
+                                          className={
+                                            useDomInitials
+                                              ? "vs01-sign-placement-box__inner"
+                                              : boxClassName
+                                          }
+                                          style={
+                                            useDomInitials
+                                              ? {
+                                                  position: "relative",
+                                                  width: "100%",
+                                                  height: "100%",
+                                                }
+                                              : {
+                                                  position: "absolute",
+                                                  left: cssRect.left,
+                                                  top: cssRect.top,
+                                                  width: cssRect.width,
+                                                  height: cssRect.height,
+                                                  zIndex: isSel ? 4 : 3,
+                                                }
+                                          }
                                           onPointerDown={(e) => onBoxPointerDown(e, field)}
                                           onClick={(e) => onPlacementBoxClick(e, field)}
                                         >
@@ -1941,7 +1967,25 @@ export function StepPrepareSignature({
                                           ) : null}
                                         </LawDogSigningField>
                                       );
+                                      return useDomInitials ? (
+                                        <Vs01InitialsDomFieldShell
+                                          key={`${field.id}-dom`}
+                                          enabled
+                                          page={p}
+                                          signerIndex={field.assignedPartyIndex ?? 0}
+                                          signerCount={Math.max(1, prepareSignerRoles?.length ?? 2)}
+                                          normalizedFallback={field}
+                                          fieldObstacles={pageObstacles}
+                                          className={boxClassName}
+                                          styleExtras={{ zIndex: isSel ? 4 : 3 }}
+                                        >
+                                          {fieldBody}
+                                        </Vs01InitialsDomFieldShell>
+                                      ) : (
+                                        fieldBody
+                                      );
                                     })}
+                                  </div>
                                   </div>
                                 </div>
                               </div>

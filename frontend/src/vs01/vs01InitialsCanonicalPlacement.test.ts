@@ -14,10 +14,16 @@ import { summarizeVs01SigningPacketInitials } from "./vs01SigningPacketInitials"
 import { buildCorpusSimulatedPageLayouts } from "./vs01PageTextLayout";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import { normalizeGuidedProCorpusStructure } from "../components/agreements/guidedDealCompletion/guidedCanonicalCorpusNormalizer";
+import { normalizedPdfRectToCssRect } from "./vs01FieldCssGeometry";
 import {
-  normalizedPdfRectToCssRect,
-  vs01InitialsVisualBottomRightCheck,
-} from "./vs01FieldCssGeometry";
+  computeInitialsDomPlacementPx,
+  initialsDomSignerColumn,
+  validateInitialsDomPlacement,
+  VS01_INITIALS_DOM_BOX_HEIGHT_PX,
+  VS01_INITIALS_DOM_BOX_WIDTH_PX,
+  VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+  VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+} from "./vs01InitialsDomPlacement";
 
 const PAGE_COUNT = 4;
 
@@ -122,7 +128,6 @@ describe("vs01InitialsCanonicalPlacement", () => {
   });
 
   it("first and last page initials use consistent box size and stay inside margins", () => {
-    const dims = prepareAutoInitialsPlacementDims();
     const corpus = normalizeGuidedProCorpusStructure(FOUR_PAGE_WITNESS_CORPUS).text;
     const pageLayouts = layoutsWithEmptyPdfMiddle(corpus);
     const roles = twoSignerRoles();
@@ -146,19 +151,30 @@ describe("vs01InitialsCanonicalPlacement", () => {
     for (const page of [0, PAGE_COUNT - 1]) {
       const onPage = initials.filter((f) => f.page === page);
       for (const f of onPage) {
-        expect(f.width).toBeCloseTo(dims.width, 3);
-        expect(f.height).toBeCloseTo(dims.height, 3);
-        expect(f.x + f.width).toBeLessThanOrEqual(1 - CANONICAL_INITIALS_RIGHT_MARGIN + 0.02);
-        const visual = vs01InitialsVisualBottomRightCheck({
-          rect: f,
-          pageWidthPx: 612,
-          pageHeightPx: 792,
-          allowShiftedUp: true,
+        const partyIndex = f.assignedPartyIndex ?? 0;
+        expect(f.width).toBeCloseTo(
+          VS01_INITIALS_DOM_BOX_WIDTH_PX / VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+          2,
+        );
+        expect(f.height).toBeCloseTo(
+          VS01_INITIALS_DOM_BOX_HEIGHT_PX / VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+          2,
+        );
+        const dom = computeInitialsDomPlacementPx({
+          pageWidth: VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+          pageHeight: VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+          signerIndex: partyIndex,
+          signerCount: roles.length,
         });
-        expect(visual.distanceFromRightPx).toBeGreaterThanOrEqual(48);
-        expect(visual.distanceFromRightPx).toBeLessThanOrEqual(128);
-        expect(visual.distanceFromBottomPx).toBeGreaterThanOrEqual(48);
-        expect(f.y).toBeGreaterThanOrEqual(0.04);
+        const { colFromRight } = initialsDomSignerColumn(partyIndex, roles.length);
+        expect(
+          validateInitialsDomPlacement({
+            page,
+            signerIndex: partyIndex,
+            placement: dom,
+            isRightmostInRow: colFromRight === 0,
+          }).passed,
+        ).toBe(true);
       }
     }
   });

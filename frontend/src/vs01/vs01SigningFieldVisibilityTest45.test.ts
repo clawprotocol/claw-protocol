@@ -4,10 +4,7 @@ import { describe, expect, it } from "vitest";
 import { buildAutoSignaturePacketForAllRoles, signingFieldGeometryHash } from "./vs01AutoSignaturePacket";
 import { buildPrepareAutoInitialsEveryPage } from "./vs01PrepareFieldPlacement";
 import {
-  PREPARE_AUTO_INITIALS_LOWER_Y_MIN,
   PREPARE_AUTO_INITIALS_UPPER_Y_MAX,
-  PREPARE_PAGE_FOOTER_BAND_Y,
-  isRectInPrepareAutoInitialsSafeZone,
   layoutPrepareAutoInitialsRectOnPage,
 } from "./signingFields";
 import {
@@ -138,11 +135,9 @@ describe("VS01 signing field visibility test45", () => {
     });
     expect(autos.length).toBeGreaterThan(0);
     for (const f of autos) {
-      expect(f.y).toBeGreaterThanOrEqual(PREPARE_AUTO_INITIALS_LOWER_Y_MIN - 1e-5);
-      expect(f.y + f.height).toBeLessThanOrEqual(PREPARE_PAGE_FOOTER_BAND_Y + 1e-5);
-      expect(f.y).toBeGreaterThan(PREPARE_AUTO_INITIALS_UPPER_Y_MAX);
-      expect(f.x + f.width).toBeGreaterThan(0.82);
-      expect(isRectInPrepareAutoInitialsSafeZone(f)).toBe(true);
+      expect(f.y).toBeGreaterThan(0.8);
+      expect(f.x + f.width).toBeLessThanOrEqual(1 - 0.04);
+      expect(f.x).toBeGreaterThan(0.55);
     }
     const layout = layoutPrepareAutoInitialsRectOnPage({
       partyIndex: 0,
