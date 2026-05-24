@@ -2995,10 +2995,16 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
             "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
             "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
             f"{body}</pre>"
-            "<p style='margin-top:18px;font-size:12px;color:#475569;text-align:center'>"
-            "Execution and signature placement are handled in the electronic signing step."
-            "</p>"
-            "</article>"
+            + (
+                ""
+                if re.search(r"\bIN WITNESS WHEREOF\b", purpose_for_body, flags=re.I)
+                else (
+                    "<p style='margin-top:18px;font-size:12px;color:#475569;text-align:center'>"
+                    "Execution and signature placement are handled in the electronic signing step."
+                    "</p>"
+                )
+            )
+            + "</article>"
         )
         if not watermark:
             return article

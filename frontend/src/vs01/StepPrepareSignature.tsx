@@ -118,6 +118,10 @@ import {
   formatVs01InitialsOnlyStatusLine,
   summarizeVs01SigningPacketInitials,
 } from "./vs01SigningPacketInitials";
+import {
+  buildVs01SigningPacketModel,
+  signingPacketLayoutsFromModel,
+} from "./buildVs01SigningPacketModel";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import { resolveVs01PreparePacketReadiness } from "./vs01PreparePacketReadiness";
 import { Vs01PrepPreparedBanner } from "./Vs01PrepPreparedBanner";
@@ -541,6 +545,20 @@ export function StepPrepareSignature({
         setPreviewLoading(false);
         return;
       }
+      if (agreementBridgePlacementCopy) {
+        const gate = resolveFinalVs01CorpusOrBlock({
+          agreementCorpusText: prepareCorpusText,
+          guidedPro: true,
+          premiumComplete: (prepareCorpusText ?? "").trim().length >= 1500,
+        });
+        if (!gate.allowed) {
+          setPdfUrl(null);
+          setPreviewError(null);
+          setPreviewLoading(false);
+          setPageLayouts(null);
+          return;
+        }
+      }
 
       setPreviewLoading(true);
       setPreviewError(null);
@@ -574,7 +592,7 @@ export function StepPrepareSignature({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [documentId]);
+  }, [documentId, agreementBridgePlacementCopy, prepareCorpusText]);
 
   useLayoutEffect(() => {
     const el = pagesInnerRef.current;
@@ -609,6 +627,21 @@ export function StepPrepareSignature({
       return next.size === prev.size ? prev : next;
     });
   }, [numPages]);
+
+  const signingPacketModel = useMemo(() => {
+    if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length) return null;
+    return buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: prepareCorpusText,
+      roles: prepareSignerRoles,
+    });
+  }, [agreementBridgePlacementCopy, prepareCorpusText, prepareSignerRoles]);
+
+  const canonicalPageLayouts = useMemo(
+    () => (signingPacketModel?.allowed ? signingPacketLayoutsFromModel(signingPacketModel) : null),
+    [signingPacketModel],
+  );
+  const effectivePageLayouts = canonicalPageLayouts ?? pageLayouts;
 
   useEffect(() => {
     return () => {
@@ -752,7 +785,7 @@ export function StepPrepareSignature({
           valueCtxForRole: (role) =>
             buildPrepareTemplateValueContext(role, ownerValueCtx),
           corpusText: prepareCorpusText,
-          pageLayouts,
+          pageLayouts: effectivePageLayouts,
           documentId,
         });
         return [...manual, ...auto];
@@ -773,7 +806,7 @@ export function StepPrepareSignature({
     prepareSignerRoles,
     signerEmailForPlacement,
     prepareCorpusText,
-    pageLayouts,
+    effectivePageLayouts,
     documentId,
     packetRebuildNonce,
   ]);
@@ -813,17 +846,18 @@ export function StepPrepareSignature({
 
   const witnessPageIndex = useMemo(() => {
     if (numPages <= 0) return 0;
-    if (!prepareCorpusText && !pageLayouts?.length) return numPages - 1;
+    const effectiveLayouts = effectivePageLayouts;
+    if (!prepareCorpusText && !effectiveLayouts?.length) return numPages - 1;
     return (
       buildVs01PlacementContext({
         corpusText: prepareCorpusText,
         pageCount: numPages,
-        pageLayouts,
+        pageLayouts: effectiveLayouts,
         documentId,
         roleCount: prepareSignerRoles?.length ?? 2,
       }).witnessPageIndex ?? numPages - 1
     );
-  }, [numPages, prepareCorpusText, pageLayouts, documentId, prepareSignerRoles?.length]);
+  }, [numPages, prepareCorpusText, effectivePageLayouts, documentId, prepareSignerRoles?.length]);
 
   useEffect(() => {
     if (!agreementBridgePlacementCopy || numPages <= 0) return;
@@ -838,7 +872,7 @@ export function StepPrepareSignature({
       roleCount: prepareSignerRoles.length,
       partyIndices: prepareSignerRoles.map((r) => r.partyIndex),
       corpusText: prepareCorpusText,
-      pageLayouts,
+      pageLayouts: effectivePageLayouts,
       documentId,
     });
   }, [
@@ -847,19 +881,20 @@ export function StepPrepareSignature({
     prepareSignerRoles,
     fields,
     prepareCorpusText,
-    pageLayouts,
+    effectivePageLayouts,
     documentId,
     packetRebuildNonce,
   ]);
 
   const prepareCorpusGate = useMemo(() => {
     if (!agreementBridgePlacementCopy) return null;
+    if (signingPacketModel) return signingPacketModel.diagnostics.corpusGate;
     return resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: prepareCorpusText,
       guidedPro: true,
       premiumComplete: (prepareCorpusText ?? "").trim().length >= 1500,
     });
-  }, [agreementBridgePlacementCopy, prepareCorpusText]);
+  }, [agreementBridgePlacementCopy, prepareCorpusText, signingPacketModel]);
 
   const packetReadiness = useMemo(
     () =>
@@ -887,7 +922,7 @@ export function StepPrepareSignature({
       roles: prepareSignerRoles,
       pageCount: numPages,
       corpusText: prepareCorpusText,
-      pageLayouts,
+      pageLayouts: effectivePageLayouts,
       documentId,
       existingFields: fields,
     });
@@ -896,7 +931,7 @@ export function StepPrepareSignature({
     numPages,
     prepareSignerRoles,
     prepareCorpusText,
-    pageLayouts,
+    effectivePageLayouts,
     documentId,
     fields,
   ]);
@@ -932,7 +967,7 @@ export function StepPrepareSignature({
     }
     return resolveAutoSignaturePacketMode({
       corpusText: prepareCorpusText,
-      pageLayouts,
+      pageLayouts: effectivePageLayouts,
       lastPage: witnessPageIndex,
       roleCount: prepareSignerRoles.length,
     });
@@ -941,7 +976,7 @@ export function StepPrepareSignature({
     prepareSignerRoles,
     numPages,
     prepareCorpusText,
-    pageLayouts,
+    effectivePageLayouts,
     witnessPageIndex,
   ]);
 
@@ -956,7 +991,7 @@ export function StepPrepareSignature({
   /** Default: auto-place signature block on last page when bridge opens with no manual fields yet. */
   useEffect(() => {
     if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length || numPages <= 0) return;
-    if (!prepareCorpusText && !pageLayouts?.length) return;
+    if (!prepareCorpusText && !effectivePageLayouts?.length) return;
     if (autoSignatureSeededRef.current) return;
     const hasSignature = fields.some((f) => f.type === "signature" && !f.autoInitials);
     if (hasSignature) {
@@ -974,7 +1009,7 @@ export function StepPrepareSignature({
       existingFields: fields,
       ownerValueCtx,
       corpusText: prepareCorpusText,
-      pageLayouts,
+      pageLayouts: effectivePageLayouts,
       documentId,
     });
     if (result.placedCount > 0) {
@@ -1009,7 +1044,7 @@ export function StepPrepareSignature({
     signerEmailForPlacement,
     setFields,
     prepareCorpusText,
-    pageLayouts,
+    effectivePageLayouts,
     documentId,
     packetRebuildNonce,
   ]);
@@ -1760,7 +1795,7 @@ export function StepPrepareSignature({
                                 if (b.id === selectedFieldId) return -1;
                                 return 0;
                               });
-                            const pageTextRects = pageLayouts?.find((layout) => layout.pageIndex === p)?.textRects ?? [];
+                            const pageTextRects = effectivePageLayouts?.find((layout) => layout.pageIndex === p)?.textRects ?? [];
                             return (
                               <div
                                 key={p}
