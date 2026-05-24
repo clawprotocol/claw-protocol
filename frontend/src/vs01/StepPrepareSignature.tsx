@@ -87,8 +87,10 @@ import {
   PREPARE_BLOCKED_PANEL_TITLE,
   PREPARE_OPTIONAL_FIELDS_HINT,
   PREPARE_PACKET_READY_COPY,
-  PREPARE_PACKET_BRIDGE_HEADLINE,
-  PREPARE_PACKET_BRIDGE_LEAD,
+  PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED,
+  PREPARE_PACKET_BRIDGE_HEADLINE_READY,
+  PREPARE_PACKET_BRIDGE_LEAD_BLOCKED,
+  PREPARE_PACKET_BRIDGE_LEAD_READY,
   PREPARE_PACKET_BRIDGE_PRIMARY_CTA,
   PREPARE_PACKET_BRIDGE_SECONDARY_CTA,
   PREPARE_PACKET_INITIALS_TOGGLE_LABEL,
@@ -116,8 +118,10 @@ import {
 } from "./vs01AutoSignaturePacket";
 import {
   formatVs01InitialsOnlyStatusLine,
+  summarizeCanonicalSigningPacketInitials,
   summarizeVs01SigningPacketInitials,
 } from "./vs01SigningPacketInitials";
+import { alignPlacedSignatureFieldToMeasuredUnderline } from "./vs01CanonicalTextLayout";
 import {
   buildVs01SigningPacketModel,
   signingPacketLayoutsFromModel,
@@ -408,8 +412,6 @@ export function StepPrepareSignature({
 
   const [autoInitialsEveryPage, setAutoInitialsEveryPage] = useState(false);
   const [skippedAutoInitialsSlots, setSkippedAutoInitialsSlots] = useState<Set<string>>(() => new Set());
-  const [packetRebuildNonce, setPacketRebuildNonce] = useState(0);
-
   const [signatureMode, setSignatureMode] = useState<SignatureMode>("type");
   const [typedName, setTypedName] = useState(() => nameFromSignerRef(defaultSignerRef));
   const [initials, setInitials] = useState(() => initialsFromName(nameFromSignerRef(defaultSignerRef)));
@@ -796,6 +798,9 @@ export function StepPrepareSignature({
 
     setFields((prev) => {
       const manual = prev.filter((f) => !f.autoInitials);
+      if (agreementBridgePlacementCopy && signingPacketModel?.allowed) {
+        return prev;
+      }
       if (agreementBridgePlacementCopy && prepareSignerRoles && prepareSignerRoles.length > 0) {
         const auto = buildPrepareAutoInitialsForAllRoles({
           roles: prepareSignerRoles,
@@ -828,7 +833,7 @@ export function StepPrepareSignature({
     prepareCorpusText,
     effectivePageLayouts,
     documentId,
-    packetRebuildNonce,
+    signingPacketModel?.allowed,
   ]);
 
   /** Keep auto-initials text in sync when the user edits initials/name, without rebuilding positions. */
@@ -886,6 +891,14 @@ export function StepPrepareSignature({
 
   const initialsPacketSummary = useMemo(() => {
     if (!autoInitialsEveryPage || numPages <= 0 || !prepareSignerRoles?.length) return null;
+    if (signingPacketModel?.allowed) {
+      return summarizeCanonicalSigningPacketInitials({
+        fields,
+        pageCount: numPages,
+        roleCount: prepareSignerRoles.length,
+        pages: signingPacketModel.pages,
+      });
+    }
     return summarizeVs01SigningPacketInitials({
       fields,
       pageCount: numPages,
@@ -903,7 +916,7 @@ export function StepPrepareSignature({
     prepareCorpusText,
     effectivePageLayouts,
     documentId,
-    packetRebuildNonce,
+    signingPacketModel,
   ]);
 
   const prepareCorpusGate = useMemo(() => {
@@ -992,10 +1005,7 @@ export function StepPrepareSignature({
             if (!measured) return f;
             return {
               ...f,
-              x: measured.normRect.x,
-              y: Math.max(0, measured.normRect.y - measured.normRect.height * 0.35),
-              width: Math.max(0.2, measured.normRect.width),
-              height: Math.max(0.032, measured.normRect.height * 2.2),
+              ...alignPlacedSignatureFieldToMeasuredUnderline(f, measured.normRect),
             };
           }),
         );
@@ -1038,9 +1048,9 @@ export function StepPrepareSignature({
     if (!agreementBridgePlacementCopy || packetReady) return null;
     if (!prepareCorpusGate?.allowed || showCanonicalFinalizeBlocked) return VS01_CORPUS_GATE_USER_MESSAGE;
     if (canonicalTextRendered === false) {
-      return "LawDog is still preparing this packet. Rebuild placement before sending.";
+      return "Signature fields are being placed. Please wait a moment.";
     }
-    return "LawDog is still preparing this packet. Rebuild placement before sending.";
+    return PREPARE_PACKET_BRIDGE_LEAD_BLOCKED;
   }, [
     agreementBridgePlacementCopy,
     packetReady,
@@ -1124,6 +1134,10 @@ export function StepPrepareSignature({
   /** Default: auto-place signature block on last page when bridge opens with no manual fields yet. */
   useEffect(() => {
     if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length || numPages <= 0) return;
+    if (signingPacketModel?.allowed) {
+      autoSignatureSeededRef.current = true;
+      return;
+    }
     if (!prepareCorpusText && !effectivePageLayouts?.length) return;
     if (autoSignatureSeededRef.current) return;
     const hasSignature = fields.some((f) => f.type === "signature" && !f.autoInitials);
@@ -1179,7 +1193,7 @@ export function StepPrepareSignature({
     prepareCorpusText,
     effectivePageLayouts,
     documentId,
-    packetRebuildNonce,
+    signingPacketModel?.allowed,
   ]);
 
   const onPagePlacementClick = useCallback(
@@ -1329,24 +1343,6 @@ export function StepPrepareSignature({
     ],
   );
 
-  const handleRebuildSigningPacket = useCallback(() => {
-    autoSignatureSeededRef.current = false;
-    setManualPlacementOverride(false);
-    setSelectedFieldId(null);
-    setPlacementNotice("Rebuilding signing packet placement…");
-    setAutoPrepBannerMessage(null);
-    setSkippedAutoInitialsSlots(new Set());
-    setAutoInitialsEveryPage(true);
-    setFields((prev) =>
-      prev.filter((f) => {
-        if (f.autoInitials) return false;
-        if (agreementBridgePlacementCopy && f.type === "signature") return false;
-        return true;
-      }),
-    );
-    setPacketRebuildNonce((n) => n + 1);
-  }, [agreementBridgePlacementCopy, setFields]);
-
   const prepareMissingSummary = useMemo(() => {
     if (!preparePacketGate || !prepareSignerRoles?.length) return [];
     return buildPrepareMissingBySignerSummary(preparePacketGate, prepareSignerRoles);
@@ -1359,7 +1355,7 @@ export function StepPrepareSignature({
         incompleteSignerCount: prepareMissingSummary.length,
         focusRoleIdShort: null,
       });
-      onError(packetBlockedMessage ?? "LawDog is still preparing this packet. Rebuild placement before sending.");
+      onError(packetBlockedMessage ?? "Signature fields are being placed. Please wait a moment.");
       return;
     }
     const result = evaluatePrepareFinishClick(preparePacketGate, prepareSignerRoles ?? []);
@@ -1828,8 +1824,12 @@ export function StepPrepareSignature({
           },
         ];
       });
-      const validation = validateVs01SigningPacketDomRects({ model: signingPacketModel, domRects });
-      setModelDomValidationOk(validation.ok && domRects.length === signingPacketModel.fields.length);
+      const validation = validateVs01SigningPacketDomRects({
+        pages: signingPacketModel.pages,
+        fields,
+        domRects,
+      });
+      setModelDomValidationOk(validation.ok && domRects.length === fields.length);
     });
     return () => window.cancelAnimationFrame(handle);
   }, [fields, pageRenderWidth, renderCanonicalModel, signingPacketModel]);
@@ -1850,11 +1850,17 @@ export function StepPrepareSignature({
     <section data-vs01-step={STEP_ID} aria-labelledby="vs01-step-prepare-title" className="vs01-sign-step">
       <header className="vs01-sign-step-header">
         <h2 id="vs01-step-prepare-title" className="vs01-card-title">
-          {agreementBridgePlacementCopy ? PREPARE_PACKET_BRIDGE_HEADLINE : "Sign your document"}
+          {agreementBridgePlacementCopy
+            ? packetReady
+              ? PREPARE_PACKET_BRIDGE_HEADLINE_READY
+              : PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED
+            : "Sign your document"}
         </h2>
         <p className="vs01-card-help vs01-sign-step-lead">
           {agreementBridgePlacementCopy
-            ? PREPARE_PACKET_BRIDGE_LEAD
+            ? packetReady
+              ? PREPARE_PACKET_BRIDGE_LEAD_READY
+              : PREPARE_PACKET_BRIDGE_LEAD_BLOCKED
             : "Choose a field type, then click once where it should go."}
         </p>
         {agreementBridgePlacementCopy && prepareSignerRoles?.length && packetReady ? (
@@ -2790,9 +2796,13 @@ export function StepPrepareSignature({
           ) : null}
           {agreementBridgePlacementCopy && !packetReady && !receiptId ? (
             <div className="vs01-prepare-blocked-panel" role="alert" data-testid="vs01-prepare-packet-blocked">
-              <p className="vs01-prepare-blocked-panel__title">Review required before sending</p>
+              <p className="vs01-prepare-blocked-panel__title">
+                {showCanonicalFinalizeBlocked
+                  ? "Agreement text needs attention"
+                  : PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED}
+              </p>
               <p className="vs01-prepare-blocked-panel__body">
-                {packetBlockedMessage ?? "LawDog is still preparing this packet. Rebuild placement before sending."}
+                {packetBlockedMessage ?? PREPARE_PACKET_BRIDGE_LEAD_BLOCKED}
               </p>
             </div>
           ) : null}
@@ -2814,7 +2824,7 @@ export function StepPrepareSignature({
 
           {!receiptId && agreementBridgePlacementCopy ? (
             <p className="vs01-sign-rail-helper" role="note">
-              {PREPARE_PACKET_BRIDGE_LEAD}
+              {packetReady ? PREPARE_PACKET_BRIDGE_LEAD_READY : PREPARE_PACKET_BRIDGE_LEAD_BLOCKED}
             </p>
           ) : null}
 
@@ -2825,11 +2835,10 @@ export function StepPrepareSignature({
             <button
               type="button"
               className={`vs01-btn vs01-btn--primary${receiptId ? " vs01-btn--signed-done" : ""}`}
-              disabled={agreementBridgePlacementCopy ? busy : primaryDisabled}
+              disabled={agreementBridgePlacementCopy ? busy || !packetReady : primaryDisabled}
               onClick={() => {
                 if (agreementBridgePlacementCopy) {
                   if (!packetReady) {
-                    handleRebuildSigningPacket();
                     return;
                   }
                   handlePrepareContinue();
@@ -2843,7 +2852,7 @@ export function StepPrepareSignature({
                 : agreementBridgePlacementCopy
                   ? packetReady
                     ? PREPARE_PACKET_BRIDGE_PRIMARY_CTA
-                    : "Rebuild signing packet"
+                    : "Preparing fields…"
                   : busySession
                     ? "Working…"
                     : busyComplete

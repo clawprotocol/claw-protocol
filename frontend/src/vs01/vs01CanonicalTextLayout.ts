@@ -1,6 +1,7 @@
 import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
 import type { Vs01NormalizedRect } from "./vs01FieldCssGeometry";
 import type { Vs01NormTextRect } from "./vs01PageTextLayout";
+import type { PlacedSigningField } from "./signingFields";
 
 export type Vs01CanonicalTextLayoutMode = "flow" | "absolute";
 
@@ -218,6 +219,19 @@ export function logVs01CanonicalTextLayoutFail(payload: Record<string, unknown>)
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.warn("[vs01-canonical-text-layout-fail]", payload);
+}
+
+export function alignPlacedSignatureFieldToMeasuredUnderline(
+  field: Pick<PlacedSigningField, "x" | "y" | "width" | "height">,
+  measured: Vs01NormalizedRect,
+): Pick<PlacedSigningField, "x" | "y" | "width" | "height"> {
+  const height = field.height > 0 ? field.height : 0.04;
+  return {
+    x: measured.x,
+    y: Math.max(0, measured.y + measured.height - height),
+    width: Math.max(0.2, measured.width),
+    height,
+  };
 }
 
 export function logVs01SignatureAnchorDomMeasured(payload: Record<string, unknown>): void {

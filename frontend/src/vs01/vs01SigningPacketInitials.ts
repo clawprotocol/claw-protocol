@@ -2,6 +2,7 @@
  * Per-page VS01 initials placement planning and packet validation.
  */
 
+import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
 import { fieldRectsOverlap, type PlacedSigningField } from "./signingFields";
 import {
   checkInitialsDomTextCollisions,
@@ -102,6 +103,83 @@ export function planVs01InitialsPages(args: {
     logVs01PageInitialsPlan(plan);
   }
   return plans;
+}
+
+/** Initials/signature summary for canonical signing packet fields (no PDF/corpus merge). */
+export function summarizeCanonicalSigningPacketInitials(args: {
+  fields: readonly PlacedSigningField[];
+  pageCount: number;
+  roleCount: number;
+  pages: readonly Pick<Vs01SigningPacketPage, "pageIndex" | "textBlocks">[];
+}): Vs01SigningPacketInitialsSummary {
+  const pageCount = Math.max(1, args.pageCount);
+  const roleCount = Math.max(1, args.roleCount);
+  const eligiblePages = Array.from({ length: pageCount }, (_, i) => i);
+  const initialsFields = args.fields.filter((f) => f.type === "initials" && f.autoInitials);
+  const signatureFields = args.fields.filter((f) => f.type === "signature");
+  const pagesWithInitialsPerRole: number[] = [];
+  const incompletePages: number[] = [];
+  let unsafeInitialsCount = 0;
+  let unsafeSignatureCount = 0;
+
+  for (const p of eligiblePages) {
+    const pageModel = args.pages.find((page) => page.pageIndex === p);
+    const onPage = args.fields.filter((f) => f.page === p);
+    const partiesWithInitials = new Set(
+      initialsFields
+        .filter((f) => f.page === p)
+        .map((f) => f.assignedPartyIndex ?? -1)
+        .filter((idx) => idx >= 0),
+    );
+    const placedCount = partiesWithInitials.size;
+    pagesWithInitialsPerRole.push(placedCount);
+    if (placedCount < roleCount) incompletePages.push(p);
+
+    for (const field of initialsFields.filter((f) => f.page === p)) {
+      const hitsText = (pageModel?.textBlocks ?? []).some((text) =>
+        fieldRectsOverlap(field, text, 0.004),
+      );
+      const hitsSignature = onPage.some(
+        (o) => o.id !== field.id && o.type === "signature" && fieldRectsOverlap(field, o, 0.012),
+      );
+      if (hitsText || hitsSignature) unsafeInitialsCount += 1;
+    }
+  }
+
+  for (const sig of signatureFields) {
+    const pageModel = args.pages.find((page) => page.pageIndex === sig.page);
+    const hitsText = (pageModel?.textBlocks ?? []).some(
+      (text) =>
+        text.text.trim().length > 0 &&
+        fieldRectsOverlap(sig, text, 0.004) &&
+        !/^(?:By|Signature)\s*:/i.test(text.text.trim()),
+    );
+    if (hitsText) unsafeSignatureCount += 1;
+  }
+
+  const witnessPageIndex =
+    args.pages.find((page) =>
+      page.textBlocks.some((b) => /\bIN WITNESS WHEREOF\b/i.test(b.text)),
+    )?.pageIndex ?? pageCount - 1;
+
+  return {
+    pageCount,
+    roleCount,
+    eligiblePages,
+    pagesWithInitialsPerRole,
+    incompletePages,
+    unsafeInitialsCount,
+    initialsFieldCount: initialsFields.length,
+    signatureFieldCount: signatureFields.length,
+    unsafeSignatureCount,
+    witnessPageIndex,
+    complete:
+      signatureFields.length >= roleCount &&
+      unsafeSignatureCount === 0 &&
+      incompletePages.length === 0 &&
+      unsafeInitialsCount === 0 &&
+      initialsFields.length >= pageCount * roleCount,
+  };
 }
 
 export function summarizeVs01SigningPacketInitials(args: {

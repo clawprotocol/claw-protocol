@@ -14,18 +14,25 @@ export const PREPARE_BLOCKED_PANEL_BODY =
   "Each signer needs one signature field. Other fields are optional.";
 export const PREPARE_OPTIONAL_FIELDS_HINT =
   "Optional: add name, title, or date fields if you want LawDog to prefill them.";
-export const PREPARE_PACKET_READY_COPY = "Signature fields are ready — continue to signing links.";
-export const PREPARE_PACKET_BRIDGE_HEADLINE = "Signature fields are ready.";
-export const PREPARE_PACKET_BRIDGE_LEAD =
-  "LawDog placed signature fields next to each signer’s signature line. Initials are optional.";
+export const PREPARE_PACKET_READY_COPY = "Your agreement is ready for signing.";
+export const PREPARE_PACKET_BRIDGE_HEADLINE_READY = "Signature fields are ready";
+export const PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED = "Review placement before sending";
+export const PREPARE_PACKET_BRIDGE_LEAD_READY =
+  "LawDog placed signature fields for each signer. Continue when placement looks right.";
+export const PREPARE_PACKET_BRIDGE_LEAD_BLOCKED =
+  "LawDog found a placement issue. Rebuild the packet or edit placement.";
+/** @deprecated Use {@link PREPARE_PACKET_BRIDGE_HEADLINE_READY} with packetReady. */
+export const PREPARE_PACKET_BRIDGE_HEADLINE = PREPARE_PACKET_BRIDGE_HEADLINE_READY;
+/** @deprecated Use ready/blocked lead constants with packetReady. */
+export const PREPARE_PACKET_BRIDGE_LEAD = PREPARE_PACKET_BRIDGE_LEAD_READY;
 export const PREPARE_PACKET_BRIDGE_PRIMARY_CTA = "Continue to signing links";
 export const PREPARE_PACKET_BRIDGE_SECONDARY_CTA = "Edit field placement";
-export const PREPARE_PACKET_INITIALS_TOGGLE_LABEL = "Add initials to each page";
+export const PREPARE_PACKET_INITIALS_TOGGLE_LABEL = "Initials on each page";
 export const PREPARE_PACKET_INITIALS_SUPPRESSED_HINT =
   "Initials could not be placed safely on every eligible page — only signature fields are required.";
 
 export const PREPARE_PACKET_INITIALS_TOGGLE_HINT =
-  "Optional. Signers can still complete the agreement without changing placement.";
+  "Initials are enabled on each page for every signer.";
 
 const MISSING_LABEL: Record<string, string> = {
   signature: "Signature",

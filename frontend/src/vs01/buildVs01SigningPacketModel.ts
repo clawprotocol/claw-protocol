@@ -17,7 +17,11 @@ import {
   type Vs01NormTextRect,
   type Vs01PageTextLayout,
 } from "./vs01PageTextLayout";
-import { newSigningFieldId, type PlacedSigningField } from "./signingFields";
+import {
+  newSigningFieldId,
+  prepareAutoInitialsPlacementDims,
+  type PlacedSigningField,
+} from "./signingFields";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { PREPARE_FIELD_ASSIGNMENT_SOURCE } from "./vs01PrepareFieldPlacement";
 import { defaultPrepareTemplateStoredValue } from "./vs01PrepareTemplateField";
@@ -60,8 +64,10 @@ export const VS01_PACKET_MARGIN_LEFT_PT = 44;
 export const VS01_PACKET_MARGIN_TOP_PT = 50;
 export const VS01_PACKET_MARGIN_RIGHT_PT = 44;
 export const VS01_PACKET_MARGIN_BOTTOM_PT = 40;
-export const VS01_PACKET_INITIALS_BAND_PT = 300;
+export const VS01_PACKET_INITIALS_BAND_PT = 96;
 export const VS01_PACKET_LINE_HEIGHT_PT = 18;
+/** Extra lines withheld from pagination so DOM flow does not spill into the initials band. */
+export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 3;
 
 const CONTENT_X = VS01_PACKET_MARGIN_LEFT_PT / VS01_PACKET_PAGE_WIDTH_PT;
 const CONTENT_TOP = VS01_PACKET_MARGIN_TOP_PT / VS01_PACKET_PAGE_HEIGHT_PT;
@@ -79,12 +85,16 @@ const CHARS_PER_LINE = 84;
 
 function normalizeLines(corpus: string): string[] {
   const out: string[] = [];
+  let previousWasBlank = false;
   for (const raw of corpus.replace(/\r\n/g, "\n").split("\n")) {
     const trimmed = raw.trimEnd();
     if (!trimmed.trim()) {
+      if (previousWasBlank) continue;
       out.push("");
+      previousWasBlank = true;
       continue;
     }
+    previousWasBlank = false;
     if (trimmed.length <= CHARS_PER_LINE) {
       out.push(trimmed);
       continue;
@@ -167,9 +177,14 @@ type PaginatedCorpusSlice = {
   textRects: Vs01NormTextRect[];
 };
 
+export function maxFlowLinesPerSigningPacketPage(): number {
+  const raw = Math.floor((CONTENT_BOTTOM_LIMIT - CONTENT_TOP) / LINE_HEIGHT);
+  return Math.max(1, raw - VS01_PACKET_FLOW_LINE_DOM_BUFFER);
+}
+
 function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   const lines = normalizeLines(corpus);
-  const maxLinesPerPage = Math.max(1, Math.floor((CONTENT_BOTTOM_LIMIT - CONTENT_TOP) / LINE_HEIGHT));
+  const maxLinesPerPage = maxFlowLinesPerSigningPacketPage();
   const pages: PaginatedCorpusSlice[] = [];
   let pageIndex = 0;
   let lineInPage = 0;
@@ -184,7 +199,35 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     rects = [];
   };
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    const nextNonBlank = lines.slice(i + 1).find((l) => l.trim())?.trim() ?? "";
+    const startsExecutionBlock =
+      /^IN WITNESS WHEREOF/i.test(trimmed) ||
+      /^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed);
+    const startsSectionHeading =
+      /^[A-Z][A-Z0-9 ,;:'"()/&.-]{3,}$/.test(trimmed) && trimmed.length <= 90;
+    const nextStartsExecutionLine = /^(?:By|Signature|Name|Title|Date)\s*:/i.test(nextNonBlank);
+    const minKeepTogether = /^IN WITNESS WHEREOF/i.test(trimmed)
+      ? 14
+      : startsExecutionBlock
+        ? 7
+        : startsSectionHeading
+          ? 3
+          : nextStartsExecutionLine
+            ? 4
+            : 0;
+    if (/^IN WITNESS WHEREOF/i.test(trimmed) && lineInPage > 0) {
+      flush();
+    }
+    if (
+      lineInPage > 0 &&
+      minKeepTogether > 0 &&
+      maxLinesPerPage - lineInPage < minKeepTogether
+    ) {
+      flush();
+    }
     if (lineInPage >= maxLinesPerPage) flush();
     pageLines.push(line);
     if (line.trim()) {
@@ -226,14 +269,27 @@ function fieldBase(role: Vs01PrepareSigningRole, page: number): Pick<
   };
 }
 
+export function signatureFieldRectOnUnderlineAnchor(
+  anchor: Pick<Vs01ByLinePlacement, "x" | "y" | "width" | "height">,
+  fieldHeight = 0.04,
+): Pick<PlacedSigningField, "x" | "y" | "width" | "height"> {
+  return {
+    x: anchor.x,
+    y: Math.max(0, anchor.y + anchor.height - fieldHeight),
+    width: Math.max(0.2, anchor.width),
+    height: fieldHeight,
+  };
+}
+
 function signatureFieldForAnchor(role: Vs01PrepareSigningRole, anchor: Vs01ByLinePlacement, page: number): PlacedSigningField {
+  const geom = signatureFieldRectOnUnderlineAnchor(anchor);
   return {
     id: `canonical_sig_${role.roleId}_${page}_${newSigningFieldId()}`,
     type: "signature",
-    x: anchor.x,
-    y: anchor.y,
-    width: Math.max(0.2, anchor.width),
-    height: Math.max(0.028, anchor.height * 1.35),
+    x: geom.x,
+    y: geom.y,
+    width: geom.width,
+    height: geom.height,
     value: defaultPrepareTemplateStoredValue("signature", role, {
       typedName: role.signerName || role.entityName,
       initials: "",
@@ -244,19 +300,21 @@ function signatureFieldForAnchor(role: Vs01PrepareSigningRole, anchor: Vs01ByLin
 }
 
 function initialsFieldForRole(role: Vs01PrepareSigningRole, page: number, roleIndex: number, roleCount: number): PlacedSigningField {
-  const boxWidth = 0.15;
-  const boxHeight = 0.08;
-  const gap = 0.022;
+  const { width: boxWidth, height: boxHeight } = prepareAutoInitialsPlacementDims();
+  const gap = 0.014;
   const cols = Math.min(2, Math.max(1, roleCount));
   const col = roleIndex % cols;
   const row = Math.floor(roleIndex / cols);
-  const right = CONTENT_X + CONTENT_WIDTH - 0.055 - boxWidth - (cols - 1 - col) * (boxWidth + gap);
-  const top = BAND_TOP + 0.16 + row * (boxHeight + 0.035);
+  const rows = Math.ceil(roleCount / cols);
+  const right = CONTENT_X + CONTENT_WIDTH - 0.035 - boxWidth - (cols - 1 - col) * (boxWidth + gap);
+  const bandBottom = BAND_TOP + BAND_HEIGHT;
+  const groupHeight = rows * boxHeight + Math.max(0, rows - 1) * gap;
+  const top = bandBottom - 0.022 - groupHeight + row * (boxHeight + gap);
   return {
     id: `canonical_initials_${role.roleId}_${page}`,
     type: "initials",
     x: right,
-    y: Math.min(BAND_TOP + BAND_HEIGHT - boxHeight - 0.02, top),
+    y: Math.max(BAND_TOP + 0.012, Math.min(BAND_TOP + BAND_HEIGHT - boxHeight - 0.012, top)),
     width: boxWidth,
     height: boxHeight,
     value: defaultPrepareTemplateStoredValue("initials", role, {
@@ -313,23 +371,38 @@ export function validateVs01SigningPacketGeometry(args: {
   return [...new Set(errors)];
 }
 
+function signatureDomRectAlignsWithAnchor(
+  dom: Vs01NormalizedRect,
+  anchor: Vs01ByLinePlacement,
+): boolean {
+  const onUnderline = signatureFieldRectOnUnderlineAnchor(anchor);
+  const expandedAnchor: Vs01NormalizedRect = {
+    x: anchor.x,
+    y: anchor.y,
+    width: anchor.width,
+    height: anchor.height + 0.02,
+  };
+  return (
+    textRectIntersects(dom, expandedAnchor) ||
+    textRectIntersects(dom, onUnderline) ||
+    Math.abs(dom.y - onUnderline.y) < 0.025
+  );
+}
+
 export function validateVs01SigningPacketDomRects(args: {
-  model: Pick<Vs01SigningPacketModel, "pages" | "fields">;
+  pages: readonly Vs01SigningPacketPage[];
+  fields: readonly PlacedSigningField[];
   domRects: readonly { fieldId: string; fieldType: PlacedSigningField["type"]; page: number; rect: Vs01NormalizedRect }[];
 }): { ok: boolean; mismatchCount: number } {
   let mismatchCount = 0;
   for (const dom of args.domRects) {
-    const expected = args.model.fields.find((f) => f.id === dom.fieldId);
-    const page = args.model.pages.find((p) => p.pageIndex === dom.page);
+    const expected = args.fields.find((f) => f.id === dom.fieldId);
+    const page = args.pages.find((p) => p.pageIndex === dom.page);
     let ok = Boolean(expected && page);
     if (expected && page) {
       if (expected.type === "signature") {
         const anchor = page.signatureAnchorRects.find((a) => a.partyIndex === expected.assignedPartyIndex);
-        ok = Boolean(
-          anchor &&
-            (textRectIntersects(dom.rect, anchor) ||
-              Math.abs(dom.rect.y - anchor.y) < 0.04),
-        );
+        ok = Boolean(anchor && signatureDomRectAlignsWithAnchor(dom.rect, anchor));
       } else if (expected.type === "initials") {
         ok =
           textRectIntersects(dom.rect, page.initialsBandRect) &&

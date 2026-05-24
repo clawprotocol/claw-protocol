@@ -47,13 +47,14 @@ describe("VS01 prepare packet readiness gate", () => {
     expect(readiness.packetReady).toBe(true);
   });
 
-  it("prepare page uses rebuild action and never prepared copy when validation blocks", () => {
+  it("prepare page uses packetReady-gated bridge copy and no rebuild warning", () => {
     const src = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
-    const banner = readFileSync(join(__dirname, "Vs01PrepPreparedBanner.tsx"), "utf8");
+    const completion = readFileSync(join(__dirname, "vs01PreparePacketCompletion.ts"), "utf8");
     expect(src).toContain("resolveVs01PreparePacketReadiness");
-    expect(src).toContain("Rebuild signing packet");
-    expect(src).toContain("? PREPARE_PACKET_BRIDGE_PRIMARY_CTA");
-    expect(banner).toContain("Review required before sending");
-    expect(banner).toContain('ready ? "LawDog prepared your signing packet"');
+    expect(src).not.toContain("Rebuild signing packet");
+    expect(src).toMatch(/packetReady[\s\S]{0,80}PREPARE_PACKET_BRIDGE_HEADLINE_READY/);
+    expect(src).toContain("PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED");
+    expect(completion).toContain("Continue to signing links");
+    expect(completion).toContain("Initials are enabled on each page");
   });
 });

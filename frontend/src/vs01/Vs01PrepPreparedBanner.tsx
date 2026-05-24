@@ -27,12 +27,12 @@ export function Vs01PrepPreparedBanner({
       data-testid="vs01-prep-prepared-banner"
     >
       <p className={ready ? "text-sm font-semibold text-emerald-950" : "text-sm font-semibold text-amber-950"}>
-        {ready ? "LawDog prepared your signing packet" : "Review required before sending"}
+        {ready ? "Signature fields are ready." : "Agreement text needs attention"}
       </p>
       <p className={ready ? "mt-0.5 text-xs text-emerald-900/90" : "mt-0.5 text-xs text-amber-900/90"}>
         {ready
-          ? "Signature fields were placed automatically. Review once, then send."
-          : "Initials or signature fields overlap the document. Rebuild placement before creating signing links."}
+          ? "LawDog placed signature fields for each signer."
+          : "The agreement text must be finalized before signing links can be created."}
       </p>
       <p className={ready ? "mt-1.5 text-[11px] text-emerald-800/90" : "mt-1.5 text-[11px] text-amber-900/90"}>
         <span className="font-medium">{agreementTitle.trim() || "Your agreement"}</span>

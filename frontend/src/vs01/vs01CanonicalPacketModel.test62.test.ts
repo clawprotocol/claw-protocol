@@ -118,10 +118,18 @@ describe("test62 canonical VS01 e-sign packet render", () => {
     expect(signatureFields.length).toBe(2);
     for (const field of signatureFields) {
       const page = model.pages.find((p) => p.pageIndex === field.page);
-      expect(page?.signatureAnchorRects.some((anchor) => anchor.y === field.y)).toBe(true);
+      expect(
+        page?.signatureAnchorRects.some(
+          (anchor) =>
+            field.x === anchor.x &&
+            field.y <= anchor.y &&
+            field.y + field.height >= anchor.y + anchor.height * 0.5,
+        ),
+      ).toBe(true);
     }
     const shifted = validateVs01SigningPacketDomRects({
-      model,
+      pages: model.pages,
+      fields: model.fields,
       domRects: model.fields.map((field) => ({
         fieldId: field.id,
         fieldType: field.type,

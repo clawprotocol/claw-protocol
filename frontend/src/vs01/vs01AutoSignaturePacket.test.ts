@@ -37,11 +37,11 @@ describe("vs01AutoSignaturePacket", () => {
 
   it("Vs01PrepPreparedBanner only uses prepared copy when ready", () => {
     const src = readFileSync(join(__dirname, "Vs01PrepPreparedBanner.tsx"), "utf8");
-    expect(src).toContain('ready ? "LawDog prepared your signing packet"');
-    expect(src).toContain("Review required before sending");
+    expect(src).toContain('ready ? "Signature fields are ready."');
+    expect(src).toContain("Agreement text needs attention");
   });
 
-  it("StepPrepareSignature offers Continue to signing links when auto prepared", () => {
+  it("StepPrepareSignature offers the bridge primary CTA when auto prepared", () => {
     const src = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
     expect(src).toContain("PREPARE_PACKET_BRIDGE_PRIMARY_CTA");
     expect(src).toContain("PREPARE_PACKET_BRIDGE_SECONDARY_CTA");
