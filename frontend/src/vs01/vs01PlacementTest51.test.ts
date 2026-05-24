@@ -4,16 +4,18 @@ import {
   signingFieldGeometryHash,
 } from "./vs01AutoSignaturePacket";
 import { buildVs01PlacementContext, findSafeInitialsRectOnPage } from "./vs01FieldGeometry";
+import { verifyCanonicalInitialsRectClear } from "./vs01InitialsCanonicalPlacement";
 import {
   computePageTextExtents,
-  initialsFieldsOverlapDocumentText,
   pageBottomTooCrowdedForBelowTextPlacement,
   verifyInitialsRectClear,
 } from "./vs01InitialsSafeZone";
 import { buildPrepareAutoInitialsForAllRoles } from "./vs01PrepareFieldPlacement";
+import { summarizeVs01SigningPacketInitials } from "./vs01SigningPacketInitials";
 import {
   buildCorpusSimulatedPageLayouts,
   findSignatureLinePlacementsFromPageLayout,
+  mergePageLayoutForInitials,
   pageLayoutForIndex,
   type Vs01PageTextLayout,
 } from "./vs01PageTextLayout";
@@ -125,7 +127,25 @@ describe("VS01 placement test51 — initials safe zones", () => {
     });
     const owner = initials.filter((f) => f.assignedPartyIndex === 0);
     expect(owner.some((f) => f.page === SIGNATURE_PAGE)).toBe(true);
-    expect(initialsFieldsOverlapDocumentText(owner, layouts)).toBe(false);
+    const placementCtx = buildVs01PlacementContext({
+      corpusText: corpus,
+      pageCount: PAGE_COUNT,
+      pageLayouts: layouts,
+      roleCount: roles().length,
+    });
+    const corpusLayouts = buildCorpusSimulatedPageLayouts(corpus, PAGE_COUNT);
+    for (const field of owner) {
+      const effective = mergePageLayoutForInitials(
+        pageLayoutForIndex(placementCtx.layouts, field.page),
+        pageLayoutForIndex(corpusLayouts, field.page),
+      );
+      const check = verifyCanonicalInitialsRectClear({
+        rect: field,
+        pageLayout: effective,
+        fieldObstacles: initials.filter((f) => f.id !== field.id && f.page === field.page),
+      });
+      expect(check.ok).toBe(true);
+    }
   });
 
   it("keeps two signature fields anchored to visible By/Signature lines", () => {
@@ -176,7 +196,16 @@ describe("VS01 placement test51 — initials safe zones", () => {
       valueCtxForRole: () => ({ typedName: "Anthem H Blanchard", initials: "AHB" }),
     });
     const merged = [...packet.fields, ...initials];
-    expect(initialsFieldsOverlapDocumentText(merged, layouts)).toBe(false);
+    const summary = summarizeVs01SigningPacketInitials({
+      fields: merged,
+      pageCount: PAGE_COUNT,
+      roleCount: r.length,
+      partyIndices: r.map((role) => role.partyIndex),
+      corpusText: corpus,
+      pageLayouts: layouts,
+    });
+    expect(summary.incompletePages).toEqual([]);
+    expect(summary.complete).toBe(true);
     const recipient = buildRecipientSigningDocumentFields({
       ownerRole: r[0]!,
       roles: r,

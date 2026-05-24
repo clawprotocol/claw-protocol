@@ -247,11 +247,9 @@ export function isFooterOnlyPageLayout(layout: Vs01PageTextLayout | null | undef
   return rects.every((r) => r.kind === "footer" || r.y >= 0.9);
 }
 
-export function layoutHasPlaceableInitialsContent(layout: Vs01PageTextLayout | null | undefined): boolean {
-  if (isFooterOnlyPageLayout(layout)) return false;
-  const rects = layout?.textRects ?? [];
-  if (rects.length === 0) return true;
-  return rects.some((r) => r.kind === "body" || r.kind === "heading" || r.kind === "signature_label");
+/** Every page in the packet receives initials — missing PDF text layer must not skip a page. */
+export function layoutHasPlaceableInitialsContent(_layout: Vs01PageTextLayout | null | undefined): boolean {
+  return true;
 }
 
 export function selectVerifiedInitialsRect(args: {

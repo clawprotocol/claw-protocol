@@ -7,7 +7,7 @@ import {
 } from "./vs01PrepareFieldPlacement";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import { fieldRectsOverlap, findNonOverlappingPrepareRect } from "./signingFields";
-import { verifyInitialsRectClear } from "./vs01InitialsSafeZone";
+import { verifyCanonicalInitialsRectClear } from "./vs01InitialsCanonicalPlacement";
 import { stampSenderFieldWithPrepareRole } from "./vs01SignerFieldAssignment";
 import {
   resolvePrepareSignerDisplayName,
@@ -45,6 +45,7 @@ describe("buildPrepareAutoInitialsEveryPage deconflict", () => {
         skippedPages: new Set(),
         existingFields: existing,
         valueCtx: { typedName: "O", initials: "O" },
+        signerCount: roles.length,
       });
       existing = [...existing, ...batch];
     }
@@ -59,7 +60,9 @@ describe("buildPrepareAutoInitialsEveryPage deconflict", () => {
       }
     }
     for (const f of existing) {
-      expect(verifyInitialsRectClear({ rect: f, pageLayout: null, fieldObstacles: [] }).ok).toBe(true);
+      expect(verifyCanonicalInitialsRectClear({ rect: f, pageLayout: null, fieldObstacles: [] }).ok).toBe(
+        true,
+      );
     }
   });
 
@@ -87,7 +90,9 @@ describe("buildPrepareAutoInitialsEveryPage deconflict", () => {
     });
     expect(autos.length).toBe(1);
     expect(fieldRectsOverlap(sig, autos[0]!)).toBe(false);
-    expect(verifyInitialsRectClear({ rect: autos[0]!, pageLayout: null, fieldObstacles: [sig] }).ok).toBe(true);
+    expect(
+      verifyCanonicalInitialsRectClear({ rect: autos[0]!, pageLayout: null, fieldObstacles: [sig] }).ok,
+    ).toBe(true);
   });
 
   it("re-running checkbox does not duplicate initials for same role/page", () => {

@@ -167,7 +167,7 @@ describe("VS01 placement test48 — witness page geometry", () => {
     expect(cp.x).toBeCloseTo(by[1]!.x, 2);
   });
 
-  it("places initials on witness page and skips footer-only page 5", () => {
+  it("places initials on every page including witness and footer-only last page", () => {
     const pdfLike = buildTest48PdfLikeLayouts();
     const owner = roles()[0]!;
     const initials = buildPrepareAutoInitialsEveryPage({
@@ -178,9 +178,12 @@ describe("VS01 placement test48 — witness page geometry", () => {
       valueCtx: { typedName: "Anthem H Blanchard", initials: "AB" },
       corpusText: TEST48_CORPUS,
       pageLayouts: pdfLike,
+      signerCount: 2,
     });
+    const pages = new Set(initials.map((f) => f.page));
     expect(initials.some((f) => f.page === WITNESS_PAGE_INDEX)).toBe(true);
-    expect(initials.some((f) => f.page === PAGE_COUNT - 1)).toBe(false);
+    expect(pages.has(PAGE_COUNT - 1)).toBe(true);
+    expect(pages.size).toBe(PAGE_COUNT);
   });
 
   it("prepare and recipient signing share the same geometry hash", () => {

@@ -10,7 +10,6 @@ import {
   pageLayoutForIndex,
   type Vs01PageTextLayout,
 } from "./vs01PageTextLayout";
-import { layoutHasPlaceableInitialsContent } from "./vs01InitialsSafeZone";
 
 export type Vs01InitialsPlacementMode = "placed_all_eligible" | "suppressed_document_wide";
 
@@ -58,35 +57,25 @@ export function resolveVs01InitialsPlacementPolicy(args: {
   const corpusLayouts =
     corpus.length >= 40 ? buildCorpusSimulatedPageLayouts(corpus, pageCount) : [];
   const dims = prepareAutoInitialsPlacementDims();
-  const eligiblePages: number[] = [];
+  const eligiblePages = Array.from({ length: pageCount }, (_, i) => i);
   const skippedPages: number[] = [];
-
-  for (let p = 0; p < pageCount; p += 1) {
-    const layout = pageLayoutForIndex(placementCtx.layouts, p);
-    const corpusPage = pageLayoutForIndex(corpusLayouts, p);
-    const effective = effectivePageLayout(layout, corpusPage);
-    if (!layoutHasPlaceableInitialsContent(effective)) {
-      skippedPages.push(p);
-      continue;
-    }
-    eligiblePages.push(p);
-  }
-
   const rectByPartyIndex = new Map<number, { x: number; y: number; width: number; height: number }>();
-  if (eligiblePages.length === 0 || args.partyIndices.length === 0) {
+  const signerCount = Math.max(1, args.partyIndices.length);
+
+  if (args.partyIndices.length === 0) {
     const policy: Vs01InitialsPlacementPolicy = {
       mode: "suppressed_document_wide",
       witnessPageIndex,
-      eligiblePages,
+      eligiblePages: [],
       placedPages: [],
       skippedPages,
-      suppressedReason: "no_eligible_pages",
+      suppressedReason: "no_signers",
       rectByPartyIndex,
     };
     logVs01InitialsPolicy({
       pageCount,
       witnessPageIndex,
-      eligiblePages,
+      eligiblePages: [],
       placedPages: [],
       skippedPages,
       mode: policy.mode,
@@ -95,57 +84,31 @@ export function resolveVs01InitialsPlacementPolicy(args: {
     return policy;
   }
 
-  let verifiedPages = 0;
   for (const partyIndex of args.partyIndices) {
-    for (const p of eligiblePages) {
-      const onPage = (args.existingFields ?? []).filter((f) => f.page === p);
-      const fieldObstacles = onPage.map((f) => ({
-        x: f.x,
-        y: f.y,
-        width: f.width,
-        height: f.height,
-      }));
-      const safe = findSafeInitialsRectOnPage({
-        page: p,
-        partyIndex,
-        pageLayout: effectivePageLayout(
-          pageLayoutForIndex(placementCtx.layouts, p),
-          pageLayoutForIndex(corpusLayouts, p),
-        ),
-        corpusText: args.corpusText,
-        fieldObstacles,
-        dims,
-        isSignaturePage: p === witnessPageIndex,
-      });
-      if (safe.rect) {
-        rectByPartyIndex.set(partyIndex, safe.rect);
-        verifiedPages += 1;
-        break;
-      }
-    }
-  }
-
-  if (rectByPartyIndex.size < args.partyIndices.length) {
-    const policy: Vs01InitialsPlacementPolicy = {
-      mode: "suppressed_document_wide",
-      witnessPageIndex,
-      eligiblePages,
-      placedPages: [],
-      skippedPages,
-      suppressedReason: "no_verified_safe_zone",
-      rectByPartyIndex: new Map(),
-    };
-    logVs01InitialsPolicy({
-      pageCount,
-      witnessPageIndex,
-      eligiblePages,
-      placedPages: [],
-      skippedPages,
-      mode: policy.mode,
-      reason: policy.suppressedReason,
-      verifiedPages,
+    const p = witnessPageIndex >= 0 ? witnessPageIndex : 0;
+    const onPage = (args.existingFields ?? []).filter((f) => f.page === p);
+    const fieldObstacles = onPage.map((f) => ({
+      x: f.x,
+      y: f.y,
+      width: f.width,
+      height: f.height,
+    }));
+    const safe = findSafeInitialsRectOnPage({
+      page: p,
+      partyIndex,
+      pageLayout: effectivePageLayout(
+        pageLayoutForIndex(placementCtx.layouts, p),
+        pageLayoutForIndex(corpusLayouts, p),
+      ),
+      corpusText: args.corpusText,
+      fieldObstacles,
+      dims,
+      isSignaturePage: true,
+      signerCount,
     });
-    return policy;
+    if (safe.rect) {
+      rectByPartyIndex.set(partyIndex, safe.rect);
+    }
   }
 
   const placedPages = [...eligiblePages];

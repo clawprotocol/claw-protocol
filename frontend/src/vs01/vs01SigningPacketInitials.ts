@@ -3,12 +3,8 @@
  */
 
 import type { PlacedSigningField } from "./signingFields";
-import {
-  initialsFieldsOverlapDocumentText,
-  layoutHasPlaceableInitialsContent,
-  textObstaclesForInitialsPlacement,
-  verifyInitialsRectClear,
-} from "./vs01InitialsSafeZone";
+import { verifyCanonicalInitialsRectClear } from "./vs01InitialsCanonicalPlacement";
+import { textObstaclesForInitialsPlacement } from "./vs01InitialsSafeZone";
 import { verifySignatureRectClear } from "./vs01SignaturePlacement";
 import { buildVs01PlacementContext } from "./vs01FieldGeometry";
 import {
@@ -84,8 +80,7 @@ export function planVs01InitialsPages(args: {
     const pdfLayout = pageLayoutForIndex(args.pageLayouts, p);
     const corpusLayout = pageLayoutForIndex(corpusLayouts, p);
     const effective = mergePageLayoutForInitials(pdfLayout, corpusLayout);
-    const eligible =
-      policy.eligiblePages.includes(p) && layoutHasPlaceableInitialsContent(effective);
+    const eligible = policy.eligiblePages.includes(p);
     const onPage = (args.existingFields ?? []).filter((f) => f.page === p);
     const plan: Vs01InitialsPagePlan = {
       page: p,
@@ -128,6 +123,7 @@ export function summarizeVs01SigningPacketInitials(args: {
     documentId: args.documentId,
     roleCount,
   });
+  const reconciledLayouts = placementCtx.layouts;
   const witnessPageIndex = placementCtx.witnessPageIndex ?? pageCount - 1;
   const corpusLayouts =
     (args.corpusText ?? "").trim().length >= 40
@@ -139,7 +135,7 @@ export function summarizeVs01SigningPacketInitials(args: {
   let unsafeInitialsCount = 0;
   let unsafeSignatureCount = 0;
   const witnessLayout = mergePageLayoutForInitials(
-    pageLayoutForIndex(args.pageLayouts, witnessPageIndex),
+    pageLayoutForIndex(reconciledLayouts, witnessPageIndex),
     pageLayoutForIndex(corpusLayouts, witnessPageIndex),
   );
   for (const sig of signatureFields) {
@@ -152,14 +148,17 @@ export function summarizeVs01SigningPacketInitials(args: {
   }
 
   for (const p of eligiblePages) {
-    const pdfLayout = pageLayoutForIndex(args.pageLayouts, p);
+    const pdfLayout = pageLayoutForIndex(reconciledLayouts, p);
     const corpusLayout = pageLayoutForIndex(corpusLayouts, p);
     const effective = mergePageLayoutForInitials(pdfLayout, corpusLayout);
     const onPage = args.fields.filter((f) => f.page === p);
-    const roleIdsWithInitials = new Set(
-      initialsFields.filter((f) => f.page === p).map((f) => (f.assignedSignerRoleId ?? "").trim()),
+    const partiesWithInitials = new Set(
+      initialsFields
+        .filter((f) => f.page === p)
+        .map((f) => f.assignedPartyIndex ?? -1)
+        .filter((idx) => idx >= 0),
     );
-    const placedCount = roleIdsWithInitials.size;
+    const placedCount = partiesWithInitials.size;
     pagesWithInitialsPerRole.push(placedCount);
 
     if (placedCount < roleCount) {
@@ -178,12 +177,13 @@ export function summarizeVs01SigningPacketInitials(args: {
       const fieldObstacles = onPage
         .filter((o) => o.id !== field.id)
         .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
-      const check = verifyInitialsRectClear({
+      const check = verifyCanonicalInitialsRectClear({
         rect: field,
         pageLayout: effective,
         fieldObstacles,
+        signerCount: roleCount,
       });
-      if (!check.ok || initialsFieldsOverlapDocumentText([field], effective ? [effective] : [])) {
+      if (!check.ok) {
         unsafeInitialsCount += 1;
       }
     }
@@ -209,11 +209,13 @@ export function summarizeVs01SigningPacketInitials(args: {
       initialsFields.length >= eligiblePages.length * roleCount,
   };
 
+  const initialsPagesPlaced = new Set(initialsFields.map((f) => f.page)).size;
   logVs01SigningPacketValidation({
     pageCount: summary.pageCount,
     signatureFieldCount: summary.signatureFieldCount,
-    initialsPagesExpected: eligiblePages.length * roleCount,
-    initialsPagesPlaced: initialsFields.length,
+    initialsPagesExpected: pageCount * roleCount,
+    initialsPagesPlaced,
+    initialsFieldsPlaced: initialsFields.length,
     unsafeInitialsCount: summary.unsafeInitialsCount,
     unsafeSignatureCount: summary.unsafeSignatureCount,
     witnessPageIndex: summary.witnessPageIndex,

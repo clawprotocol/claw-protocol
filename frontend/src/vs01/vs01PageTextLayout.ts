@@ -327,21 +327,11 @@ export function pageLayoutForIndex(
   return layouts.find((l) => l.pageIndex === pageIndex) ?? null;
 }
 
-function pdfPageIsFooterOnly(layout: Vs01PageTextLayout | null): boolean {
-  const rects = layout?.textRects ?? [];
-  if (rects.length === 0) return false;
-  if (rects.some((r) => r.kind === "body" || r.kind === "heading")) return false;
-  return rects.every((r) => r.kind === "footer" || r.y >= 0.9);
-}
-
 /** Prefer PDF text geometry; union with corpus when both carry body (avoids missed overlap). */
 export function mergePageLayoutForInitials(
   pdfLayout: Vs01PageTextLayout | null,
   corpusLayout: Vs01PageTextLayout | null,
 ): Vs01PageTextLayout | null {
-  if (pdfLayout && pdfPageIsFooterOnly(pdfLayout)) {
-    return pdfLayout;
-  }
   const pdfRects = pdfLayout?.textRects ?? [];
   const corpusRects = corpusLayout?.textRects ?? [];
   const pdfHasBody = pdfRects.some((r) => r.kind === "body" || r.kind === "heading");

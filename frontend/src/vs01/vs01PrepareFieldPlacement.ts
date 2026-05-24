@@ -27,7 +27,8 @@ import {
   findSafeInitialsRectOnPage,
   logVs01InitialsPageDecision,
 } from "./vs01FieldGeometry";
-import { layoutHasPlaceableInitialsContent, verifyInitialsRectClear } from "./vs01InitialsSafeZone";
+import { verifyCanonicalInitialsRectClear } from "./vs01InitialsCanonicalPlacement";
+import { layoutHasPlaceableInitialsContent } from "./vs01InitialsSafeZone";
 import {
   resolveVs01InitialsPlacementPolicy,
   type Vs01InitialsPlacementPolicy,
@@ -235,6 +236,8 @@ export function buildPrepareAutoInitialsEveryPage(args: {
   documentId?: string | null;
   /** When set, only eligible pages from document-wide policy are considered. */
   initialsPolicy?: Vs01InitialsPlacementPolicy | null;
+  /** Total signers (for bottom-right grid). Defaults to 2. */
+  signerCount?: number;
 }): PlacedSigningField[] {
   const dims = prepareAutoInitialsPlacementDims();
   const { width, height } = dims;
@@ -327,6 +330,7 @@ export function buildPrepareAutoInitialsEveryPage(args: {
       fieldObstacles,
       dims,
       isSignaturePage: p === witnessPage,
+      signerCount: args.signerCount ?? Math.max(2, partyIndex + 1),
     });
     const layout = {
       rect: safe.rect,
@@ -417,10 +421,11 @@ export function buildPrepareAutoInitialsEveryPage(args: {
         toY: resolved.y,
       });
     }
-    const clearCheck = verifyInitialsRectClear({
+    const clearCheck = verifyCanonicalInitialsRectClear({
       rect: resolved,
       pageLayout: pageLayoutForVisit,
       fieldObstacles: onPage,
+      signerCount: args.signerCount ?? 2,
     });
     if (!clearCheck.ok) {
       skipped += 1;
@@ -429,7 +434,11 @@ export function buildPrepareAutoInitialsEveryPage(args: {
         roleIdShort: roleId.slice(0, 16),
         partyIndex,
         decision: "skipped",
-        reason: clearCheck.overlapText ? "overlaps_document_text" : "overlaps_field",
+        reason: clearCheck.overlapText
+          ? "overlaps_document_text"
+          : clearCheck.overlapSignature
+            ? "overlaps_signature_field"
+            : "overlaps_footer",
       });
       continue;
     }
@@ -563,6 +572,7 @@ export function buildPrepareAutoInitialsForAllRoles(args: {
       pageLayouts: args.pageLayouts,
       documentId: args.documentId,
       initialsPolicy,
+      signerCount: args.roles.length,
     });
     out.push(...batch);
     placedSoFar = [...manual, ...out];

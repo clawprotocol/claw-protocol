@@ -21,11 +21,8 @@ import {
 } from "./vs01SignaturePlacement";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { getVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
-import {
-  selectVerifiedInitialsRect,
-  textObstaclesForInitialsPlacement,
-  yBelowPageText,
-} from "./vs01InitialsSafeZone";
+import { placeCanonicalInitialsRect } from "./vs01InitialsCanonicalPlacement";
+import { textObstaclesForInitialsPlacement, yBelowPageText } from "./vs01InitialsSafeZone";
 import {
   findSignatureLinePlacementsFromPageLayout,
   pageLayoutForIndex,
@@ -283,6 +280,8 @@ export function findSafeInitialsRectOnPage(args: {
   fieldObstacles: readonly { x: number; y: number; width: number; height: number }[];
   dims?: { width: number; height: number };
   isSignaturePage?: boolean;
+  /** Total signers on the agreement (for bottom-right grid spacing). */
+  signerCount?: number;
 }): {
   rect: { x: number; y: number; width: number; height: number } | null;
   anchorKind: Vs01FieldPlacementAnchorKind;
@@ -297,27 +296,28 @@ export function findSafeInitialsRectOnPage(args: {
     return { rect: null, anchorKind: "initials_suppressed" };
   }
 
-  const selected = selectVerifiedInitialsRect({
+  const placed = placeCanonicalInitialsRect({
     page: args.page,
-    partyIndex: args.partyIndex,
-    pageLayout: args.pageLayout,
+    signerIndex: args.partyIndex,
+    signerCount: Math.max(1, args.signerCount ?? 2),
     fieldObstacles: args.fieldObstacles,
+    pageLayout: args.pageLayout,
     dims,
-    isSignaturePage: args.isSignaturePage ?? false,
+    logPagePlan: args.partyIndex === 0,
   });
-  if (selected.rect) {
+  if (placed.rect) {
     logVs01InitialsFieldGenerated({
       page: args.page,
       partyIndex: args.partyIndex,
-      rect: selected.rect,
-      source: selected.candidate ?? "verified_safe_zone",
+      rect: placed.rect,
+      source: placed.shifted ? "canonical_bottom_right_shifted" : "canonical_bottom_right",
     });
-    return { rect: selected.rect, anchorKind: "initials_margin" };
+    return { rect: placed.rect, anchorKind: "initials_margin" };
   }
 
   logVs01InitialsPlacementSuppressed({
     page: args.page,
-    reason: "no_verified_safe_candidate",
+    reason: placed.missingReason ?? "canonical_placement_failed",
     partyIndex: args.partyIndex,
   });
   return { rect: null, anchorKind: "initials_suppressed" };

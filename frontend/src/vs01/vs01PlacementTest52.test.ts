@@ -8,10 +8,7 @@ import {
   formatVs01InitialsOnlyStatusLine,
   summarizeVs01SigningPacketInitials,
 } from "./vs01SigningPacketInitials";
-import {
-  initialsFieldsOverlapDocumentText,
-  verifyInitialsRectClear,
-} from "./vs01InitialsSafeZone";
+import { verifyCanonicalInitialsRectClear } from "./vs01InitialsCanonicalPlacement";
 import {
   buildCorpusSimulatedPageLayouts,
   findSignatureLinePlacementsFromPageLayout,
@@ -95,14 +92,13 @@ describe("VS01 placement test52", () => {
         pageLayoutForIndex(pageLayouts, field.page),
         pageLayoutForIndex(buildCorpusSimulatedPageLayouts(corpus, PAGE_COUNT), field.page),
       );
-      const check = verifyInitialsRectClear({
+      const check = verifyCanonicalInitialsRectClear({
         rect: field,
         pageLayout: layout,
         fieldObstacles: signatures.filter((s) => s.page === field.page),
       });
       expect(check.ok, `page ${field.page + 1}`).toBe(true);
     }
-    expect(initialsFieldsOverlapDocumentText(initials, pageLayouts)).toBe(false);
   });
 
   it("prepare status does not claim initials are safe when pages are incomplete", () => {
