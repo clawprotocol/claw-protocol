@@ -3,10 +3,13 @@ import {
   computeInitialsDomPlacementNormalized,
   computeInitialsDomPlacementPx,
   domPlacementPxToNormalized,
+  checkInitialsDomTextCollisions,
+  initialsReservedBandForPage,
   validateInitialsDomPlacement,
   VS01_INITIALS_DOM_BOTTOM_MARGIN_PX,
   VS01_INITIALS_DOM_BOX_HEIGHT_PX,
   VS01_INITIALS_DOM_BOX_WIDTH_PX,
+  VS01_INITIALS_RESERVED_BOTTOM_BAND_PX,
   VS01_INITIALS_DOM_RIGHT_MARGIN_PX,
   VS01_INITIALS_DOM_SIGNER_GAP_PX,
 } from "./vs01InitialsDomPlacement";
@@ -14,6 +17,7 @@ import { buildPrepareAutoInitialsForAllRoles } from "./vs01PrepareFieldPlacement
 import { buildCorpusSimulatedPageLayouts } from "./vs01PageTextLayout";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import { findSafeInitialsRectOnPage } from "./vs01FieldGeometry";
+import { summarizeVs01SigningPacketInitials } from "./vs01SigningPacketInitials";
 
 const PAGE_W = 816;
 const PAGE_H = 1056;
@@ -60,6 +64,42 @@ describe("vs01InitialsDomPlacement", () => {
     expect(norm.y).toBeGreaterThan(0.88);
     expect(norm.width).toBeCloseTo(VS01_INITIALS_DOM_BOX_WIDTH_PX / PAGE_W, 3);
     expect(norm.height).toBeCloseTo(VS01_INITIALS_DOM_BOX_HEIGHT_PX / PAGE_H, 3);
+  });
+
+  it("keeps initials inside the reserved footer band", () => {
+    const px = computeInitialsDomPlacementPx({
+      pageWidth: PAGE_W,
+      pageHeight: PAGE_H,
+      signerIndex: 1,
+      signerCount: 2,
+    });
+    const band = initialsReservedBandForPage(PAGE_H);
+    expect(band.reservedBottomPx).toBe(VS01_INITIALS_RESERVED_BOTTOM_BAND_PX);
+    expect(px.top).toBeGreaterThanOrEqual(band.contentBottomLimit);
+  });
+
+  it("detects mocked text collisions inside the initials band", () => {
+    const px = computeInitialsDomPlacementPx({
+      pageWidth: PAGE_W,
+      pageHeight: PAGE_H,
+      signerIndex: 1,
+      signerCount: 2,
+    });
+    const collision = checkInitialsDomTextCollisions({
+      placement: px,
+      pageWidth: PAGE_W,
+      pageHeight: PAGE_H,
+      textRects: [
+        {
+          x: px.left / PAGE_W,
+          y: px.top / PAGE_H,
+          width: px.width / PAGE_W,
+          height: px.height / PAGE_H,
+        },
+      ],
+    });
+    expect(collision.collisionCount).toBe(1);
+    expect(collision.worstOverlapPx).toBeGreaterThan(0);
   });
 
   it("does not overlap adjacent signer boxes", () => {
@@ -146,5 +186,50 @@ describe("vs01InitialsDomPlacement", () => {
     const b = computeInitialsDomPlacementNormalized({ signerIndex: 0, signerCount: 2 });
     expect(a.x).toBeCloseTo(b.x, 4);
     expect(a.y).toBeCloseTo(b.y, 4);
+  });
+
+  it("packet validation fails when a mocked text rect intersects initials", () => {
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_collision",
+      creatorName: "Acme LLC",
+      creatorEmail: "a@acme.com",
+      ownerSignerName: "Anthem",
+      counterparties: [{ id: "cp1", name: "Joe", email: "j@j.com" }],
+    });
+    const pageCount = 1;
+    const initials = buildPrepareAutoInitialsForAllRoles({
+      roles,
+      pageCount,
+      skippedSlots: new Set(),
+      existingFields: [],
+      valueCtxForRole: () => ({ typedName: "A", initials: "AB" }),
+      corpusText: "Agreement body.\n\nIN WITNESS WHEREOF\nBy: ___",
+      pageLayouts: [],
+    });
+    const rightmost = computeInitialsDomPlacementNormalized({ signerIndex: 1, signerCount: 2 });
+    const summary = summarizeVs01SigningPacketInitials({
+      fields: initials,
+      pageCount,
+      roleCount: roles.length,
+      partyIndices: roles.map((r) => r.partyIndex),
+      pageLayouts: [
+        {
+          pageIndex: 0,
+          source: "pdf",
+          textRects: [
+            {
+              x: rightmost.x,
+              y: rightmost.y,
+              width: rightmost.width,
+              height: rightmost.height,
+              text: "Mocked text in initials band",
+              kind: "body",
+            },
+          ],
+        },
+      ],
+    });
+    expect(summary.unsafeInitialsCount).toBeGreaterThan(0);
+    expect(summary.complete).toBe(false);
   });
 });

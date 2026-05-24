@@ -37,6 +37,7 @@ export type RecipientSigningFieldOverlayProps = {
   onUpdateValue: (fieldId: string, value: string) => void;
   signerCount?: number;
   pageFieldObstacles?: readonly { x: number; y: number; width: number; height: number }[];
+  pageTextRects?: readonly { x: number; y: number; width: number; height: number }[];
 };
 
 export function RecipientSigningFieldOverlay({
@@ -48,6 +49,7 @@ export function RecipientSigningFieldOverlay({
   onUpdateValue,
   signerCount = 2,
   pageFieldObstacles = [],
+  pageTextRects = [],
 }: RecipientSigningFieldOverlayProps) {
   const useDomInitials = field.type === "initials" && field.autoInitials === true;
   const percentStyle = normalizedPdfRectToCssPercent(field);
@@ -253,6 +255,7 @@ export function RecipientSigningFieldOverlay({
         signerCount={signerCount}
         normalizedFallback={field}
         fieldObstacles={pageFieldObstacles}
+        textRects={pageTextRects}
         className={`${boxClass} vs01-recipient-initials-slot`}
         styleExtras={{
           zIndex: isMine ? 4 : 2,

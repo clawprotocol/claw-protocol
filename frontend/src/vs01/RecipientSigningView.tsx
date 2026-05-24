@@ -15,6 +15,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 import { fetchDocumentContent } from "./vs01Api";
 import { setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { extractPdfPageLayoutsFromBlob } from "./vs01PdfPageLayout";
+import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
 import type {
   Vs01Counterparty,
   Vs01RecipientPlacedField,
@@ -222,6 +223,7 @@ export function RecipientSigningView({
   const [currentPage, setCurrentPage] = useState(1);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [pageLayouts, setPageLayouts] = useState<Vs01PageTextLayout[] | null>(null);
 
   const pagesInnerRef = useRef<HTMLDivElement>(null);
   const [pageRenderWidth, setPageRenderWidth] = useState(520);
@@ -235,6 +237,7 @@ export function RecipientSigningView({
       if (!documentId?.trim()) {
         setPdfUrl(null);
         setPreviewError(null);
+        setPageLayouts(null);
         setPreviewLoading(false);
         return;
       }
@@ -248,14 +251,19 @@ export function RecipientSigningView({
         setPdfUrl(objectUrl);
         try {
           const layouts = await extractPdfPageLayoutsFromBlob(blob);
-          if (!cancelled) setVs01DocumentPageLayouts(documentId.trim(), layouts);
+          if (!cancelled) {
+            setPageLayouts(layouts);
+            setVs01DocumentPageLayouts(documentId.trim(), layouts);
+          }
         } catch {
+          if (!cancelled) setPageLayouts(null);
           /* layout extraction is best-effort; manifest rects are authoritative */
         }
       } catch (e) {
         if (!cancelled) {
           setPdfUrl(null);
           setPreviewError(e instanceof Error ? e.message : String(e));
+          setPageLayouts(null);
         }
       } finally {
         if (!cancelled) setPreviewLoading(false);
@@ -543,6 +551,7 @@ export function RecipientSigningView({
                             );
                             const hasRecipientOnPage = fieldsHere.length > 0;
                             const hasSenderOnPage = senderFieldsHere.length > 0;
+                            const pageTextRects = pageLayouts?.find((layout) => layout.pageIndex === p)?.textRects ?? [];
                             return (
                               <div
                                 key={p}
@@ -619,6 +628,7 @@ export function RecipientSigningView({
                                                 width: f.width,
                                                 height: f.height,
                                               }))}
+                                            pageTextRects={pageTextRects}
                                           />
                                         ))}
                                       </div>

@@ -1696,6 +1696,7 @@ export function StepPrepareSignature({
                                 if (b.id === selectedFieldId) return -1;
                                 return 0;
                               });
+                            const pageTextRects = pageLayouts?.find((layout) => layout.pageIndex === p)?.textRects ?? [];
                             return (
                               <div
                                 key={p}
@@ -1976,6 +1977,7 @@ export function StepPrepareSignature({
                                           signerCount={Math.max(1, prepareSignerRoles?.length ?? 2)}
                                           normalizedFallback={field}
                                           fieldObstacles={pageObstacles}
+                                          textRects={pageTextRects}
                                           className={boxClassName}
                                           styleExtras={{ zIndex: isSel ? 4 : 3 }}
                                         >

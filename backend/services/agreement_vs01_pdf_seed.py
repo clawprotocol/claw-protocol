@@ -14,12 +14,12 @@ log = logging.getLogger(__name__)
 _MAX_HTML_CHARS: Final[int] = 1_200_000
 _MAX_STORY_PAGES: Final[int] = 400
 
-# US Letter Story layout: asymmetric bottom inset reserves space for rendered footer + VS01 gray
-# auto-initials (never overlap agreement body). Sides/top stay ~0.56in; bottom ~1in per product spec.
+# US Letter Story layout: asymmetric bottom inset reserves space for the VS01 initials band
+# (76x48px boxes, labels/shadow, and bottom margin) so agreement body never flows beneath initials.
 VS01_SIGNING_STORY_MARGIN_LEFT_PT: Final[int] = 40
 VS01_SIGNING_STORY_MARGIN_TOP_PT: Final[int] = 40
 VS01_SIGNING_STORY_MARGIN_RIGHT_PT: Final[int] = 40
-VS01_SIGNING_STORY_MARGIN_BOTTOM_PT: Final[int] = 72
+VS01_SIGNING_STORY_MARGIN_BOTTOM_PT: Final[int] = 120
 
 
 def _import_fitz_module() -> Optional[Any]:
@@ -111,11 +111,11 @@ StoryCssProfile = Literal["vs01", "recipient"]
 
 def _vs01_signing_story_user_css() -> str:
     """
-    CSS for PyMuPDF Story: Letter @page with ~1in bottom reserve (footer + VS01 gray auto-initials),
+    CSS for PyMuPDF Story: Letter @page with a dedicated VS01 initials footer reserve,
     plus body typography and draft footer stability.
     """
     return (
-        "@page{size:letter;margin:40pt 40pt 72pt 40pt;}"
+        f"@page{{size:letter;margin:40pt 40pt {VS01_SIGNING_STORY_MARGIN_BOTTOM_PT}pt 40pt;}}"
         "body{font-family:Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.35;"
         "margin:0;padding:0;}"
         "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"

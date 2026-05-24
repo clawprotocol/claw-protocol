@@ -3510,6 +3510,7 @@ button.vs01-upload-btn:disabled {
   position: relative;
   display: inline-block;
   max-width: 100%;
+  --vs01-initials-reserved-band: 120px;
 }
 
 /**
@@ -3519,13 +3520,13 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-page-surface--footer-safe {
   isolation: isolate;
   box-shadow:
-    inset 0 -5.5rem 3.5rem -1rem rgba(255, 255, 255, 0.92),
+    inset 0 calc(-1 * var(--vs01-initials-reserved-band)) 4.5rem -1rem rgba(255, 255, 255, 0.96),
     inset 0 -1.25rem 1.5rem rgba(255, 255, 255, 0.55);
 }
 
 .vs01-sign-doc-surface .vs01-sign-page-surface--footer-safe {
   box-shadow:
-    inset 0 -5.5rem 3.5rem -1rem rgba(250, 248, 245, 0.93),
+    inset 0 calc(-1 * var(--vs01-initials-reserved-band)) 4.5rem -1rem rgba(250, 248, 245, 0.96),
     inset 0 -1.25rem 1.5rem rgba(250, 248, 245, 0.58);
 }
 
@@ -3539,7 +3540,7 @@ button.vs01-upload-btn:disabled {
   left: 0;
   right: 0;
   bottom: 0;
-  height: clamp(2.65rem, 15%, 5.25rem);
+  height: min(var(--vs01-initials-reserved-band), 18%);
   z-index: 1;
   pointer-events: none;
   background: linear-gradient(

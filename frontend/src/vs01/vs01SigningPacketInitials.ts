@@ -2,10 +2,14 @@
  * Per-page VS01 initials placement planning and packet validation.
  */
 
-import type { PlacedSigningField } from "./signingFields";
+import { fieldRectsOverlap, type PlacedSigningField } from "./signingFields";
 import {
+  checkInitialsDomTextCollisions,
   computeInitialsDomPlacementPx,
+  initialsReservedBandForPage,
   initialsDomSignerColumn,
+  logVs01InitialsReservedBand,
+  logVs01InitialsTextCollisionCheck,
   validateInitialsDomPlacement,
   VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
   VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
@@ -154,7 +158,17 @@ export function summarizeVs01SigningPacketInitials(args: {
   }
 
   for (const p of eligiblePages) {
+    const pdfLayout = pageLayoutForIndex(reconciledLayouts, p);
+    const corpusLayout = pageLayoutForIndex(corpusLayouts, p);
+    const effective = mergePageLayoutForInitials(pdfLayout, corpusLayout);
     const onPage = args.fields.filter((f) => f.page === p);
+    const band = initialsReservedBandForPage(VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX);
+    logVs01InitialsReservedBand({
+      page: p,
+      reservedBottomPx: band.reservedBottomPx,
+      pageHeight: VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+      contentBottomLimit: band.contentBottomLimit,
+    });
     const partiesWithInitials = new Set(
       initialsFields
         .filter((f) => f.page === p)
@@ -194,10 +208,39 @@ export function summarizeVs01SigningPacketInitials(args: {
         page: p,
         signerIndex: partyIndex,
         placement: dom,
+        pageHeight: VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
         isRightmostInRow: colFromRight === 0,
         shiftedForSignature: dom.bottomDistance > 96,
       });
+      const textCollision = checkInitialsDomTextCollisions({
+        placement: dom,
+        pageWidth: VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX,
+        pageHeight: VS01_INITIALS_DOM_REFERENCE_PAGE_HEIGHT_PX,
+        textRects: effective?.textRects ?? [],
+      });
+      logVs01InitialsTextCollisionCheck({
+        page: p,
+        signerIndex: partyIndex,
+        initialsRect: {
+          left: dom.left,
+          top: dom.top,
+          width: dom.width,
+          height: dom.height,
+        },
+        textRectCount: effective?.textRects.length ?? 0,
+        collisionCount: textCollision.collisionCount,
+        worstOverlapPx: textCollision.worstOverlapPx,
+      });
       if (!domCheck.passed) {
+        unsafeInitialsCount += 1;
+      }
+      if (textCollision.collisionCount > 0) {
+        unsafeInitialsCount += 1;
+      }
+      const hitsSignature = onPage.some(
+        (o) => o.id !== field.id && o.type === "signature" && fieldRectsOverlap(field, o, 0.012),
+      );
+      if (hitsSignature) {
         unsafeInitialsCount += 1;
       }
     }

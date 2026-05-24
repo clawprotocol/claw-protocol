@@ -13,6 +13,9 @@ export const VS01_INITIALS_DOM_RIGHT_MARGIN_PX = 64;
 export const VS01_INITIALS_DOM_BOTTOM_MARGIN_PX = 64;
 export const VS01_INITIALS_DOM_SIGNER_GAP_PX = 12;
 export const VS01_INITIALS_DOM_MAX_COLS = 2;
+export const VS01_INITIALS_RESERVED_BOTTOM_BAND_PX = 120;
+export const VS01_INITIALS_DOM_COMPACT_BOX_WIDTH_PX = 72;
+export const VS01_INITIALS_DOM_COMPACT_BOX_HEIGHT_PX = 42;
 
 /** US Letter reference for persisted normalized geometry (72dpi). */
 export const VS01_INITIALS_DOM_REFERENCE_PAGE_WIDTH_PX = 612;
@@ -58,6 +61,30 @@ export function logVs01InitialsDomPlacementFail(payload: Record<string, unknown>
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.warn("[vs01-initials-dom-placement-fail]", payload);
+}
+
+export function logVs01InitialsReservedBand(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-initials-reserved-band]", payload);
+}
+
+export function logVs01InitialsTextCollisionCheck(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-initials-text-collision-check]", payload);
+}
+
+export function logVs01InitialsOverlapPrevented(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-initials-overlap-prevented]", payload);
+}
+
+export function logVs01InitialsOverlapFail(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[vs01-initials-overlap-fail]", payload);
 }
 
 export function initialsDomSignerColumn(signerIndex: number, signerCount: number): {
@@ -124,6 +151,179 @@ export function computeInitialsDomPlacementPx(
   return { left, top, width: boxWidth, height: boxHeight, rightDistance, bottomDistance };
 }
 
+export type Vs01InitialsTextCollisionSummary = {
+  collisionCount: number;
+  worstOverlapPx: number;
+};
+
+export function initialsReservedBandForPage(pageHeight: number): {
+  reservedBottomPx: number;
+  contentBottomLimit: number;
+} {
+  const h = Math.max(1, pageHeight);
+  const reservedBottomPx = Math.min(VS01_INITIALS_RESERVED_BOTTOM_BAND_PX, Math.max(0, h - 1));
+  return {
+    reservedBottomPx,
+    contentBottomLimit: h - reservedBottomPx,
+  };
+}
+
+function pxRectsOverlap(
+  a: Pick<Vs01InitialsDomPlacementPx, "left" | "top" | "width" | "height">,
+  b: Pick<Vs01InitialsDomPlacementPx, "left" | "top" | "width" | "height">,
+): { overlaps: boolean; overlapPx: number } {
+  const x = Math.max(0, Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left));
+  const y = Math.max(0, Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top));
+  return { overlaps: x > 0 && y > 0, overlapPx: Math.max(x, y) };
+}
+
+function normalizedTextRectToPagePx(
+  rect: Vs01NormalizedRect,
+  pageWidth: number,
+  pageHeight: number,
+): Vs01InitialsDomPlacementPx {
+  const left = rect.x * pageWidth;
+  const top = rect.y * pageHeight;
+  const width = rect.width * pageWidth;
+  const height = rect.height * pageHeight;
+  return {
+    left,
+    top,
+    width,
+    height,
+    rightDistance: pageWidth - left - width,
+    bottomDistance: pageHeight - top - height,
+  };
+}
+
+export function checkInitialsDomTextCollisions(args: {
+  placement: Pick<Vs01InitialsDomPlacementPx, "left" | "top" | "width" | "height">;
+  pageWidth: number;
+  pageHeight: number;
+  textRects?: readonly Vs01NormalizedRect[];
+}): Vs01InitialsTextCollisionSummary {
+  const textRects = args.textRects ?? [];
+  let collisionCount = 0;
+  let worstOverlapPx = 0;
+  for (const rect of textRects) {
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    const textPx = normalizedTextRectToPagePx(rect, args.pageWidth, args.pageHeight);
+    const hit = pxRectsOverlap(args.placement, textPx);
+    if (!hit.overlaps) continue;
+    collisionCount += 1;
+    worstOverlapPx = Math.max(worstOverlapPx, hit.overlapPx);
+  }
+  return { collisionCount, worstOverlapPx };
+}
+
+function placementWithBox(
+  placement: Vs01InitialsDomPlacementPx,
+  boxWidth: number,
+  boxHeight: number,
+  pageWidth: number,
+  pageHeight: number,
+): Vs01InitialsDomPlacementPx {
+  const rightDistance = placement.rightDistance;
+  const bottomDistance = placement.bottomDistance;
+  const left = pageWidth - rightDistance - boxWidth;
+  const top = pageHeight - bottomDistance - boxHeight;
+  return { left, top, width: boxWidth, height: boxHeight, rightDistance, bottomDistance };
+}
+
+export function resolveInitialsDomTextOverlap(args: {
+  page: number;
+  signerIndex: number;
+  placement: Vs01InitialsDomPlacementPx;
+  pageWidth: number;
+  pageHeight: number;
+  textRects?: readonly Vs01NormalizedRect[];
+}): { placement: Vs01InitialsDomPlacementPx; collision: Vs01InitialsTextCollisionSummary; strategy: string | null } {
+  const { contentBottomLimit } = initialsReservedBandForPage(args.pageHeight);
+  const fitsBand = (p: Vs01InitialsDomPlacementPx) =>
+    p.top >= contentBottomLimit &&
+    p.left >= 0 &&
+    p.top >= 0 &&
+    p.left + p.width <= args.pageWidth &&
+    p.top + p.height <= args.pageHeight;
+  const candidates: Array<{ strategy: string | null; placement: Vs01InitialsDomPlacementPx }> = [
+    { strategy: null, placement: args.placement },
+  ];
+
+  const down = {
+    ...args.placement,
+    top: Math.min(
+      args.pageHeight - args.placement.height - VS01_INITIALS_DOM_BOTTOM_MIN_PX,
+      args.placement.top + 16,
+    ),
+  };
+  down.bottomDistance = args.pageHeight - down.top - down.height;
+  candidates.push({ strategy: "shift_down_inside_reserved_band", placement: down });
+
+  const right = {
+    ...args.placement,
+    left: Math.min(
+      args.pageWidth - args.placement.width - VS01_INITIALS_DOM_RIGHT_MIN_PX,
+      args.placement.left + 16,
+    ),
+  };
+  right.rightDistance = args.pageWidth - right.left - right.width;
+  candidates.push({ strategy: "shift_right_inside_reserved_band", placement: right });
+
+  candidates.push({
+    strategy: "compact_box_inside_reserved_band",
+    placement: placementWithBox(
+      args.placement,
+      VS01_INITIALS_DOM_COMPACT_BOX_WIDTH_PX,
+      VS01_INITIALS_DOM_COMPACT_BOX_HEIGHT_PX,
+      args.pageWidth,
+      args.pageHeight,
+    ),
+  });
+
+  let best = candidates[0]!;
+  let bestCollision = checkInitialsDomTextCollisions({
+    placement: best.placement,
+    pageWidth: args.pageWidth,
+    pageHeight: args.pageHeight,
+    textRects: args.textRects,
+  });
+
+  for (const candidate of candidates) {
+    if (!fitsBand(candidate.placement)) continue;
+    const collision = checkInitialsDomTextCollisions({
+      placement: candidate.placement,
+      pageWidth: args.pageWidth,
+      pageHeight: args.pageHeight,
+      textRects: args.textRects,
+    });
+    if (collision.collisionCount === 0) {
+      if (candidate.strategy) {
+        logVs01InitialsOverlapPrevented({
+          page: args.page,
+          signerIndex: args.signerIndex,
+          strategy: candidate.strategy,
+        });
+      }
+      return { placement: candidate.placement, collision, strategy: candidate.strategy };
+    }
+    if (
+      collision.collisionCount < bestCollision.collisionCount ||
+      (collision.collisionCount === bestCollision.collisionCount &&
+        collision.worstOverlapPx < bestCollision.worstOverlapPx)
+    ) {
+      best = candidate;
+      bestCollision = collision;
+    }
+  }
+
+  logVs01InitialsOverlapFail({
+    page: args.page,
+    signerIndex: args.signerIndex,
+    reason: "text_collision_in_reserved_band",
+  });
+  return { placement: best.placement, collision: bestCollision, strategy: best.strategy };
+}
+
 export function domPlacementPxToNormalized(
   px: Pick<Vs01InitialsDomPlacementPx, "left" | "top" | "width" | "height">,
   pageWidth: number,
@@ -155,6 +355,7 @@ export function validateInitialsDomPlacement(args: {
   page: number;
   signerIndex: number;
   placement: Vs01InitialsDomPlacementPx;
+  pageHeight?: number;
   isRightmostInRow?: boolean;
   shiftedForSignature?: boolean;
 }): { passed: boolean; reason?: string } {
@@ -169,6 +370,22 @@ export function validateInitialsDomPlacement(args: {
   }
   if (placement.left < -1 || placement.top < -1) {
     return { passed: false, reason: "outside_page" };
+  }
+
+  if (args.pageHeight != null) {
+    const { contentBottomLimit } = initialsReservedBandForPage(args.pageHeight);
+    if (placement.top < contentBottomLimit - 1) {
+      logVs01InitialsDomPlacementFail({
+        page: args.page,
+        signerIndex: args.signerIndex,
+        reason: "outside_reserved_band",
+        expectedRightPx: VS01_INITIALS_DOM_RIGHT_MARGIN_PX,
+        actualRightPx: placement.rightDistance,
+        expectedBottomPx: VS01_INITIALS_DOM_BOTTOM_MARGIN_PX,
+        actualBottomPx: placement.bottomDistance,
+      });
+      return { passed: false, reason: "outside_reserved_band" };
+    }
   }
 
   if (isRightmostInRow) {

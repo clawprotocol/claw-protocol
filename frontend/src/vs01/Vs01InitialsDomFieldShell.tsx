@@ -11,6 +11,7 @@ export type Vs01InitialsDomFieldShellProps = {
   signerCount: number;
   normalizedFallback: Vs01NormalizedRect;
   fieldObstacles?: readonly Vs01NormalizedRect[];
+  textRects?: readonly Vs01NormalizedRect[];
   className?: string;
   styleExtras?: CSSProperties;
   children: ReactNode;
@@ -26,6 +27,7 @@ export function Vs01InitialsDomFieldShell({
   signerCount,
   normalizedFallback,
   fieldObstacles,
+  textRects,
   className,
   styleExtras,
   children,
@@ -49,6 +51,7 @@ export function Vs01InitialsDomFieldShell({
     signerIndex,
     signerCount,
     fieldObstacles,
+    textRects,
     placementHost,
   });
 

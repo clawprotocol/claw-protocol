@@ -4,7 +4,11 @@ import {
   computeInitialsDomPlacementPx,
   initialsDomPlacementCssStyle,
   initialsDomSignerColumn,
+  initialsReservedBandForPage,
   logInitialsDomPlacementForPage,
+  logVs01InitialsReservedBand,
+  logVs01InitialsTextCollisionCheck,
+  resolveInitialsDomTextOverlap,
   validateInitialsDomPlacement,
   VS01_INITIALS_DOM_BOTTOM_MAX_PX,
 } from "./vs01InitialsDomPlacement";
@@ -15,6 +19,7 @@ export function useVs01InitialsDomOverlayStyle(args: {
   signerIndex: number;
   signerCount: number;
   fieldObstacles?: readonly Vs01NormalizedRect[];
+  textRects?: readonly Vs01NormalizedRect[];
   placementHost: HTMLElement | null;
 }): CSSProperties | null {
   const [style, setStyle] = useState<CSSProperties | null>(null);
@@ -31,8 +36,15 @@ export function useVs01InitialsDomOverlayStyle(args: {
       const pageWidth = host.clientWidth;
       const pageHeight = host.clientHeight;
       if (pageWidth < 8 || pageHeight < 8) return;
+      const band = initialsReservedBandForPage(pageHeight);
+      logVs01InitialsReservedBand({
+        page: args.page,
+        reservedBottomPx: band.reservedBottomPx,
+        pageHeight,
+        contentBottomLimit: band.contentBottomLimit,
+      });
 
-      const dom = computeInitialsDomPlacementPx({
+      const initialDom = computeInitialsDomPlacementPx({
         pageWidth,
         pageHeight,
         signerIndex: args.signerIndex,
@@ -40,6 +52,15 @@ export function useVs01InitialsDomOverlayStyle(args: {
         fieldObstacles: args.fieldObstacles,
         allowSignatureShift: true,
       });
+      const resolved = resolveInitialsDomTextOverlap({
+        page: args.page,
+        signerIndex: args.signerIndex,
+        placement: initialDom,
+        pageWidth,
+        pageHeight,
+        textRects: args.textRects,
+      });
+      const dom = resolved.placement;
 
       const { colFromRight } = initialsDomSignerColumn(args.signerIndex, args.signerCount);
       const isRightmost = colFromRight === 0;
@@ -48,8 +69,22 @@ export function useVs01InitialsDomOverlayStyle(args: {
         page: args.page,
         signerIndex: args.signerIndex,
         placement: dom,
+        pageHeight,
         isRightmostInRow: isRightmost,
         shiftedForSignature: shifted,
+      });
+      logVs01InitialsTextCollisionCheck({
+        page: args.page,
+        signerIndex: args.signerIndex,
+        initialsRect: {
+          left: dom.left,
+          top: dom.top,
+          width: dom.width,
+          height: dom.height,
+        },
+        textRectCount: args.textRects?.length ?? 0,
+        collisionCount: resolved.collision.collisionCount,
+        worstOverlapPx: resolved.collision.worstOverlapPx,
       });
       logInitialsDomPlacementForPage({
         page: args.page,
@@ -73,6 +108,7 @@ export function useVs01InitialsDomOverlayStyle(args: {
     args.signerCount,
     args.placementHost,
     args.fieldObstacles,
+    args.textRects,
   ]);
 
   return style;
