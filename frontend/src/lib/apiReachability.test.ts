@@ -4,6 +4,7 @@ import { getApiReachabilityState, probeApiHealth } from "./apiReachability";
 vi.mock("./clawApi", () => ({
   apiUrl: (p: string) => `http://127.0.0.1:8000${p}`,
   getApiBase: () => "",
+  getLawDogApiBase: () => "http://127.0.0.1:8000",
   resolveApiBase: () => "http://127.0.0.1:8000",
   isProductionApiMisconfigured: () => false,
 }));

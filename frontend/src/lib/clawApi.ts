@@ -5,6 +5,7 @@ const DEV_API_FALLBACK = "http://127.0.0.1:8000";
 export const CLAW_PUBLIC_API_BASE_WINDOW_KEY = "__CLAW_PUBLIC_API_BASE__" as const;
 
 let loggedApiBaseOnce = false;
+const loggedNormalizeKeys = new Set<string>();
 
 function getRuntimePublicApiBase(): string {
   if (typeof window === "undefined") return "";
@@ -73,10 +74,55 @@ function isPrivateLanHost(h: string): boolean {
   return false;
 }
 
+export function isLocalBrowserOrigin(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return isLoopbackHost(new URL(window.location.origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * When the SPA is opened on localhost / 127.0.0.1 (including `vite preview`),
+ * rewrite LAN or 0.0.0.0 API hosts to loopback so the browser can reach the backend.
+ */
+export function normalizeLocalApiBase(raw: string, caller = "unknown"): string {
+  const trimmed = String(raw ?? "").trim().replace(/\/$/, "");
+  if (!trimmed) return trimmed;
+  if (!isLocalBrowserOrigin()) return trimmed;
+  try {
+    const u = new URL(trimmed);
+    const needsLoopback =
+      isPrivateLanHost(u.hostname) || u.hostname === "0.0.0.0" || u.hostname === "[::]";
+    if (!needsLoopback) return trimmed;
+    const normalized = `${u.protocol}//127.0.0.1${u.port ? `:${u.port}` : ""}`;
+    const logKey = `${trimmed}|${normalized}|${caller}`;
+    if (!loggedNormalizeKeys.has(logKey)) {
+      loggedNormalizeKeys.add(logKey);
+      // eslint-disable-next-line no-console
+      console.warn("[lawdog-api-base-raw-blocked]", {
+        raw: trimmed,
+        caller,
+      });
+      // eslint-disable-next-line no-console
+      console.info("[lawdog-api-base-normalized]", {
+        from: trimmed,
+        to: normalized,
+        origin: window.location.origin,
+        caller,
+      });
+    }
+    return normalized;
+  } catch {
+    return trimmed;
+  }
+}
+
 /**
  * Explicit API origin from env (VITE_CLAW_API_BASE or VITE_API_BASE).
  * Empty string = same-origin requests (production API on the same host as the SPA).
- * @see getRuntimePublicApiBase — use resolveApiBase() in requests so runtime injection can apply.
+ * @see getRuntimePublicApiBase — use getLawDogApiBase() in requests so runtime injection can apply.
  */
 export function getApiBase(): string {
   const a = String((import.meta.env.VITE_CLAW_API_BASE as string | undefined) ?? "").trim();
@@ -85,40 +131,32 @@ export function getApiBase(): string {
 }
 
 /**
- * Resolved base URL for fetch() to the LawDog API.
- * - Production: uses explicit env only, or "" for same-origin (no silent localhost).
- * - Dev: falls back to 127.0.0.1:8000 when unset (local backend).
+ * Canonical resolved API origin for all LawDog frontend fetch() calls.
  */
-export function resolveApiBase(): string {
-  const explicit = getApiBase() || getRuntimePublicApiBase();
+export function getLawDogApiBase(): string {
+  const rawEnv = getApiBase();
+  const rawRuntime = getRuntimePublicApiBase();
+  const explicit = rawEnv || rawRuntime;
   if (explicit) {
-    logApiBaseResolvedOnce(explicit, getApiBase() ? "env" : "runtime_meta");
-    if (!import.meta.env.PROD && typeof window !== "undefined") {
-      try {
-        const originHost = new URL(window.location.origin).hostname;
-        const u = new URL(explicit);
-        if (isLoopbackHost(originHost) && isPrivateLanHost(u.hostname)) {
-          const normalized = `${u.protocol}//127.0.0.1${u.port ? `:${u.port}` : ""}`;
-          console.warn("[LawDog dev] normalized API base to loopback for local browser origin", {
-            from: explicit,
-            to: normalized,
-            origin: window.location.origin,
-          });
-          return normalized;
-        }
-      } catch {
-        /* ignore normalization and keep explicit */
-      }
-    }
-    if (import.meta.env.PROD) {
-      const l = explicit.toLowerCase();
+    const normalized = normalizeLocalApiBase(explicit, "getLawDogApiBase");
+    logApiBaseResolvedOnce(normalized, rawEnv ? "env" : "runtime_meta");
+    if (import.meta.env.PROD && !isLocalBrowserOrigin()) {
+      const l = normalized.toLowerCase();
       if (l.includes("localhost") || l.includes("127.0.0.1")) {
         console.warn(
           "[LawDog operator] Production build uses a loopback API URL. Set the frontend build-time API origin to your hosted API.",
         );
       }
     }
-    return explicit;
+    return normalized;
+  }
+  if (import.meta.env.PROD && !isLocalBrowserOrigin()) {
+    logApiBaseResolvedOnce("", "same_origin");
+    return "";
+  }
+  if (isLocalBrowserOrigin()) {
+    logApiBaseResolvedOnce(DEV_API_FALLBACK, "dev_fallback");
+    return DEV_API_FALLBACK;
   }
   if (import.meta.env.PROD) {
     logApiBaseResolvedOnce("", "same_origin");
@@ -128,19 +166,25 @@ export function resolveApiBase(): string {
   return DEV_API_FALLBACK;
 }
 
+/** @deprecated Prefer {@link getLawDogApiBase}. */
+export function resolveApiBase(): string {
+  return getLawDogApiBase();
+}
+
 /** True when prod build has an explicit API base that still targets loopback (misconfiguration). */
 export function isProductionApiMisconfigured(): boolean {
   if (!import.meta.env.PROD) return false;
+  if (isLocalBrowserOrigin()) return false;
   const b = getApiBase();
   if (!b) return false;
   const l = b.toLowerCase();
   return l.includes("localhost") || l.includes("127.0.0.1");
 }
 
-/** Absolute or root-relative URL for an API path (uses same resolution as `resolveApiBase`). */
+/** Absolute or root-relative URL for an API path (uses same resolution as `getLawDogApiBase`). */
 export function apiUrl(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
-  const base = resolveApiBase().replace(/\/$/, "");
+  const base = getLawDogApiBase().replace(/\/$/, "");
   return base ? `${base}${p}` : p;
 }
 

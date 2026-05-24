@@ -3,7 +3,7 @@
  * Same-origin production builds skip probing — the page and API share fate.
  */
 
-import { apiUrl, getApiBase, resolveApiBase, isProductionApiMisconfigured } from "./clawApi";
+import { apiUrl, getApiBase, getLawDogApiBase, isProductionApiMisconfigured } from "./clawApi";
 
 export type ApiReachabilityState = "unknown" | "ok" | "unavailable" | "misconfigured";
 
@@ -37,7 +37,7 @@ function shouldProbeApi(): boolean {
   if (isProductionApiMisconfigured()) return false;
   const explicit = getApiBase();
   if (import.meta.env.PROD && !explicit) return false;
-  return Boolean(resolveApiBase());
+  return Boolean(getLawDogApiBase());
 }
 
 export async function probeApiHealth(force = false): Promise<ApiReachabilityState> {
