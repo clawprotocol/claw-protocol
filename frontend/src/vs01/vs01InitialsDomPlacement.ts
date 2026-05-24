@@ -13,7 +13,7 @@ export const VS01_INITIALS_DOM_RIGHT_MARGIN_PX = 64;
 export const VS01_INITIALS_DOM_BOTTOM_MARGIN_PX = 64;
 export const VS01_INITIALS_DOM_SIGNER_GAP_PX = 12;
 export const VS01_INITIALS_DOM_MAX_COLS = 2;
-export const VS01_INITIALS_RESERVED_BOTTOM_BAND_PX = 120;
+export const VS01_INITIALS_RESERVED_BOTTOM_BAND_PX = 160;
 export const VS01_INITIALS_DOM_COMPACT_BOX_WIDTH_PX = 72;
 export const VS01_INITIALS_DOM_COMPACT_BOX_HEIGHT_PX = 42;
 
@@ -119,7 +119,9 @@ export function computeInitialsDomPlacementPx(
 
   let left =
     pageWidth - rightMargin - boxWidth - colFromRight * (boxWidth + signerGap);
+  const { contentBottomLimit } = initialsReservedBandForPage(pageHeight);
   let top = pageHeight - bottomMargin - boxHeight - row * rowStep;
+  top = Math.max(contentBottomLimit, top);
 
   const obstacles = args.fieldObstacles ?? [];
   const allowShift = args.allowSignatureShift !== false && obstacles.length > 0;

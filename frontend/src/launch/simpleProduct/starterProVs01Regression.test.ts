@@ -34,6 +34,9 @@ describe("starter Pro VS01 regression (source locks)", () => {
     expect(handoff).toContain("[send-flow-skip-review-link-interstitial]");
     expect(bridge).toContain("/app/esign/");
     expect(bridge).toContain("agreement_bridge=1");
+    expect(bridge).toContain("resolveVs01SigningCorpusForHandoff");
+    expect(bridge).toContain("signing_corpus_plain");
+    expect(bridge).toContain("[vs01-signing-corpus-source]");
     const onCreated = page.indexOf("onCreated={");
     expect(onCreated).toBeGreaterThanOrEqual(0);
     const slice = page.slice(onCreated, onCreated + 3200);

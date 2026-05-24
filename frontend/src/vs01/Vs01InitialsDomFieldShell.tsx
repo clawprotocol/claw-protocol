@@ -45,7 +45,7 @@ export function Vs01InitialsDomFieldShell({
     setPlacementHost(host);
   }, [page, enabled]);
 
-  const domStyle = useVs01InitialsDomOverlayStyle({
+  const { style: domStyle, hasTextCollision } = useVs01InitialsDomOverlayStyle({
     enabled,
     page,
     signerIndex,
@@ -54,6 +54,13 @@ export function Vs01InitialsDomFieldShell({
     textRects,
     placementHost,
   });
+
+  const shellClassName = [
+    className,
+    enabled && hasTextCollision ? "vs01-initials-dom-field--collision" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const fallbackStyle = normalizedPdfRectToCssPercent(normalizedFallback);
   const positionStyle: CSSProperties =
@@ -88,7 +95,7 @@ export function Vs01InitialsDomFieldShell({
           }}
         />
       ) : null}
-      <div ref={shellRef} className={className} style={positionStyle}>
+      <div ref={shellRef} className={shellClassName || undefined} style={positionStyle}>
         {children}
       </div>
     </>

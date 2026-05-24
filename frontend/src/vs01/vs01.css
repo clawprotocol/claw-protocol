@@ -3510,7 +3510,7 @@ button.vs01-upload-btn:disabled {
   position: relative;
   display: inline-block;
   max-width: 100%;
-  --vs01-initials-reserved-band: 120px;
+  --vs01-initials-reserved-band: 160px;
 }
 
 /**
@@ -3573,6 +3573,12 @@ button.vs01-upload-btn:disabled {
   inset: 0;
   z-index: 2;
   pointer-events: none;
+}
+
+.vs01-initials-dom-field--collision {
+  outline: 2px solid #dc2626;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.35);
 }
 
 /* Sender fields from Step 3 — read-only reference under recipient placement (Step 4). */

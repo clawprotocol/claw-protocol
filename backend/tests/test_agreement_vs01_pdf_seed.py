@@ -13,7 +13,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_vs01_signing_story_reserves_at_least_three_quarter_inch_bottom() -> None:
-    assert VS01_SIGNING_STORY_MARGIN_BOTTOM_PT >= 54
+    assert VS01_SIGNING_STORY_MARGIN_BOTTOM_PT >= 160
 
 
 def test_vs01_signing_story_user_css_has_letter_page_and_bottom_margin() -> None:

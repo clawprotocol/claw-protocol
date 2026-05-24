@@ -5544,6 +5544,15 @@ def _draft_placeholder_intake_corpus(draft: AgreementDraft) -> str:
     return "\n".join(parts)
 
 
+class Vs01SigningSeedBody(BaseModel):
+    """Optional authoritative signing corpus for paid Pro VS01 seed (must exceed stored draft preview)."""
+
+    signing_corpus_plain: Optional[str] = Field(default=None, max_length=1_200_000)
+
+
+_VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN = 1500
+
+
 def _vs01_signing_seed_error_detail(
     *,
     agreement_id: str,
@@ -5569,7 +5578,11 @@ def _vs01_signing_seed_error_detail(
 
 
 @router.post("/{agreement_id}/vs01-signing-seed")
-def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dict[str, Any]:
+def post_agreement_vs01_signing_seed(
+    agreement_id: str,
+    request: Request,
+    body: Vs01SigningSeedBody = Vs01SigningSeedBody(),
+) -> Dict[str, Any]:
     """
     Owner-only: render locked agreement HTML to PDF and finalize as a VS01 /v1/documents body
     (used by paid Pro sender-first → /app/esign/:documentId bridge).
@@ -5637,6 +5650,27 @@ def post_agreement_vs01_signing_seed(agreement_id: str, request: Request) -> Dic
                 exc=exc,
             ),
         ) from exc
+
+    signing_plain = (body.signing_corpus_plain or "").strip()
+    if len(signing_plain) >= _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN:
+        field_key_override, corpus_before = primary_agreement_plain_field_and_value(draft)
+        if len(signing_plain) > len(corpus_before or ""):
+            merge_fields: Dict[str, str] = {field_key_override: signing_plain}
+            for alt_key in (
+                "premium_full_document_text",
+                "server_full_document_text",
+                "document_text",
+            ):
+                if alt_key != field_key_override:
+                    merge_fields[alt_key] = signing_plain
+            draft = _merge_agreement_draft(draft, **merge_fields)
+            log.info(
+                "[vs01-signing-seed-corpus-override] agreement_id=%s len=%s field=%s prev_len=%s",
+                aid,
+                len(signing_plain),
+                field_key_override,
+                len(corpus_before or ""),
+            )
 
     # --- placeholder_template_safety (pre-render) ---
     party_names_vs = [str(p.name or "").strip() for p in (draft.parties or []) if str(p.name or "").strip()]

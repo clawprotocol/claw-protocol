@@ -21,12 +21,14 @@ export function useVs01InitialsDomOverlayStyle(args: {
   fieldObstacles?: readonly Vs01NormalizedRect[];
   textRects?: readonly Vs01NormalizedRect[];
   placementHost: HTMLElement | null;
-}): CSSProperties | null {
+}): { style: CSSProperties | null; hasTextCollision: boolean } {
   const [style, setStyle] = useState<CSSProperties | null>(null);
+  const [hasTextCollision, setHasTextCollision] = useState(false);
 
   useLayoutEffect(() => {
     if (!args.enabled || !args.placementHost) {
       setStyle(null);
+      setHasTextCollision(false);
       return;
     }
 
@@ -95,6 +97,7 @@ export function useVs01InitialsDomOverlayStyle(args: {
       });
 
       setStyle(initialsDomPlacementCssStyle(dom));
+      setHasTextCollision(resolved.collision.collisionCount > 0);
     };
 
     measure();
@@ -111,5 +114,5 @@ export function useVs01InitialsDomOverlayStyle(args: {
     args.textRects,
   ]);
 
-  return style;
+  return { style, hasTextCollision };
 }

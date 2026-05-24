@@ -16,7 +16,12 @@ import {
   readPremiumRecipientHandoff,
 } from "../../components/agreements/premiumPartyNamesHandoff";
 import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
+import { buildAgreementPreviewText } from "../../components/agreements/agreementPreviewFromDraft";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import {
+  resolveVs01SigningCorpusForHandoff,
+  VS01_SIGNING_CORPUS_MIN_LEN,
+} from "../../vs01/vs01SigningCorpus";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
@@ -524,8 +529,8 @@ export function buildAgreementVs01BridgeSession(params: {
   assertSignerMetadataPreserved(participants, participants, "vs01-bridge-build");
   const senderFirst = Boolean(params.senderFirstLawdogHandoff);
   const reviewerApproved = Boolean(params.reviewerApprovedCleanHandoff);
-  const agreementCorpusText =
-    (params.agreementCorpusText ?? "").trim() || resolveBridgeAgreementCorpusFromDraft(params.draft);
+  const draftCorpus = resolveBridgeAgreementCorpusFromDraft(params.draft);
+  const agreementCorpusText = (params.agreementCorpusText ?? "").trim() || draftCorpus;
   return {
     vs01DocumentId: params.vs01DocumentId.trim(),
     agreementId: params.agreementId.trim(),
@@ -549,7 +554,7 @@ export function buildAgreementVs01BridgeSession(params: {
         } as const)
       : {}),
     ...(reviewerApproved ? { reviewerApprovedCleanHandoff: true as const } : {}),
-    ...(agreementCorpusText.length >= 200 ? { agreementCorpusText } : {}),
+    ...(agreementCorpusText.length >= VS01_SIGNING_CORPUS_MIN_LEN ? { agreementCorpusText } : {}),
   };
 }
 
@@ -683,14 +688,24 @@ function logVs01SigningSeed422(detail: unknown, status: number): void {
 export async function fetchAgreementVs01SigningSeed(
   agreementId: string,
   draft?: AgreementDraft | null,
+  signingCorpusPlain?: string | null,
 ): Promise<AgreementVs01SigningSeedResult> {
   const id = agreementId.trim();
   if (!id) return { ok: false, reason: "missing_agreement_id" };
   logVs01SigningSeedPreflight(id, draft ?? null);
+  const corpusPayload = (signingCorpusPlain ?? "").trim();
   try {
     const res = await fetch(
       `${resolveApiBase().replace(/\/$/, "")}/api/agreements/${encodeURIComponent(id)}/vs01-signing-seed`,
-      { method: "POST", headers: clawAgreementHeaders({ "Content-Type": "application/json" }), body: "{}" },
+      {
+        method: "POST",
+        headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          ...(corpusPayload.length >= VS01_SIGNING_CORPUS_MIN_LEN
+            ? { signing_corpus_plain: corpusPayload }
+            : {}),
+        }),
+      },
     );
     const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
@@ -751,7 +766,29 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     options.recipientSetup ?? null,
   );
   const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, resolvedSetup);
-  const vs01Seed = await fetchAgreementVs01SigningSeed(id, merged);
+  const freeBaselinePlain = merged
+    ? buildAgreementPreviewText(merged as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
+        starterPreview: true,
+      })
+    : "";
+  const bridgeDraft = buildAgreementVs01BridgeSession({
+    agreementId: id,
+    vs01DocumentId: "pending",
+    draft: merged,
+    senderFirstLawdogHandoff: true,
+    reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
+    agreementCorpusText: options.agreementCorpusText,
+  });
+  const corpusResolution = resolveVs01SigningCorpusForHandoff({
+    agreementCorpusText: options.agreementCorpusText,
+    draft: merged,
+    bridge: bridgeDraft,
+    guidedPro: true,
+    freeBaselinePlain,
+  });
+  if (!corpusResolution.allowed) return false;
+
+  const vs01Seed = await fetchAgreementVs01SigningSeed(id, merged, corpusResolution.corpus);
   if (!vs01Seed.ok) return false;
   logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
   logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
@@ -761,7 +798,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     draft: merged,
     senderFirstLawdogHandoff: true,
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
-    agreementCorpusText: options.agreementCorpusText,
+    agreementCorpusText: corpusResolution.corpus,
   });
   logAgreementVs01BridgePreflight(bridge);
   logVs01BridgeSignerMetadata(bridge);
