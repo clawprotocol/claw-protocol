@@ -35,9 +35,10 @@ describe("vs01AutoSignaturePacket", () => {
     expect(src).toContain("fieldCount: placedCount");
   });
 
-  it("Vs01PrepPreparedBanner uses LawDog prepared copy", () => {
+  it("Vs01PrepPreparedBanner only uses prepared copy when ready", () => {
     const src = readFileSync(join(__dirname, "Vs01PrepPreparedBanner.tsx"), "utf8");
-    expect(src).toContain("LawDog prepared your signing packet");
+    expect(src).toContain('ready ? "LawDog prepared your signing packet"');
+    expect(src).toContain("Review required before sending");
   });
 
   it("StepPrepareSignature offers Continue to signing links when auto prepared", () => {

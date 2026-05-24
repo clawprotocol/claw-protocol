@@ -3581,6 +3581,27 @@ button.vs01-upload-btn:disabled {
   box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.35);
 }
 
+.vs01-prepare-blocked-panel {
+  margin: 0.5rem 0;
+  border: 1px solid rgba(245, 158, 11, 0.65);
+  border-radius: 0.75rem;
+  background: rgba(254, 243, 199, 0.14);
+  padding: 0.75rem;
+  color: var(--vs01-color-text);
+}
+
+.vs01-prepare-blocked-panel__title {
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.vs01-prepare-blocked-panel__body {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--vs01-color-text-muted) 70%, #fbbf24);
+}
+
 /* Sender fields from Step 3 — read-only reference under recipient placement (Step 4). */
 .vs01-sign-sender-ref-layer {
   position: absolute;
