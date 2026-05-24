@@ -575,6 +575,12 @@ export function logGuidedCorpusSectionNormalized(payload: Record<string, unknown
   console.info("[guided-corpus-section-normalized]", payload);
 }
 
+export function logGuidedCorpusIntegrityWarn(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[guided-corpus-integrity-warn]", payload);
+}
+
 export function logGuidedCorpusIntegrityFail(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

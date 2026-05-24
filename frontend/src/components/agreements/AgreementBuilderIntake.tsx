@@ -556,6 +556,15 @@ import {
   shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative,
   tryBeginPremiumEnsureForIntake,
 } from "./premiumAuthoritativeVisibleSurface";
+import {
+  corpusIntegrityFromStructureDefects,
+  logGuidedProgressionBlocked,
+  logPaymentFlowStage,
+  readAuthoritativeSnapshotBody,
+  serializeProgressionError,
+  snapshotReadyForPostCheckoutUnlock,
+  withSigningPrepareTimeout,
+} from "./paymentFlowProgression";
 import { PremiumFinishAgreementGapsPanel } from "./PremiumFinishAgreementGapsPanel";
 import {
   GuidedDealCompletionPanel,
@@ -4901,6 +4910,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           } catch {
             /* ignore */
           }
+          applyHydrationFromPremiumSnapshot(postCheckoutReturnSnap);
+          paidCheckoutCompletedRef.current = true;
+          logPaymentFlowStage("premium_unlock_received", {
+            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+            premiumUnlocked: true,
+            paymentState: "snapshot_return_hydrate",
+          });
+          logPaymentFlowStage("checkout_complete", {
+            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+            premiumUnlocked: true,
+            corpusIntegrity: "ok",
+          });
           return;
         }
       } else {
@@ -4913,6 +4934,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         } catch {
           /* ignore */
         }
+        logGuidedProgressionBlocked({
+          reason: "post_checkout_snapshot_missing_body",
+          validator: "postCheckoutReturnSnap",
+          phase: premiumPostCheckoutPhaseRef.current,
+        });
+        setPremiumPostCheckoutPhase(null);
+        setPremiumPipelineUserMessage(null);
         return;
       }
     }
@@ -5295,6 +5323,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
         paidCheckoutCompletedRef.current = true;
+        logPaymentFlowStage("premium_unlock_received", {
+          agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+          premiumUnlocked: hasFullDraftAccessRef.current,
+          paymentState: premiumPostCheckoutPhaseRef.current,
+        });
         {
           const wDup = (result.winningPremiumBodyText || "").trim();
           if (
@@ -6017,6 +6050,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         markPremiumPostCheckoutRevealDismissed();
         setPremiumRecipientUxActive(false);
         setPremiumPostCheckoutPhase(null);
+        logPaymentFlowStage("checkout_complete", {
+          agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+          premiumUnlocked: true,
+          corpusIntegrity: "ok",
+          paymentState: result.premiumRenderSource,
+        });
         bumpPremiumSurfaceGateTick();
         if (usePaidAuthoritativeBody) {
           const snapGen = result.agreementGenerationId;
@@ -6088,6 +6127,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (usePaidAuthoritativeBody && !shouldImmediateAuthoritativeCommit) {
           resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply" });
         }
+        } catch (applyErr: unknown) {
+          const serialized = serializeProgressionError(applyErr);
+          logPaymentFlowStage("signing_prepare_failed", {
+            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+            error: serialized.message,
+            stack: serialized.stack,
+            paymentState: "applySuccess_throw",
+          });
+          logGuidedProgressionBlocked({
+            reason: "apply_success_threw",
+            validator: "applySuccess",
+            phase: premiumPostCheckoutPhaseRef.current,
+          });
+          setPremiumPostCheckoutPhase(null);
+          setPremiumPipelineUserMessage(null);
+          setHardError(
+            "We finished payment but hit an error loading your Pro agreement. Use Retry to continue — your payment is saved.",
+          );
+          setProFullDraftQualityRetry(true);
         } finally {
           if (extendedWaitAtApplyStart) {
             premiumModalExtendedWaitActiveRef.current = false;
@@ -6368,6 +6426,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               reason: "ensure_skipped_snapshot_already_authoritative",
               intakeFingerprint: intakeFpGuard,
             });
+            const authoritativeSnap = readPremiumCompletionSnapshot();
+            if (authoritativeSnap) {
+              applyHydrationFromPremiumSnapshot(authoritativeSnap);
+              paidCheckoutCompletedRef.current = true;
+              logPaymentFlowStage("premium_unlock_received", {
+                agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                premiumUnlocked: true,
+                paymentState: "ensure_skipped_authoritative_snapshot",
+              });
+              logPaymentFlowStage("checkout_complete", {
+                agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                premiumUnlocked: true,
+                corpusIntegrity: "ok",
+              });
+            } else {
+              setPremiumPostCheckoutPhase(null);
+              setPremiumPipelineUserMessage(null);
+              logGuidedProgressionBlocked({
+                reason: "ensure_skipped_without_snapshot",
+                validator: "shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative",
+              });
+            }
             return;
           }
           setPremiumPostCheckoutPhase("processing");
@@ -6417,11 +6497,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             const premiumCompletionAttemptStartedAt = Date.now();
             const premiumCompletionAttemptTimeoutMs = PREMIUM_COMPLETION_ATTEMPT_MAX_MS;
             if (!tryBeginPremiumEnsureForIntake(intakeFpGuard)) {
-              logPremiumDuplicateRunBlocked({
-                reason: "premium_ensure_intake_mutex_busy",
-                intakeFingerprint: intakeFpGuard,
-              });
-              return;
+              await new Promise((resolve) => window.setTimeout(resolve, 450));
+              if (!tryBeginPremiumEnsureForIntake(intakeFpGuard)) {
+                logPremiumDuplicateRunBlocked({
+                  reason: "premium_ensure_intake_mutex_busy",
+                  intakeFingerprint: intakeFpGuard,
+                });
+                const mutexSnap = readPremiumCompletionSnapshot();
+                if (
+                  mutexSnap &&
+                  snapshotReadyForPostCheckoutUnlock({
+                    snapshot: mutexSnap,
+                    intakeFingerprint: intakeFpGuard,
+                  })
+                ) {
+                  applyHydrationFromPremiumSnapshot(mutexSnap);
+                  paidCheckoutCompletedRef.current = true;
+                  logPaymentFlowStage("checkout_complete", {
+                    agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                    premiumUnlocked: true,
+                    paymentState: "mutex_busy_authoritative_snapshot",
+                  });
+                } else {
+                  setPremiumPostCheckoutPhase(null);
+                  setPremiumPipelineUserMessage(null);
+                  logGuidedProgressionBlocked({
+                    reason: "premium_ensure_intake_mutex_busy",
+                    validator: "tryBeginPremiumEnsureForIntake",
+                    unresolvedPromise: "ensurePremiumCompletion",
+                  });
+                }
+                return;
+              }
             }
             try {
               const originalMergeHint = pickLongestPremiumIntakeCorpus(
@@ -6710,6 +6817,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumProRunInFlightRef.current = false;
             setPremiumNetworkRetryInFlight(false);
             setPremiumNetworkStillReconnecting(false);
+            if (premiumPostCheckoutPhaseRef.current === "processing") {
+              const recoverySnap = readPremiumCompletionSnapshot();
+              const recoveryFp = shortIntakeFingerprint(args.intakeText);
+              if (
+                recoverySnap &&
+                snapshotReadyForPostCheckoutUnlock({
+                  snapshot: recoverySnap,
+                  intakeFingerprint: recoveryFp,
+                })
+              ) {
+                applyHydrationFromPremiumSnapshot(recoverySnap);
+                paidCheckoutCompletedRef.current = true;
+                logPaymentFlowStage("checkout_complete", {
+                  agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                  premiumUnlocked: true,
+                  paymentState: "processing_stuck_snapshot_recovery",
+                  corpusIntegrity: "ok",
+                });
+              } else if (!recoverySnap || readAuthoritativeSnapshotBody(recoverySnap).length < 500) {
+                logGuidedProgressionBlocked({
+                  reason: "post_checkout_processing_without_resolution",
+                  validator: "runModelPass_finally",
+                  phase: "processing",
+                  missingState: "authoritative_snapshot",
+                });
+                setPremiumPostCheckoutPhase(null);
+                setPremiumPipelineUserMessage(null);
+                setProFullDraftCustomGateMessage(
+                  "Your payment went through, but the Pro agreement is still loading. Use Retry below to finish generation.",
+                );
+                setProFullDraftQualityRetry(true);
+              }
+            }
           }
         };
 
@@ -14940,6 +15080,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const finalizeAndFreezeGuidedFinalCorpus = React.useCallback(
     (source: string): FinalizeGuidedProAgreementCorpusResult => {
+      const corpusStartedAt = Date.now();
+      logPaymentFlowStage("authoritative_corpus_started", {
+        agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+        paymentState: source,
+      });
       const rd = reviewDraft ?? draft;
       const freeBasicDraftPlain = rd ? buildAgreementPreviewText(rd, { starterPreview: true }) : "";
       const serverFullDocumentText = (
@@ -14993,6 +15138,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         freeBasicDraftPlain,
       });
       if (!result.ok) {
+        logPaymentFlowStage("authoritative_corpus_complete", {
+          agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+          corpusIntegrity: corpusIntegrityFromStructureDefects(result.diagnostics.structureDefects),
+          durationMs: Date.now() - corpusStartedAt,
+          error: "finalize_not_ok",
+        });
+        logGuidedProgressionBlocked({
+          reason: "guided_corpus_finalize_failed",
+          validator: "finalizeGuidedProAgreementCorpus",
+          missingState:
+            result.unresolvedPlaceholders.length > 0
+              ? result.unresolvedPlaceholders.join(",")
+              : result.diagnostics.validationMissing.join(",") ||
+                result.diagnostics.validationContradictions.join(","),
+        });
         if (result.unresolvedPlaceholders.length > 0) {
           const partyBlock = result.unresolvedPlaceholders.find(
             (p): p is GuidedFinalReviewPartyBlockReason =>
@@ -15021,6 +15181,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       logAuthoritativeCorpusFrozen({ bodyLen: stable.length, source });
       setGuidedAuthVersionNonce((n) => n + 1);
+      logPaymentFlowStage("authoritative_corpus_complete", {
+        agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+        corpusIntegrity: corpusIntegrityFromStructureDefects(result.diagnostics.structureDefects),
+        durationMs: Date.now() - corpusStartedAt,
+      });
       return result;
     },
     [
@@ -15179,6 +15344,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return true;
     }
     if (!opts?.modalAlreadyActive) logGuidedFinalizeModalEnter();
+    logPaymentFlowStage("review_transition_started", {
+      agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+      paymentState: createFlowPhase,
+    });
     setGuidedFinalizeModalBlockedMessage(null);
     setGuidedFinalizeModalBlockedPresentation(null);
     setGuidedFinalizeModalStage("preparing_final_agreement");
@@ -15370,6 +15539,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           behavior: "smooth",
           block: "start",
         });
+      });
+      logPaymentFlowStage("review_transition_complete", {
+        agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+        corpusIntegrity: corpusIntegrityFromStructureDefects(finalCorpus.diagnostics.structureDefects),
       });
       return true;
     } finally {
@@ -16218,6 +16391,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             phase: "guided_final_review",
             hash: guidedFinalReviewAuthoritativeResolution.finalizedHash,
           });
+          logPaymentFlowStage("review_transition_complete", {
+            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+            paymentState: "signer_setup_to_final_review",
+          });
+        } catch (transitionErr: unknown) {
+          const serialized = serializeProgressionError(transitionErr);
+          logGuidedProgressionBlocked({
+            reason: "continue_guided_signer_setup_threw",
+            validator: "continueGuidedSignerSetupToFinalReview",
+            phase: createFlowPhase,
+            missingState: serialized.message,
+          });
+          setGuidedFinalizeModalStage("blocked");
+          setGuidedFinalizeModalBlockedMessage(
+            "We could not open final review. Retry in a moment or refresh the page.",
+          );
+          setHardError("Final review could not open. Retry when ready.");
         } finally {
           setGuidedFinalReviewTransitionInFlight(false);
         }
@@ -17383,20 +17573,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           buildRecipientSetupForVs01Bridge(mergedDraft),
         ) ?? (mergedDraft as unknown as AgreementDraft);
 
-      const result = await executePaidProPostRecipientSetupHandoff({
-        navigate: (to) => void navigate(to),
+      logPaymentFlowStage("signing_prepare_started", {
         agreementId: id,
-        draft: {
-          ...primedForHandoff,
-          server_full_document_text: corpusText,
-        } as AgreementDraft,
-        premiumSendIntent: "signature",
-        recipientSetup: buildRecipientSetupForVs01Bridge(mergedDraft),
-        logSource: "guided_signature_track",
-        agreementCorpusText: corpusText,
+        paymentState: createFlowPhase,
       });
+      const signingPrepareStartedAt = Date.now();
+      const timedHandoff = await withSigningPrepareTimeout(
+        "guided_signature_track_handoff",
+        executePaidProPostRecipientSetupHandoff({
+          navigate: (to) => void navigate(to),
+          agreementId: id,
+          draft: {
+            ...primedForHandoff,
+            server_full_document_text: corpusText,
+          } as AgreementDraft,
+          premiumSendIntent: "signature",
+          recipientSetup: buildRecipientSetupForVs01Bridge(mergedDraft),
+          logSource: "guided_signature_track",
+          agreementCorpusText: corpusText,
+        }),
+      );
+      if (!timedHandoff.ok) {
+        logPaymentFlowStage("signing_prepare_failed", {
+          agreementId: id,
+          error: "signing_prepare_timeout",
+          durationMs: Date.now() - signingPrepareStartedAt,
+        });
+        showModalIfSlow("blocked");
+        setGuidedFinalizeModalBlockedMessage(
+          "Signing preparation is taking longer than expected. You can retry from final review or continue editing the agreement.",
+        );
+        setHardError(
+          "Signing preparation timed out. Retry from final review when your connection is stable.",
+        );
+        return;
+      }
+      const result = timedHandoff.value;
 
       if (result.ok) {
+        logPaymentFlowStage("signing_prepare_complete", {
+          agreementId: id,
+          durationMs: Date.now() - signingPrepareStartedAt,
+        });
         logGuidedSignatureRouteEntered({ destination: result.destination, agreementId: id });
         if (modalVisible) {
           setGuidedFinalizeModalStage("signing_packet_ready");

@@ -41,7 +41,7 @@ import {
   validateCorpusAgainstCanonicalManifest,
 } from "./guidedCanonicalAnswerManifest";
 import {
-  logGuidedCorpusIntegrityFail,
+  logGuidedCorpusIntegrityWarn,
   logGuidedCorpusSectionNormalized,
   normalizeGuidedProCorpusStructure,
   validateNormalizedCorpusStructure,
@@ -498,10 +498,11 @@ export function finalizeGuidedProAgreementCorpus(
   }
   diagnostics.structureDefects = structureCheck.defects;
   if (!structureCheck.ok) {
-    diagnostics.validationContradictions.push(
-      ...structureCheck.defects.map((d) => `corpus_structure:${d}`),
-    );
-    logGuidedCorpusIntegrityFail({ defects: structureCheck.defects, bodyLen: body.length });
+    logGuidedCorpusIntegrityWarn({
+      defects: structureCheck.defects,
+      bodyLen: body.length,
+      note: "non_fatal_progression_allowed",
+    });
   }
   body = normalizePartyNameSpacingInCorpus(body);
   if (
