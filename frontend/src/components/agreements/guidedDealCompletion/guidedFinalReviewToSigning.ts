@@ -204,9 +204,34 @@ export function normalizePartyNameSpacingInCorpus(text: string): string {
 }
 
 /** Strip guided-merge markdown heading artifacts and normalize party parentheticals. */
+export function stripPhantomGuidedSectionMarkers(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const out: string[] = [];
+  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+    const t = line.trim();
+    if (/^\d+\.\d+\.?\s*$/.test(t)) {
+      repairs.push(`phantom_subsection:${t}`);
+      continue;
+    }
+    if (/^\*{1,2}\s*\d+(?:\.\d+)*\.?\s*\*{0,2}\s*$/.test(t)) {
+      repairs.push(`phantom_markdown_heading:${t}`);
+      continue;
+    }
+    if (/^\d+\.\s*$/.test(t)) {
+      repairs.push(`phantom_section_number:${t}`);
+      continue;
+    }
+    out.push(line);
+  }
+  return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), repairs };
+}
+
 export function normalizeGuidedCorpusHeadingArtifacts(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
-  let out = text
+  const phantom = stripPhantomGuidedSectionMarkers(text);
+  let out = phantom.text;
+  repairs.push(...phantom.repairs);
+  out = out
     .replace(/\*\*(\d+(?:\.\d+)*\.)\s+/g, (_, n) => {
       repairs.push("heading_leading_markdown");
       return `${n} `;

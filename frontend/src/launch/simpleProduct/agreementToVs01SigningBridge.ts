@@ -18,8 +18,8 @@ import {
 import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
 import { buildAgreementPreviewText } from "../../components/agreements/agreementPreviewFromDraft";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import type { GuidedVs01SigningHandoff } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
 import {
-  pickDraftSigningCorpusPlain,
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
 } from "../../vs01/vs01SigningCorpus";
@@ -759,6 +759,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
   reviewerApprovedCleanHandoff?: boolean;
   /** Final agreement plain text for VS01 signature-block anchor placement. */
   agreementCorpusText?: string | null;
+  guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
 }): Promise<boolean> {
   const id = String(options.agreementId || "").trim();
   if (!id) return false;
@@ -780,18 +781,18 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
     agreementCorpusText: options.agreementCorpusText,
   });
-  const draftCorpus = pickDraftSigningCorpusPlain(merged);
-  const handoffLen = (options.agreementCorpusText ?? "").trim().length;
+  const handoff = options.guidedSigningHandoff ?? null;
+  const handoffText = (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim();
+  const handoffLen = handoffText.length;
   const corpusResolution = resolveFinalVs01CorpusOrBlock({
-    agreementCorpusText: options.agreementCorpusText,
+    agreementCorpusText: handoffText,
+    guidedSigningHandoff: handoff,
     draft: merged,
     bridge: bridgeDraft,
     guidedPro: true,
     freeBaselinePlain,
-    premiumPipelinePlain: draftCorpus,
-    hydratedPremiumPlain: draftCorpus,
-    premiumComplete:
-      draftCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN || handoffLen >= VS01_SIGNING_CORPUS_MIN_LEN,
+    premiumComplete: handoffLen >= VS01_SIGNING_CORPUS_MIN_LEN,
+    signatureRebuilt: handoff?.signatureRebuilt,
   });
   if (!corpusResolution.allowed) return false;
 

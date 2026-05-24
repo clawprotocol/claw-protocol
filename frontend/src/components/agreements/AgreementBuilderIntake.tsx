@@ -402,7 +402,13 @@ import {
   resolveFinalVs01CorpusOrBlock,
   VS01_CORPUS_GATE_USER_MESSAGE,
   VS01_CORPUS_PREFERRED_MIN_LEN,
+  GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE,
 } from "../../vs01/vs01SigningCorpus";
+import {
+  buildGuidedVs01SigningHandoff,
+  logGuidedVs01SigningHandoff,
+  mapTrackCorpusSourceToHandoffSource,
+} from "./guidedDealCompletion/guidedVs01SigningHandoff";
 import {
   executePaidProPostRecipientSetupHandoff,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
@@ -2717,6 +2723,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const authoritativeAgreementSnapshotRef = useRef("");
   const acceptedReviewCorpusRef = useRef("");
   const finalizedSigningCorpusRef = useRef("");
+  const guidedSignatureRebuiltRef = useRef(false);
+  const guidedVs01SigningHandoffRef = useRef<ReturnType<typeof buildGuidedVs01SigningHandoff> | null>(null);
   const canonicalSignerManifestRef = useRef<CanonicalSignerManifest | null>(null);
   const [reviewSessionState, setReviewSessionState] = useState<ReviewSessionState>("idle");
   const [reviewAcceptedByParties, setReviewAcceptedByParties] = useState(false);
@@ -15258,6 +15266,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hydratedPremiumBodyRef.current = stable;
       premiumPipelineOutputBodyRef.current = stable;
       canonicalSignerManifestRef.current = result.signerManifest;
+      guidedSignatureRebuiltRef.current = result.diagnostics.signatureRebuilt;
       setAgreementDocumentText(stable);
       syncReviewContinuityState({
         ...reviewContinuityStateRef.current,
@@ -15361,20 +15370,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     () =>
       resolveFinalVs01CorpusOrBlock({
         agreementCorpusText:
+          guidedVs01SigningHandoffRef.current?.corpusText ||
           finalizedSigningCorpusRef.current ||
           acceptedReviewCorpusRef.current ||
           guidedSigningAuthoritativePlain,
+        guidedSigningHandoff: guidedVs01SigningHandoffRef.current,
         draft: (draft ?? null) as unknown as AgreementDraft | null,
         guidedPro: paidProAuthoritative,
         freeBaselinePlain: paidProStarterPreviewPlain,
-        premiumPipelinePlain: premiumPipelineOutputBodyRef.current,
-        hydratedPremiumPlain: hydratedPremiumBodyRef.current,
-        lastKnownGoodPlain: lastKnownGoodAuthoritativeDraftRef.current,
-        finalizedSigningPlain: finalizedSigningCorpusRef.current,
-        acceptedReviewPlain: acceptedReviewCorpusRef.current,
-        renderedPreviewPlain: renderedAgreementPreview,
-        renderedPreviewSource: premiumPaidReadonlyPick.sourceUsed ?? "rendered_preview",
         premiumInProgress: premiumCorpusInProgress,
+        signatureRebuilt: guidedSignatureRebuiltRef.current,
         premiumComplete:
           !premiumCorpusInProgress &&
           Math.max(
@@ -15460,18 +15465,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       peekPremiumSenderSignFirst() ?? true,
     );
     setGuidedAuthVersionNonce((n) => n + 1);
+    const recipientEmails = [
+      recipient1Email.trim(),
+      recipient2Email.trim(),
+      ...extraPartyReviewEmails.map((e) => e.trim()),
+    ].filter((email) => looksLikeEmail(email));
+    const handoff = buildGuidedVs01SigningHandoff({
+      corpusText,
+      source: "finalized_signer_applied_guided_corpus",
+      signerMetadata: canonicalSignerManifestRef.current,
+      recipientEmails,
+      signatureRebuilt: guidedSignatureRebuiltRef.current,
+    });
+    guidedVs01SigningHandoffRef.current = handoff;
+    logGuidedVs01SigningHandoff(handoff);
     const gate = resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: corpusText,
+      guidedSigningHandoff: handoff,
       draft: (draft ?? null) as AgreementDraft | null,
       guidedPro: true,
       freeBaselinePlain: paidProStarterPreviewPlain,
-      premiumPipelinePlain: premiumPipelineOutputBodyRef.current,
-      hydratedPremiumPlain: hydratedPremiumBodyRef.current,
-      lastKnownGoodPlain: corpusText,
-      finalizedSigningPlain: corpusText,
-      acceptedReviewPlain: corpusText,
       premiumInProgress: premiumCorpusInProgress,
       premiumComplete: corpusText.length >= VS01_CORPUS_PREFERRED_MIN_LEN,
+      signatureRebuilt: guidedSignatureRebuiltRef.current,
     });
     if (!gate.allowed) return "";
     return gate.corpus;
@@ -15487,6 +15503,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     canonicalSignerManifest,
     paidProStarterPreviewPlain,
     premiumCorpusInProgress,
+    recipient1Email,
+    recipient2Email,
+    extraPartyReviewEmails,
   ]);
 
   const handleGuidedOpenFinalReview = React.useCallback((opts?: { modalAlreadyActive?: boolean }): boolean => {
@@ -17607,7 +17626,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!corpusText) {
         logGuidedSignatureTrackFailed({ reason: "corpus_not_ready" });
         showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(VS01_CORPUS_GATE_USER_MESSAGE);
+        setGuidedFinalizeModalBlockedMessage(GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE);
         return;
       }
 
@@ -17644,6 +17663,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         bodyLen: selected.body.length,
         hash: selected.hash,
       });
+
+      const recipientEmails = [
+        recipient1Email.trim(),
+        recipient2Email.trim(),
+        ...extraPartyReviewEmails.map((e) => e.trim()),
+      ].filter((email) => looksLikeEmail(email));
+      const vs01Handoff = buildGuidedVs01SigningHandoff({
+        corpusText: selected.body,
+        source: mapTrackCorpusSourceToHandoffSource(selected.source),
+        signerMetadata: canonicalSignerManifestRef.current,
+        recipientEmails,
+        signatureRebuilt: guidedSignatureRebuiltRef.current,
+      });
+      guidedVs01SigningHandoffRef.current = vs01Handoff;
+      logGuidedVs01SigningHandoff(vs01Handoff);
 
       if (!draft) {
         logGuidedSignatureTrackFailed({ reason: "draft_missing" });
@@ -17746,11 +17780,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           draft: {
             ...primedForHandoff,
             server_full_document_text: corpusText,
+            premium_full_document_text: corpusText,
           } as AgreementDraft,
           premiumSendIntent: "signature",
           recipientSetup: buildRecipientSetupForVs01Bridge(mergedDraft),
           logSource: "guided_signature_track",
           agreementCorpusText: corpusText,
+          guidedSigningHandoff: vs01Handoff,
         }),
       );
       if (!timedHandoff.ok) {
@@ -17820,6 +17856,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient1Email,
     recipient2Name,
     recipient2Email,
+    extraPartyReviewEmails,
     recipientSignerLabels,
     bumpPremiumSurfaceGateTick,
     navigate,

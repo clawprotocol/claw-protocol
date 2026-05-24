@@ -1,4 +1,5 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import type { GuidedVs01SigningHandoff } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
 import { orderedAuthoritativePartyDisplayNames } from "../../agreement/handoffPartyDisplay";
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
 import { emitActionCompleted } from "../../joy/joyTelemetry";
@@ -94,6 +95,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   logSource: string;
   /** Final agreement plain text for VS01 signature-block anchor placement. */
   agreementCorpusText?: string | null;
+  guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
 }): Promise<PaidProPostRecipientSetupResult> {
   const id = String(options.agreementId || "").trim();
   if (!id) {
@@ -149,7 +151,8 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     draft: options.draft,
     logReason: options.logSource,
     recipientSetup: options.recipientSetup ?? null,
-    agreementCorpusText: options.agreementCorpusText,
+    agreementCorpusText: options.guidedSigningHandoff?.corpusText ?? options.agreementCorpusText,
+    guidedSigningHandoff: options.guidedSigningHandoff ?? null,
   });
 
   if (vs01Ok) {

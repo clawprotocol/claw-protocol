@@ -3,6 +3,7 @@ import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreeme
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "../components/agreements/simpleProFinalReviewCorpus";
 import { resolvePremiumSignaturePreviewMode } from "../components/agreements/premiumAgreementDocumentHtml";
+import { buildGuidedVs01SigningHandoff } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
 import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MAX_PREVIEW_LEN,
@@ -121,21 +122,30 @@ describe("vs01SigningCorpus", () => {
     expect(preview.hasCorpusSignatureBlock).toBe(true);
   });
 
-  it("prefers longer draft authoritative text over short handoff preview", () => {
-    const draftCorpus = fullGuidedCorpus();
+  it("uses frozen handoff over longer stale draft_authoritative for guided Pro", () => {
+    const frozen = fullGuidedCorpus();
+    const staleDraft = `${frozen}\nStale appendix from server_full_document_text must not override handoff.`;
+    const handoff = buildGuidedVs01SigningHandoff({
+      corpusText: frozen,
+      source: "finalized_signer_applied_guided_corpus",
+      signatureRebuilt: true,
+    });
     const resolution = resolveFinalVs01CorpusOrBlock({
-      agreementCorpusText: SHORT_FALLBACK,
+      agreementCorpusText: frozen,
+      guidedSigningHandoff: handoff,
       draft: {
         parties: [],
         title: "MSA",
-        premium_full_document_text: draftCorpus,
+        premium_full_document_text: staleDraft,
+        server_full_document_text: staleDraft,
       } as never,
       guidedPro: true,
       freeBaselinePlain: SHORT_FALLBACK,
       bridge,
+      signatureRebuilt: true,
     });
     expect(resolution.allowed).toBe(true);
-    expect(resolution.len).toBeGreaterThanOrEqual(GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN);
-    expect(fingerprintAgreementBody(resolution.corpus)).toBe(fingerprintAgreementBody(draftCorpus));
+    expect(resolution.source).toBe("finalized_signer_applied_guided_corpus");
+    expect(fingerprintAgreementBody(resolution.corpus)).toBe(handoff.corpusHash);
   });
 });

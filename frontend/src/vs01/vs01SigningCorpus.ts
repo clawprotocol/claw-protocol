@@ -20,6 +20,11 @@ import {
   type CanonicalPartyIdentity,
 } from "../components/agreements/guidedDealCompletion/signerPartyIdentity";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
+import type { GuidedVs01SigningHandoff } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+import {
+  GUIDED_VS01_HANDOFF_ALLOWED_SOURCES,
+  GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE,
+} from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
 
 export const VS01_SIGNING_CORPUS_MIN_LEN = GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 /** Preferred final guided Pro corpus length (test59 / full premium snapshot). */
@@ -32,6 +37,8 @@ export const VS01_INITIALS_RESERVED_BAND_MIN_PX = 220;
 export const VS01_CORPUS_GATE_USER_MESSAGE =
   "Still finalizing the Pro agreement. Please wait a moment.";
 
+export { GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+
 export const VS01_BLOCKED_PREVIEW_SOURCES = new Set([
   "rendered_preview",
   "live_generated_preview",
@@ -41,12 +48,14 @@ export const VS01_BLOCKED_PREVIEW_SOURCES = new Set([
 
 export type FinalVs01CorpusSource =
   | "handoff_corpus"
+  | "finalized_signer_applied_guided_corpus"
   | "premium_pipeline"
   | "hydrated_premium"
   | "draft_authoritative"
   | "last_known_good"
   | "finalized_signing"
   | "accepted_review"
+  | "canonical_working_draft"
   | "rebuilt_witness_block"
   | "blocked_short_preview";
 
@@ -180,6 +189,8 @@ export function ensureVs01SigningCorpusWitnessBlock(args: {
 
 export type ResolveFinalVs01CorpusOrBlockArgs = {
   agreementCorpusText?: string | null;
+  /** Frozen guided Pro handoff — wins over draft_authoritative / server_full_document_text. */
+  guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
   draft?: AgreementDraft | null;
   bridge?: AgreementVs01BridgeSession | null;
   guidedPro?: boolean;
@@ -193,7 +204,58 @@ export type ResolveFinalVs01CorpusOrBlockArgs = {
   renderedPreviewSource?: string | null;
   premiumInProgress?: boolean;
   premiumComplete?: boolean;
+  signatureRebuilt?: boolean;
 };
+
+function mapHandoffSourceToFinalSource(
+  source: GuidedVs01SigningHandoff["source"],
+): FinalVs01CorpusSource {
+  switch (source) {
+    case "finalized_signer_applied_guided_corpus":
+      return "finalized_signer_applied_guided_corpus";
+    case "canonical_working_draft":
+      return "canonical_working_draft";
+    case "accepted_review":
+      return "accepted_review";
+    default:
+      return "finalized_signing";
+  }
+}
+
+function buildCorpusGateBlockedLogPayload(args: {
+  resolution: Pick<
+    FinalVs01CorpusResolution,
+    "allowed" | "source" | "len" | "hash" | "hasWitnessBlock" | "hasBySignatureLines" | "blockReason"
+  >;
+  guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
+  draftPlain?: string;
+  expectedHash?: string;
+  signatureRebuilt?: boolean;
+}): Record<string, unknown> {
+  const handoff = args.guidedSigningHandoff;
+  const draftPlain = (args.draftPlain ?? "").trim();
+  const staleAuthoritativeSource =
+    handoff &&
+    draftPlain.length > 0 &&
+    handoff.corpusHash !== fingerprintAgreementBody(draftPlain) &&
+    draftPlain.length > handoff.corpusText.length
+      ? "draft_authoritative"
+      : null;
+  return {
+    allowed: args.resolution.allowed,
+    source: args.resolution.source,
+    len: args.resolution.len,
+    hash: args.resolution.hash,
+    missingWitnessBlock: !args.resolution.hasWitnessBlock,
+    missingByOrSignatureLines: !args.resolution.hasBySignatureLines,
+    hasFinalizedGuidedHash: Boolean(handoff?.corpusHash),
+    expectedHash: args.expectedHash ?? handoff?.corpusHash ?? null,
+    actualHash: args.resolution.hash,
+    staleAuthoritativeSource,
+    reason: args.resolution.blockReason ?? null,
+    signatureRebuilt: args.signatureRebuilt ?? handoff?.signatureRebuilt ?? false,
+  };
+}
 
 type CorpusCandidate = { text: string; source: FinalVs01CorpusSource };
 
@@ -212,39 +274,80 @@ export function resolveFinalVs01CorpusOrBlock(
     1 + (args.bridge?.counterparties?.length ?? args.draft?.parties?.length ?? 1),
   );
 
+  const handoff = args.guidedSigningHandoff;
+  const handoffTrusted =
+    handoff &&
+    GUIDED_VS01_HANDOFF_ALLOWED_SOURCES.has(handoff.source) &&
+    handoff.corpusText.trim().length >= VS01_SIGNING_CORPUS_MIN_LEN;
+
   const draftPlain = pickDraftSigningCorpusPlain(args.draft ?? null);
+  const previewSource = (args.renderedPreviewSource ?? "rendered_preview").trim();
+  const previewPlain = (args.renderedPreviewPlain ?? "").trim();
   const candidates: CorpusCandidate[] = [];
   const push = (text: string | null | undefined, source: FinalVs01CorpusSource) => {
     const t = (text ?? "").trim();
     if (t.length > 0) candidates.push({ text: t, source });
   };
 
-  push(args.agreementCorpusText, "handoff_corpus");
-  push(args.premiumPipelinePlain, "premium_pipeline");
-  push(args.hydratedPremiumPlain, "hydrated_premium");
-  push(draftPlain, "draft_authoritative");
-  push(args.lastKnownGoodPlain, "last_known_good");
-  push(args.finalizedSigningPlain, "finalized_signing");
-  push(args.acceptedReviewPlain, "accepted_review");
+  let best: CorpusCandidate = { text: "", source: "blocked_short_preview" };
 
-  const previewSource = (args.renderedPreviewSource ?? "rendered_preview").trim();
-  const previewPlain = (args.renderedPreviewPlain ?? "").trim();
-  if (previewPlain.length > 0 && !guidedPro) {
-    push(previewPlain, "handoff_corpus");
-  }
+  if (handoffTrusted) {
+    best = {
+      text: handoff!.corpusText.trim(),
+      source: mapHandoffSourceToFinalSource(handoff!.source),
+    };
+  } else {
+    push(args.agreementCorpusText, "handoff_corpus");
+    push(args.premiumPipelinePlain, "premium_pipeline");
+    push(args.hydratedPremiumPlain, "hydrated_premium");
+    if (!guidedPro) {
+      push(draftPlain, "draft_authoritative");
+    }
+    push(args.lastKnownGoodPlain, "last_known_good");
+    push(args.finalizedSigningPlain, "finalized_signing");
+    push(args.acceptedReviewPlain, "accepted_review");
 
-  let best = candidates.sort((a, b) => b.text.length - a.text.length)[0] ?? {
-    text: "",
-    source: "blocked_short_preview" as const,
-  };
+    if (previewPlain.length > 0 && !guidedPro) {
+      push(previewPlain, "handoff_corpus");
+    }
 
-  if (
-    guidedPro &&
-    best.text.length > 0 &&
-    best.text.length <= VS01_SIGNING_CORPUS_MAX_PREVIEW_LEN
-  ) {
-    const longer = candidates.find((c) => c.text.length >= VS01_SIGNING_CORPUS_MIN_LEN);
-    if (longer) best = longer;
+    if (guidedPro) {
+      const handoffPlain = (args.agreementCorpusText ?? "").trim();
+      if (handoffPlain.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
+        push(handoffPlain, "handoff_corpus");
+      }
+      push(args.finalizedSigningPlain, "finalized_signing");
+      push(args.acceptedReviewPlain, "accepted_review");
+      push(args.premiumPipelinePlain, "premium_pipeline");
+      push(args.hydratedPremiumPlain, "hydrated_premium");
+      push(args.lastKnownGoodPlain, "last_known_good");
+    }
+
+    const sorted = [...candidates].sort((a, b) => {
+      const priority = (source: FinalVs01CorpusSource): number => {
+        if (source === "handoff_corpus") return 0;
+        if (source === "finalized_signer_applied_guided_corpus") return 1;
+        if (source === "finalized_signing") return 2;
+        if (source === "accepted_review") return 3;
+        if (source === "canonical_working_draft") return 4;
+        if (source === "premium_pipeline" || source === "hydrated_premium") return 5;
+        if (source === "draft_authoritative") return 9;
+        return 6;
+      };
+      const byPriority = priority(a.source) - priority(b.source);
+      if (byPriority !== 0) return byPriority;
+      return b.text.length - a.text.length;
+    });
+    best = sorted[0] ?? best;
+
+    if (
+      guidedPro &&
+      best.text.length > 0 &&
+      best.text.length <= VS01_SIGNING_CORPUS_MAX_PREVIEW_LEN
+    ) {
+      const longer = candidates.find((c) => c.text.length >= VS01_SIGNING_CORPUS_MIN_LEN);
+      if (longer) best = longer;
+    }
   }
 
   const witness = ensureVs01SigningCorpusWitnessBlock({
@@ -317,21 +420,20 @@ export function resolveFinalVs01CorpusOrBlock(
     blockReason,
     premiumInProgress,
     premiumComplete,
-    userMessage: allowed ? undefined : VS01_CORPUS_GATE_USER_MESSAGE,
+    userMessage: allowed
+      ? undefined
+      : handoffTrusted
+        ? GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE
+        : VS01_CORPUS_GATE_USER_MESSAGE,
   };
 
-  const gatePayload = {
-    allowed,
-    source,
-    len: resolution.len,
-    hash: resolution.hash,
-    matchesFreeHash: resolution.matchesFreeHash,
-    hasWitnessBlock: resolution.hasWitnessBlock,
-    hasBySignatureLines: resolution.hasBySignatureLines,
-    premiumInProgress,
-    premiumComplete,
-    reason: blockReason ?? null,
-  };
+  const gatePayload = buildCorpusGateBlockedLogPayload({
+    resolution,
+    guidedSigningHandoff: handoff ?? null,
+    draftPlain,
+    expectedHash: handoff?.corpusHash,
+    signatureRebuilt: args.signatureRebuilt ?? handoff?.signatureRebuilt,
+  });
 
   if (allowed) {
     logVs01CorpusGate(gatePayload);

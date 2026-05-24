@@ -187,6 +187,7 @@ export function canonicalKeyForSectionNumber(sectionNumber: number): string | nu
 
 const ORPHAN_NUMBERED_HEADING_RE = /^\s*(?:\*{0,2})?(\d+)\.(?:\*{0,2})?\s*$/;
 const ORPHAN_EMPTY_SUBSECTION_RE = /^\s*\d+\.\d+\.?\s*$/;
+const ORPHAN_MARKDOWN_NUMBERED_HEADING_RE = /^\s*\*{1,2}\s*\d+(?:\.\d+)*\.?\s*\*{0,2}\s*$/;
 
 export function stripOrphanNumberedHeadingLines(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
@@ -199,6 +200,10 @@ export function stripOrphanNumberedHeadingLines(text: string): { text: string; r
     }
     if (ORPHAN_EMPTY_SUBSECTION_RE.test(t)) {
       repairs.push(`orphan_empty_subsection:${t}`);
+      continue;
+    }
+    if (ORPHAN_MARKDOWN_NUMBERED_HEADING_RE.test(t)) {
+      repairs.push(`orphan_markdown_numbered_heading:${t.slice(0, 12)}`);
       continue;
     }
     out.push(line);
