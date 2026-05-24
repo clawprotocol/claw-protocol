@@ -67,16 +67,21 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   if (authoritative.length > 0) {
     authCandidates.push({ plain: authoritative, source: "authoritative_hydrated" });
   }
-  if (picker.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
-    authCandidates.push({ plain: picker, source: "picker_authoritative" });
-  }
-  if (adt.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
-    authCandidates.push({ plain: adt, source: "agreement_document" });
+  /** Final review must not swap signer-applied corpus for longer stale server/picker drafts. */
+  if (!authorityOnly) {
+    if (picker.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
+      authCandidates.push({ plain: picker, source: "picker_authoritative" });
+    }
+    if (adt.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
+      authCandidates.push({ plain: adt, source: "agreement_document" });
+    }
   }
 
-  const picked = pickLongestAuthoritative(
-    authCandidates.length ? authCandidates : [{ plain: authoritative, source: "authoritative_hydrated" }],
-  );
+  const picked = authorityOnly
+    ? authCandidates[0] ?? { plain: authoritative, source: "authoritative_hydrated" as const }
+    : pickLongestAuthoritative(
+        authCandidates.length ? authCandidates : [{ plain: authoritative, source: "authoritative_hydrated" }],
+      );
 
   let plainText = picked.plain;
   let source = picked.source;

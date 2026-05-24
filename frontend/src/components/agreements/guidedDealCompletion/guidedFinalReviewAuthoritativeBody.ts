@@ -33,6 +33,14 @@ export const GUIDED_PRE_SIGNING_CORPUS_SOURCES = new Set<GuidedFinalCorpusCandid
   "finalized_guided_corpus",
 ]);
 
+/** Stale server/picker drafts — must not override frozen signer-applied corpus on final review. */
+export const GUIDED_STALE_POST_SIGNER_CORPUS_SOURCES = new Set<GuidedFinalCorpusCandidateSource>([
+  "server_full_document_text",
+  "picker_authoritative",
+  "agreement_document",
+  "last_accepted_premium_candidate",
+]);
+
 export function isGuidedSigningCorpusSelectionReady(args: {
   guidedUxState?: string;
   signerSetupComplete?: boolean;
@@ -52,7 +60,7 @@ export function rejectGuidedAuthoritativeSourceUntilSigningReady(
   source: GuidedFinalCorpusCandidateSource,
   signingReady: boolean,
 ): boolean {
-  if (signingReady) return false;
+  if (signingReady) return GUIDED_STALE_POST_SIGNER_CORPUS_SOURCES.has(source);
   return GUIDED_PRE_SIGNING_CORPUS_SOURCES.has(source);
 }
 

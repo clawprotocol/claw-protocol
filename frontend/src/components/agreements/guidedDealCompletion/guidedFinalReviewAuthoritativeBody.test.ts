@@ -63,6 +63,23 @@ describe("guidedFinalReviewAuthoritativeBody", () => {
     expect(resolved.len).toBe(0);
   });
 
+  it("rejects server and picker sources when signing-ready", () => {
+    const signerApplied = "Signer-applied finalized corpus. ".repeat(130);
+    const resolved = resolveGuidedFinalReviewAuthoritativeBody({
+      candidates: [
+        { source: "finalized_signer_applied_guided_corpus", body: signerApplied },
+        { source: "server_full_document_text", body: `${signerApplied} stale server appendix`.repeat(2) },
+        { source: "picker_authoritative", body: `${signerApplied} stale picker appendix`.repeat(2) },
+      ],
+      signerIdentities: identities,
+      signingCorpusReady: true,
+    });
+    expect(resolved.source).toBe("finalized_signer_applied_guided_corpus");
+    expect(resolved.body.trim()).toBe(signerApplied.trim());
+    expect(resolved.body).not.toContain("stale server appendix");
+    expect(resolved.body).not.toContain("stale picker appendix");
+  });
+
   it("prefers finalized_signer_applied over hydrated_premium", () => {
     const signerApplied = "Signer-applied finalized corpus. ".repeat(130);
     const resolved = resolveGuidedFinalReviewAuthoritativeBody({

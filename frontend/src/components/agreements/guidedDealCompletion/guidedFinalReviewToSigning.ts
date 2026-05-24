@@ -140,29 +140,42 @@ const GUIDED_ANSWER_DEDUPE_RES: readonly { re: RegExp; label: string }[] = [
   { re: /\b(?:30|thirty)\s+days?.{0,30}(?:written\s+)?notice\b/i, label: "termination_notice" },
 ];
 
-/** Prefer longest frozen/authoritative plain text; never pick a short rendered preview over a full corpus. */
+/** Prefer frozen signer-applied corpus by priority — never a longer stale server/picker draft. */
 export function resolveGuidedSigningAuthoritativePlain(
   args: ResolveGuidedSigningAuthoritativeArgs,
 ): string {
   const minLen = args.minLen ?? 500;
-  const authoritativeCandidates = [
+  const priorityOrder: Array<string | null | undefined> = [
     args.snapshot,
-    args.accepted,
     args.finalReviewCorpus,
+    args.accepted,
     args.guidedAuthoritative,
-  ]
-    .map((t) => (t || "").trim())
-    .filter((t) => t.length >= minLen);
-  const longest = authoritativeCandidates.sort((a, b) => b.length - a.length)[0] ?? "";
-  const rendered = (args.renderedPreview || "").trim();
-  if (
-    longest.length >= GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN &&
-    rendered.length > 0 &&
-    rendered.length < longest.length * 0.8
-  ) {
-    return longest;
+  ];
+  for (const raw of priorityOrder) {
+    const body = (raw || "").trim();
+    if (body.length >= minLen && !isGuidedSigningPlaceholderPreviewBody(body)) {
+      return body;
+    }
   }
-  return longest || rendered;
+  const rendered = (args.renderedPreview || "").trim();
+  return rendered.length >= minLen ? rendered : "";
+}
+
+export function resolveGuidedSigningPersistAgreementId(args: {
+  reviewAgreementIdRef?: string | null;
+  reviewAgreementId?: string | null;
+  productionSendBarAgreementId?: string | null;
+  draftAgreementId?: string | null;
+  resumeAgreementId?: string | null;
+}): string {
+  return (
+    args.reviewAgreementIdRef?.trim() ||
+    args.reviewAgreementId?.trim() ||
+    args.productionSendBarAgreementId?.trim() ||
+    args.draftAgreementId?.trim() ||
+    args.resumeAgreementId?.trim() ||
+    ""
+  );
 }
 
 /** True when body still carries guided pre-signer placeholder tokens (must not enter signing track). */

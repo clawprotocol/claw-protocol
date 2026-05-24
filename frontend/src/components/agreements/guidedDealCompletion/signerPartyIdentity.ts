@@ -113,6 +113,30 @@ function replaceRecitalPartyTokens(text: string, identities: readonly CanonicalP
   return out;
 }
 
+/** Replace generic Party A / Party B slot labels when signer setup has real names. */
+export function replacePartySlotLabelsInBody(
+  text: string,
+  identities: readonly CanonicalPartyIdentity[],
+): { text: string; count: number } {
+  const partyA = identities[0]?.partyDisplayName?.trim();
+  const partyB = identities[1]?.partyDisplayName?.trim();
+  if (!partyA || !partyB) return { text, count: 0 };
+  if (isPlaceholderPartyName(partyA) || isPlaceholderPartyName(partyB)) {
+    return { text, count: 0 };
+  }
+  let out = text;
+  let count = 0;
+  if (/\bParty\s+A\b/i.test(out)) {
+    out = out.replace(/\bParty\s+A\b/gi, partyA);
+    count += 1;
+  }
+  if (/\bParty\s+B\b/i.test(out)) {
+    out = out.replace(/\bParty\s+B\b/gi, partyB);
+    count += 1;
+  }
+  return { text: out, count };
+}
+
 function replaceGenericOpeningPartyLabels(
   text: string,
   identities: readonly CanonicalPartyIdentity[],
@@ -354,6 +378,8 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
   out = replaceRecitalPartyTokens(out, identities);
   const openingPatch = replaceGenericOpeningPartyLabels(out, identities);
   out = openingPatch.text;
+  const slotPatch = replacePartySlotLabelsInBody(out, identities);
+  out = slotPatch.text;
 
   const repair = repairAgreementTemplatePlaceholders(out, {
     intakeRaw,
@@ -386,7 +412,7 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
   }
 
   const signaturePolishCount =
-    openingPatch.count + sigFill.count + blockPolish.count + headings.log.replacedCount;
+    openingPatch.count + slotPatch.count + sigFill.count + blockPolish.count + headings.log.replacedCount;
 
   if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
     // eslint-disable-next-line no-console

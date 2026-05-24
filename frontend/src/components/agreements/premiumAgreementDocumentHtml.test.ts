@@ -70,6 +70,19 @@ Date: _________________________
     expect(html).not.toMatch(/The lines below mirror a traditional signature page/i);
   });
 
+  it("skips decorative signature card when forceEmbeddedCorpusSignature is set for guided final review", () => {
+    const plain = "SERVICES AGREEMENT\n\n1. SCOPE\nThe parties agree.";
+    expect(resolvePremiumSignaturePreviewMode(plain, 2, { forceEmbeddedCorpusSignature: true }).mode).toBe(
+      "embedded_corpus_signature_block",
+    );
+    const html = buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "collaboration",
+      partyNames: ["Acme LLC", "Joe Brown"],
+      forceEmbeddedCorpusSignature: true,
+    });
+    expect(html).not.toContain("claw-premium-signature-section");
+  });
+
   it("renders decorative signature card only when corpus lacks execution block", () => {
     const html = buildPremiumAgreementReadonlyHtml("SERVICES AGREEMENT\n\n1. SCOPE\nThe parties agree.", {
       signatureSectionMode: "execution",

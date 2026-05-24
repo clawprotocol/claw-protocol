@@ -787,6 +787,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("handleGuidedSigningConfirmationContinue");
     expect(intake).toContain("openConfirmModal: true");
     expect(intake).toContain("enterGuidedSignatureTrackRoute");
+    expect(intake).toContain("resolveGuidedSigningPersistAgreementId");
     expect(intake).toContain("logGuidedSignatureGenericSendBypassed");
     expect(intake).toContain("preparing_signing_links");
     expect(intake).toContain("adding_signature_fields");

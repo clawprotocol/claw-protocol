@@ -614,6 +614,15 @@ export function finalizeGuidedProAgreementCorpus(
     diagnostics.validationMissing.length === 0 &&
     diagnostics.validationContradictions.length === 0 &&
     fatalScan.ok;
+  if (
+    ok &&
+    args.signerIdentities.length >= 2 &&
+    !diagnostics.signerIdentityRejected &&
+    (diagnostics.signatureRebuilt || diagnostics.signaturePolishCount > 0)
+  ) {
+    diagnostics.selectedSource = "finalized_signer_applied_guided_corpus";
+  }
+
   logGuidedFinalCorpusFinalized({
     ok,
     bodyLen: body.length,

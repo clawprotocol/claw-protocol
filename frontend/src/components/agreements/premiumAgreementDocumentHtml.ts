@@ -131,6 +131,8 @@ export type BuildPremiumAgreementReadonlyHtmlOpts = {
   signatureSectionMode: PremiumSignatureSectionMode;
   partyNames: readonly string[];
   renderHints?: PremiumDocumentRenderHints | null;
+  /** Guided Pro final review: never append decorative signature cards when corpus was rebuilt. */
+  forceEmbeddedCorpusSignature?: boolean;
 };
 
 export type PremiumSignaturePreviewMode =
@@ -140,14 +142,17 @@ export type PremiumSignaturePreviewMode =
 export function resolvePremiumSignaturePreviewMode(
   plain: string,
   signerCount: number,
+  opts?: { forceEmbeddedCorpusSignature?: boolean },
 ): { mode: PremiumSignaturePreviewMode; hasCorpusSignatureBlock: boolean; signerCount: number } {
   const count = Math.max(1, signerCount);
   const hasCorpusSignatureBlock = corpusSignatureBlocksHaveRequiredByLines(plain, count);
+  const forceEmbedded = Boolean(opts?.forceEmbeddedCorpusSignature);
   return {
-    mode: hasCorpusSignatureBlock
-      ? "embedded_corpus_signature_block"
-      : "decorative_fallback_signature_card",
-    hasCorpusSignatureBlock,
+    mode:
+      hasCorpusSignatureBlock || forceEmbedded
+        ? "embedded_corpus_signature_block"
+        : "decorative_fallback_signature_card",
+    hasCorpusSignatureBlock: hasCorpusSignatureBlock || forceEmbedded,
     signerCount: count,
   };
 }
@@ -231,7 +236,9 @@ export function buildPremiumAgreementReadonlyHtml(
       (_m, before, mid) => `${before}${mid}${premiumCalloutInline("Select jurisdiction before signing.")}`,
     );
   }
-  const previewMode = resolvePremiumSignaturePreviewMode(raw, opts.partyNames.length);
+  const previewMode = resolvePremiumSignaturePreviewMode(raw, opts.partyNames.length, {
+    forceEmbeddedCorpusSignature: opts.forceEmbeddedCorpusSignature,
+  });
   logSignaturePreviewMode(previewMode);
   if (previewMode.mode === "decorative_fallback_signature_card") {
     html += buildPremiumSignatureSectionHtml(opts.partyNames, opts.signatureSectionMode);

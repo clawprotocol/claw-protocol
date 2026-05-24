@@ -8,6 +8,7 @@ import {
   normalizePartyNameSpacingInCorpus,
   prepareGuidedSigningCorpusCleanup,
   resolveGuidedSigningAuthoritativePlain,
+  resolveGuidedSigningPersistAgreementId,
   selectGuidedSignatureTrackCorpus,
   shouldBypassGenericOnGenerateForGuidedSignature,
   shouldShowPacketSignerMetaLine,
@@ -80,6 +81,63 @@ describe("resolveGuidedSigningAuthoritativePlain", () => {
       renderedPreview: SHORT_RENDERED,
     });
     expect(plain.length).toBeGreaterThanOrEqual(GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN);
+  });
+
+  it("prefers frozen snapshot over longer stale server/picker authoritative", () => {
+    const frozen = `${"Signer-applied finalized corpus. ".repeat(130)}${witnessBlock()}`;
+    const staleServer = `${frozen} Stale server_full_document_text appendix.`;
+    expect(staleServer.length).toBeGreaterThan(frozen.length);
+    const plain = resolveGuidedSigningAuthoritativePlain({
+      snapshot: frozen,
+      finalReviewCorpus: frozen,
+      guidedAuthoritative: staleServer,
+    });
+    expect(plain).toBe(frozen);
+    expect(plain).not.toContain("Stale server_full_document_text");
+  });
+});
+
+function witnessBlock(): string {
+  return `
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Acme LLC
+By: ______________________
+Name: Anthem H Blanchard
+Title: Manager
+Date: ____________________
+
+SERVICE PROVIDER:
+Joe Brown
+By: ______________________
+Name: Joe Brown
+Date: ____________________`;
+}
+
+describe("resolveGuidedSigningPersistAgreementId", () => {
+  it("collects agreement id from ref, state, send bar, draft, and resume", () => {
+    expect(
+      resolveGuidedSigningPersistAgreementId({
+        reviewAgreementIdRef: "ref-id",
+        reviewAgreementId: "state-id",
+        productionSendBarAgreementId: "bar-id",
+        draftAgreementId: "draft-id",
+        resumeAgreementId: "resume-id",
+      }),
+    ).toBe("ref-id");
+    expect(
+      resolveGuidedSigningPersistAgreementId({
+        reviewAgreementId: "state-id",
+        productionSendBarAgreementId: "bar-id",
+      }),
+    ).toBe("state-id");
+    expect(
+      resolveGuidedSigningPersistAgreementId({
+        productionSendBarAgreementId: "bar-id",
+        draftAgreementId: "draft-id",
+      }),
+    ).toBe("bar-id");
   });
 });
 

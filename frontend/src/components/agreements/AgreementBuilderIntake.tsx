@@ -824,6 +824,7 @@ import {
   logGuidedSignatureTrackStart,
   prepareGuidedSigningCorpusCleanup,
   resolveGuidedSigningAuthoritativePlain,
+  resolveGuidedSigningPersistAgreementId,
   selectGuidedSignatureTrackCorpus,
   shouldBypassGenericOnGenerateForGuidedSignature,
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
@@ -14967,85 +14968,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [draft, reviewDocRefreshTick, premiumSurfaceGateTick]);
 
-  const guidedAuthoritativeBodyPlain = useMemo(() => {
-    return pickBestPaidProAuthoritativeCorpusPlain(
-      [
-        hydratedPremiumBodyRef.current,
-        premiumPipelineOutputBodyRef.current,
-        lastPremiumWinningCorpusRef.current,
-        lastKnownGoodAuthoritativeDraftRef.current,
-        agreementDocumentText,
-        premiumPaidReadonlyPick.plainText,
-      ],
-      paidProStarterPreviewPlain,
-    );
-  }, [
-    agreementDocumentText,
-    premiumPaidReadonlyPick.plainText,
-    paidProStarterPreviewPlain,
-    guidedAuthVersionNonce,
-    guidedCompletionPhase,
-    reviewDocRefreshTick,
-    premiumSurfaceGateTick,
-  ]);
-
   const guidedAuthoritativeVersionId = useMemo(() => {
     void guidedAuthVersionNonce;
     return readAuthoritativeAgreementVersion()?.versionId ?? null;
   }, [guidedAuthVersionNonce, guidedCompletionPhase]);
-
-  const guidedAuthoritativeBodyHash = useMemo(
-    () => fingerprintAgreementBody(guidedAuthoritativeBodyPlain),
-    [guidedAuthoritativeBodyPlain],
-  );
-
-  const guidedAuthoritativeBodyLenForGate = useMemo(
-    () =>
-      Math.max(
-        guidedAuthoritativeBodyPlain.length,
-        (
-          hydratedPremiumBodyRef.current ||
-          lastKnownGoodAuthoritativeDraftRef.current ||
-          paidBodyForGuidedCompletion
-        ).trim().length,
-      ),
-    [
-      guidedAuthoritativeBodyPlain,
-      paidBodyForGuidedCompletion,
-      guidedAuthVersionNonce,
-      reviewDocRefreshTick,
-      premiumSurfaceGateTick,
-    ],
-  );
-
-  const buildGuidedFinalReviewUnlockGateArgs = React.useCallback(() => {
-    const applyStatus = resolveGuidedAnswerApplyStatus({
-      guidedAnswerApplyStatus,
-      guidedCompletionPhase,
-      bulkApplying: guidedBulkApplyingActive,
-    });
-    guidedAnswerApplyStatusRef.current = applyStatus;
-    const session = guidedCompletionSessionRef.current;
-    const answeredCount = session ? listGuidedAnsweredVariableIds(session).length : 0;
-    return {
-      applyStatus,
-      signerStatus: resolveGuidedSignerSetupStatus(guidedPreReviewSignerSlots.complete),
-      authoritativeBodyLen: guidedAuthoritativeBodyLenForGate,
-      signersEditing: guidedSignerFieldFocusedRef.current,
-      signerMetadataDebouncing: guidedSignerMetadataDebouncingRef.current,
-      guidedCompletionPhase,
-      guidedSessionComplete: Boolean(session && isGuidedCompletionComplete(session)),
-      answeredCount,
-      hasAppliedSummary: guidedAuthoritativeSummaryAreas.length > 0,
-    };
-  }, [
-    guidedAnswerApplyStatus,
-    guidedCompletionPhase,
-    guidedBulkApplyingActive,
-    guidedPreReviewSignerSlots.complete,
-    guidedAuthoritativeBodyLenForGate,
-    guidedAuthoritativeSummaryAreas.length,
-  ]);
 
   const guidedSigningCorpusSelectionReady = useMemo(
     () =>
@@ -15103,6 +15029,89 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     latestAcceptedCorpus,
     guidedSigningCorpusSelectionReady,
+  ]);
+
+  const guidedAuthoritativeBodyPlain = useMemo(() => {
+    const frozenFinalReview =
+      guidedSigningCorpusSelectionReady && guidedFinalReviewAuthoritativeResolution.body.trim().length > 0
+        ? guidedFinalReviewAuthoritativeResolution.body.trim()
+        : "";
+    if (frozenFinalReview) return frozenFinalReview;
+    return pickBestPaidProAuthoritativeCorpusPlain(
+      [
+        finalizedSigningCorpusRef.current,
+        hydratedPremiumBodyRef.current,
+        premiumPipelineOutputBodyRef.current,
+        lastPremiumWinningCorpusRef.current,
+        lastKnownGoodAuthoritativeDraftRef.current,
+        agreementDocumentText,
+        premiumPaidReadonlyPick.plainText,
+      ],
+      paidProStarterPreviewPlain,
+    );
+  }, [
+    agreementDocumentText,
+    premiumPaidReadonlyPick.plainText,
+    paidProStarterPreviewPlain,
+    guidedAuthVersionNonce,
+    guidedCompletionPhase,
+    guidedSigningCorpusSelectionReady,
+    guidedFinalReviewAuthoritativeResolution.body,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+  ]);
+
+  const guidedAuthoritativeBodyHash = useMemo(
+    () => fingerprintAgreementBody(guidedAuthoritativeBodyPlain),
+    [guidedAuthoritativeBodyPlain],
+  );
+
+  const guidedAuthoritativeBodyLenForGate = useMemo(
+    () =>
+      Math.max(
+        guidedAuthoritativeBodyPlain.length,
+        (
+          hydratedPremiumBodyRef.current ||
+          lastKnownGoodAuthoritativeDraftRef.current ||
+          paidBodyForGuidedCompletion
+        ).trim().length,
+      ),
+    [
+      guidedAuthoritativeBodyPlain,
+      paidBodyForGuidedCompletion,
+      guidedAuthVersionNonce,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
+
+  const buildGuidedFinalReviewUnlockGateArgs = React.useCallback(() => {
+    const applyStatus = resolveGuidedAnswerApplyStatus({
+      guidedAnswerApplyStatus,
+      guidedCompletionPhase,
+      bulkApplying: guidedBulkApplyingActive,
+    });
+    guidedAnswerApplyStatusRef.current = applyStatus;
+    const session = guidedCompletionSessionRef.current;
+    const answeredCount = session ? listGuidedAnsweredVariableIds(session).length : 0;
+    return {
+      applyStatus,
+      signerStatus: resolveGuidedSignerSetupStatus(guidedPreReviewSignerSlots.complete),
+      authoritativeBodyLen: guidedAuthoritativeBodyLenForGate,
+      signersEditing: guidedSignerFieldFocusedRef.current,
+      signerMetadataDebouncing: guidedSignerMetadataDebouncingRef.current,
+      guidedCompletionPhase,
+      guidedSessionComplete: Boolean(session && isGuidedCompletionComplete(session)),
+      answeredCount,
+      hasAppliedSummary: guidedAuthoritativeSummaryAreas.length > 0,
+    };
+  }, [
+    guidedAnswerApplyStatus,
+    guidedCompletionPhase,
+    guidedBulkApplyingActive,
+    guidedPreReviewSignerSlots.complete,
+    guidedAuthoritativeBodyLenForGate,
+    guidedAuthoritativeSummaryAreas.length,
   ]);
 
   const simpleProFinalReviewCorpus = useMemo(() => {
@@ -15775,6 +15784,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signatureSectionMode: "collaboration",
       partyNames: signaturePartyNames,
       renderHints,
+      forceEmbeddedCorpusSignature:
+        guidedSignatureRebuiltRef.current ||
+        guidedFinalReviewAuthoritativeResolution.source === "finalized_signer_applied_guided_corpus",
     });
   }, [
     simpleProFinalReviewCorpus.plainText,
@@ -15784,6 +15796,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     currentPremiumMergedIntakeKey,
     displayLivePreviewModel.partiesLine,
     guidedSignerCanonicalIdentities,
+    guidedFinalReviewAuthoritativeResolution.source,
+    guidedAuthVersionNonce,
   ]);
 
   React.useEffect(() => {
@@ -17720,12 +17734,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       showModalIfSlow("adding_signature_fields");
 
-      let id = (
-        reviewAgreementIdRef.current ||
-        reviewAgreementId ||
-        productionSendBarAgreementId ||
-        ""
-      ).trim();
+      let id = resolveGuidedSigningPersistAgreementId({
+        reviewAgreementIdRef: reviewAgreementIdRef.current,
+        reviewAgreementId,
+        productionSendBarAgreementId,
+        draftAgreementId: (mergedDraft as { id?: string | null } | null)?.id ?? null,
+        resumeAgreementId: readCreateReviewAgreementResumeId(),
+      });
       if (!id) {
         const rawFromDraft = buildReviewCoercionRawIntakeFromDraft(mergedDraft, intakeCombined);
         const rawIntake = (rawFromDraft || finalTranscriptRef.current || "").trim();
@@ -17748,7 +17763,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setHardError(null);
         const ok = await runPersistAndOpen(mergedDraft, partyCtx, true, "signature", "send");
         setLoading(false);
-        if (!ok) {
+        id = resolveGuidedSigningPersistAgreementId({
+          reviewAgreementIdRef: reviewAgreementIdRef.current,
+          reviewAgreementId,
+          productionSendBarAgreementId,
+          draftAgreementId: (mergedDraft as { id?: string | null } | null)?.id ?? null,
+          resumeAgreementId: readCreateReviewAgreementResumeId(),
+        });
+        if (!ok && !id) {
           logGuidedSignatureTrackFailed({ reason: "persist_failed" });
           showModalIfSlow("blocked");
           setGuidedFinalizeModalBlockedMessage(
@@ -17756,7 +17778,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           );
           return;
         }
-        id = (reviewAgreementIdRef.current || reviewAgreementId || "").trim();
       }
 
       if (!id) {

@@ -1,5 +1,11 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { prepareGuidedSigningCorpusCleanup } from "./guidedFinalReviewToSigning";
+import {
+  prepareGuidedSigningCorpusCleanup,
+  selectGuidedSignatureTrackCorpus,
+} from "./guidedFinalReviewToSigning";
+import { resolveGuidedFinalReviewAuthoritativeBody } from "./guidedFinalReviewAuthoritativeBody";
+import { resolveSimpleProFinalReviewCorpus } from "../simpleProFinalReviewCorpus";
+import { fingerprintAgreementBody } from "./guidedSigningPacketVersion";
 import { resolveCanonicalFinalPartyManifest } from "./canonicalFinalPartyManifest";
 import { buildGuidedVs01SigningHandoff, assertGuidedProVs01BridgeCorpusReady } from "./guidedVs01SigningHandoff";
 import {
@@ -157,6 +163,40 @@ describe("guided VS01 bridge handoff regression (failure shape)", () => {
     );
     expect(assertBad.ok).toBe(false);
     expect(assertBad.reason).toBe("corpus_too_short");
+  });
+
+  it("aligns final review display, VS01 handoff, and signing track on the same finalized signer corpus", () => {
+    const corpus = aiAutomationCorpus();
+    const staleServer = `${corpus}\n\nStale server_full_document_text appendix.`;
+    const stalePicker = `${corpus}\n\nStale picker_authoritative appendix.`;
+    expect(staleServer.length).toBeGreaterThan(corpus.length);
+
+    const finalReview = resolveGuidedFinalReviewAuthoritativeBody({
+      candidates: [
+        { source: "finalized_signer_applied_guided_corpus", body: corpus },
+        { source: "server_full_document_text", body: staleServer },
+        { source: "picker_authoritative", body: stalePicker },
+      ],
+      signingCorpusReady: true,
+    });
+    const display = resolveSimpleProFinalReviewCorpus({
+      authoritativePlain: finalReview.body,
+      pickerPlain: stalePicker,
+      finalReviewAuthorityOnly: true,
+    });
+    const track = selectGuidedSignatureTrackCorpus({ finalizedSignerApplied: corpus });
+    const handoff = buildGuidedVs01SigningHandoff({
+      corpusText: track.body,
+      source: "finalized_signer_applied_guided_corpus",
+      signatureRebuilt: true,
+    });
+
+    expect(finalReview.source).toBe("finalized_signer_applied_guided_corpus");
+    expect(display.plainText).toBe(corpus);
+    expect(track.body).toBe(corpus);
+    expect(fingerprintAgreementBody(display.plainText)).toBe(handoff.corpusHash);
+    expect(display.plainText).not.toContain("Stale server_full_document_text");
+    expect(display.plainText).not.toContain("Stale picker_authoritative");
   });
 
   it("mergeAgreementDraftWithGuidedSigningHandoff writes corpus into draft fields", () => {

@@ -87,6 +87,47 @@ describe("signerPartyIdentity (test26)", () => {
     expect(text).not.toMatch(/SERVICE PROVIDER:[\s\S]*?Name:\s*Acme LLC/i);
   });
 
+  it("replaces Party A / Party B slot labels when Acme LLC and Joe Brown are known", () => {
+    const body = `AI AUTOMATION SERVICES AGREEMENT
+
+This agreement is between Party A and Party B for AI automation workflows and dashboards.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Party A
+By: __________________________
+Name: ________________________
+Title: _________________________
+Date: _________________________
+
+SERVICE PROVIDER:
+Party B
+By: __________________________
+Name: ________________________
+Date: _________________________
+`;
+    const ids = resolveCanonicalPartyIdentitiesFromSignerSetup({
+      ...signerArgs,
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Brown",
+      partySignerNames: ["Anthem Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      draftPartyNames: ["Party A", "Party B"],
+    });
+    const { text } = applySignerPartyIdentityToAuthoritativeAgreement(
+      body,
+      ids,
+      "agreement for somebody helping us with AI automation workflows and dashboards",
+    );
+    expect(text).toContain("between Acme LLC");
+    expect(text).toContain("Joe Brown");
+    expect(text).not.toMatch(/\bParty\s+A\b/i);
+    expect(text).not.toMatch(/\bParty\s+B\b/i);
+    expect(text).toMatch(/CLIENT:[\s\S]*Acme LLC/i);
+    expect(text).toMatch(/SERVICE PROVIDER:[\s\S]*Joe Brown/i);
+  });
+
   it("patches generic opening party labels with known party names before signing", () => {
     const body = `MASTER SERVICES AGREEMENT
 
