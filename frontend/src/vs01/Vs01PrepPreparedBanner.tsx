@@ -20,21 +20,21 @@ export function Vs01PrepPreparedBanner({
     <div
       className={
         ready
-          ? "vs01-prep-prepared-banner mb-3 rounded-lg border border-emerald-200/80 bg-emerald-50/90 px-3 py-2.5"
-          : "vs01-prep-prepared-banner mb-3 rounded-lg border border-amber-300/80 bg-amber-50/95 px-3 py-2.5"
+          ? "vs01-prep-prepared-banner mb-3 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5"
+          : "vs01-prep-prepared-banner mb-3 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5"
       }
       role="status"
       data-testid="vs01-prep-prepared-banner"
     >
-      <p className={ready ? "text-sm font-semibold text-emerald-950" : "text-sm font-semibold text-amber-950"}>
-        {ready ? "Signature fields are ready." : "Agreement text needs attention"}
+      <p className={ready ? "text-sm font-semibold text-slate-950" : "text-sm font-semibold text-slate-950"}>
+        {ready ? "Ready for signing." : "Preparing agreement."}
       </p>
-      <p className={ready ? "mt-0.5 text-xs text-emerald-900/90" : "mt-0.5 text-xs text-amber-900/90"}>
+      <p className={ready ? "mt-0.5 text-xs text-slate-600" : "mt-0.5 text-xs text-slate-600"}>
         {ready
-          ? "LawDog placed signature fields for each signer."
-          : "The agreement text must be finalized before signing links can be created."}
+          ? "Signature fields are placed for each signer."
+          : "The signing packet will appear when the agreement is ready."}
       </p>
-      <p className={ready ? "mt-1.5 text-[11px] text-emerald-800/90" : "mt-1.5 text-[11px] text-amber-900/90"}>
+      <p className={ready ? "mt-1.5 text-[11px] text-slate-500" : "mt-1.5 text-[11px] text-slate-500"}>
         <span className="font-medium">{agreementTitle.trim() || "Your agreement"}</span>
         {" · "}
         {signerCount} signer{signerCount === 1 ? "" : "s"}
@@ -43,7 +43,7 @@ export function Vs01PrepPreparedBanner({
         {autoPrepared ? " · latest version" : ""}
       </p>
       {message ? (
-        <p className={ready ? "mt-1 text-[11px] text-emerald-800/95" : "mt-1 text-[11px] text-amber-900/95"}>
+        <p className={ready ? "mt-1 text-[11px] text-slate-500" : "mt-1 text-[11px] text-slate-500"}>
           {message}
         </p>
       ) : null}

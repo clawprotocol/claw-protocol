@@ -19,6 +19,7 @@ import { normalizeAgreementDisplayTitle } from "../../components/agreements/cano
 import { buildAgreementPreviewText } from "../../components/agreements/agreementPreviewFromDraft";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import type { GuidedVs01SigningHandoff } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+import { mergeAgreementDraftWithGuidedSigningHandoff } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
 import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
@@ -647,14 +648,21 @@ function vs01SeedFailureReason(detail: unknown, httpStatus: number): string {
   return `http_${httpStatus}`;
 }
 
-function logVs01SigningSeedPreflight(agreementId: string, draft: AgreementDraft | null): void {
+function logVs01SigningSeedPreflight(
+  agreementId: string,
+  draft: AgreementDraft | null,
+  signingCorpusPlain?: string | null,
+  signingCorpusSource?: string | null,
+): void {
   if (import.meta.env.MODE === "test") return;
   const parties = (draft?.parties ?? []) as AgreementParty[];
-  const docLen = Math.max(
+  const signingLen = (signingCorpusPlain ?? "").trim().length;
+  const draftLen = Math.max(
     String((draft as { document_text?: string })?.document_text ?? "").length,
     String((draft as { premium_full_document_text?: string })?.premium_full_document_text ?? "").length,
     String((draft as { server_full_document_text?: string })?.server_full_document_text ?? "").length,
   );
+  const docLen = signingLen > 0 ? signingLen : draftLen;
   const id = agreementId.trim();
   // eslint-disable-next-line no-console
   console.info("[vs01-signing-seed-preflight]", {
@@ -664,7 +672,9 @@ function logVs01SigningSeedPreflight(agreementId: string, draft: AgreementDraft 
       Boolean(explicitSignerNameForEntity(p.signerName, (p.name || "").trim())),
     ).length,
     hasDocumentText: docLen > 0,
-    documentTextLen: docLen || null,
+    documentTextLen: docLen > 0 ? docLen : null,
+    documentTextSource:
+      signingLen > 0 ? signingCorpusSource ?? "signing_corpus_plain" : draftLen > 0 ? "draft_fields" : "none",
     hasTitle: Boolean((draft?.title || "").trim()),
     hasPartyLabels: parties.filter((p) => (p.name || "").trim()).length,
     payloadKeys: [],
@@ -690,10 +700,11 @@ export async function fetchAgreementVs01SigningSeed(
   agreementId: string,
   draft?: AgreementDraft | null,
   signingCorpusPlain?: string | null,
+  signingCorpusSource?: string | null,
 ): Promise<AgreementVs01SigningSeedResult> {
   const id = agreementId.trim();
   if (!id) return { ok: false, reason: "missing_agreement_id" };
-  logVs01SigningSeedPreflight(id, draft ?? null);
+  logVs01SigningSeedPreflight(id, draft ?? null, signingCorpusPlain, signingCorpusSource);
   const corpusPayload = (signingCorpusPlain ?? "").trim();
   try {
     const res = await fetch(
@@ -768,26 +779,27 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     options.recipientSetup ?? null,
   );
   const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, resolvedSetup);
-  const freeBaselinePlain = merged
+  const handoff = options.guidedSigningHandoff ?? null;
+  const mergedWithCorpus = mergeAgreementDraftWithGuidedSigningHandoff(merged ?? ({} as AgreementDraft), handoff);
+  const freeBaselinePlain = mergedWithCorpus
     ? buildAgreementPreviewText(merged as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
         starterPreview: true,
       })
     : "";
+  const handoffText = (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim();
   const bridgeDraft = buildAgreementVs01BridgeSession({
     agreementId: id,
     vs01DocumentId: "pending",
-    draft: merged,
+    draft: mergedWithCorpus,
     senderFirstLawdogHandoff: true,
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
-    agreementCorpusText: options.agreementCorpusText,
+    agreementCorpusText: handoffText,
   });
-  const handoff = options.guidedSigningHandoff ?? null;
-  const handoffText = (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim();
   const handoffLen = handoffText.length;
   const corpusResolution = resolveFinalVs01CorpusOrBlock({
     agreementCorpusText: handoffText,
     guidedSigningHandoff: handoff,
-    draft: merged,
+    draft: mergedWithCorpus,
     bridge: bridgeDraft,
     guidedPro: true,
     freeBaselinePlain,
@@ -796,14 +808,19 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
   });
   if (!corpusResolution.allowed) return false;
 
-  const vs01Seed = await fetchAgreementVs01SigningSeed(id, merged, corpusResolution.corpus);
+  const vs01Seed = await fetchAgreementVs01SigningSeed(
+    id,
+    mergedWithCorpus,
+    corpusResolution.corpus,
+    handoff?.source ?? corpusResolution.source,
+  );
   if (!vs01Seed.ok) return false;
   logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
   logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
   const bridge = buildAgreementVs01BridgeSession({
     agreementId: id,
     vs01DocumentId: vs01Seed.documentId,
-    draft: merged,
+    draft: mergedWithCorpus,
     senderFirstLawdogHandoff: true,
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
     agreementCorpusText: corpusResolution.corpus,

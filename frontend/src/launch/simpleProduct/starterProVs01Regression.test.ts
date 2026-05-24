@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  labelForFieldType,
+  labelForPreparePlacedField,
+  PREPARE_PACKET_FIELD_TOOLS,
+  SIGNING_FIELD_TOOLS,
+} from "../../vs01/signingFields";
 
 /**
  * Regression lock: starter → LawDog Pro → VS01 sender-first → workspace (not review-first shell).
@@ -29,6 +35,7 @@ describe("starter Pro VS01 regression (source locks)", () => {
     const page = readFileSync(join(__dirname, "SimpleCreatePage.tsx"), "utf8");
     const handoff = readFileSync(join(__dirname, "paidProPostRecipientSetupHandoff.ts"), "utf8");
     const bridge = readFileSync(join(__dirname, "agreementToVs01SigningBridge.ts"), "utf8");
+    const corpusGate = readFileSync(join(__dirname, "../../vs01/vs01SigningCorpus.ts"), "utf8");
     expect(page).toContain("executePaidProPostRecipientSetupHandoff");
     expect(page).toContain("shouldSkipPaidProPrepareReviewLinkInterstitial");
     expect(handoff).toContain("[send-flow-skip-review-link-interstitial]");
@@ -36,7 +43,8 @@ describe("starter Pro VS01 regression (source locks)", () => {
     expect(bridge).toContain("agreement_bridge=1");
     expect(bridge).toContain("resolveFinalVs01CorpusOrBlock");
     expect(bridge).toContain("signing_corpus_plain");
-    expect(bridge).toContain("[vs01-signing-corpus-source]");
+    expect(corpusGate).toContain("logVs01CorpusGate");
+    expect(corpusGate).toContain("[vs01-corpus-gate]");
     const onCreated = page.indexOf("onCreated={");
     expect(onCreated).toBeGreaterThanOrEqual(0);
     const slice = page.slice(onCreated, onCreated + 3200);
@@ -65,8 +73,30 @@ describe("starter Pro VS01 regression (source locks)", () => {
   it("sender placement (StepPrepareSignature) uses distinct Text label, not merged Printed name / Text", () => {
     const prepare = readFileSync(join(__dirname, "../../vs01/StepPrepareSignature.tsx"), "utf8");
     expect(prepare).not.toContain("Printed name / Text");
-    expect(prepare).toContain('labelForFieldType(type)');
-    expect(prepare).toContain('case "text":');
-    expect(prepare).toContain('base = "Text"');
+    expect(prepare).toContain("labelForFieldType");
+    expect(prepare).toContain("labelForPreparePlacedField");
+    expect(prepare).toContain("PREPARE_PACKET_FIELD_TOOLS");
+    expect(prepare).toContain("SIGNING_FIELD_TOOLS");
+
+    expect(labelForFieldType("printed_name")).toBe("Printed name");
+    expect(labelForFieldType("text")).toBe("Text");
+    expect(labelForFieldType("signature")).toBe("Signature");
+    expect(labelForFieldType("initials")).toBe("Initials");
+    expect(labelForFieldType("date")).toBe("Date");
+
+    expect(labelForPreparePlacedField("printed_name")).toBe("Printed name");
+    expect(labelForPreparePlacedField("text", "title")).toBe("Title");
+    expect(labelForPreparePlacedField("text", "custom")).toBe("Custom text");
+
+    const signingToolLabels = SIGNING_FIELD_TOOLS.map((tool) => tool.label);
+    expect(signingToolLabels).toContain("Printed name");
+    expect(signingToolLabels).toContain("Text");
+    expect(signingToolLabels).not.toContain("Printed name / Text");
+
+    const prepareToolLabels = PREPARE_PACKET_FIELD_TOOLS.map((tool) => tool.label);
+    expect(prepareToolLabels).toContain("Printed name");
+    expect(prepareToolLabels).toContain("Title");
+    expect(prepareToolLabels).toContain("Custom text");
+    expect(prepareToolLabels).not.toContain("Printed name / Text");
   });
 });

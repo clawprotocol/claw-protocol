@@ -119,16 +119,13 @@ import {
   summarizeCanonicalSigningPacketInitials,
   summarizeVs01SigningPacketInitials,
 } from "./vs01SigningPacketInitials";
-import { alignPlacedSignatureFieldToMeasuredUnderline } from "./vs01CanonicalTextLayout";
 import {
   buildVs01SigningPacketModel,
   signingPacketLayoutsFromModel,
-  validateVs01SigningPacketDomRects,
+  VS01_PACKET_PAGE_HEIGHT_PT,
+  VS01_PACKET_PAGE_WIDTH_PT,
 } from "./buildVs01SigningPacketModel";
-import {
-  Vs01CanonicalSigningPage,
-  type Vs01CanonicalPageLayoutResult,
-} from "./Vs01CanonicalSigningPage";
+import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
 import { signingPacketHasVisibleText } from "./vs01CanonicalPageRender";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import { resolveVs01PreparePacketReadiness } from "./vs01PreparePacketReadiness";
@@ -354,11 +351,6 @@ export function StepPrepareSignature({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [autoPrepBannerMessage, setAutoPrepBannerMessage] = useState<string | null>(null);
-  const [modelDomValidationOk, setModelDomValidationOk] = useState(true);
-  const [canonicalTextPaintedByPage, setCanonicalTextPaintedByPage] = useState<Record<number, number>>({});
-  const [canonicalLayoutByPage, setCanonicalLayoutByPage] = useState<
-    Record<number, Vs01CanonicalPageLayoutResult>
-  >({});
   const [manualPlacementOverride, setManualPlacementOverride] = useState(false);
   const autoSignatureSeededRef = useRef(false);
   const autoPlacementComplete = Boolean(autoPrepBannerMessage);
@@ -428,7 +420,6 @@ export function StepPrepareSignature({
   const [pageRenderWidth, setPageRenderWidth] = useState(520);
   const pageSurfaceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const pageStackRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const [canonicalDomValidationPending, setCanonicalDomValidationPending] = useState(false);
   const typedNameRef = useRef(typedName);
   const initialsRef = useRef(initials);
   typedNameRef.current = typedName;
@@ -604,6 +595,10 @@ export function StepPrepareSignature({
   }, [documentId, agreementBridgePlacementCopy, prepareCorpusText]);
 
   useLayoutEffect(() => {
+    if (agreementBridgePlacementCopy) {
+      setPageRenderWidth(VS01_PACKET_PAGE_WIDTH_PT);
+      return;
+    }
     const el = pagesInnerRef.current;
     if (!el) return;
     const apply = () => {
@@ -614,7 +609,7 @@ export function StepPrepareSignature({
     const ro = new ResizeObserver(apply);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [pdfUrl]);
+  }, [agreementBridgePlacementCopy, pdfUrl]);
 
   const registerPageStack = useCallback((pageIndex: number, el: HTMLDivElement | null) => {
     if (el) pageStackRefs.current.set(pageIndex, el);
@@ -958,80 +953,10 @@ export function StepPrepareSignature({
     agreementBridgePlacementCopy && (!signingPacketModel?.allowed || !canonicalModelHasText),
   );
 
-  const canonicalTextRendered = useMemo(() => {
-    if (!agreementBridgePlacementCopy || !canonicalModelHasText || !signingPacketModel) return undefined;
-    const pagesWithText = signingPacketModel.pages.filter(
-      (p) =>
-        p.flowLines.some((line) => line.trim().length > 0) ||
-        p.textBlocks.some((b) => b.text.trim().length > 0),
-    );
-    if (pagesWithText.length === 0) return false;
-    return pagesWithText.every((p) => (canonicalTextPaintedByPage[p.pageIndex] ?? 0) > 0);
-  }, [
-    agreementBridgePlacementCopy,
-    canonicalModelHasText,
-    signingPacketModel,
-    canonicalTextPaintedByPage,
-  ]);
-  const canonicalSignatureLinesRendered = useMemo(() => {
-    if (!signingPacketModel?.allowed) return undefined;
-    const witnessPage = signingPacketModel.pages.find((p) =>
-      p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
-    );
-    if (!witnessPage) return false;
-    const measured = canonicalLayoutByPage[witnessPage.pageIndex];
-    if (measured) return measured.signatureLines.length >= 2;
-    return false;
-  }, [signingPacketModel, canonicalLayoutByPage]);
-
-  const canonicalTextOverlapping = useMemo(() => {
-    const results = Object.values(canonicalLayoutByPage);
-    if (!renderCanonicalModel || results.length === 0) return undefined;
-    return results.some((r) => r.overlappingTextRects > 0);
-  }, [canonicalLayoutByPage, renderCanonicalModel]);
-
-  const canonicalTextInInitialsBand = useMemo(() => {
-    const results = Object.values(canonicalLayoutByPage);
-    if (!renderCanonicalModel || results.length === 0) return undefined;
-    return results.some((r) => r.textEntersInitialsBand);
-  }, [canonicalLayoutByPage, renderCanonicalModel]);
-
-  const handleCanonicalLayoutMeasured = useCallback(
-    (result: Vs01CanonicalPageLayoutResult) => {
-      setCanonicalLayoutByPage((prev) => {
-        const cur = prev[result.pageIndex];
-        if (
-          cur &&
-          cur.renderedLineCount === result.renderedLineCount &&
-          cur.overlappingTextRects === result.overlappingTextRects &&
-          cur.signatureLines.length === result.signatureLines.length
-        ) {
-          return prev;
-        }
-        return { ...prev, [result.pageIndex]: result };
-      });
-      setCanonicalTextPaintedByPage((prev) => {
-        if (prev[result.pageIndex] === result.renderedLineCount) return prev;
-        return { ...prev, [result.pageIndex]: result.renderedLineCount };
-      });
-      if (result.signatureLines.length > 0) {
-        setFields((prev) =>
-          prev.map((f) => {
-            if (f.type !== "signature" || f.page !== result.pageIndex) return f;
-            const measured = result.signatureLines.find(
-              (line) => line.partyIndex === (f.assignedPartyIndex ?? 0),
-            );
-            if (!measured) return f;
-            return {
-              ...f,
-              ...alignPlacedSignatureFieldToMeasuredUnderline(f, measured.normRect),
-            };
-          }),
-        );
-      }
-    },
-    [setFields],
-  );
+  const canonicalTextRendered = agreementBridgePlacementCopy ? canonicalModelHasText : undefined;
+  const canonicalSignatureLinesRendered = agreementBridgePlacementCopy
+    ? Boolean(signingPacketModel?.diagnostics.signatureAnchorCount)
+    : undefined;
 
   const packetReadiness = useMemo(
     () =>
@@ -1047,14 +972,6 @@ export function StepPrepareSignature({
         initialsSummary: initialsPacketSummary,
         canonicalTextRendered,
         canonicalSignatureLinesRendered,
-        canonicalDomMeasured: renderCanonicalModel ? !canonicalDomValidationPending : undefined,
-        canonicalDomAligned: renderCanonicalModel
-          ? canonicalDomValidationPending
-            ? undefined
-            : modelDomValidationOk
-          : undefined,
-        canonicalTextOverlapping,
-        canonicalTextInInitialsBand,
       }),
     [
       prepareCorpusGate,
@@ -1065,11 +982,6 @@ export function StepPrepareSignature({
       initialsPacketSummary,
       canonicalTextRendered,
       canonicalSignatureLinesRendered,
-      renderCanonicalModel,
-      canonicalDomValidationPending,
-      modelDomValidationOk,
-      canonicalTextOverlapping,
-      canonicalTextInInitialsBand,
     ],
   );
 
@@ -1089,14 +1001,9 @@ export function StepPrepareSignature({
   const packetBlockedHeadline = useMemo(() => {
     if (!agreementBridgePlacementCopy || packetReady) return null;
     switch (packetReadiness.reason) {
-      case "canonical_text_in_initials_band":
-        return "Initials band overlap";
-      case "canonical_field_dom_mismatch":
-        return "Signature line alignment issue";
       case "canonical_page_text_not_rendered":
       case "canonical_signature_lines_not_rendered":
-      case "canonical_field_dom_pending":
-        return "Preparing fields...";
+        return "Preparing agreement";
       default:
         return PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED;
     }
@@ -1107,16 +1014,9 @@ export function StepPrepareSignature({
     if (!prepareCorpusGate?.allowed || showCanonicalFinalizeBlocked) return VS01_CORPUS_GATE_USER_MESSAGE;
     if (
       packetReadiness.reason === "canonical_page_text_not_rendered" ||
-      packetReadiness.reason === "canonical_signature_lines_not_rendered" ||
-      packetReadiness.reason === "canonical_field_dom_pending"
+      packetReadiness.reason === "canonical_signature_lines_not_rendered"
     ) {
-      return "Preparing fields...";
-    }
-    if (packetReadiness.reason === "canonical_text_in_initials_band") {
-      return "Initials band overlap";
-    }
-    if (packetReadiness.reason === "canonical_field_dom_mismatch") {
-      return "Signature line alignment issue";
+      return "Preparing agreement...";
     }
     return PREPARE_PACKET_BRIDGE_LEAD_BLOCKED;
   }, [
@@ -1810,51 +1710,6 @@ export function StepPrepareSignature({
     });
   }, [renderCanonicalModel, signingPacketModel]);
 
-  useLayoutEffect(() => {
-    if (!renderCanonicalModel || !signingPacketModel) {
-      setModelDomValidationOk(true);
-      setCanonicalDomValidationPending(false);
-      return;
-    }
-    const handle = window.requestAnimationFrame(() => {
-      const canonicalFields = fields.filter((field) => field.assignmentSource === "prepare_active_role");
-      const domRects = canonicalFields.flatMap((field) => {
-        const surface = pageSurfaceRefs.current.get(field.page);
-        const el = surface?.querySelector<HTMLElement>(`[data-field-id="${field.id}"]`);
-        if (!surface || !el) return [];
-        const surfaceRect = surface.getBoundingClientRect();
-        const fieldRect = el.getBoundingClientRect();
-        if (surfaceRect.width <= 0 || surfaceRect.height <= 0) return [];
-        return [
-          {
-            fieldId: field.id,
-            fieldType: field.type,
-            page: field.page,
-            rect: {
-              x: (fieldRect.left - surfaceRect.left) / surfaceRect.width,
-              y: (fieldRect.top - surfaceRect.top) / surfaceRect.height,
-              width: fieldRect.width / surfaceRect.width,
-              height: fieldRect.height / surfaceRect.height,
-            },
-          },
-        ];
-      });
-      if (domRects.length < canonicalFields.length || canonicalFields.length === 0) {
-        setCanonicalDomValidationPending(true);
-        setModelDomValidationOk(true);
-        return;
-      }
-      const validation = validateVs01SigningPacketDomRects({
-        pages: signingPacketModel.pages,
-        fields: canonicalFields,
-        domRects,
-      });
-      setCanonicalDomValidationPending(false);
-      setModelDomValidationOk(validation.ok);
-    });
-    return () => window.cancelAnimationFrame(handle);
-  }, [fields, pageRenderWidth, renderCanonicalModel, signingPacketModel]);
-
   const onAutoInitialsToggle = useCallback((checked: boolean) => {
     setAutoInitialsEveryPage(checked);
     if (checked) {
@@ -1881,7 +1736,7 @@ export function StepPrepareSignature({
           {agreementBridgePlacementCopy
             ? packetReady
               ? PREPARE_PACKET_BRIDGE_LEAD_READY
-              : packetBlockedMessage ?? "Preparing fields..."
+              : packetBlockedMessage ?? "Preparing agreement..."
             : "Choose a field type, then click once where it should go."}
         </p>
         {agreementBridgePlacementCopy && prepareSignerRoles?.length && packetReady ? (
@@ -1960,7 +1815,7 @@ export function StepPrepareSignature({
               </div>
             ) : showCanonicalFinalizeBlocked ? (
               <div className="vs01-sign-preview-fallback" role="alert" data-testid="vs01-canonical-finalize-blocked">
-                <strong>Still finalizing the Pro agreement.</strong> {VS01_CORPUS_GATE_USER_MESSAGE}
+                <strong>Preparing your signing packet.</strong> {VS01_CORPUS_GATE_USER_MESSAGE}
               </div>
             ) : renderCanonicalModel && signingPacketModel ? (
               <div
@@ -1988,14 +1843,13 @@ export function StepPrepareSignature({
                           ref={(el) => registerPageSurface(page.pageIndex, el)}
                           className="vs01-sign-page-surface vs01-sign-page-surface--footer-safe vs01-sign-page-surface--canonical"
                           style={{
-                            width: pageRenderWidth,
-                            height: (pageRenderWidth * 792) / 612,
+                            width: VS01_PACKET_PAGE_WIDTH_PT,
+                            height: VS01_PACKET_PAGE_HEIGHT_PT,
                           }}
                         >
                           <Vs01CanonicalSigningPage
                             page={page}
-                            pageWidthPx={pageRenderWidth}
-                            onLayoutMeasured={handleCanonicalLayoutMeasured}
+                            pageWidthPx={VS01_PACKET_PAGE_WIDTH_PT}
                           />
                           <div className="vs01-sign-page-placement-host">
                             <div
@@ -2819,11 +2673,11 @@ export function StepPrepareSignature({
             <div className="vs01-prepare-blocked-panel" role="alert" data-testid="vs01-prepare-packet-blocked">
               <p className="vs01-prepare-blocked-panel__title">
                 {showCanonicalFinalizeBlocked
-                  ? "Agreement text needs attention"
+                  ? "Preparing agreement"
                   : packetBlockedHeadline ?? PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED}
               </p>
               <p className="vs01-prepare-blocked-panel__body">
-                {packetBlockedMessage ?? "Preparing fields..."}
+                {packetBlockedMessage ?? "Preparing agreement..."}
               </p>
             </div>
           ) : null}
@@ -2845,7 +2699,7 @@ export function StepPrepareSignature({
 
           {!receiptId && agreementBridgePlacementCopy ? (
             <p className="vs01-sign-rail-helper" role="note">
-              {packetReady ? PREPARE_PACKET_BRIDGE_LEAD_READY : packetBlockedMessage ?? "Preparing fields..."}
+              {packetReady ? PREPARE_PACKET_BRIDGE_LEAD_READY : packetBlockedMessage ?? "Preparing agreement..."}
             </p>
           ) : null}
 
@@ -2873,7 +2727,7 @@ export function StepPrepareSignature({
                 : agreementBridgePlacementCopy
                   ? packetReady
                     ? PREPARE_PACKET_BRIDGE_PRIMARY_CTA
-                    : "Preparing fields..."
+                    : "Preparing agreement..."
                   : busySession
                     ? "Working…"
                     : busyComplete

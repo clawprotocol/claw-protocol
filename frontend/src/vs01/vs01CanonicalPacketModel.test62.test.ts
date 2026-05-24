@@ -6,7 +6,7 @@ import { updateLastKnownGoodAuthoritativeDraftRef } from "../components/agreemen
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import {
   buildVs01SigningPacketModel,
-  validateVs01SigningPacketDomRects,
+  signatureFieldRectOnUnderlineAnchor,
   VS01_PACKET_INITIALS_BAND_PT,
 } from "./buildVs01SigningPacketModel";
 
@@ -107,7 +107,7 @@ describe("test62 canonical VS01 e-sign packet render", () => {
     }
   });
 
-  it("aligns signature fields to model signature lines and fails shifted DOM rects", () => {
+  it("aligns signature fields to model signature lines", () => {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: premiumCorpus(),
@@ -118,27 +118,13 @@ describe("test62 canonical VS01 e-sign packet render", () => {
     expect(signatureFields.length).toBe(2);
     for (const field of signatureFields) {
       const page = model.pages.find((p) => p.pageIndex === field.page);
-      expect(
-        page?.signatureAnchorRects.some(
-          (anchor) =>
-            field.x === anchor.x &&
-            field.y <= anchor.y &&
-            field.y + field.height >= anchor.y + anchor.height * 0.5,
-        ),
-      ).toBe(true);
+      const anchor = page?.signatureAnchorRects.find((a) => a.partyIndex === field.assignedPartyIndex);
+      expect(anchor).toBeTruthy();
+      const onUnderline = signatureFieldRectOnUnderlineAnchor(anchor!);
+      expect(field.x).toBeCloseTo(onUnderline.x, 3);
+      expect(field.y).toBeCloseTo(onUnderline.y, 3);
+      expect(field.width).toBeCloseTo(onUnderline.width, 3);
     }
-    const shifted = validateVs01SigningPacketDomRects({
-      pages: model.pages,
-      fields: model.fields,
-      domRects: model.fields.map((field) => ({
-        fieldId: field.id,
-        fieldType: field.type,
-        page: field.page,
-        rect: { x: field.x, y: Math.min(0.95, field.y + 0.2), width: field.width, height: field.height },
-      })),
-    });
-    expect(shifted.ok).toBe(false);
-    expect(shifted.mismatchCount).toBeGreaterThan(0);
   });
 
   it("prepare source blocks PDF preview when canonical corpus is blocked", () => {

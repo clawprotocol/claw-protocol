@@ -9,9 +9,12 @@ describe("starter Pro VS01 full flow (canonical dashboard path)", () => {
   it("routes paid Pro signature through VS01 esign with agreement_bridge before send fallback", () => {
     const bridge = readFileSync(join(__dirname, "agreementToVs01SigningBridge.ts"), "utf8");
     const create = readFileSync(join(__dirname, "SimpleCreatePage.tsx"), "utf8");
+    const handoff = readFileSync(join(__dirname, "paidProPostRecipientSetupHandoff.ts"), "utf8");
     expect(bridge).toContain("/app/esign/");
     expect(bridge).toContain("agreement_bridge=1");
-    expect(create).toContain("tryNavigatePaidProAgreementSenderFirstVs01Esign");
+    expect(bridge).toContain("tryNavigatePaidProAgreementSenderFirstVs01Esign");
+    expect(handoff).toContain("tryNavigatePaidProAgreementSenderFirstVs01Esign");
+    expect(create).toContain("executePaidProPostRecipientSetupHandoff");
     expect(create).toContain("shouldSuppressReviewPipelineTelemetry");
   });
 

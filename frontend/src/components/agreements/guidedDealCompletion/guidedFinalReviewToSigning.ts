@@ -18,7 +18,11 @@ import {
   corpusHasVisibleSignatureExecutionLines,
   corpusSignatureBlocksHaveRequiredByLines,
 } from "./signatureRegion";
-import { stripStaleExecutionPlacementCorpusCopy } from "./guidedCorpusLineRepairs";
+import {
+  renumberGuidedTopLevelSectionsSequentially,
+  stripOrphanNumberedHeadingLines,
+  stripStaleExecutionPlacementCorpusCopy,
+} from "./guidedCorpusLineRepairs";
 
 export type ResolveGuidedSigningAuthoritativeArgs = {
   snapshot?: string;
@@ -380,6 +384,10 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   out = executionFooter.text;
   repairs.push(...executionFooter.repairs);
 
+  const finalRenumber = renumberGuidedTopLevelSectionsSequentially(out);
+  out = finalRenumber.text;
+  repairs.push(...finalRenumber.repairs);
+
   const preWitnessIdentity = stripDuplicatePreWitnessIdentityFragment(out, identities);
   out = preWitnessIdentity.text;
   repairs.push(...preWitnessIdentity.repairs);
@@ -404,6 +412,14 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   if (identities.length >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, identities.length)) {
     repairs.push("signature:by_lines_still_missing");
   }
+
+  const handoffRenumber = renumberGuidedTopLevelSectionsSequentially(out);
+  out = handoffRenumber.text;
+  repairs.push(...handoffRenumber.repairs.map((r) => `handoff:${r}`));
+
+  const orphanStrip = stripOrphanNumberedHeadingLines(out);
+  out = orphanStrip.text;
+  repairs.push(...orphanStrip.repairs.map((r) => `handoff:${r}`));
 
   return { body: out, repairs, hash: fingerprintAgreementBody(out) };
 }

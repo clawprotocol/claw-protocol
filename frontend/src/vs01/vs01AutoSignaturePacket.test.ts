@@ -37,8 +37,8 @@ describe("vs01AutoSignaturePacket", () => {
 
   it("Vs01PrepPreparedBanner only uses prepared copy when ready", () => {
     const src = readFileSync(join(__dirname, "Vs01PrepPreparedBanner.tsx"), "utf8");
-    expect(src).toContain('ready ? "Signature fields are ready."');
-    expect(src).toContain("Agreement text needs attention");
+    expect(src).toContain('ready ? "Ready for signing."');
+    expect(src).toContain("Preparing agreement.");
   });
 
   it("StepPrepareSignature offers the bridge primary CTA when auto prepared", () => {

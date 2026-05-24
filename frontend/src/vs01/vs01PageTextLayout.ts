@@ -364,7 +364,7 @@ const BLOCK_HEADING_RES = [
   { re: /^\s*PARTY\s+(\d+)\s*:?\s*$/i, partyIndex: -1, label: "PARTY" },
 ];
 
-function parseSignatureLineWidth(lineText: string, lineRectWidth: number): number {
+export function parseSignatureLineWidth(lineText: string, lineRectWidth: number): number {
   const underline = lineText.match(/_+/);
   if (underline?.[0]) {
     return Math.min(0.58, Math.max(0.2, underline[0].length * CORPUS_CHAR_WIDTH));
@@ -376,7 +376,7 @@ function parseSignatureLineWidth(lineText: string, lineRectWidth: number): numbe
   return Math.min(0.48, Math.max(0.22, lineRectWidth * 0.72));
 }
 
-function signatureLinePrefixNormX(lineText: string, lineX: number): number {
+export function signatureLinePrefixNormX(lineText: string, lineX: number): number {
   const m = lineText.match(/^(?:By|Signature)\s*:\s*/i);
   const prefixChars = m ? m[0].length : 4;
   return lineX + prefixChars * CORPUS_CHAR_WIDTH;

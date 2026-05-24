@@ -73,7 +73,6 @@ describe("test64 canonical signing document text render", () => {
       initialsSummary: { complete: true, unsafeInitialsCount: 0, unsafeSignatureCount: 0 },
       canonicalTextRendered: false,
       canonicalSignatureLinesRendered: true,
-      canonicalDomAligned: true,
     });
     expect(readiness.packetReady).toBe(false);
     expect(readiness.reason).toBe("canonical_page_text_not_rendered");
@@ -109,10 +108,10 @@ describe("test64 canonical signing document text render", () => {
     expect(container.querySelectorAll(".vs01-canonical-signature-underline").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("uses readable px typography derived from page width", () => {
+  it("uses fixed readable px typography", () => {
     const { fontSizePx, lineHeightPx } = canonicalPageTypographyPx(612);
-    expect(fontSizePx).toBeGreaterThanOrEqual(10);
-    expect(lineHeightPx).toBeGreaterThan(fontSizePx);
+    expect(fontSizePx).toBe(13);
+    expect(lineHeightPx).toBe(19);
   });
 
   it("keeps initials band reserved and forbids decorative fallback for guided Pro", () => {

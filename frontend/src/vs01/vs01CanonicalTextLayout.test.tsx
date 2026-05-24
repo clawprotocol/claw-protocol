@@ -4,11 +4,7 @@ import { render } from "@testing-library/react";
 import { buildVs01SigningPacketModel } from "./buildVs01SigningPacketModel";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
-import {
-  buildFlowLineDescriptors,
-  countOverlappingDomTextRects,
-  textBlocksHaveOverlappingGeometry,
-} from "./vs01CanonicalTextLayout";
+import { buildFlowLineDescriptors } from "./vs01CanonicalTextLayout";
 import { updateLastKnownGoodAuthoritativeDraftRef } from "../components/agreements/guidedDealCompletion/guidedCompletionRenderAuthority";
 import { resolvePremiumSignaturePreviewMode } from "../components/agreements/premiumAgreementDocumentHtml";
 
@@ -44,7 +40,7 @@ Date: ____________________`;
 }
 
 describe("VS01 canonical text flow layout", () => {
-  it("renders readable flow lines without DOM overlap on dense corpus", () => {
+  it("renders readable deterministic flow lines on dense corpus", () => {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: premiumCorpus(),
@@ -56,24 +52,11 @@ describe("VS01 canonical text flow layout", () => {
     const { container } = render(<Vs01CanonicalSigningPage page={model.pages[0]!} pageWidthPx={612} />);
     const textEls = [...container.querySelectorAll<HTMLElement>("[data-vs01-canonical-text]")];
     expect(textEls.length).toBeGreaterThan(3);
-    expect(countOverlappingDomTextRects(textEls)).toBe(0);
+    expect(container.querySelector("[data-vs01-canonical-layout-mode='flow']")).toBeTruthy();
     expect(container.textContent).toMatch(/Professional services agreement/i);
   });
 
-  it("falls back to flow when textBlock geometry overlaps", () => {
-    const block = {
-      x: 0.1,
-      y: 0.1,
-      width: 0.5,
-      height: 0.05,
-      text: "overlap a",
-      kind: "body" as const,
-    };
-    const overlapping = [
-      block,
-      { ...block, y: 0.101, text: "overlap b" },
-    ];
-    expect(textBlocksHaveOverlappingGeometry(overlapping)).toBe(true);
+  it("classifies canonical flow descriptors without a fallback layout mode", () => {
     const descriptors = buildFlowLineDescriptors(["Line one", "Line two", "By: ______"]);
     expect(descriptors).toHaveLength(3);
     expect(descriptors[2]?.isSignatureExecutionLine).toBe(true);

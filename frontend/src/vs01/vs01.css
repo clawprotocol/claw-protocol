@@ -2677,9 +2677,10 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-signature-body .vs01-sign-placement-script {
-  font-size: min(1.05rem, 85cqh, 42cqw);
+  font-size: min(0.98rem, 82cqh, 13cqw);
   line-height: 1.05;
   white-space: nowrap;
+  text-overflow: clip;
 }
 
 .vs01-sign-placement-box--signature .vs01-sign-placement-img {
@@ -3218,9 +3219,9 @@ button.vs01-upload-btn:disabled {
 .vs01-recipient-field-body--fill .vs01-sign-placement-script {
   max-width: 100%;
   text-align: center;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .vs01-recipient-field-printed-readout {
@@ -3468,10 +3469,10 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-workspace--prepare .vs01-sign-scroll {
-  max-height: min(76vh, calc(100vh - 10rem));
+  max-height: min(82vh, calc(100vh - 8rem));
   background:
-    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08), transparent 34rem),
-    color-mix(in srgb, var(--vs01-color-preview-canvas) 86%, #020617);
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.1), transparent 34rem),
+    color-mix(in srgb, var(--vs01-color-preview-canvas) 92%, #f8fafc);
 }
 
 /* Scroll wrapper: native wheel/trackpad scroll; placement layer does not call preventDefault on wheel. */
@@ -3509,7 +3510,7 @@ button.vs01-upload-btn:disabled {
   border-radius: inherit;
   background: transparent;
   border: none;
-  min-height: min(62vh, 120px);
+  min-height: min(68vh, 640px);
   overflow: visible;
 }
 
@@ -3518,11 +3519,8 @@ button.vs01-upload-btn:disabled {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  .vs01-sign-workspace--prepare .vs01-sign-doc-surface--bridge .vs01-sign-page-surface {
-    min-width: min(100%, 340px);
-  }
   .vs01-sign-workspace--prepare .vs01-sign-scroll {
-    min-height: min(50vh, 420px);
+    min-height: min(68vh, 560px);
   }
 }
 
@@ -3536,6 +3534,12 @@ button.vs01-upload-btn:disabled {
   box-sizing: border-box;
 }
 
+.vs01-sign-workspace--prepare .vs01-sign-pages-inner {
+  width: max-content;
+  min-width: 100%;
+  padding: 1.5rem;
+}
+
 .vs01-sign-page-stack {
   width: 100%;
   display: flex;
@@ -3545,11 +3549,14 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-page-surface {
   position: relative;
   display: inline-block;
-  max-width: 100%;
   --vs01-initials-reserved-band: 96px;
   border-radius: 3px;
   background: #fff;
   overflow: hidden;
+}
+
+.vs01-sign-page-surface:not(.vs01-sign-page-surface--canonical) {
+  max-width: 100%;
 }
 
 /**
@@ -3626,30 +3633,32 @@ button.vs01-upload-btn:disabled {
 
 .vs01-prepare-blocked-panel {
   margin: 0.5rem 0;
-  border: 1px solid rgba(245, 158, 11, 0.65);
+  border: 1px solid color-mix(in srgb, var(--vs01-color-border-subtle) 82%, #d97706);
   border-radius: 0.75rem;
-  background: rgba(254, 243, 199, 0.14);
+  background: color-mix(in srgb, var(--vs01-color-bg-card) 92%, #fef3c7);
   padding: 0.75rem;
   color: var(--vs01-color-text);
 }
 
 .vs01-prepare-blocked-panel__title {
   font-weight: 700;
-  color: #fbbf24;
+  color: var(--vs01-color-text-primary);
 }
 
 .vs01-prepare-blocked-panel__body {
   margin-top: 0.25rem;
   font-size: 0.85rem;
   line-height: 1.35;
-  color: color-mix(in srgb, var(--vs01-color-text-muted) 70%, #fbbf24);
+  color: var(--vs01-color-text-secondary);
 }
 
 .vs01-sign-page-surface--canonical {
+  max-width: none;
   background: #fff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.72),
-    0 22px 60px rgba(2, 6, 23, 0.38);
+    0 18px 48px rgba(15, 23, 42, 0.18);
 }
 
 .vs01-canonical-page-content {
@@ -3665,11 +3674,9 @@ button.vs01-upload-btn:disabled {
 .vs01-canonical-flow-body {
   position: absolute;
   box-sizing: border-box;
-  overflow: hidden;
-  padding-bottom: 0.35em;
+  overflow: visible;
   color: #111827;
   font-family: Georgia, "Times New Roman", serif;
-  line-height: 1.35;
   text-rendering: optimizeLegibility;
 }
 
@@ -3686,30 +3693,32 @@ button.vs01-upload-btn:disabled {
 
 .vs01-canonical-flow-line--heading {
   font-weight: 700;
-  margin-top: 0.18em;
+  letter-spacing: 0.005em;
 }
 
 .vs01-canonical-flow-line--signature {
-  margin-top: 0.08em;
+  white-space: nowrap;
 }
 
 .vs01-canonical-flow-spacer {
   display: block;
-  height: 0.55em;
+  height: calc(var(--vs01-canonical-line-height, 1em) * 0.62);
 }
 
 .vs01-canonical-signature-underline {
   display: inline-block;
-  min-width: 10em;
+  width: 190px;
+  min-width: 190px;
   border-bottom: 1px solid #111827;
+  color: transparent;
   vertical-align: baseline;
   line-height: 1;
 }
 
 .vs01-canonical-initials-band {
   position: absolute;
-  border-top: 1px solid rgba(203, 213, 225, 0.32);
-  background: linear-gradient(to bottom, rgba(248, 250, 252, 0.18), rgba(248, 250, 252, 0.48));
+  border-top: 1px solid rgba(203, 213, 225, 0.22);
+  background: transparent;
   pointer-events: none;
   z-index: 0;
 }
@@ -3744,7 +3753,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-sender-ref-label {
-  font-size: max(0.48rem, 4.8cqi);
+  font-size: 0.48rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3754,7 +3763,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-sender-ref-yours {
-  font-size: max(0.42rem, 4cqi);
+  font-size: 0.42rem;
   font-weight: 650;
   color: var(--vs01-color-text-muted);
   line-height: 1.1;
@@ -3763,7 +3772,7 @@ button.vs01-upload-btn:disabled {
 
 .vs01-sign-sender-ref-script {
   font-family: "Segoe Script", "Brush Script MT", "Apple Chancery", "Snell Roundhand", cursive;
-  font-size: max(0.48rem, 11cqi);
+  font-size: 0.8rem;
   line-height: 1.05;
   color: color-mix(in srgb, var(--vs01-color-text-secondary) 88%, #111);
   white-space: nowrap;
@@ -3788,7 +3797,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-sender-ref-meta {
-  font-size: max(0.42rem, 7cqi);
+  font-size: 0.46rem;
   color: var(--vs01-color-text-muted);
   text-align: center;
   flex: 1 1 auto;
@@ -3799,7 +3808,7 @@ button.vs01-upload-btn:disabled {
 
 .vs01-sign-sender-ref-initials {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: max(0.68rem, 12cqi);
+  font-size: 0.82rem;
   font-weight: 650;
   letter-spacing: 0.04em;
   color: color-mix(in srgb, var(--vs01-color-text-secondary) 85%, #111);
@@ -3811,7 +3820,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-sender-ref-text {
-  font-size: max(0.42rem, 8.5cqi);
+  font-size: 0.5rem;
   line-height: 1.12;
   color: color-mix(in srgb, var(--vs01-color-text-secondary) 85%, #111);
   overflow: hidden;
@@ -4058,7 +4067,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .lawdog-signing-field__signer {
-  font-size: clamp(0.5rem, 18cqb, 0.68rem);
+  font-size: 0.64rem;
   font-weight: 650;
   line-height: 1.15;
   letter-spacing: 0.02em;
@@ -4075,8 +4084,8 @@ button.vs01-upload-btn:disabled {
   position: absolute;
   right: -3px;
   bottom: -3px;
-  width: clamp(15px, 3.6cqi, 22px);
-  height: clamp(15px, 3.6cqi, 22px);
+  width: 18px;
+  height: 18px;
   margin: 0;
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--vs01-color-accent) 70%, var(--vs01-color-border-subtle));
@@ -4125,7 +4134,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-label {
-  font-size: clamp(0.36rem, 22cqb, 0.5rem);
+  font-size: 0.46rem;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -4139,7 +4148,7 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-placement-box--email .vs01-sign-placement-label,
 .vs01-sign-placement-box--date .vs01-sign-placement-label,
 .vs01-sign-placement-box--printed_name .vs01-sign-placement-label {
-  font-size: clamp(0.34rem, 20cqb, 0.46rem);
+  font-size: 0.43rem;
   letter-spacing: 0.065em;
   font-weight: 700;
 }
@@ -4151,7 +4160,7 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-placement-box--auto-initials .vs01-sign-placement-initials {
-  font-size: max(0.34rem, 7.5cqi);
+  font-size: 0.52rem;
   font-weight: 600;
   letter-spacing: 0.07em;
 }
@@ -4163,12 +4172,12 @@ button.vs01-upload-btn:disabled {
 
 .vs01-sign-placement-script {
   font-family: "Segoe Script", "Brush Script MT", "Apple Chancery", "Snell Roundhand", cursive;
-  font-size: max(0.5rem, 13cqi);
+  font-size: 0.82rem;
   line-height: 1.05;
   color: #111111;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   max-width: 100%;
   pointer-events: none;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
@@ -5165,11 +5174,15 @@ button.vs01-upload-btn:disabled {
 
 .vs01-recipient-signature-slot__script {
   font-family: "Segoe Script", "Snell Roundhand", "Brush Script MT", cursive;
-  font-size: 1.15rem;
-  line-height: 1.2;
+  display: block;
+  max-width: 100%;
+  font-size: min(1.02rem, 13cqw);
+  line-height: 1.05;
   color: #0f172a;
   text-align: center;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .vs01-recipient-signature-slot__input {
@@ -5210,7 +5223,9 @@ button.vs01-upload-btn:disabled {
   font-size: inherit;
   line-height: 1.25;
   color: #0f172a;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .workspace-agreement-status-badge {

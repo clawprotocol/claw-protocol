@@ -67,6 +67,7 @@ export function logRecipientAccessMintPreflight(args: {
   documentTextLen?: number;
   hasTitle?: boolean;
   hasPartyLabels?: boolean;
+  documentTextSource?: string | null;
 }): void {
   if (import.meta.env.MODE === "test") return;
   const id = args.agreementId.trim();
@@ -78,6 +79,7 @@ export function logRecipientAccessMintPreflight(args: {
     signerCount: args.signerCount ?? null,
     hasDocumentText: args.hasDocumentText ?? null,
     documentTextLen: args.documentTextLen ?? null,
+    documentTextSource: args.documentTextSource ?? null,
     hasTitle: args.hasTitle ?? null,
     hasPartyLabels: args.hasPartyLabels ?? null,
     payloadKeys: Object.keys(args.body),

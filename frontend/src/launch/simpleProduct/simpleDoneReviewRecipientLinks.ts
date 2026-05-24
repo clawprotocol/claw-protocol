@@ -164,6 +164,9 @@ function resolveReviewHrefFromMint(
 export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   agreementId: string;
   draft: AgreementDraft;
+  /** Authoritative signing corpus for preflight logging (guided Pro handoff). */
+  signingCorpusPlain?: string | null;
+  signingCorpusSource?: string | null;
 }): Promise<{
   rows: SimpleDoneReviewRecipientLinkRow[];
   attemptedMintCount: number;
@@ -178,6 +181,12 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   const list = parties as AgreementParty[];
   const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(list);
   const inviter = String(list[ownerIdx]?.name ?? "").trim();
+  const signingCorpusLen = (args.signingCorpusPlain ?? "").trim().length;
+  const draftDocumentLen = Math.max(
+    String((args.draft as { document_text?: string }).document_text ?? "").length,
+    String((args.draft as { server_full_document_text?: string }).server_full_document_text ?? "").length,
+    String((args.draft as { premium_full_document_text?: string }).premium_full_document_text ?? "").length,
+  );
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const out: SimpleDoneReviewRecipientLinkRow[] = [];
   let attemptedMintCount = 0;
@@ -202,6 +211,20 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
         inviter_display_name: inviter || undefined,
       },
       mintKey,
+      {
+        recipientCount: Math.max(0, list.length - 1),
+        signerCount: list.filter((p) => (p.name || "").trim().length > 0).length,
+        hasDocumentText: signingCorpusLen > 0 || draftDocumentLen > 0,
+        documentTextLen: signingCorpusLen > 0 ? signingCorpusLen : draftDocumentLen || undefined,
+        hasTitle: Boolean((args.draft.title || "").trim()),
+        hasPartyLabels: list.filter((p) => (p.name || "").trim()).length > 0,
+        documentTextSource:
+          signingCorpusLen > 0
+            ? args.signingCorpusSource ?? "signing_corpus_plain"
+            : draftDocumentLen > 0
+              ? "draft_fields"
+              : "none",
+      },
     );
     if (!res.ok) {
       if (firstErrorStatus === undefined) firstErrorStatus = res.status;

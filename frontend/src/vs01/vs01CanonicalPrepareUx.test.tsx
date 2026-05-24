@@ -2,16 +2,18 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { render, waitFor } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
+import { buildGuidedVs01SigningHandoff } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+import { resolveFinalVs01CorpusOrBlock } from "./vs01SigningCorpus";
 import {
   buildVs01SigningPacketModel,
   maxFlowLinesPerSigningPacketPage,
   signatureFieldRectOnUnderlineAnchor,
-  validateVs01SigningPacketDomRects,
   validateVs01SigningPacketGeometry,
 } from "./buildVs01SigningPacketModel";
-import { alignPlacedSignatureFieldToMeasuredUnderline } from "./vs01CanonicalTextLayout";
+import { prepareGuidedSigningCorpusCleanup } from "../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
+import { resolveCanonicalFinalPartyManifest } from "../components/agreements/guidedDealCompletion/canonicalFinalPartyManifest";
 import { resolveVs01PreparePacketReadiness } from "./vs01PreparePacketReadiness";
 import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
 
@@ -56,6 +58,63 @@ function buildPremiumModel() {
   });
 }
 
+function rectsIntersect(
+  a: Pick<ReturnType<typeof signatureFieldRectOnUnderlineAnchor>, "x" | "y" | "width" | "height">,
+  b: Pick<ReturnType<typeof signatureFieldRectOnUnderlineAnchor>, "x" | "y" | "width" | "height">,
+): boolean {
+  const x = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const y = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return x > 0 && y > 0;
+}
+
+function aiAutomationFinalizedCorpus(): string {
+  const manifest = resolveCanonicalFinalPartyManifest({
+    partyCount: 2,
+    partySignerNames: ["Anthem H Blanchard", ""],
+    partySignerTitles: ["Manager", ""],
+    recipient1Name: "Acme LLC",
+    recipient2Name: "Joe Smith",
+    recipient1Email: "anthem@example.test",
+    recipient2Email: "joe@example.test",
+    extraPartyReviewEmails: [],
+    draftPartyNames: ["Acme LLC", "Joe Smith"],
+    sendMode: "signature",
+    recipientsDeferred: false,
+  });
+  const body = `
+AI AUTOMATION SERVICES AGREEMENT
+
+This Agreement covers AI automation strategy, implementation, prompt operations, dashboarding, and managed workflow support for the Client.
+
+1. Purpose and Scope
+Provider will design, configure, test, and support AI automation workflows for lead intake, reporting, and internal operations. ${"The parties will coordinate on approvals, implementation cadence, data handoffs, and commercially reasonable acceptance criteria. ".repeat(7)}
+
+2. Fees and Payment
+Client will pay the agreed monthly service fee and approved implementation fees. Invoices are due Net 30 from receipt.
+
+3. Confidentiality
+Each party will protect non-public business, technical, financial, and customer information using reasonable safeguards.
+
+4. Ownership and Work Product
+Client owns client data, brand assets, customer lists, ad accounts, and final client-specific deliverables after payment.
+
+5. Support and Service Levels
+Provider will provide commercially reasonable support, monitor automations during business hours, and respond to priority incidents.
+
+6. Term and Termination
+The initial term continues until terminated by either party with 30 days written notice.
+
+7. Notices
+Notices may be delivered electronically to the recipient emails listed for the parties.
+
+9. Electronic Signatures
+The parties may execute this Agreement electronically and in counterparts.
+
+${"AI automation operating clause with workflow definitions, model review responsibilities, change control, incident response, and human approval safeguards. ".repeat(20)}
+`.trim();
+  return prepareGuidedSigningCorpusCleanup({ body, partyManifest: manifest }).body;
+}
+
 describe("VS01 canonical prepare UX regressions", () => {
   it("keeps paginated text blocks out of the initials band", () => {
     const model = buildPremiumModel();
@@ -83,7 +142,7 @@ describe("VS01 canonical prepare UX regressions", () => {
     }
   });
 
-  it("aligns both signature fields to underline anchors", () => {
+  it("aligns both signature fields to model underline anchors", () => {
     const model = buildPremiumModel();
     const witnessPage = model.pages.find((p) =>
       p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
@@ -96,13 +155,8 @@ describe("VS01 canonical prepare UX regressions", () => {
       expect(field).toBeTruthy();
       const onUnderline = signatureFieldRectOnUnderlineAnchor(anchor!);
       expect(field!.y).toBeCloseTo(onUnderline.y, 3);
-      const aligned = alignPlacedSignatureFieldToMeasuredUnderline(field!, {
-        x: anchor!.x,
-        y: anchor!.y,
-        width: anchor!.width,
-        height: anchor!.height,
-      });
-      expect(aligned.y).toBeCloseTo(onUnderline.y, 3);
+      expect(field!.x).toBeCloseTo(onUnderline.x, 3);
+      expect(field!.width).toBeCloseTo(onUnderline.width, 3);
     }
   });
 
@@ -120,7 +174,7 @@ describe("VS01 canonical prepare UX regressions", () => {
     expect(witnessLineIdx).toBeLessThan(Math.ceil(maxLines * 0.65));
   });
 
-  it("bridge prepare source uses canonical-only geometry and debug hooks", () => {
+  it("bridge prepare source uses canonical-only model geometry without DOM debug gates", () => {
     const src = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
     expect(src).toContain("[vs01-bridge-canonical-only]");
     expect(src).toContain("[vs01-packet-ready-reason]");
@@ -129,74 +183,128 @@ describe("VS01 canonical prepare UX regressions", () => {
     expect(src).toMatch(/effectivePageLayouts = agreementBridgePlacementCopy \? canonicalPageLayouts : pageLayouts/);
     expect(src).not.toMatch(/canonicalPageLayouts \?\? pageLayouts/);
     expect(src).toMatch(/packetReady[\s\S]{0,80}PREPARE_PACKET_BRIDGE_HEADLINE_READY/);
-    expect(src).toContain("canonical_field_dom_pending");
-    expect(src).toContain("Preparing fields...");
-    expect(src).toContain("Initials band overlap");
-    expect(src).toContain("Signature line alignment issue");
+    expect(src).not.toContain("canonical_field_dom_pending");
+    expect(src).not.toContain("canonical_field_dom_mismatch");
+    expect(src).not.toContain("Initials band overlap");
+    expect(src).not.toContain("Signature line alignment issue");
   });
 
-  it("treats DOM measurement as pending before packetReady", () => {
-    const pending = resolveVs01PreparePacketReadiness({
+  it("does not wait for DOM measurement before packetReady", () => {
+    const ready = resolveVs01PreparePacketReadiness({
       corpusGate: { allowed: true },
       placementCanFinish: true,
       initialsSummary: { complete: true, unsafeInitialsCount: 0, unsafeSignatureCount: 0 },
       canonicalTextRendered: true,
       canonicalSignatureLinesRendered: true,
-      canonicalDomMeasured: false,
-      canonicalDomAligned: undefined,
     });
-    expect(pending.packetReady).toBe(false);
-    expect(pending.reason).toBe("canonical_field_dom_pending");
+    expect(ready.packetReady).toBe(true);
+    expect(ready.reason).toBeNull();
   });
 
-  it("canonical rendered pages do not report initials-band overlap in DOM measure", async () => {
+  it("canonical rendered pages use model-reserved initials band without DOM measurement", () => {
     const model = buildPremiumModel();
     const pagesWithText = model.pages.filter((page) => page.flowLines.some((line) => line.trim()));
-    const layoutResults: boolean[] = [];
     for (const page of pagesWithText) {
-      const pageHeightPx = (520 * 792) / 612;
-      render(
+      const { container } = render(
         <div
           className="vs01-sign-page-surface vs01-sign-page-surface--canonical"
-          style={{ width: 520, height: pageHeightPx, position: "relative" }}
+          style={{ width: 612, height: 792, position: "relative" }}
         >
-          <Vs01CanonicalSigningPage
-            page={page}
-            pageWidthPx={520}
-            onLayoutMeasured={(result) => {
-              layoutResults.push(result.textEntersInitialsBand);
-            }}
-          />
+          <Vs01CanonicalSigningPage page={page} pageWidthPx={612} />
         </div>,
       );
+      expect(container.querySelectorAll("[data-vs01-canonical-text]").length).toBeGreaterThan(0);
+      const textBottom = Math.max(0, ...page.textBlocks.map((b) => b.y + b.height));
+      expect(textBottom).toBeLessThanOrEqual(page.initialsBandRect.y);
     }
-    await waitFor(() => {
-      expect(layoutResults).toHaveLength(pagesWithText.length);
-    });
-    expect(layoutResults.every((flag) => flag === false)).toBe(true);
   });
 
-  it("validates aligned signature DOM rects against canonical fields", () => {
+  it("keeps signature fields aligned to canonical model anchors", () => {
     const model = buildPremiumModel();
     const witnessPage = model.pages.find((p) =>
       p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
     )!;
     const signatureFields = model.fields.filter((f) => f.type === "signature");
-    const domRects = signatureFields.map((field) => {
+    for (const field of signatureFields) {
       const anchor = witnessPage.signatureLineAnchors.find((a) => a.partyIndex === field.assignedPartyIndex)!;
       const onUnderline = signatureFieldRectOnUnderlineAnchor(anchor);
-      return {
-        fieldId: field.id,
-        fieldType: field.type,
-        page: field.page,
-        rect: { x: onUnderline.x, y: onUnderline.y, width: onUnderline.width, height: onUnderline.height },
-      };
+      expect(field.x).toBeCloseTo(onUnderline.x, 3);
+      expect(field.y).toBeCloseTo(onUnderline.y, 3);
+      expect(field.width).toBeCloseTo(onUnderline.width, 3);
+    }
+  });
+
+  it("test68 renders finalized guided Pro handoff as ready canonical packet at narrow and desktop widths", async () => {
+    const corpus = aiAutomationFinalizedCorpus();
+    expect(corpus.length).toBeGreaterThan(4000);
+    expect(corpus).not.toMatch(/^\s*4\.2\.?\s*$/m);
+    expect(corpus).not.toMatch(/\*\*\s*\d+\./);
+    const sectionNumbers = [...corpus.matchAll(/^\s*(\d+)\.\s+[A-Z]/gm)].map((m) => Number(m[1]));
+    expect(sectionNumbers).toEqual(sectionNumbers.map((_, i) => i + 1));
+    expect(sectionNumbers).toContain(8);
+
+    const signerRoles = roles();
+    const handoff = buildGuidedVs01SigningHandoff({
+      corpusText: corpus,
+      source: "finalized_signer_applied_guided_corpus",
+      signerMetadata: null,
+      recipientEmails: ["anthem@example.test", "joe@example.test"],
+      signatureRebuilt: true,
     });
-    const validation = validateVs01SigningPacketDomRects({
-      pages: model.pages,
-      fields: signatureFields,
-      domRects,
+    const gate = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: corpus,
+      guidedSigningHandoff: handoff,
+      guidedPro: true,
+      premiumComplete: true,
+      signatureRebuilt: true,
+      freeBaselinePlain: STARTER_749,
     });
-    expect(validation.ok).toBe(true);
+    expect(gate.allowed).toBe(true);
+
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: gate.corpus,
+      roles: signerRoles,
+      corpusGateArgs: {
+        guidedSigningHandoff: handoff,
+        freeBaselinePlain: STARTER_749,
+        premiumComplete: true,
+        signatureRebuilt: true,
+      },
+    });
+    expect(model.allowed).toBe(true);
+    expect(model.pages.length).toBeGreaterThanOrEqual(4);
+    expect(model.diagnostics.textIntersectsInitialsBand).toBe(false);
+    expect(model.diagnostics.initialsFieldCount).toBe(model.pages.length * signerRoles.length);
+    expect(model.diagnostics.signatureFieldCount).toBe(signerRoles.length);
+
+    const signatureFields = model.fields.filter((f) => f.type === "signature");
+    for (const field of signatureFields) {
+      const page = model.pages.find((p) => p.pageIndex === field.page)!;
+      const anchor = page.signatureLineAnchors.find((a) => a.partyIndex === field.assignedPartyIndex)!;
+      expect(anchor.lineText).toMatch(/^By:/);
+      expect(rectsIntersect(field, signatureFieldRectOnUnderlineAnchor(anchor))).toBe(true);
+    }
+
+    const readiness = resolveVs01PreparePacketReadiness({
+      corpusGate: gate,
+      placementCanFinish: true,
+      initialsSummary: { complete: true, unsafeInitialsCount: 0, unsafeSignatureCount: 0 },
+      canonicalTextRendered: true,
+      canonicalSignatureLinesRendered: true,
+    });
+    expect(readiness.packetReady).toBe(true);
+
+    for (const width of [376, 612]) {
+      const { container } = render(
+        <div
+          className="vs01-sign-page-surface vs01-sign-page-surface--canonical"
+          style={{ width: 612, height: 792, position: "relative", maxWidth: "none", overflowX: "auto" }}
+        >
+          <Vs01CanonicalSigningPage page={model.pages[0]!} pageWidthPx={width} />
+        </div>,
+      );
+      expect(container.querySelectorAll("[data-vs01-canonical-text]").length).toBeGreaterThan(0);
+    }
   });
 });

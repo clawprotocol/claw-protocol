@@ -24,6 +24,12 @@ describe("premium send workflow guard", () => {
         createFlowPhase: "draft_ready_for_review",
       }),
     ).toBe(false);
+    expect(
+      shouldSuppressPremiumAuthoritativeRehydrate({
+        createFlowPhase: "draft_ready_for_review",
+        finalizedSigningCorpusLen: 3977,
+      }),
+    ).toBe(true);
   });
 
   it("committed review artifact tracks single apply count", () => {

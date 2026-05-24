@@ -211,6 +211,57 @@ export function stripOrphanNumberedHeadingLines(text: string): { text: string; r
   return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), repairs };
 }
 
+export function renumberGuidedTopLevelSectionsSequentially(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const normalized = text.replace(/\r\n/g, "\n");
+  const witnessIdx = normalized.search(/\bIN WITNESS WHEREOF\b/i);
+  const before = witnessIdx >= 0 ? normalized.slice(0, witnessIdx) : normalized;
+  const after = witnessIdx >= 0 ? normalized.slice(witnessIdx) : "";
+  let nextSection = 1;
+  let currentOldSection: number | null = null;
+  let currentNewSection: number | null = null;
+
+  const lines = before.split("\n").map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+    if (ORPHAN_NUMBERED_HEADING_RE.test(trimmed) || ORPHAN_EMPTY_SUBSECTION_RE.test(trimmed)) {
+      repairs.push(`final_renumber_strip_orphan:${trimmed.slice(0, 16)}`);
+      return "";
+    }
+    const heading = trimmed.match(/^\*{0,2}\s*(\d+)\.\s+(.+?)\s*\*{0,2}$/);
+    if (heading && !/^\d+\.\d+\.?\s+/.test(trimmed)) {
+      const oldSection = Number(heading[1]);
+      const title = heading[2].replace(/\*\*/g, "").trim();
+      const newSection = nextSection;
+      nextSection += 1;
+      currentOldSection = oldSection;
+      currentNewSection = newSection;
+      if (oldSection !== newSection || /\*\*/.test(trimmed)) {
+        repairs.push(`final_renumber_section:${oldSection}->${newSection}`);
+      }
+      return `${newSection}. ${title}`;
+    }
+    const sub = trimmed.match(/^(\d+)\.(\d+)\.?\s+(.+)$/);
+    if (sub && currentOldSection != null && currentNewSection != null && Number(sub[1]) === currentOldSection) {
+      if (currentOldSection !== currentNewSection) {
+        repairs.push(`final_renumber_subclause:${currentOldSection}.${sub[2]}->${currentNewSection}.${sub[2]}`);
+      }
+      return `${currentNewSection}.${sub[2]} ${sub[3].replace(/\*\*/g, "").trim()}`;
+    }
+    if (/\*\*/.test(trimmed)) {
+      repairs.push("final_strip_markdown_asterisks");
+      return line.replace(/\*\*/g, "");
+    }
+    return line;
+  });
+
+  const repaired = [lines.join("\n").replace(/\n{3,}/g, "\n\n").trim(), after.trim()]
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+  return { text: repaired, repairs };
+}
+
 export function isStructurallyEmptySectionBody(bodyLines: string[]): boolean {
   const substantive = bodyLines
     .map((l) => l.trim())

@@ -1,5 +1,14 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import type { GuidedVs01SigningHandoff } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+import {
+  assertGuidedProVs01BridgeCorpusReady,
+  logGuidedProVs01BridgeCorpusBlocked,
+  type GuidedVs01SigningHandoff,
+} from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+import {
+  mergeAgreementDraftWithGuidedSigningHandoff,
+  resolveGuidedVs01SigningHandoffForBridge,
+  writeGuidedVs01SigningHandoffSession,
+} from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
 import { orderedAuthoritativePartyDisplayNames } from "../../agreement/handoffPartyDisplay";
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
 import { emitActionCompleted } from "../../joy/joyTelemetry";
@@ -126,8 +135,40 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     return { ok: true, destination: "done" };
   }
 
+  const handoff = resolveGuidedVs01SigningHandoffForBridge(options.guidedSigningHandoff);
+  const draftForBridge = mergeAgreementDraftWithGuidedSigningHandoff(options.draft, handoff);
+  const signingCorpusPlain = (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim();
+
+  if (options.premiumSendIntent === "signature" && handoff) {
+    const corpusAssert = assertGuidedProVs01BridgeCorpusReady(handoff);
+    if (!corpusAssert.ok) {
+      logGuidedProVs01BridgeCorpusBlocked({
+        agreementId: id,
+        source: options.logSource,
+        reason: corpusAssert.reason,
+        ...corpusAssert.diagnostics,
+      });
+      return {
+        ok: false,
+        failure: {
+          agreementId: id,
+          reason: "vs01_seed",
+          userMessage:
+            "The finalized agreement is not ready for signing yet. Return to final review and try again.",
+          premiumSendIntent: options.premiumSendIntent,
+        },
+      };
+    }
+    writeGuidedVs01SigningHandoffSession(handoff);
+  }
+
   try {
-    const minted = await mintSimpleDoneReviewRecipientLinkRows({ agreementId: id, draft: options.draft });
+    const minted = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: id,
+      draft: draftForBridge,
+      signingCorpusPlain: signingCorpusPlain || undefined,
+      signingCorpusSource: handoff?.source,
+    });
     if (reviewLinkMintHasUsableUrls(minted.rows)) {
       writeSimpleDoneReviewRecipientLinks({
         agreementId: id,
@@ -143,16 +184,23 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   console.info("[send-flow-vs01-bridge-start]", {
     agreementId: id,
     source: options.logSource,
+    signingCorpusLen: signingCorpusPlain.length || null,
+    signingCorpusSource: handoff?.source ?? null,
+    draftDocumentTextLen: Math.max(
+      String((draftForBridge as { document_text?: string }).document_text ?? "").length,
+      String((draftForBridge as { server_full_document_text?: string }).server_full_document_text ?? "").length,
+      String((draftForBridge as { premium_full_document_text?: string }).premium_full_document_text ?? "").length,
+    ),
   });
 
   const vs01Ok = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
     navigate: options.navigate,
     agreementId: id,
-    draft: options.draft,
+    draft: draftForBridge,
     logReason: options.logSource,
     recipientSetup: options.recipientSetup ?? null,
-    agreementCorpusText: options.guidedSigningHandoff?.corpusText ?? options.agreementCorpusText,
-    guidedSigningHandoff: options.guidedSigningHandoff ?? null,
+    agreementCorpusText: signingCorpusPlain || options.agreementCorpusText,
+    guidedSigningHandoff: handoff,
   });
 
   if (vs01Ok) {

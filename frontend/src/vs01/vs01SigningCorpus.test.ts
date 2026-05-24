@@ -122,6 +122,29 @@ describe("vs01SigningCorpus", () => {
     expect(preview.hasCorpusSignatureBlock).toBe(true);
   });
 
+  it("does not rebuild witness when finalized guided handoff corpus is complete", () => {
+    const corpus = fullGuidedCorpus();
+    const handoff = buildGuidedVs01SigningHandoff({
+      corpusText: corpus,
+      source: "finalized_signer_applied_guided_corpus",
+      signatureRebuilt: true,
+    });
+    const resolution = resolveFinalVs01CorpusOrBlock({
+      guidedSigningHandoff: handoff,
+      draft: {
+        parties: [],
+        title: "MSA",
+        server_full_document_text: "",
+        premium_full_document_text: "",
+      } as never,
+      guidedPro: true,
+      signatureRebuilt: true,
+    });
+    expect(resolution.allowed).toBe(true);
+    expect(resolution.source).not.toBe("rebuilt_witness_block");
+    expect(resolution.len).toBeGreaterThan(1500);
+  });
+
   it("uses frozen handoff over longer stale draft_authoritative for guided Pro", () => {
     const frozen = fullGuidedCorpus();
     const staleDraft = `${frozen}\nStale appendix from server_full_document_text must not override handoff.`;

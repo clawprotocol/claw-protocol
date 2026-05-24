@@ -409,6 +409,7 @@ import {
   logGuidedVs01SigningHandoff,
   mapTrackCorpusSourceToHandoffSource,
 } from "./guidedDealCompletion/guidedVs01SigningHandoff";
+import { writeGuidedVs01SigningHandoffSession } from "./guidedDealCompletion/guidedVs01SigningHandoffSession";
 import {
   executePaidProPostRecipientSetupHandoff,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
@@ -11909,6 +11910,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       shouldSuppressPremiumAuthoritativeRehydrate({
         createFlowPhase: createFlowPhaseRef.current,
         createUiStage: String(createUiStageRef.current),
+        finalizedSigningCorpusLen: Math.max(
+          finalizedSigningCorpusRef.current.trim().length,
+          guidedVs01SigningHandoffRef.current?.corpusText.length ?? 0,
+        ),
       })
     ) {
       return;
@@ -15478,6 +15483,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signatureRebuilt: guidedSignatureRebuiltRef.current,
     });
     guidedVs01SigningHandoffRef.current = handoff;
+    writeGuidedVs01SigningHandoffSession(handoff);
     logGuidedVs01SigningHandoff(handoff);
     const gate = resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: corpusText,
@@ -17677,6 +17683,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         signatureRebuilt: guidedSignatureRebuiltRef.current,
       });
       guidedVs01SigningHandoffRef.current = vs01Handoff;
+      writeGuidedVs01SigningHandoffSession(vs01Handoff);
       logGuidedVs01SigningHandoff(vs01Handoff);
 
       if (!draft) {

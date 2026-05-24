@@ -2,7 +2,6 @@ import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
 import {
   VS01_PACKET_LINE_HEIGHT_PT,
   VS01_PACKET_PAGE_HEIGHT_PT,
-  VS01_PACKET_PAGE_WIDTH_PT,
 } from "./buildVs01SigningPacketModel";
 
 export type Vs01CanonicalPageRenderMetrics = {
@@ -14,14 +13,15 @@ export type Vs01CanonicalPageRenderMetrics = {
   renderedTextNodeCount: number;
 };
 
-export function canonicalPageTypographyPx(pageWidthPx: number): {
+export function canonicalPageTypographyPx(pageWidthPx?: number): {
   pageHeightPx: number;
   lineHeightPx: number;
   fontSizePx: number;
 } {
-  const pageHeightPx = (pageWidthPx * VS01_PACKET_PAGE_HEIGHT_PT) / VS01_PACKET_PAGE_WIDTH_PT;
-  const lineHeightPx = (pageHeightPx * VS01_PACKET_LINE_HEIGHT_PT) / VS01_PACKET_PAGE_HEIGHT_PT;
-  const fontSizePx = Math.max(10.5, Math.round(lineHeightPx * 0.82 * 10) / 10);
+  void pageWidthPx;
+  const pageHeightPx = VS01_PACKET_PAGE_HEIGHT_PT;
+  const lineHeightPx = VS01_PACKET_LINE_HEIGHT_PT;
+  const fontSizePx = 13;
   return { pageHeightPx, lineHeightPx, fontSizePx };
 }
 

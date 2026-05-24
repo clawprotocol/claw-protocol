@@ -71,8 +71,12 @@ export function isPremiumSendWorkflowPhase(phase: string | null | undefined): bo
 export function shouldSuppressPremiumAuthoritativeRehydrate(args: {
   createFlowPhase: string | null | undefined;
   createUiStage?: string | null;
+  /** When set, block premium GET/hydrate from replacing frozen signing corpus. */
+  finalizedSigningCorpusLen?: number;
 }): boolean {
   if (isPremiumSendWorkflowPhase(args.createFlowPhase)) return true;
   if (args.createUiStage === "RECIPIENTS") return true;
+  if (args.createFlowPhase === "guided_final_review") return true;
+  if ((args.finalizedSigningCorpusLen ?? 0) >= 1500) return true;
   return false;
 }

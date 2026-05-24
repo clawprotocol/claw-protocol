@@ -1,30 +1,14 @@
-import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { useMemo, type CSSProperties, type ReactNode } from "react";
 import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
 import { canonicalPageTypographyPx } from "./vs01CanonicalPageRender";
 import {
   buildFlowLineDescriptors,
   flowLinesForPage,
-  logVs01CanonicalTextLayout,
-  logVs01CanonicalTextLayoutFail,
-  measureCanonicalFlowTextLayout,
-  resolveCanonicalTextLayoutMode,
-  logVs01SignatureAnchorDomMeasured,
-  type Vs01MeasuredSignatureLine,
 } from "./vs01CanonicalTextLayout";
-
-export type Vs01CanonicalPageLayoutResult = {
-  pageIndex: number;
-  renderedLineCount: number;
-  overlappingTextRects: number;
-  textEntersInitialsBand: boolean;
-  signatureLines: Vs01MeasuredSignatureLine[];
-};
 
 export type Vs01CanonicalSigningPageProps = {
   page: Vs01SigningPacketPage;
-  pageWidthPx: number;
-  onTextPainted?: (pageIndex: number, renderedTextNodeCount: number) => void;
-  onLayoutMeasured?: (result: Vs01CanonicalPageLayoutResult) => void;
+  pageWidthPx?: number;
 };
 
 function pct(n: number): string {
@@ -37,7 +21,7 @@ function renderSignatureLineContent(line: string): ReactNode {
   const [, prefix, underscores] = m;
   return (
     <>
-      <span>{prefix}</span>
+      <span>{prefix.replace(/^Signature/i, "By")}</span>
       <span className="vs01-canonical-signature-underline">{underscores ?? "______________________"}</span>
     </>
   );
@@ -46,91 +30,30 @@ function renderSignatureLineContent(line: string): ReactNode {
 export function Vs01CanonicalSigningPage({
   page,
   pageWidthPx,
-  onTextPainted,
-  onLayoutMeasured,
 }: Vs01CanonicalSigningPageProps) {
-  const contentRef = useRef<HTMLDivElement>(null);
+  const { contentRect, initialsBandRect } = page;
   const { lineHeightPx, fontSizePx } = canonicalPageTypographyPx(pageWidthPx);
   const flowLines = useMemo(() => flowLinesForPage(page), [page]);
   const lineDescriptors = useMemo(() => buildFlowLineDescriptors(flowLines), [flowLines]);
-  const layoutMode = useMemo(() => resolveCanonicalTextLayoutMode(page), [page]);
-
-  useLayoutEffect(() => {
-    const surface = contentRef.current?.closest(".vs01-sign-page-surface") as HTMLElement | null;
-    const flowRoot = contentRef.current?.querySelector<HTMLElement>(".vs01-canonical-flow-body");
-    if (!surface || !flowRoot) return;
-
-    const { report, signatureLines, firstBadRects } = measureCanonicalFlowTextLayout({
-      flowRoot,
-      surface,
-      page,
-      mode: layoutMode,
-    });
-    logVs01CanonicalTextLayout(report);
-    if (report.overlappingTextRects > 0 || report.textEntersInitialsBand) {
-      logVs01CanonicalTextLayoutFail({
-        page: report.page,
-        reason: report.textEntersInitialsBand ? "text_in_initials_band" : "overlapping_text_rects",
-        overlappingTextRects: report.overlappingTextRects,
-        firstBadRects: firstBadRects.slice(0, 2),
-      });
-    }
-
-    onTextPainted?.(page.pageIndex, report.renderedLineCount);
-    onLayoutMeasured?.({
-      pageIndex: page.pageIndex,
-      renderedLineCount: report.renderedLineCount,
-      overlappingTextRects: report.overlappingTextRects,
-      textEntersInitialsBand: report.textEntersInitialsBand,
-      signatureLines,
-    });
-
-    const fieldHost = surface.querySelector<HTMLElement>(".vs01-sign-page-placement-host");
-    for (const measured of signatureLines) {
-      const fieldEl = fieldHost?.querySelector<HTMLElement>(
-        `[data-vs01-signature-field-party="${measured.partyIndex}"]`,
-      );
-      const lineRect = measured.lineRect;
-      const fieldRect = fieldEl?.getBoundingClientRect();
-      const intersects = Boolean(
-        fieldRect &&
-          lineRect.left < fieldRect.right &&
-          lineRect.right > fieldRect.left &&
-          lineRect.top < fieldRect.bottom &&
-          lineRect.bottom > fieldRect.top,
-      );
-      logVs01SignatureAnchorDomMeasured({
-        page: page.pageIndex,
-        signer: measured.partyIndex,
-        lineRect: { x: lineRect.x, y: lineRect.y, w: lineRect.width, h: lineRect.height },
-        fieldRect: fieldRect
-          ? { x: fieldRect.x, y: fieldRect.y, w: fieldRect.width, h: fieldRect.height }
-          : null,
-        intersects,
-        deltaY: fieldRect ? fieldRect.top - lineRect.top : null,
-      });
-    }
-  }, [page, pageWidthPx, layoutMode, lineDescriptors, onTextPainted, onLayoutMeasured]);
-
-  const { contentRect, initialsBandRect } = page;
+  const flowBodyStyle: CSSProperties = {
+    left: pct(contentRect.x),
+    top: pct(contentRect.y),
+    width: pct(contentRect.width),
+    height: pct(contentRect.height),
+    fontSize: `${fontSizePx}px`,
+    lineHeight: `${lineHeightPx}px`,
+    "--vs01-canonical-line-height": `${lineHeightPx}px`,
+  } as CSSProperties;
 
   return (
     <div
-      ref={contentRef}
       className="vs01-canonical-page-content"
       aria-label={`Canonical signing page ${page.pageIndex + 1}`}
-      data-vs01-canonical-layout-mode={layoutMode}
+      data-vs01-canonical-layout-mode="flow"
     >
       <div
         className="vs01-canonical-flow-body"
-        style={{
-          left: pct(contentRect.x),
-          top: pct(contentRect.y),
-          width: pct(contentRect.width),
-          height: pct(contentRect.height),
-          fontSize: `${fontSizePx}px`,
-          lineHeight: `${lineHeightPx}px`,
-        }}
+        style={flowBodyStyle}
       >
         {lineDescriptors.map((line, i) => {
           if (!line.trimmed) {

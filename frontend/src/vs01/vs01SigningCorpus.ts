@@ -35,7 +35,7 @@ export const VS01_SIGNING_CORPUS_MAX_PREVIEW_LEN = 1200;
 export const VS01_INITIALS_RESERVED_BAND_MIN_PX = 220;
 
 export const VS01_CORPUS_GATE_USER_MESSAGE =
-  "Still finalizing the Pro agreement. Please wait a moment.";
+  "Preparing the final agreement for signing. Please wait a moment.";
 
 export { GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
 
@@ -167,6 +167,13 @@ export function ensureVs01SigningCorpusWitnessBlock(args: {
   const beforeLen = args.corpus.trim().length;
   let out = stripStaleExecutionPlacementCorpusCopy(args.corpus.trim()).text;
   const signerCount = Math.max(1, args.signerCount);
+  if (
+    beforeLen >= VS01_SIGNING_CORPUS_MIN_LEN &&
+    corpusHasVisibleSignatureExecutionLines(out) &&
+    corpusSignatureBlocksHaveRequiredByLines(out, signerCount)
+  ) {
+    return { corpus: out, rebuilt: false, beforeLen, afterLen: out.length };
+  }
   if (
     args.bridge &&
     signerCount >= 2 &&
@@ -352,7 +359,7 @@ export function resolveFinalVs01CorpusOrBlock(
 
   const witness = ensureVs01SigningCorpusWitnessBlock({
     corpus: best.text,
-    bridge: args.bridge ?? null,
+    bridge: handoffTrusted ? null : args.bridge ?? null,
     signerCount,
   });
   const corpus = witness.corpus;
@@ -363,6 +370,7 @@ export function resolveFinalVs01CorpusOrBlock(
       beforeLen: witness.beforeLen,
       afterLen: witness.afterLen,
       hasWitnessBlock: corpusHasVisibleSignatureExecutionLines(corpus),
+      handoffTrusted,
     });
   }
 
@@ -399,6 +407,10 @@ export function resolveFinalVs01CorpusOrBlock(
     blockReason = "missing_witness_block";
   } else if (!hasBySignatureLines) {
     blockReason = "missing_by_or_signature_lines";
+  } else if (guidedPro && handoffTrusted && witness.rebuilt) {
+    blockReason = "finalized_corpus_witness_rebuild_rejected";
+  } else if (guidedPro && handoffTrusted && source === "rebuilt_witness_block") {
+    blockReason = "finalized_corpus_replaced_by_witness_rebuild";
   } else if (!guidedPro && corpus.length < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
     blockReason = "corpus_below_send_handoff_min";
   } else {

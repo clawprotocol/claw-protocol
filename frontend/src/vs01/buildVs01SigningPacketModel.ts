@@ -11,8 +11,10 @@ import {
   type ResolveFinalVs01CorpusOrBlockArgs,
 } from "./vs01SigningCorpus";
 import type { Vs01NormalizedRect } from "./vs01FieldCssGeometry";
+import { buildFlowLineDescriptors, flowLinesForPage } from "./vs01CanonicalTextLayout";
 import {
-  findSignatureLinePlacementsFromPageLayout,
+  parseSignatureLineWidth,
+  signatureLinePrefixNormX,
   type Vs01ByLinePlacement,
   type Vs01NormTextRect,
   type Vs01PageTextLayout,
@@ -60,14 +62,16 @@ export type Vs01SigningPacketModel = {
 
 export const VS01_PACKET_PAGE_WIDTH_PT = 612;
 export const VS01_PACKET_PAGE_HEIGHT_PT = 792;
-export const VS01_PACKET_MARGIN_LEFT_PT = 44;
+export const VS01_PACKET_MARGIN_LEFT_PT = 54;
 export const VS01_PACKET_MARGIN_TOP_PT = 50;
-export const VS01_PACKET_MARGIN_RIGHT_PT = 44;
-export const VS01_PACKET_MARGIN_BOTTOM_PT = 40;
-export const VS01_PACKET_INITIALS_BAND_PT = 96;
-export const VS01_PACKET_LINE_HEIGHT_PT = 18;
+export const VS01_PACKET_MARGIN_RIGHT_PT = 54;
+export const VS01_PACKET_MARGIN_BOTTOM_PT = 20;
+/** Compact footer reservation: enough for auto-initials without creating a half-empty page. */
+export const VS01_PACKET_INITIALS_BAND_PT = 64;
+export const VS01_PACKET_LINE_HEIGHT_PT = 19;
 /** Extra lines withheld from pagination so DOM flow does not spill into the initials band. */
-export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 5;
+export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 2;
+export const VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT = 6.3;
 
 const CONTENT_X = VS01_PACKET_MARGIN_LEFT_PT / VS01_PACKET_PAGE_WIDTH_PT;
 const CONTENT_TOP = VS01_PACKET_MARGIN_TOP_PT / VS01_PACKET_PAGE_HEIGHT_PT;
@@ -81,7 +85,10 @@ const BAND_HEIGHT = VS01_PACKET_INITIALS_BAND_PT / VS01_PACKET_PAGE_HEIGHT_PT;
 const FOOTER_TOP = (VS01_PACKET_PAGE_HEIGHT_PT - VS01_PACKET_MARGIN_BOTTOM_PT) / VS01_PACKET_PAGE_HEIGHT_PT;
 const LINE_HEIGHT = VS01_PACKET_LINE_HEIGHT_PT / VS01_PACKET_PAGE_HEIGHT_PT;
 const CONTENT_BOTTOM_LIMIT = BAND_TOP;
-const CHARS_PER_LINE = 66;
+const CHARS_PER_LINE = Math.floor(
+  (VS01_PACKET_PAGE_WIDTH_PT - VS01_PACKET_MARGIN_LEFT_PT - VS01_PACKET_MARGIN_RIGHT_PT) /
+  VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT,
+);
 
 function isStandaloneCanonicalLine(line: string): boolean {
   const t = line.trim();
@@ -107,6 +114,71 @@ function wrapCanonicalTextLine(line: string): string[] {
   }
   if (rest) out.push(rest);
   return out;
+}
+
+function canonicalFlowLineHeightUnits(line: string): number {
+  const t = line.trim();
+  if (!t) return 0.62;
+  if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return 1.12;
+  if (/^IN WITNESS WHEREOF/i.test(t)) return 1.18;
+  if (/^(?:By|Signature|Name|Title|Date)\s*:/i.test(t)) return 1.08;
+  if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return 1.16;
+  return 1;
+}
+
+/** Matches canonical flow CSS: spacer 0.62 line-height, each text line one line-height block. */
+export function canonicalFlowLineStackStepUnits(line: string): number {
+  return line.trim() ? 1 : 0.62;
+}
+
+const SIGNATURE_UNDERLINE_BASELINE_FRAC = 0.8;
+const SIGNATURE_UNDERLINE_HEIGHT_FRAC = 0.12;
+export const VS01_CANONICAL_SIGNATURE_UNDERLINE_WIDTH_NORM = 190 / VS01_PACKET_PAGE_WIDTH_PT;
+
+/**
+ * Signature anchors from flow line stack geometry (same vertical rhythm as Vs01CanonicalSigningPage).
+ * Do not use pagination textRects — they use different line-height units and drift from flow render.
+ */
+export function findSignatureLinePlacementsFromFlowPage(
+  page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks">,
+): Vs01ByLinePlacement[] {
+  const flowLines = flowLinesForPage(page);
+  const descriptors = buildFlowLineDescriptors(flowLines);
+  const contentTop = page.contentRect.y;
+  const contentX = page.contentRect.x;
+  let cursorY = contentTop;
+  const out: Vs01ByLinePlacement[] = [];
+
+  for (const descriptor of descriptors) {
+    const step = canonicalFlowLineStackStepUnits(descriptor.text);
+    const lineTop = cursorY;
+    const lineStackHeight = step * LINE_HEIGHT;
+
+    if (descriptor.isSignatureExecutionLine && descriptor.partyIndex != null) {
+      const partyIndex = descriptor.partyIndex;
+      if (!out.some((anchor) => anchor.partyIndex === partyIndex)) {
+        const lineText = descriptor.trimmed;
+        const width = Math.max(
+          VS01_CANONICAL_SIGNATURE_UNDERLINE_WIDTH_NORM,
+          parseSignatureLineWidth(lineText, lineWidth(lineText)),
+        );
+        const x = signatureLinePrefixNormX(lineText, contentX);
+        out.push({
+          partyIndex,
+          blockHeading: descriptor.blockHeading ?? (partyIndex === 0 ? "CLIENT" : "SERVICE PROVIDER"),
+          x,
+          y: lineTop + lineStackHeight * SIGNATURE_UNDERLINE_BASELINE_FRAC,
+          width,
+          height: lineStackHeight * SIGNATURE_UNDERLINE_HEIGHT_FRAC,
+          lineText,
+        });
+      }
+    }
+
+    cursorY += lineStackHeight;
+  }
+
+  return out.sort((a, b) => a.partyIndex - b.partyIndex);
 }
 
 function normalizeLines(corpus: string): string[] {
@@ -161,7 +233,7 @@ function canonicalWitnessBlockFromRoles(roles: readonly Vs01PrepareSigningRole[]
       [
         i === 0 ? "SERVICE PROVIDER:" : `PARTY ${i + 2}:`,
         role.entityName || role.partyName || `Party ${i + 2}`,
-        "Signature: _______________",
+        "By: ______________________",
         `Name: ${role.signerName || role.entityName || role.partyName || ""}`.trim(),
         ...(role.signerTitle ? [`Title: ${role.signerTitle}`] : []),
         "Date: ____________________",
@@ -171,8 +243,12 @@ function canonicalWitnessBlockFromRoles(roles: readonly Vs01PrepareSigningRole[]
   return blocks.join("\n\n");
 }
 
+function standardizeWitnessSignatureLines(corpus: string): string {
+  return corpus.replace(/^(\s*)Signature(\s*:\s*)_{2,}\s*$/gim, "$1By$2______________________");
+}
+
 function ensureWitnessBlockFromRoles(corpus: string, roles: readonly Vs01PrepareSigningRole[]): string {
-  const cleaned = stripStaleExecutionPlacementCorpusCopy(corpus).text.trim();
+  const cleaned = standardizeWitnessSignatureLines(stripStaleExecutionPlacementCorpusCopy(corpus).text.trim());
   const signerCount = Math.max(2, roles.length);
   if (
     corpusHasVisibleSignatureExecutionLines(cleaned) &&
@@ -188,11 +264,15 @@ function classifyText(line: string): Vs01NormTextRect["kind"] {
   if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return "heading";
   if (/^(?:By|Signature|Name|Title|Date)\s*:/i.test(t)) return "signature_label";
   if (/^IN WITNESS WHEREOF/i.test(t)) return "heading";
+  if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return "heading";
   return "body";
 }
 
 function lineWidth(line: string): number {
-  return Math.min(CONTENT_WIDTH, Math.max(0.08, line.trim().length * 0.0052));
+  return Math.min(
+    CONTENT_WIDTH,
+    Math.max(0.08, (line.trim().length * VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT) / VS01_PACKET_PAGE_WIDTH_PT),
+  );
 }
 
 function textRectIntersects(a: Vs01NormalizedRect, b: Vs01NormalizedRect): boolean {
@@ -229,8 +309,9 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     rects = [];
   };
 
-  const lineWouldEnterInitialsBand = () =>
-    CONTENT_TOP + (lineInPage + 1) * LINE_HEIGHT > CONTENT_BOTTOM_LIMIT - LINE_HEIGHT * 0.5;
+  const lineWouldEnterInitialsBand = (line: string) =>
+    CONTENT_TOP + (lineInPage + canonicalFlowLineHeightUnits(line)) * LINE_HEIGHT >
+    CONTENT_BOTTOM_LIMIT - LINE_HEIGHT * 0.5;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
@@ -261,19 +342,19 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     ) {
       flush();
     }
-    if (lineInPage >= maxLinesPerPage || lineWouldEnterInitialsBand()) flush();
+    if (lineInPage >= maxLinesPerPage || lineWouldEnterInitialsBand(line)) flush();
     pageLines.push(line);
     if (line.trim()) {
       rects.push({
         x: CONTENT_X,
         y: CONTENT_TOP + lineInPage * LINE_HEIGHT,
         width: lineWidth(line),
-        height: LINE_HEIGHT * 0.92,
+        height: LINE_HEIGHT * 0.72,
         text: line,
         kind: classifyText(line),
       });
     }
-    lineInPage += 1;
+    lineInPage += canonicalFlowLineHeightUnits(line);
   }
   flush();
   const finalPages = pages.length ? pages : [{ pageIndex: 0, flowLines: [], textRects: [] }];
@@ -316,14 +397,36 @@ function fieldBase(role: Vs01PrepareSigningRole, page: number): Pick<
   };
 }
 
-export function signatureFieldRectOnUnderlineAnchor(
+export const VS01_SIGNATURE_FIELD_HEIGHT_NORM = 0.038;
+
+/** Underline band on the By line (for intersection checks; matches flow baseline geometry). */
+export function signatureUnderlineBandFromAnchor(
   anchor: Pick<Vs01ByLinePlacement, "x" | "y" | "width" | "height">,
-  fieldHeight = 0.04,
 ): Pick<PlacedSigningField, "x" | "y" | "width" | "height"> {
+  const byLineTop = anchor.y - LINE_HEIGHT * SIGNATURE_UNDERLINE_BASELINE_FRAC;
   return {
     x: anchor.x,
-    y: Math.max(0, anchor.y + anchor.height - fieldHeight),
-    width: Math.max(0.2, anchor.width),
+    y: byLineTop + LINE_HEIGHT * 0.58,
+    width: anchor.width,
+    height: LINE_HEIGHT * 0.3,
+  };
+}
+
+export function signatureFieldRectOnUnderlineAnchor(
+  anchor: Pick<Vs01ByLinePlacement, "x" | "y" | "width" | "height">,
+  fieldHeight = VS01_SIGNATURE_FIELD_HEIGHT_NORM,
+): Pick<PlacedSigningField, "x" | "y" | "width" | "height"> {
+  const leftInset = Math.min(0.014, Math.max(0.006, anchor.width * 0.03));
+  const usableWidth = Math.max(0.2, anchor.width - leftInset);
+  const fieldWidth = Math.min(usableWidth, Math.max(anchor.width * 0.82, 0.24));
+  const byLineTop = anchor.y - LINE_HEIGHT * SIGNATURE_UNDERLINE_BASELINE_FRAC;
+  const nameLineTop = byLineTop + LINE_HEIGHT;
+  const maxY = nameLineTop - fieldHeight - 0.0025;
+  const preferredY = anchor.y - fieldHeight * 0.48;
+  return {
+    x: anchor.x + leftInset,
+    y: Math.max(0, Math.min(preferredY, maxY)),
+    width: fieldWidth,
     height: fieldHeight,
   };
 }
@@ -418,67 +521,6 @@ export function validateVs01SigningPacketGeometry(args: {
   return [...new Set(errors)];
 }
 
-function signatureDomRectAlignsWithAnchor(
-  dom: Vs01NormalizedRect,
-  anchor: Vs01ByLinePlacement,
-): boolean {
-  const onUnderline = signatureFieldRectOnUnderlineAnchor(anchor);
-  const expandedAnchor: Vs01NormalizedRect = {
-    x: anchor.x,
-    y: anchor.y,
-    width: anchor.width,
-    height: anchor.height + 0.02,
-  };
-  return (
-    textRectIntersects(dom, expandedAnchor) ||
-    textRectIntersects(dom, onUnderline) ||
-    Math.abs(dom.y - onUnderline.y) < 0.025
-  );
-}
-
-export function validateVs01SigningPacketDomRects(args: {
-  pages: readonly Vs01SigningPacketPage[];
-  fields: readonly PlacedSigningField[];
-  domRects: readonly { fieldId: string; fieldType: PlacedSigningField["type"]; page: number; rect: Vs01NormalizedRect }[];
-}): { ok: boolean; mismatchCount: number } {
-  let mismatchCount = 0;
-  for (const dom of args.domRects) {
-    const expected = args.fields.find((f) => f.id === dom.fieldId);
-    const page = args.pages.find((p) => p.pageIndex === dom.page);
-    let ok = Boolean(expected && page);
-    if (expected && page) {
-      if (expected.type === "signature") {
-        const anchor = page.signatureAnchorRects.find((a) => a.partyIndex === expected.assignedPartyIndex);
-        ok = Boolean(anchor && signatureDomRectAlignsWithAnchor(dom.rect, anchor));
-      } else if (expected.type === "initials") {
-        ok =
-          textRectIntersects(dom.rect, page.initialsBandRect) &&
-          !page.textBlocks.some((text) => textRectIntersects(text, dom.rect));
-      } else {
-        ok = textRectIntersects(dom.rect, expected);
-      }
-    }
-    if (!ok) mismatchCount += 1;
-    // eslint-disable-next-line no-console
-    console.info("[vs01-field-dom-vs-model]", {
-      fieldType: dom.fieldType,
-      page: dom.page,
-      expectedRect: expected ?? null,
-      actualRect: dom.rect,
-      delta: expected
-        ? {
-            x: dom.rect.x - expected.x,
-            y: dom.rect.y - expected.y,
-            width: dom.rect.width - expected.width,
-            height: dom.rect.height - expected.height,
-          }
-        : null,
-      ok,
-    });
-  }
-  return { ok: mismatchCount === 0, mismatchCount };
-}
-
 export function buildVs01SigningPacketModel(args: {
   mode: Vs01SigningPacketMode;
   authoritativeCorpusPlain?: string | null;
@@ -504,12 +546,16 @@ export function buildVs01SigningPacketModel(args: {
   const roles = [...args.roles];
   const fields: PlacedSigningField[] = [];
   const pages: Vs01SigningPacketPage[] = layouts.map((slice) => {
-    const layout: Vs01PageTextLayout = {
-      pageIndex: slice.pageIndex,
-      source: "corpus_sim",
-      textRects: slice.textRects,
-    };
-    const signatureLineAnchors = findSignatureLinePlacementsFromPageLayout(layout);
+    const signatureLineAnchors = findSignatureLinePlacementsFromFlowPage({
+      flowLines: slice.flowLines,
+      textBlocks: slice.textRects,
+      contentRect: {
+        x: CONTENT_X,
+        y: CONTENT_TOP,
+        width: CONTENT_WIDTH,
+        height: CONTENT_BOTTOM_LIMIT - CONTENT_TOP,
+      },
+    });
     const contentRect = {
       x: CONTENT_X,
       y: CONTENT_TOP,

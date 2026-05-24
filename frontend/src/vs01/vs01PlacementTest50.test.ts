@@ -112,14 +112,14 @@ function buildMisleadingLastPageLayouts(): ReturnType<typeof buildCorpusSimulate
 }
 
 describe("VS01 placement test50 — visible signature block + initials regression", () => {
-  it("rebuilds entity By and individual Signature execution lines for two parties", () => {
+  it("rebuilds canonical By execution lines for both parties", () => {
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities("Agreement body.\n", IDENTITIES);
-    expect(rebuilt.text).toMatch(/By:\s*_{3,}/);
-    expect(rebuilt.text).toMatch(/Signature:\s*_{3,}/);
+    expect(rebuilt.text.match(/^By:\s*_{3,}/gim)).toHaveLength(2);
+    expect(rebuilt.text).not.toMatch(/^Signature:\s*_{3,}/gim);
     expect(corpusHasVisibleSignatureExecutionLines(rebuilt.text)).toBe(true);
   });
 
-  it("anchor parser resolves By for entity and Signature for individual", () => {
+  it("anchor parser resolves By lines for entity and individual signers", () => {
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities(CORPUS_BODY, IDENTITIES);
     const anchors = findSignatureLineAnchorsFromCorpusText(rebuilt.text);
     expect(anchors.length).toBe(2);

@@ -15,31 +15,15 @@ export function resolveVs01PreparePacketReadiness(args: {
   > | null;
   canonicalTextRendered?: boolean;
   canonicalSignatureLinesRendered?: boolean;
-  canonicalDomMeasured?: boolean;
-  canonicalDomAligned?: boolean;
-  canonicalTextOverlapping?: boolean;
-  canonicalTextInInitialsBand?: boolean;
 }): Vs01PreparePacketReadiness {
   if (!args.corpusGate?.allowed) {
     return { packetReady: false, reason: args.corpusGate?.blockReason ?? "corpus_gate_blocked" };
-  }
-  if (args.canonicalTextOverlapping === true) {
-    return { packetReady: false, reason: "canonical_text_overlapping" };
-  }
-  if (args.canonicalTextInInitialsBand === true) {
-    return { packetReady: false, reason: "canonical_text_in_initials_band" };
   }
   if (args.canonicalTextRendered === false) {
     return { packetReady: false, reason: "canonical_page_text_not_rendered" };
   }
   if (args.canonicalSignatureLinesRendered === false) {
     return { packetReady: false, reason: "canonical_signature_lines_not_rendered" };
-  }
-  if (args.canonicalDomMeasured === false) {
-    return { packetReady: false, reason: "canonical_field_dom_pending" };
-  }
-  if (args.canonicalDomAligned === false) {
-    return { packetReady: false, reason: "canonical_field_dom_mismatch" };
   }
   if (!args.placementCanFinish) {
     return { packetReady: false, reason: "missing_required_signature_fields" };

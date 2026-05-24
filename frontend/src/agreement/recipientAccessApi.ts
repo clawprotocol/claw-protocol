@@ -112,6 +112,7 @@ export async function mintRecipientAccessTokenResult(
     documentTextLen?: number;
     hasTitle?: boolean;
     hasPartyLabels?: boolean;
+    documentTextSource?: string | null;
   },
 ): Promise<MintRecipientAccessTokenResult> {
   const headers: Record<string, string> = {
