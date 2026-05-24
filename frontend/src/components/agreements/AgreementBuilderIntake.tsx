@@ -14775,7 +14775,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           hydratedPremiumBodyRef.current = recoveryPlain;
           premiumPipelineOutputBodyRef.current = recoveryPlain;
-          lastKnownGoodAuthoritativeDraftRef.current = recoveryPlain;
+          updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, recoveryPlain, "guided_bulk_recovery", {
+            paidProFlow: true,
+            freeBaselinePlain: paidProStarterPreviewPlain,
+            source: "guided_bulk_recovery",
+          });
           setAgreementDocumentText(recoveryPlain);
           const nextLen = recoveryPlain.length;
           assertAuthoritativeBodyContinuity({
@@ -15137,7 +15141,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!stable) return false;
     acceptedReviewCorpusRef.current = stable;
     setAgreementDocumentText(stable);
-    lastKnownGoodAuthoritativeDraftRef.current = stable;
+    updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, stable, "accept_guided_review", {
+      paidProFlow: true,
+      freeBaselinePlain: paidProStarterPreviewPlain,
+      source: "accepted_review",
+    });
     hydratedPremiumBodyRef.current = stable;
     premiumPipelineOutputBodyRef.current = stable;
     const next = {
@@ -15242,7 +15250,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       authoritativeAgreementSnapshotRef.current = stable;
       acceptedReviewCorpusRef.current = stable;
       finalizedSigningCorpusRef.current = stable;
-      lastKnownGoodAuthoritativeDraftRef.current = stable;
+      updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, stable, "finalize_guided_corpus", {
+        paidProFlow: true,
+        freeBaselinePlain: freeBasicDraftPlain,
+        source,
+      });
       hydratedPremiumBodyRef.current = stable;
       premiumPipelineOutputBodyRef.current = stable;
       canonicalSignerManifestRef.current = result.signerManifest;
@@ -15430,7 +15442,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setDraft(mergedDraft);
       persistPremiumRecipientHandoffFromDraftAndUi(mergedDraft);
     }
-    lastKnownGoodAuthoritativeDraftRef.current = corpusText;
+    updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, corpusText, "guided_signing_corpus_ready", {
+      paidProFlow: true,
+      freeBaselinePlain: paidProStarterPreviewPlain,
+      source: "finalized_signing",
+    });
     hydratedPremiumBodyRef.current = corpusText;
     premiumPipelineOutputBodyRef.current = corpusText;
     acceptedReviewCorpusRef.current = corpusText;
@@ -16274,7 +16290,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       persistGuidedSession(freezeStart, guidedSessionKey);
       hydratedPremiumBodyRef.current = corpusPlain;
       premiumPipelineOutputBodyRef.current = corpusPlain;
-      lastKnownGoodAuthoritativeDraftRef.current = corpusPlain;
+      updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, corpusPlain, "guided_sync_apply", {
+        paidProFlow: true,
+        freeBaselinePlain: paidProStarterPreviewPlain,
+        source: "guided_sync_apply",
+      });
       setAgreementDocumentText(corpusPlain);
       setGuidedAnswerApplyStatus("applied");
       guidedAnswerApplyStatusRef.current = "applied";

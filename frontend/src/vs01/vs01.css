@@ -3602,6 +3602,43 @@ button.vs01-upload-btn:disabled {
   color: color-mix(in srgb, var(--vs01-color-text-muted) 70%, #fbbf24);
 }
 
+.vs01-sign-page-surface--canonical {
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
+}
+
+.vs01-canonical-page-content {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: #fff;
+  color: #111827;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.vs01-canonical-text-block {
+  position: absolute;
+  overflow: hidden;
+  font-size: 2.05%;
+  line-height: 1.12;
+  white-space: nowrap;
+}
+
+.vs01-canonical-text-block--heading {
+  font-weight: 700;
+}
+
+.vs01-canonical-text-block--signature_label {
+  font-size: 1.85%;
+}
+
+.vs01-canonical-initials-band {
+  position: absolute;
+  border-top: 1px solid rgba(203, 213, 225, 0.45);
+  background: linear-gradient(to bottom, rgba(248, 250, 252, 0.3), rgba(248, 250, 252, 0.74));
+}
+
 /* Sender fields from Step 3 — read-only reference under recipient placement (Step 4). */
 .vs01-sign-sender-ref-layer {
   position: absolute;

@@ -26,8 +26,11 @@ export type Vs01SigningPacketMode = "guided_pro" | "free" | "uploaded_pdf";
 
 export type Vs01SigningPacketPage = {
   pageIndex: number;
+  contentRect: Vs01NormalizedRect;
   textBlocks: Vs01NormTextRect[];
+  initialsBandRect: Vs01NormalizedRect;
   reservedInitialsBandRect: Vs01NormalizedRect;
+  signatureAnchorRects: Vs01ByLinePlacement[];
   signatureLineAnchors: Vs01ByLinePlacement[];
   footerRect: Vs01NormalizedRect;
 };
@@ -270,20 +273,75 @@ export function validateVs01SigningPacketGeometry(args: {
 }): string[] {
   const errors: string[] = [];
   const textIntersectsInitialsBand = args.pages.some((page) =>
-    page.textBlocks.some((text) => textRectIntersects(text, page.reservedInitialsBandRect)),
+    page.textBlocks.some((text) => textRectIntersects(text, page.initialsBandRect)),
   );
-  if (textIntersectsInitialsBand) errors.push("text_intersects_initials_band");
+  if (textIntersectsInitialsBand) {
+    for (const page of args.pages) {
+      const offenders = page.textBlocks.filter((text) => textRectIntersects(text, page.initialsBandRect));
+      if (offenders.length > 0) {
+        // eslint-disable-next-line no-console
+        console.warn("[vs01-text-in-initials-band-fail]", {
+          page: page.pageIndex,
+          text: offenders.slice(0, 3).map((t) => t.text),
+          count: offenders.length,
+        });
+      }
+    }
+    errors.push("text_intersects_initials_band");
+  }
 
   const signatureAnchorCount = args.pages.reduce((sum, p) => sum + p.signatureLineAnchors.length, 0);
   if (signatureAnchorCount < args.roleCount) errors.push("signature_anchor_count_below_roles");
 
   for (const field of args.fields.filter((f) => f.type === "initials")) {
     const page = args.pages.find((p) => p.pageIndex === field.page);
-    if (!page || !textRectIntersects(field, page.reservedInitialsBandRect)) {
+    if (!page || !textRectIntersects(field, page.initialsBandRect)) {
       errors.push(`initials_outside_reserved_band:${field.page}`);
     }
   }
   return [...new Set(errors)];
+}
+
+export function validateVs01SigningPacketDomRects(args: {
+  model: Pick<Vs01SigningPacketModel, "pages" | "fields">;
+  domRects: readonly { fieldId: string; fieldType: PlacedSigningField["type"]; page: number; rect: Vs01NormalizedRect }[];
+}): { ok: boolean; mismatchCount: number } {
+  let mismatchCount = 0;
+  for (const dom of args.domRects) {
+    const expected = args.model.fields.find((f) => f.id === dom.fieldId);
+    const page = args.model.pages.find((p) => p.pageIndex === dom.page);
+    let ok = Boolean(expected && page);
+    if (expected && page) {
+      if (expected.type === "signature") {
+        const anchor = page.signatureAnchorRects.find((a) => textRectIntersects(a, expected));
+        ok = Boolean(anchor && textRectIntersects(dom.rect, anchor));
+      } else if (expected.type === "initials") {
+        ok =
+          textRectIntersects(dom.rect, page.initialsBandRect) &&
+          !page.textBlocks.some((text) => textRectIntersects(text, dom.rect));
+      } else {
+        ok = textRectIntersects(dom.rect, expected);
+      }
+    }
+    if (!ok) mismatchCount += 1;
+    // eslint-disable-next-line no-console
+    console.info("[vs01-field-dom-vs-model]", {
+      fieldType: dom.fieldType,
+      page: dom.page,
+      expectedRect: expected ?? null,
+      actualRect: dom.rect,
+      delta: expected
+        ? {
+            x: dom.rect.x - expected.x,
+            y: dom.rect.y - expected.y,
+            width: dom.rect.width - expected.width,
+            height: dom.rect.height - expected.height,
+          }
+        : null,
+      ok,
+    });
+  }
+  return { ok: mismatchCount === 0, mismatchCount };
 }
 
 export function buildVs01SigningPacketModel(args: {
@@ -312,15 +370,25 @@ export function buildVs01SigningPacketModel(args: {
   const fields: PlacedSigningField[] = [];
   const pages: Vs01SigningPacketPage[] = layouts.map((layout) => {
     const signatureLineAnchors = findSignatureLinePlacementsFromPageLayout(layout);
+    const contentRect = {
+      x: CONTENT_X,
+      y: CONTENT_TOP,
+      width: CONTENT_WIDTH,
+      height: CONTENT_BOTTOM_LIMIT - CONTENT_TOP,
+    };
+    const initialsBandRect = {
+      x: CONTENT_X,
+      y: BAND_TOP,
+      width: CONTENT_WIDTH,
+      height: BAND_HEIGHT,
+    };
     return {
       pageIndex: layout.pageIndex,
+      contentRect,
       textBlocks: layout.textRects,
-      reservedInitialsBandRect: {
-        x: CONTENT_X,
-        y: BAND_TOP,
-        width: CONTENT_WIDTH,
-        height: BAND_HEIGHT,
-      },
+      initialsBandRect,
+      reservedInitialsBandRect: initialsBandRect,
+      signatureAnchorRects: signatureLineAnchors,
       signatureLineAnchors,
       footerRect: {
         x: CONTENT_X,

@@ -121,6 +121,7 @@ import {
 import {
   buildVs01SigningPacketModel,
   signingPacketLayoutsFromModel,
+  validateVs01SigningPacketDomRects,
 } from "./buildVs01SigningPacketModel";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import { resolveVs01PreparePacketReadiness } from "./vs01PreparePacketReadiness";
@@ -348,6 +349,7 @@ export function StepPrepareSignature({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [autoPrepBannerMessage, setAutoPrepBannerMessage] = useState<string | null>(null);
+  const [modelDomValidationOk, setModelDomValidationOk] = useState(true);
   const [manualPlacementOverride, setManualPlacementOverride] = useState(false);
   const autoSignatureSeededRef = useRef(false);
   const autoPlacementComplete = Boolean(autoPrepBannerMessage);
@@ -551,13 +553,12 @@ export function StepPrepareSignature({
           guidedPro: true,
           premiumComplete: (prepareCorpusText ?? "").trim().length >= 1500,
         });
-        if (!gate.allowed) {
-          setPdfUrl(null);
-          setPreviewError(null);
-          setPreviewLoading(false);
-          setPageLayouts(null);
-          return;
-        }
+        setPdfUrl(null);
+        setPreviewError(gate.allowed ? null : VS01_CORPUS_GATE_USER_MESSAGE);
+        setPreviewLoading(false);
+        setPageLayouts(null);
+        setPdfDocReady(gate.allowed);
+        return;
       }
 
       setPreviewLoading(true);
@@ -642,6 +643,16 @@ export function StepPrepareSignature({
     [signingPacketModel],
   );
   const effectivePageLayouts = canonicalPageLayouts ?? pageLayouts;
+
+  useEffect(() => {
+    if (!agreementBridgePlacementCopy || !signingPacketModel?.allowed) return;
+    setNumPages(signingPacketModel.pages.length);
+    setPdfDocReady(true);
+    setFields((prev) => {
+      const manualNonAuto = prev.filter((f) => f.assignmentSource !== "prepare_active_role" && !f.autoInitials);
+      return [...manualNonAuto, ...signingPacketModel.fields];
+    });
+  }, [agreementBridgePlacementCopy, signingPacketModel, setFields]);
 
   useEffect(() => {
     return () => {
@@ -906,7 +917,9 @@ export function StepPrepareSignature({
     [prepareCorpusGate, preparePacketGate, initialsPacketSummary],
   );
 
-  const packetReady = agreementBridgePlacementCopy ? packetReadiness.packetReady : flowStep3Ready;
+  const packetReady = agreementBridgePlacementCopy
+    ? packetReadiness.packetReady && modelDomValidationOk
+    : flowStep3Ready;
 
   const flowStep3ReadyEffective = agreementBridgePlacementCopy ? packetReady : flowStep3Ready;
 
@@ -1616,7 +1629,9 @@ export function StepPrepareSignature({
   const canContinueToHandoff = Boolean(receiptId);
   const named = counterparties.filter((c) => c.name.trim());
 
-  const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
+  const renderCanonicalModel = Boolean(agreementBridgePlacementCopy && signingPacketModel?.allowed);
+  const placementSurface =
+    renderCanonicalModel || Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
 
   const primaryDisabled = busy || Boolean(receiptId) || !flowStep3ReadyEffective;
 
@@ -1657,6 +1672,49 @@ export function StepPrepareSignature({
     );
   }, [numPages]);
 
+  useEffect(() => {
+    if (!renderCanonicalModel || !signingPacketModel) return;
+    // eslint-disable-next-line no-console
+    console.info("[vs01-model-render-source]", {
+      source: "canonical_model",
+      pageCount: signingPacketModel.pages.length,
+      fieldCount: signingPacketModel.fields.length,
+    });
+  }, [renderCanonicalModel, signingPacketModel]);
+
+  useLayoutEffect(() => {
+    if (!renderCanonicalModel || !signingPacketModel) {
+      setModelDomValidationOk(true);
+      return;
+    }
+    const handle = window.requestAnimationFrame(() => {
+      const domRects = signingPacketModel.fields.flatMap((field) => {
+        const surface = pageSurfaceRefs.current.get(field.page);
+        const el = surface?.querySelector<HTMLElement>(`[data-field-id="${field.id}"]`);
+        if (!surface || !el) return [];
+        const surfaceRect = surface.getBoundingClientRect();
+        const fieldRect = el.getBoundingClientRect();
+        if (surfaceRect.width <= 0 || surfaceRect.height <= 0) return [];
+        return [
+          {
+            fieldId: field.id,
+            fieldType: field.type,
+            page: field.page,
+            rect: {
+              x: (fieldRect.left - surfaceRect.left) / surfaceRect.width,
+              y: (fieldRect.top - surfaceRect.top) / surfaceRect.height,
+              width: fieldRect.width / surfaceRect.width,
+              height: fieldRect.height / surfaceRect.height,
+            },
+          },
+        ];
+      });
+      const validation = validateVs01SigningPacketDomRects({ model: signingPacketModel, domRects });
+      setModelDomValidationOk(validation.ok && domRects.length === signingPacketModel.fields.length);
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [fields, pageRenderWidth, renderCanonicalModel, signingPacketModel]);
+
   const onAutoInitialsToggle = useCallback((checked: boolean) => {
     setAutoInitialsEveryPage(checked);
     if (checked) {
@@ -1680,13 +1738,13 @@ export function StepPrepareSignature({
             ? PREPARE_PACKET_BRIDGE_LEAD
             : "Choose a field type, then click once where it should go."}
         </p>
-        {agreementBridgePlacementCopy && prepareSignerRoles?.length ? (
+        {agreementBridgePlacementCopy && prepareSignerRoles?.length && packetReady ? (
           <Vs01PrepPreparedBanner
             agreementTitle={prepareSignerRoles[0]?.entityName ?? "Your agreement"}
             signerCount={prepareSignerRoles.length}
             fieldCount={fields.filter((f) => f.type === "signature" && !f.autoInitials).length}
             autoPrepared={Boolean(autoPrepBannerMessage)}
-            message={packetReady ? autoPrepBannerMessage : (packetBlockedMessage ?? autoPrepBannerMessage)}
+            message={autoPrepBannerMessage}
             ready={packetReady}
           />
         ) : null}
@@ -1753,6 +1811,129 @@ export function StepPrepareSignature({
             {previewLoading ? (
               <div className="vs01-sign-preview-fallback" role="status">
                 Loading document…
+              </div>
+            ) : renderCanonicalModel && signingPacketModel ? (
+              <div
+                className={`vs01-sign-doc-pages-wrap vs01-sign-doc-surface vs01-sign-doc-surface--bridge${placementArmed ? " vs01-sign-doc-surface--armed" : ""}`}
+                data-testid="vs01-canonical-model-render"
+              >
+                <div ref={pagesInnerRef} className="vs01-sign-pages-inner">
+                  {signingPacketModel.pages.map((page) => {
+                    const fieldsHere = fields
+                      .filter((f) => f.page === page.pageIndex)
+                      .slice()
+                      .sort((a, b) => {
+                        if (a.id === selectedFieldId) return 1;
+                        if (b.id === selectedFieldId) return -1;
+                        return 0;
+                      });
+                    return (
+                      <div
+                        key={page.pageIndex}
+                        ref={(el) => registerPageStack(page.pageIndex, el)}
+                        className="vs01-sign-page-stack"
+                        data-vs01-sign-page={page.pageIndex}
+                      >
+                        <div
+                          ref={(el) => registerPageSurface(page.pageIndex, el)}
+                          className="vs01-sign-page-surface vs01-sign-page-surface--footer-safe vs01-sign-page-surface--canonical"
+                          style={{
+                            width: pageRenderWidth,
+                            height: (pageRenderWidth * 792) / 612,
+                          }}
+                        >
+                          <div className="vs01-canonical-page-content" aria-label={`Canonical signing page ${page.pageIndex + 1}`}>
+                            {page.textBlocks.map((block, i) => (
+                              <div
+                                key={`${page.pageIndex}-${i}-${block.text.slice(0, 12)}`}
+                                className={`vs01-canonical-text-block vs01-canonical-text-block--${block.kind}`}
+                                style={{
+                                  left: `${block.x * 100}%`,
+                                  top: `${block.y * 100}%`,
+                                  width: `${block.width * 100}%`,
+                                  height: `${block.height * 100}%`,
+                                }}
+                              >
+                                {block.text}
+                              </div>
+                            ))}
+                            <div
+                              className="vs01-canonical-initials-band"
+                              aria-hidden
+                              style={{
+                                left: `${page.initialsBandRect.x * 100}%`,
+                                top: `${page.initialsBandRect.y * 100}%`,
+                                width: `${page.initialsBandRect.width * 100}%`,
+                                height: `${page.initialsBandRect.height * 100}%`,
+                              }}
+                            />
+                          </div>
+                          <div className="vs01-sign-page-placement-host">
+                            <div
+                              className={`vs01-sign-placement-click-layer${
+                                placementArmed
+                                  ? " vs01-sign-placement-click-layer--armed"
+                                  : " vs01-sign-placement-click-layer--idle"
+                              }`}
+                              aria-hidden
+                              onClick={placementArmed ? (ev) => onPagePlacementClick(page.pageIndex, ev) : undefined}
+                            />
+                            <div
+                              className={`vs01-sign-overlay${fieldsHere.length > 0 ? " vs01-sign-overlay--placed" : ""}`}
+                              role="presentation"
+                            >
+                              {fieldsHere.map((field) => {
+                                const cssRect = normalizedPdfRectToCssPercent(field);
+                                const fieldRole = findPrepareSigningRole(prepareSignerRoles, field.assignedSignerRoleId);
+                                const label = prepareTemplateCornerLabel(field.type, fieldRole, field.textPurpose);
+                                return (
+                                  <div
+                                    key={field.id}
+                                    className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
+                                      field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
+                                    }`}
+                                    style={{
+                                      position: "absolute",
+                                      left: cssRect.left,
+                                      top: cssRect.top,
+                                      width: cssRect.width,
+                                      height: cssRect.height,
+                                      zIndex: 3,
+                                    }}
+                                    data-field-id={field.id}
+                                  >
+                                    <span className="vs01-sign-placement-label">{label}</span>
+                                    <PrepareSigningFieldBody
+                                      field={field}
+                                      role={fieldRole}
+                                      ownerPreview={{
+                                        signatureMode,
+                                        typedName,
+                                        hasDrawn,
+                                        uploadPreviewUrl,
+                                      }}
+                                      ownerPad={ownerPadForFields}
+                                      preparePacketMode
+                                      isSelected={selectedFieldId === field.id}
+                                      busy={busy}
+                                      onValueChange={(value) => updateField(field.id, { value })}
+                                      onInputFocus={() =>
+                                        logVs01FieldInputFocus({
+                                          fieldId: field.id.slice(0, 12),
+                                          fieldType: field.type,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ) : pdfUrl || (documentId?.trim() && previewError) ? (
               <div

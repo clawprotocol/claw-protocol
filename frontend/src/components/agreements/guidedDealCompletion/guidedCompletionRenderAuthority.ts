@@ -54,7 +54,20 @@ export type LastKnownGoodAuthoritativeUpdateOptions = {
   /** Paid Pro / guided — refuse free-starter hash and never shrink a full corpus. */
   paidProFlow?: boolean;
   freeBaselinePlain?: string | null;
+  source?: string;
 };
+
+export function logAuthoritativeCorpusRejected(payload: Record<string, unknown>): void {
+  if (!import.meta.env.DEV) return;
+  // eslint-disable-next-line no-console
+  console.warn("[authoritative-corpus-rejected]", payload);
+}
+
+export function logAuthoritativeCorpusAccepted(payload: Record<string, unknown>): void {
+  if (!import.meta.env.DEV) return;
+  // eslint-disable-next-line no-console
+  console.info("[authoritative-corpus-accepted]", payload);
+}
 
 export function updateLastKnownGoodAuthoritativeDraftRef(
   ref: { current: string },
@@ -63,18 +76,28 @@ export function updateLastKnownGoodAuthoritativeDraftRef(
   options?: LastKnownGoodAuthoritativeUpdateOptions,
 ): boolean {
   const t = norm(plainText);
+  const source = options?.source ?? reason;
+  const hash = t ? fingerprintAgreementBody(t) : "";
   const minLen = options?.paidProFlow ? GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN : GUIDED_MIN_AUTHORITATIVE_BODY_LEN;
-  if (t.length < minLen) return false;
+  if (t.length < minLen) {
+    logAuthoritativeCorpusRejected({ reason: "too_short", len: t.length, hash, source });
+    return false;
+  }
   const freeBase = norm(options?.freeBaselinePlain);
   if (options?.paidProFlow && freeBase.length >= 200) {
-    if (fingerprintAgreementBody(t) === fingerprintAgreementBody(freeBase)) return false;
+    if (fingerprintAgreementBody(t) === fingerprintAgreementBody(freeBase)) {
+      logAuthoritativeCorpusRejected({ reason: "free_hash_match", len: t.length, hash, source });
+      return false;
+    }
   }
   const cur = norm(ref.current);
   if (options?.paidProFlow && cur.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN && t.length < cur.length) {
+    logAuthoritativeCorpusRejected({ reason: "shrink_attempt", len: t.length, hash, source });
     return false;
   }
   if (ref.current === t) return false;
   ref.current = t;
+  logAuthoritativeCorpusAccepted({ len: t.length, hash, source });
   logGuidedAuthoritativeHydrated(reason, t.length);
   return true;
 }
