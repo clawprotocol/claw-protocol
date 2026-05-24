@@ -4,11 +4,8 @@
  */
 
 import {
-  clampPrepareFieldRectToSafeBounds,
   fieldRectsOverlap,
   prepareAutoInitialsPlacementDims,
-  PREPARE_PAGE_FOOTER_BAND_Y,
-  PREPARE_PAGE_WATERMARK_BAND_Y,
 } from "./signingFields";
 import { fieldOverlapsDocumentText } from "./vs01FieldGeometry";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
@@ -19,10 +16,10 @@ export type Vs01InitialsNormRect = { x: number; y: number; width: number; height
 /** Normalized letter page (0–1). */
 export const CANONICAL_PAGE_WIDTH = 1;
 export const CANONICAL_PAGE_HEIGHT = 1;
-export const CANONICAL_INITIALS_RIGHT_MARGIN = 0.072;
-export const CANONICAL_INITIALS_BOTTOM_MARGIN = 0.058;
+export const CANONICAL_INITIALS_RIGHT_MARGIN = 0.085;
+export const CANONICAL_INITIALS_BOTTOM_MARGIN = 0.075;
 export const CANONICAL_INITIALS_BOX_GAP = 0.014;
-export const CANONICAL_INITIALS_MIN_Y = 0.085;
+export const CANONICAL_INITIALS_MIN_Y = 0.04;
 export const CANONICAL_INITIALS_MAX_COLS_PER_ROW = 2;
 
 const FIELD_COLLISION_PAD = 0.014;
@@ -55,16 +52,21 @@ export function logVs01InitialsCanonicalMissing(payload: Record<string, unknown>
 
 function hardFooterObstacles(): Vs01InitialsNormRect[] {
   return [
-    { x: 0, y: PREPARE_PAGE_FOOTER_BAND_Y, width: 1, height: 0.1 },
-    { x: 0.04, y: PREPARE_PAGE_WATERMARK_BAND_Y, width: 0.92, height: 0.05 },
+    { x: 0, y: 0.965, width: 1, height: 0.035 },
   ];
 }
 
 function withinPageBounds(rect: Vs01InitialsNormRect): boolean {
   if (rect.x < -1e-5 || rect.y < CANONICAL_INITIALS_MIN_Y - 1e-5) return false;
   if (rect.x + rect.width > CANONICAL_PAGE_WIDTH + 1e-5) return false;
-  if (rect.y + rect.height > PREPARE_PAGE_FOOTER_BAND_Y + 1e-5) return false;
+  if (rect.y + rect.height > CANONICAL_PAGE_HEIGHT + 1e-5) return false;
   return true;
+}
+
+function clampCanonicalInitialsRect(rect: Vs01InitialsNormRect): Vs01InitialsNormRect {
+  const x = Math.max(0, Math.min(CANONICAL_PAGE_WIDTH - rect.width, rect.x));
+  const y = Math.max(CANONICAL_INITIALS_MIN_Y, Math.min(CANONICAL_PAGE_HEIGHT - rect.height, rect.y));
+  return { x, y, width: rect.width, height: rect.height };
 }
 
 export function overlapsHardFooterControls(rect: Vs01InitialsNormRect): boolean {
@@ -196,12 +198,14 @@ export function placeCanonicalInitialsRect(args: {
     width: dims.width,
     height: dims.height,
   };
+  let lastBlockedReason: "text_in_bottom_right" | "signature_field" | "footer_controls" | "page_bounds" =
+    "page_bounds";
 
   for (let attempt = 0; attempt < 48; attempt += 1) {
     const y = grid.y - attempt * step;
     if (y < CANONICAL_INITIALS_MIN_Y - 1e-5) break;
     const raw: Vs01InitialsNormRect = { x: grid.x, y, width: dims.width, height: dims.height };
-    const rect = clampPrepareFieldRectToSafeBounds(raw, { kind: "initials" });
+    const rect = clampCanonicalInitialsRect(raw);
     const check = verifyCanonicalInitialsRectClear({
       rect,
       pageLayout: args.pageLayout,
@@ -213,11 +217,7 @@ export function placeCanonicalInitialsRect(args: {
         logVs01InitialsCanonicalShifted({
           page: args.page,
           signerIndex: args.signerIndex,
-          reason: check.overlapText
-            ? "text_in_bottom_right"
-            : check.overlapSignature
-              ? "signature_field"
-              : "footer_band",
+          reason: lastBlockedReason,
           from: fromAnchor,
           to: rect,
         });
@@ -235,6 +235,13 @@ export function placeCanonicalInitialsRect(args: {
         to: attempt > 0 ? rect : undefined,
       };
     }
+    lastBlockedReason = check.overlapText
+      ? "text_in_bottom_right"
+      : check.overlapSignature
+        ? "signature_field"
+        : check.overlapFooter
+          ? "footer_controls"
+          : "page_bounds";
   }
 
   const fallbackY = CANONICAL_INITIALS_MIN_Y;
@@ -244,7 +251,7 @@ export function placeCanonicalInitialsRect(args: {
     width: dims.width,
     height: dims.height,
   };
-  const fallback = clampPrepareFieldRectToSafeBounds(fallbackRaw, { kind: "initials" });
+  const fallback = clampCanonicalInitialsRect(fallbackRaw);
   const fallbackCheck = verifyCanonicalInitialsRectClear({
     rect: fallback,
     pageLayout: null,

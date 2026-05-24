@@ -10,6 +10,13 @@ import {
   resolveRecipientSigningAutoValue,
 } from "./recipientSigningFieldUtils";
 import { LawDogSigningField } from "./LawDogSigningField";
+import {
+  logVs01InitialsCoordinateAudit,
+  logVs01InitialsVisualBottomRightCheck,
+  normalizedPdfRectToCssPercent,
+  normalizedPdfRectToCssRect,
+  vs01InitialsVisualBottomRightCheck,
+} from "./vs01FieldCssGeometry";
 
 function logVs01SigningFieldRender(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
@@ -43,14 +50,7 @@ export function RecipientSigningFieldOverlay({
   cpById,
   onUpdateValue,
 }: RecipientSigningFieldOverlayProps) {
-  const xFit = Math.min(field.x, 1 - field.width);
-  const yFit = Math.min(field.y, 1 - field.height);
-  const style = {
-    left: `${xFit * 100}%`,
-    top: `${yFit * 100}%`,
-    width: `${field.width * 100}%`,
-    height: `${field.height * 100}%`,
-  } as const;
+  const style = normalizedPdfRectToCssPercent(field);
 
   const isMine = recipientFieldBelongsToLockedSigner(
     field,
@@ -128,6 +128,52 @@ export function RecipientSigningFieldOverlay({
     fieldVisible,
     overlayClassName,
   ]);
+
+  useEffect(() => {
+    if (field.type !== "initials") return;
+    const el = document.querySelector<HTMLElement>(`[data-field-id="${CSS.escape(field.id)}"]`);
+    const host = el?.closest<HTMLElement>(".vs01-sign-page-placement-host");
+    if (!el || !host) return;
+    const hostRect = host.getBoundingClientRect();
+    const cssRect = normalizedPdfRectToCssRect(field, {
+      width: hostRect.width,
+      height: hostRect.height,
+    });
+    const scaleX = hostRect.width > 0 ? hostRect.width : 1;
+    const scaleY = hostRect.height > 0 ? hostRect.height : 1;
+    logVs01InitialsCoordinateAudit({
+      page: field.page,
+      fieldType: field.type,
+      normalizedRect: {
+        x: field.x,
+        y: field.y,
+        width: field.width,
+        height: field.height,
+      },
+      pdfPageWidth: null,
+      pdfPageHeight: null,
+      viewportWidth: hostRect.width,
+      viewportHeight: hostRect.height,
+      domPageWidth: hostRect.width,
+      domPageHeight: hostRect.height,
+      renderedCssLeft: cssRect.left,
+      renderedCssTop: cssRect.top,
+      renderedCssWidth: cssRect.width,
+      renderedCssHeight: cssRect.height,
+      yOrigin: "top-left",
+      scaleX,
+      scaleY,
+    });
+    logVs01InitialsVisualBottomRightCheck({
+      page: field.page,
+      ...vs01InitialsVisualBottomRightCheck({
+        rect: field,
+        pageWidthPx: hostRect.width,
+        pageHeightPx: hostRect.height,
+        allowShiftedUp: true,
+      }),
+    });
+  }, [field.id, field.type, field.page, field.x, field.y, field.width, field.height]);
 
   if (isMetadata) {
     const metaLabel =

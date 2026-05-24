@@ -21,6 +21,7 @@ import {
 import { completeSignSession, createSignSession, fetchDocumentContent } from "./vs01Api";
 import { clearVs01DocumentPageLayouts, setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { buildVs01PlacementContext } from "./vs01FieldGeometry";
+import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
 import { extractPdfPageLayoutsFromBlob } from "./vs01PdfPageLayout";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -1731,8 +1732,7 @@ export function StepPrepareSignature({
                                       </div>
                                     ) : null}
                                     {fieldsHere.map((field) => {
-                                      const xFit = Math.min(field.x, 1 - field.width);
-                                      const yFit = Math.min(field.y, 1 - field.height);
+                                      const cssRect = normalizedPdfRectToCssPercent(field);
                                       const isSel = selectedFieldId === field.id;
                                       const pop = placementPopId === field.id;
                                       const fieldRole = findPrepareSigningRole(
@@ -1774,10 +1774,10 @@ export function StepPrepareSignature({
                                             pop ? " vs01-sign-placement-box--pop" : ""
                                           }${!isActiveRoleField ? " vs01-sign-placement-box--other-role" : ""}`}
                                           style={{
-                                            left: `${xFit * 100}%`,
-                                            top: `${yFit * 100}%`,
-                                            width: `${field.width * 100}%`,
-                                            height: `${field.height * 100}%`,
+                                            left: cssRect.left,
+                                            top: cssRect.top,
+                                            width: cssRect.width,
+                                            height: cssRect.height,
                                             zIndex: isSel ? 4 : 3,
                                           }}
                                           onPointerDown={(e) => onBoxPointerDown(e, field)}

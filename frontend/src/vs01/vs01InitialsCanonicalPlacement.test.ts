@@ -14,6 +14,10 @@ import { summarizeVs01SigningPacketInitials } from "./vs01SigningPacketInitials"
 import { buildCorpusSimulatedPageLayouts } from "./vs01PageTextLayout";
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import { normalizeGuidedProCorpusStructure } from "../components/agreements/guidedDealCompletion/guidedCanonicalCorpusNormalizer";
+import {
+  normalizedPdfRectToCssRect,
+  vs01InitialsVisualBottomRightCheck,
+} from "./vs01FieldCssGeometry";
 
 const PAGE_COUNT = 4;
 
@@ -145,10 +149,38 @@ describe("vs01InitialsCanonicalPlacement", () => {
         expect(f.width).toBeCloseTo(dims.width, 3);
         expect(f.height).toBeCloseTo(dims.height, 3);
         expect(f.x + f.width).toBeLessThanOrEqual(1 - CANONICAL_INITIALS_RIGHT_MARGIN + 0.02);
-        expect(f.y + f.height).toBeLessThanOrEqual(0.92);
-        expect(f.y).toBeGreaterThanOrEqual(0.08);
+        const visual = vs01InitialsVisualBottomRightCheck({
+          rect: f,
+          pageWidthPx: 612,
+          pageHeightPx: 792,
+          allowShiftedUp: true,
+        });
+        expect(visual.distanceFromRightPx).toBeGreaterThanOrEqual(48);
+        expect(visual.distanceFromRightPx).toBeLessThanOrEqual(128);
+        expect(visual.distanceFromBottomPx).toBeGreaterThanOrEqual(48);
+        expect(f.y).toBeGreaterThanOrEqual(0.04);
       }
     }
+  });
+
+  it("maps normalized top-origin rects to CSS without y inversion", () => {
+    const css = normalizedPdfRectToCssRect(
+      { x: 0.8, y: 0.9, width: 0.08, height: 0.05 },
+      { width: 612, height: 792 },
+    );
+    expect(css.left).toBeCloseTo(489.6, 1);
+    expect(css.top).toBeCloseTo(712.8, 1);
+    expect(612 - css.left - css.width).toBeCloseTo(73.44, 1);
+    expect(792 - css.top - css.height).toBeCloseTo(39.6, 1);
+  });
+
+  it("converts bottom-origin rects once at the render boundary", () => {
+    const css = normalizedPdfRectToCssRect(
+      { x: 0.8, y: 0.05, width: 0.08, height: 0.05 },
+      { width: 612, height: 792 },
+      { yOrigin: "bottom-left" },
+    );
+    expect(css.top).toBeCloseTo(712.8, 1);
   });
 
   it("initials do not overlap each other on the same page", () => {

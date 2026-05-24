@@ -160,7 +160,7 @@ describe("guided Pro final review test44 signing/corpus congruency", () => {
   it("final review renders clean-signature note rather than fake field boxes", () => {
     const screen = readFileSync(join(__dirname, "../SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain("simple-pro-final-review-signing-fields-note");
-    expect(screen).toContain("Signature blocks stay as clean agreement text here");
+    expect(screen).toContain("LawDog will place matching e-signature fields on the signature lines when you continue.");
     expect(screen).not.toContain("LawDogSigningField");
     expect(screen).not.toContain("vs01-sign-placement-box");
   });

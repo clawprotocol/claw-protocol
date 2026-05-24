@@ -42,6 +42,7 @@ import {
   type PlacedSigningField,
 } from "./signingFields";
 import { RecipientPrintedNameFieldBody, RecipientSignatureFieldBody } from "./StepRecipientFields";
+import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
 import {
   PrepareSigningFieldBody,
   prepareFieldDataAttributes,
@@ -1110,17 +1111,16 @@ export function StepCompleteAndSend({
                                         {hasSenderOnPage ? (
                                           <div className="vs01-sign-sender-ref-layer" aria-hidden>
                                             {senderFieldsHere.map((field) => {
-                                              const xFit = Math.min(field.x, 1 - field.width);
-                                              const yFit = Math.min(field.y, 1 - field.height);
+                                              const cssRect = normalizedPdfRectToCssPercent(field);
                                               return (
                                                 <div
                                                   key={`sender-ref-${field.id}`}
                                                   className={`vs01-sign-sender-ref-box vs01-sign-sender-ref-box--${field.type}`}
                                                   style={{
-                                                    left: `${xFit * 100}%`,
-                                                    top: `${yFit * 100}%`,
-                                                    width: `${field.width * 100}%`,
-                                                    height: `${field.height * 100}%`,
+                                                    left: cssRect.left,
+                                                    top: cssRect.top,
+                                                    width: cssRect.width,
+                                                    height: cssRect.height,
                                                   }}
                                                 >
                                                   <span className="vs01-sign-sender-ref-label">
@@ -1157,8 +1157,7 @@ export function StepCompleteAndSend({
                                             </div>
                                           ) : null}
                                           {fieldsHere.map((field) => {
-                                            const xFit = Math.min(field.x, 1 - field.width);
-                                            const yFit = Math.min(field.y, 1 - field.height);
+                                            const cssRect = normalizedPdfRectToCssPercent(field);
                                             const isSel = selectedFieldId === field.id;
                                             const pop = placementPopId === field.id;
                                             const textVal = typeof field.value === "string" ? field.value : "";
@@ -1208,10 +1207,10 @@ export function StepCompleteAndSend({
                                                   pop ? " vs01-sign-placement-box--pop" : ""
                                                 }${!isActiveRoleField ? " vs01-sign-placement-box--other-role" : ""}`}
                                                 style={{
-                                                  left: `${xFit * 100}%`,
-                                                  top: `${yFit * 100}%`,
-                                                  width: `${field.width * 100}%`,
-                                                  height: `${field.height * 100}%`,
+                                                  left: cssRect.left,
+                                                  top: cssRect.top,
+                                                  width: cssRect.width,
+                                                  height: cssRect.height,
                                                   zIndex: isSel ? 4 : 3,
                                                 }}
                                                 onPointerDown={(e) => onBoxPointerDown(e, field)}

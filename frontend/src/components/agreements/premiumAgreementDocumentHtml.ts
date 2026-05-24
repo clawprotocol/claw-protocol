@@ -3,6 +3,7 @@
  */
 
 import type { PremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
+import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
 
 export function escapeHtml(s: string): string {
   return (s || "")
@@ -47,7 +48,7 @@ function formatSignerDisplayName(raw: string, index: number): { primary: string;
 }
 
 /**
- * Formal signature block at the end of the LawDog Pro read-only paper (always shown).
+ * Formal fallback signature block at the end of the LawDog Pro read-only paper.
  * `execution` adds initials emphasis and execution-ready framing (Ready for Signature path).
  */
 export function buildPremiumSignatureSectionHtml(
@@ -132,9 +133,38 @@ export type BuildPremiumAgreementReadonlyHtmlOpts = {
   renderHints?: PremiumDocumentRenderHints | null;
 };
 
+export type PremiumSignaturePreviewMode =
+  | "embedded_corpus_signature_block"
+  | "decorative_fallback_signature_card";
+
+export function resolvePremiumSignaturePreviewMode(
+  plain: string,
+  signerCount: number,
+): { mode: PremiumSignaturePreviewMode; hasCorpusSignatureBlock: boolean; signerCount: number } {
+  const count = Math.max(1, signerCount);
+  const hasCorpusSignatureBlock = corpusSignatureBlocksHaveRequiredByLines(plain, count);
+  return {
+    mode: hasCorpusSignatureBlock
+      ? "embedded_corpus_signature_block"
+      : "decorative_fallback_signature_card",
+    hasCorpusSignatureBlock,
+    signerCount: count,
+  };
+}
+
+export function logSignaturePreviewMode(payload: {
+  mode: PremiumSignaturePreviewMode;
+  hasCorpusSignatureBlock: boolean;
+  signerCount: number;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[signature-preview-mode]", payload);
+}
+
 /**
  * Convert plain agreement body (from `agreementDocumentText` or picked corpus) to HTML paragraphs and headings.
- * Always appends a professional signature section inside the paper document.
+ * Uses the embedded corpus signature block when present; otherwise appends a professional fallback section.
  */
 /** Remove free-tier starter disclaimer lines that must not appear on Pro paper or PDF exports. */
 export function stripStarterPreviewDisclaimerFromPlainText(plain: string): string {
@@ -201,6 +231,10 @@ export function buildPremiumAgreementReadonlyHtml(
       (_m, before, mid) => `${before}${mid}${premiumCalloutInline("Select jurisdiction before signing.")}`,
     );
   }
-  html += buildPremiumSignatureSectionHtml(opts.partyNames, opts.signatureSectionMode);
+  const previewMode = resolvePremiumSignaturePreviewMode(raw, opts.partyNames.length);
+  logSignaturePreviewMode(previewMode);
+  if (previewMode.mode === "decorative_fallback_signature_card") {
+    html += buildPremiumSignatureSectionHtml(opts.partyNames, opts.signatureSectionMode);
+  }
   return html;
 }

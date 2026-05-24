@@ -44,6 +44,7 @@ import {
   buildVs01PrepareSigningRoles,
 } from "./vs01SignerFieldAssignment";
 import { logVs01PersistedGeometryHash } from "./vs01AutoSignaturePacket";
+import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -560,17 +561,16 @@ export function RecipientSigningView({
                                       {hasSenderOnPage ? (
                                         <div className="vs01-sign-sender-ref-layer" aria-hidden>
                                           {senderFieldsHere.map((field) => {
-                                            const xFit = Math.min(field.x, 1 - field.width);
-                                            const yFit = Math.min(field.y, 1 - field.height);
+                                            const cssRect = normalizedPdfRectToCssPercent(field);
                                             return (
                                               <div
                                                 key={`sender-ref-${field.id}`}
                                                 className={`vs01-sign-sender-ref-box vs01-sign-sender-ref-box--${field.type}`}
                                                 style={{
-                                                  left: `${xFit * 100}%`,
-                                                  top: `${yFit * 100}%`,
-                                                  width: `${field.width * 100}%`,
-                                                  height: `${field.height * 100}%`,
+                                                  left: cssRect.left,
+                                                  top: cssRect.top,
+                                                  width: cssRect.width,
+                                                  height: cssRect.height,
                                                 }}
                                               >
                                                 <span className="vs01-sign-sender-ref-label">

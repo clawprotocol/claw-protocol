@@ -8,6 +8,10 @@ import { textObstaclesForInitialsPlacement } from "./vs01InitialsSafeZone";
 import { verifySignatureRectClear } from "./vs01SignaturePlacement";
 import { buildVs01PlacementContext } from "./vs01FieldGeometry";
 import {
+  logVs01InitialsVisualBottomRightCheck,
+  vs01InitialsVisualBottomRightCheck,
+} from "./vs01FieldCssGeometry";
+import {
   buildCorpusSimulatedPageLayouts,
   mergePageLayoutForInitials,
   pageLayoutForIndex,
@@ -183,7 +187,15 @@ export function summarizeVs01SigningPacketInitials(args: {
         fieldObstacles,
         signerCount: roleCount,
       });
-      if (!check.ok) {
+      const visual = vs01InitialsVisualBottomRightCheck({
+        rect: field,
+        pageWidthPx: 612,
+        pageHeightPx: 792,
+        overlapsTextApprox: check.overlapText,
+        allowShiftedUp: true,
+      });
+      logVs01InitialsVisualBottomRightCheck({ page: p, ...visual });
+      if (!check.ok || !visual.passed) {
         unsafeInitialsCount += 1;
       }
     }
