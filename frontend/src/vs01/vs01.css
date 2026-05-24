@@ -2734,9 +2734,13 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-workspace--prepare .vs01-sign-placement-box--auto-initials {
-  background: rgba(248, 250, 252, 0.58);
-  border-color: color-mix(in srgb, var(--vs01-color-text-muted) 46%, var(--vs01-color-border-subtle));
-  opacity: 0.82;
+  background: rgba(248, 250, 252, 0.78);
+  border-color: color-mix(in srgb, var(--vs01-color-text-muted) 56%, var(--vs01-color-border-subtle));
+  opacity: 0.96;
+}
+
+.vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials {
+  z-index: 4;
 }
 
 .vs01-sign-placement-signature-body--counterparty {

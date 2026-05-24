@@ -15,6 +15,7 @@ export function resolveVs01PreparePacketReadiness(args: {
   > | null;
   canonicalTextRendered?: boolean;
   canonicalSignatureLinesRendered?: boolean;
+  canonicalDomMeasured?: boolean;
   canonicalDomAligned?: boolean;
   canonicalTextOverlapping?: boolean;
   canonicalTextInInitialsBand?: boolean;
@@ -33,6 +34,9 @@ export function resolveVs01PreparePacketReadiness(args: {
   }
   if (args.canonicalSignatureLinesRendered === false) {
     return { packetReady: false, reason: "canonical_signature_lines_not_rendered" };
+  }
+  if (args.canonicalDomMeasured === false) {
+    return { packetReady: false, reason: "canonical_field_dom_pending" };
   }
   if (args.canonicalDomAligned === false) {
     return { packetReady: false, reason: "canonical_field_dom_mismatch" };

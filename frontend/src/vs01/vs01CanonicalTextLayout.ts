@@ -160,15 +160,15 @@ export function measureCanonicalFlowTextLayout(args: {
   const textEls = [...args.flowRoot.querySelectorAll<HTMLElement>("[data-vs01-canonical-text]")];
   const overlappingTextRects = countOverlappingDomTextRects(textEls);
   const surfaceRect = args.surface.getBoundingClientRect();
-  const initialsDom = args.surface.querySelector<HTMLElement>(".vs01-canonical-initials-band");
-  const initialsRect = initialsDom?.getBoundingClientRect() ?? null;
+  const contentBottomPx =
+    surfaceRect.top + args.page.contentRect.height * surfaceRect.height + 1;
   let textEntersInitialsBand = false;
-  if (initialsRect) {
-    for (const el of textEls) {
-      if (rectsOverlap(el.getBoundingClientRect(), initialsRect, 0)) {
-        textEntersInitialsBand = true;
-        break;
-      }
+  for (const el of textEls) {
+    if (el.closest("[data-vs01-signature-execution-line]")) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.bottom > contentBottomPx) {
+      textEntersInitialsBand = true;
+      break;
     }
   }
 

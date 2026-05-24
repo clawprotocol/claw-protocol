@@ -67,7 +67,7 @@ export const VS01_PACKET_MARGIN_BOTTOM_PT = 40;
 export const VS01_PACKET_INITIALS_BAND_PT = 96;
 export const VS01_PACKET_LINE_HEIGHT_PT = 18;
 /** Extra lines withheld from pagination so DOM flow does not spill into the initials band. */
-export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 3;
+export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 5;
 
 const CONTENT_X = VS01_PACKET_MARGIN_LEFT_PT / VS01_PACKET_PAGE_WIDTH_PT;
 const CONTENT_TOP = VS01_PACKET_MARGIN_TOP_PT / VS01_PACKET_PAGE_HEIGHT_PT;
@@ -81,33 +81,63 @@ const BAND_HEIGHT = VS01_PACKET_INITIALS_BAND_PT / VS01_PACKET_PAGE_HEIGHT_PT;
 const FOOTER_TOP = (VS01_PACKET_PAGE_HEIGHT_PT - VS01_PACKET_MARGIN_BOTTOM_PT) / VS01_PACKET_PAGE_HEIGHT_PT;
 const LINE_HEIGHT = VS01_PACKET_LINE_HEIGHT_PT / VS01_PACKET_PAGE_HEIGHT_PT;
 const CONTENT_BOTTOM_LIMIT = BAND_TOP;
-const CHARS_PER_LINE = 84;
+const CHARS_PER_LINE = 66;
+
+function isStandaloneCanonicalLine(line: string): boolean {
+  const t = line.trim();
+  return (
+    /^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t) ||
+    /^(?:By|Signature|Name|Title|Date)\s*:/i.test(t) ||
+    /^IN WITNESS WHEREOF/i.test(t) ||
+    /^\d+(?:\.\d+)*\.\s+[A-Z]/.test(t) ||
+    /^[-*]\s+/.test(t)
+  );
+}
+
+function wrapCanonicalTextLine(line: string): string[] {
+  const trimmed = line.trimEnd();
+  if (trimmed.length <= CHARS_PER_LINE || isStandaloneCanonicalLine(trimmed)) return [trimmed];
+  const out: string[] = [];
+  let rest = trimmed;
+  while (rest.length > CHARS_PER_LINE) {
+    const cut = rest.lastIndexOf(" ", CHARS_PER_LINE);
+    const idx = cut > 32 ? cut : CHARS_PER_LINE;
+    out.push(rest.slice(0, idx).trimEnd());
+    rest = rest.slice(idx).trimStart();
+  }
+  if (rest) out.push(rest);
+  return out;
+}
 
 function normalizeLines(corpus: string): string[] {
   const out: string[] = [];
+  let paragraph: string[] = [];
   let previousWasBlank = false;
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    const joined = paragraph.join(" ").replace(/\s+/g, " ").trim();
+    if (joined) out.push(...wrapCanonicalTextLine(joined));
+    paragraph = [];
+  };
+
   for (const raw of corpus.replace(/\r\n/g, "\n").split("\n")) {
     const trimmed = raw.trimEnd();
     if (!trimmed.trim()) {
-      if (previousWasBlank) continue;
-      out.push("");
+      flushParagraph();
+      if (!previousWasBlank) out.push("");
       previousWasBlank = true;
       continue;
     }
     previousWasBlank = false;
-    if (trimmed.length <= CHARS_PER_LINE) {
-      out.push(trimmed);
+    if (isStandaloneCanonicalLine(trimmed)) {
+      flushParagraph();
+      out.push(...wrapCanonicalTextLine(trimmed));
       continue;
     }
-    let rest = trimmed;
-    while (rest.length > CHARS_PER_LINE) {
-      const cut = rest.lastIndexOf(" ", CHARS_PER_LINE);
-      const idx = cut > 32 ? cut : CHARS_PER_LINE;
-      out.push(rest.slice(0, idx).trimEnd());
-      rest = rest.slice(idx).trimStart();
-    }
-    if (rest) out.push(rest);
+    paragraph.push(trimmed.trim());
   }
+  flushParagraph();
   return out;
 }
 
@@ -199,6 +229,9 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     rects = [];
   };
 
+  const lineWouldEnterInitialsBand = () =>
+    CONTENT_TOP + (lineInPage + 1) * LINE_HEIGHT > CONTENT_BOTTOM_LIMIT - LINE_HEIGHT * 0.5;
+
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
     const trimmed = line.trim();
@@ -228,7 +261,7 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     ) {
       flush();
     }
-    if (lineInPage >= maxLinesPerPage) flush();
+    if (lineInPage >= maxLinesPerPage || lineWouldEnterInitialsBand()) flush();
     pageLines.push(line);
     if (line.trim()) {
       rects.push({
@@ -243,7 +276,21 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     lineInPage += 1;
   }
   flush();
-  return pages.length ? pages : [{ pageIndex: 0, flowLines: [], textRects: [] }];
+  const finalPages = pages.length ? pages : [{ pageIndex: 0, flowLines: [], textRects: [] }];
+  for (const page of finalPages) {
+    const lastLineBottom = Math.max(0, ...page.textRects.map((r) => r.y + r.height));
+    if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-canonical-pagination-page]", {
+        page: page.pageIndex,
+        lineCount: page.flowLines.filter((line) => line.trim()).length,
+        lastLineBottom,
+        initialsBandTop: BAND_TOP,
+        ok: lastLineBottom <= BAND_TOP,
+      });
+    }
+  }
+  return finalPages;
 }
 
 function fieldBase(role: Vs01PrepareSigningRole, page: number): Pick<
