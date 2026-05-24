@@ -48,7 +48,12 @@ import { markPaidPremiumCompletionSession } from "../../components/agreements/pr
 import { trackStarterProRefineCheckoutSuccessFromContext } from "../../components/agreements/starterProRefineCheckoutSuccess";
 import { checkoutLossAversionFromIntentSignals } from "../../components/agreements/upgradeContextReasons";
 import { CreateFlowAgreementCheckoutPricing } from "./CreateFlowAgreementCheckoutPricing";
-import { isDevCreateFlowPaymentBypassEnabled } from "../devPaymentBypass";
+import {
+  logDevPaymentBypassState,
+  resolveDevPaymentBypassState,
+} from "../devPaymentBypass";
+import { isLocalBrowserOrigin } from "../../lib/clawApi";
+import { logPaymentFlowStage } from "../../components/agreements/paymentFlowProgression";
 import { ensureAffiliateAttributionForOrg, getAffiliateCodeForAttribution } from "../affiliate/affiliateAttributionContext";
 import { ensureGenesisReferralHandoffForCheckout } from "../genesisReferral/ensureGenesisReferralHandoff";
 import { getOrgId } from "../orgContext";
@@ -289,6 +294,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         clearUpgradeCheckoutContext();
         clearCheckoutBackRestoreSnapshot();
         markPaidPremiumCompletionSession();
+        logPaymentFlowStage("checkout_complete", { agreementId });
+        console.info("[premium-flow] payment_return_detected", {
+          agreementId,
+          via: "checkout_settlement",
+        });
       }
       const destination =
         agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID
@@ -304,6 +314,27 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   async function onCardPay(e: FormEvent): Promise<void> {
     e.preventDefault();
     if (finishedRef.current || processing || amountUsd == null) return;
+    if (devPaymentBypassActive) {
+      console.info("[DEV PAYMENT BYPASS] active");
+      console.info(
+        "[DEV PAYMENT BYPASS] simulating successful payment — reusing demo settlement + applyConfirmedSettlement",
+      );
+      void ensureGenesisReferralHandoffForCheckout().catch((err) => {
+        console.warn("[genesis-referral] checkout handoff skipped for dev bypass", err);
+      });
+      const intent = createFiatToCryptoOnrampIntent({
+        agreementId,
+        tierId: tier.id,
+        cadence,
+        amountUsd,
+      });
+      const conf = await demoConfirmFiatToCryptoOnrampFromCard({
+        intent,
+        cardNumberDigits: "4242424242424242",
+      });
+      await applyConfirmedSettlement(conf);
+      return;
+    }
     const affiliateCode = getAffiliateCodeForAttribution();
     if (affiliateCode) {
       const attributed = await ensureAffiliateAttributionForOrg(getOrgId());
@@ -319,21 +350,6 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     }
     if (import.meta.env.DEV && genesisHandoff.metadata.referral_code) {
       console.info("[genesis-referral] checkout metadata", genesisHandoff.metadata);
-    }
-    if (devPaymentBypassActive) {
-      console.info("[DEV PAYMENT BYPASS] simulating successful payment — reusing demo settlement + applyConfirmedSettlement");
-      const intent = createFiatToCryptoOnrampIntent({
-        agreementId,
-        tierId: tier.id,
-        cadence,
-        amountUsd,
-      });
-      const conf = await demoConfirmFiatToCryptoOnrampFromCard({
-        intent,
-        cardNumberDigits: "4242424242424242",
-      });
-      await applyConfirmedSettlement(conf);
-      return;
     }
     const digits = stripCardDigits(cardNumber);
     if (!cardName.trim() || digits.length < 15 || !cardExp.trim() || cardCvc.trim().length < 3) {
@@ -369,17 +385,25 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const returnParsed = extractAgreementIdFromSendReturnUrl(returnTo);
 
   const isCreateAgreementCheckout = agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !isSingleAgreementCheckout;
-  const devPaymentBypassActive = isCreateAgreementCheckout && isDevCreateFlowPaymentBypassEnabled();
+  const devPaymentBypassState = useMemo(() => resolveDevPaymentBypassState(), []);
+  const devPaymentBypassActive = isCreateAgreementCheckout && devPaymentBypassState.enabled;
+  const localSmokeBypassBlocked =
+    isCreateAgreementCheckout && isLocalBrowserOrigin() && !devPaymentBypassState.enabled;
   const [upgradeCheckoutSnap, setUpgradeCheckoutSnap] = useState<UpgradeCheckoutContextV1 | null>(() =>
     agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID ? readUpgradeCheckoutContext() : null,
   );
 
   useEffect(() => {
+    if (!isCreateAgreementCheckout) return;
+    logDevPaymentBypassState();
+    if (localSmokeBypassBlocked) {
+      console.warn("[dev-payment-bypass-disabled-blocking-local-smoke]");
+    }
     if (!devPaymentBypassActive) return;
     console.info(
-      "[DEV PAYMENT BYPASS] active — primary checkout CTA uses demo settlement + applyConfirmedSettlement → premiumCompletion=1 (Vite dev only; set VITE_ENABLE_DEV_PAYMENT_BYPASS=0 to require card fields)",
+      "[DEV PAYMENT BYPASS] active — primary checkout CTA uses demo settlement + applyConfirmedSettlement → premiumCompletion=1 (local preview + Vite dev; set VITE_ENABLE_DEV_PAYMENT_BYPASS=0 to require card fields or Stripe)",
     );
-  }, [devPaymentBypassActive]);
+  }, [isCreateAgreementCheckout, devPaymentBypassActive, localSmokeBypassBlocked]);
 
   useEffect(() => {
     if (!isCreateAgreementCheckout) {
@@ -612,6 +636,15 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
               </button>
             </form>
               </div>
+              {localSmokeBypassBlocked ? (
+                <div
+                  className="mt-3 rounded-md border border-amber-700/60 bg-amber-950/50 px-3 py-2 text-sm text-amber-100"
+                  role="alert"
+                >
+                  Dev payment bypass is disabled. Set VITE_ENABLE_DEV_PAYMENT_BYPASS=1 or use real Stripe
+                  checkout.
+                </div>
+              ) : null}
               {devPaymentBypassActive ? (
                 <p
                   className="mt-3 rounded-md border border-amber-600/50 bg-amber-950/40 px-3 py-2 text-center text-[11px] font-medium uppercase tracking-wide text-amber-200/95 sm:text-left sm:text-xs"
