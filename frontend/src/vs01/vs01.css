@@ -3619,10 +3619,11 @@ button.vs01-upload-btn:disabled {
 
 .vs01-canonical-text-block {
   position: absolute;
-  overflow: hidden;
-  font-size: 2.05%;
-  line-height: 1.12;
-  white-space: nowrap;
+  box-sizing: border-box;
+  overflow: visible;
+  color: #111827;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .vs01-canonical-text-block--heading {
@@ -3630,13 +3631,24 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-canonical-text-block--signature_label {
-  font-size: 1.85%;
+  letter-spacing: 0.01em;
+}
+
+.vs01-canonical-signature-underline {
+  position: absolute;
+  height: 2px;
+  background: #111827;
+  opacity: 0.72;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .vs01-canonical-initials-band {
   position: absolute;
   border-top: 1px solid rgba(203, 213, 225, 0.45);
   background: linear-gradient(to bottom, rgba(248, 250, 252, 0.3), rgba(248, 250, 252, 0.74));
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* Sender fields from Step 3 — read-only reference under recipient placement (Step 4). */

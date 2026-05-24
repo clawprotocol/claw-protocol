@@ -13,9 +13,21 @@ export function resolveVs01PreparePacketReadiness(args: {
     Vs01SigningPacketInitialsSummary,
     "complete" | "unsafeInitialsCount" | "unsafeSignatureCount"
   > | null;
+  canonicalTextRendered?: boolean;
+  canonicalSignatureLinesRendered?: boolean;
+  canonicalDomAligned?: boolean;
 }): Vs01PreparePacketReadiness {
   if (!args.corpusGate?.allowed) {
     return { packetReady: false, reason: args.corpusGate?.blockReason ?? "corpus_gate_blocked" };
+  }
+  if (args.canonicalTextRendered === false) {
+    return { packetReady: false, reason: "canonical_page_text_not_rendered" };
+  }
+  if (args.canonicalSignatureLinesRendered === false) {
+    return { packetReady: false, reason: "canonical_signature_lines_not_rendered" };
+  }
+  if (args.canonicalDomAligned === false) {
+    return { packetReady: false, reason: "canonical_field_dom_mismatch" };
   }
   if (!args.placementCanFinish) {
     return { packetReady: false, reason: "missing_required_signature_fields" };

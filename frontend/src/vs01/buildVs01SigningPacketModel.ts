@@ -415,6 +415,20 @@ export function buildVs01SigningPacketModel(args: {
     });
   }
 
+  const totalVisibleChars = pages.reduce(
+    (sum, p) => sum + p.textBlocks.reduce((lineSum, b) => lineSum + b.text.trim().length, 0),
+    0,
+  );
+  if (corpusGate.allowed && totalVisibleChars < 80) {
+    validationErrors.push("canonical_pages_blank");
+  }
+  const hasWitnessInPages = pages.some((p) =>
+    p.textBlocks.some((b) => /\bIN WITNESS WHEREOF\b/i.test(b.text)),
+  );
+  if (corpusGate.allowed && guidedPro && !hasWitnessInPages) {
+    validationErrors.push("witness_block_not_in_pages");
+  }
+
   const signatureAnchorCount = pages.reduce((sum, p) => sum + p.signatureLineAnchors.length, 0);
   const geometryErrors = validateVs01SigningPacketGeometry({
     pages,
