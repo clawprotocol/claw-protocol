@@ -16,9 +16,17 @@ export function resolveVs01PreparePacketReadiness(args: {
   canonicalTextRendered?: boolean;
   canonicalSignatureLinesRendered?: boolean;
   canonicalDomAligned?: boolean;
+  canonicalTextOverlapping?: boolean;
+  canonicalTextInInitialsBand?: boolean;
 }): Vs01PreparePacketReadiness {
   if (!args.corpusGate?.allowed) {
     return { packetReady: false, reason: args.corpusGate?.blockReason ?? "corpus_gate_blocked" };
+  }
+  if (args.canonicalTextOverlapping === true) {
+    return { packetReady: false, reason: "canonical_text_overlapping" };
+  }
+  if (args.canonicalTextInInitialsBand === true) {
+    return { packetReady: false, reason: "canonical_text_in_initials_band" };
   }
   if (args.canonicalTextRendered === false) {
     return { packetReady: false, reason: "canonical_page_text_not_rendered" };

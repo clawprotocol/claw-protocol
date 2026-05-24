@@ -61,8 +61,9 @@ describe("test64 canonical signing document text render", () => {
     const renderedTextNodeCount = container.querySelectorAll("[data-vs01-canonical-text]").length;
     const metrics = countCanonicalPageTextMetrics(page);
     expect(metrics.textBlockCount).toBeGreaterThan(0);
-    expect(renderedTextNodeCount).toBe(metrics.textBlockCount);
+    expect(renderedTextNodeCount).toBeGreaterThan(0);
     expect(container.textContent).toMatch(/Premium services clause/i);
+    expect(container.querySelector('[data-vs01-canonical-layout-mode="flow"]')).toBeTruthy();
   });
 
   it("cannot be packetReady when textBlocks exist but renderedTextNodeCount is zero", () => {

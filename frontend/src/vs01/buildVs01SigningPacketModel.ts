@@ -27,6 +27,8 @@ export type Vs01SigningPacketMode = "guided_pro" | "free" | "uploaded_pdf";
 export type Vs01SigningPacketPage = {
   pageIndex: number;
   contentRect: Vs01NormalizedRect;
+  /** Source lines for flow layout (preferred over absolute textBlocks). */
+  flowLines: string[];
   textBlocks: Vs01NormTextRect[];
   initialsBandRect: Vs01NormalizedRect;
   reservedInitialsBandRect: Vs01NormalizedRect;
@@ -159,23 +161,32 @@ function textRectIntersects(a: Vs01NormalizedRect, b: Vs01NormalizedRect): boole
   return x > 0 && y > 0;
 }
 
-function paginateCorpus(corpus: string): Vs01PageTextLayout[] {
+type PaginatedCorpusSlice = {
+  pageIndex: number;
+  flowLines: string[];
+  textRects: Vs01NormTextRect[];
+};
+
+function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   const lines = normalizeLines(corpus);
   const maxLinesPerPage = Math.max(1, Math.floor((CONTENT_BOTTOM_LIMIT - CONTENT_TOP) / LINE_HEIGHT));
-  const pages: Vs01PageTextLayout[] = [];
+  const pages: PaginatedCorpusSlice[] = [];
   let pageIndex = 0;
   let lineInPage = 0;
+  let pageLines: string[] = [];
   let rects: Vs01NormTextRect[] = [];
 
   const flush = () => {
-    pages.push({ pageIndex, source: "corpus_sim", textRects: rects });
+    pages.push({ pageIndex, flowLines: pageLines, textRects: rects });
     pageIndex += 1;
     lineInPage = 0;
+    pageLines = [];
     rects = [];
   };
 
   for (const line of lines) {
     if (lineInPage >= maxLinesPerPage) flush();
+    pageLines.push(line);
     if (line.trim()) {
       rects.push({
         x: CONTENT_X,
@@ -189,7 +200,7 @@ function paginateCorpus(corpus: string): Vs01PageTextLayout[] {
     lineInPage += 1;
   }
   flush();
-  return pages.length ? pages : [{ pageIndex: 0, source: "corpus_sim", textRects: [] }];
+  return pages.length ? pages : [{ pageIndex: 0, flowLines: [], textRects: [] }];
 }
 
 function fieldBase(role: Vs01PrepareSigningRole, page: number): Pick<
@@ -313,8 +324,12 @@ export function validateVs01SigningPacketDomRects(args: {
     let ok = Boolean(expected && page);
     if (expected && page) {
       if (expected.type === "signature") {
-        const anchor = page.signatureAnchorRects.find((a) => textRectIntersects(a, expected));
-        ok = Boolean(anchor && textRectIntersects(dom.rect, anchor));
+        const anchor = page.signatureAnchorRects.find((a) => a.partyIndex === expected.assignedPartyIndex);
+        ok = Boolean(
+          anchor &&
+            (textRectIntersects(dom.rect, anchor) ||
+              Math.abs(dom.rect.y - anchor.y) < 0.04),
+        );
       } else if (expected.type === "initials") {
         ok =
           textRectIntersects(dom.rect, page.initialsBandRect) &&
@@ -368,7 +383,12 @@ export function buildVs01SigningPacketModel(args: {
   const layouts = corpusGate.allowed ? paginateCorpus(corpusGate.corpus) : [];
   const roles = [...args.roles];
   const fields: PlacedSigningField[] = [];
-  const pages: Vs01SigningPacketPage[] = layouts.map((layout) => {
+  const pages: Vs01SigningPacketPage[] = layouts.map((slice) => {
+    const layout: Vs01PageTextLayout = {
+      pageIndex: slice.pageIndex,
+      source: "corpus_sim",
+      textRects: slice.textRects,
+    };
     const signatureLineAnchors = findSignatureLinePlacementsFromPageLayout(layout);
     const contentRect = {
       x: CONTENT_X,
@@ -383,9 +403,10 @@ export function buildVs01SigningPacketModel(args: {
       height: BAND_HEIGHT,
     };
     return {
-      pageIndex: layout.pageIndex,
+      pageIndex: slice.pageIndex,
       contentRect,
-      textBlocks: layout.textRects,
+      flowLines: slice.flowLines,
+      textBlocks: slice.textRects,
       initialsBandRect,
       reservedInitialsBandRect: initialsBandRect,
       signatureAnchorRects: signatureLineAnchors,
@@ -416,7 +437,9 @@ export function buildVs01SigningPacketModel(args: {
   }
 
   const totalVisibleChars = pages.reduce(
-    (sum, p) => sum + p.textBlocks.reduce((lineSum, b) => lineSum + b.text.trim().length, 0),
+    (sum, p) =>
+      sum +
+      p.flowLines.reduce((lineSum, line) => lineSum + line.trim().length, 0),
     0,
   );
   if (corpusGate.allowed && totalVisibleChars < 80) {

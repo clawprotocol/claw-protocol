@@ -58,7 +58,11 @@ export function logVs01SignatureLineDomAnchor(payload: Record<string, unknown>):
 }
 
 export function signingPacketHasVisibleText(pages: readonly Vs01SigningPacketPage[]): boolean {
-  return pages.some((p) => p.textBlocks.some((b) => b.text.trim().length > 0));
+  return pages.some(
+    (p) =>
+      p.flowLines.some((line) => line.trim().length > 0) ||
+      p.textBlocks.some((b) => b.text.trim().length > 0),
+  );
 }
 
 export function signingPacketTotalCharCount(pages: readonly Vs01SigningPacketPage[]): number {
