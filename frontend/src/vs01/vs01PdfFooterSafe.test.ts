@@ -9,7 +9,7 @@ describe("VS01 PDF footer-safe overlay", () => {
     expect(css).toContain(".vs01-pdf-footer-watermark-shim");
     expect(css).toContain("z-index: 1");
     expect(css).toContain(".vs01-sign-page-surface--footer-safe");
-    expect(css).toContain("--vs01-initials-reserved-band: 160px");
+    expect(css).toContain("--vs01-initials-reserved-band: 220px");
     expect(css).toContain("box-shadow:");
     expect(css).toContain("var(--vs01-initials-reserved-band)");
     for (const f of ["StepPrepareSignature.tsx", "StepCompleteAndSend.tsx", "RecipientSigningView.tsx"]) {

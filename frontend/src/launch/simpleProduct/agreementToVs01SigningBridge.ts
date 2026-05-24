@@ -19,7 +19,8 @@ import { normalizeAgreementDisplayTitle } from "../../components/agreements/cano
 import { buildAgreementPreviewText } from "../../components/agreements/agreementPreviewFromDraft";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import {
-  resolveVs01SigningCorpusForHandoff,
+  pickDraftSigningCorpusPlain,
+  resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
 } from "../../vs01/vs01SigningCorpus";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
@@ -779,12 +780,18 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
     agreementCorpusText: options.agreementCorpusText,
   });
-  const corpusResolution = resolveVs01SigningCorpusForHandoff({
+  const draftCorpus = pickDraftSigningCorpusPlain(merged);
+  const handoffLen = (options.agreementCorpusText ?? "").trim().length;
+  const corpusResolution = resolveFinalVs01CorpusOrBlock({
     agreementCorpusText: options.agreementCorpusText,
     draft: merged,
     bridge: bridgeDraft,
     guidedPro: true,
     freeBaselinePlain,
+    premiumPipelinePlain: draftCorpus,
+    hydratedPremiumPlain: draftCorpus,
+    premiumComplete:
+      draftCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN || handoffLen >= VS01_SIGNING_CORPUS_MIN_LEN,
   });
   if (!corpusResolution.allowed) return false;
 

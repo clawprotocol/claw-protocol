@@ -14,7 +14,10 @@ import {
   shouldRejectSignerIdentityCorpusShrink,
   type CanonicalPartyIdentity,
 } from "./signerPartyIdentity";
-import { corpusSignatureBlocksHaveRequiredByLines } from "./signatureRegion";
+import {
+  corpusHasVisibleSignatureExecutionLines,
+  corpusSignatureBlocksHaveRequiredByLines,
+} from "./signatureRegion";
 import { stripStaleExecutionPlacementCorpusCopy } from "./guidedCorpusLineRepairs";
 
 export type ResolveGuidedSigningAuthoritativeArgs = {
@@ -482,6 +485,13 @@ export function assertGuidedVs01SigningHandoffReady(args: {
   const body = (args.corpusBody || "").trim();
   if (body.length < GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN) {
     return { ok: false, reason: "corpus_too_short" };
+  }
+  if (!corpusHasVisibleSignatureExecutionLines(body)) {
+    return { ok: false, reason: "missing_witness_block" };
+  }
+  const partyCount = Math.max(2, parties.length);
+  if (!corpusSignatureBlocksHaveRequiredByLines(body, partyCount)) {
+    return { ok: false, reason: "missing_by_signature_lines" };
   }
   const p0 = parties[0]!;
   const p1 = parties[1]!;

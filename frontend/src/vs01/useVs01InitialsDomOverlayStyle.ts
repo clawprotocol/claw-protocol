@@ -7,6 +7,7 @@ import {
   initialsReservedBandForPage,
   logInitialsDomPlacementForPage,
   logVs01InitialsReservedBand,
+  logVs01PageReservedBandEnforced,
   logVs01InitialsTextCollisionCheck,
   resolveInitialsDomTextOverlap,
   validateInitialsDomPlacement,
@@ -44,6 +45,17 @@ export function useVs01InitialsDomOverlayStyle(args: {
         reservedBottomPx: band.reservedBottomPx,
         pageHeight,
         contentBottomLimit: band.contentBottomLimit,
+      });
+      const textBottom = Math.max(
+        0,
+        ...(args.textRects ?? []).map((r) => (r.y + r.height) * pageHeight),
+      );
+      logVs01PageReservedBandEnforced({
+        page: args.page,
+        reservedPx: band.reservedBottomPx,
+        textBottom,
+        contentBottomLimit: band.contentBottomLimit,
+        ok: textBottom <= band.contentBottomLimit + 1,
       });
 
       const initialDom = computeInitialsDomPlacementPx({

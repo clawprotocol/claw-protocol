@@ -369,7 +369,21 @@ Date: _________________________
       sendMode: "signature",
       recipientsDeferred: false,
     });
-    const body = "D".repeat(GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN + 50);
+    const body = `${"D".repeat(GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN + 20)}
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Acme LLC
+By: ______________________
+Name: Anthem Blanchard
+Title: Manager
+Date: ____________________
+
+SERVICE PROVIDER:
+Joe Smith
+Signature: _______________
+Name: Joe Smith
+Date: ____________________`;
     expect(
       assertGuidedVs01SigningHandoffReady({
         manifest,

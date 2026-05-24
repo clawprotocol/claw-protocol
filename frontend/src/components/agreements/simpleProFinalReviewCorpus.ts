@@ -109,7 +109,8 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     if (
       plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
       rendered.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
-      rendered.length > plainText.length
+      rendered.length > plainText.length &&
+      rendered.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN
     ) {
       plainText = rendered;
       source = "rendered_preview";

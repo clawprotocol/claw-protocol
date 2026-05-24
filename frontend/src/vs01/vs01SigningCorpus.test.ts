@@ -4,7 +4,7 @@ import { fingerprintAgreementBody } from "../components/agreements/guidedDealCom
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "../components/agreements/simpleProFinalReviewCorpus";
 import { resolvePremiumSignaturePreviewMode } from "../components/agreements/premiumAgreementDocumentHtml";
 import {
-  resolveVs01SigningCorpusForHandoff,
+  resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MAX_PREVIEW_LEN,
 } from "./vs01SigningCorpus";
 
@@ -58,7 +58,7 @@ const bridge: AgreementVs01BridgeSession = {
 
 describe("vs01SigningCorpus", () => {
   it("blocks guided Pro when handoff is short free-hash-equivalent fallback", () => {
-    const resolution = resolveVs01SigningCorpusForHandoff({
+    const resolution = resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: SHORT_FALLBACK,
       guidedPro: true,
       freeBaselinePlain: SHORT_FALLBACK,
@@ -74,7 +74,7 @@ describe("vs01SigningCorpus", () => {
   it("allows guided Pro when authoritative handoff corpus has witness block and By/Signature lines", () => {
     const corpus = fullGuidedCorpus();
     expect(corpus.length).toBeGreaterThanOrEqual(GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN);
-    const resolution = resolveVs01SigningCorpusForHandoff({
+    const resolution = resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: corpus,
       guidedPro: true,
       freeBaselinePlain: SHORT_FALLBACK,
@@ -89,7 +89,7 @@ describe("vs01SigningCorpus", () => {
   it("rebuilds witness block when operative body is long but signature lines are missing", () => {
     const bodyOnly = longOperativePad();
     expect(bodyOnly.length).toBeGreaterThanOrEqual(GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN);
-    const resolution = resolveVs01SigningCorpusForHandoff({
+    const resolution = resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: bodyOnly,
       guidedPro: true,
       bridge,
@@ -110,7 +110,7 @@ describe("vs01SigningCorpus", () => {
 
   it("test58-style handoff: guided Pro resolution never reports missing signature block when allowed", () => {
     const corpus = fullGuidedCorpus();
-    const resolution = resolveVs01SigningCorpusForHandoff({
+    const resolution = resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: corpus,
       guidedPro: true,
       bridge,
@@ -123,7 +123,7 @@ describe("vs01SigningCorpus", () => {
 
   it("prefers longer draft authoritative text over short handoff preview", () => {
     const draftCorpus = fullGuidedCorpus();
-    const resolution = resolveVs01SigningCorpusForHandoff({
+    const resolution = resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: SHORT_FALLBACK,
       draft: {
         parties: [],

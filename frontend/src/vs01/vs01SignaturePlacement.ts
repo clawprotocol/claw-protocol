@@ -59,6 +59,12 @@ export function logVs01SignaturePlacementMode(payload: Record<string, unknown>):
   console.info("[vs01-signature-placement-mode]", payload);
 }
 
+export function logVs01SignatureAnchorValidation(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-signature-anchor-validation]", payload);
+}
+
 export function logVs01CollisionRejected(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
@@ -244,6 +250,20 @@ export function resolveSignatureFieldRect(args: {
       mode,
       y: rect.y,
       x: rect.x,
+    });
+    const anchorLine = (args.pageLayout?.textRects ?? []).find(
+      (r) =>
+        /^(?:By|Signature)\s*:/i.test(r.text.trim()) &&
+        Math.abs(r.y - rect.y) < 0.06,
+    );
+    logVs01SignatureAnchorValidation({
+      page: args.page,
+      signer: args.partyIndex,
+      anchorText: anchorLine?.text?.trim() ?? mode,
+      anchorY: rect.y,
+      overlapsFooter: check.footerZone,
+      overlapsBodyText: check.overlapText,
+      accepted: true,
     });
     logVs01SignaturePlacementMode({ page: args.page, partyIndex: args.partyIndex, mode });
     return { rect, mode };

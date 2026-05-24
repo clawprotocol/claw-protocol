@@ -398,6 +398,12 @@ import {
 } from "../../launch/simpleProduct/premiumSendIntent";
 import { mergeLiveDraftWithRecipientSetupForVs01Bridge } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
 import {
+  pickBestPaidProAuthoritativeCorpusPlain,
+  resolveFinalVs01CorpusOrBlock,
+  VS01_CORPUS_GATE_USER_MESSAGE,
+  VS01_CORPUS_PREFERRED_MIN_LEN,
+} from "../../vs01/vs01SigningCorpus";
+import {
   executePaidProPostRecipientSetupHandoff,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
 } from "../../launch/simpleProduct/paidProPostRecipientSetupHandoff";
@@ -2322,6 +2328,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       lastPremiumWinningCorpusRef,
       premiumPipelineOutputBodyRef,
       lastPremiumPipelineRenderSourceRef,
+      lastKnownGoodAuthoritativeDraftRef,
     }),
     [],
   );
@@ -5499,6 +5506,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           hydratedPremiumBodyRef.current = authoritativePaidBody;
           lastPremiumWinningCorpusRef.current = authoritativePaidBody;
           premiumPipelineOutputBodyRef.current = authoritativePaidBody;
+          updateLastKnownGoodAuthoritativeDraftRef(
+            lastKnownGoodAuthoritativeDraftRef,
+            authoritativePaidBody,
+            "premium_payment_success",
+            {
+              paidProFlow: true,
+              freeBaselinePlain: draft
+                ? buildAgreementPreviewText(draft as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
+                    starterPreview: true,
+                  })
+                : "",
+            },
+          );
           setProUpgradeUseStarterView(false);
         }
         if (import.meta.env.DEV) {
@@ -13575,6 +13595,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
+    const premiumCorpusStillProcessing =
+      premiumPostCheckoutPhase === "processing" ||
+      premiumPostCheckoutPhase === "awaiting_gaps" ||
+      premiumPostCheckoutPhase === "network_retry" ||
+      premiumPostCheckoutPhase === "generation_retry";
+    const maxPaidAuthoritativeCorpusLen = Math.max(
+      finalizedSigningCorpusRef.current.trim().length,
+      hydratedPremiumBodyRef.current.trim().length,
+      premiumPipelineOutputBodyRef.current.trim().length,
+      lastKnownGoodAuthoritativeDraftRef.current.trim().length,
+      acceptedReviewCorpusRef.current.trim().length,
+    );
     if (!simpleCreateUnifiedBottomCta) {
       return {
         label: "",
@@ -13720,18 +13752,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               (readAgreementFieldsPlacedCount(sendAgreementId) ||
                 readSigningPacketPrepSnapshot()?.fieldsPlacedCount ||
                 0) <= 0);
+          const vs01SigningCorpusBlocked =
+            paidProAuthoritative &&
+            effectivePremiumSendMode === "signature" &&
+            (premiumCorpusStillProcessing || maxPaidAuthoritativeCorpusLen < 1500);
           const sendDisabled =
             (!recipientsDeferred && (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)) ||
             Boolean(loading) ||
             premiumSendConfirmOpen ||
             guidedPacketSendBlocked ||
-            signingPacketCtaBlocked;
+            signingPacketCtaBlocked ||
+            vs01SigningCorpusBlocked;
           const premiumOutbox = premiumSignersSurfaceReady;
           const persistSendLabel =
             loading &&
             (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
             createFlowPhase === "ready_to_send"
               ? "Saving…"
+              : vs01SigningCorpusBlocked
+                ? VS01_CORPUS_GATE_USER_MESSAGE
               : signingPacketCtaBlocked
                 ? "Prepare signing packet first."
               : paidProRecipientSetupOnDraft &&
@@ -13803,14 +13842,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         if (
           simpleProFinalReviewActive &&
-          finalizedSigningCorpusRef.current.trim().length >= 1500 &&
           (canonicalSignerManifestRef.current?.entries.length ?? 0) > 0
         ) {
+          const signingCorpusReady =
+            !premiumCorpusStillProcessing && maxPaidAuthoritativeCorpusLen >= 1500;
           return {
-            label: "Create signing links",
+            label: signingCorpusReady ? "Create signing links" : VS01_CORPUS_GATE_USER_MESSAGE,
             action: "premium_continue_to_signers",
-            disabled: false,
-            reason: "guided_final_review_ready_to_sign",
+            disabled: !signingCorpusReady,
+            reason: signingCorpusReady
+              ? "guided_final_review_ready_to_sign"
+              : premiumCorpusStillProcessing
+                ? "premium_corpus_in_progress"
+                : "vs01_corpus_too_short",
           };
         }
         if (
@@ -14429,7 +14473,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         if (progressive.merges.some((m) => m.action === "merged")) {
           hydratedPremiumBodyRef.current = progressive.body;
-          lastKnownGoodAuthoritativeDraftRef.current = progressive.body;
+          updateLastKnownGoodAuthoritativeDraftRef(
+            lastKnownGoodAuthoritativeDraftRef,
+            progressive.body,
+            "guided_progressive_merge",
+            {
+              paidProFlow: paidProAuthoritative,
+              freeBaselinePlain: draft
+                ? buildAgreementPreviewText(draft as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
+                    starterPreview: true,
+                  })
+                : "",
+            },
+          );
           authoritativeAgreementSnapshotRef.current = progressive.body;
           setAgreementDocumentText(progressive.body);
           setGuidedAuthVersionNonce((n) => n + 1);
@@ -14879,17 +14935,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
   ]);
 
+  const paidProStarterPreviewPlain = useMemo(() => {
+    if (!draft) return "";
+    try {
+      return buildAgreementPreviewText(draft as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
+        starterPreview: true,
+      }).trim();
+    } catch {
+      return "";
+    }
+  }, [draft, reviewDocRefreshTick, premiumSurfaceGateTick]);
+
   const guidedAuthoritativeBodyPlain = useMemo(() => {
-    const lastKnown = (lastKnownGoodAuthoritativeDraftRef.current || "").trim();
-    const hydrated = (hydratedPremiumBodyRef.current || "").trim();
-    const doc = (agreementDocumentText || "").trim();
-    const picker = (premiumPaidReadonlyPick.plainText || "").trim();
-    const candidates = [lastKnown, hydrated, doc, picker].filter((t) => t.length > 0);
-    if (!candidates.length) return "";
-    return candidates.reduce((longest, next) => (next.length > longest.length ? next : longest));
+    return pickBestPaidProAuthoritativeCorpusPlain(
+      [
+        hydratedPremiumBodyRef.current,
+        premiumPipelineOutputBodyRef.current,
+        lastPremiumWinningCorpusRef.current,
+        lastKnownGoodAuthoritativeDraftRef.current,
+        agreementDocumentText,
+        premiumPaidReadonlyPick.plainText,
+      ],
+      paidProStarterPreviewPlain,
+    );
   }, [
     agreementDocumentText,
     premiumPaidReadonlyPick.plainText,
+    paidProStarterPreviewPlain,
     guidedAuthVersionNonce,
     guidedCompletionPhase,
     reviewDocRefreshTick,
@@ -15264,6 +15336,57 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const premiumCorpusInProgress = useMemo(
+    () =>
+      premiumPostCheckoutPhase === "processing" ||
+      premiumPostCheckoutPhase === "awaiting_gaps" ||
+      premiumPostCheckoutPhase === "network_retry" ||
+      premiumPostCheckoutPhase === "generation_retry",
+    [premiumPostCheckoutPhase],
+  );
+
+  const vs01FinalCorpusGate = useMemo(
+    () =>
+      resolveFinalVs01CorpusOrBlock({
+        agreementCorpusText:
+          finalizedSigningCorpusRef.current ||
+          acceptedReviewCorpusRef.current ||
+          guidedSigningAuthoritativePlain,
+        draft: (draft ?? null) as unknown as AgreementDraft | null,
+        guidedPro: paidProAuthoritative,
+        freeBaselinePlain: paidProStarterPreviewPlain,
+        premiumPipelinePlain: premiumPipelineOutputBodyRef.current,
+        hydratedPremiumPlain: hydratedPremiumBodyRef.current,
+        lastKnownGoodPlain: lastKnownGoodAuthoritativeDraftRef.current,
+        finalizedSigningPlain: finalizedSigningCorpusRef.current,
+        acceptedReviewPlain: acceptedReviewCorpusRef.current,
+        renderedPreviewPlain: renderedAgreementPreview,
+        renderedPreviewSource: premiumPaidReadonlyPick.sourceUsed ?? "rendered_preview",
+        premiumInProgress: premiumCorpusInProgress,
+        premiumComplete:
+          !premiumCorpusInProgress &&
+          Math.max(
+            hydratedPremiumBodyRef.current.trim().length,
+            premiumPipelineOutputBodyRef.current.trim().length,
+            lastKnownGoodAuthoritativeDraftRef.current.trim().length,
+            guidedSigningAuthoritativePlain.trim().length,
+          ) >= VS01_CORPUS_PREFERRED_MIN_LEN,
+      }),
+    [
+      draft,
+      paidProAuthoritative,
+      paidProStarterPreviewPlain,
+      guidedSigningAuthoritativePlain,
+      renderedAgreementPreview,
+      premiumPaidReadonlyPick.sourceUsed,
+      premiumCorpusInProgress,
+      guidedAuthVersionNonce,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+      simpleProFinalReviewActive,
+    ],
+  );
+
   const canProceedGuidedFinalReviewToSigning = useMemo(
     () =>
       canProceedFromGuidedFinalReviewToSigning({
@@ -15321,7 +15444,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       peekPremiumSenderSignFirst() ?? true,
     );
     setGuidedAuthVersionNonce((n) => n + 1);
-    return corpusText;
+    const gate = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: corpusText,
+      draft: (draft ?? null) as AgreementDraft | null,
+      guidedPro: true,
+      freeBaselinePlain: paidProStarterPreviewPlain,
+      premiumPipelinePlain: premiumPipelineOutputBodyRef.current,
+      hydratedPremiumPlain: hydratedPremiumBodyRef.current,
+      lastKnownGoodPlain: corpusText,
+      finalizedSigningPlain: corpusText,
+      acceptedReviewPlain: corpusText,
+      premiumInProgress: premiumCorpusInProgress,
+      premiumComplete: corpusText.length >= VS01_CORPUS_PREFERRED_MIN_LEN,
+    });
+    if (!gate.allowed) return "";
+    return gate.corpus;
   }, [
     flushGuidedSignerMetadataBeforeFinalReview,
     finalizeAndFreezeGuidedFinalCorpus,
@@ -15332,6 +15469,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     freezeGuidedAuthoritativeCorpusSnapshot,
     acceptGuidedReviewCorpus,
     canonicalSignerManifest,
+    paidProStarterPreviewPlain,
+    premiumCorpusInProgress,
   ]);
 
   const handleGuidedOpenFinalReview = React.useCallback((opts?: { modalAlreadyActive?: boolean }): boolean => {
@@ -15798,7 +15937,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumSendIntent: effectivePremiumSendMode,
         recipientSetup: buildRecipientSetupForVs01Bridge(draft as unknown as ParsedDraftShape),
         logSource: "intake_inline_send_success_cta",
-        agreementCorpusText: guidedAuthoritativeBodyPlain || undefined,
+        agreementCorpusText:
+          (vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : guidedAuthoritativeBodyPlain) || undefined,
       });
       if (result.ok) {
         clearPaidProStarterSignatureSendFromCreateFlow();
@@ -15825,6 +15965,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     navigate,
     freshSimpleCreateUx,
     tier,
+    vs01FinalCorpusGate,
+    guidedAuthoritativeBodyPlain,
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
     assertSigningSendReadyOrBlock,
@@ -17445,9 +17587,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!corpusText) {
         logGuidedSignatureTrackFailed({ reason: "corpus_not_ready" });
         showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(
-          "The final agreement body is not ready yet. Return to final review and try again.",
-        );
+        setGuidedFinalizeModalBlockedMessage(VS01_CORPUS_GATE_USER_MESSAGE);
         return;
       }
 

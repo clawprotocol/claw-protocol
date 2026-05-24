@@ -18,6 +18,8 @@ export type AuthoritativePremiumDocumentRefs = {
   lastPremiumWinningCorpusRef: MutableRefObject<string>;
   premiumPipelineOutputBodyRef: MutableRefObject<string>;
   lastPremiumPipelineRenderSourceRef: MutableRefObject<string | null>;
+  /** When set, full premium commits replace stale short last-known-good snapshots. */
+  lastKnownGoodAuthoritativeDraftRef?: MutableRefObject<string>;
 };
 
 export type CommitAuthoritativePremiumDocumentMetadata = {
@@ -41,6 +43,12 @@ export function syncAuthoritativePremiumDocumentRefs(
   refs.hydratedPremiumBodyRef.current = bodyTrim;
   refs.lastPremiumWinningCorpusRef.current = bodyTrim;
   refs.premiumPipelineOutputBodyRef.current = bodyTrim;
+  if (refs.lastKnownGoodAuthoritativeDraftRef && bodyTrim.length >= 1500) {
+    const cur = refs.lastKnownGoodAuthoritativeDraftRef.current.trim();
+    if (!cur || bodyTrim.length >= cur.length) {
+      refs.lastKnownGoodAuthoritativeDraftRef.current = bodyTrim;
+    }
+  }
   refs.lastPremiumPipelineRenderSourceRef.current = meta.pipelineSource;
   refs.agreementDocumentTextRef.current = collapsedDoc;
   refs.agreementDocumentDirtyRef.current = true;

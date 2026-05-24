@@ -4,6 +4,8 @@
  */
 
 import { isAuthoritativePremiumPipelineRenderSource } from "../premiumRenderSourceResolver";
+import { fingerprintAgreementBody } from "./guidedSigningPacketVersion";
+import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "../simpleProFinalReviewCorpus";
 
 export const GUIDED_MIN_AUTHORITATIVE_BODY_LEN = 500;
 
@@ -48,13 +50,29 @@ function hasPremiumMarkers(text: string): boolean {
   );
 }
 
+export type LastKnownGoodAuthoritativeUpdateOptions = {
+  /** Paid Pro / guided — refuse free-starter hash and never shrink a full corpus. */
+  paidProFlow?: boolean;
+  freeBaselinePlain?: string | null;
+};
+
 export function updateLastKnownGoodAuthoritativeDraftRef(
   ref: { current: string },
   plainText: string,
   reason: string,
+  options?: LastKnownGoodAuthoritativeUpdateOptions,
 ): boolean {
   const t = norm(plainText);
-  if (t.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN) return false;
+  const minLen = options?.paidProFlow ? GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN : GUIDED_MIN_AUTHORITATIVE_BODY_LEN;
+  if (t.length < minLen) return false;
+  const freeBase = norm(options?.freeBaselinePlain);
+  if (options?.paidProFlow && freeBase.length >= 200) {
+    if (fingerprintAgreementBody(t) === fingerprintAgreementBody(freeBase)) return false;
+  }
+  const cur = norm(ref.current);
+  if (options?.paidProFlow && cur.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN && t.length < cur.length) {
+    return false;
+  }
   if (ref.current === t) return false;
   ref.current = t;
   logGuidedAuthoritativeHydrated(reason, t.length);

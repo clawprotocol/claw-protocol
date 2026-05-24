@@ -34,7 +34,7 @@ import {
   readPaidProAgreementBridgeSkipMarker,
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
-import { resolveVs01SigningCorpusForHandoff } from "./vs01SigningCorpus";
+import { resolveFinalVs01CorpusOrBlock } from "./vs01SigningCorpus";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
 import {
   clearPaidProVs01PostSignHandoff,
@@ -603,10 +603,11 @@ export function Vs01Wizard({
           const ownerR = rolesForM[0]!;
           flushSync(() => {
             setVs01LinkedAgreementId(bridge.agreementId);
-            const signingCorpus = resolveVs01SigningCorpusForHandoff({
+            const signingCorpus = resolveFinalVs01CorpusOrBlock({
               agreementCorpusText: bridge.agreementCorpusText,
               bridge,
               guidedPro: Boolean(bridge.senderFirstLawdogHandoff),
+              premiumComplete: (bridge.agreementCorpusText ?? "").trim().length >= 1500,
             });
             setPrepareCorpusText(signingCorpus.corpus.trim() || null);
             setAgreementTitle(titleForUi);

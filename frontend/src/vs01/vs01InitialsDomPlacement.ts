@@ -13,7 +13,7 @@ export const VS01_INITIALS_DOM_RIGHT_MARGIN_PX = 64;
 export const VS01_INITIALS_DOM_BOTTOM_MARGIN_PX = 64;
 export const VS01_INITIALS_DOM_SIGNER_GAP_PX = 12;
 export const VS01_INITIALS_DOM_MAX_COLS = 2;
-export const VS01_INITIALS_RESERVED_BOTTOM_BAND_PX = 160;
+export const VS01_INITIALS_RESERVED_BOTTOM_BAND_PX = 220;
 export const VS01_INITIALS_DOM_COMPACT_BOX_WIDTH_PX = 72;
 export const VS01_INITIALS_DOM_COMPACT_BOX_HEIGHT_PX = 42;
 
@@ -67,6 +67,12 @@ export function logVs01InitialsReservedBand(payload: Record<string, unknown>): v
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[vs01-initials-reserved-band]", payload);
+}
+
+export function logVs01PageReservedBandEnforced(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-page-reserved-band-enforced]", payload);
 }
 
 export function logVs01InitialsTextCollisionCheck(payload: Record<string, unknown>): void {

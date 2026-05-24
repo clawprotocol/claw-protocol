@@ -3510,7 +3510,7 @@ button.vs01-upload-btn:disabled {
   position: relative;
   display: inline-block;
   max-width: 100%;
-  --vs01-initials-reserved-band: 160px;
+  --vs01-initials-reserved-band: 220px;
 }
 
 /**
