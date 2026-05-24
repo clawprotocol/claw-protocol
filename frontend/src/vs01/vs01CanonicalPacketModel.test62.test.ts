@@ -6,6 +6,7 @@ import { updateLastKnownGoodAuthoritativeDraftRef } from "../components/agreemen
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import {
   buildVs01SigningPacketModel,
+  canonicalFlowStackBottomNorm,
   signatureFieldRectOnUnderlineAnchor,
   VS01_PACKET_INITIALS_BAND_PT,
 } from "./buildVs01SigningPacketModel";
@@ -97,6 +98,7 @@ describe("test62 canonical VS01 e-sign packet render", () => {
       expect(page.initialsBandRect.height).toBeCloseTo(VS01_PACKET_INITIALS_BAND_PT / 792, 3);
       const textBottom = Math.max(0, ...page.textBlocks.map((b) => b.y + b.height));
       expect(textBottom).toBeLessThanOrEqual(page.initialsBandRect.y);
+      expect(canonicalFlowStackBottomNorm(page)).toBeLessThanOrEqual(page.initialsBandRect.y);
       for (const field of model.fields.filter((f) => f.type === "initials" && f.page === page.pageIndex)) {
         expect(field.y).toBeGreaterThanOrEqual(page.initialsBandRect.y);
         expect(field.y + field.height).toBeLessThanOrEqual(page.initialsBandRect.y + page.initialsBandRect.height);

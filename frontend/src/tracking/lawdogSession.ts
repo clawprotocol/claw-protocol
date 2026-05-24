@@ -6,8 +6,8 @@
  * - `traffic_source` from optional `?src=` on the URL (e.g. csn, doginal); defaults to `direct`.
  * - Optional `referral_source` when the first in-app landing path is an agreement deep link
  *   (`agreement_link`) or an affiliate / Doginal landing page (`affiliate_page`); omitted until set.
- * - Optional `identity_email` for the **creator / account** — set only via explicit auth or account
- *   flows when wired (not from counterparty signer/reviewer rows; those are not creator identity).
+ * - Optional creator/account identity email is stored locally for UX hints only; analytics envelopes
+ *   intentionally do not include the raw email.
  */
 
 import { parseAffiliateLandingPath } from "../launch/affiliate/affiliateLandingRoutes";
@@ -356,7 +356,7 @@ export function getLawdogEventEnvelope(): Record<string, unknown> {
     traffic_source: getLawdogTrafficSource(),
     timestamp: new Date().toISOString(),
   };
-  if (st.identity_email) base.identity_email = st.identity_email;
+  if (st.identity_email) base.identity_email_bound = true;
   const ref = getLawdogReferralSource();
   if (ref) base.referral_source = ref;
   return base;

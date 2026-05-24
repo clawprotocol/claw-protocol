@@ -5,6 +5,8 @@ import {
   getFunnelViewportBucket,
   readAgreementFunnelLandingT0Ms,
   markAgreementFunnelLandingT0IfUnset,
+  sanitizeAgreementFunnelEventExtra,
+  trackAgreementFunnelEvent,
 } from "./agreementFunnelAnalytics";
 import { drainProductEventsForTests, logProductEvent } from "../lib/experimentation/productEvents";
 
@@ -69,5 +71,46 @@ describe("agreementFunnelAnalytics", () => {
     logProductEvent("first_input_started", { chars: 3 });
     const ev = drainProductEventsForTests();
     expect(ev.some((e) => e.name === "first_input_started")).toBe(true);
+  });
+
+  it("drops agreement content and contact fields from funnel extras", () => {
+    const safe = sanitizeAgreementFunnelEventExtra({
+      surface: "recipient_review",
+      continue_mode: "signature",
+      rawIntake: "Acme hires Sam for secret terms",
+      recipientEmail: "sam@example.com",
+      signer_phone: "5551234567",
+      document_body: "Full agreement text",
+      typed_name: "Sam Example",
+      signerName: "Sam Example",
+      agreementTitle: "Secret acquisition letter",
+      maybe_safe: "owner@example.com",
+      free_title_present: true,
+    });
+    expect(safe).toEqual({
+      surface: "recipient_review",
+      continue_mode: "signature",
+      free_title_present: true,
+    });
+  });
+
+  it("trackAgreementFunnelEvent persists only sanitized checkout metadata", () => {
+    trackAgreementFunnelEvent(
+      "checkout_success_returned",
+      {
+        checkout_kind: "subscription",
+        settlement_status: "confirmed",
+        payment_authority: "settled_session",
+        intakeText: "Sensitive intake text",
+      },
+      { planTier: "pro", agreementId: "ag_123" },
+    );
+    const [event] = drainProductEventsForTests();
+    expect(event?.name).toBe("checkout_success_returned");
+    expect(event?.payload?.checkout_kind).toBe("subscription");
+    expect(event?.payload?.settlement_status).toBe("confirmed");
+    expect(event?.payload?.payment_authority).toBe("settled_session");
+    expect(event?.payload).not.toHaveProperty("intakeText");
+    expect(event?.payload?.agreementId).toBe("ag_123");
   });
 });

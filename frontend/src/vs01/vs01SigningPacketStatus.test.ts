@@ -13,6 +13,8 @@ import {
   patchSignerPacketStatus,
   readSigningPacketStatus,
 } from "./vs01SigningPacketStatusStore";
+import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
+import { drainProductEventsForTests } from "../lib/experimentation/productEvents";
 import { workspaceSigningStatusLabel } from "./vs01WorkspaceSigningStatus";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 
@@ -215,6 +217,10 @@ describe("signer completion updates status", () => {
 });
 
 describe("lifecycle audit persist row", () => {
+  beforeEach(() => {
+    drainProductEventsForTests();
+  });
+
   it("contains metadata only", () => {
     const row = toVs01LifecyclePersistRow({
       event: "vs01_signer_completed",
@@ -230,5 +236,25 @@ describe("lifecycle audit persist row", () => {
     expect(row.signer_role_id).toBe("role-abc");
     expect(row.status).toBe("signed");
     expect(JSON.stringify(row)).not.toMatch(/document.body|agreement text/i);
+  });
+
+  it("mirrors VS01 lifecycle milestones into product funnel events without signer PII", () => {
+    logVs01LifecycleEvent({
+      event: "vs01_signer_completed",
+      agreementId: AG,
+      documentId: "doc1",
+      signerRoleId: "role-abc-1234567890",
+      partyIndex: 1,
+      status: "signed",
+    });
+
+    const [event] = drainProductEventsForTests();
+    expect(event?.name).toBe("vs01_signer_completed");
+    expect(event?.payload?.surface).toBe("vs01_lifecycle");
+    expect(event?.payload?.flow).toBe("vs01");
+    expect(event?.payload?.vs01_stage).toBe("sign");
+    expect(event?.payload?.agreementId).toBe(AG);
+    expect(event?.payload?.signer_role_id).toBe("role-abc-1234567");
+    expect(JSON.stringify(event?.payload)).not.toMatch(/@|document.body|agreement text|Sam Example/i);
   });
 });

@@ -322,6 +322,7 @@ import {
   captureToPostHogIfAvailable,
   getAgreementFunnelContextProps,
   markAgreementFunnelLandingT0IfUnset,
+  sanitizeAgreementFunnelEventExtra,
   trackAgreementFunnelEvent,
 } from "../../tracking/agreementFunnelAnalytics";
 import {
@@ -3128,7 +3129,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const emitPaidFunnelEvent = React.useCallback(
     (name: PaidFunnelEventName, options?: { once?: boolean; extra?: Record<string, unknown> }) => {
       if (options?.once && paidFunnelEmittedRef.current[name]) return;
-      const payload = resolvePaidFunnelMetadata(options?.extra);
+      const payload = resolvePaidFunnelMetadata(sanitizeAgreementFunnelEventExtra(options?.extra));
       logProductEvent(name, payload);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -7306,7 +7307,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         source: fromHomeHandoff ? "home_create_submit" : "local_parse",
         fromHomeAutoGenerate: fromHomeHandoff,
       });
-      emitPaidFunnelEvent("free_draft_generated", { once: true, extra: { source: "local_parse" } });
+      emitPaidFunnelEvent("free_draft_generated", {
+        once: true,
+        extra: { source: fromHomeHandoff ? "home_create_submit" : "local_parse" },
+      });
       if (fromHomeHandoff) {
         homeAutoGenerateConsumedRef.current = true;
       }

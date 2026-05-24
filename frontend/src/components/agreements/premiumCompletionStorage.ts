@@ -37,8 +37,7 @@ export function clearPaidPremiumCompletionSession(): void {
   }
 }
 
-/** True while `premiumCompletion=1` is in the URL or the paid-return session marker is set. */
-export function hasPaidPremiumCompletionSession(): boolean {
+export function hasPremiumCheckoutReturnInUrl(): boolean {
   if (typeof window === "undefined") return false;
   try {
     const u = new URL(window.location.href);
@@ -46,12 +45,21 @@ export function hasPaidPremiumCompletionSession(): boolean {
   } catch {
     /* ignore */
   }
+  return false;
+}
+
+export function hasStoredPaidPremiumCompletionSession(): boolean {
   if (typeof sessionStorage === "undefined") return false;
   try {
     return sessionStorage.getItem(PAID_PREMIUM_COMPLETION_SESSION_KEY) === "1";
   } catch {
     return false;
   }
+}
+
+/** True while `premiumCompletion=1` is in the URL or the paid-return session marker is set. */
+export function hasPaidPremiumCompletionSession(): boolean {
+  return hasPremiumCheckoutReturnInUrl() || hasStoredPaidPremiumCompletionSession();
 }
 
 /** Set after the user dismisses the post-checkout success overlay (review-first path continues on-page). */

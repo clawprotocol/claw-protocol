@@ -29,6 +29,15 @@ describe("SimpleCheckoutPage dev payment bypass (static)", () => {
     expect(checkout).toContain("markPaidPremiumCompletionSession");
   });
 
+  it("marks checkout funnel success as settled/session-backed", () => {
+    expect(checkout).toContain('"checkout_success_returned"');
+    expect(checkout).toContain('settlement_status: "confirmed"');
+    expect(checkout).toContain('payment_authority: "settled_session"');
+    expect(checkout.indexOf('"checkout_success_returned"')).toBeGreaterThan(
+      checkout.indexOf("finishedRef.current = true"),
+    );
+  });
+
   it("shows visible message when local smoke bypass is disabled", () => {
     expect(checkout).toContain("[dev-payment-bypass-disabled-blocking-local-smoke]");
     expect(checkout).toContain("Dev payment bypass is disabled");

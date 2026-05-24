@@ -54,13 +54,13 @@ test("paid funnel: full path and dashboard (QA)", async ({ page }) => {
   }
 
   // 3) Premium upsell: CTA navigates directly to create-flow checkout (no intermediate modal in this path)
-  const sendWithPro = page.getByRole("button", { name: /send with lawdog pro/i });
+  const sendWithPro = page.getByRole("button", { name: /send with lawdog pro|continue with pro/i }).first();
   await expect(sendWithPro).toBeVisible({ timeout: 120_000 });
   await sendWithPro.click();
 
   // 4) Checkout (dev: Pay & continue triggers bypass)
   await expect(page).toHaveURL(/\/app\/checkout\//, { timeout: 30_000 });
-  await page.getByRole("button", { name: /pay & continue/i }).click();
+  await page.getByRole("button", { name: /pay & continue|continue with pro/i }).click();
 
   // 5) Return to create with premium completion — gap panel may require answers before Pro build runs
   await expect(page).toHaveURL(/\/app\/create/, { timeout: 60_000 });

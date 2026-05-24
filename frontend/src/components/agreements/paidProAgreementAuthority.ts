@@ -2,7 +2,7 @@ import type { AccessTier } from "../../access/types";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
 import {
-  hasPaidPremiumCompletionSession,
+  hasStoredPaidPremiumCompletionSession,
   peekPremiumCompletionDoneInLocalStorage,
 } from "./premiumCompletionStorage";
 import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
@@ -52,6 +52,14 @@ function snapshotAcceptedLong(snap: PremiumCompletionSnapshot | null | undefined
   return (snap.premiumWinningBodyText || snap.premiumReadonlyPlainText || "").trim().length >= PAID_PRO_AUTHORITY_MIN_LEN;
 }
 
+function isProdBuild(): boolean {
+  try {
+    return Boolean(import.meta.env?.PROD);
+  } catch {
+    return false;
+  }
+}
+
 export type PaidProAuthorityMeta = {
   authoritative: boolean;
   reason: string;
@@ -74,7 +82,8 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
   const rsRaw = d ? String(d.premium_render_source ?? "").trim() : "";
   const premium_render_source = rsRaw || null;
 
-  if (hasPaidPremiumCompletionSession()) {
+  const hasStoredPaidSession = hasStoredPaidPremiumCompletionSession();
+  if (hasStoredPaidSession) {
     return { authoritative: true, reason: "paid_premium_completion_session", corpusLen, premium_render_source };
   }
   if (input.premiumSendPathUnlocked) {
@@ -86,7 +95,12 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
   if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) {
     return { authoritative: true, reason: "tier_allows_advanced_full_draft", corpusLen, premium_render_source };
   }
-  if (input.includeLocalCompletionMarker !== false && typeof window !== "undefined" && peekPremiumCompletionDoneInLocalStorage()) {
+  if (
+    input.includeLocalCompletionMarker !== false &&
+    !isProdBuild() &&
+    typeof window !== "undefined" &&
+    peekPremiumCompletionDoneInLocalStorage()
+  ) {
     return { authoritative: true, reason: "local_storage_premium_completed_marker", corpusLen, premium_render_source };
   }
   if (snapshotAcceptedLong(input.premiumCompletionSnapshot ?? null)) {

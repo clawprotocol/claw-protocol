@@ -42,6 +42,7 @@ function readLocalDevTier(): AccessTier | null {
 }
 
 function readEnvTier(): AccessTier | null {
+  if (!devToolsUnlocked()) return null;
   try {
     return normalizeAccessTier(String(import.meta.env?.VITE_CLAW_ACCESS_TIER || "").trim());
   } catch {

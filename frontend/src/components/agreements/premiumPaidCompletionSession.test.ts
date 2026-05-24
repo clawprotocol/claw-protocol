@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearPaidPremiumCompletionSession,
   hasPaidPremiumCompletionSession,
+  hasStoredPaidPremiumCompletionSession,
   markPaidPremiumCompletionSession,
 } from "./premiumCompletionStorage";
 
@@ -29,12 +30,14 @@ describe("premium paid completion session flag", () => {
       location: { href: "https://example.test/app/create?premiumCompletion=1" },
     } as unknown as Window & typeof globalThis);
     expect(hasPaidPremiumCompletionSession()).toBe(true);
+    expect(hasStoredPaidPremiumCompletionSession()).toBe(false);
   });
 
   it("mark/clear round-trip persists paid return across URL strip", () => {
     expect(hasPaidPremiumCompletionSession()).toBe(false);
     markPaidPremiumCompletionSession();
     expect(hasPaidPremiumCompletionSession()).toBe(true);
+    expect(hasStoredPaidPremiumCompletionSession()).toBe(true);
     clearPaidPremiumCompletionSession();
     expect(hasPaidPremiumCompletionSession()).toBe(false);
   });

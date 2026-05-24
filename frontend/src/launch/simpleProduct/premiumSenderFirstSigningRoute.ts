@@ -1,6 +1,7 @@
 import { agreementSigningPath } from "../../agreement/AgreementRecipientReview";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { fetchWorkspaceIndex } from "../../agreement/agreementWorkspaceApi";
+import { sanitizedRecipientLinkSearch } from "../../agreement/recipientLinkUrlHygiene";
 import {
   fetchRecipientAccessPolicy,
   mintRecipientAccessTokenResult,
@@ -26,8 +27,21 @@ function sleep(ms: number): Promise<void> {
 
 function devSenderFirstProfessionalRoute(payload: Record<string, unknown>) {
   if (import.meta.env.DEV) {
+    const safePayload =
+      typeof payload.route === "string"
+        ? { ...payload, route: redactRecipientAccessTokenFromRoute(payload.route) }
+        : payload;
     // eslint-disable-next-line no-console
-    console.info("[sender-first-professional-esign-route]", payload);
+    console.info("[sender-first-professional-esign-route]", safePayload);
+  }
+}
+
+function redactRecipientAccessTokenFromRoute(route: string): string {
+  try {
+    const url = new URL(route, "https://lawdog.local");
+    return `${url.pathname}${sanitizedRecipientLinkSearch(url.search)}${url.hash}`;
+  } catch {
+    return route.replace(/([?&](?:t|token)=)[^&#]*/gi, "$1(redacted)");
   }
 }
 

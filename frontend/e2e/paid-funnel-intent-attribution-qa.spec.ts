@@ -228,7 +228,9 @@ async function readPostCheckoutAdvanced(page: Page) {
       (b) => (b as HTMLElement).offsetParent !== null && (b as HTMLElement).offsetWidth > 0,
     );
     const priority = candidates.find((b) =>
-      /continue to (recipient|reviewer|signer) setup|retry pro draft|send with lawdog pro/i.test(b.textContent || ""),
+      /continue to (recipient|reviewer|signer) setup|retry pro draft|send with lawdog pro|continue with pro/i.test(
+        b.textContent || "",
+      ),
     );
     const primary = priority || candidates[0] || null;
     const pText = primary
@@ -385,11 +387,11 @@ async function runCreateThroughCheckoutReturn(page: Page, prompt: string) {
   if (await trySimplified.isVisible().catch(() => false)) {
     await trySimplified.click();
   }
-  const sendWithPro = page.getByRole("button", { name: /send with lawdog pro/i });
+  const sendWithPro = page.getByRole("button", { name: /send with lawdog pro|continue with pro/i }).first();
   await expect(sendWithPro).toBeVisible({ timeout: 120_000 });
   await sendWithPro.click();
   await expect(page).toHaveURL(/\/app\/checkout\//, { timeout: 30_000 });
-  await page.getByRole("button", { name: /pay & continue/i }).click();
+  await page.getByRole("button", { name: /pay & continue|continue with pro/i }).click();
   await expect(page).toHaveURL(/\/app\/create/, { timeout: 60_000 });
   const gapDialog = page.getByRole("dialog", { name: /finish your agreement/i });
   await gapDialog.waitFor({ state: "visible", timeout: 120_000 }).catch(() => {});

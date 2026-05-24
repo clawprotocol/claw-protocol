@@ -29,4 +29,15 @@ describe("recipientMagicLinkSession", () => {
     const fp = recipientLinkTokenFingerprint("token-bbb");
     expect(sessionStorage.getItem(`claw_rml_v2:${agreementId}:${fp}`)).toContain("p-b");
   });
+
+  it("does not return a recipient token without an explicit URL token", () => {
+    const agreementId = "ag_scope_test";
+    saveRecipientMagicLinkSession({
+      agreementId,
+      token: "token-aaa",
+      recipientPartyId: "p-a",
+    });
+
+    expect(loadRecipientMagicLinkSession(agreementId)).toBeNull();
+  });
 });

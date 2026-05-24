@@ -131,6 +131,17 @@ export function canonicalFlowLineStackStepUnits(line: string): number {
   return line.trim() ? 1 : 0.62;
 }
 
+export function canonicalFlowStackBottomNorm(
+  page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks">,
+): number {
+  const flowLines = flowLinesForPage(page);
+  const stackHeight = flowLines.reduce(
+    (sum, line) => sum + canonicalFlowLineStackStepUnits(line) * LINE_HEIGHT,
+    0,
+  );
+  return page.contentRect.y + stackHeight;
+}
+
 const SIGNATURE_UNDERLINE_BASELINE_FRAC = 0.8;
 const SIGNATURE_UNDERLINE_HEIGHT_FRAC = 0.12;
 export const VS01_CANONICAL_SIGNATURE_UNDERLINE_WIDTH_NORM = 190 / VS01_PACKET_PAGE_WIDTH_PT;
@@ -507,6 +518,13 @@ export function validateVs01SigningPacketGeometry(args: {
       }
     }
     errors.push("text_intersects_initials_band");
+  }
+
+  const flowStackIntersectsInitialsBand = args.pages.some(
+    (page) => canonicalFlowStackBottomNorm(page) > page.initialsBandRect.y + 0.0001,
+  );
+  if (flowStackIntersectsInitialsBand) {
+    errors.push("flow_stack_intersects_initials_band");
   }
 
   const signatureAnchorCount = args.pages.reduce((sum, p) => sum + p.signatureLineAnchors.length, 0);

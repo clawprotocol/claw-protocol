@@ -44,6 +44,7 @@ const METADATA_EXCLUDE = new Set([
   "revenue_usd",
   "revenue_per_paywall_view_usd",
   "anonymous_user_id",
+  "identity_email",
 ]);
 
 /**

@@ -41,7 +41,8 @@ export function saveRecipientMagicLinkSession(s: RecipientMagicLinkSession): voi
 /**
  * Load the magic-link session for this agreement.
  * When ``token`` is provided, only the matching scoped row is returned (multi-reviewer safe).
- * When omitted, reads legacy single-slot storage if present (deprecated).
+ * When omitted, returns null. Legacy single-slot storage is write-cleared and intentionally ignored
+ * so a tokenless recipient route cannot inherit another recipient's token in the same browser.
  */
 export function loadRecipientMagicLinkSession(
   agreementId: string,
@@ -55,8 +56,6 @@ export function loadRecipientMagicLinkSession(
     if (cur && cur.agreementId === want && cur.token === explicit) return cur;
     return null;
   }
-  const legacy = safeParse(sessionStorage.getItem(LEGACY_STORAGE_KEY));
-  if (legacy && legacy.agreementId === want) return legacy;
   return null;
 }
 

@@ -50,6 +50,7 @@ import {
   saveRecipientMagicLinkSession,
 } from "./agreement/recipientMagicLinkSession";
 import { recipientLinkTokenFingerprint } from "./agreement/recipientLinkTokenFingerprint";
+import { stripRecipientAccessTokenQueryFromLocation } from "./agreement/recipientLinkUrlHygiene";
 import { logRecipientReviewTokenResolved } from "./components/agreements/reviewFlowDebugLog";
 import { AccessAccountPanel } from "./components/access/AccessAccountPanel";
 import { Vs01Layout, type Vs01LayoutHero } from "./vs01/Vs01Layout";
@@ -145,6 +146,7 @@ function AgreementSignGate(props: {
           const fromTok = (vr.data.recipient_party_id || "").trim();
           const fromUrl = (participantPartyId || "").trim();
           setResolvedPartyId(fromTok || fromUrl || undefined);
+          stripRecipientAccessTokenQueryFromLocation();
           setPhase("ready");
         } else {
           setBadMessage(vr.ok ? null : vr.message);
@@ -253,9 +255,8 @@ function AgreementReviewGate(props: {
       const policy = await fetchRecipientAccessPolicy();
       const urlTok = (token || "").trim();
       const sessionForUrl = urlTok ? loadRecipientMagicLinkSession(agreementId, urlTok) : null;
-      const sessionLegacy = !urlTok ? loadRecipientMagicLinkSession(agreementId) : null;
       const effectiveToken =
-        urlTok || sessionForUrl?.token?.trim() || sessionLegacy?.token?.trim() || "";
+        urlTok || sessionForUrl?.token?.trim() || "";
 
       if (effectiveToken) {
         const vr = await validateRecipientAccessToken(effectiveToken, agreementId);
@@ -281,6 +282,7 @@ function AgreementReviewGate(props: {
             inviterDisplayName: inv || undefined,
           });
           setValidatedAccessToken(effectiveToken);
+          stripRecipientAccessTokenQueryFromLocation();
           const aid = agreementId.trim();
           const agreementIdShort = aid.length <= 12 ? aid : `${aid.slice(0, 8)}…`;
           logRecipientReviewTokenResolved({

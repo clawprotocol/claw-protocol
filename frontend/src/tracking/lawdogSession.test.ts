@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { drainProductEventsForTests, logProductEvent } from "../lib/experimentation/productEvents";
+import { GROWTH_EVENTS_LOCAL_STORAGE_KEY } from "../lib/experimentation/growthEventPersistence";
 import {
   bindLawdogSessionEmail,
   getLawdogSessionEmail,
@@ -153,5 +154,16 @@ describe("logProductEvent trust envelope", () => {
     const rows = drainProductEventsForTests();
     expect(rows[0].payload?.referral_source).toBe("affiliate_page");
     expect(rows[0].payload?.traffic_source).toBe("doginal_aff");
+  });
+
+  it("does not place raw identity email into product events or persisted analytics rows", () => {
+    bindLawdogSessionEmail("founder@example.com");
+    logProductEvent("paywall_triggered", { surface: "test", reason: "x" });
+
+    const rows = drainProductEventsForTests();
+    expect(rows[0].payload?.identity_email).toBeUndefined();
+    expect(rows[0].payload?.identity_email_bound).toBe(true);
+    expect(JSON.stringify(rows)).not.toContain("founder@example.com");
+    expect(localStorage.getItem(GROWTH_EVENTS_LOCAL_STORAGE_KEY) ?? "").not.toContain("founder@example.com");
   });
 });

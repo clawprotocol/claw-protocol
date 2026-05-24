@@ -7,6 +7,9 @@ import { getOrCreateLawdogSessionId } from "./lawdogSession";
 import { logProductEvent, type ProductEventName } from "../lib/experimentation/productEvents";
 
 const LANDING_MS_KEY = "lawdog_agreement_funnel_landing_ms_v1";
+const SENSITIVE_FUNNEL_PAYLOAD_KEY =
+  /(email|phone|mobile|raw|intake|prompt|text|body|content|document|purpose|typed_name|signature|recipientName|signerName|partyName|counterpartyName|agreementTitle)/i;
+const EMAIL_LIKE_VALUE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 
 export type AgreementFunnelEventName =
   | "landing_view"
@@ -23,6 +26,14 @@ export type AgreementFunnelEventName =
   | "owner_applied_edits"
   | "signature_flow_started"
   | "agreement_completed"
+  | "vs01_prepare_started"
+  | "vs01_prepare_field_added"
+  | "vs01_prepare_field_removed"
+  | "vs01_prepare_completed"
+  | "vs01_packet_sent_or_links_created"
+  | "vs01_signer_opened"
+  | "vs01_signer_completed"
+  | "vs01_packet_fully_signed"
   | "starter_pro_refine_upsell_control_click"
   | "starter_pro_refine_upsell_variant_click"
   | "starter_pro_refine_control_impression"
@@ -99,6 +110,27 @@ export function getAgreementFunnelContextProps(opts?: {
   return base;
 }
 
+function isSafeFunnelValue(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "string") return !EMAIL_LIKE_VALUE.test(value);
+  if (typeof value === "number") return Number.isFinite(value);
+  return typeof value === "boolean";
+}
+
+/**
+ * Keep analytics payloads to coarse funnel dimensions. Agreement text, intake text,
+ * contact fields, and typed signature data must never ride along as ad-hoc extras.
+ */
+export function sanitizeAgreementFunnelEventExtra(extra?: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    if (SENSITIVE_FUNNEL_PAYLOAD_KEY.test(key)) continue;
+    if (!isSafeFunnelValue(value)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 /** Optional `window.posthog` mirror — no-op if unavailable. */
 export function captureToPostHogIfAvailable(name: string, payload: Record<string, unknown>): void {
   if (typeof window === "undefined") return;
@@ -135,7 +167,7 @@ export function trackAgreementFunnelEvent(
     atMsLink: atLink,
   });
   const id = (options?.agreementId || "").trim();
-  const payload: Record<string, unknown> = { ...env, ...extra, ...(id ? { agreementId: id } : {}) };
+  const payload: Record<string, unknown> = { ...env, ...sanitizeAgreementFunnelEventExtra(extra), ...(id ? { agreementId: id } : {}) };
   logProductEvent(name as ProductEventName, payload);
   captureToPostHogIfAvailable(name, payload);
 }

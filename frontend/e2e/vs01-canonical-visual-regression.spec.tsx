@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { buildVs01PrepareSigningRoles } from "../src/vs01/vs01SignerFieldAssignment";
 import {
   buildVs01SigningPacketModel,
+  canonicalFlowStackBottomNorm,
   type Vs01SigningPacketPage,
   VS01_PACKET_PAGE_HEIGHT_PT,
   VS01_PACKET_PAGE_WIDTH_PT,
@@ -327,6 +328,9 @@ type BrowserPageLayoutMetrics = {
   initialsChipY: number | null;
   signatureFieldX: number | null;
   signatureFieldY: number | null;
+  lastTextBottom: number;
+  pageContentOverflows: boolean;
+  surfaceOverflows: boolean;
   whitespaceRatio: number;
 };
 
@@ -388,6 +392,9 @@ function canonicalBrowserMetricsForPage(
     initialsChipY: includeFields && initials ? Number((initials.y * VS01_PACKET_PAGE_HEIGHT_PT).toFixed(2)) : null,
     signatureFieldX: includeFields && signature ? Number((signature.x * VS01_PACKET_PAGE_WIDTH_PT).toFixed(2)) : null,
     signatureFieldY: includeFields && signature ? Number((signature.y * VS01_PACKET_PAGE_HEIGHT_PT).toFixed(2)) : null,
+    lastTextBottom: Number((canonicalFlowStackBottomNorm(page) * VS01_PACKET_PAGE_HEIGHT_PT).toFixed(2)),
+    pageContentOverflows: false,
+    surfaceOverflows: false,
     whitespaceRatio: printableHeight > 0 ? Number(((printableHeight - contentHeight) / printableHeight).toFixed(4)) : 0,
   };
 }
@@ -407,6 +414,7 @@ async function collectBrowserPageLayoutMetrics(
       const docRight = (rect: DOMRect) => (rect.right - pageRect.left) / scale;
       const docBottom = (rect: DOMRect) => (rect.bottom - pageRect.top) / scale;
       const flowBody = page.querySelector(".vs01-canonical-flow-body") as HTMLElement | null;
+      const pageContent = page.querySelector(".vs01-canonical-page-content") as HTMLElement | null;
       const footerBand = page.querySelector(".vs01-canonical-initials-band") as HTMLElement | null;
       const initials = page.querySelector("[data-vs01-visual-field-type='initials']") as HTMLElement | null;
       const signature = page.querySelector("[data-vs01-visual-field-type='signature']") as HTMLElement | null;
@@ -435,6 +443,12 @@ async function collectBrowserPageLayoutMetrics(
         initialsChipY: initialsRect ? Number(docY(initialsRect).toFixed(2)) : null,
         signatureFieldX: signatureRect ? Number(docX(signatureRect).toFixed(2)) : null,
         signatureFieldY: signatureRect ? Number(docY(signatureRect).toFixed(2)) : null,
+        lastTextBottom: Number(lastTextBottom.toFixed(2)),
+        pageContentOverflows: pageContent
+          ? pageContent.scrollHeight > pageContent.clientHeight + 1 ||
+            pageContent.scrollWidth > pageContent.clientWidth + 1
+          : true,
+        surfaceOverflows: page.scrollHeight > page.clientHeight + 1 || page.scrollWidth > page.clientWidth + 1,
         whitespaceRatio: printableHeight > 0 ? Number(((printableHeight - contentHeight) / printableHeight).toFixed(4)) : 0,
       };
     },
@@ -452,6 +466,11 @@ async function assertAndLogBrowserPageLayoutMetrics(
   const canonical = canonicalBrowserMetricsForPage(viewport.label, viewport.width, pageKind, includeFields);
   console.info("[vs01-page-layout-metrics]", metrics);
   expectBrowserMetricsMatchCanonical(metrics, canonical);
+  expectClosePx(metrics.pageWidth, VS01_PACKET_PAGE_WIDTH_PT, 1);
+  expectClosePx(metrics.pageHeight, VS01_PACKET_PAGE_HEIGHT_PT, 1);
+  expect(metrics.lastTextBottom).toBeLessThan(metrics.footerRuleY - 2);
+  expect(metrics.pageContentOverflows).toBe(false);
+  expect(metrics.surfaceOverflows).toBe(false);
   return metrics;
 }
 

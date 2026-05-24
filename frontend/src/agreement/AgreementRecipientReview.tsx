@@ -46,7 +46,6 @@ import {
   buildRecipientLegalRedlinePlainTexts,
   extractPaymentPlacementCalloutSnippet,
   fingerprintPlainText,
-  snippetAroundPaymentTerms,
 } from "./recipientWholeDocRedlineSource";
 import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
@@ -1606,7 +1605,7 @@ export function AgreementRecipientReview({
     // eslint-disable-next-line no-console
     console.info("[recipient-redline-diagnosis]", {
       agreementId,
-      instruction: recipientPreview.revisionText ?? "",
+      instructionLen: (recipientPreview.revisionText ?? "").length,
       changedClauseCount: cards.length,
       clauseIds: cards.map((c) => c.id),
       clauses: cards.map((c) => ({
@@ -1615,7 +1614,7 @@ export function AgreementRecipientReview({
         afterLen: c.proposedText.length,
         hasAdds: c.redlineView.hasAdds,
         hasDeletes: c.redlineView.hasDeletes,
-        addedLines: c.redlineView.addedLines,
+        addedLineCount: c.redlineView.addedLines.length,
         fallbackReason: c.redlineView.fallbackReason ?? null,
       })),
       wholeDocFallbackReason: legalRedlineDocumentVm.fallbackReason ?? null,
@@ -1690,8 +1689,6 @@ export function AgreementRecipientReview({
       equalHtmlLengths: baseHtml.length === propHtml.length,
       redlineSourceMode: paired.sourceMode,
       usedFieldPatchBaseline: paired.sourceMode === "baseline_vs_field_patch",
-      baselineSnippet: snippetAroundPaymentTerms(paired.currentPlain),
-      proposedSnippet: snippetAroundPaymentTerms(paired.proposedPlain),
       changedClauseCount,
       wholeDocChangedBlockCount: legalRedlineDocumentVm.stats.changedBlockCount,
       wholeDocInsertCount: legalRedlineDocumentVm.stats.insertCount,

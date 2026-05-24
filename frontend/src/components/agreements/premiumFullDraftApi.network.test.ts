@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isPremiumFullDraftNetworkFailure,
   postPremiumFullDraftWithRetry,
+  PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS,
   premiumFullDraftNetworkErrorCode,
 } from "./premiumFullDraftApi";
 
@@ -52,7 +53,7 @@ describe("postPremiumFullDraftWithRetry network handling", () => {
       expect(out.failure_kind).toBe("network");
       expect(out.retryable).toBe(true);
       expect(out.document_text).toBe("");
-      expect(out.attemptCount).toBe(4);
+      expect(out.attemptCount).toBe(PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS);
       expect(["network_changed", "network_error"]).toContain(out.error_code);
     }
     const joined = JSON.stringify(log.mock.calls);

@@ -90,12 +90,12 @@ test("paid premium degraded: Pro card, blue panel, no amber dead-end, refresh, r
     await trySimplified.click();
   }
 
-  const sendWithPro = page.getByRole("button", { name: /send with lawdog pro/i });
+  const sendWithPro = page.getByRole("button", { name: /send with lawdog pro|continue with pro/i }).first();
   await expect(sendWithPro).toBeVisible({ timeout: 120_000 });
   await sendWithPro.click();
 
   await expect(page).toHaveURL(/\/app\/checkout\//, { timeout: 30_000 });
-  await page.getByRole("button", { name: /pay & continue/i }).click();
+  await page.getByRole("button", { name: /pay & continue|continue with pro/i }).click();
 
   await expect(page).toHaveURL(/\/app\/create/, { timeout: 60_000 });
   const gapDialog = page.getByRole("dialog", { name: /finish your agreement/i });

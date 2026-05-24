@@ -527,10 +527,9 @@ function logPremiumRefineDebugLine(args: {
   applyDecision: string | null;
   usedAppendReviewerNotePreserve: boolean;
 }): void {
-  const promptPreview = args.userInstruction.slice(0, 120);
   // eslint-disable-next-line no-console
   console.info("[premium-refine-debug]", {
-    promptPreview,
+    promptLen: args.userInstruction.length,
     intent: args.intent,
     isAdvisory: args.intent === "advisory_note_or_comment",
     currentDocLen: args.currentDocLen,

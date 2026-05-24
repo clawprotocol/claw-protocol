@@ -284,7 +284,15 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       finishedRef.current = true;
       trackAgreementFunnelEvent(
         "checkout_success_returned",
-        { checkout_kind: isSingleAgreementCheckout ? "single_agreement" : "subscription" },
+        {
+          checkout_kind: isSingleAgreementCheckout ? "single_agreement" : "subscription",
+          settlement_status: "confirmed",
+          payment_authority: "settled_session",
+          payment_mode:
+            agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && resolveDevPaymentBypassState().enabled
+              ? "dev_bypass"
+              : "demo_card",
+        },
         { planTier: String(tier.id), agreementId },
       );
       if (agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) {
