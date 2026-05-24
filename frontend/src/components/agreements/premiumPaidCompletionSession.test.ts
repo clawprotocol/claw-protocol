@@ -4,6 +4,7 @@ import {
   hasPaidPremiumCompletionSession,
   hasStoredPaidPremiumCompletionSession,
   markPaidPremiumCompletionSession,
+  readPaidPremiumCompletionSessionMarker,
 } from "./premiumCompletionStorage";
 
 describe("premium paid completion session flag", () => {
@@ -38,7 +39,23 @@ describe("premium paid completion session flag", () => {
     markPaidPremiumCompletionSession();
     expect(hasPaidPremiumCompletionSession()).toBe(true);
     expect(hasStoredPaidPremiumCompletionSession()).toBe(true);
+    expect(readPaidPremiumCompletionSessionMarker()).toMatchObject({ source: "settled_checkout" });
     clearPaidPremiumCompletionSession();
     expect(hasPaidPremiumCompletionSession()).toBe(false);
+  });
+
+  it("records QA bypass source on the same paid completion session marker", () => {
+    markPaidPremiumCompletionSession({ source: "qa_bypass" });
+    expect(hasPaidPremiumCompletionSession()).toBe(true);
+    expect(readPaidPremiumCompletionSessionMarker()).toMatchObject({
+      v: 1,
+      source: "qa_bypass",
+    });
+  });
+
+  it("keeps legacy settled marker readable", () => {
+    sessionStorage.setItem("claw_paid_premium_completion_session_v1", "1");
+    expect(hasStoredPaidPremiumCompletionSession()).toBe(true);
+    expect(readPaidPremiumCompletionSessionMarker()).toMatchObject({ source: "settled_checkout" });
   });
 });

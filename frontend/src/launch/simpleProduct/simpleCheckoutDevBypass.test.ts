@@ -42,4 +42,20 @@ describe("SimpleCheckoutPage dev payment bypass (static)", () => {
     expect(checkout).toContain("[dev-payment-bypass-disabled-blocking-local-smoke]");
     expect(checkout).toContain("Dev payment bypass is disabled");
   });
+
+  it("gates staging QA bypass with a dedicated flag and visible checkout button", () => {
+    expect(bypass).toContain("VITE_LAWDOG_QA_PAYMENT_BYPASS");
+    expect(bypass).toContain("resolveQaPaymentBypassState");
+    expect(bypass).toContain("isRecognizedQaPaymentBypassOrigin");
+    expect(checkout).toContain("resolveQaPaymentBypassState");
+    expect(checkout).toContain("qaPaymentBypassActive");
+    expect(checkout).toContain("QA bypass checkout");
+    expect(checkout).toContain("[QA PAYMENT BYPASS]");
+  });
+
+  it("QA bypass settlement tags the paid session and funnel event as qa_bypass", () => {
+    expect(checkout).toContain('await applyConfirmedSettlement(conf, "qa_bypass")');
+    expect(checkout).toContain('payment_mode: paymentMode');
+    expect(checkout).toContain('source: paymentMode === "qa_bypass" ? "qa_bypass" : "settled_checkout"');
+  });
 });

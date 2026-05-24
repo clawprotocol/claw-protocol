@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   isDevCreateFlowPaymentBypassEnabled,
+  isQaCreateFlowPaymentBypassEnabled,
+  isRecognizedQaPaymentBypassOrigin,
   logDevPaymentBypassState,
+  logQaPaymentBypassState,
   resolveDevPaymentBypassState,
+  resolveQaPaymentBypassState,
 } from "./devPaymentBypass";
 
 describe("resolveDevPaymentBypassState", () => {
@@ -94,10 +98,131 @@ describe("isDevCreateFlowPaymentBypassEnabled", () => {
   });
 });
 
+describe("resolveQaPaymentBypassState", () => {
+  it("is disabled on production origin when the QA flag is absent", () => {
+    vi.stubGlobal("window", { location: { origin: "https://app.lawdog.ai" } });
+    expect(
+      resolveQaPaymentBypassState({
+        PROD: true,
+        DEV: false,
+        MODE: "production",
+      }),
+    ).toMatchObject({
+      enabled: false,
+      reason: "qa_env_flag_not_enabled",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps production origin disabled even when the QA flag is set", () => {
+    vi.stubGlobal("window", { location: { origin: "https://app.lawdog.ai" } });
+    expect(
+      resolveQaPaymentBypassState({
+        PROD: true,
+        DEV: false,
+        MODE: "production",
+        VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
+      }),
+    ).toMatchObject({
+      enabled: false,
+      reason: "qa_origin_or_env_required",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("is enabled on Railway preview origins when the QA flag is set", () => {
+    vi.stubGlobal("window", { location: { origin: "https://claw-bot-pr-77.up.railway.app" } });
+    expect(
+      resolveQaPaymentBypassState({
+        PROD: true,
+        DEV: false,
+        MODE: "production",
+        VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
+      }),
+    ).toMatchObject({
+      enabled: true,
+      reason: "recognized_qa_origin",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("is enabled by explicit non-production deployment environment plus the QA flag", () => {
+    vi.stubGlobal("window", { location: { origin: "https://example-public-host.invalid" } });
+    expect(
+      resolveQaPaymentBypassState({
+        PROD: true,
+        DEV: false,
+        MODE: "production",
+        VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
+        VITE_LAWDOG_ENV: "staging",
+      }),
+    ).toMatchObject({
+      enabled: true,
+      reason: "explicit_non_production_env",
+      deploymentEnv: "staging",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("does not treat query or storage values as QA bypass authority", () => {
+    const localStore = new Map<string, string>([["VITE_LAWDOG_QA_PAYMENT_BYPASS", "1"]]);
+    vi.stubGlobal("window", {
+      location: { origin: "https://app.lawdog.ai", href: "https://app.lawdog.ai/app/checkout?qa_bypass=1" },
+    });
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => localStore.get(key) ?? null,
+      setItem: (key: string, value: string) => void localStore.set(key, value),
+      removeItem: (key: string) => void localStore.delete(key),
+    } as Storage);
+    expect(
+      resolveQaPaymentBypassState({
+        PROD: true,
+        DEV: false,
+        MODE: "production",
+      }),
+    ).toMatchObject({
+      enabled: false,
+      reason: "qa_env_flag_not_enabled",
+    });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("isQaCreateFlowPaymentBypassEnabled", () => {
+  it("delegates to resolveQaPaymentBypassState", () => {
+    vi.stubGlobal("window", { location: { origin: "https://staging.lawdog.ai" } });
+    expect(
+      isQaCreateFlowPaymentBypassEnabled({
+        PROD: true,
+        DEV: false,
+        VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
+      }),
+    ).toBe(true);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("isRecognizedQaPaymentBypassOrigin", () => {
+  it("recognizes QA/staging/Railway hosts but not production hosts", () => {
+    expect(isRecognizedQaPaymentBypassOrigin("https://claw-bot-pr-77.up.railway.app")).toBe(true);
+    expect(isRecognizedQaPaymentBypassOrigin("https://staging.lawdog.ai")).toBe(true);
+    expect(isRecognizedQaPaymentBypassOrigin("https://app.lawdog.ai")).toBe(false);
+  });
+});
+
 describe("logDevPaymentBypassState", () => {
   it("does not log in test mode", () => {
     const spy = vi.spyOn(console, "info").mockImplementation(() => {});
     logDevPaymentBypassState({ PROD: true, DEV: false });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+describe("logQaPaymentBypassState", () => {
+  it("does not log in test mode", () => {
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+    logQaPaymentBypassState({ PROD: true, DEV: false });
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });

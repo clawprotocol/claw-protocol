@@ -50,7 +50,9 @@ import { checkoutLossAversionFromIntentSignals } from "../../components/agreemen
 import { CreateFlowAgreementCheckoutPricing } from "./CreateFlowAgreementCheckoutPricing";
 import {
   logDevPaymentBypassState,
+  logQaPaymentBypassState,
   resolveDevPaymentBypassState,
+  resolveQaPaymentBypassState,
 } from "../devPaymentBypass";
 import { isLocalBrowserOrigin } from "../../lib/clawApi";
 import { logPaymentFlowStage } from "../../components/agreements/paymentFlowProgression";
@@ -67,6 +69,8 @@ import {
   TAX_VAT_LOCATION_NEUTRAL,
   paidSubscriptionRenewalMaterialLine,
 } from "../../compliance/disclosureCopy";
+
+type CheckoutPaymentMode = "demo_card" | "dev_bypass" | "qa_bypass";
 
 function CheckoutPrePaymentDisclosure(props: { planName: string; priceLine: string; cadence: PricingCadence }) {
   const { planName, priceLine, cadence } = props;
@@ -249,7 +253,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   }
 
   const applyConfirmedSettlement = useCallback(
-    async (conf: SettlementConfirmation) => {
+    async (conf: SettlementConfirmation, paymentMode: CheckoutPaymentMode = "demo_card") => {
       if (!conf.ok) {
         fail(conf.error);
         return;
@@ -288,10 +292,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           checkout_kind: isSingleAgreementCheckout ? "single_agreement" : "subscription",
           settlement_status: "confirmed",
           payment_authority: "settled_session",
-          payment_mode:
-            agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && resolveDevPaymentBypassState().enabled
-              ? "dev_bypass"
-              : "demo_card",
+          payment_mode: paymentMode,
         },
         { planTier: String(tier.id), agreementId },
       );
@@ -301,11 +302,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         markAdvancedFullDraftCheckoutGranted();
         clearUpgradeCheckoutContext();
         clearCheckoutBackRestoreSnapshot();
-        markPaidPremiumCompletionSession();
+        markPaidPremiumCompletionSession({ source: paymentMode === "qa_bypass" ? "qa_bypass" : "settled_checkout" });
         logPaymentFlowStage("checkout_complete", { agreementId });
         console.info("[premium-flow] payment_return_detected", {
           agreementId,
-          via: "checkout_settlement",
+          via: paymentMode === "qa_bypass" ? "qa_bypass" : "checkout_settlement",
         });
       }
       const destination =
@@ -340,7 +341,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         intent,
         cardNumberDigits: "4242424242424242",
       });
-      await applyConfirmedSettlement(conf);
+      await applyConfirmedSettlement(conf, "dev_bypass");
       return;
     }
     const affiliateCode = getAffiliateCodeForAttribution();
@@ -371,7 +372,26 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       amountUsd,
     });
     const conf = await demoConfirmFiatToCryptoOnrampFromCard({ intent, cardNumberDigits: digits });
-    await applyConfirmedSettlement(conf);
+    await applyConfirmedSettlement(conf, "demo_card");
+  }
+
+  async function onQaPaymentBypass(): Promise<void> {
+    if (!qaPaymentBypassActive || finishedRef.current || processing || amountUsd == null) return;
+    console.info("[QA PAYMENT BYPASS] simulating successful payment — staging only");
+    void ensureGenesisReferralHandoffForCheckout().catch((err) => {
+      console.warn("[genesis-referral] checkout handoff skipped for QA bypass", err);
+    });
+    const intent = createFiatToCryptoOnrampIntent({
+      agreementId,
+      tierId: tier.id,
+      cadence,
+      amountUsd,
+    });
+    const conf = await demoConfirmFiatToCryptoOnrampFromCard({
+      intent,
+      cardNumberDigits: "4242424242424242",
+    });
+    await applyConfirmedSettlement(conf, "qa_bypass");
   }
 
   const priceLine =
@@ -395,6 +415,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const isCreateAgreementCheckout = agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !isSingleAgreementCheckout;
   const devPaymentBypassState = useMemo(() => resolveDevPaymentBypassState(), []);
   const devPaymentBypassActive = isCreateAgreementCheckout && devPaymentBypassState.enabled;
+  const qaPaymentBypassState = useMemo(() => resolveQaPaymentBypassState(), []);
+  const qaPaymentBypassActive = isCreateAgreementCheckout && qaPaymentBypassState.enabled;
   const localSmokeBypassBlocked =
     isCreateAgreementCheckout && isLocalBrowserOrigin() && !devPaymentBypassState.enabled;
   const [upgradeCheckoutSnap, setUpgradeCheckoutSnap] = useState<UpgradeCheckoutContextV1 | null>(() =>
@@ -404,14 +426,21 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   useEffect(() => {
     if (!isCreateAgreementCheckout) return;
     logDevPaymentBypassState();
+    logQaPaymentBypassState();
     if (localSmokeBypassBlocked) {
       console.warn("[dev-payment-bypass-disabled-blocking-local-smoke]");
     }
-    if (!devPaymentBypassActive) return;
-    console.info(
-      "[DEV PAYMENT BYPASS] active — primary checkout CTA uses demo settlement + applyConfirmedSettlement → premiumCompletion=1 (local preview + Vite dev; set VITE_ENABLE_DEV_PAYMENT_BYPASS=0 to require card fields or Stripe)",
-    );
-  }, [isCreateAgreementCheckout, devPaymentBypassActive, localSmokeBypassBlocked]);
+    if (devPaymentBypassActive) {
+      console.info(
+        "[DEV PAYMENT BYPASS] active — primary checkout CTA uses demo settlement + applyConfirmedSettlement → premiumCompletion=1 (local preview + Vite dev; set VITE_ENABLE_DEV_PAYMENT_BYPASS=0 to require card fields or Stripe)",
+      );
+    }
+    if (qaPaymentBypassActive) {
+      console.info(
+        "[QA PAYMENT BYPASS] active — explicit staging/QA checkout bypass enabled with VITE_LAWDOG_QA_PAYMENT_BYPASS=1",
+      );
+    }
+  }, [isCreateAgreementCheckout, devPaymentBypassActive, qaPaymentBypassActive, localSmokeBypassBlocked]);
 
   useEffect(() => {
     if (!isCreateAgreementCheckout) {
@@ -643,6 +672,23 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                 )}
               </button>
             </form>
+                {qaPaymentBypassActive ? (
+                  <div className="mt-4 rounded-lg border border-sky-600/60 bg-sky-950/35 px-3 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-sky-200">QA-only checkout bypass</p>
+                    <p className="mt-1 text-sm leading-relaxed text-sky-100/90">
+                      Staging/preview only. This simulates a settled Pro checkout and tags the paid session as
+                      qa_bypass.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={processing || finishedRef.current}
+                      className="vs01-btn vs01-btn--secondary mt-3 min-h-[2.75rem] w-full border-sky-500/70 bg-sky-950/70 text-sky-100 hover:border-sky-400 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void onQaPaymentBypass()}
+                    >
+                      QA bypass checkout
+                    </button>
+                  </div>
+                ) : null}
               </div>
               {localSmokeBypassBlocked ? (
                 <div

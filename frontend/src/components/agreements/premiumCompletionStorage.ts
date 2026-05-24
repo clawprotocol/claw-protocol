@@ -19,10 +19,23 @@ const KEY = "claw_premium_completion_snapshot_v1";
  */
 const PAID_PREMIUM_COMPLETION_SESSION_KEY = "claw_paid_premium_completion_session_v1";
 
-export function markPaidPremiumCompletionSession(): void {
+export type PaidPremiumCompletionSessionSource = "settled_checkout" | "qa_bypass";
+
+export type PaidPremiumCompletionSessionMarker = {
+  v: 1;
+  source: PaidPremiumCompletionSessionSource;
+  markedAt: number;
+};
+
+export function markPaidPremiumCompletionSession(options?: { source?: PaidPremiumCompletionSessionSource }): void {
   if (typeof sessionStorage === "undefined") return;
   try {
-    sessionStorage.setItem(PAID_PREMIUM_COMPLETION_SESSION_KEY, "1");
+    const marker: PaidPremiumCompletionSessionMarker = {
+      v: 1,
+      source: options?.source ?? "settled_checkout",
+      markedAt: Date.now(),
+    };
+    sessionStorage.setItem(PAID_PREMIUM_COMPLETION_SESSION_KEY, JSON.stringify(marker));
   } catch {
     /* ignore */
   }
@@ -51,9 +64,39 @@ export function hasPremiumCheckoutReturnInUrl(): boolean {
 export function hasStoredPaidPremiumCompletionSession(): boolean {
   if (typeof sessionStorage === "undefined") return false;
   try {
-    return sessionStorage.getItem(PAID_PREMIUM_COMPLETION_SESSION_KEY) === "1";
+    const raw = sessionStorage.getItem(PAID_PREMIUM_COMPLETION_SESSION_KEY);
+    if (raw === "1") return true;
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as Partial<PaidPremiumCompletionSessionMarker>;
+    return (
+      parsed?.v === 1 &&
+      (parsed.source === "settled_checkout" || parsed.source === "qa_bypass") &&
+      typeof parsed.markedAt === "number" &&
+      Number.isFinite(parsed.markedAt)
+    );
   } catch {
     return false;
+  }
+}
+
+export function readPaidPremiumCompletionSessionMarker(): PaidPremiumCompletionSessionMarker | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(PAID_PREMIUM_COMPLETION_SESSION_KEY);
+    if (raw === "1") return { v: 1, source: "settled_checkout", markedAt: 0 };
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PaidPremiumCompletionSessionMarker>;
+    if (
+      parsed?.v !== 1 ||
+      (parsed.source !== "settled_checkout" && parsed.source !== "qa_bypass") ||
+      typeof parsed.markedAt !== "number" ||
+      !Number.isFinite(parsed.markedAt)
+    ) {
+      return null;
+    }
+    return parsed as PaidPremiumCompletionSessionMarker;
+  } catch {
+    return null;
   }
 }
 
