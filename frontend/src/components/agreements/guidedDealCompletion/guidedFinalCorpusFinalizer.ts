@@ -492,6 +492,7 @@ export function finalizeGuidedProAgreementCorpus(
     defects: finalGrade.defects,
     repaired: true,
     bodyLen: body.length,
+    blocking: finalGrade.defects.filter((d) => d !== "party_letter_fallback").length > 0,
   });
   const structureNormalized = normalizeGuidedProCorpusStructure(body);
   body = structureNormalized.text;

@@ -909,19 +909,25 @@ export function StepPrepareSignature({
   const canonicalFieldsForGate =
     agreementBridgePlacementCopy && signingPacketModel?.allowed ? signingPacketModel.fields : fields;
 
+  const bridgePlacementFields = useMemo(
+    () => canonicalFieldsForGate,
+    [canonicalFieldsForGate],
+  );
+
   const initialsPacketSummary = useMemo(() => {
-    if (!autoInitialsEveryPage || numPages <= 0 || !prepareSignerRoles?.length) return null;
+    const packetPageCount = signingPacketModel?.allowed ? signingPacketModel.pages.length : numPages;
+    if (!autoInitialsEveryPage || packetPageCount <= 0 || !prepareSignerRoles?.length) return null;
     if (signingPacketModel?.allowed) {
       return summarizeCanonicalSigningPacketInitials({
         fields: canonicalFieldsForGate,
-        pageCount: numPages,
+        pageCount: packetPageCount,
         roleCount: prepareSignerRoles.length,
         pages: signingPacketModel.pages,
       });
     }
     return summarizeVs01SigningPacketInitials({
       fields,
-      pageCount: numPages,
+      pageCount: packetPageCount,
       roleCount: prepareSignerRoles.length,
       partyIndices: prepareSignerRoles.map((r) => r.partyIndex),
       corpusText: prepareCorpusText,
@@ -931,6 +937,7 @@ export function StepPrepareSignature({
   }, [
     autoInitialsEveryPage,
     numPages,
+    signingPacketModel,
     prepareSignerRoles,
     canonicalFieldsForGate,
     prepareCorpusText,
@@ -949,12 +956,14 @@ export function StepPrepareSignature({
     });
   }, [agreementBridgePlacementCopy, prepareCorpusText, signingPacketModel]);
 
-  const canonicalModelHasText = Boolean(
-    signingPacketModel?.allowed && signingPacketHasVisibleText(signingPacketModel.pages),
+  const canonicalModelReady = Boolean(
+    agreementBridgePlacementCopy &&
+      signingPacketModel?.allowed &&
+      signingPacketModel.pages.length > 0 &&
+      signingPacketHasVisibleText(signingPacketModel.pages),
   );
-  const renderCanonicalModel = Boolean(
-    agreementBridgePlacementCopy && signingPacketModel?.allowed && canonicalModelHasText,
-  );
+  const canonicalModelHasText = canonicalModelReady;
+  const renderCanonicalModel = canonicalModelReady;
   const showCanonicalFinalizeBlocked = Boolean(
     agreementBridgePlacementCopy && (!signingPacketModel?.allowed || !canonicalModelHasText),
   );
@@ -1061,7 +1070,7 @@ export function StepPrepareSignature({
 
   useEffect(() => {
     if (!agreementBridgePlacementCopy || !autoInitialsEveryPage) return;
-    const sigCount = fields.filter((f) => f.type === "signature" && !f.autoInitials).length;
+    const sigCount = canonicalFieldsForGate.filter((f) => f.type === "signature" && !f.autoInitials).length;
     if (sigCount <= 0) return;
     const initialsLine = formatVs01InitialsOnlyStatusLine(initialsPacketSummary);
     setAutoPrepBannerMessage(
@@ -1080,7 +1089,7 @@ export function StepPrepareSignature({
   }, [
     agreementBridgePlacementCopy,
     autoInitialsEveryPage,
-    fields,
+    canonicalFieldsForGate,
     initialsPacketSummary,
   ]);
 
@@ -1834,7 +1843,7 @@ export function StepPrepareSignature({
               >
                 <div ref={pagesInnerRef} className="vs01-sign-pages-inner">
                   {signingPacketModel.pages.map((page) => {
-                    const fieldsHere = fields
+                    const fieldsHere = bridgePlacementFields
                       .filter((f) => f.page === page.pageIndex)
                       .slice()
                       .sort((a, b) => {
@@ -1894,6 +1903,13 @@ export function StepPrepareSignature({
                                       zIndex: 3,
                                     }}
                                     data-field-id={field.id}
+                                    data-testid={
+                                      field.type === "initials"
+                                        ? `vs01-canonical-initials-field-${field.assignedPartyIndex ?? 0}-p${page.pageIndex}`
+                                        : field.type === "signature"
+                                          ? `vs01-canonical-signature-field-p${page.pageIndex}`
+                                          : undefined
+                                    }
                                     {...(field.type === "signature"
                                       ? {
                                           "data-vs01-signature-field-party": String(

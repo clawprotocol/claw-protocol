@@ -48,7 +48,7 @@ export type ParsedCorpusSection = {
   canonicalKey: CanonicalSectionKey;
 };
 
-const CANONICAL_SECTION_SPECS: ReadonlyArray<{
+export const CANONICAL_SECTION_SPECS: ReadonlyArray<{
   key: CanonicalSectionKey;
   number: number;
   label: string;

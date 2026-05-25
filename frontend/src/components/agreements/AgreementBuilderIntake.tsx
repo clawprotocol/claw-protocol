@@ -677,7 +677,10 @@ import {
   resolveSimpleProFinalReviewActive,
   type FinalReviewSendIntent,
 } from "./simpleProFinalReviewPhase";
-import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
+import {
+  GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN,
+  resolveSimpleProFinalReviewCorpus,
+} from "./simpleProFinalReviewCorpus";
 import {
   canActivateGuidedCompletionPhase,
   GUIDED_COMPLETION_PHASE_INACTIVE,
@@ -2682,6 +2685,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [proFinalReviewEditPlain, setProFinalReviewEditPlain] = useState("");
   const [proFinalReviewSaveBusy, setProFinalReviewSaveBusy] = useState(false);
   const [proFinalReviewSaveAck, setProFinalReviewSaveAck] = useState(false);
+  const proFinalReviewUserEditedRef = useRef(false);
   const [proFinalReviewCopyAck, setProFinalReviewCopyAck] = useState(false);
   const [proFinalReviewExportBusy, setProFinalReviewExportBusy] = useState(false);
   const [proFinalReviewExportError, setProFinalReviewExportError] = useState<string | null>(null);
@@ -15214,6 +15218,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     (body: string, source: string) => {
       const pinned = buildPinnedFinalizedSignerCorpus(body);
       if (!pinned) return;
+      if (source === "pro_final_review_plain_edit") {
+        proFinalReviewUserEditedRef.current = true;
+      }
       pinnedFinalizedSignerCorpusRef.current = pinned.body;
       pinnedFinalizedSignerCorpusHashRef.current = pinned.hash;
       finalizedSigningCorpusRef.current = pinned.body;
@@ -15309,6 +15316,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const finalizeAndFreezeGuidedFinalCorpus = React.useCallback(
     (source: string): FinalizeGuidedProAgreementCorpusResult => {
+      if (proFinalReviewUserEditedRef.current) {
+        const pinned = pinnedFinalizedSignerCorpusRef.current.trim();
+        if (pinned.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+          return {
+            ok: true,
+            body: pinned,
+            appliedAnswerIds: [],
+            signerManifest: canonicalSignerManifestRef.current ?? canonicalSignerManifest,
+            unresolvedPlaceholders: [],
+            diagnostics: {
+              selectedSource: "finalized_signer_applied_guided_corpus",
+              selectedLen: pinned.length,
+              rejected: [],
+              appliedAnswerIds: [],
+              signaturePolishCount: 0,
+              signatureRebuilt: guidedSignatureRebuiltRef.current,
+              repairs: ["skip_finalize:user_edited_final_review"],
+              finalHash: "",
+              validationMissing: [],
+              validationContradictions: [],
+              structureDefects: [],
+            },
+          };
+        }
+      }
       const corpusStartedAt = Date.now();
       logPaymentFlowStage("authoritative_corpus_started", {
         agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
@@ -15583,6 +15615,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       body: finalCorpus.body,
       partyManifest: guidedFinalPartyManifest,
       signerIdentities: guidedSignerCanonicalIdentities,
+      preserveUserEdits: proFinalReviewUserEditedRef.current,
     });
     const corpusText = cleaned.body.trim();
     if (draft) {

@@ -14,6 +14,8 @@ import type { PlacedSigningField } from "../src/vs01/signingFields";
 import { normalizedPdfRectToCssPercent } from "../src/vs01/vs01FieldCssGeometry";
 import { canonicalPageTypographyPx } from "../src/vs01/vs01CanonicalPageRender";
 import { buildFlowLineDescriptors, flowLinesForPage } from "../src/vs01/vs01CanonicalTextLayout";
+import { repairFinalGradeGuidedCorpus } from "../src/components/agreements/guidedDealCompletion/guidedFinalGradeCorpus";
+import { TEST74_BAD_GUIDED_CORPUS } from "../src/components/agreements/guidedDealCompletion/guidedFinalGradeCorpus.fixtures";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ARTIFACT_DIR = join(__dirname, "artifacts", "vs01-canonical-visual");
@@ -251,6 +253,22 @@ function buildVisualModel() {
   });
   if (!model.allowed) {
     throw new Error(`Signing packet model not allowed: ${model.diagnostics.validationErrors.join(", ")}`);
+  }
+  return model;
+}
+
+function buildTest74VisualModel() {
+  const repaired = repairFinalGradeGuidedCorpus(TEST74_BAD_GUIDED_CORPUS, {
+    authoritativePartyNames: ["Acme LLC", "Joe Smith"],
+  }).text;
+  const model = buildVs01SigningPacketModel({
+    mode: "guided_pro",
+    authoritativeCorpusPlain: repaired,
+    roles: roles(),
+    corpusGateArgs: { freeBaselinePlain: STARTER_749 },
+  });
+  if (!model.allowed) {
+    throw new Error(`Test74 signing packet model not allowed: ${model.diagnostics.validationErrors.join(", ")}`);
   }
   return model;
 }
@@ -760,4 +778,29 @@ test.describe("VS01 canonical visual regression", () => {
       });
     }
   }
+});
+
+test.describe("VS01 test74 repaired corpus visual", () => {
+  test("test74 repaired corpus keeps initials in band on body page (desktop-1440)", async ({ page }) => {
+    const model = buildTest74VisualModel();
+    assertInitialsModelGeometry(model);
+    const pageIndex = 0;
+    const packetPage = model.pages[pageIndex]!;
+    const pageFields = model.fields.filter((f) => f.page === pageIndex);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      `<!doctype html><body style="margin:0;background:#444;padding:24px;">${renderCanonicalPageHtml(packetPage, pageFields, {
+        showInitials: true,
+        renderFields: true,
+      })}</body>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(2);
+    await screenshotCanonicalSurface(
+      page,
+      surface,
+      join(ARTIFACT_DIR, "vs01-test74-body-initials-desktop-1440.png"),
+    );
+  });
 });

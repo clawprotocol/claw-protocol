@@ -66,4 +66,33 @@ describe("summarizeCanonicalSigningPacketInitials", () => {
     expect(readiness.packetReady).toBe(true);
     expect(readiness.reason).toBeNull();
   });
+
+  it("packet readiness stays true across repeated canonical summaries (no flicker)", () => {
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: premiumCorpus(),
+      roles: roles(),
+      corpusGateArgs: { freeBaselinePlain: STARTER_749 },
+    });
+    expect(model.allowed).toBe(true);
+    const results = Array.from({ length: 4 }, () => {
+      const summary = summarizeCanonicalSigningPacketInitials({
+        fields: model.fields,
+        pageCount: model.pages.length,
+        roleCount: roles().length,
+        pages: model.pages,
+      });
+      return resolveVs01PreparePacketReadiness({
+        corpusGate: { allowed: true },
+        placementCanFinish: true,
+        initialsSummary: summary,
+        canonicalTextRendered: true,
+        canonicalSignatureLinesRendered: true,
+      });
+    });
+    for (const r of results) {
+      expect(r.packetReady).toBe(true);
+      expect(r.reason).toBeNull();
+    }
+  });
 });

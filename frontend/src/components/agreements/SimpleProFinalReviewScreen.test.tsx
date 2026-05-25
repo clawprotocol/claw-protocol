@@ -16,7 +16,7 @@ describe("SimpleProFinalReviewScreen", () => {
           "Termination / Renewal",
           "Invoice timing & renewal",
         ]}
-        appliedVariableIds={[]}
+        appliedVariableIds={["payment_timing", "saas_sla", "ip_ownership", "renewal_notice"]}
         onSendForSignature={vi.fn()}
         onSendForReview={vi.fn()}
         onCopyAgreement={vi.fn()}

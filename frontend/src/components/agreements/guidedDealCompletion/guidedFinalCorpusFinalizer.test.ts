@@ -201,9 +201,11 @@ describe("guided final corpus finalizer (test32)", () => {
       freeBasicDraftPlain: free,
     });
     expect(result.ok).toBe(true);
-    expect(["last_accepted_premium_candidate", "canonical_working_draft"]).toContain(
-      result.diagnostics.selectedSource,
-    );
+    expect([
+      "finalized_signer_applied_guided_corpus",
+      "last_accepted_premium_candidate",
+      "canonical_working_draft",
+    ]).toContain(result.diagnostics.selectedSource);
     expect(result.diagnostics.rejected.some((r) => r.source === "rendered_preview")).toBe(true);
   });
 
@@ -221,7 +223,7 @@ describe("guided final corpus finalizer (test32)", () => {
     expect(result.body).toMatch(/\bNet 30\b/i);
     expect(result.body).toMatch(/\bbuild-heavy\b/i);
     expect(result.body).toMatch(/\b99\.9\s*%/i);
-    expect(result.body).toMatch(/\bCompany owns the project deliverables\b/i);
+    expect(result.body).toMatch(/\b(?:Company|Client) owns the project deliverables\b/i);
     expect(result.body).toMatch(/\b30\s+days?.{0,30}notice\b/i);
     expect(result.body).not.toMatch(/\[Client's Full Legal Name\]|\[Client's Address\]|\[Service Provider's Address\]|Your Company Name|Service Provider Name|\[Your Company Name\]/i);
     expect(result.body).toMatch(/CLIENT:\s*\nAcme LLC\s*\nBy: __________________________\s*\nName: Anthem H Blanchard\s*\nTitle: Manager\s*\nDate: _________________________/);
@@ -244,7 +246,9 @@ describe("guided final corpus finalizer (test32)", () => {
       originalIntake: "AI automation support agreement",
     });
     expect(result.ok).toBe(true);
-    expect(["hydrated_premium", "canonical_working_draft"]).toContain(result.diagnostics.selectedSource);
+    expect(["hydrated_premium", "canonical_working_draft", "finalized_signer_applied_guided_corpus"]).toContain(
+      result.diagnostics.selectedSource,
+    );
   });
 
   it("test33 regression: stale last_accepted placeholders do not block when hydrated authority is selected", () => {
@@ -264,7 +268,9 @@ describe("guided final corpus finalizer (test32)", () => {
       freeBasicDraftPlain: "Free starter ".repeat(70),
     });
     expect(result.ok).toBe(true);
-    expect(["hydrated_premium", "canonical_working_draft"]).toContain(result.diagnostics.selectedSource);
+    expect(["hydrated_premium", "canonical_working_draft", "finalized_signer_applied_guided_corpus"]).toContain(
+      result.diagnostics.selectedSource,
+    );
     expect(result.body).not.toMatch(/Your Company Name|Service Provider Name|\[Your Company Name\]/i);
     expect(result.body).toMatch(/Acme LLC/);
     expect(result.body).toMatch(/Joe Smith/);

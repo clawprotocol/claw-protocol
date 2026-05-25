@@ -10,16 +10,21 @@ import {
 } from "./guidedCanonicalCorpusNormalizer";
 import { stripGuidedInstructionLeakLines } from "./guidedCorpusLineRepairs";
 import { stripDuplicatePreWitnessIdentityFragment } from "./guidedFinalReviewToSigning";
+import { rebuildCanonicalGuidedCorpusFromClauses } from "./guidedCanonicalCorpusRebuild";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 
 export type FinalGradeCorpusDefect =
   | "empty_numbered_section"
+  | "weak_purpose_section"
   | "subsection_number_mismatch"
   | "misplaced_subsection_content"
+  | "fees_section_contamination"
   | "duplicate_conflicting_fees"
   | "orphan_signer_metadata"
+  | "duplicate_witness_block"
   | "instruction_leak"
-  | "party_letter_fallback";
+  | "party_letter_fallback"
+  | "contractor_party_fallback";
 
 const TOP_LEVEL_SECTION_RE = /^\s*(\d+)\.\s+(.+)$/;
 const SUBCLAUSE_RE = /^(\d+)\.(\d+)\.?\s+/;
@@ -29,6 +34,11 @@ const MONTHLY_FEE_RE =
   /\b(?:\$[\d,]+(?:\.\d{2})?|\d[\d,]*)\s*(?:per\s+)?month(?:ly)?\b|\bmonthly\s+(?:fee|service\s+fee|payment)\b/i;
 const TOTAL_PROJECT_FEE_RE =
   /\b(?:total\s+(?:project\s+)?fee|total\s+contract\s+fee|\$120[,\s]?000)\b/i;
+const FEES_CONTAMINATION_RE =
+  /\b(?:confidential|non-public|proprietary information)\b/i;
+const FEES_ATTORNEY_RE = /\battorney\s+fees?\b/i;
+const CONTRACTOR_FALLBACK_RE = /\b(?:the\s+)?Contractor\b|\bthe\s+Company\b/i;
+const WEAK_PURPOSE_RE = /^AI\s+AUTOMATION\s+SERVICES\s+AGREEMENT\s*$/i;
 
 function normLines(text: string): string[] {
   return text.replace(/\r\n/g, "\n").split("\n");
@@ -105,6 +115,10 @@ export function detectFinalGradeCorpusDefects(
   if (instruction.repairs.length > 0) defects.add("instruction_leak");
 
   if (PARTY_LETTER_FALLBACK_RE.test(corpus)) defects.add("party_letter_fallback");
+  if (opts?.authoritativePartyNames?.length && CONTRACTOR_FALLBACK_RE.test(corpus)) {
+    defects.add("contractor_party_fallback");
+  }
+  if ((corpus.match(/\bIN WITNESS WHEREOF\b/gi) ?? []).length > 1) defects.add("duplicate_witness_block");
 
   const sections = parseTopLevelSections(corpus);
   for (const section of sections) {
@@ -125,7 +139,20 @@ export function detectFinalGradeCorpusDefects(
     }
   }
 
+  const purposeBody = sections.find((s) => s.number === 1)?.bodyLines.join("\n").trim() ?? "";
+  if (
+    !purposeBody ||
+    purposeBody.length < 48 ||
+    WEAK_PURPOSE_RE.test(purposeBody) ||
+    /^AI\s+AUTOMATION\s+SERVICES\s+AGREEMENT\s*$/i.test(purposeBody)
+  ) {
+    defects.add("weak_purpose_section");
+  }
+
   const feesBody = sections.find((s) => s.number === 2)?.bodyLines.join("\n") ?? "";
+  if (FEES_CONTAMINATION_RE.test(feesBody) || FEES_ATTORNEY_RE.test(feesBody)) {
+    defects.add("fees_section_contamination");
+  }
   if (MONTHLY_FEE_RE.test(feesBody) && TOTAL_PROJECT_FEE_RE.test(feesBody)) {
     const hasSchedule = /\bschedule\s+a\b/i.test(feesBody);
     const hasAlternative = /\b(?:alternative|either|or,?\s+if)\b/i.test(feesBody);
@@ -274,6 +301,63 @@ function repairEmptyNumberedSections(text: string): { text: string; repairs: str
   return { text: `${merged}\n\n${after}`.replace(/\n{3,}/g, "\n\n").trim(), repairs };
 }
 
+function stripAllPreWitnessSignerFragments(
+  text: string,
+  identities: readonly CanonicalPartyIdentity[],
+): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = text;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const stripped = stripDuplicatePreWitnessIdentityFragment(out, identities);
+    out = stripped.text;
+    if (stripped.repairs.length) repairs.push(...stripped.repairs);
+    else break;
+  }
+  const witnessIdx = witnessIndex(out);
+  if (witnessIdx <= 0) return { text: out, repairs };
+  const before = out.slice(0, witnessIdx).trimEnd();
+  const after = out.slice(witnessIdx).trimStart();
+  const lines = normLines(before);
+  const needles = identities.map((id) => id.partyDisplayName.trim().toLowerCase()).filter(Boolean);
+  const kept = lines.filter((line) => {
+    const t = line.trim();
+    if (!t) return true;
+    if (/^(?:CLIENT|SERVICE PROVIDER)\s*:/i.test(t)) return false;
+    if (/^(?:Name|Title|Date|Email)\s*:/i.test(t)) return false;
+    if (needles.some((n) => t.toLowerCase() === n)) return false;
+    return true;
+  });
+  if (kept.length !== lines.length) repairs.push("strip_all_pre_witness_signer_lines");
+  return { text: `${kept.join("\n")}\n\n${after}`.replace(/\n{3,}/g, "\n\n").trim(), repairs };
+}
+
+function dedupeWitnessBlocks(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const matches = [...text.matchAll(/\bIN WITNESS WHEREOF\b/gi)];
+  if (matches.length <= 1) return { text, repairs };
+  const firstIdx = matches[0]!.index ?? 0;
+  const before = text.slice(0, firstIdx).trimEnd();
+  const tail = text.slice(firstIdx).trimStart();
+  repairs.push("dedupe_witness_block");
+  return { text: `${before}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trim(), repairs };
+}
+
+function replaceContractorCompanyPartyLabels(
+  text: string,
+  opts?: { authoritativePartyNames?: readonly string[] },
+): { text: string; repairs: string[] } {
+  if (!opts?.authoritativePartyNames?.length) return { text, repairs: [] };
+  const repairs: string[] = [];
+  let out = text;
+  if (CONTRACTOR_FALLBACK_RE.test(out)) {
+    out = out.replace(/\bthe\s+Contractor\b/gi, "Service Provider");
+    out = out.replace(/\bContractor\b/g, "Service Provider");
+    out = out.replace(/\bthe\s+Company\b/gi, "the Client");
+    repairs.push("replace_contractor_company_labels");
+  }
+  return { text: out, repairs };
+}
+
 export function repairFinalGradeGuidedCorpus(
   text: string,
   opts?: {
@@ -297,11 +381,21 @@ export function repairFinalGradeGuidedCorpus(
   out = purpose.text;
   repairs.push(...purpose.repairs);
 
+  const partyLabels = replaceContractorCompanyPartyLabels(out, {
+    authoritativePartyNames: opts?.authoritativePartyNames,
+  });
+  out = partyLabels.text;
+  repairs.push(...partyLabels.repairs);
+
   if (opts?.signerIdentities?.length) {
-    const preWitness = stripDuplicatePreWitnessIdentityFragment(out, opts.signerIdentities);
+    const preWitness = stripAllPreWitnessSignerFragments(out, opts.signerIdentities);
     out = preWitness.text;
     repairs.push(...preWitness.repairs);
   }
+
+  const witnessDedupe = dedupeWitnessBlocks(out);
+  out = witnessDedupe.text;
+  repairs.push(...witnessDedupe.repairs);
 
   const structure = normalizeGuidedProCorpusStructure(out);
   out = structure.text;
@@ -322,9 +416,43 @@ export function repairFinalGradeGuidedCorpus(
     repairs.push(...retry.repairs.map((r) => `structure_retry:${r}`));
   }
 
-  const defects = detectFinalGradeCorpusDefects(out, {
+  let defects = detectFinalGradeCorpusDefects(out, {
     authoritativePartyNames: opts?.authoritativePartyNames,
   });
+  const blocking = defects.filter(
+    (d) => d !== "party_letter_fallback" || !opts?.authoritativePartyNames?.length,
+  );
+  const rebuildTriggers: FinalGradeCorpusDefect[] = [
+    "fees_section_contamination",
+    "misplaced_subsection_content",
+    "orphan_signer_metadata",
+    "duplicate_witness_block",
+    "subsection_number_mismatch",
+  ];
+  if (blocking.some((d) => rebuildTriggers.includes(d))) {
+    const rebuilt = rebuildCanonicalGuidedCorpusFromClauses(out, {
+      signerIdentities: opts?.signerIdentities,
+    });
+    out = rebuilt.text;
+    repairs.push(...rebuilt.repairs);
+    const postRebuildParty = replaceContractorCompanyPartyLabels(out, {
+      authoritativePartyNames: opts?.authoritativePartyNames,
+    });
+    out = postRebuildParty.text;
+    repairs.push(...postRebuildParty.repairs);
+    if (opts?.signerIdentities?.length) {
+      const preWitness = stripAllPreWitnessSignerFragments(out, opts.signerIdentities);
+      out = preWitness.text;
+      repairs.push(...preWitness.repairs);
+    }
+    const witnessAgain = dedupeWitnessBlocks(out);
+    out = witnessAgain.text;
+    repairs.push(...witnessAgain.repairs);
+    defects = detectFinalGradeCorpusDefects(out, {
+      authoritativePartyNames: opts?.authoritativePartyNames,
+    });
+  }
+
   return { text: out, repairs, defects };
 }
 
@@ -350,8 +478,19 @@ export function logFinalGradeCorpusDefects(payload: {
   defects: readonly FinalGradeCorpusDefect[];
   repaired: boolean;
   bodyLen: number;
+  blocking?: boolean;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[guided-final-grade-corpus]", payload);
+}
+
+/** True when corpus passes final-grade invariants (optionally after repair). */
+export function isFinalGradeCorpusBlocking(
+  defects: readonly FinalGradeCorpusDefect[],
+  opts?: { authoritativePartyNames?: readonly string[] },
+): boolean {
+  return (
+    defects.filter((d) => d !== "party_letter_fallback" || !opts?.authoritativePartyNames?.length).length > 0
+  );
 }

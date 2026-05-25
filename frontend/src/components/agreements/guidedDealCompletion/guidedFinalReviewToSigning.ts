@@ -353,6 +353,8 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   body: string;
   partyManifest: CanonicalFinalPartyManifest;
   signerIdentities?: readonly CanonicalPartyIdentity[];
+  /** When true, skip guided re-merge/final-grade rebuild so user-saved final review text stays authoritative. */
+  preserveUserEdits?: boolean;
 }): { body: string; repairs: string[]; hash: string } {
   const identities =
     args.signerIdentities ?? manifestToCanonicalPartyIdentities(args.partyManifest);
@@ -376,28 +378,34 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   out = manifestPatch.text;
   repairs.push(...manifestPatch.repairs);
 
-  const dedupe = dedupeGuidedAnswerClauses(out);
-  out = dedupe.text;
-  repairs.push(...dedupe.repairs);
+  if (!args.preserveUserEdits) {
+    const dedupe = dedupeGuidedAnswerClauses(out);
+    out = dedupe.text;
+    repairs.push(...dedupe.repairs);
+  }
 
   const instructionLeak = stripGuidedInstructionLeakLines(out);
   out = instructionLeak.text;
   repairs.push(...instructionLeak.repairs);
 
-  const finalGrade = repairFinalGradeGuidedCorpus(out, {
-    signerIdentities: identities,
-    authoritativePartyNames: identities.map((id) => id.partyDisplayName).filter(Boolean),
-  });
-  out = finalGrade.text;
-  repairs.push(...finalGrade.repairs.map((r) => `final_grade:${r}`));
+  if (!args.preserveUserEdits) {
+    const finalGrade = repairFinalGradeGuidedCorpus(out, {
+      signerIdentities: identities,
+      authoritativePartyNames: identities.map((id) => id.partyDisplayName).filter(Boolean),
+    });
+    out = finalGrade.text;
+    repairs.push(...finalGrade.repairs.map((r) => `final_grade:${r}`));
+  }
 
   const executionFooter = stripStaleExecutionPlacementCorpusCopy(out);
   out = executionFooter.text;
   repairs.push(...executionFooter.repairs);
 
-  const finalRenumber = renumberGuidedTopLevelSectionsSequentially(out);
-  out = finalRenumber.text;
-  repairs.push(...finalRenumber.repairs);
+  if (!args.preserveUserEdits) {
+    const finalRenumber = renumberGuidedTopLevelSectionsSequentially(out);
+    out = finalRenumber.text;
+    repairs.push(...finalRenumber.repairs);
+  }
 
   const preWitnessIdentity = stripDuplicatePreWitnessIdentityFragment(out, identities);
   out = preWitnessIdentity.text;

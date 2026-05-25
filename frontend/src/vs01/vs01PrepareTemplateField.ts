@@ -130,6 +130,13 @@ export function prepareTemplateDisplayForField(
             isPlaceholder: !resolved.trim(),
             source: "field_only",
           };
+      if (preparePacket && field.autoInitials) {
+        return {
+          body: initialsLabel.label,
+          assigneeLine: entity ? `INITIALS — ${entity}` : "INITIALS",
+          isPlaceholder: false,
+        };
+      }
       return {
         body: initialsLabel.label,
         assigneeLine: entity,

@@ -2741,11 +2741,26 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials {
-  z-index: 4;
+  z-index: 5;
   opacity: 1;
   border-style: solid;
+  border-width: 1px;
   border-color: color-mix(in srgb, var(--vs01-color-text-muted) 72%, var(--vs01-color-border-subtle));
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  pointer-events: auto;
+}
+
+.vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials .vs01-sign-placement-initials,
+.vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials .vs01-sign-placement-label {
+  opacity: 1;
+  color: #0f172a;
+}
+
+.vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials .vs01-sign-placement-ph {
+  opacity: 0.92;
+  color: #334155;
+  font-weight: 700;
 }
 
 .vs01-sign-placement-signature-body--counterparty {

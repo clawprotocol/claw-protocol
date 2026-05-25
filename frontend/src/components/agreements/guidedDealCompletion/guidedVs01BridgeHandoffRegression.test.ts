@@ -305,4 +305,30 @@ describe("guided VS01 bridge handoff regression (failure shape)", () => {
     expect(gate.allowed).toBe(true);
     expect(gate.corpus).toContain(editMarker);
   });
+
+  it("preserveUserEdits signing cleanup keeps user marker without guided re-merge", () => {
+    const base = aiAutomationCorpus();
+    const marker = "PRO_REVIEW_USER_EDIT_MARKER_TEST74";
+    const edited = base.replace("Net 30", marker);
+    const manifest = resolveCanonicalFinalPartyManifest({
+      partyCount: 2,
+      partySignerNames: ["Anthem H Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      recipient1Email: "anthem@example.test",
+      recipient2Email: "joe@example.test",
+      extraPartyReviewEmails: [],
+      draftPartyNames: ["Acme LLC", "Joe Smith"],
+      sendMode: "signature",
+      recipientsDeferred: false,
+    });
+    const cleaned = prepareGuidedSigningCorpusCleanup({
+      body: edited,
+      partyManifest: manifest,
+      preserveUserEdits: true,
+    }).body;
+    expect(cleaned).toContain(marker);
+    expect(cleaned).not.toContain("PRO_REVIEW_USER_EDIT_MARKER_TEST74\n\n2. Fees");
+  });
 });
