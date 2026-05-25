@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 describe("paid Pro review-first send route (no generic /app/send gate)", () => {
   it("SimpleSendPage redirects authoritative review-first away from generic send shell", () => {
     const page = readFileSync(join(__dirname, "SimpleSendPage.tsx"), "utf8");
-    expect(page).toContain("shouldSkipPaidProPrepareReviewLinkInterstitial");
+    expect(page).toContain("shouldRenderPaidProReviewFirstSendSurface");
     expect(page).toContain("executePaidProPostRecipientSetupHandoff");
     expect(page).toContain("simple_send_review_first_redirect");
     expect(page).toContain("clearPersistedSimpleSendPhase");
-    expect(page).toContain('simpleFlowPremiumHandoffIntent !== "review"');
+    expect(page).toContain("review-first-send-surface");
   });
 
   it("SimpleSendPage does not open conversion modal for paid Pro review-first continue", () => {

@@ -449,6 +449,8 @@ Date: _________________________
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
     const handoffBlock = intake.slice(handoffIdx, handoffIdx + 9000);
     expect(handoffBlock).toContain("logReviewFirstHandoffStart");
+    expect(handoffBlock).toContain("writeReviewFirstHandoffSource");
+    expect(handoffBlock).toContain("clearReviewFirstHandoffSource");
     expect(handoffBlock).toContain("logReviewFirstLinkCreated");
     expect(handoffBlock).toContain("logReviewFirstNavigateDone");
     expect(handoffBlock).toContain("logReviewFirstError");

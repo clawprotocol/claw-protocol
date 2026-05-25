@@ -210,7 +210,10 @@ test("review-first simplified UI (desktop + laptop PNGs)", async ({ page }, test
     await expect(page.getByRole("button", { name: /Request changes/i })).toHaveCount(0);
 
     await page.screenshot({
-      path: join(artifactDir, `review-first-${viewport.name}.png`),
+      path: join(
+        artifactDir,
+        viewport.name === "desktop" ? "reviewer-simplified-review-page.png" : `review-first-${viewport.name}.png`,
+      ),
       fullPage: true,
     });
   }
@@ -318,7 +321,7 @@ test("paid Pro review-first on /app/send shows token-config error, not generic s
   await expect(page).toHaveURL(new RegExp(`/app/send/${agreementId}`));
 
   await page.screenshot({
-    path: join(artifactDir, "review-first-token-config-error.png"),
+    path: join(artifactDir, "review-first-no-legacy-send-shell-error.png"),
     fullPage: true,
   });
 });

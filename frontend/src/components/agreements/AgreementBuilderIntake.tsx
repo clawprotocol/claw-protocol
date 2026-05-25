@@ -416,6 +416,10 @@ import {
   shouldSkipPaidProPrepareReviewLinkInterstitial,
 } from "../../launch/simpleProduct/paidProPostRecipientSetupHandoff";
 import {
+  clearReviewFirstHandoffSource,
+  writeReviewFirstHandoffSource,
+} from "../../launch/simpleProduct/reviewFirstSendSurface";
+import {
   explicitSignerNameForEntity,
   logSignerMetadataInputChange,
   logSignerMetadataNormalizedForSave,
@@ -17885,6 +17889,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
 
+        writeReviewFirstHandoffSource(source, id);
+
         const primedForHandoff =
           mergeLiveDraftWithRecipientSetupForVs01Bridge(
             {
@@ -17920,6 +17926,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         logReviewFirstLinkCreated({ agreementId: id, destination: result.destination, source });
         logReviewFirstNavigateDone({ agreementId: id, path: donePath, source });
         clearPremiumSendIntent();
+        clearReviewFirstHandoffSource();
         clearPersistedSimpleSendPhase(id);
       } catch (err) {
         const message =
@@ -18698,6 +18705,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       canProceed: canProceedGuidedFinalReviewToSigning,
       bodyLen: simpleProFinalReviewCorpus.plainText.length,
     });
+    const reviewFirstAgId = (
+      productionSendBarAgreementId ||
+      reviewAgreementIdRef.current ||
+      reviewAgreementId ||
+      ""
+    ).trim();
+    if (reviewFirstAgId) {
+      writeReviewFirstHandoffSource("simple_pro_send_for_review", reviewFirstAgId);
+    }
     if (guidedCompletionActive) {
       logGuidedReviewTransition({
         bodyLen: simpleProFinalReviewCorpus.plainText.length,

@@ -48,8 +48,9 @@ import {
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
 import {
-  isPaidProReviewFirstSendIntent,
+  clearReviewFirstHandoffSource,
   ReviewFirstMintErrorPanel,
+  shouldRenderPaidProReviewFirstSendSurface,
 } from "./reviewFirstSendSurface";
 import {
   clearPersistedSimpleSendPhase,
@@ -197,18 +198,28 @@ export function SimpleSendPage(props: { agreementId: string }) {
   /** Bumps when AgreementReview reports a live draft so review-first redirect can re-run after hydration. */
   const [redirectDraftTick, setRedirectDraftTick] = useState(0);
   const paidProReviewFirstRoute = useMemo(() => {
-    const intent = sendLanding.premiumIntent ?? simpleFlowPremiumHandoffIntent ?? peekPremiumSendIntent();
-    if (intent !== "review") return false;
     const draft = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null);
-    if (isPaidProReviewFirstSendIntent(draft, agreementId, "review")) return true;
-    return Boolean(sendAuthoritative && intent === "review");
+    return shouldRenderPaidProReviewFirstSendSurface({
+      agreementId,
+      draft,
+      handoffPremiumIntent: sendLanding.premiumIntent,
+      handoffOpenFlowPhase: sendLanding.openFlowPhase,
+      statePremiumIntent: simpleFlowPremiumHandoffIntent,
+      streamlinedSimpleFlow,
+      sendAuthoritative,
+      paidProSendAllowed: paidProSendBranch.paidProSendAllowed,
+      hasPrimedHandoffDraft: Boolean(initialDraftSnapshot),
+    });
   }, [
     agreementId,
     initialDraftSnapshot,
     redirectDraftTick,
     sendAuthoritative,
+    sendLanding.openFlowPhase,
     sendLanding.premiumIntent,
     simpleFlowPremiumHandoffIntent,
+    streamlinedSimpleFlow,
+    paidProSendBranch.paidProSendAllowed,
   ]);
   const authoritativeProBypassRef = useRef(paidProSendBranch.paidProSendAllowed);
   authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
@@ -332,10 +343,13 @@ export function SimpleSendPage(props: { agreementId: string }) {
   useEffect(() => {
     const intent = sendLanding.premiumIntent ?? peekPremiumSendIntent();
     setSimpleFlowPremiumHandoffIntent(intent);
-    setSimpleFlowPhase(resolveSimpleFlowPhase(intent));
     if (intent === "review") {
+      clearPersistedSendPhase(agreementId);
       clearPersistedSimpleSendPhase(agreementId);
+      setSimpleFlowPhase("review");
+      return;
     }
+    setSimpleFlowPhase(resolveSimpleFlowPhase(intent));
   }, [agreementId, resolveSimpleFlowPhase, sendLanding.openFlowPhase, sendLanding.premiumIntent]);
 
   const runPaidProReviewFirstMintHandoff = useCallback(
@@ -363,6 +377,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
         return;
       }
       clearPremiumSendIntent();
+      clearReviewFirstHandoffSource();
       clearPersistedSimpleSendPhase(agreementId);
     },
     [agreementId, initialDraftSnapshot, navigate],
@@ -373,15 +388,6 @@ export function SimpleSendPage(props: { agreementId: string }) {
     if (!paidProReviewFirstRoute) return;
     const draft = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null);
     if (!draft) return;
-    if (
-      !shouldSkipPaidProPrepareReviewLinkInterstitial({
-        draft,
-        agreementId,
-        premiumSendIntent: "review",
-      })
-    ) {
-      return;
-    }
     void runPaidProReviewFirstMintHandoff("simple_send_review_first_redirect");
   }, [
     agreementId,
@@ -420,9 +426,10 @@ export function SimpleSendPage(props: { agreementId: string }) {
 
   /** After `?phase=send` is stripped from the URL, keep send so refresh on `/app/send/:id` stays on the send step. */
   useEffect(() => {
+    if (paidProReviewFirstRoute) return;
     if (simpleFlowPhase !== "send") return;
     persistSendPhase(agreementId);
-  }, [agreementId, simpleFlowPhase]);
+  }, [agreementId, paidProReviewFirstRoute, simpleFlowPhase]);
 
   /** Premium create-flow: jump to Send once paywall unlocks if intent was signature. */
   useEffect(() => {
@@ -459,8 +466,11 @@ export function SimpleSendPage(props: { agreementId: string }) {
   }, [paidProReviewFirstRoute, premiumSendUnlocked, reviewLinkMintFailure, simpleFlowPremiumHandoffIntent]);
   const showPremiumFork = premiumSendUnlocked && simpleFlowPhase === "review" && simpleFlowPremiumHandoffIntent === null;
 
-  const subtitle =
-    showPremiumFork
+  const subtitle = paidProReviewFirstRoute
+    ? reviewLinkMintFailure
+      ? "Review links could not be created. Fix the environment configuration or retry."
+      : "Minting personal review links for your recipients. Nothing is sent for signature."
+    : showPremiumFork
       ? "Pick how you close: collaborate on changes before signing, or send for tracked signature — both paths keep you looking deal-ready."
       : premiumSendUnlocked && simpleFlowPremiumHandoffIntent === "review"
         ? "Choose who can review this agreement. Nothing is signed."
@@ -612,6 +622,37 @@ export function SimpleSendPage(props: { agreementId: string }) {
     senderFirstRouteRetryTick,
   ]);
 
+  if (paidProReviewFirstRoute) {
+    return (
+      <SimpleFlowShell
+        step={lifecycleStepForStage("review") as 1 | 2 | 3 | 4}
+        progressLabels={FLOW_PROGRESS}
+        title={shellTitle}
+        subtitle={subtitle}
+      >
+        <div className="flex flex-col gap-4 py-2" data-testid="review-first-send-surface">
+          {reviewFirstMintBusy && !reviewLinkMintFailure ? (
+            <p className="text-center text-sm text-slate-400" role="status" data-testid="review-first-mint-busy">
+              Creating review links…
+            </p>
+          ) : null}
+          {reviewLinkMintFailure ? (
+            <ReviewFirstMintErrorPanel
+              message={reviewLinkMintFailure}
+              busy={reviewFirstMintBusy}
+              onBackToFinalReview={navigateBackToCreateForEdit}
+              onRetry={() => void runPaidProReviewFirstMintHandoff("simple_send_review_first_retry")}
+            />
+          ) : reviewFirstMintBusy ? null : (
+            <p className="text-center text-sm text-slate-400" role="status">
+              Preparing review links…
+            </p>
+          )}
+        </div>
+      </SimpleFlowShell>
+    );
+  }
+
   return (
     <SimpleFlowShell step={shellStep as 1 | 2 | 3 | 4} progressLabels={FLOW_PROGRESS} title={shellTitle} subtitle={subtitle}>
       {flash === "draft_ready" && !streamlinedSimpleFlow ? (
@@ -746,27 +787,6 @@ export function SimpleSendPage(props: { agreementId: string }) {
         )
       ) : null}
 
-      {paidProReviewFirstRoute ? (
-        <div className="flex flex-col gap-4 py-2">
-          {reviewFirstMintBusy && !reviewLinkMintFailure ? (
-            <p className="text-center text-sm text-slate-400" role="status" data-testid="review-first-mint-busy">
-              Creating review links…
-            </p>
-          ) : null}
-          {reviewLinkMintFailure ? (
-            <ReviewFirstMintErrorPanel
-              message={reviewLinkMintFailure}
-              busy={reviewFirstMintBusy}
-              onBackToFinalReview={navigateBackToCreateForEdit}
-              onRetry={() => void runPaidProReviewFirstMintHandoff("simple_send_review_first_retry")}
-            />
-          ) : reviewFirstMintBusy ? null : (
-            <p className="text-center text-sm text-slate-400" role="status">
-              Preparing review links…
-            </p>
-          )}
-        </div>
-      ) : (
       <AgreementReviewErrorBoundary onBack={navigateBackToCreateForEdit}>
         <AgreementReview
           agreementId={agreementId}
@@ -972,7 +992,6 @@ export function SimpleSendPage(props: { agreementId: string }) {
           }}
         />
       </AgreementReviewErrorBoundary>
-      )}
 
       <SendConversionModal
         open={paywallOpen && !sendAuthoritative && !paidProReviewFirstRoute}
