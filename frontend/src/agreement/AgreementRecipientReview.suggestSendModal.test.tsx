@@ -3,10 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientQuickChangeWorkspace } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import {
-  RECIPIENT_BTN_SEND_CHANGES,
-  RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY,
   RECIPIENT_PREVIEW_TRUST_SUBCOPY,
 } from "./portableReviewCopy";
 
@@ -100,8 +99,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
+    await openRecipientQuickChangeWorkspace();
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment to Net 30.");
@@ -113,14 +111,14 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
     expect(panel.textContent).not.toMatch(/\bCLAW\b/i);
-    expect(panel.textContent).toContain(RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY);
+    expect(panel.textContent).toContain("Changes proposed");
     expect(panel.textContent).toContain(RECIPIENT_PREVIEW_TRUST_SUBCOPY);
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: new RegExp(`${RECIPIENT_BTN_SEND_CHANGES}\\?`, "i") })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Save updated draft\?/i })).toBeTruthy();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
       "These go to the agreement owner.",
     );

@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientReviseUploadPickMethod } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
-import { RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE } from "./portableReviewCopy";
 import * as pdfDl from "./recipientPreviewPdfDownload";
 
 const extractMock = vi.fn();
@@ -90,13 +90,12 @@ describe("AgreementRecipientReview want-copy draft PDF (baseline only)", () => {
 
     await waitFor(() => expect(screen.queryByText(/Loading agreement/i)).toBeNull());
 
-    const draftBtn = screen.getByTestId("recipient-download-draft-pdf");
-    expect(draftBtn.getAttribute("title")).toBe(RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE);
+    const draftBtn = screen.getByTestId("recipient-review-download-pdf");
+    expect(draftBtn.textContent).toMatch(/Download PDF/i);
 
-    await userEvent.click(screen.getByTestId("recipient-want-copy-upload-revised"));
-    await waitFor(() => expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy());
+    await openRecipientReviseUploadPickMethod();
 
-    await userEvent.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), new File([revisedBody], "rev.txt"));
+    await userEvent.upload(screen.getByTestId("recipient-import-draft-file-input"), new File([revisedBody], "rev.txt"));
 
     await waitFor(
       () => {
@@ -105,8 +104,13 @@ describe("AgreementRecipientReview want-copy draft PDF (baseline only)", () => {
       { timeout: 20_000 },
     );
 
+    await userEvent.click(screen.getByRole("button", { name: "← Back to agreement" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-review-download-pdf")).toBeTruthy();
+    });
+
     dlSpy.mockClear();
-    await userEvent.click(screen.getByTestId("recipient-download-draft-pdf"));
+    await userEvent.click(screen.getByTestId("recipient-review-download-pdf"));
 
     await waitFor(() => expect(dlSpy).toHaveBeenCalled());
     const arg = dlSpy.mock.calls[0]![0]!;

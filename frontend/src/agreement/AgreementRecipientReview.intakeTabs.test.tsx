@@ -3,6 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import {
+  openRecipientQuickChangeWorkspace,
+  openRecipientReviseEditWorkspace,
+  openRecipientReviseUploadPickMethod,
+} from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import { computeRecipientDraftTextareaMaxPx } from "../hooks/useRecipientDraftTextareaMaxPx";
 import {
@@ -75,15 +80,9 @@ describe("AgreementRecipientReview revise workflow routing", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-    });
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
+    await openRecipientReviseUploadPickMethod();
 
-    await waitFor(() => {
-      expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
-    });
+    expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
     expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
     expect(
       screen.getByRole("tablist", { name: `${RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL} / ${RECIPIENT_CARD_SMALL_TWEAK_TITLE}` }),
@@ -116,11 +115,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-    });
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
+    await openRecipientReviseEditWorkspace();
     await userEvent.click(
       within(
         screen.getAllByRole("tablist", {
@@ -159,12 +154,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-    });
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
-    await userEvent.click(screen.getAllByTestId("recipient-workflow-quick")[0]!);
+    await openRecipientQuickChangeWorkspace();
     await userEvent.click(screen.getAllByTestId("recipient-switch-to-revised-draft-link")[0]!);
 
     expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
@@ -200,13 +190,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-    });
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
-
-    await userEvent.click(screen.getAllByTestId("recipient-workflow-quick")[0]!);
+    await openRecipientQuickChangeWorkspace();
     await userEvent.type(screen.getAllByTestId("recipient-revision-voice-field")[0]!, "Make payment Net 30.");
     await userEvent.click(screen.getAllByTestId("recipient-compare-versions-button")[0]!);
 
@@ -239,11 +223,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-    });
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
+    await openRecipientReviseUploadPickMethod();
 
     const importDraftInput = screen.getByTestId("recipient-import-draft-file-input");
     expect(importDraftInput.getAttribute("accept")).toBe(REVISED_DRAFT_FILE_INPUT_ACCEPT);
@@ -256,7 +236,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(screen.getByTestId("recipient-revised-workspace-notes-hint")).toBeTruthy();
     const paste = "x".repeat(2500);
     fireEvent.change(scoped.getByTestId("recipient-revised-draft-paste"), { target: { value: paste } });
-    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Compare drafts/i);
+    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Save updated draft/i);
     await userEvent.click(screen.getAllByTestId("recipient-compare-versions-button")[0]!);
 
     await waitFor(() => {
@@ -288,12 +268,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-    });
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
-    await userEvent.click(screen.getAllByTestId("recipient-workflow-quick")[0]!);
+    await openRecipientQuickChangeWorkspace();
 
     const big = "THIS AGREEMENT\n\n".repeat(200);
     fireEvent.change(screen.getAllByTestId("recipient-revision-voice-field")[0]!, { target: { value: big } });
@@ -345,11 +320,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
       await waitFor(() => {
         expect(scoped.queryByText(/Loading agreement/i)).toBeNull();
       });
-      await userEvent.click(scoped.getAllByTestId("recipient-document-first-request-changes")[0]!);
-      await waitFor(() => {
-        expect(scoped.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-      });
-      await userEvent.click(scoped.getByTestId("recipient-compose-card-bigger-rewrite"));
+      await openRecipientReviseUploadPickMethod();
       await userEvent.click(scoped.getAllByTestId("recipient-intake-mode-paste-revised")[0]!);
 
       const ta = scoped.getAllByTestId("recipient-revised-draft-paste")[0]! as HTMLTextAreaElement;

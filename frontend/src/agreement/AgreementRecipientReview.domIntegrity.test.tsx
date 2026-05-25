@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientQuickChangeWorkspace } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 
 function jsonResponse(obj: unknown, status = 200) {
@@ -124,11 +125,7 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-    });
-    await userEvent.click(screen.getByTestId("recipient-compose-card-small-tweak"));
+    await openRecipientQuickChangeWorkspace();
 
     const voice = screen.getByTestId("recipient-revision-voice-field");
     await userEvent.type(voice, "Switch to Net 30 for payment timing.");
@@ -139,7 +136,7 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
         expect(screen.getByTestId("recipient-preview-versions-export")).toBeTruthy();
       });
       expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(1);
-      expect(screen.queryAllByTestId("recipient-want-a-copy-card")).toHaveLength(1);
+      expect(screen.queryAllByTestId("recipient-review-download-actions")).toHaveLength(0);
 
       const exportRegion = screen.getByTestId("recipient-preview-versions-export");
       await userEvent.click(within(exportRegion).getByTestId("recipient-preview-download-original-pdf"));
@@ -152,9 +149,9 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "← Back to agreement" }));
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-want-a-copy-card")).toBeTruthy();
+      expect(screen.getByTestId("recipient-review-download-actions")).toBeTruthy();
     });
-    expect(screen.queryAllByTestId("recipient-want-a-copy-card")).toHaveLength(1);
+    expect(screen.queryAllByTestId("recipient-review-download-actions")).toHaveLength(1);
     expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(0);
     expect(duplicateDomIds(container)).toEqual([]);
   });

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientReviseUploadPickMethod } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import {
   RECIPIENT_BTN_CONTINUE_EDITING,
@@ -74,14 +75,11 @@ describe("AgreementRecipientReview upload classification", () => {
 
     const callsAfterLoad = fetchSpy.mock.calls.length;
 
-    await user.click(screen.getByTestId("recipient-want-copy-upload-revised"));
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy();
-    });
+    await openRecipientReviseUploadPickMethod(user);
 
     const notesOnly = "Recommendation\n\nWe suggest changing payment to Net 45 for cash flow.";
     const file = new File([notesOnly], "notes.txt", { type: "text/plain" });
-    await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
+    await user.upload(screen.getByTestId("recipient-import-draft-file-input"), file);
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-upload-notes-only-card")).toBeTruthy();
@@ -124,10 +122,7 @@ describe("AgreementRecipientReview upload classification", () => {
 
     const callsAfterLoad = fetchSpy.mock.calls.length;
 
-    await user.click(screen.getByTestId("recipient-want-copy-upload-revised"));
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy();
-    });
+    await openRecipientReviseUploadPickMethod(user);
 
     const bullets = [
       "Please review the following adjustments before we sign.",
@@ -138,7 +133,7 @@ describe("AgreementRecipientReview upload classification", () => {
       "- Third-party tools: clarify who pays for SaaS the team needs mid-project",
     ].join("\n");
     const file = new File([bullets], "asks.txt", { type: "text/plain" });
-    await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
+    await user.upload(screen.getByTestId("recipient-import-draft-file-input"), file);
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-clause-suggestions-surface")).toBeTruthy();
@@ -178,14 +173,11 @@ describe("AgreementRecipientReview upload classification", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await user.click(screen.getByTestId("recipient-want-copy-upload-revised"));
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy();
-    });
+    await openRecipientReviseUploadPickMethod(user);
 
     const body = "y".repeat(2000);
     const file = new File([body], "rev.txt", { type: "text/plain" });
-    await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
+    await user.upload(screen.getByTestId("recipient-import-draft-file-input"), file);
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-suggested-changes-panel")).toBeTruthy();

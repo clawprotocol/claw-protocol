@@ -3,18 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientReviseUploadPickMethod } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
-import {
-  RECIPIENT_BTN_CONTINUE_EDITING,
-  RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE,
-  RECIPIENT_WANT_COPY_BODY,
-  RECIPIENT_WANT_COPY_DROPZONE_PRIMARY,
-  RECIPIENT_WANT_COPY_DROPZONE_SECONDARY,
-  RECIPIENT_WANT_COPY_HEADING,
-  RECIPIENT_WANT_COPY_LOOPBACK_CUE,
-  RECIPIENT_WANT_COPY_UPLOAD_CTA,
-  RECIPIENT_WANT_COPY_UPLOAD_TIP,
-} from "./portableReviewCopy";
+import { RECIPIENT_BTN_CONTINUE_EDITING } from "./portableReviewCopy";
 import { REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 
 function jsonResponse(obj: unknown, status = 200) {
@@ -53,7 +44,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows outside-review strip with PDF, text, copy, upload, and compare helper", async () => {
+  it("shows review-first compact download actions on the read tab", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
       if (url.includes(`/api/agreements/${agreementId}`) && !url.includes("/render")) {
@@ -76,30 +67,16 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-want-a-copy-card")).toBeTruthy();
+      expect(screen.getByTestId("recipient-review-download-actions")).toBeTruthy();
     });
-    expect(screen.getByRole("heading", { name: RECIPIENT_WANT_COPY_HEADING })).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_BODY)).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_UPLOAD_TIP)).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_LOOPBACK_CUE)).toBeTruthy();
-    expect(screen.getByRole("button", { name: RECIPIENT_WANT_COPY_UPLOAD_CTA })).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_PRIMARY)).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_WANT_COPY_DROPZONE_SECONDARY)).toBeTruthy();
-    expect(screen.getByTestId("recipient-download-draft-pdf")).toBeTruthy();
-    expect(screen.getByTestId("recipient-download-draft-pdf").getAttribute("title")).toBe(
-      RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE,
-    );
-    expect(screen.getByRole("button", { name: /Download draft PDF/i })).toBeTruthy();
-    expect(screen.getByTestId("recipient-download-draft-text")).toBeTruthy();
-    expect(screen.getByTestId("recipient-copy-draft-text")).toBeTruthy();
-    expect(screen.queryAllByTestId("recipient-download-draft-pdf")).toHaveLength(1);
+    expect(screen.getByTestId("recipient-review-download-pdf")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download PDF/i })).toBeTruthy();
+    expect(screen.getByTestId("recipient-review-download-text")).toBeTruthy();
+    expect(screen.getByTestId("recipient-review-copy-text")).toBeTruthy();
+    expect(screen.queryAllByTestId("recipient-review-download-pdf")).toHaveLength(1);
+    expect(screen.queryByTestId("recipient-want-a-copy-card")).toBeNull();
 
-    const wantCopyInput = screen.getByTestId("recipient-want-copy-upload-revised-input");
-    expect(wantCopyInput.getAttribute("accept")).toBe(REVISED_DRAFT_FILE_INPUT_ACCEPT);
-    expect(wantCopyInput.getAttribute("accept")).toContain(".pdf");
-    expect(wantCopyInput.getAttribute("accept")).toContain("application/pdf");
-
-    const block = screen.getByTestId("recipient-want-a-copy-card").textContent ?? "";
+    const block = screen.getByTestId("recipient-review-download-actions").textContent ?? "";
     const upper = block.toUpperCase();
     for (const b of bannedInBlock) {
       expect(upper.includes(b.toUpperCase()), `unexpected “${b}” in export block`).toBe(false);
@@ -107,7 +84,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     expect(block.toLowerCase()).not.toMatch(/\bpost\b/);
   });
 
-  it("want-copy upload runs auto-compare and lands on suggested-changes panel (full recipient surface)", async () => {
+  it("upload updated draft runs auto-compare and lands on suggested-changes panel", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -134,11 +111,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await user.click(screen.getByTestId("recipient-want-copy-upload-revised"));
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy();
-    });
-
+    await openRecipientReviseUploadPickMethod(user);
     const workspaceImport = screen.getByTestId("recipient-import-draft-file-input");
     expect(workspaceImport.getAttribute("accept")).toBe(REVISED_DRAFT_FILE_INPUT_ACCEPT);
     expect(workspaceImport.getAttribute("accept")).toContain(".pdf");
@@ -160,7 +133,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
       "This agreement shall be governed by the laws of the State of California.",
     ].join("\n\n");
     const file = new File([importedRevisedBody], "rev.txt", { type: "text/plain" });
-    await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
+    await user.upload(workspaceImport, file);
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-revised-upload-analyzing")).toBeTruthy();
@@ -184,7 +157,7 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     });
   }, 25_000);
 
-  it("want-copy upload separates Reviewer Notes and shows callout on compare panel", async () => {
+  it("upload separates Reviewer Notes and shows callout on compare panel", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -211,14 +184,11 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await user.click(screen.getByTestId("recipient-want-copy-upload-revised"));
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy();
-    });
+    await openRecipientReviseUploadPickMethod(user);
 
     const agreementLike = "y".repeat(2000);
     const file = new File([`${agreementLike}\n\nReviewer Notes\nPrefer Net 45.`], "rev.txt", { type: "text/plain" });
-    await user.upload(screen.getByTestId("recipient-want-copy-upload-revised-input"), file);
+    await user.upload(screen.getByTestId("recipient-import-draft-file-input"), file);
 
     await waitFor(
       () => {

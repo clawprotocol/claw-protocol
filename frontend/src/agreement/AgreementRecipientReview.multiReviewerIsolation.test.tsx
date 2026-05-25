@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
 
@@ -90,10 +90,8 @@ describe("AgreementRecipientReview multi-reviewer token isolation", () => {
     expect(screen.queryByText("Reviewer approved this draft without requesting changes.")).toBeNull();
     expect(screen.queryByTestId("recipient-accepted-awaiting-lock-root")).toBeNull();
 
-    const actionRoots = screen.getAllByTestId("recipient-party-review-actions");
-    const landingDesktop = actionRoots.find((el) => el.getAttribute("data-placement") === "landing");
-    expect(landingDesktop).toBeTruthy();
-    expect(within(landingDesktop!).getByTestId("recipient-document-first-looks-good")).toBeTruthy();
-    expect(within(landingDesktop!).getByTestId("recipient-document-first-request-changes")).toBeTruthy();
+    expect(screen.getByTestId("recipient-review-first-actions")).toBeTruthy();
+    expect(screen.getByTestId("recipient-review-approve-draft")).toBeTruthy();
+    expect(screen.getByTestId("recipient-review-edit-draft")).toBeTruthy();
   });
 });

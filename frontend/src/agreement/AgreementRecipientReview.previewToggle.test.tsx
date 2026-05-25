@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientQuickChangeWorkspace } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 
 function jsonResponse(obj: unknown, status = 200) {
@@ -90,10 +91,7 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    const suggestButtons = screen.getAllByRole("button", { name: /Request changes/i });
-    await userEvent.click(suggestButtons[0]!);
-
-    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
+    await openRecipientQuickChangeWorkspace();
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, { target: { value: "Change payment terms to Net 30" } });
 
@@ -180,8 +178,7 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
+    await openRecipientQuickChangeWorkspace();
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     fireEvent.change(instruction, { target: { value: "Change payment terms to Net 30" } });
     await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));

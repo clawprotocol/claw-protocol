@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientQuickChangeWorkspace } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 
 function jsonResponse(obj: unknown, status = 200) {
@@ -98,8 +99,7 @@ describe("AgreementRecipientReview redline chrome", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
+    await openRecipientQuickChangeWorkspace();
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     await userEvent.clear(instruction);
     await userEvent.type(instruction, "Change payment terms to Net 30");
@@ -116,10 +116,11 @@ describe("AgreementRecipientReview redline chrome", () => {
     expect(legalRoot.querySelector('[data-redline="insert"]')).toBeTruthy();
     expect(legalRoot.querySelectorAll('[data-testid="recipient-redline-changed-block"]').length).toBeGreaterThan(0);
 
+    await userEvent.click(screen.getByTestId("recipient-preview-export-details"));
     const exportRoot = screen.getByTestId("recipient-preview-versions-export");
     expect(exportRoot.textContent).not.toMatch(/\bCLAW\b/i);
     expect(screen.queryAllByTestId("recipient-read-download-pdf")).toHaveLength(0);
-    expect(screen.getAllByTestId("recipient-download-draft-pdf").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByTestId("recipient-review-download-pdf")).toHaveLength(0);
     expect(screen.queryAllByTestId("recipient-request-copy-export-pdf")).toHaveLength(0);
     expect(screen.getByRole("heading", { name: /Export review versions/i })).toBeTruthy();
     expect(screen.getByText(/Save the original, proposed version, or redline before sending/i)).toBeTruthy();
@@ -144,19 +145,6 @@ describe("AgreementRecipientReview redline chrome", () => {
       expect(String(init.body)).toContain("<p>Services Agreement</p>");
     });
 
-    await userEvent.click(screen.getByTestId("recipient-download-draft-pdf"));
-    await waitFor(() => {
-      const calls = vi.mocked(globalThis.fetch).mock.calls;
-      const pdfCalls = calls.filter((c) => String(c[0]).includes("recipient-preview-export-pdf"));
-      const init = pdfCalls[pdfCalls.length - 1]![1] as RequestInit;
-      const body = String(init.body);
-      expect(body).toContain('"export_kind":"original"');
-      expect(body).toContain("Pay upon receipt");
-      expect(body).not.toMatch(/Net\s+30/i);
-      expect(body.toLowerCase()).not.toContain("<del");
-      expect(body.toLowerCase()).not.toContain("<ins");
-    });
-
     await userEvent.click(screen.getByTestId("recipient-preview-download-proposed-pdf"));
     await waitFor(() => {
       const calls = vi.mocked(globalThis.fetch).mock.calls;
@@ -172,6 +160,7 @@ describe("AgreementRecipientReview redline chrome", () => {
       const last = pdfCalls[pdfCalls.length - 1]![1] as RequestInit;
       expect(String(last.body)).toContain('"export_kind":"redline"');
     });
+
     const writeText = vi.fn().mockResolvedValue(undefined);
     const prev = globalThis.navigator.clipboard;
     Object.defineProperty(globalThis.navigator, "clipboard", {
@@ -183,6 +172,23 @@ describe("AgreementRecipientReview redline chrome", () => {
     Object.defineProperty(globalThis.navigator, "clipboard", {
       configurable: true,
       value: prev,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "← Back to agreement" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-review-download-pdf")).toBeTruthy();
+    });
+    await userEvent.click(screen.getByTestId("recipient-review-download-pdf"));
+    await waitFor(() => {
+      const calls = vi.mocked(globalThis.fetch).mock.calls;
+      const pdfCalls = calls.filter((c) => String(c[0]).includes("recipient-preview-export-pdf"));
+      const init = pdfCalls[pdfCalls.length - 1]![1] as RequestInit;
+      const body = String(init.body);
+      expect(body).toContain('"export_kind":"original"');
+      expect(body).toContain("Pay upon receipt");
+      expect(body).not.toMatch(/Net\s+30/i);
+      expect(body.toLowerCase()).not.toContain("<del");
+      expect(body.toLowerCase()).not.toContain("<ins");
     });
   });
 });

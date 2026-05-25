@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientReviseUploadPickMethod } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
-import { RECIPIENT_BTN_CONTINUE_EDITING, RECIPIENT_PREVIEW_SUMMARY_HEADLINE } from "./portableReviewCopy";
+import { RECIPIENT_BTN_CONTINUE_EDITING } from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -72,14 +73,8 @@ function mockFetchForCompare() {
 }
 
 async function openWorkspaceRevisedPickMethod(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-  await waitFor(() => {
-    expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-  });
-  await user.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
-  await waitFor(() => {
-    expect(screen.getByTestId("recipient-upload-revised-file")).toBeTruthy();
-  });
+  await openRecipientReviseUploadPickMethod(user);
+  expect(screen.getByTestId("recipient-upload-revised-file")).toBeTruthy();
 }
 
 describe("AgreementRecipientReview revised upload → compare (regression guard)", () => {
@@ -120,9 +115,7 @@ describe("AgreementRecipientReview revised upload → compare (regression guard)
     );
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
-    expect(within(panel).getByTestId("recipient-preview-summary-heading").textContent).toBe(
-      RECIPIENT_PREVIEW_SUMMARY_HEADLINE,
-    );
+    expect(within(panel).getByTestId("recipient-preview-summary-heading").textContent).toBe("Changes proposed");
     expect(within(panel).getByRole("button", { name: RECIPIENT_BTN_CONTINUE_EDITING })).toBeTruthy();
   }, 30_000);
 
@@ -172,11 +165,7 @@ describe("AgreementRecipientReview revised upload → compare (regression guard)
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy();
-    });
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
+    await openRecipientReviseUploadPickMethod();
     const panelEl = await screen.findByTestId("recipient-revised-version-panel");
 
     const body = "q".repeat(2000);

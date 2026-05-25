@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { openRecipientReviseUploadPickMethod } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import { htmlToPlainText } from "./externalAiHandoff";
 import { substitutePartyPlaceholdersInUserFacingText } from "./partyPlaceholderDisplay";
@@ -99,10 +100,8 @@ describe("AgreementRecipientReview same-PDF import (no material change)", () => 
 
     await waitFor(() => expect(screen.queryByText(/Loading agreement/i)).toBeNull());
 
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy());
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
-    await waitFor(() => expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy());
+    await openRecipientReviseUploadPickMethod();
+    expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
 
     const fileInput = await screen.findByTestId("recipient-import-draft-file-input");
     fireEvent.change(fileInput, { target: { files: [new File(["dummy"], "same.pdf", { type: "application/pdf" })] } });
@@ -180,10 +179,8 @@ describe("AgreementRecipientReview same-PDF import (no material change)", () => 
 
     await waitFor(() => expect(screen.queryByText(/Loading agreement/i)).toBeNull());
 
-    await userEvent.click(screen.getAllByTestId("recipient-document-first-request-changes")[0]!);
-    await waitFor(() => expect(screen.getByTestId("recipient-compose-path-cards")).toBeTruthy());
-    await userEvent.click(screen.getByTestId("recipient-compose-card-bigger-rewrite"));
-    await waitFor(() => expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy());
+    await openRecipientReviseUploadPickMethod();
+    expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
 
     const fileInput = await screen.findByTestId("recipient-import-draft-file-input");
     fireEvent.change(fileInput, { target: { files: [new File(["a"], "changed.pdf", { type: "application/pdf" })] } });

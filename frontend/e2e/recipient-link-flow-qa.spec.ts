@@ -5,6 +5,8 @@
  * local API.
  */
 import { expect, test, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 type DraftRec = {
   id: string;
@@ -52,10 +54,16 @@ function installIsolatedAgreementsApi(
     }
 
     if (url.includes("/render") && method === "POST") {
+      const id = url.match(/\/api\/agreements\/([^/]+)\/render/)?.[1];
+      const rec = id ? state.drafts.get(decodeURIComponent(id)) : null;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ rendered_html: "<p>LawDog <strong>preview</strong> — E2E</p>" }),
+        body: JSON.stringify({
+          rendered_html: rec
+            ? `<p>${rec.title}</p><p>${rec.purpose}</p><p>${rec.payment_terms}</p>`
+            : "<p>LawDog <strong>preview</strong> — E2E</p>",
+        }),
       });
       return;
     }
@@ -76,7 +84,7 @@ function installIsolatedAgreementsApi(
               { name: "Client LLC", role: "party" },
             ],
             purpose: "Professional services and deliverables (preview merge).",
-            payment_terms: inst.includes("e2e")
+            payment_terms: inst.includes("e2e") || inst.includes("30")
               ? "Revised: Net 30 per E2E preview (do not use as legal advice)."
               : "Net 15.",
             duration: "12 months",
@@ -205,6 +213,76 @@ async function expectNoMisleadingSentCopy(page: Page) {
 
 test.describe("recipient + link flow QA", () => {
   test.describe.configure({ mode: "serial" });
+
+  test("review-first route shows simplified draft review and visible proposed changes", async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    const artifactDir = join(testInfo.project.outputDir, "..", "artifacts", "recipient-review-first");
+    mkdirSync(artifactDir, { recursive: true });
+    const agreementId = "ag_review_first_ui";
+    const now = new Date().toISOString();
+    const drafts = new Map<string, DraftRec>();
+    drafts.set(agreementId, {
+      id: agreementId,
+      title: "Review First Services",
+      jurisdiction: "California",
+      parties: [
+        { name: "Studio LLC", role: "owner", email: "owner@example.com" },
+        { name: "Client LLC", role: "party", email: "client@example.com" },
+      ],
+      purpose: "Professional services.",
+      payment_terms: "Payment due within 15 days.",
+      duration: "6 months",
+      due_date: null,
+      effective_date: "2026-01-01",
+      versions: [{ version: 1, created_at: now, note: "review" }],
+      audit_log: [],
+      created_at: now,
+      updated_at: now,
+    });
+    await installIsolatedAgreementsApi(page, { drafts });
+
+    for (const viewport of [
+      { name: "desktop", width: 1440, height: 1100 },
+      { name: "laptop", width: 1100, height: 900 },
+    ]) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.goto(`/agreements/${agreementId}/review?p=p1&role=reviewer`);
+      await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible();
+      await expect(page.getByText(/Review the draft below/i)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Approve draft" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Edit text directly" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Upload updated draft" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Download text" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Request changes/i })).toHaveCount(0);
+      await expect(page.getByText(/I'm not participating|I’m not participating/i)).toHaveCount(0);
+      await expect(page.getByText(/Review somewhere else/i)).toHaveCount(0);
+
+      await page.screenshot({
+        path: join(artifactDir, `review-first-read-${viewport.name}.png`),
+        fullPage: true,
+      });
+
+      await page.getByRole("button", { name: "Edit text directly" }).click();
+      const textarea = page.getByTestId("recipient-edit-draft-textarea");
+      await expect(textarea).toBeVisible({ timeout: 10_000 });
+      await textarea.fill("Review First Services Agreement\n\nPayment due within 30 days.\n\nProfessional services.");
+      const saveDraftBtn = page.getByTestId("recipient-compare-versions-button");
+      await expect(saveDraftBtn).toBeEnabled({ timeout: 10_000 });
+      await saveDraftBtn.click();
+      const changesPanel = page.getByTestId("recipient-suggested-changes-panel");
+      await expect(changesPanel).toBeVisible({ timeout: 25_000 });
+      await expect(changesPanel.getByRole("heading", { name: "Changes proposed" })).toBeVisible();
+      await expect(page.getByTestId("recipient-review-change-visibility-summary")).toContainText("Proposed by");
+      await expect(page.getByText("Previous")).toBeVisible();
+      await expect(page.getByText("Proposed")).toBeVisible();
+
+      await page.screenshot({
+        path: join(artifactDir, `review-first-changes-${viewport.name}.png`),
+        fullPage: true,
+      });
+    }
+  });
 
   test("1–2) Share copy, no false “sent”, malformed email (mocked create; live Pro in other specs)", async ({ page }) => {
     test.setTimeout(90_000);

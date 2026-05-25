@@ -6,6 +6,7 @@ import {
   AgreementRecipientReview,
   RECIPIENT_REVISE_PREVIEW_CONNECTION_ERROR,
 } from "./AgreementRecipientReview";
+import { openRecipientQuickChangeWorkspace } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 
 function jsonResponse(obj: unknown, status = 200) {
@@ -99,9 +100,7 @@ describe("AgreementRecipientReview revise preview failure", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    await userEvent.click(screen.getAllByRole("button", { name: /Request changes/i })[0]!);
-
-    await userEvent.click(await screen.findByTestId("recipient-compose-card-small-tweak"));
+    await openRecipientQuickChangeWorkspace();
     const instruction = await screen.findByTestId("recipient-revision-voice-field");
     const note = "Change payment terms to Net 30";
     fireEvent.change(instruction, { target: { value: note } });

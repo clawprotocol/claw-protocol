@@ -5,9 +5,12 @@ import { describe, expect, it } from "vitest";
 describe("Review link handoff UX (LawDog)", () => {
   it("owner success on SimpleDonePage shows handoff copy and not Your Agreement", () => {
     const p = join(__dirname, "SimpleDonePage.tsx");
+    const signals = join(__dirname, "../../components/agreements/draftRecipientReviewSignals.ts");
     const s = readFileSync(p, "utf8");
-    expect(s).toContain("Review link created");
-    expect(s).toContain("Nothing has been signed. Copy this private link and send it to the reviewer.");
+    const signalsSrc = readFileSync(signals, "utf8");
+    expect(s).toContain("reviewApprovalAgg.flowShellTitle");
+    expect(signalsSrc).toContain("Review link created");
+    expect(s).toContain("Nothing has been signed. Copy this private link and send it to each reviewer.");
     expect(s).toContain("Copy review link");
     expect(s).toContain("Open reviewer view");
     expect(s).toContain("[review-link-owner-success-visible]");
@@ -33,30 +36,28 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).toContain("simpleReviewLinkConfirmModalOpen");
   });
 
-  it("AgreementRecipientReview reviewer surface uses reviewer heading", () => {
+  it("AgreementRecipientReview reviewer surface uses review-first collaborative draft UI", () => {
     const p = join(__dirname, "../../agreement/AgreementRecipientReview.tsx");
     const s = readFileSync(p, "utf8");
-    const party = readFileSync(join(__dirname, "../../agreement/recipientReviewPartyActions.tsx"), "utf8");
-    expect(s).toContain("RECIPIENT_PUBLIC_HERO_TITLE");
-    expect(s).toContain("RECIPIENT_PUBLIC_HERO_SUBTITLE");
+    expect(s).toContain("REVIEW_FIRST_TITLE");
+    expect(s).toContain("Review agreement");
+    expect(s).toContain("REVIEW_FIRST_HELPER");
+    expect(s).toContain("recipient-review-first-actions");
+    expect(s).toContain("recipient-review-approve-draft");
+    expect(s).toContain("recipient-review-edit-draft");
+    expect(s).toContain("recipient-review-upload-updated-draft");
+    expect(s).toContain("recipient-review-download-actions");
+    expect(s).toContain("recipient-review-change-visibility-summary");
+    expect(s).toContain("Changes proposed");
     expect(s).toContain("recipient-summary-card");
     expect(s).toContain("recipient-document-shell");
-    expect(s).toContain("RecipientPartyReviewActions");
-    expect(party).toContain("Send back a revised version");
-    expect(party).toContain("Looks good");
-    expect(party).toContain("I'm not participating");
     expect(s).toContain("← Back to agreement");
     expect(s).toContain("scrollAndFocusSuggestPanel");
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain("RECIPIENT_PREVIEW_COMPARE_TRUST_SUBCOPY");
     expect(s).toContain("recipient-workflow-revised");
     expect(s).toContain("recipient-workflow-quick");
-    expect(s).toContain("RecipientWantACopyStrip");
-    const wantCopy = readFileSync(join(__dirname, "../../agreement/recipientWantACopyStrip.tsx"), "utf8");
-    expect(wantCopy).toContain("recipient-download-draft-pdf");
-    expect(s).not.toContain("Manual compare");
     expect(s).toContain("recipient-suggested-changes-panel");
     expect(s).toContain("recipient-suggested-changes-document");
     expect(s).not.toContain("recipient-tab-redline");

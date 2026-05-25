@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
+import { approveDraftFromReviewFirst } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import { recipientPartyReviewCopy } from "./recipientReviewPartyActions";
 
@@ -105,10 +105,8 @@ describe("AgreementRecipientReview approve + localStorage quota", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
-    const actionRoots = screen.getAllByTestId("recipient-party-review-actions");
-    const landing = actionRoots.find((el) => el.getAttribute("data-placement") === "landing");
-    expect(landing).toBeTruthy();
-    await userEvent.click(within(landing!).getByTestId("recipient-document-first-looks-good"));
+    expect(screen.getByTestId("recipient-review-approve-draft")).toBeTruthy();
+    await approveDraftFromReviewFirst();
 
     await waitFor(() => {
       expect(screen.getByText("Reviewer approved this draft without requesting changes.")).toBeTruthy();
